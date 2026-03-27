@@ -1675,15 +1675,12 @@ async def preview_ib_filter():
 @router.post("/build-adv-cache")
 async def build_adv_cache(batch_size: int = 100):
     """
-    Build/refresh the ADV (Average Daily Volume) cache for all US stocks.
+    Build/refresh the ADV (Average Daily Volume) cache from IB daily bars.
     
-    This enables accurate filtering by liquidity. The cache stores the 20-day
-    average volume for each symbol.
+    Uses consolidated volume from IB Gateway historical data (not Alpaca IEX).
+    Calculates 20-day average volume per symbol from ib_historical_data collection.
     
-    ⚠️ This is a LONG-RUNNING operation (30-60 minutes for full market).
-    Run once to initialize, then periodically to refresh.
-    
-    - **batch_size**: Number of symbols to process per Alpaca API call
+    Note: Requires IB daily bar data to be collected first.
     """
     try:
         collector = get_ib_collector()

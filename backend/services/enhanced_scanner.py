@@ -1834,27 +1834,42 @@ class EnhancedBackgroundScanner:
     
     async def _batch_fetch_adv_smart(self, symbols: List[str]) -> Dict[str, int]:
         """
-        Fetch ADV using multiple data sources in priority order:
-        1. IB historical data (from our collected data)
-        2. IB real-time (if pusher connected, use recent volume)
-        3. Alpaca historical bars (fallback)
+        Fetch ADV using IB-only data sources in priority order:
+        1. symbol_adv_cache (pre-calculated from IB daily bars — fastest)
+        2. IB historical data (live query from our collected bars)
+        3. IB real-time (if pusher connected, use recent volume)
+        
+        FAIL CLOSED: No Alpaca/IEX fallback. Symbols without IB data get ADV=0.
         
         Returns dict of {symbol: avg_daily_volume}
         """
         adv_data = {}
         symbols_remaining = list(symbols)
         
-        # === SOURCE 1: IB Historical Data (from MongoDB) ===
+        # === SOURCE 0: Pre-calculated ADV cache (IB daily bars) ===
         try:
-            adv_from_db = await self._get_adv_from_ib_historical(symbols_remaining)
-            for symbol, adv in adv_from_db.items():
+            adv_from_cache = await self._get_adv_from_cache(symbols_remaining)
+            for symbol, adv in adv_from_cache.items():
                 if adv > 0:
                     adv_data[symbol] = adv
-                    symbols_remaining.remove(symbol)
-            if adv_from_db:
-                logger.debug(f"ADV from IB historical DB: {len(adv_from_db)} symbols")
+            symbols_remaining = [s for s in symbols_remaining if s not in adv_from_cache or adv_from_cache[s] <= 0]
+            if adv_from_cache:
+                logger.debug(f"ADV from IB cache: {len(adv_from_cache)} symbols")
         except Exception as e:
-            logger.debug(f"IB historical ADV lookup failed: {e}")
+            logger.debug(f"ADV cache lookup failed: {e}")
+        
+        # === SOURCE 1: IB Historical Data (live query from MongoDB) ===
+        if symbols_remaining:
+            try:
+                adv_from_db = await self._get_adv_from_ib_historical(symbols_remaining)
+                for symbol, adv in adv_from_db.items():
+                    if adv > 0:
+                        adv_data[symbol] = adv
+                symbols_remaining = [s for s in symbols_remaining if s not in adv_from_db or adv_from_db[s] <= 0]
+                if adv_from_db:
+                    logger.debug(f"ADV from IB historical DB: {len(adv_from_db)} symbols")
+            except Exception as e:
+                logger.debug(f"IB historical ADV lookup failed: {e}")
         
         # === SOURCE 2: IB Real-time Pushed Data ===
         if symbols_remaining:
@@ -1870,20 +1885,41 @@ class EnhancedBackgroundScanner:
             except Exception as e:
                 logger.debug(f"IB real-time ADV lookup failed: {e}")
         
-        # === SOURCE 3: Alpaca Historical Bars (fallback) ===
+        # FAIL CLOSED: Remaining symbols get ADV=0 (no Alpaca/IEX fallback)
         if symbols_remaining:
-            try:
-                adv_from_alpaca = await self._batch_fetch_adv(symbols_remaining)
-                adv_data.update(adv_from_alpaca)
-                logger.debug(f"ADV from Alpaca: {len(symbols_remaining)} symbols")
-            except Exception as e:
-                logger.debug(f"Alpaca ADV fetch failed: {e}")
-                # Mark remaining as 0
-                for symbol in symbols_remaining:
-                    if symbol not in adv_data:
-                        adv_data[symbol] = 0
+            logger.debug(f"ADV fail-closed: {len(symbols_remaining)} symbols with no IB data")
+            for symbol in symbols_remaining:
+                if symbol not in adv_data:
+                    adv_data[symbol] = 0
         
         return adv_data
+    
+    async def _get_adv_from_cache(self, symbols: List[str]) -> Dict[str, int]:
+        """
+        Get ADV from the pre-calculated symbol_adv_cache collection.
+        This is the fastest lookup — already computed from IB daily bars.
+        """
+        def _sync_lookup():
+            adv_data = {}
+            try:
+                from database import get_database
+                db = get_database()
+                if db is None:
+                    return adv_data
+                cursor = db["symbol_adv_cache"].find(
+                    {"symbol": {"$in": symbols}},
+                    {"_id": 0, "symbol": 1, "avg_volume": 1}
+                )
+                for doc in cursor:
+                    sym = doc.get("symbol", "")
+                    vol = doc.get("avg_volume", 0)
+                    if sym and vol > 0:
+                        adv_data[sym] = int(vol)
+            except Exception as e:
+                logger.debug(f"Error reading symbol_adv_cache: {e}")
+            return adv_data
+
+        return await asyncio.to_thread(_sync_lookup)
     
     async def _get_adv_from_ib_historical(self, symbols: List[str]) -> Dict[str, int]:
         """
@@ -2049,7 +2085,9 @@ class EnhancedBackgroundScanner:
             # Update caches with fresh data
             now = datetime.now(timezone.utc)
             self._rvol_cache[symbol] = (snapshot.rvol, now)
-            self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
+            # Only update ADV cache from snapshot if we don't already have IB-sourced data
+            if symbol not in self._adv_cache:
+                self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
             
             # Get tape reading for this symbol
             tape = await self._get_tape_reading(symbol, snapshot)

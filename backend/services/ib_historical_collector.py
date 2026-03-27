@@ -373,40 +373,11 @@ class IBHistoricalCollector:
     
     async def build_adv_cache(self, batch_size: int = 100) -> Dict[str, Any]:
         """
-        Build/refresh the ADV (Average Daily Volume) cache for all symbols.
-        This enables accurate filtering by liquidity.
-        
-        Fetches 20-day volume data from Alpaca for all symbols in the universe.
-        
-        Args:
-            batch_size: Number of symbols to process per batch
-            
-        Returns:
-            Summary of cache build operation
+        DEPRECATED: Redirects to rebuild_adv_from_ib_data() which uses IB daily bars.
+        The old Alpaca IEX-based ADV was inaccurate (IEX underreports volume by ~95%).
         """
-        if self._alpaca_service is None:
-            return {"success": False, "error": "Alpaca service not available"}
-            
-        if self._db is None:
-            return {"success": False, "error": "Database not available"}
-        
-        # Get all symbols from market scanner
-        all_symbols = []
-        if self._market_scanner:
-            try:
-                universe = await self._market_scanner.get_symbol_universe()
-                all_symbols = [s.get("symbol") for s in universe if s.get("symbol")]
-            except Exception as e:
-                logger.warning(f"Could not get universe from scanner: {e}")
-        
-        if not all_symbols:
-            # Fall back to direct Alpaca fetch
-            all_symbols = await self.get_all_us_symbols()
-        
-        if not all_symbols:
-            return {"success": False, "error": "Could not fetch symbol list"}
-        
-        logger.info(f"Building ADV cache for {len(all_symbols)} symbols...")
+        logger.warning("build_adv_cache() is deprecated — redirecting to rebuild_adv_from_ib_data()")
+        return await self.rebuild_adv_from_ib_data()
         
     async def rebuild_adv_from_ib_data(self) -> Dict[str, Any]:
         """
@@ -564,96 +535,6 @@ class IBHistoricalCollector:
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
-        
-        # Process in batches
-        adv_cache_col = self._db["symbol_adv_cache"]
-        processed = 0
-        cached = 0
-        errors = 0
-        
-        for i in range(0, len(all_symbols), batch_size):
-            batch = all_symbols[i:i + batch_size]
-            
-            try:
-                # Fetch bars for batch
-                from alpaca.data.historical import StockHistoricalDataClient
-                from alpaca.data.requests import StockBarsRequest
-                from alpaca.data.timeframe import TimeFrame
-                from alpaca.data.enums import DataFeed
-                import os
-                
-                api_key = os.environ.get("ALPACA_API_KEY", "")
-                secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
-                
-                if not api_key or not secret_key:
-                    return {"success": False, "error": "Alpaca keys not configured"}
-                
-                client = StockHistoricalDataClient(api_key, secret_key)
-                
-                from datetime import datetime, timedelta, timezone
-                end = datetime.now(timezone.utc) - timedelta(days=1)  # Yesterday to avoid SIP issues
-                start = end - timedelta(days=35)  # 35 days to get ~20 trading days
-                
-                request = StockBarsRequest(
-                    symbol_or_symbols=batch,
-                    timeframe=TimeFrame.Day,
-                    start=start,
-                    end=end,
-                    feed=DataFeed.IEX  # Use IEX feed (free tier compatible)
-                )
-                
-                bars = client.get_stock_bars(request)
-                
-                # Calculate ADV for each symbol
-                for symbol in batch:
-                    try:
-                        # BarSet uses [] access, not .get()
-                        symbol_bars = bars[symbol] if symbol in bars.data else []
-                        if symbol_bars and len(symbol_bars) > 0:
-                            volumes = [b.volume for b in symbol_bars[-20:]]
-                            avg_volume = sum(volumes) / len(volumes) if volumes else 0
-                            
-                            # Upsert to cache
-                            adv_cache_col.update_one(
-                                {"symbol": symbol},
-                                {"$set": {
-                                    "symbol": symbol,
-                                    "avg_volume": avg_volume,
-                                    "sample_days": len(volumes),
-                                    "updated_at": datetime.now(timezone.utc).isoformat()
-                                }},
-                                upsert=True
-                            )
-                            cached += 1
-                    except Exception as e:
-                        logger.debug(f"Error processing {symbol}: {e}")
-                        errors += 1
-                
-                processed += len(batch)
-                logger.info(f"ADV cache progress: {processed}/{len(all_symbols)} ({cached} cached)")
-                
-                # Rate limit
-                await asyncio.sleep(0.5)
-                
-            except Exception as e:
-                logger.error(f"Error processing batch: {e}")
-                errors += len(batch)
-                processed += len(batch)
-        
-        # Create index
-        try:
-            adv_cache_col.create_index("avg_volume")
-            adv_cache_col.create_index("symbol", unique=True)
-        except Exception:
-            pass
-        
-        return {
-            "success": True,
-            "total_symbols": len(all_symbols),
-            "cached": cached,
-            "errors": errors,
-            "message": f"ADV cache built for {cached} symbols"
-        }
     
     async def get_adv_cache_stats(self) -> Dict[str, Any]:
         """Get statistics about the ADV cache"""

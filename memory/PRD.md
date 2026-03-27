@@ -154,6 +154,16 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - ADV filter: only stores symbols with avg_volume >= 500K
     - `force=true` param to bypass skip and re-fetch
 
+- **ADV Cache Audit & IEX Contamination Cleanup** (Mar 27, 2026)
+  - Audited all code paths that write to or read from `symbol_adv_cache`
+  - **Deprecated `build_adv_cache()`** in `ib_historical_collector.py` — was using Alpaca IEX data (underreports volume ~95%). Now redirects to `rebuild_adv_from_ib_data()` which uses IB daily bars
+  - **Removed Alpaca IEX fallback** from `enhanced_scanner.py: _batch_fetch_adv_smart()` — was Source 3. Now uses: (0) pre-calculated IB cache → (1) IB historical live query → (2) IB real-time volume. Fail-closed if no IB data
+  - **Added `_get_adv_from_cache()`** — new fast-path lookup that reads `symbol_adv_cache` directly (bulk $in query)
+  - **Fixed snapshot ADV overwrite** in `_scan_symbol_all_setups()` — Alpaca snapshot no longer overwrites in-memory ADV cache when IB data already loaded
+  - **Removed 90 lines of dead Alpaca IEX code** from `ib_historical_collector.py`
+  - **Cleaned 10,724 stale FINRA records** (2018/2020/2025 dates) from production DB
+  - ADV cache status: 9,248 symbols, all from `source: ib_historical_recalc`, 2,702 qualifying (≥500K)
+
 - **Vendor 1-Min Data Import**: User actively importing ~3.35GB of 30-day vendor data
   - 2026-02-18 through 2026-03-18, full market OHLCV 1-min bars
   - Import script runs locally with `--skip-days 0` (no overlap with IB data)
