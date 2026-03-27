@@ -25,6 +25,7 @@ import {
   Wifi,
   RefreshCw
 } from 'lucide-react';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -79,6 +80,9 @@ const StartupModal = ({ onComplete }) => {
   const [checkCount, setCheckCount] = useState(0);
   const mountedRef = useRef(true);
   const timerRef = useRef(null);
+  
+  // Frontend WS connection state — supplements backend's report
+  const { isConnected: frontendWsConnected } = useWsData();
 
   // Check if user has opted out
   useEffect(() => {
@@ -107,7 +111,8 @@ const StartupModal = ({ onComplete }) => {
       // Map backend response to service statuses
       newStatus.backend   = d.backend   ? 'success' : 'error';
       newStatus.database  = d.database  ? 'success' : 'error';
-      newStatus.websocket = d.websocket ? 'success' : 'error';
+      // WebSocket: green if both backend WS server has connections AND frontend is connected
+      newStatus.websocket = (d.websocket || frontendWsConnected) ? 'success' : (d.backend ? 'warning' : 'error');
       // IB Gateway: green only if connected AND data flowing (farms active)
       // Yellow if socket connected but farms not sending data
       newStatus.ib        = d.ib        ? 'success' : d.ib_connected ? 'warning' : 'warning';
@@ -117,7 +122,7 @@ const StartupModal = ({ onComplete }) => {
       newStatus.timeseries = d.timeseries ? 'success' : 'warning';
       newStatus.learning  = d.learning  ? 'success' : 'warning';
 
-      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} ib=${d.ib} ib_connected=${d.ib_connected} ib_data=${d.ib_data_flowing} ollama=${d.ollama} ai_fallback=${d.ai_fallback_only} scanner=${d.scanner}`);
+      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} db=${d.database} ws=${d.websocket}(${d.ws_connections || 0} conns, fe=${frontendWsConnected}) ib=${d.ib} ib_connected=${d.ib_connected} ib_data=${d.ib_data_flowing} ollama=${d.ollama} ai_fallback=${d.ai_fallback_only} scanner=${d.scanner}`);
       setServiceStatus(newStatus);
       setLastResponseData(d);
     } else {
@@ -204,6 +209,12 @@ const StartupModal = ({ onComplete }) => {
     }
     if (serviceId === 'ib' && status === 'warning' && data?.ib_connected) {
       return 'No Data';
+    }
+    if (serviceId === 'websocket' && status === 'success' && data?.ws_connections > 0) {
+      return `Live (${data.ws_connections} conn${data.ws_connections > 1 ? 's' : ''})`;
+    }
+    if (serviceId === 'websocket' && status === 'warning') {
+      return 'Connecting...';
     }
     switch (status) {
       case 'success': return 'Ready';

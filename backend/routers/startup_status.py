@@ -51,13 +51,15 @@ async def get_startup_status():
             except Exception as e:
                 logger.warning(f"IB check failed: {e}")
             
-            # Quick WebSocket check
-            ws_status = {"status": "ready", "connections": 0}
+            # Quick WebSocket check — use actual connection manager
+            ws_status = {"status": "waiting", "connections": 0}
             try:
-                import server
-                quote_connections = getattr(server, 'quote_connections', None)
-                if quote_connections:
-                    ws_status["connections"] = len(quote_connections)
+                from server import manager as ws_mgr
+                conn_count = len(ws_mgr.active_connections)
+                ws_status = {
+                    "status": "ready" if conn_count > 0 else "waiting",
+                    "connections": conn_count
+                }
             except Exception:
                 pass
             
@@ -65,10 +67,36 @@ async def get_startup_status():
             ollama_status = {"status": "offline"}
             
             # Quick trading bot check - non-blocking
-            bot_status = {"status": "ready", "running": True, "mode": "AUTONOMOUS"}
+            bot_status = {"status": "waiting", "mode": "unknown"}
+            try:
+                from server import trading_bot
+                if trading_bot:
+                    is_running = getattr(trading_bot, '_running', False)
+                    mode = getattr(trading_bot, 'mode', 'AUTONOMOUS')
+                    open_positions = len(getattr(trading_bot, 'positions', {}))
+                    pending = len(getattr(trading_bot, 'order_queue', []))
+                    bot_status = {
+                        "status": "ready" if is_running else "waiting",
+                        "running": is_running,
+                        "mode": str(mode),
+                        "open_positions": open_positions,
+                        "queue_pending": pending
+                    }
+            except Exception:
+                pass
             
             # Quick scanner check
-            scanner_status = {"status": "ready", "running": True}
+            scanner_status = {"status": "waiting", "running": False}
+            try:
+                from server import background_scanner
+                if background_scanner:
+                    is_running = getattr(background_scanner, '_running', False)
+                    scanner_status = {
+                        "status": "ready" if is_running else "waiting",
+                        "running": is_running
+                    }
+            except Exception:
+                pass
             
             # Build response
             status = {
@@ -90,7 +118,7 @@ async def get_startup_status():
                     "scanner": scanner_status,
                 },
                 "data": {
-                    "historical": {"status": "ready", "total_bars": 5400000},
+                    "historical": {"status": "ready"},
                 }
             }
             

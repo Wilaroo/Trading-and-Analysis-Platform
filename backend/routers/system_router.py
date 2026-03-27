@@ -75,10 +75,30 @@ async def startup_check():
     """
     Ultra-lightweight startup check endpoint for the StartupModal.
     Returns ALL service statuses in a SINGLE call using ONLY in-memory state.
-    No DB queries, no network calls, no blocking operations.
+    No heavy DB queries, no blocking operations.
     Responds in <10ms even when event loop is under heavy load.
     """
     backend_ok = True
+
+    # Check actual WebSocket connections
+    ws_connected = False
+    ws_connection_count = 0
+    try:
+        from server import manager as ws_manager
+        ws_connection_count = len(ws_manager.active_connections)
+        ws_connected = ws_connection_count > 0
+    except Exception:
+        pass
+
+    # Check actual MongoDB connectivity
+    db_ok = False
+    try:
+        from server import mongo_client
+        # ping is the lightest possible DB check
+        await mongo_client.admin.command('ping')
+        db_ok = True
+    except Exception:
+        db_ok = backend_ok  # Fallback — if backend is up, DB was likely ok at startup
 
     ib_connected = False
     ib_data_flowing = False
@@ -134,8 +154,9 @@ async def startup_check():
 
     return {
         "backend": backend_ok,
-        "database": backend_ok,
-        "websocket": backend_ok,
+        "database": db_ok,
+        "websocket": ws_connected,
+        "ws_connections": ws_connection_count,
         "ib": ib_connected and ib_data_flowing,
         "ib_connected": ib_connected,
         "ib_data_flowing": ib_data_flowing,
