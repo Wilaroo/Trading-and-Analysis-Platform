@@ -26,8 +26,18 @@ echo       This enables GPU acceleration for your RTX 5060 Ti
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 echo.
 
-echo [3/5] Installing LightGBM...
-pip install lightgbm
+echo [3/5] Installing LightGBM with GPU support...
+echo       Building LightGBM with OpenCL GPU acceleration...
+echo       (This may take a few minutes - compiling from source)
+pip uninstall lightgbm -y >nul 2>&1
+pip install lightgbm --config-settings=cmake.define.USE_GPU=ON
+if %errorlevel% neq 0 (
+    echo       [WARN] GPU build failed - installing CPU version as fallback
+    pip install lightgbm
+    echo       LightGBM installed (CPU only)
+) else (
+    echo       LightGBM installed with GPU support!
+)
 echo.
 
 echo [4/5] Installing NLP/Embedding libraries...
@@ -45,9 +55,19 @@ python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f
 echo.
 
 echo ============================================
-echo   Testing LightGBM...
+echo   Testing LightGBM GPU...
 echo ============================================
-python -c "import lightgbm; print(f'LightGBM version: {lightgbm.__version__}')"
+python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('LightGBM GPU: ENABLED')" 2>nul
+if %errorlevel% neq 0 (
+    python -c "import lightgbm; print(f'LightGBM version: {lightgbm.__version__} (CPU only)')"
+    echo.
+    echo       [NOTE] LightGBM GPU not detected. This can happen if:
+    echo         - OpenCL runtime is not installed (get from GPU vendor drivers)
+    echo         - LightGBM was not compiled with GPU support
+    echo         - Try: pip install lightgbm --config-settings=cmake.define.USE_GPU=ON
+) else (
+    python -c "import lightgbm; print(f'LightGBM version: {lightgbm.__version__} (GPU ENABLED)')"
+)
 echo.
 
 echo ============================================

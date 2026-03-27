@@ -496,6 +496,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - SentCom filter thoughts expanded from 2 to 4 reasoning items — shows model predictions and learning feedback
     - Full data flow: Scanner → Opportunity Evaluator → Confidence Gate (regime + model consensus + live prediction + learning feedback + quality) → Trading Bot → Trade Record → SentCom Stream → WebSocket → Frontend
 
+  - **LightGBM GPU Support Wired** (Mar 27, 2026)
+    - `InstallML_GPU.bat`: Now installs LightGBM with `--config-settings=cmake.define.USE_GPU=ON`, verifies GPU via Booster test
+    - `TradeCommand_AITraining.bat`: Auto-detects CPU-only LightGBM at startup, upgrades to GPU version automatically (with CPU fallback)
+    - `StartLocal_GPU.bat`: Added LightGBM GPU status to prereq check and health check
+    - Backend auto-detection (`timeseries_gbm.py`): When GPU LightGBM installed, `DEFAULT_PARAMS` auto-sets `device=gpu`, `gpu_platform_id=0`, `gpu_device_id=0` — flows to all training paths
+    - No `requirements.txt` changes (user installs GPU LightGBM locally via bat)
+
 - **Pipeline Gap Fixes — Full AI Data Flow Wiring** (Mar 27, 2026)
   - **GAP 1: TQS → Confidence Gate**: Confidence Gate Step 3 now uses TQS score (5-pillar) instead of raw scanner score (was using `alert.score` default 70)
   - **GAP 2: AI → TQS**: Scanner now runs AI enrichment BEFORE TQS calculation (was opposite). TQS `calculate_tqs()` now receives `ai_model_direction/confidence/agrees` from scanner AI, activating Context Quality's AI alignment scoring (10% weight, was always neutral 50)

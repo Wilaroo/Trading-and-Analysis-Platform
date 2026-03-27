@@ -57,10 +57,34 @@ where node >nul 2>&1 && echo        Node.js: OK || echo        Node.js: MISSING
 where yarn >nul 2>&1 && echo        Yarn: OK || (echo        Installing yarn... && npm install -g yarn >nul 2>&1)
 
 :: Check GPU for ML training
-python -c "import torch; print(f'        GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory // 1024**3}GB)') if torch.cuda.is_available() else print('        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
+python -c "import torch; print(f'        GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_mem // 1024**3}GB)') if torch.cuda.is_available() else print('        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
 
-:: Check ML dependencies
-python -c "import lightgbm" >nul 2>&1 && echo        LightGBM: OK || echo        LightGBM: MISSING (run: pip install lightgbm)
+:: Check LightGBM + GPU support
+python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('        LightGBM: GPU ENABLED')" 2>nul
+if %errorlevel% neq 0 (
+    python -c "import lightgbm" >nul 2>&1
+    if %errorlevel%==0 (
+        echo        LightGBM: CPU only (upgrading to GPU...)
+        echo        Installing LightGBM with GPU support...
+        pip uninstall lightgbm -y >nul 2>&1
+        pip install lightgbm --config-settings=cmake.define.USE_GPU=ON 2>nul
+        if %errorlevel%==0 (
+            echo        LightGBM: GPU version installed!
+        ) else (
+            echo        LightGBM: GPU build failed, reinstalling CPU version
+            pip install lightgbm >nul 2>&1
+        )
+    ) else (
+        echo        LightGBM: MISSING - Installing with GPU support...
+        pip install lightgbm --config-settings=cmake.define.USE_GPU=ON 2>nul
+        if %errorlevel%==0 (
+            echo        LightGBM: GPU version installed!
+        ) else (
+            echo        LightGBM: GPU build failed, installing CPU version
+            pip install lightgbm >nul 2>&1
+        )
+    )
+)
 echo.
 
 :: =====================================================
@@ -359,7 +383,7 @@ echo    ^|  GRAY        [OLLAMA]       AI Model Server     ^|
 echo    +-------------------------------------------------+
 echo.
 echo    ML Training Ready:
-echo    * GPU available for LightGBM training
+echo    * LightGBM with GPU acceleration (auto-detected)
 echo    * Backend in stable mode (no auto-reload)
 echo    * Background Worker running for isolated jobs
 echo    * 3 Historical Collectors running (~79K queue)
@@ -438,6 +462,7 @@ del "%TEMP%\queue_check.tmp" 2>nul
 :: ML Status
 echo.
 echo ------- ML TRAINING STATUS -------
+python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('LightGBM GPU:  ENABLED')" 2>nul || echo LightGBM GPU:  DISABLED (CPU mode)
 curl -s -f -m 5 %LOCAL_BACKEND%/api/ai-modules/timeseries/available-data 2>nul | findstr "total_bars" >nul 2>&1
 if %errorlevel%==0 (
     echo Training Data: AVAILABLE

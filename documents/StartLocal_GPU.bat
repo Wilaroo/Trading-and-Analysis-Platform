@@ -69,6 +69,19 @@ if %errorlevel%==0 (
 ) else (
     echo       GPU: Not configured (run InstallML_GPU.bat first)
 )
+
+:: Check LightGBM GPU support
+python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p)" 2>nul
+if %errorlevel%==0 (
+    echo       LightGBM: GPU ENABLED
+) else (
+    python -c "import lightgbm" >nul 2>&1
+    if %errorlevel%==0 (
+        echo       LightGBM: CPU only (run InstallML_GPU.bat for GPU)
+    ) else (
+        echo       LightGBM: MISSING (run InstallML_GPU.bat)
+    )
+)
 echo.
 
 :: =====================================================
@@ -234,6 +247,7 @@ netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1 && echo IB G
 echo.
 echo GPU Status:
 python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}' if torch.cuda.is_available() else '')" 2>nul
+python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('LightGBM GPU: ENABLED')" 2>nul || echo LightGBM GPU: DISABLED (CPU mode)
 echo.
 echo ============================================
 echo Press any key for another check, or close this window
