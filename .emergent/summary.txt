@@ -1,69 +1,65 @@
-<analysis>Here is the comprehensive handover summary based on the provided LLM message history:
+<analysis>Here is the handover summary based on the provided LLM message history:
 
 **original_problem_statement**: 
-The user requested help executing a massive 1-min OHLCV vendor data import script, diagnosing and fixing stuck historical data collectors, and optimizing collector speeds. Afterward, the user requested two major features: Phase 1: Short Setup Models (building inverse features for bearish setups) and Phase 2: Short Float Data Integration (fetching real-time shortable shares from IB and bi-monthly short interest from the FINRA free API). The user also requested a future task to build a Twitter/X social stream widget for specific handles without a paid API.
+The user originally requested to implement Phase 1 (Short Setup Models) and Phase 2 (Short Float Data Integration via FINRA/IB), alongside fixing data collector speeds. In this session, the user shifted focus to fixing severe data redundancy bugs in the FINRA fetcher, purging low-quality Alpaca/IEX data from the Average Daily Volume (ADV) cache, implementing an automated weekly ADV cache rebuild, migrating frontend HTTP polling to WebSockets, and refactoring the massive  file.
 
-**PRODUCT REQUIREMENTS ADDED IN THIS SESSION:**
-- Import ~11M+ rows of 1-min vendor data using the  script.
-- Optimize IB data collector speeds.
-- Phase 1: Build inverse feature extractors for Short Setup Models and register them in the training pipeline.
-- Phase 2: Integrate IB  (tick types 46, 236) and FINRA bi-monthly short interest data into the backend and DB.
-- Document the ideal physical hardware specs in the PRD for a future migration from Atlas to a fully local DB.
+PRODUCT REQUIREMENTS:
+- Eliminate redundant and un-paginated FINRA short interest data.
+- Ensure the  strictly uses high-quality IB consolidated volume data, removing all traces of Alpaca/IEX volume fallbacks.
+- Schedule a weekly automatic ADV cache rebuild (Sundays at 10 PM ET).
+- Migrate frontend  polling components to WebSocket streams to reduce HTTP load.
+- Extract sub-modules from the 4,400+ line  without breaking existing functionality.
 
 **User's preferred language**: English
 (INSTRUCT next agent: You MUST respond in English only)
 
 **what currently exists?** 
-A heavy-duty AI trading platform backend with a massive MongoDB Atlas DB (~100M historical bars). It now includes 80 total LightGBM setup models (including 17 newly added  models). The data pusher locally streams market data and IB . A FINRA short interest API integration exists but the background data population script currently has a string-matching bug preventing it from saving qualifying symbols.
+A heavily optimized AI trading backend running locally against a MongoDB Atlas database. The FINRA background fetcher now cleanly pulls and deduplicates data (1.00x redundancy). The ADV cache is strictly IB-data sourced and auto-updates weekly. The React frontend relies on a unified  with 19 active streams rather than spamming HTTP polling requests. The  has had trailing stops and trade intelligence logic extracted, but remains a large core file.
 
 **Last working item**: 
-    - Last item agent was working: Debugging the FINRA Short Interest API background fetcher. The API correctly fetches paginated records (5,000 per page), but 0 records are being saved to MongoDB because the fetched  is failing to match the  list in the ADV qualifying cache.
+    - Last item agent was working: Phase 2 of refactoring . The agent had successfully extracted  and , and was just mapping out how to extract , , and  when the context window ended.
     - Status: IN PROGRESS
-    - Agent Testing Done: Y (Ran testing subagent for API surface which passed 18/18, but manual script testing revealed the data population bug afterwards).
-    - Which testing method agent to use? manual testing by python -c script / curl to trigger and verify the background fetch.
+    - Agent Testing Done: Y (For the previous extractions via backend logs and  sanity checks)
+    - Which testing method agent to use? manual testing by python -c / backend startup logs. (Check if backend compiles cleanly and  starts without missing import errors).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: FINRA API Symbol Matching Bug (P0)
-     - Attempted fixes: Implemented  pagination to walk through 20,000+ FINRA records. Added  to prevent CSV responses. Moved fetch to a background task to avoid HTTP timeouts.
-     - Next debug checklist: Check  background task logic. The FINRA  (e.g., TSLA) is being fetched, but the  check is discarding it. Inspect the exact string formatting of  returned by FINRA (e.g., trailing whitespace, case mismatch) or if  set is not loaded properly in the async context.
-     - Why fix this issue and what will be achieved with the fix?: Will successfully populate the database with critical short interest/days-to-cover data for the user's trading universe.
-     - Status: IN PROGRESS
+  Issue 1: Namespace Collision on  (P0 - CAUTIONARY)
+     - Attempted fixes: The agent attempted to extract position sizing logic from  into . However, a complex TQS-based  service *already exists* at that path and is used by . The agent reverted this extraction to prevent breaking the app.
+     - Next debug checklist: If extracting position sizing from the bot service in the future, it must either be integrated into the existing  service or extracted into a uniquely named file (e.g., ).
+     - Why fix this issue and what will be achieved with the fix?: Prevents breaking backend routing and risk management.
+     - Status: RESOLVED (Reverted), but noted for future refactoring safety.
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Backend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  Task 1: Complete Phase 2 Short Float Data Integration
-     - Where to resume: Fix the aforementioned FINRA symbol matching bug in .
-     - What will be achieved with this?: Proper storage of short data to be fed into the Short Setup Models.
+  Task 1: Continue extracting 
+     - Where to resume: Review the methods , , and  in  and extract them into focused modules (e.g., , ).
+     - What will be achieved with this? Shrinks the core bot file (currently ~3,966 lines) for better maintainability.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on something: Issue 1
+     - Should Test frontend/backend/both after fix? Backend (Must ensure the FastAPI server successfully starts without import errors).
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P1) Twitter/X Social Stream Widget: Build a widget for the Command Center that updates tweets/truths from specific followed handles (User explicitly noted they do *not* have a paid Twitter API account, so a creative/free RSS or scraping approach is needed).
+    - 🔴 (P1) Twitter/X Social Stream Widget: Build a widget for the Command Center that updates tweets/truths from specific followed handles (without a paid Twitter API account).
     - 🟡 (P2) MFE/MAE Scatter Chart: Per-setup visualization for trade efficiency.
     - 🟡 (P2) Confidence Gate Tuner: A tool to auto-calibrate the Confidence Gate's skip/reduce/go thresholds based on live decision data.
     - 🟡 (P2) Auto-Optimize AI Settings: Sweep confidence thresholds and lookback windows per strategy.
     
     Future Tasks:
-    - 🟢 (P3) Complete WebSocket Migration: Convert remaining minor frontend polling intervals.
-    - 🟢 (P3) Refactor : Extract Position Sizing and Order Management logic.
-    - 🟢 (Future) Post-Development Local DB Migration: Execute the hardware/DB migration to a local NVMe drive once development is finalized (Documented in PRD).
+    - 🟢 (Future) Post-Development Local DB Migration: Execute the hardware/DB migration to a local NVMe drive once development is finalized.
 
 **Completed work in this session**
-- Vendor 1-min data import execution support and script fixes (DONE)
-- Fixed stalled 5-min historical data collector by manually clearing stalled queue jobs (DONE)
-- Increased collector batch speeds ( 10s -> 3s) (DONE)
-- Built  for inverse long features (DONE)
-- Updated  and  to handle 10 short setup types and 17 short profiles (DONE)
-- Added IB  and shortable levels to  (DONE)
-- Created  endpoints and integrated IB push logic (DONE)
+- Fixed P0 FINRA Short Interest API Symbol Matching & Pagination Bug (Deleted 10k+ stale rows, achieved 1.00x redundancy) (DONE)
+- Fully purged Alpaca IEX data fallbacks from ADV caching and enforced strict IB data usage (DONE)
+- Implemented  weekly scheduler for ADV cache recalculation (Sundays 10 PM ET) (DONE)
+- WebSocket Migration: Created 7 new backend WS streams (, , , , , , ) and migrated React frontend components (DONE)
+- Extracted  (121 lines) and  (346 lines) from  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None, aside from the active P0 FINRA matching bug.
+   - None
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: None
@@ -74,53 +70,51 @@ A heavy-duty AI trading platform backend with a massive MongoDB Atlas DB (~100M 
 
 
 **Key Technical Concepts**
-- **Short Setup Models:** Models built specifically for bearish setups. They use  which mathematically inverts the long-biased features (e.g., breakdown below support instead of breakout above resistance) but uses the same LightGBM training pipeline.
-- **FINRA Consolidated API:** Provides free bi-monthly short interest data. Requires  for pagination and  headers. Responses must be filtered against the user's ADV cache to prevent DB bloat.
-- **IB Shortable Shares:** Real-time data from IB Gateway using tick types 46 (Shortable level) and 236 (Shares available).
+- **WebSocket Streaming ()**: Replaced ~11 frontend HTTP pollers with FastAPI backend  loops that broadcast state changes via . Drastically reduces HTTP connection overhead.
+- **Strict IB Data Enforcement**: The ADV () cache determines if a stock is liquid enough to trade. It is now strictly enforced to use IB  rather than the heavily under-reported Alpaca IEX free-tier feed.
+- **Bot Service Delegation**: Large logic blocks in  are being moved to dedicated classes, instantiated in , with the core bot service acting as an orchestrator/facade to maintain public API stability.
 
 **key DB schema**
-  - 
-  - : {symbol, short_interest, prev_short_interest, days_to_cover, si_change_pct, settlement_date, avg_daily_volume}
-  - : {symbol, shortable, shortable_level, shortable_shares, updated_at}
+  - : Now correctly contains exact unique records based on .
+  - : Contains volume data sourced exclusively from .
 
 **changes in tech stack**
-  - **IMPORTANT:** User explicitly trashed the Emergent Cloud deployment in the deployment tab to save Atlas DB bandwidth. **DO NOT** attempt to debug 502 Bad Gateway errors for the preview URLs. The user is strictly running the platform locally against the Atlas cluster.
+  - High reliance on WebSockets over REST for background data fetching.
+  - **REMINDER:** The user trashed the Emergent Cloud deployment. All components are being run by the user *locally* on their PC, talking to the remote MongoDB Atlas cluster. DO NOT attempt to debug 502 Bad Gateway errors for the preview URLs.
 
 **All files of reference**
   - 
   - 
-  - 
+  -  (NEW)
+  -  (NEW)
   - 
 
 **Areas that need refactoring**
-  -  (Still very large, needs extraction of Order Management).
+  -  (Currently in progress).
 
 **key api endpoints**
-  -  (Triggers background FINRA pagination)
-  -  (Returns counts of FINRA/IB data)
-  -  (Receives data from local )
+  -  (Manual trigger for what is now an automated Sunday task)
 
 **Critical Info for New Agent**
-- **Deployment is Dead:** The user trashed the cloud deployment. All components (backend, frontend, collectors, pusher, Ollama) are being run by the user *locally* on their PC, talking to the remote MongoDB Atlas cluster. Continue modifying files via the emergent platform, and the user will  locally.
-- **FINRA API:** If you query it, ensure you request , otherwise it returns CSV text. Offset pagination (5000 rows at a time) is required to reach later letters like TSLA.
-- **Do not modify IB connection configs:** Simulated connection errors in the cloud environment are expected because the IB Gateway runs on the user's PC.
+- **Existing :** Do NOT attempt to extract position sizing from  into a file named . A completely separate service by that name already exists and is wired to the . Doing so will crash the FastAPI app with an . 
+- **React Hooks constraint:** When migrating or updating frontend components, ensure  or  hooks are called at the top level unconditionally. Conditionally wrapping hooks will cause a Webpack compilation error ().
 
 **documents and test reports created in this job**
-  - 
-  - 
+  -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. **User**: Confirmed FINRA was showing 2020 data.
-2. **Agent**: Added  to get 2026-03-13 data. Timeout issues occurred on the HTTP request.
-3. **User**: Noticed the HTTP request timeouts.
-4. **Agent**: Moved the FINRA fetch to a background task (). Noticed  was missing because it exceeded the 5000-record API limit.
-5. **Agent**: Implemented  pagination to fetch all 20,000+ records.
-6. **Agent**: Debugged the pagination. Realized FINRA was returning CSV. Added .
-7. **Agent**: Ran the fetch script in the background. Identified that 0 records were being stored out of the 21,589 fetched.
-8. **Agent**: Started investigating why the  returned from FINRA was failing the  check, directly resulting in the current P0 bug.
+1. **User**: Confirmed plan to fix P0 FINRA bug and ADV data waste.
+2. **User**: Asked to audit the whole app to ensure ADV cache strictly uses IB data and removes low-volume IEX contamination.
+3. **User**: Confirmed plan to set up a weekly auto-scheduler for the ADV cache (Sundays, automatic, short lookback).
+4. **User**: Asked for explanation of backlog tasks (WS Migration & Bot Refactoring).
+5. **User**: Directed agent to start WebSocket migration and Refactoring.
+6. **User**: Asked if WS migration would affect IB/Ollama connections (Agent clarified it's purely frontend-backend).
+7. **User**: Asked if WebSockets would overload browser/server (Agent clarified it drastically reduces load).
+8. **User**: Authorized migrating all polling endpoints to WebSockets (Option C).
+9. **User**: Authorized starting the extraction of  as long as you dont break anything.
 
 **Project Health Check:**
-Broken (FINRA background ingestion task logic).
+Healthy.
 
 **3rd Party Integrations**
   - Interactive Brokers (IB Gateway) — Requires local user instance.
@@ -128,13 +122,18 @@ Broken (FINRA background ingestion task logic).
   - FINRA API — Free API for Short Interest.
 
 **Testing status**
-  - Testing agent used after significant changes: YES (For Phase 2 API surface).
+  - Testing agent used after significant changes: NO (Testing done manually via startup logs and curl).
   - Troubleshoot agent used after agent stuck in loop: NO.
-  - Test files created: 
-  - Known regressions: FINRA symbol string-matching logic is preventing DB writes.
+  - Test files created: None.
+  - Known regressions: None.
 
 **Credentials to test flow:**
-Standard  variables. Use  scripts to trigger background tasks and verify MongoDB documents.
+Standard  variables. Use  scripts or backend                          RUNNING   pid 47, uptime 0:00:04
+code-server                      STOPPED   Not started
+frontend                         STOPPED   Mar 27 06:39 PM
+mongodb                          RUNNING   pid 50, uptime 0:00:04
+nginx-code-proxy                 RUNNING   pid 45, uptime 0:00:04
+worker                           RUNNING   pid 53, uptime 0:00:04 to check service health.
 
 **What agent forgot to execute**
-The agent was in the middle of fixing the FINRA string-matching bug when context ended. Furthermore, the user's request for a **Twitter/X Social Stream Widget** was planned but not started.</analysis>
+The agent was in the middle of extracting  and  from  when the context window maxed out.</analysis>
