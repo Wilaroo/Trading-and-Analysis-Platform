@@ -28,6 +28,7 @@ class IBShortDataPush(BaseModel):
 class FINRAFetchRequest(BaseModel):
     symbols: Optional[List[str]] = None
     settlement_date: Optional[str] = None
+    force: bool = False
 
 
 def _get_service():
@@ -54,25 +55,27 @@ async def push_ib_short_data(payload: IBShortDataPush):
 async def fetch_finra_data(request: FINRAFetchRequest):
     """
     Fetch and store short interest data from FINRA's free API.
-    Runs as background task since it may take 30-60 seconds.
+    Auto-discovers latest settlement date. Skips if already populated (use force=true to re-fetch).
+    Runs as background task for full fetches.
     """
-    from fastapi import BackgroundTasks
     svc = _get_service()
 
-    # Run synchronously for small requests, async for full fetch
+    # Small targeted requests run inline
     if request.symbols and len(request.symbols) <= 10:
         result = await svc.fetch_finra_short_interest(
             symbols=request.symbols,
             settlement_date=request.settlement_date,
+            force=request.force,
         )
         return result
 
-    # For large fetches, run in background
+    # Full fetches run in background
     import asyncio
     loop = asyncio.get_event_loop()
     loop.create_task(svc.fetch_finra_short_interest(
         symbols=request.symbols,
         settlement_date=request.settlement_date,
+        force=request.force,
     ))
     return {
         "success": True,

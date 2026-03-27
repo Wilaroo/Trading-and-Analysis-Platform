@@ -55,31 +55,81 @@ class ShortInterestService:
             return {"stored": stored}
         return {"stored": 0}
 
-    async def fetch_finra_short_interest(self, symbols: List[str] = None, settlement_date: str = None) -> Dict:
+    async def _discover_latest_settlement_date(self) -> str:
+        """Probe FINRA to find the most recent available settlement date."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+        # FINRA publishes bi-monthly (~every 2 weeks). Probe narrow windows
+        # starting from the most recent, expanding if empty.
+        for days_back in [15, 30, 45, 60]:
+            start = (now - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            end = (now - timedelta(days=max(0, days_back - 15))).strftime("%Y-%m-%d") if days_back > 15 else now.strftime("%Y-%m-%d")
+            # For the first window, end = today
+            if days_back == 15:
+                end = now.strftime("%Y-%m-%d")
+
+            payload = {
+                "limit": 1,
+                "offset": 0,
+                "dateRangeFilters": [{"fieldName": "settlementDate", "startDate": start, "endDate": end}],
+            }
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.post(FINRA_API_URL, json=payload, headers=headers)
+                if resp.status_code == 200 and resp.json():
+                    date = resp.json()[0].get("settlementDate", "")
+                    logger.info(f"FINRA discovery: found date {date} in window {start}..{end}")
+                    return date
+            except Exception:
+                continue
+
+        # Fallback: broad 90-day window, use the date from the first record
+        start = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+        payload = {"limit": 1, "offset": 0, "dateRangeFilters": [{"fieldName": "settlementDate", "startDate": start, "endDate": now.strftime("%Y-%m-%d")}]}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(FINRA_API_URL, json=payload, headers=headers)
+            if resp.status_code == 200 and resp.json():
+                return resp.json()[0].get("settlementDate", "")
+        except Exception:
+            pass
+        return ""
+
+    async def fetch_finra_short_interest(self, symbols: List[str] = None, settlement_date: str = None, force: bool = False) -> Dict:
         """
-        Fetch short interest data from FINRA's free Consolidated API.
-        Paginates to get complete coverage. Filters to ADV-qualifying symbols.
+        Fetch short interest from FINRA's free Consolidated API.
+        - Auto-discovers latest settlement date if none provided
+        - Skips if we already have that date fully populated (unless force=True)
+        - Fetches ONLY the target date (no multi-date bloat)
+        - Filters to ADV-qualifying symbols
+        - Upserts by symbol only (1 record per symbol, latest wins)
+        - Cleans up older settlement dates after successful fetch
         """
         try:
-            # Build date range filter
-            if settlement_date:
-                date_filter = [{
-                    "fieldName": "settlementDate",
-                    "startDate": settlement_date,
-                    "endDate": settlement_date,
-                }]
-            else:
-                from datetime import timedelta
-                now = datetime.now(timezone.utc)
-                start = (now - timedelta(days=90)).strftime("%Y-%m-%d")
-                end = now.strftime("%Y-%m-%d")
-                date_filter = [{
-                    "fieldName": "settlementDate",
-                    "startDate": start,
-                    "endDate": end,
-                }]
+            # 1. Determine target settlement date
+            target_date = settlement_date
+            if not target_date:
+                target_date = await self._discover_latest_settlement_date()
+                if not target_date:
+                    return {"success": False, "error": "Could not discover latest FINRA settlement date"}
 
-            # Load qualifying symbols for filtering
+            # 2. Check if we already have this date fully populated
+            if not force:
+                existing = self.db["finra_short_interest"].count_documents({"settlement_date": target_date})
+                if existing >= 2000:  # ~2500 qualifying symbols expected
+                    logger.info(f"FINRA date {target_date} already populated ({existing} records). Use force=True to re-fetch.")
+                    return {
+                        "success": True,
+                        "records": existing,
+                        "settlement_date": target_date,
+                        "total_from_api": 0,
+                        "skipped": True,
+                        "message": f"Already have {existing} records for {target_date}. Use force=true to re-fetch.",
+                    }
+
+            # 3. Load qualifying symbols
             qualifying = None
             try:
                 adv_symbols = set()
@@ -87,17 +137,21 @@ class ShortInterestService:
                     adv_symbols.add(doc.get("symbol", "").upper())
                 if adv_symbols:
                     qualifying = adv_symbols
-            except Exception:
-                pass
+                    logger.info(f"ADV filter loaded: {len(qualifying)} qualifying symbols")
+            except Exception as e:
+                logger.warning(f"Could not load ADV cache: {e}")
 
-            # Paginate through FINRA API using offset
+            symbols_upper = set(s.upper() for s in symbols) if symbols else None
+
+            # 4. Paginate ONLY for the target date
+            date_filter = [{"fieldName": "settlementDate", "startDate": target_date, "endDate": target_date}]
             from pymongo import UpdateOne
             total_stored = 0
             total_from_api = 0
-            settle_date = ""
+            total_skipped_adv = 0
             offset = 0
             page_size = 5000
-            max_pages = 10
+            max_pages = 5  # Single date has ~10-15K records, 3 pages is plenty
 
             for page in range(max_pages):
                 payload = {
@@ -108,8 +162,7 @@ class ShortInterestService:
 
                 async with httpx.AsyncClient(timeout=60) as client:
                     response = await client.post(
-                        FINRA_API_URL,
-                        json=payload,
+                        FINRA_API_URL, json=payload,
                         headers={"Content-Type": "application/json", "Accept": "application/json"},
                     )
 
@@ -119,40 +172,33 @@ class ShortInterestService:
 
                 records = response.json()
                 total_from_api += len(records)
-                logger.info(f"FINRA page {page+1} (offset {offset}): {len(records)} records")
+                logger.info(f"FINRA page {page+1} (offset {offset}): {len(records)} records for {target_date}")
 
                 if not records:
                     break
 
                 ops = []
                 for record in records:
-                    symbol = record.get("symbolCode", record.get("issueSymbolIdentifier", "")).upper()
+                    symbol = record.get("symbolCode", "").upper().strip()
                     if not symbol:
                         continue
-                    if symbols and symbol not in [s.upper() for s in symbols]:
+                    if symbols_upper and symbol not in symbols_upper:
                         continue
                     if qualifying and symbol not in qualifying:
+                        total_skipped_adv += 1
                         continue
 
-                    short_interest = record.get("currentShortPositionQuantity", record.get("currentShortShareNumber", 0))
-                    prev_short_interest = record.get("previousShortPositionQuantity", record.get("previousShortShareNumber", 0))
-                    change_pct = record.get("changePercent", 0)
-                    adv = record.get("averageDailyVolumeQuantity", record.get("averageShortShareNumber", 0))
-                    days_to_cover = record.get("daysToCoverQuantity", record.get("daysToCoverNumber", 0))
-                    settle_date = record.get("settlementDate", settlement_date or "")
-                    market_class = record.get("marketClassCode", record.get("marketCategoryCode", ""))
-
                     ops.append(UpdateOne(
-                        {"symbol": symbol, "settlement_date": settle_date},
+                        {"symbol": symbol},
                         {"$set": {
                             "symbol": symbol,
-                            "settlement_date": settle_date,
-                            "short_interest": short_interest,
-                            "prev_short_interest": prev_short_interest,
-                            "change_pct": change_pct,
-                            "avg_daily_volume": adv,
-                            "days_to_cover": days_to_cover,
-                            "market_class": market_class,
+                            "settlement_date": target_date,
+                            "short_interest": record.get("currentShortPositionQuantity", 0),
+                            "prev_short_interest": record.get("previousShortPositionQuantity", 0),
+                            "change_pct": record.get("changePercent", 0),
+                            "avg_daily_volume": record.get("averageDailyVolumeQuantity", 0),
+                            "days_to_cover": record.get("daysToCoverQuantity", 0),
+                            "market_class": record.get("marketClassCode", ""),
                             "fetched_at": datetime.now(timezone.utc).isoformat(),
                             "source": "finra",
                         }},
@@ -169,13 +215,23 @@ class ShortInterestService:
                     break
                 offset += page_size
 
-            logger.info(f"FINRA fetch complete: {total_stored} stored from {total_from_api} records")
+            # 5. Clean up old settlement dates (keep only the latest)
+            if total_stored > 0:
+                deleted = self.db["finra_short_interest"].delete_many(
+                    {"settlement_date": {"$ne": target_date, "$exists": True}}
+                )
+                if deleted.deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted.deleted_count} stale records from older settlement dates")
+
+            logger.info(f"FINRA fetch complete: {total_stored} stored, {total_skipped_adv} skipped (not in ADV), {total_from_api} from API")
             return {
                 "success": True,
                 "records": total_stored,
-                "settlement_date": settle_date if total_stored > 0 else None,
+                "settlement_date": target_date,
                 "total_from_api": total_from_api,
                 "filtered_by_adv": qualifying is not None,
+                "adv_qualifying_count": len(qualifying) if qualifying else 0,
+                "skipped_not_qualifying": total_skipped_adv,
             }
 
         except Exception as e:
@@ -219,26 +275,14 @@ class ShortInterestService:
         return result
 
     async def get_short_data_bulk(self, symbols: List[str] = None, limit: int = 100) -> List[Dict]:
-        """Get short data for multiple symbols (combined IB + FINRA)."""
-        pipeline = [
-            {"$sort": {"settlement_date": -1}},
-            {"$group": {
-                "_id": "$symbol",
-                "short_interest": {"$first": "$short_interest"},
-                "prev_short_interest": {"$first": "$prev_short_interest"},
-                "change_pct": {"$first": "$change_pct"},
-                "days_to_cover": {"$first": "$days_to_cover"},
-                "settlement_date": {"$first": "$settlement_date"},
-                "avg_daily_volume": {"$first": "$avg_daily_volume"},
-            }},
-            {"$limit": limit},
-        ]
+        """Get short data for multiple symbols (combined IB + FINRA). Single record per symbol."""
+        query = {}
         if symbols:
-            pipeline.insert(0, {"$match": {"symbol": {"$in": [s.upper() for s in symbols]}}})
+            query["symbol"] = {"$in": [s.upper() for s in symbols]}
 
         finra_map = {}
-        for doc in self.db["finra_short_interest"].aggregate(pipeline):
-            finra_map[doc["_id"]] = doc
+        for doc in self.db["finra_short_interest"].find(query, {"_id": 0}).limit(limit):
+            finra_map[doc["symbol"]] = doc
 
         ib_query = {"symbol": {"$in": [s.upper() for s in symbols]}} if symbols else {}
         ib_map = {}
@@ -275,6 +319,6 @@ class ShortInterestService:
     async def ensure_indexes(self):
         """Create indexes for short data collections."""
         self.db["ib_short_data"].create_index("symbol", unique=True)
-        self.db["finra_short_interest"].create_index([("symbol", 1), ("settlement_date", -1)])
+        self.db["finra_short_interest"].create_index("symbol", unique=True)
         self.db["finra_short_interest"].create_index("settlement_date")
         logger.info("Short data indexes created")

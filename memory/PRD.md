@@ -138,13 +138,21 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - `GET /api/short-data/symbol/{symbol}` — Combined IB + FINRA data per symbol
     - `GET /api/short-data/bulk?symbols=...` — Bulk query
     - `POST /api/short-data/ib/push` — Receives IB shortable data from local pusher
-    - `POST /api/short-data/finra/fetch` — Triggers FINRA data refresh
+    - `POST /api/short-data/finra/fetch` — Triggers FINRA data refresh (supports `force` and `settlement_date` params)
   - Updated `ib_data_pusher.py`:
     - Added tick type 236 to market data subscriptions
     - Captures `shortable_level` (tick 46)
     - Pushes shortable data to `/api/short-data/ib/push` alongside regular market data
   - MongoDB collections: `ib_short_data` (real-time), `finra_short_interest` (bi-monthly)
-  - FINRA data: 10,000 records stored, 8,395 unique symbols, ADV-filtered
+  - FINRA data: 2,702 records stored, 1 per symbol, single latest settlement date (2026-03-13)
+  - FINRA fetch optimizations (Mar 27, 2026):
+    - Auto-discovers latest settlement date (probes narrow windows, most-recent first)
+    - Skip logic: won't re-fetch if already have >= 2000 records for latest date
+    - Single-date fetch: only fetches target date (no multi-date bloat)
+    - Upserts by symbol only (1 record per symbol, latest always wins)
+    - Auto-cleans stale records from older settlement dates
+    - ADV filter: only stores symbols with avg_volume >= 500K
+    - `force=true` param to bypass skip and re-fetch
 
 - **Vendor 1-Min Data Import**: User actively importing ~3.35GB of 30-day vendor data
   - 2026-02-18 through 2026-03-18, full market OHLCV 1-min bars
