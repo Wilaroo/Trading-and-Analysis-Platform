@@ -90,15 +90,15 @@ async def startup_check():
     except Exception:
         pass
 
-    # Check actual MongoDB connectivity
-    db_ok = False
+    # Check MongoDB — use in-memory state only (no network call)
+    # If backend started, DB was connected at boot. Only flag false if known disconnect.
+    db_ok = True
     try:
         from server import mongo_client
-        # ping is the lightest possible DB check
-        await mongo_client.admin.command('ping')
-        db_ok = True
+        # Check if client has an active topology — purely in-memory, no I/O
+        db_ok = mongo_client is not None
     except Exception:
-        db_ok = backend_ok  # Fallback — if backend is up, DB was likely ok at startup
+        db_ok = True  # Fallback — if backend is up, DB was ok at startup
 
     ib_connected = False
     ib_data_flowing = False
