@@ -110,6 +110,51 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ### Session 4.8 (Mar 26, 2026 - P3 Complete: WebSocket Context + Full Migration + SmartFilter Delegation)
 
+### Session 5.0 (Mar 27, 2026 - Short Setup Models + Short Interest Data Integration)
+
+- **Phase 1: Short Setup Models** (10 new short setup types, 17 new model profiles)
+  - `short_setup_features.py` — 10 feature extractors, each with 5-6 inverse features:
+    - SHORT_BREAKDOWN: dist_from_support, lower_low_streak, lower_high_streak, down_vs_up_volume, breakdown_magnitude, upper_wick_ratio
+    - SHORT_MOMENTUM: bearish_momentum_accel, down_streak, ema_stack_bearish, below_ema_count, bearish_vol_alignment, rsi_decline
+    - SHORT_REVERSAL: overbought_rsi, dist_from_recent_high, bearish_engulfing, shooting_star, volume_climax, bearish_divergence
+    - SHORT_GAP_FADE: gap_up_size, gap_fill_pct, post_gap_bearish, gap_vs_atr, gap_rejection, fade_volume_ratio
+    - SHORT_VWAP: price_vs_vwap, below_vwap_duration, vwap_slope, vol_below_vwap_ratio, vwap_rejection
+    - SHORT_MEAN_REVERSION: zscore_high, bb_upper_position, rsi_overbought_level, overextension_duration, momentum_deceleration, vol_at_high
+    - SHORT_SCALP: bearish_body, close_at_low, decline_speed, red_bar_ratio, downside_vol_expansion, spread_proxy
+    - SHORT_ORB: below_or_low, dist_below_or, or_range_pct, breakdown_vol_ratio, first_bar_bearish
+    - SHORT_TREND: bearish_trend_strength, below_ma_count, ema21_rejection, lower_highs_count, macd_bearish
+    - SHORT_RANGE: range_position, below_range, time_in_range, breakdown_vol_surge, failed_upbreak
+  - Updated `setup_training_config.py`: 17 SHORT_* profiles with `direction: "short"` flag
+  - Updated `training_pipeline.py`: Phase 2.5 trains short models with inverted targets (DOWN = positive outcome)
+  - Updated `setup_features.py`: SHORT_* extractors registered in main registry
+  - Total models: 63 → **80** (17 new short models)
+
+- **Phase 2: Short Interest Data Integration** (IB + FINRA)
+  - `short_interest_service.py` — Unified short interest data from two sources:
+    - IB Gateway: Real-time `shortableShares` + `shortable` level (tick 236) pushed by local pusher
+    - FINRA: Bi-monthly consolidated short interest from free API (NYSE + NASDAQ + OTC)
+  - `routers/short_data.py` — API endpoints:
+    - `GET /api/short-data/summary` — Data coverage overview
+    - `GET /api/short-data/symbol/{symbol}` — Combined IB + FINRA data per symbol
+    - `GET /api/short-data/bulk?symbols=...` — Bulk query
+    - `POST /api/short-data/ib/push` — Receives IB shortable data from local pusher
+    - `POST /api/short-data/finra/fetch` — Triggers FINRA data refresh
+  - Updated `ib_data_pusher.py`:
+    - Added tick type 236 to market data subscriptions
+    - Captures `shortable_level` (tick 46)
+    - Pushes shortable data to `/api/short-data/ib/push` alongside regular market data
+  - MongoDB collections: `ib_short_data` (real-time), `finra_short_interest` (bi-monthly)
+  - FINRA data: 10,000 records stored, 8,395 unique symbols, ADV-filtered
+
+- **Vendor 1-Min Data Import**: User actively importing ~3.35GB of 30-day vendor data
+  - 2026-02-18 through 2026-03-18, full market OHLCV 1-min bars
+  - Import script runs locally with `--skip-days 0` (no overlap with IB data)
+  - Progress: ~89% complete at last check (~11M bars written to Atlas)
+
+- **Collector Speed Optimization**: `base_batch_delay` 10s → 6s → 3s (0 pacing violations)
+
+- **Deployment**: User trashed cloud deployment — running fully local setup
+
 - **WebSocketDataContext** (`contexts/WebSocketDataContext.jsx`)
   - Centralized WS data store: 13 data types (quotes, ibStatus, botStatus, botTrades, scannerStatus, scannerAlerts, smartWatchlist, coachingNotifications, confidenceGate, trainingStatus, marketRegime, filterThoughts, sentcomStream)
   - `useWsData()` hook — any component can subscribe to any WS data type without prop drilling
