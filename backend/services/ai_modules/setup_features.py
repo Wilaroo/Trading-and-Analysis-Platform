@@ -683,6 +683,13 @@ SETUP_FEATURE_EXTRACTORS = {
     'MEAN_REVERSION': mean_reversion_features,
 }
 
+# Import short setup extractors and merge
+try:
+    from services.ai_modules.short_setup_features import SHORT_SETUP_FEATURE_EXTRACTORS
+    SETUP_FEATURE_EXTRACTORS.update(SHORT_SETUP_FEATURE_EXTRACTORS)
+except ImportError:
+    pass
+
 
 def get_setup_features(setup_type: str, opens, highs, lows, closes, volumes) -> Dict[str, float]:
     """

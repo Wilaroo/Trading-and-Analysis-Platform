@@ -51,6 +51,12 @@ ALL_SETUP_TYPES = [
     "RANGE", "MEAN_REVERSION", "REVERSAL", "TREND_CONTINUATION", "MOMENTUM",
 ]
 
+# Short setup types (inverse of longs)
+ALL_SHORT_SETUP_TYPES = [
+    "SHORT_SCALP", "SHORT_ORB", "SHORT_GAP_FADE", "SHORT_VWAP", "SHORT_BREAKDOWN",
+    "SHORT_RANGE", "SHORT_MEAN_REVERSION", "SHORT_REVERSAL", "SHORT_MOMENTUM", "SHORT_TREND",
+]
+
 # Minimum training samples to proceed with training
 MIN_TRAINING_SAMPLES = 200
 
@@ -144,14 +150,16 @@ async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
 
 def count_total_models() -> int:
     """Count total models that will be trained."""
+    from services.ai_modules.setup_training_config import get_all_profile_count, SETUP_TRAINING_PROFILES
     generic = len(BAR_SIZE_CONFIGS)  # 7
-    setup_specific = 16  # As defined in setup_training_config
+    setup_specific = 16  # Long setup profiles
+    short_specific = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if k.startswith("SHORT_"))
     volatility = len(BAR_SIZE_CONFIGS)  # 7
     exit_timing = len(ALL_SETUP_TYPES)  # 10
     sector_relative = 3  # daily, hourly, 5min
     gap_fill = 3  # 5min, 1min, 15min
     risk_of_ruin = 6  # 1min through daily
-    return generic + setup_specific + volatility + exit_timing + sector_relative + gap_fill + risk_of_ruin
+    return generic + setup_specific + short_specific + volatility + exit_timing + sector_relative + gap_fill + risk_of_ruin
 
 
 async def run_training_pipeline(
@@ -174,7 +182,7 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "volatility", "exit", "sector", "gap_fill", "risk"]
+        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
 
     if bar_sizes is None:
@@ -259,6 +267,130 @@ async def run_training_pipeline(
             # Delegate to existing timeseries_service setup training
             # This is already implemented in the service
             logger.info("Setup-specific training deferred to existing service (trigger via API)")
+
+        # ── Phase 2.5: Short Setup-Specific Models ──
+        if "short" in phases:
+            status.update(phase="short_setup_specific")
+            logger.info("=== Phase 2.5: Training SHORT Setup-Specific Models ===")
+            from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+            from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.advanced_targets import compute_advanced_target
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            for setup_type in ALL_SHORT_SETUP_TYPES:
+                profiles = get_setup_profiles(setup_type)
+                for profile in profiles:
+                    bs = profile["bar_size"]
+                    fh = profile["forecast_horizon"]
+                    noise_thr = profile.get("noise_threshold", 0.003)
+                    num_boost = profile.get("num_boost_round", 150)
+                    model_name = get_model_name(setup_type, bs)
+                    max_sym = profile.get("max_symbols", 2500)
+                    max_bars = profile.get("max_bars_per_symbol", 5000)
+                    status.update(current_model=model_name)
+
+                    try:
+                        symbols = await get_available_symbols(db, bs, 100)
+                        symbols = symbols[:max_sym]
+
+                        if not symbols:
+                            logger.warning(f"No symbols available for {model_name}")
+                            continue
+
+                        # Get short-specific feature names
+                        short_feat_names = get_short_setup_feature_names(setup_type)
+                        combined_names = base_names + [f"short_{n}" for n in short_feat_names]
+
+                        all_X = []
+                        all_y = []
+
+                        for sym in symbols:
+                            bars = await load_symbol_bars(db, sym, bs)
+                            if len(bars) < 70 + fh:
+                                continue
+                            bars = bars[:max_bars]
+
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+
+                            for i in range(50, len(bars) - fh):
+                                # Base features
+                                window = bars[i - 49: i + 1][::-1]
+                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                                if fs is None:
+                                    continue
+                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                                # Short-specific features
+                                c_window = closes[max(0, i - 49): i + 1][::-1]
+                                h_window = highs[max(0, i - 49): i + 1][::-1]
+                                l_window = lows[max(0, i - 49): i + 1][::-1]
+                                v_window = volumes[max(0, i - 49): i + 1][::-1]
+                                o_window = opens[max(0, i - 49): i + 1][::-1]
+
+                                short_feats = get_short_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
+                                short_vec = [short_feats.get(f, 0.0) for f in short_feat_names]
+
+                                # Target: For SHORT models, "positive outcome" = price goes DOWN
+                                # Use inverted return: positive return = price dropped
+                                future_return = (closes[i] - closes[i - fh]) / closes[i] if closes[i] > 0 else 0
+                                # Invert: if future_return is negative (price went down), that's good for shorts
+                                inverted_return = -future_return
+
+                                if abs(inverted_return) < noise_thr:
+                                    target = 1  # FLAT
+                                elif inverted_return > 0:
+                                    target = 2  # DOWN (good for short) → maps to "up" in model terms
+                                else:
+                                    target = 0  # UP (bad for short) → maps to "down" in model terms
+
+                                all_X.append(base_vec + short_vec)
+                                all_y.append(target)
+
+                        if len(all_X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient short training data for {model_name}: {len(all_X)}")
+                            results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
+                            continue
+
+                        X = np.array(all_X)
+                        y = np.array(all_y)
+                        logger.info(
+                            f"Training {model_name}: {len(X)} samples, {len(combined_names)} features, "
+                            f"DOWN(good)={np.sum(y==2)}, FLAT={np.sum(y==1)}, UP(bad)={np.sum(y==0)}"
+                        )
+
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                        model.set_db(db)
+                        metrics = model.train_from_features(
+                            X, y, combined_names,
+                            num_boost_round=num_boost,
+                            early_stopping_rounds=15,
+                            num_classes=3,
+                        )
+
+                        if metrics and metrics.accuracy > 0:
+                            results["models_trained"].append({
+                                "name": model_name,
+                                "accuracy": metrics.accuracy,
+                                "samples": metrics.training_samples,
+                                "direction": "short",
+                            })
+                            results["total_samples"] += metrics.training_samples
+                            status.add_completed(model_name, metrics.accuracy)
+                        else:
+                            results["models_failed"].append({"name": model_name, "reason": "Low accuracy or no metrics"})
+
+                    except Exception as e:
+                        logger.error(f"Failed to train {model_name}: {e}")
+                        results["models_failed"].append({"name": model_name, "reason": str(e)})
+                        status.add_error(model_name, str(e))
 
         # ── Phase 3: Volatility Prediction Models ──
         if "volatility" in phases:

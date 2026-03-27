@@ -356,6 +356,10 @@ class IBDataPusher:
                     if hasattr(ticker, 'shortableShares') and ticker.shortableShares:
                         fund["shortable_shares"] = ticker.shortableShares
                     
+                    # Shortable level (tick 46): >2.5 = easy, <=1.5 = not shortable
+                    if hasattr(ticker, 'shortable') and ticker.shortable is not None:
+                        fund["shortable_level"] = ticker.shortable
+                    
                     # Fundamental ratios come through ticker.fundamentalRatios
                     if hasattr(ticker, 'fundamentalRatios') and ticker.fundamentalRatios:
                         ratios = ticker.fundamentalRatios
@@ -551,7 +555,8 @@ class IBDataPusher:
         # 411 = Real-time Historical Volatility
         # 456 = IB Dividends
         # Using only valid tick types to avoid Error 321
-        fundamental_ticks = "165,293,294,295,411,456" if include_fundamentals else ""
+        # 236 = Shortable data (shortableShares + shortable level)
+        fundamental_ticks = "165,236,293,294,295,411,456" if include_fundamentals else ""
         
         for symbol in symbols:
             try:
@@ -948,6 +953,23 @@ class IBDataPusher:
             else:
                 logger.warning(f"Push returned error: {result}")
                 self.consecutive_push_failures += 1
+
+            # Push shortable data to dedicated endpoint
+            short_data = []
+            for sym, fund in self.fundamentals_buffer.items():
+                shortable_shares = fund.get("shortable_shares")
+                if shortable_shares is not None and shortable_shares > 0:
+                    short_data.append({
+                        "symbol": sym,
+                        "shortable_shares": int(shortable_shares),
+                        "shortable_level": fund.get("shortable_level", 3.0),
+                        "timestamp": fund.get("timestamp", datetime.now().isoformat()),
+                    })
+            if short_data:
+                try:
+                    self.api.post("/api/short-data/ib/push", {"data": short_data}, timeout=10)
+                except Exception:
+                    pass  # Non-critical, don't block main push
                         
         except Exception as e:
             logger.error(f"Push error: {e}")
