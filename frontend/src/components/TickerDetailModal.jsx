@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Target,
@@ -16,6 +16,18 @@ import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 import { TickerAwareText } from '../utils/tickerUtils';
 import QuickActionsMenu from './QuickActionsMenu';
+import { useWsData } from '../contexts/WebSocketDataContext';
+
+// Per-symbol cache (survives modal close/reopen, 60s TTL)
+const _tdmCache = {};
+const getTDMCached = (symbol) => {
+  const e = _tdmCache[symbol];
+  if (!e || Date.now() - e.ts > 60000) return null;
+  return e;
+};
+const setTDMCached = (symbol, data) => {
+  _tdmCache[symbol] = { ...data, ts: Date.now() };
+};
 
 const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [analysis, setAnalysis] = useState(null);
@@ -26,32 +38,39 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [showTradingLines, setShowTradingLines] = useState(true);
   const [chartError, setChartError] = useState(null);
+  const [deferredLoaded, setDeferredLoaded] = useState(false);
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
 
+  // ── WebSocket real-time quotes ──
+  const { quotes: wsQuotes } = useWsData();
+
+  // ── Phase 1: Critical data (analysis + chart) ──
   useEffect(() => {
     if (!ticker?.symbol) return;
     
-    const fetchData = async () => {
+    // Check cache first
+    const cached = getTDMCached(ticker.symbol);
+    if (cached) {
+      setAnalysis(cached.analysis);
+      setHistoricalData(cached.historicalData);
+      if (cached.qualityData) setQualityData(cached.qualityData);
+      if (cached.earningsData) setEarningsData(cached.earningsData);
+      setLoading(false);
+      setDeferredLoaded(!!cached.qualityData);
+      return;
+    }
+    
+    const fetchCritical = async () => {
       setLoading(true);
       setChartError(null);
-      
-      const fetchWithRetry = async (fetcher, retries = 2, delay = 1000) => {
-        for (let i = 0; i <= retries; i++) {
-          try {
-            return await fetcher();
-          } catch (err) {
-            if (i === retries) throw err;
-            await new Promise(r => setTimeout(r, delay));
-          }
-        }
-      };
+      setDeferredLoaded(false);
       
       try {
-        const [analysisRes, histRes, qualityRes, earningsRes] = await Promise.all([
-          fetchWithRetry(() => api.get(`/api/ib/analysis/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`)).catch((err) => {
+        const [analysisRes, histRes] = await Promise.all([
+          api.get(`/api/ib/analysis/${ticker.symbol}`).catch(() => ({ data: null })),
+          api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch((err) => {
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
               setChartError('IB Gateway is busy with a scan. Using cached/Alpaca data.');
@@ -60,22 +79,46 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
             }
             return { data: { bars: [] } };
           }),
-          fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/earnings/${ticker.symbol}`)).catch(() => ({ data: null }))
         ]);
         
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
-        setQualityData(qualityRes.data);
-        setEarningsData(earningsRes.data);
+        setTDMCached(ticker.symbol, {
+          analysis: analysisRes.data,
+          historicalData: histRes.data?.bars || [],
+        });
       } catch (err) {
         setChartError('Failed to load data. Please try again.');
       }
       setLoading(false);
     };
     
-    fetchData();
+    fetchCritical();
   }, [ticker?.symbol]);
+
+  // ── Phase 2: Deferred data (quality + earnings) ──
+  useEffect(() => {
+    if (!ticker?.symbol || loading || deferredLoaded) return;
+    
+    const fetchDeferred = async () => {
+      const [qualityRes, earningsRes] = await Promise.all([
+        api.get(`/api/quality/score/${ticker.symbol}`).catch(() => ({ data: null })),
+        api.get(`/api/earnings/${ticker.symbol}`).catch(() => ({ data: null })),
+      ]);
+      
+      setQualityData(qualityRes.data);
+      setEarningsData(earningsRes.data);
+      setDeferredLoaded(true);
+      
+      // Update cache
+      const cached = getTDMCached(ticker.symbol);
+      if (cached) {
+        setTDMCached(ticker.symbol, { ...cached, qualityData: qualityRes.data, earningsData: earningsRes.data });
+      }
+    };
+    
+    fetchDeferred();
+  }, [ticker?.symbol, loading, deferredLoaded]);
 
   // Create chart when tab changes to chart
   useEffect(() => {
@@ -124,7 +167,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
       } catch (err) {
         setChartError('Failed to initialize chart');
       }
-    }, 150);
+    }, 50);
     
     return () => {
       clearTimeout(timer);
@@ -163,6 +206,11 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   if (!ticker) return null;
 
   const quote = analysis?.quote || ticker.quote || ticker;
+  // Overlay WS real-time price if available
+  const wsQuote = wsQuotes?.[ticker.symbol];
+  const livePrice = wsQuote?.price || quote?.price;
+  const liveChangePct = wsQuote?.change_percent ?? quote?.change_percent;
+  
   const tradingSummary = analysis?.trading_summary || {};
   const scores = analysis?.scores || {};
   const technicals = analysis?.technicals || {};
@@ -234,9 +282,9 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <span className="text-2xl font-mono font-bold text-white">${formatPrice(quote?.price)}</span>
-                <span className={`ml-2 font-mono ${quote?.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {formatPercent(quote?.change_percent)}
+                <span className="text-2xl font-mono font-bold text-white">${formatPrice(livePrice)}</span>
+                <span className={`ml-2 font-mono ${liveChangePct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {formatPercent(liveChangePct)}
                 </span>
               </div>
               {onAskAI && (
@@ -623,7 +671,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
             <QuickActionsMenu 
               symbol={ticker.symbol} 
               hasPosition={false}
-              currentPrice={analysis?.quote?.price}
+              currentPrice={livePrice}
               variant="buttons"
               className="mr-auto"
             />

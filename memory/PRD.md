@@ -427,6 +427,23 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - ~36 → 25 remaining setInterval calls (all are job polling, UI timers, heartbeats — appropriate)
   - Estimated reduction: ~400 HTTP requests/min → near zero polling traffic
 
+- ~~Ticker/Chart Modal Audit & Load Speed Optimization~~ **DONE (Mar 27, 2026)**
+  - **EnhancedTickerModal.jsx** optimizations:
+    - Wired `useWsData()` for real-time WebSocket price quotes (replaces stale REST-only prices)
+    - Two-phase data loading: critical (analysis + chart bars) first, deferred (quality, earnings, news, learning insights) after — reduces initial blocking calls from 5+1 to 2
+    - Per-symbol data cache (60s TTL) for instant re-opens of same ticker
+    - Static constants (`TIMEFRAMES`, `QUICK_TICKERS`, `TABS`) moved outside component
+    - Sub-components wrapped with `React.memo` (GlassCard, PositionProgressBar, ScoreRing)
+    - Removed `fetchWithRetry` wrapper (eliminated retry delays on every endpoint)
+    - Chart init delay reduced from 100ms to 50ms
+    - Consolidated learning insights fetch into deferred phase (removed duplicate effect)
+  - **TickerDetailModal.jsx** optimizations:
+    - Wired `useWsData()` for real-time WebSocket price quotes
+    - Two-phase data loading: critical (analysis + chart) first, deferred (quality, earnings) after — reduces initial calls from 4 to 2
+    - Per-symbol data cache (60s TTL) for instant re-opens
+    - Removed `fetchWithRetry` wrapper
+    - Chart init delay reduced from 150ms to 50ms
+
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic
   - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring

@@ -9,7 +9,7 @@
  * - Collapsible company info
  * - Bot Vision toggle for chart annotations
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -40,8 +40,38 @@ import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 import QuickActionsMenu from './QuickActionsMenu';
 import SmartStopSelector from './SmartStopSelector';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// ── Static constants (outside component to avoid re-creation) ──
+const QUICK_TICKERS = ['NVDA', 'AMD', 'TSLA', 'META', 'AAPL', 'SPY', 'QQQ'];
+const TIMEFRAMES = [
+  { id: '1m', label: '1m', duration: '1 D', barSize: '1 min' },
+  { id: '5m', label: '5m', duration: '1 D', barSize: '5 mins' },
+  { id: '15m', label: '15m', duration: '2 D', barSize: '15 mins' },
+  { id: '1h', label: '1H', duration: '5 D', barSize: '1 hour' },
+  { id: 'D', label: 'D', duration: '6 M', barSize: '1 day' },
+];
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'chart', label: 'Chart' },
+  { id: 'research', label: 'Research' },
+];
+
+// ── Per-symbol data cache (survives modal close/reopen) ──
+const _symbolCache = {};
+const getCachedSymbolData = (symbol) => {
+  const entry = _symbolCache[symbol];
+  if (!entry) return null;
+  const age = Date.now() - entry.timestamp;
+  // Cache valid for 60s
+  if (age > 60000) return null;
+  return entry;
+};
+const setCachedSymbolData = (symbol, data) => {
+  _symbolCache[symbol] = { ...data, timestamp: Date.now() };
+};
 
 // Score color helper
 const getScoreColor = (score) => {
@@ -67,7 +97,7 @@ const getGradeBadgeColor = (grade) => {
 };
 
 // Glass Card Component for V2 styling
-const GlassCard = ({ children, className = '', gradient = false, glow = false }) => (
+const GlassCard = React.memo(({ children, className = '', gradient = false, glow = false }) => (
   <div className={`
     relative overflow-hidden rounded-xl
     bg-gradient-to-br from-white/[0.08] to-white/[0.02]
@@ -81,10 +111,10 @@ const GlassCard = ({ children, className = '', gradient = false, glow = false })
     )}
     <div className="relative">{children}</div>
   </div>
-);
+));
 
 // Progress bar for position
-const PositionProgressBar = ({ entry, stop, target, current }) => {
+const PositionProgressBar = React.memo(({ entry, stop, target, current }) => {
   if (!entry || !stop || !target) return null;
   
   const range = target - stop;
@@ -113,10 +143,10 @@ const PositionProgressBar = ({ entry, stop, target, current }) => {
       </div>
     </div>
   );
-};
+});
 
 // Score Ring Component
-const ScoreRing = ({ score, size = 64 }) => {
+const ScoreRing = React.memo(({ score, size = 64 }) => {
   const circumference = 2 * Math.PI * (size / 2 - 4);
   const offset = circumference - (score / 100) * circumference;
   const grade = score >= 70 ? 'A' : score >= 60 ? 'B+' : score >= 50 ? 'B' : score >= 40 ? 'C' : 'D';
@@ -147,7 +177,7 @@ const ScoreRing = ({ score, size = 64 }) => {
       </div>
     </div>
   );
-};
+});
 
 // Our Take Card - Enhanced with stop analysis (formerly Bot's Take)
 const BotTakeCard = ({ trade, symbol }) => {
@@ -507,48 +537,23 @@ const EnhancedTickerModal = ({
   const [selectedStopData, setSelectedStopData] = useState(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState('5m');
   const [loadingNews, setLoadingNews] = useState(false);
+  const [deferredLoaded, setDeferredLoaded] = useState(false);
   
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const priceLinesRef = useRef([]);
   
-  // Quick ticker chips
-  const quickTickers = ['NVDA', 'AMD', 'TSLA', 'META', 'AAPL', 'SPY', 'QQQ'];
-  
-  // Timeframe configuration
-  const timeframes = [
-    { id: '1m', label: '1m', duration: '1 D', barSize: '1 min' },
-    { id: '5m', label: '5m', duration: '1 D', barSize: '5 mins' },
-    { id: '15m', label: '15m', duration: '2 D', barSize: '15 mins' },
-    { id: '1h', label: '1H', duration: '5 D', barSize: '1 hour' },
-    { id: 'D', label: 'D', duration: '6 M', barSize: '1 day' },
-  ];
+  // ── WebSocket real-time quotes ──
+  const { quotes: wsQuotes } = useWsData();
 
-  // Fetch learning insights for this symbol
-  const fetchLearningInsights = useCallback(async () => {
-    if (!ticker?.symbol) return;
-    try {
-      const response = await api.get(`/api/sentcom/learning/insights?symbol=${ticker.symbol}`);
-      if (response.data?.success) {
-        setLearningInsights(response.data.insights);
-      }
-    } catch (err) {
-      console.debug('Learning insights fetch error:', err);
-    }
-  }, [ticker?.symbol]);
+  // Fetch learning insights for this symbol (now part of deferred phase above)
 
-  // Fetch learning insights when modal opens
-  useEffect(() => {
-    fetchLearningInsights();
-  }, [fetchLearningInsights]);
-
-  // Fetch all data
   // Fetch historical data for timeframe
   const fetchHistoricalData = useCallback(async (tf) => {
     if (!ticker?.symbol) return;
     
-    const tfConfig = timeframes.find(t => t.id === tf) || timeframes[1];
+    const tfConfig = TIMEFRAMES.find(t => t.id === tf) || TIMEFRAMES[1];
     
     try {
       const response = await api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`);
@@ -564,7 +569,7 @@ const EnhancedTickerModal = ({
         setChartError(errorMsg);
       }
     }
-  }, [ticker?.symbol, timeframes]);
+  }, [ticker?.symbol]);
   
   // Fetch news data
   const fetchNewsData = useCallback(async () => {
@@ -588,30 +593,35 @@ const EnhancedTickerModal = ({
     fetchHistoricalData(tf);
   };
 
+  // ── Phase 1: Critical data (analysis + chart) — blocks loading spinner ──
   useEffect(() => {
     if (!ticker?.symbol) return;
     
-    const fetchData = async () => {
+    // Check cache first for instant display
+    const cached = getCachedSymbolData(ticker.symbol);
+    if (cached) {
+      setAnalysis(cached.analysis);
+      setHistoricalData(cached.historicalData);
+      if (cached.qualityData) setQualityData(cached.qualityData);
+      if (cached.earningsData) setEarningsData(cached.earningsData);
+      if (cached.newsData) setNewsData(cached.newsData);
+      if (cached.learningInsights) setLearningInsights(cached.learningInsights);
+      setLoading(false);
+      setDeferredLoaded(!!cached.qualityData);
+      return;
+    }
+    
+    const fetchCritical = async () => {
       setLoading(true);
       setChartError(null);
+      setDeferredLoaded(false);
       
-      const fetchWithRetry = async (fetcher, retries = 2, delay = 1000) => {
-        for (let i = 0; i <= retries; i++) {
-          try {
-            return await fetcher();
-          } catch (err) {
-            if (i === retries) throw err;
-            await new Promise(r => setTimeout(r, delay));
-          }
-        }
-      };
-      
-      const tfConfig = timeframes.find(t => t.id === selectedTimeframe) || timeframes[1];
+      const tfConfig = TIMEFRAMES.find(t => t.id === selectedTimeframe) || TIMEFRAMES[1];
       
       try {
-        const [analysisRes, histRes, qualityRes, earningsRes, newsRes] = await Promise.all([
-          fetchWithRetry(() => api.get(`/api/ib/analysis/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`)).catch((err) => {
+        const [analysisRes, histRes] = await Promise.all([
+          api.get(`/api/ib/analysis/${ticker.symbol}`).catch(() => ({ data: null })),
+          api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`).catch((err) => {
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
               setChartError('IB Gateway is busy. Using cached data.');
@@ -620,24 +630,58 @@ const EnhancedTickerModal = ({
             }
             return { data: { bars: [] } };
           }),
-          fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/earnings/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/ib/news/${ticker.symbol}`)).catch(() => ({ data: { news: [] } }))
         ]);
         
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
-        setQualityData(qualityRes.data);
-        setEarningsData(earningsRes.data);
-        setNewsData(newsRes.data?.news || []);
+        
+        // Start caching
+        setCachedSymbolData(ticker.symbol, {
+          analysis: analysisRes.data,
+          historicalData: histRes.data?.bars || [],
+        });
       } catch (err) {
         setChartError('Failed to load data. Please try again.');
       }
       setLoading(false);
     };
     
-    fetchData();
+    fetchCritical();
   }, [ticker?.symbol]);
+
+  // ── Phase 2: Deferred data (quality, earnings, news, insights) — loaded after critical ──
+  useEffect(() => {
+    if (!ticker?.symbol || loading || deferredLoaded) return;
+    
+    const fetchDeferred = async () => {
+      const [qualityRes, earningsRes, newsRes, insightsRes] = await Promise.all([
+        api.get(`/api/quality/score/${ticker.symbol}`).catch(() => ({ data: null })),
+        api.get(`/api/earnings/${ticker.symbol}`).catch(() => ({ data: null })),
+        api.get(`/api/ib/news/${ticker.symbol}`).catch(() => ({ data: { news: [] } })),
+        api.get(`/api/sentcom/learning/insights?symbol=${ticker.symbol}`).catch(() => ({ data: null })),
+      ]);
+      
+      setQualityData(qualityRes.data);
+      setEarningsData(earningsRes.data);
+      setNewsData(newsRes.data?.news || []);
+      if (insightsRes.data?.success) setLearningInsights(insightsRes.data.insights);
+      setDeferredLoaded(true);
+      
+      // Update cache with deferred data
+      const cached = getCachedSymbolData(ticker.symbol);
+      if (cached) {
+        setCachedSymbolData(ticker.symbol, {
+          ...cached,
+          qualityData: qualityRes.data,
+          earningsData: earningsRes.data,
+          newsData: newsRes.data?.news || [],
+          learningInsights: insightsRes.data?.success ? insightsRes.data.insights : null,
+        });
+      }
+    };
+    
+    fetchDeferred();
+  }, [ticker?.symbol, loading, deferredLoaded]);
 
   // Create chart
   useEffect(() => {
@@ -710,7 +754,7 @@ const EnhancedTickerModal = ({
         console.error('Chart init error:', err);
         setChartError('Failed to initialize chart');
       }
-    }, 100);
+    }, 50);
     
     return () => {
       clearTimeout(timer);
@@ -831,7 +875,13 @@ const EnhancedTickerModal = ({
 
   if (!ticker) return null;
 
+  // ── Memoized derived data (avoids recalculation on every render) ──
   const quote = analysis?.quote || ticker.quote || ticker;
+  // Overlay WS real-time price if available
+  const wsQuote = wsQuotes?.[ticker.symbol];
+  const livePrice = wsQuote?.price || quote?.price;
+  const liveChangePct = wsQuote?.change_percent ?? quote?.change_percent;
+  
   const tradingSummary = analysis?.trading_summary || {};
   const scores = analysis?.scores || {};
   const technicals = analysis?.technicals || {};
@@ -863,12 +913,6 @@ const EnhancedTickerModal = ({
     { label: 'Resist', value: supportResistance.resistance_2, color: 'yellow' },
     { label: 'Support', value: supportResistance.support_2, color: 'zinc' },
   ].filter(l => l.value);
-
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'chart', label: 'Chart' },
-    { id: 'research', label: 'Research' },
-  ];
 
   return (
     <AnimatePresence>
@@ -942,7 +986,7 @@ const EnhancedTickerModal = ({
                   placeholder="Symbol..." 
                   className="w-20 bg-black/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs uppercase font-mono focus:border-cyan-400 focus:outline-none" 
                 />
-                {quickTickers.slice(0, 5).map(t => (
+                {QUICK_TICKERS.slice(0, 5).map(t => (
                   <button 
                     key={t}
                     onClick={() => handleTickerChange(t)}
@@ -959,9 +1003,9 @@ const EnhancedTickerModal = ({
             {/* Price */}
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <div className="font-mono text-xl text-white">${formatPrice(quote?.price)}</div>
-                <div className={`text-xs font-medium ${quote?.change_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {formatPercent(quote?.change_percent)}
+                <div className="font-mono text-xl text-white">${formatPrice(livePrice)}</div>
+                <div className={`text-xs font-medium ${liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatPercent(liveChangePct)}
                 </div>
               </div>
             </div>
@@ -970,7 +1014,7 @@ const EnhancedTickerModal = ({
           {/* TABS */}
           <div className="relative px-4 border-b border-white/10 flex-shrink-0 bg-black/20">
             <nav className="flex gap-1">
-              {tabs.map(tab => (
+              {TABS.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -1153,7 +1197,7 @@ const EnhancedTickerModal = ({
                 {/* Chart Controls */}
                 <div className="flex justify-between items-center mb-2 flex-shrink-0">
                   <div className="flex gap-1">
-                    {timeframes.map((tf) => (
+                    {TIMEFRAMES.map((tf) => (
                       <button 
                         key={tf.id}
                         onClick={() => handleTimeframeChange(tf.id)}
@@ -1271,7 +1315,7 @@ const EnhancedTickerModal = ({
                   {/* Chart Controls */}
                   <div className="flex justify-between items-center mb-2 flex-shrink-0">
                     <div className="flex gap-1">
-                      {timeframes.map((tf) => (
+                      {TIMEFRAMES.map((tf) => (
                         <button 
                           key={tf.id}
                           onClick={() => handleTimeframeChange(tf.id)}
@@ -1419,16 +1463,16 @@ const EnhancedTickerModal = ({
                       entry={trade?.fill_price || trade?.entry_price || tradingSummary.entry}
                       stop={selectedStopData?.stop_price || trade?.stop_price || tradingSummary.stop_loss}
                       target={trade?.target_prices?.[0] || tradingSummary.target}
-                      current={quote?.price}
+                      current={livePrice}
                     />
                   </div>
                   
                   {/* Smart Stop Selector */}
                   <SmartStopSelector
                     symbol={ticker?.symbol}
-                    entryPrice={trade?.fill_price || trade?.entry_price || tradingSummary.entry || quote?.price}
+                    entryPrice={trade?.fill_price || trade?.entry_price || tradingSummary.entry || livePrice}
                     direction={hasBotPosition && trade?.quantity < 0 ? 'short' : 'long'}
-                    atr={analysis?.atr || (quote?.price * 0.02)}
+                    atr={analysis?.atr || (livePrice * 0.02)}
                     support={tradingSummary.stop_loss}
                     swingLow={analysis?.support_levels?.[0]}
                     swingHigh={analysis?.resistance_levels?.[0]}
@@ -1612,7 +1656,7 @@ const EnhancedTickerModal = ({
             <QuickActionsMenu 
               symbol={ticker.symbol} 
               hasPosition={hasBotPosition}
-              currentPrice={quote?.price}
+              currentPrice={livePrice}
               variant="buttons"
               className="mr-2"
             />
