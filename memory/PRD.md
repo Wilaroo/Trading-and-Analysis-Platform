@@ -432,10 +432,12 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring
   - Extracted `trade_execution.py` (312 lines) — Trade execution, confirmation (stale check + price recalc), rejection
   - Extracted `position_reconciler.py` (463 lines) — IB position reconciliation, sync, phantom close, full sync
-  - Main file: 4,444 → 3,281 lines (1,163 lines extracted into 4 modules)
+  - Extracted `position_manager.py` (464 lines) — P&L updates, MFE/MAE tracking, scale-out, EOD close, trade close
+  - Extracted `bot_persistence.py` (486 lines) — State restore/save, trade persistence, trade deserialization
+  - Main file: 4,444 → 2,455 lines (1,989 lines extracted into 6 modules)
   - Public API unchanged — delegation wrappers maintain backward compatibility
 - Migrate trading_bot_service.py to use extracted smart_filter.py module (delegation instead of inline)
-- Further refactor trading_bot_service.py (3,281 lines → extract learning_loop, risk_calculator, scan_loop, position_management modules)
+- Further refactor trading_bot_service.py (2,455 lines → extract evaluate_opportunity, entry_context/explanation, scan_loop modules)
 
 ### Post-Development: Full Local Migration
 **Goal:** Run the entire platform locally with zero cloud dependencies (except IB Gateway's internet connection for live data/trading). Eliminates Atlas costs, reduces latency, ensures data privacy.

@@ -635,10 +635,14 @@ class TradingBotService:
         from services.trade_intelligence import TradeIntelligence
         from services.trade_execution import TradeExecution
         from services.position_reconciler import PositionReconciler
+        from services.position_manager import PositionManager
+        from services.bot_persistence import BotPersistence
         self._stop_manager = StopManager()
         self._trade_intel = TradeIntelligence()
         self._trade_execution = TradeExecution()
         self._position_reconciler = PositionReconciler()
+        self._position_manager = PositionManager()
+        self._persistence = BotPersistence()
         
         logger.info("TradingBotService initialized in AUTONOMOUS mode")
     
@@ -870,375 +874,32 @@ class TradingBotService:
         return 100000  # Default fallback
     
     async def _restore_state(self):
-        """Restore bot state from MongoDB on startup - COMPREHENSIVE SESSION PERSISTENCE"""
-        try:
-            if self._db is None:
-                return
-            
-            # === 1. RESTORE BOT STATE ===
-            state = await asyncio.to_thread(self._db.bot_state.find_one, {"_id": "bot_state"})
-            if state:
-                was_running = state.get("running", False)
-                saved_mode = state.get("mode", "confirmation")
-                saved_watchlist = state.get("watchlist", [])
-                saved_setups = state.get("enabled_setups", [])
-                saved_risk_params = state.get("risk_params", {})
-                
-                # Restore mode - but prefer AUTONOMOUS if that's the default
-                if saved_mode in ["autonomous", "confirmation", "paused"]:
-                    self._mode = BotMode(saved_mode)
-                
-                # Restore watchlist
-                if saved_watchlist:
-                    self._watchlist = saved_watchlist
-                    logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist[:5])}{'...' if len(saved_watchlist) > 5 else ''}")
-                
-                # Restore enabled setups only if more than defaults were saved
-                if saved_setups and len(saved_setups) > 10:
-                    self._enabled_setups = saved_setups
-                    logger.info(f"🎯 Restored {len(saved_setups)} strategies")
-                else:
-                    logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies")
-                
-                # Restore risk parameters
-                if saved_risk_params:
-                    if "max_risk_per_trade" in saved_risk_params:
-                        self.risk_params.max_risk_per_trade = saved_risk_params["max_risk_per_trade"]
-                    if "max_daily_loss" in saved_risk_params:
-                        self.risk_params.max_daily_loss = saved_risk_params["max_daily_loss"]
-                    if "max_daily_loss_pct" in saved_risk_params:
-                        self.risk_params.max_daily_loss_pct = saved_risk_params["max_daily_loss_pct"]
-                    if "max_open_positions" in saved_risk_params:
-                        self.risk_params.max_open_positions = saved_risk_params["max_open_positions"]
-                    if "max_position_pct" in saved_risk_params:
-                        self.risk_params.max_position_pct = saved_risk_params["max_position_pct"]
-                    if "min_risk_reward" in saved_risk_params:
-                        self.risk_params.min_risk_reward = saved_risk_params["min_risk_reward"]
-                    if "starting_capital" in saved_risk_params:
-                        self.risk_params.starting_capital = saved_risk_params["starting_capital"]
-                    logger.info(f"💰 Restored risk params: max_risk=${self.risk_params.max_risk_per_trade:,.0f}, max_positions={self.risk_params.max_open_positions}, min_rr={self.risk_params.min_risk_reward}")
-            
-            # === 2. RESTORE EOD CONFIG ===
-            eod_config = await asyncio.to_thread(self._db.bot_config.find_one, {"_id": "eod_config"})
-            if eod_config:
-                self._eod_close_enabled = eod_config.get("enabled", True)
-                self._eod_close_hour = eod_config.get("close_hour", 15)
-                self._eod_close_minute = eod_config.get("close_minute", 57)
-                logger.info(f"⏰ Restored EOD config: {self._eod_close_hour}:{self._eod_close_minute:02d} PM ET, enabled={self._eod_close_enabled}")
-            
-            # === 3. RESTORE DAILY STATS ===
-            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            daily_stats = await asyncio.to_thread(self._db.daily_stats.find_one, {"date": today_str})
-            if daily_stats:
-                self._daily_stats = DailyStats(
-                    date=today_str,
-                    trades_executed=daily_stats.get("trades_executed", 0),
-                    trades_won=daily_stats.get("trades_won", 0),
-                    trades_lost=daily_stats.get("trades_lost", 0),
-                    gross_pnl=daily_stats.get("gross_pnl", 0.0),
-                    net_pnl=daily_stats.get("net_pnl", 0.0),
-                    largest_win=daily_stats.get("largest_win", 0.0),
-                    largest_loss=daily_stats.get("largest_loss", 0.0),
-                    win_rate=daily_stats.get("win_rate", 0.0),
-                    daily_limit_hit=daily_stats.get("daily_limit_hit", False)
-                )
-                logger.info(f"📊 Restored daily stats: P&L=${self._daily_stats.net_pnl:+,.2f}, Trades={self._daily_stats.trades_executed}")
-            
-            # === 4. RESTORE OPEN TRADES ===
-            await self._restore_open_trades()
-            
-            # === 5. RESTORE CLOSED TRADES (recent) ===
-            await self._restore_closed_trades()
-            
-            # === 6. AUTO-RESTART if bot was running ===
-            if state and state.get("running", False):
-                logger.info("🔄 Bot was running before restart - auto-resuming...")
-                await self.start()
-            
-            logger.info(f"✅ Session restored: mode={self._mode.value}, running={self._running}, open_trades={len(self._open_trades)}, closed_trades={len(self._closed_trades)}")
-            
-        except Exception as e:
-            logger.warning(f"Could not restore bot state: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+        """Restore bot state — delegated to BotPersistence module."""
+        await self._persistence.restore_state(self)
     
     async def _restore_closed_trades(self):
-        """Restore recent closed trades for history display"""
-        try:
-            if self._db is None:
-                return
-            
-            # Restore last 100 closed trades
-            closed_trades = await asyncio.to_thread(
-                lambda: list(self._db.bot_trades.find({"status": "closed"}).sort("closed_at", -1).limit(100))
-            )
-            
-            for trade_doc in closed_trades:
-                try:
-                    # Create trade object from stored data
-                    direction = trade_doc.get("direction", "long")
-                    if isinstance(direction, str):
-                        direction = TradeDirection.LONG if direction.lower() == "long" else TradeDirection.SHORT
-                    
-                    trade = BotTrade(
-                        id=trade_doc.get("id", str(uuid.uuid4())[:8]),
-                        symbol=trade_doc.get("symbol", "UNKNOWN"),
-                        direction=direction,
-                        status=TradeStatus.CLOSED,
-                        setup_type=trade_doc.get("setup_type", "unknown"),
-                        timeframe=trade_doc.get("timeframe", "daily"),
-                        quality_score=trade_doc.get("quality_score", 50),
-                        quality_grade=trade_doc.get("quality_grade", "B"),
-                        entry_price=trade_doc.get("entry_price", 0),
-                        current_price=trade_doc.get("exit_price", trade_doc.get("entry_price", 0)),
-                        stop_price=trade_doc.get("stop_price", 0),
-                        target_prices=trade_doc.get("target_prices", []),
-                        shares=trade_doc.get("shares", 0),
-                        risk_amount=trade_doc.get("risk_amount", 0),
-                        potential_reward=trade_doc.get("potential_reward", 0),
-                        risk_reward_ratio=trade_doc.get("risk_reward_ratio", 0)
-                    )
-                    trade.fill_price = trade_doc.get("fill_price", trade_doc.get("entry_price", 0))
-                    trade.exit_price = trade_doc.get("exit_price", 0)
-                    trade.realized_pnl = trade_doc.get("realized_pnl", 0)
-                    trade.close_reason = trade_doc.get("close_reason", trade_doc.get("exit_reason", "unknown"))
-                    trade.closed_at = trade_doc.get("closed_at")
-                    
-                    self._closed_trades.append(trade)
-                except Exception as e:
-                    logger.debug(f"Could not restore closed trade: {e}")
-            
-            if self._closed_trades:
-                logger.info(f"📚 Restored {len(self._closed_trades)} closed trades from history")
-                
-        except Exception as e:
-            logger.warning(f"Could not restore closed trades: {e}")
+        """Restore closed trades — delegated to BotPersistence module."""
+        await self._persistence.restore_closed_trades(self)
     
     async def _restore_open_trades(self):
-        """Restore open trades from database - CRITICAL for persistence across restarts"""
-        try:
-            if self._db is None:
-                return
-            
-            # Find all trades with open or pending status
-            open_trades = await asyncio.to_thread(
-                lambda: list(self._db.bot_trades.find({"status": {"$in": ["open", "pending", "filled"]}}))
-            )
-            
-            restored_count = 0
-            for trade_doc in open_trades:
-                try:
-                    # Get all required fields with defaults for missing data
-                    symbol = trade_doc.get("symbol", "UNKNOWN")
-                    entry_price = trade_doc.get("entry_price", 0) or trade_doc.get("fill_price", 0)
-                    stop_price = trade_doc.get("stop_price", 0)
-                    target_prices = trade_doc.get("target_prices", [entry_price * 1.02])
-                    shares = trade_doc.get("shares", 0)
-                    risk_amount = trade_doc.get("risk_amount", 0)
-                    
-                    # Calculate missing fields
-                    if not target_prices:
-                        target_prices = [entry_price * 1.02, entry_price * 1.05]
-                    
-                    risk_per_share = abs(entry_price - stop_price) if stop_price else entry_price * 0.02
-                    if risk_amount == 0:
-                        risk_amount = risk_per_share * shares
-                    
-                    reward_per_share = abs(target_prices[0] - entry_price) if target_prices else entry_price * 0.04
-                    potential_reward = reward_per_share * shares
-                    risk_reward_ratio = (reward_per_share / risk_per_share) if risk_per_share > 0 else 2.0
-                    
-                    # Reconstruct BotTrade object with ALL required fields
-                    trade = BotTrade(
-                        id=str(trade_doc.get("id", trade_doc.get("_id", str(uuid.uuid4())))),
-                        symbol=symbol,
-                        direction=TradeDirection(trade_doc.get("direction", "long")),
-                        status=TradeStatus(trade_doc.get("status", "open")),
-                        setup_type=trade_doc.get("setup_type", "restored"),
-                        timeframe=trade_doc.get("timeframe", "intraday"),
-                        quality_score=trade_doc.get("quality_score", 70),
-                        quality_grade=trade_doc.get("quality_grade", "B"),
-                        entry_price=entry_price,
-                        current_price=trade_doc.get("current_price", entry_price),
-                        stop_price=stop_price,
-                        target_prices=target_prices,
-                        shares=shares,
-                        risk_amount=risk_amount,
-                        potential_reward=potential_reward,
-                        risk_reward_ratio=risk_reward_ratio
-                    )
-                    
-                    # Restore optional fields via direct assignment
-                    trade.fill_price = trade_doc.get("fill_price", entry_price)
-                    trade.executed_at = trade_doc.get("executed_at")
-                    trade.entry_order_id = trade_doc.get("entry_order_id")
-                    trade.stop_order_id = trade_doc.get("stop_order_id")
-                    trade.notes = trade_doc.get("notes", "") or trade_doc.get("rationale", "")
-                    trade.market_regime = trade_doc.get("market_regime", "UNKNOWN")
-                    trade.regime_score = trade_doc.get("regime_score", 50.0)
-                    
-                    # Restore trailing stop config
-                    if trade_doc.get("trailing_stop_config"):
-                        trade.trailing_stop_config = trade_doc["trailing_stop_config"]
-                    else:
-                        # Initialize trailing stop with current stop
-                        trade.trailing_stop_config["current_stop"] = stop_price
-                        trade.trailing_stop_config["original_stop"] = stop_price
-                    
-                    # Restore richer trade logging fields
-                    trade.setup_variant = trade_doc.get("setup_variant", "")
-                    trade.entry_context = trade_doc.get("entry_context", {})
-                    trade.mfe_price = trade_doc.get("mfe_price", trade.fill_price)
-                    trade.mfe_pct = trade_doc.get("mfe_pct", 0.0)
-                    trade.mfe_r = trade_doc.get("mfe_r", 0.0)
-                    trade.mae_price = trade_doc.get("mae_price", trade.fill_price)
-                    trade.mae_pct = trade_doc.get("mae_pct", 0.0)
-                    trade.mae_r = trade_doc.get("mae_r", 0.0)
-                    
-                    # Add to appropriate dict
-                    if trade.status == TradeStatus.PENDING:
-                        self._pending_trades[trade.id] = trade
-                    else:
-                        self._open_trades[trade.id] = trade
-                    
-                    restored_count += 1
-                    logger.info(f"📥 Restored trade: {trade.symbol} {trade.direction.value} {trade.shares} shares @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to restore trade {trade_doc.get('symbol')}: {e}")
-            
-            if restored_count > 0:
-                logger.info(f"✅ Restored {restored_count} open trades from database")
-            else:
-                logger.info("📭 No open trades to restore from database")
-            
-            # Schedule position reconciliation after a short delay (allow IB pusher to connect)
-            # This ensures our restored state matches actual IB positions
-            asyncio.create_task(self._delayed_reconciliation())
-                
-        except Exception as e:
-            logger.warning(f"Could not restore open trades: {e}")
-    
+        """Restore open trades — delegated to BotPersistence module."""
+        await self._persistence.restore_open_trades(self)
+
     async def _delayed_reconciliation(self):
-        """Run position reconciliation after startup delay to allow IB connection"""
-        try:
-            # Wait for IB pusher to potentially connect
-            await asyncio.sleep(10)
-            
-            from routers.ib import is_pusher_connected
-            if is_pusher_connected():
-                logger.info("🔄 Running startup position reconciliation...")
-                report = await self.reconcile_positions_with_ib()
-                
-                if report.get("discrepancies"):
-                    disc_count = len(report["discrepancies"])
-                    logger.warning(f"⚠️ Found {disc_count} position discrepancies on startup!")
-                    for d in report["discrepancies"]:
-                        logger.warning(f"   - {d['message']}")
-                    logger.info("💡 Run /api/trading-bot/positions/sync-all to auto-fix discrepancies")
-                else:
-                    logger.info("✅ Position reconciliation: All positions in sync with IB")
-            else:
-                logger.info("⏳ IB pusher not connected - skipping startup reconciliation")
-        except Exception as e:
-            logger.debug(f"Startup reconciliation skipped: {e}")
+        """Startup reconciliation — delegated to BotPersistence module."""
+        await self._persistence.delayed_reconciliation(self)
     
     async def _save_state(self):
-        """Save bot state to MongoDB - COMPREHENSIVE SESSION PERSISTENCE"""
-        try:
-            if self._db is None:
-                return
-            
-            # Build state and stats documents first (lightweight, no IO)
-            state_doc = {
-                "running": self._running,
-                "mode": self._mode.value,
-                "watchlist": self._watchlist,
-                "enabled_setups": self._enabled_setups,
-                "risk_params": {
-                    "max_risk_per_trade": self.risk_params.max_risk_per_trade,
-                    "max_daily_loss": self.risk_params.max_daily_loss,
-                    "max_daily_loss_pct": self.risk_params.max_daily_loss_pct,
-                    "max_open_positions": self.risk_params.max_open_positions,
-                    "max_position_pct": self.risk_params.max_position_pct,
-                    "min_risk_reward": self.risk_params.min_risk_reward,
-                    "starting_capital": self.risk_params.starting_capital
-                },
-                "last_updated": datetime.now(timezone.utc).isoformat()
-            }
-            stats_doc = {
-                "trades_executed": self._daily_stats.trades_executed,
-                "trades_won": self._daily_stats.trades_won,
-                "trades_lost": self._daily_stats.trades_lost,
-                "gross_pnl": self._daily_stats.gross_pnl,
-                "net_pnl": self._daily_stats.net_pnl,
-                "largest_win": self._daily_stats.largest_win,
-                "largest_loss": self._daily_stats.largest_loss,
-                "win_rate": self._daily_stats.win_rate,
-                "daily_limit_hit": self._daily_stats.daily_limit_hit,
-                "last_updated": datetime.now(timezone.utc).isoformat()
-            }
-            stats_date = self._daily_stats.date
+        """Save bot state — delegated to BotPersistence module."""
+        await self._persistence.save_state(self)
 
-            # Run all DB writes in a thread to avoid blocking
-            def _sync_save():
-                self._db.bot_state.update_one(
-                    {"_id": "bot_state"}, {"$set": state_doc}, upsert=True
-                )
-                self._db.daily_stats.update_one(
-                    {"date": stats_date}, {"$set": stats_doc}, upsert=True
-                )
-                self._persist_all_open_trades()
-
-            await asyncio.to_thread(_sync_save)
-            
-            logger.info(f"💾 Session saved: running={self._running}, P&L=${self._daily_stats.net_pnl:+,.2f}, open_trades={len(self._open_trades)}")
-        except Exception as e:
-            logger.warning(f"Could not save bot state: {e}")
-    
     def _persist_trade(self, trade: 'BotTrade'):
-        """
-        Persist a single trade to MongoDB.
-        Called whenever a trade's state changes (created, filled, updated, closed).
-        This is CRITICAL for data consistency and session persistence.
-        """
-        if self._db is None:
-            logger.warning("Cannot persist trade - no database connection")
-            return
-        
-        try:
-            trade_dict = trade.to_dict()
-            
-            # Ensure status is stored as string value
-            if isinstance(trade_dict.get("status"), TradeStatus):
-                trade_dict["status"] = trade_dict["status"].value
-            if isinstance(trade_dict.get("direction"), TradeDirection):
-                trade_dict["direction"] = trade_dict["direction"].value
-            
-            # Add metadata
-            trade_dict["last_updated"] = datetime.now(timezone.utc).isoformat()
-            
-            # Upsert to MongoDB
-            self._db.bot_trades.update_one(
-                {"id": trade.id},
-                {"$set": trade_dict},
-                upsert=True
-            )
-            
-            logger.debug(f"💾 Trade persisted: {trade.symbol} ({trade.id}) status={trade.status.value if hasattr(trade.status, 'value') else trade.status}")
-            
-        except Exception as e:
-            logger.error(f"Failed to persist trade {trade.id}: {e}")
-    
+        """Persist a single trade — delegated to BotPersistence module."""
+        self._persistence.persist_trade(trade, self)
+
     def _persist_all_open_trades(self):
-        """Persist all open trades - call this periodically or on shutdown"""
-        if self._db is None:
-            return
-        
-        for trade in self._open_trades.values():
-            self._persist_trade(trade)
-        
-        logger.info(f"💾 Persisted {len(self._open_trades)} open trades")
+        """Persist all open trades — delegated to BotPersistence module."""
+        self._persistence.persist_all_open_trades(self)
     
     # ==================== INTELLIGENCE SERVICE PROPERTIES ====================
     
@@ -2438,199 +2099,12 @@ class TradingBotService:
     # ==================== POSITION MANAGEMENT ====================
     
     async def _update_open_positions(self):
-        """Update P&L for open positions - uses IB data first, then Alpaca"""
-        for trade_id, trade in list(self._open_trades.items()):
-            try:
-                quote = None
-                
-                # Try IB pushed data first
-                try:
-                    from routers.ib import get_pushed_quotes, is_pusher_connected
-                    if is_pusher_connected():
-                        quotes = get_pushed_quotes()
-                        if trade.symbol in quotes:
-                            q = quotes[trade.symbol]
-                            quote = {'price': q.get('last') or q.get('close') or 0}
-                except Exception:
-                    pass
-                
-                # Fallback to Alpaca
-                if not quote and self._alpaca_service:
-                    quote = await self._alpaca_service.get_quote(trade.symbol)
-                
-                if not quote:
-                    continue
-                
-                trade.current_price = quote.get('price', trade.current_price)
-                
-                # Initialize remaining_shares if not set
-                if trade.remaining_shares == 0:
-                    trade.remaining_shares = trade.shares
-                    trade.original_shares = trade.shares
-                
-                # Initialize trailing stop config if not set
-                if trade.trailing_stop_config.get('original_stop', 0) == 0:
-                    trade.trailing_stop_config['original_stop'] = trade.stop_price
-                    trade.trailing_stop_config['current_stop'] = trade.stop_price
-                    trade.trailing_stop_config['mode'] = 'original'
-                
-                # Calculate unrealized P&L on remaining shares
-                if trade.direction == TradeDirection.LONG:
-                    trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
-                else:
-                    trade.unrealized_pnl = (trade.fill_price - trade.current_price) * trade.remaining_shares
-                
-                # === MFE/MAE TRACKING ===
-                # Track from moment of fill for the full trade lifecycle
-                if trade.fill_price and trade.fill_price > 0:
-                    risk_per_share = abs(trade.fill_price - trade.stop_price) if trade.stop_price else trade.fill_price * 0.02
-                    if risk_per_share == 0:
-                        risk_per_share = trade.fill_price * 0.02  # Fallback: 2% of entry
-                    
-                    if trade.direction == TradeDirection.LONG:
-                        # MFE: highest price since fill
-                        if trade.current_price > trade.mfe_price or trade.mfe_price == 0:
-                            trade.mfe_price = trade.current_price
-                            trade.mfe_pct = ((trade.mfe_price - trade.fill_price) / trade.fill_price) * 100
-                            trade.mfe_r = (trade.mfe_price - trade.fill_price) / risk_per_share
-                        # MAE: lowest price since fill
-                        if trade.current_price < trade.mae_price or trade.mae_price == 0:
-                            trade.mae_price = trade.current_price
-                            trade.mae_pct = ((trade.mae_price - trade.fill_price) / trade.fill_price) * 100
-                            trade.mae_r = (trade.mae_price - trade.fill_price) / risk_per_share
-                    else:  # SHORT
-                        # MFE: lowest price since fill (favorable for shorts)
-                        if trade.current_price < trade.mfe_price or trade.mfe_price == 0:
-                            trade.mfe_price = trade.current_price
-                            trade.mfe_pct = ((trade.fill_price - trade.mfe_price) / trade.fill_price) * 100
-                            trade.mfe_r = (trade.fill_price - trade.mfe_price) / risk_per_share
-                        # MAE: highest price since fill (adverse for shorts)
-                        if trade.current_price > trade.mae_price or trade.mae_price == 0:
-                            trade.mae_price = trade.current_price
-                            trade.mae_pct = -((trade.mae_price - trade.fill_price) / trade.fill_price) * 100
-                            trade.mae_r = -(trade.mae_price - trade.fill_price) / risk_per_share
-                
-                # Include realized P&L from partial exits
-                total_value = trade.remaining_shares * trade.fill_price
-                if total_value > 0:
-                    trade.pnl_pct = ((trade.unrealized_pnl + trade.realized_pnl) / (trade.original_shares * trade.fill_price)) * 100
-                
-                # Update trailing stop if enabled
-                if trade.trailing_stop_config.get('enabled', True):
-                    await self._update_trailing_stop(trade)
-                
-                # Automatic stop-loss monitoring using current_stop (which may be trailing)
-                effective_stop = trade.trailing_stop_config.get('current_stop', trade.stop_price)
-                stop_hit = False
-                if trade.direction == TradeDirection.LONG:
-                    if trade.current_price <= effective_stop:
-                        stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} <= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
-                else:  # SHORT
-                    if trade.current_price >= effective_stop:
-                        stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} >= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
-                
-                if stop_hit:
-                    stop_mode = trade.trailing_stop_config.get('mode', 'original')
-                    reason = f"stop_loss_{stop_mode}" if stop_mode != 'original' else "stop_loss"
-                    logger.info(f"Auto-closing {trade.symbol} due to {stop_mode} stop trigger")
-                    await self.close_trade(trade_id, reason=reason)
-                    continue
-                
-                # Automatic target profit-taking with scale-out
-                if trade.target_prices and trade.scale_out_config.get('enabled', True):
-                    await self._check_and_execute_scale_out(trade)
-                
-                await self._notify_trade_update(trade, "updated")
-                
-            except Exception as e:
-                logger.error(f"Error updating position {trade_id}: {e}")
+        """Update open positions — delegated to PositionManager module."""
+        await self._position_manager.update_open_positions(self)
 
     async def _check_eod_close(self):
-        """
-        Close ALL open positions near market close (default: 3:57 PM ET).
-        This is a critical risk management feature to avoid overnight exposure.
-        
-        Configurable via:
-        - self._eod_close_enabled: Enable/disable EOD close
-        - self._eod_close_hour: Hour in ET (24-hour format, default 15 = 3 PM)
-        - self._eod_close_minute: Minute (default 57)
-        """
-        if not self._eod_close_enabled:
-            return
-        
-        try:
-            from zoneinfo import ZoneInfo
-        except ImportError:
-            from backports.zoneinfo import ZoneInfo
-        
-        now_et = datetime.now(ZoneInfo("America/New_York"))
-        today_str = now_et.strftime("%Y-%m-%d")
-        
-        # Reset the executed flag if it's a new day
-        if self._last_eod_check_date != today_str:
-            self._eod_close_executed_today = False
-            self._last_eod_check_date = today_str
-        
-        # Skip if already executed today
-        if self._eod_close_executed_today:
-            return
-        
-        # Only run on weekdays during market hours
-        if now_et.weekday() >= 5:
-            return
-        
-        # Check if we're in the EOD close window (3:57-3:59 PM ET)
-        eod_hour = self._eod_close_hour
-        eod_minute = self._eod_close_minute
-        
-        # Not yet time to close
-        if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
-            return
-        
-        # After 4:00 PM, stop checking (market closed)
-        if now_et.hour >= 16:
-            return
-        
-        # Time to close all positions!
-        open_count = len(self._open_trades)
-        if open_count == 0:
-            self._eod_close_executed_today = True
-            return
-        
-        logger.info(f"🔔 EOD AUTO-CLOSE: Closing all {open_count} open positions at {now_et.strftime('%H:%M:%S')} ET")
-        
-        closed_count = 0
-        total_pnl = 0.0
-        
-        for trade_id, trade in list(self._open_trades.items()):
-            try:
-                logger.info(f"  📤 EOD CLOSE: {trade.symbol} - {trade.direction.value} {trade.remaining_shares} shares")
-                result = await self.close_trade(trade_id, reason="eod_auto_close")
-                if result.get("success"):
-                    closed_count += 1
-                    total_pnl += result.get("realized_pnl", 0)
-                else:
-                    logger.error(f"  ❌ Failed to close {trade.symbol}: {result.get('error')}")
-            except Exception as e:
-                logger.error(f"  ❌ Error closing {trade.symbol}: {e}")
-        
-        self._eod_close_executed_today = True
-        
-        # Persist the EOD close event
-        if self._db:
-            eod_event = {
-                "event_type": "eod_auto_close",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "date": today_str,
-                "positions_closed": closed_count,
-                "total_pnl": total_pnl,
-                "close_time_et": now_et.strftime("%H:%M:%S")
-            }
-            await asyncio.to_thread(self._db.bot_events.insert_one, eod_event)
-        
-        logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
+        """EOD auto-close — delegated to PositionManager module."""
+        await self._position_manager.check_eod_close(self)
 
     async def _update_trailing_stop(self, trade: BotTrade):
         """Delegates to StopManager module."""
@@ -2654,248 +2128,17 @@ class TradingBotService:
 
 
     async def _check_and_execute_scale_out(self, trade: BotTrade):
-        """
-        Check if any target prices are hit and execute scale-out sells.
-        Sells 1/3 at Target 1, 1/3 at Target 2, keeps 1/3 for Target 3 (runner).
-        """
-        if not trade.target_prices or trade.remaining_shares <= 0:
-            return
-        
-        targets_hit = trade.scale_out_config.get('targets_hit', [])
-        scale_out_pcts = trade.scale_out_config.get('scale_out_pcts', [0.33, 0.33, 0.34])
-        
-        for i, target in enumerate(trade.target_prices):
-            if i in targets_hit:
-                continue  # Already sold at this target
-            
-            # Check if target is hit
-            target_hit = False
-            if trade.direction == TradeDirection.LONG:
-                if trade.current_price >= target:
-                    target_hit = True
-            else:  # SHORT
-                if trade.current_price <= target:
-                    target_hit = True
-            
-            if target_hit:
-                # Calculate shares to sell at this target
-                pct_to_sell = scale_out_pcts[i] if i < len(scale_out_pcts) else 0.34
-                
-                # For last target, sell all remaining
-                if i == len(trade.target_prices) - 1:
-                    shares_to_sell = trade.remaining_shares
-                else:
-                    shares_to_sell = max(1, int(trade.original_shares * pct_to_sell))
-                    shares_to_sell = min(shares_to_sell, trade.remaining_shares)
-                
-                if shares_to_sell <= 0:
-                    continue
-                
-                logger.info(f"TARGET {i+1} HIT: {trade.symbol} - Scaling out {shares_to_sell} shares at ${trade.current_price:.2f}")
-                
-                # Execute partial exit
-                exit_result = await self._execute_partial_exit(trade, shares_to_sell, target, i)
-                
-                if exit_result.get('success'):
-                    fill_price = exit_result.get('fill_price', trade.current_price)
-                    
-                    # Calculate P&L for this scale-out
-                    if trade.direction == TradeDirection.LONG:
-                        partial_pnl = (fill_price - trade.fill_price) * shares_to_sell
-                    else:
-                        partial_pnl = (trade.fill_price - fill_price) * shares_to_sell
-                    
-                    # Update trade state
-                    trade.remaining_shares -= shares_to_sell
-                    trade.realized_pnl += partial_pnl
-                    
-                    # Track commission for partial exit
-                    scale_commission = self._apply_commission(trade, shares_to_sell)
-                    
-                    targets_hit.append(i)
-                    trade.scale_out_config['targets_hit'] = targets_hit
-                    
-                    # Record the partial exit
-                    partial_exit_record = {
-                        'target_idx': i + 1,
-                        'target_price': target,
-                        'shares_sold': shares_to_sell,
-                        'fill_price': fill_price,
-                        'pnl': partial_pnl,
-                        'timestamp': datetime.now(timezone.utc).isoformat()
-                    }
-                    trade.scale_out_config.setdefault('partial_exits', []).append(partial_exit_record)
-                    
-                    logger.info(f"Scale-out complete: {trade.symbol} T{i+1} - Sold {shares_to_sell} @ ${fill_price:.2f}, P&L: ${partial_pnl:.2f}, Remaining: {trade.remaining_shares}")
-                    
-                    await self._notify_trade_update(trade, f"scale_out_t{i+1}")
-                    
-                    # If all shares sold, close the trade
-                    if trade.remaining_shares <= 0:
-                        trade.status = TradeStatus.CLOSED
-                        trade.closed_at = datetime.now(timezone.utc).isoformat()
-                        trade.close_reason = f"target_{i+1}_complete"
-                        trade.exit_price = fill_price
-                        trade.unrealized_pnl = 0
-                        
-                        # Update daily stats with net P&L (after commissions)
-                        if trade.net_pnl > 0:
-                            self._daily_stats.trades_won += 1
-                            self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.net_pnl)
-                        else:
-                            self._daily_stats.trades_lost += 1
-                            self._daily_stats.largest_loss = min(self._daily_stats.largest_loss, trade.net_pnl)
-                        
-                        self._daily_stats.net_pnl += trade.net_pnl
-                        total = self._daily_stats.trades_won + self._daily_stats.trades_lost
-                        self._daily_stats.win_rate = (self._daily_stats.trades_won / total * 100) if total > 0 else 0
-                        
-                        # Move to closed trades
-                        del self._open_trades[trade.id]
-                        self._closed_trades.append(trade)
-                        
-                        await self._notify_trade_update(trade, "closed")
-                        await self._save_trade(trade)
-                        
-                        # Log to regime performance tracking
-                        await self._log_trade_to_regime_performance(trade)
-                        
-                        logger.info(f"Trade fully closed at Target {i+1}: {trade.symbol} Total P&L: ${trade.realized_pnl:.2f}")
-                        return
+        """Scale-out check — delegated to PositionManager module."""
+        await self._position_manager.check_and_execute_scale_out(trade, self)
     
     async def _execute_partial_exit(self, trade: BotTrade, shares: int, target_price: float, target_idx: int) -> Dict:
-        """Execute a partial position exit (scale-out)"""
-        if not self._trade_executor:
-            # Simulated exit
-            return {
-                'success': True,
-                'fill_price': trade.current_price,
-                'shares': shares,
-                'simulated': True
-            }
-        
-        try:
-            # Use trade executor to sell partial position
-            result = await self._trade_executor.execute_partial_exit(trade, shares)
-            return result
-        except Exception as e:
-            logger.error(f"Partial exit error: {e}")
-            # Fall back to simulated
-            return {
-                'success': True,
-                'fill_price': trade.current_price,
-                'shares': shares,
-                'simulated': True
-            }
+        """Partial exit — delegated to PositionManager module."""
+        return await self._position_manager.execute_partial_exit(trade, shares, target_price, target_idx, self)
 
     
     async def close_trade(self, trade_id: str, reason: str = "manual") -> bool:
-        """Close an open trade (sells remaining shares)"""
-        if trade_id not in self._open_trades:
-            return False
-        
-        trade = self._open_trades[trade_id]
-        
-        # Use remaining shares if we've done partial exits, otherwise use original shares
-        shares_to_close = trade.remaining_shares if trade.remaining_shares > 0 else trade.shares
-        
-        try:
-            if self._trade_executor and shares_to_close > 0:
-                # Update trade.shares temporarily for the executor
-                original_shares = trade.shares
-                trade.shares = shares_to_close
-                
-                result = await self._trade_executor.close_position(trade)
-                
-                trade.shares = original_shares  # Restore
-                
-                if result.get('success'):
-                    trade.exit_price = result.get('fill_price', trade.current_price)
-            else:
-                trade.exit_price = trade.current_price
-            
-            # Calculate realized P&L for remaining shares and add to cumulative
-            if shares_to_close > 0:
-                if trade.direction == TradeDirection.LONG:
-                    final_pnl = (trade.exit_price - trade.fill_price) * shares_to_close
-                else:
-                    final_pnl = (trade.fill_price - trade.exit_price) * shares_to_close
-                trade.realized_pnl += final_pnl
-                
-                # Track exit commission
-                exit_commission = self._apply_commission(trade, shares_to_close)
-                logger.info(f"Exit commission: ${exit_commission:.2f} | Total commissions: ${trade.total_commissions:.2f} | Net P&L: ${trade.net_pnl:.2f}")
-            
-            trade.status = TradeStatus.CLOSED
-            trade.closed_at = datetime.now(timezone.utc).isoformat()
-            trade.close_reason = reason
-            trade.unrealized_pnl = 0
-            trade.remaining_shares = 0
-            
-            # Update daily stats with net P&L (after commissions)
-            self._daily_stats.net_pnl += trade.net_pnl
-            if trade.realized_pnl > 0:
-                self._daily_stats.trades_won += 1
-                self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.realized_pnl)
-            else:
-                self._daily_stats.trades_lost += 1
-                self._daily_stats.largest_loss = min(self._daily_stats.largest_loss, trade.realized_pnl)
-            
-            # Calculate win rate
-            total = self._daily_stats.trades_won + self._daily_stats.trades_lost
-            self._daily_stats.win_rate = (self._daily_stats.trades_won / total * 100) if total > 0 else 0
-            
-            # Move to closed trades
-            del self._open_trades[trade_id]
-            self._closed_trades.append(trade)
-            
-            await self._notify_trade_update(trade, "closed")
-            await self._save_trade(trade)
-            
-            # Auto-record exit to Trade Journal
-            await self._log_trade_to_journal(trade, "exit")
-            
-            # Record performance for learning loop
-            if hasattr(self, '_perf_service') and self._perf_service:
-                try:
-                    self._perf_service.record_trade(trade.to_dict())
-                except Exception as e:
-                    logger.warning(f"Failed to record trade performance: {e}")
-            
-            # NEW: Record to Learning Loop (Phase 1)
-            if hasattr(self, '_learning_loop') and self._learning_loop:
-                try:
-                    outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
-                    asyncio.create_task(self._learning_loop.record_trade_outcome(
-                        trade_id=trade.id,
-                        alert_id=getattr(trade, 'alert_id', trade.id),
-                        symbol=trade.symbol,
-                        setup_type=trade.setup_type,
-                        strategy_name=trade.setup_type,
-                        direction=trade.direction.value if hasattr(trade.direction, 'value') else str(trade.direction),
-                        trade_style=getattr(trade, 'trade_style', 'move_2_move'),
-                        entry_price=trade.fill_price,
-                        exit_price=trade.exit_price,
-                        stop_price=trade.stop_loss,
-                        target_price=trade.targets[0] if trade.targets else trade.fill_price * 1.02,
-                        outcome=outcome,
-                        pnl=trade.realized_pnl,
-                        entry_time=trade.opened_at,
-                        exit_time=trade.closed_at,
-                        confirmation_signals=getattr(trade, 'confirmation_signals', [])
-                    ))
-                except Exception as e:
-                    logger.warning(f"Failed to record trade to learning loop: {e}")
-            
-            # Log to regime performance tracking
-            await self._log_trade_to_regime_performance(trade)
-            
-            logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error closing trade: {e}")
-            return False
+        """Close an open trade — delegated to PositionManager module."""
+        return await self._position_manager.close_trade(trade_id, self, reason=reason)
     
     # ==================== DATA ACCESS ====================
     
@@ -3002,85 +2245,16 @@ class TradingBotService:
     # ==================== PERSISTENCE ====================
     
     async def _save_trade(self, trade: BotTrade):
-        """Save trade to database"""
-        if self._db is None:
-            return
-        
-        try:
-            trades_col = self._db["bot_trades"]
-            trade_dict = trade.to_dict()
-            trade_dict['_id'] = trade.id
-            
-            await asyncio.to_thread(
-                lambda: trades_col.replace_one(
-                    {"_id": trade.id},
-                    trade_dict,
-                    upsert=True
-                )
-            )
-        except Exception as e:
-            logger.error(f"Error saving trade: {e}")
-    
-    async def load_trades_from_db(self):
-        """Load trades from database on startup"""
-        if self._db is None:
-            return
-        
-        try:
-            def _sync_load():
-                trades_col = self._db["bot_trades"]
-                return list(trades_col.find({"status": "open"}))
+        """Save trade to database — delegated to BotPersistence module."""
+        await self._persistence.save_trade(trade, self)
 
-            docs = await asyncio.to_thread(_sync_load)
-            for doc in docs:
-                doc.pop('_id', None)
-                trade = self._dict_to_trade(doc)
-                if trade:
-                    self._open_trades[trade.id] = trade
-            
-            logger.info(f"Loaded {len(self._open_trades)} open trades from database")
-            
-        except Exception as e:
-            logger.error(f"Error loading trades: {e}")
-    
+    async def load_trades_from_db(self):
+        """Load trades from database — delegated to BotPersistence module."""
+        await self._persistence.load_trades_from_db(self)
+
     def _dict_to_trade(self, d: Dict) -> Optional[BotTrade]:
-        """Convert dictionary to BotTrade"""
-        try:
-            return BotTrade(
-                id=d.get('id', ''),
-                symbol=d.get('symbol', ''),
-                direction=TradeDirection(d.get('direction', 'long')),
-                status=TradeStatus(d.get('status', 'pending')),
-                setup_type=d.get('setup_type', ''),
-                timeframe=d.get('timeframe', 'intraday'),
-                quality_score=d.get('quality_score', 0),
-                quality_grade=d.get('quality_grade', ''),
-                entry_price=d.get('entry_price', 0),
-                current_price=d.get('current_price', 0),
-                stop_price=d.get('stop_price', 0),
-                target_prices=d.get('target_prices', []),
-                shares=d.get('shares', 0),
-                risk_amount=d.get('risk_amount', 0),
-                potential_reward=d.get('potential_reward', 0),
-                risk_reward_ratio=d.get('risk_reward_ratio', 0),
-                fill_price=d.get('fill_price'),
-                exit_price=d.get('exit_price'),
-                unrealized_pnl=d.get('unrealized_pnl', 0),
-                realized_pnl=d.get('realized_pnl', 0),
-                pnl_pct=d.get('pnl_pct', 0),
-                created_at=d.get('created_at', ''),
-                executed_at=d.get('executed_at'),
-                closed_at=d.get('closed_at'),
-                estimated_duration=d.get('estimated_duration', ''),
-                close_at_eod=d.get('close_at_eod', True),
-                explanation=None,
-                entry_order_id=d.get('entry_order_id'),
-                stop_order_id=d.get('stop_order_id'),
-                target_order_ids=d.get('target_order_ids', [])
-            )
-        except Exception as e:
-            logger.error(f"Error deserializing trade: {e}")
-            return None
+        """Convert dict to BotTrade — delegated to BotPersistence module."""
+        return self._persistence.dict_to_trade(d)
     
     # ==================== SCANNER AUTO-EXECUTION ====================
     
