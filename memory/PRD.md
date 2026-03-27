@@ -459,6 +459,12 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - NewDashboard DashboardHeader: Session poll reduced from 30s to 60s
   - **Impact:** ~40% reduction in REST polling across the app. Critical data now flows via WebSocket in real-time. Tab switches are instant for previously slow-loading pages.
 
+- ~~Startup/Status Systems Audit — Real WS & DB Checks~~ **DONE (Mar 27, 2026)**
+  - `/api/startup-check`: `websocket` now checks actual `ConnectionManager.active_connections` (was hardcoded `true`). `database` checks `mongo_client is not None` (was hardcoded `true`). Added `ws_connections` count field.
+  - `/api/startup-status`: Fixed WS check (was using nonexistent `server.quote_connections`), bot/scanner status now reads real runtime state (was hardcoded "ready").
+  - `StartupModal.jsx`: Uses `useWsData().isConnected` to supplement backend WS check. Shows "Live (N conns)" detail text.
+  - All checks remain in-memory only — zero I/O, zero startup slowdown.
+
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic
   - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring
