@@ -92,11 +92,16 @@ class OpportunityEvaluator:
 
             if hasattr(bot, '_confidence_gate') and bot._confidence_gate is not None:
                 try:
+                    # GAP 1 FIX: Use TQS score (richer 5-pillar assessment) instead of raw scanner score
+                    gate_quality = alert.get('tqs_score') or alert.get('score', 70)
+                    # Ensure it's numeric (TQS can be float)
+                    gate_quality = int(gate_quality) if gate_quality else 70
+
                     confidence_gate_result = await bot._confidence_gate.evaluate(
                         symbol=symbol,
                         setup_type=setup_type,
                         direction=direction.value if hasattr(direction, 'value') else str(direction),
-                        quality_score=alert.get('score', 70),
+                        quality_score=gate_quality,
                         entry_price=alert.get('trigger_price', current_price),
                         stop_price=alert.get('stop_price', 0),
                         regime_engine=bot._market_regime_engine,
@@ -129,6 +134,52 @@ class OpportunityEvaluator:
                 except Exception as e:
                     logger.warning(f"Confidence gate error (proceeding anyway): {e}")
                     print(f"   ⚠️ Confidence gate error: {str(e)[:100]}")
+
+            # ==================== GAP 3 FIX: POST-GATE TQS RECALCULATION ====================
+            # The Confidence Gate produces the richest AI data (setup-specific live prediction,
+            # model consensus, learning loop feedback). Recalculate TQS with this data so the
+            # trade's quality score reflects the full AI pipeline.
+            if confidence_gate_result and confidence_gate_result.get("live_prediction"):
+                try:
+                    from services.tqs.tqs_engine import get_tqs_engine
+                    tqs_engine = get_tqs_engine()
+                    
+                    pred = confidence_gate_result["live_prediction"]
+                    pred_dir = pred.get("direction", "flat")
+                    pred_conf = pred.get("confidence", 0)
+                    trade_is_long = direction_str.lower() in ("long", "buy")
+                    model_agrees = (
+                        (trade_is_long and pred_dir == "up") or
+                        (not trade_is_long and pred_dir == "down")
+                    )
+                    
+                    recalc_tqs = await tqs_engine.calculate_tqs(
+                        symbol=symbol,
+                        setup_type=setup_type,
+                        direction=direction_str,
+                        trade_style=alert.get("trade_style"),
+                        tape_score=alert.get("tape_score", 0),
+                        tape_confirmation=alert.get("tape_confirmation", False),
+                        smb_grade=alert.get("smb_grade", "B"),
+                        smb_5var_score=alert.get("smb_score_total", 25),
+                        risk_reward=alert.get("risk_reward", 2.0),
+                        alert_priority=alert.get("priority", "medium"),
+                        ai_model_direction=pred_dir,
+                        ai_model_confidence=pred_conf,
+                        ai_model_agrees=model_agrees,
+                    )
+                    
+                    if recalc_tqs:
+                        # Store the AI-enriched TQS for the trade
+                        alert["_post_gate_tqs_score"] = recalc_tqs.score
+                        alert["_post_gate_tqs_grade"] = recalc_tqs.grade
+                        alert["_post_gate_tqs_action"] = recalc_tqs.action
+                        logger.debug(
+                            f"Post-gate TQS for {symbol}: {recalc_tqs.score:.1f} "
+                            f"(pre-gate: {alert.get('tqs_score', 'N/A')})"
+                        )
+                except Exception as e:
+                    logger.debug(f"Post-gate TQS recalculation failed (non-critical): {e}")
 
             # ==================== ENHANCED INTELLIGENCE GATHERING ====================
             intelligence = await bot._gather_trade_intelligence(symbol, alert)
@@ -571,6 +622,25 @@ class OpportunityEvaluator:
                     "points": fb.get("points", 0),
                     "reasoning": fb.get("reasoning", ""),
                 }
+            # Include cross-model agreement (GAP 4)
+            if confidence_gate_result.get("cross_model_agreement"):
+                ctx["confidence_gate"]["cross_model_agreement"] = confidence_gate_result["cross_model_agreement"]
+
+        # 9. Post-gate TQS recalculation (GAP 3: AI-enriched quality score)
+        pre_gate_tqs = alert.get("tqs_score", 0)
+        post_gate_tqs = alert.get("_post_gate_tqs_score")
+        if post_gate_tqs:
+            ctx["tqs"] = {
+                "pre_gate_score": round(pre_gate_tqs, 1) if pre_gate_tqs else None,
+                "post_gate_score": round(post_gate_tqs, 1),
+                "post_gate_grade": alert.get("_post_gate_tqs_grade", ""),
+                "post_gate_action": alert.get("_post_gate_tqs_action", ""),
+                "delta": round(post_gate_tqs - pre_gate_tqs, 1) if pre_gate_tqs else None,
+            }
+        elif pre_gate_tqs:
+            ctx["tqs"] = {
+                "pre_gate_score": round(pre_gate_tqs, 1),
+            }
 
         return ctx
 

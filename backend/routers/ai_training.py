@@ -511,3 +511,21 @@ async def evaluate_trade_confidence(symbol: str, setup_type: str, direction: str
     except Exception as e:
         logger.error(f"Confidence gate evaluate error: {e}")
         return {"success": False, "error": str(e)}
+
+
+
+@router.get("/confidence-gate/accuracy")
+async def get_confidence_gate_accuracy(limit: int = 100):
+    """
+    GAP 5: Get decision accuracy — how often did GO/REDUCE/SKIP lead to wins?
+    Returns per-decision win rate, total P&L, and avg confidence.
+    Used by the upcoming Confidence Gate Tuner (P2).
+    """
+    try:
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        accuracy = gate.get_decision_accuracy(limit=limit)
+        return {"success": True, **accuracy}
+    except Exception as e:
+        logger.error(f"Confidence gate accuracy error: {e}")
+        return {"success": False, "error": str(e)}

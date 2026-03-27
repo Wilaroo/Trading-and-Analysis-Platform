@@ -211,6 +211,34 @@ class ConfidenceGate:
                     f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) — reducing size 30%"
                 )
 
+        # --- 2c. CROSS-MODEL AGREEMENT (GAP 4) ---
+        # Compare static model consensus (Step 2) with live prediction (Step 2b).
+        # If both ran, check if they agree. Disagreement is an additional risk signal.
+        cross_model_agreement = None
+        if model_signals.get("has_models") and live_prediction.get("has_prediction"):
+            consensus_agrees = model_signals.get("agreement_pct", 0) >= 0.5
+            live_agrees = live_prediction.get("has_prediction") and (
+                (direction.lower() in ("long", "buy") and live_prediction["direction"] == "up") or
+                (direction.lower() not in ("long", "buy") and live_prediction["direction"] == "down")
+            )
+            
+            if consensus_agrees and live_agrees:
+                cross_model_agreement = "aligned"
+                confidence_points += 5
+                reasoning.append("Cross-model: consensus + live prediction ALIGNED (+5)")
+            elif not consensus_agrees and not live_agrees:
+                cross_model_agreement = "both_disagree"
+                confidence_points -= 10
+                position_multiplier *= 0.8
+                reasoning.append("Cross-model: consensus + live prediction BOTH AGAINST — reducing size 20%")
+            else:
+                cross_model_agreement = "mixed"
+                # Mixed signals — no additional adjustment but note it
+                reasoning.append(
+                    f"Cross-model: MIXED signals (consensus {'agrees' if consensus_agrees else 'disagrees'}, "
+                    f"live {'agrees' if live_agrees else 'disagrees'})"
+                )
+
         # --- 3. QUALITY SCORE ---
         if quality_score >= 80:
             confidence_points += 10
@@ -266,6 +294,7 @@ class ConfidenceGate:
             "model_signals": model_signals,
             "live_prediction": live_prediction if live_prediction.get("has_prediction") else None,
             "learning_feedback": learning_adjustment if learning_adjustment.get("has_data") else None,
+            "cross_model_agreement": cross_model_agreement,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -276,12 +305,16 @@ class ConfidenceGate:
         # Log decision
         self._decision_log.appendleft(result)
 
-        # Persist to DB if available
+        # GAP 5: Persist to DB with outcome-trackable fields for auto-calibration
         if self._db is not None:
             try:
                 self._db["confidence_gate_log"].insert_one({
                     **{k: v for k, v in result.items() if k != "model_signals"},
                     "model_signal_summary": model_signals.get("summary", ""),
+                    # GAP 5 fields: enable correlating gate decisions with trade outcomes
+                    "outcome_tracked": False,  # Set to True when trade outcome is recorded
+                    "trade_outcome": None,      # Filled by learning loop: "win", "loss", "scratch"
+                    "outcome_pnl": None,         # Filled by learning loop: actual P&L
                 })
             except Exception as e:
                 logger.debug(f"Failed to persist confidence gate log: {e}")
@@ -691,6 +724,104 @@ class ConfidenceGate:
             } if streak_type else None,
             "total_evaluated": self._stats["total_evaluated"],
         }
+
+    async def record_trade_outcome(
+        self, symbol: str, setup_type: str, outcome: str, pnl: float = 0
+    ) -> bool:
+        """
+        GAP 5: Close the feedback loop by recording trade outcomes against gate decisions.
+        
+        Called by the learning loop when a trade is closed. Finds the most recent
+        gate decision for this symbol+setup and updates it with the outcome.
+        
+        This data enables the future Confidence Gate Tuner (P2) to auto-calibrate
+        GO/REDUCE/SKIP thresholds by analyzing which decisions led to wins/losses.
+        
+        Args:
+            symbol: Trade symbol
+            setup_type: Setup type used
+            outcome: "win", "loss", or "scratch"
+            pnl: Actual P&L of the trade
+            
+        Returns:
+            True if a matching gate decision was found and updated
+        """
+        if self._db is None:
+            return False
+            
+        try:
+            result = self._db["confidence_gate_log"].find_one_and_update(
+                {
+                    "symbol": symbol,
+                    "setup_type": setup_type,
+                    "outcome_tracked": False,
+                },
+                {
+                    "$set": {
+                        "outcome_tracked": True,
+                        "trade_outcome": outcome,
+                        "outcome_pnl": pnl,
+                        "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+                sort=[("timestamp", -1)],  # Most recent decision first
+            )
+            if result:
+                logger.debug(
+                    f"Gate outcome recorded: {symbol} {setup_type} "
+                    f"decision={result.get('decision')} → outcome={outcome} pnl={pnl:.2f}"
+                )
+                return True
+            return False
+        except Exception as e:
+            logger.debug(f"Failed to record gate outcome: {e}")
+            return False
+
+    def get_decision_accuracy(self, limit: int = 100) -> Dict[str, Any]:
+        """
+        GAP 5: Get accuracy stats for gate decisions — how often did GO lead to wins?
+        
+        Returns breakdown of outcomes per decision type for the Gate Tuner.
+        """
+        if self._db is None:
+            return {"has_data": False}
+            
+        try:
+            pipeline = [
+                {"$match": {"outcome_tracked": True}},
+                {"$sort": {"timestamp": -1}},
+                {"$limit": limit},
+                {"$group": {
+                    "_id": "$decision",
+                    "total": {"$sum": 1},
+                    "wins": {"$sum": {"$cond": [{"$eq": ["$trade_outcome", "win"]}, 1, 0]}},
+                    "losses": {"$sum": {"$cond": [{"$eq": ["$trade_outcome", "loss"]}, 1, 0]}},
+                    "scratches": {"$sum": {"$cond": [{"$eq": ["$trade_outcome", "scratch"]}, 1, 0]}},
+                    "total_pnl": {"$sum": {"$ifNull": ["$outcome_pnl", 0]}},
+                    "avg_confidence": {"$avg": "$confidence_score"},
+                }},
+            ]
+            results = list(self._db["confidence_gate_log"].aggregate(pipeline))
+            
+            accuracy = {}
+            for r in results:
+                decision = r["_id"]
+                total = r["total"]
+                wins = r["wins"]
+                accuracy[decision] = {
+                    "total": total,
+                    "wins": wins,
+                    "losses": r["losses"],
+                    "scratches": r["scratches"],
+                    "win_rate": round(wins / total, 3) if total > 0 else 0,
+                    "total_pnl": round(r["total_pnl"], 2),
+                    "avg_confidence": round(r["avg_confidence"], 1),
+                }
+            
+            return {"has_data": bool(accuracy), "decisions": accuracy}
+        except Exception as e:
+            logger.debug(f"Decision accuracy query failed: {e}")
+            return {"has_data": False}
 
 
 # Module-level singleton

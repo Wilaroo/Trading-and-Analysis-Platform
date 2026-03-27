@@ -409,6 +409,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Feature engineering & model architecture complete — ready for training when collection finishes
 
 ### P1 - Next Up
+- **Twitter/X Social Stream Widget**: Command Center widget for followed handle tweets (no paid API)
 - **Training Pipeline Execution**: Train all ~154 models on available 52.7M+ bars
   - Can start immediately with `POST /api/ai-training/start`
   - Retrain on complete dataset once collection reaches 100%
@@ -417,7 +418,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 ### P2 - Upcoming
 - MFE/MAE Scatter Chart per setup type
 - Auto-Optimize AI Settings (sweep confidence thresholds/lookback windows)
-- **Confidence Gate Tuner**: Once live trade decisions accumulate, auto-calibrate skip/reduce/go thresholds by analyzing which combinations produce the best results for your actual trading style
+- **Confidence Gate Tuner**: Backend prepwork done (GAP 5) — decision outcomes are now tracked in `confidence_gate_log` with `outcome_tracked`, `trade_outcome`, `outcome_pnl` fields. `GET /api/ai-training/confidence-gate/accuracy` endpoint ready. UI tuner is next step.
 
 ### P3 - Future
 - ~~Complete WebSocket migration for remaining ~20+ polling components~~ **DONE (Mar 27, 2026)**
@@ -494,6 +495,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - Entry context now includes `live_prediction` and `learning_feedback` for post-trade analysis
     - SentCom filter thoughts expanded from 2 to 4 reasoning items — shows model predictions and learning feedback
     - Full data flow: Scanner → Opportunity Evaluator → Confidence Gate (regime + model consensus + live prediction + learning feedback + quality) → Trading Bot → Trade Record → SentCom Stream → WebSocket → Frontend
+
+- **Pipeline Gap Fixes — Full AI Data Flow Wiring** (Mar 27, 2026)
+  - **GAP 1: TQS → Confidence Gate**: Confidence Gate Step 3 now uses TQS score (5-pillar) instead of raw scanner score (was using `alert.score` default 70)
+  - **GAP 2: AI → TQS**: Scanner now runs AI enrichment BEFORE TQS calculation (was opposite). TQS `calculate_tqs()` now receives `ai_model_direction/confidence/agrees` from scanner AI, activating Context Quality's AI alignment scoring (10% weight, was always neutral 50)
+  - **GAP 3: Post-Gate TQS Recalculation**: Opportunity evaluator recalculates TQS after Confidence Gate runs, using the setup-specific live prediction data. Entry context now captures `tqs.pre_gate_score`, `tqs.post_gate_score`, `tqs.delta` for post-trade analysis
+  - **GAP 4: Cross-Model Agreement**: New Step 2c in Confidence Gate compares static model consensus (Step 2) with live prediction (Step 2b). Both agree → +5 pts. Both disagree → -10 pts + 20% size reduction. Mixed → noted in reasoning. Tracked in `cross_model_agreement` field
+  - **GAP 5: Gate Decision Outcome Tracking**: `confidence_gate_log` now stores `outcome_tracked`, `trade_outcome`, `outcome_pnl` fields. Learning loop auto-updates gate decisions when trades close via `record_trade_outcome()`. New `GET /api/ai-training/confidence-gate/accuracy` endpoint returns per-decision win rates for future Gate Tuner UI
 
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic

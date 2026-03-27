@@ -336,6 +336,19 @@ class LearningLoopService:
         # Store in database
         await self._store_outcome(trade_outcome)
         
+        # GAP 5: Update confidence gate log with trade outcome for auto-calibration
+        try:
+            from services.ai_modules.confidence_gate import get_confidence_gate
+            gate = get_confidence_gate()
+            await gate.record_trade_outcome(
+                symbol=symbol,
+                setup_type=setup_type,
+                outcome=outcome,
+                pnl=pnl,
+            )
+        except Exception as e:
+            logger.debug(f"Could not update confidence gate outcome (non-critical): {e}")
+        
         # Update tilt state
         await self._update_tilt_state(trade_outcome)
         

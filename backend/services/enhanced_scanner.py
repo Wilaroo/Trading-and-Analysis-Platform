@@ -2142,13 +2142,14 @@ class EnhancedBackgroundScanner:
                     
                     alerts.append(alert)
             
-            # Process all alerts for this symbol - ADD TQS SCORING and AI ENRICHMENT
+            # Process all alerts for this symbol - AI ENRICHMENT first, then TQS SCORING
+            # GAP 2 FIX: AI enrichment runs first so TQS can incorporate AI model alignment
             for alert in alerts:
-                # Calculate TQS for this alert (async)
-                await self._enrich_alert_with_tqs(alert)
-                
-                # Add AI predictions to the alert
+                # Add AI predictions to the alert (must run before TQS)
                 await self._enrich_alert_with_ai(alert)
+                
+                # Calculate TQS for this alert (now has AI data available)
+                await self._enrich_alert_with_tqs(alert)
                 
                 await self._process_new_alert(alert)
                 
@@ -3980,6 +3981,13 @@ class EnhancedBackgroundScanner:
             trade_style = alert.trade_style or "trade_2_hold"
             
             # Calculate TQS with all available context
+            # GAP 2 FIX: Pass AI model alignment data so Context Quality pillar can score it
+            ai_dir = getattr(alert, 'ai_prediction', None)
+            ai_conf = getattr(alert, 'ai_confidence', None)
+            if ai_conf is not None:
+                ai_conf = ai_conf / 100.0  # Convert 0-100 to 0.0-1.0
+            ai_agrees = getattr(alert, 'ai_agrees_with_direction', None)
+            
             tqs_result = await tqs_engine.calculate_tqs(
                 symbol=alert.symbol,
                 setup_type=alert.setup_type,
@@ -3990,7 +3998,10 @@ class EnhancedBackgroundScanner:
                 smb_grade=alert.trade_grade,
                 smb_5var_score=alert.smb_score_total,
                 risk_reward=alert.risk_reward,
-                alert_priority=alert.priority.value if hasattr(alert.priority, 'value') else str(alert.priority)
+                alert_priority=alert.priority.value if hasattr(alert.priority, 'value') else str(alert.priority),
+                ai_model_direction=ai_dir,
+                ai_model_confidence=ai_conf,
+                ai_model_agrees=ai_agrees,
             )
             
             if tqs_result:
