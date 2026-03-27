@@ -164,6 +164,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - **Cleaned 10,724 stale FINRA records** (2018/2020/2025 dates) from production DB
   - ADV cache status: 9,248 symbols, all from `source: ib_historical_recalc`, 2,702 qualifying (≥500K)
 
+- **Weekly ADV Cache Auto-Recalculation** (Mar 27, 2026)
+  - Background scheduler runs every Sunday at 10 PM ET (before Monday open)
+  - Uses 10-day lookback (2 trading weeks) with min 5 bars per symbol
+  - Integrated into `server.py` startup via `asyncio.create_task(_weekly_adv_recalc_loop())`
+  - Uses `recalculate_adv_cache.py` (IB daily bars only, no IEX)
+  - Manual trigger available: `POST /api/ib-collector/build-adv-cache` or `POST /api/ai-modules/adv/recalculate`
+
 - **Vendor 1-Min Data Import**: User actively importing ~3.35GB of 30-day vendor data
   - 2026-02-18 through 2026-03-18, full market OHLCV 1-min bars
   - Import script runs locally with `--skip-days 0` (no overlap with IB data)

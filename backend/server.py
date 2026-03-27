@@ -2971,6 +2971,49 @@ async def stream_filter_thoughts():
         
         await asyncio.sleep(10)  # Every 10 seconds
 
+
+async def _weekly_adv_recalc_loop():
+    """
+    Background task: recalculate ADV cache from IB daily bars every Sunday at 10 PM ET.
+    Uses 10-day lookback (2 trading weeks) since IB data is collected weekly.
+    """
+    import pytz
+    et = pytz.timezone("US/Eastern")
+
+    while True:
+        try:
+            now_et = datetime.now(et)
+            # Calculate next Sunday 10 PM ET
+            days_until_sunday = (6 - now_et.weekday()) % 7
+            if days_until_sunday == 0 and now_et.hour >= 22:
+                days_until_sunday = 7  # Already past this Sunday's window
+            next_run = now_et.replace(hour=22, minute=0, second=0, microsecond=0) + timedelta(days=days_until_sunday)
+            wait_seconds = (next_run - now_et).total_seconds()
+            print(f"[ADV Scheduler] Next recalc: {next_run.strftime('%a %b %d %I:%M %p ET')} (in {wait_seconds/3600:.1f}h)")
+            await asyncio.sleep(wait_seconds)
+
+            # Run the recalculation in a thread (heavy MongoDB aggregation)
+            print("[ADV Scheduler] Starting weekly ADV cache recalculation...")
+            result = await asyncio.to_thread(_run_adv_recalc)
+            print(f"[ADV Scheduler] Complete: {result}")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[ADV Scheduler] Error: {e}")
+            await asyncio.sleep(3600)  # Retry in 1 hour on error
+
+
+def _run_adv_recalc():
+    """Sync wrapper for ADV recalculation (runs in thread)."""
+    try:
+        from scripts.recalculate_adv_cache import recalculate_adv_cache
+        stats = recalculate_adv_cache(db, lookback_days=10, min_bars=5, verbose=True)
+        return stats
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
@@ -3008,6 +3051,10 @@ async def startup_event():
     # Start market intel scheduler (auto-generates reports at scheduled times)
     asyncio.create_task(market_intel_service.start_scheduler())
     print("Market intel scheduler started")
+    
+    # Start weekly ADV cache recalculation (Sunday 10 PM ET)
+    asyncio.create_task(_weekly_adv_recalc_loop())
+    print("Weekly ADV cache recalc scheduler started (Sunday 10 PM ET)")
     
     # --- Heavy initialization (non-blocking) ---
     # All heavy operations run in background tasks so the server accepts
