@@ -737,12 +737,10 @@ const LiveAlertsPanel = ({
     fetchWatchlist();
     const cleanup = connectToStream();
     
-    // Periodic status refresh
-    const statusInterval = setInterval(fetchStatus, 60000);
+    // No status polling — WebSocket stream_scanner_alerts handles updates
     
     return () => {
       cleanup?.();
-      clearInterval(statusInterval);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }

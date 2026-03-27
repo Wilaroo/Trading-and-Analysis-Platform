@@ -20,6 +20,7 @@ import api from '../utils/api';
 import { toast } from 'sonner';
 import { renderTickerAwareContent } from '../utils/tickerUtils';
 import { CustomTip } from './shared/Tooltip';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const REPORT_ICONS = {
   sunrise: Sunrise,
@@ -83,6 +84,21 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
     setLoading(false);
   }, []);
 
+  const { marketIntel: wsIntel } = useWsData();
+
+  // Subscribe to WS market intel updates (replaces 60s polling)
+  useEffect(() => {
+    if (!wsIntel) return;
+    if (wsIntel.schedule) setSchedule(wsIntel.schedule);
+    if (wsIntel.reports) setReports(wsIntel.reports);
+    if (wsIntel.current?.has_report) {
+      setActiveReport(wsIntel.current.report);
+    } else if (wsIntel.reports?.length > 0) {
+      setActiveReport(wsIntel.reports[wsIntel.reports.length - 1]);
+    }
+    setLoading(false);
+  }, [wsIntel]);
+
   // Auto-trigger: on first load, check if we should generate a report
   useEffect(() => {
     const checkAutoTrigger = async () => {
@@ -111,8 +127,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
     };
 
     fetchData().then(checkAutoTrigger);
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
+    // No polling — WebSocket handles updates
   }, [fetchData, autoTriggered]);
 
   const handleGenerate = async (reportType) => {

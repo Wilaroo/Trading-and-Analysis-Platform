@@ -630,6 +630,12 @@ class TradingBotService:
         self._smart_filter = SmartFilter()
         self._smart_filter_config = self._smart_filter.config
         
+        # Extracted modules (Phase: refactoring)
+        from services.stop_manager import StopManager
+        from services.trade_intelligence import TradeIntelligence
+        self._stop_manager = StopManager()
+        self._trade_intel = TradeIntelligence()
+        
         logger.info("TradingBotService initialized in AUTONOMOUS mode")
     
     def set_services(self, alert_system, trading_intelligence, alpaca_service, trade_executor, db):
@@ -2092,130 +2098,56 @@ class TradingBotService:
             return None
     
     def _calculate_position_size(self, entry_price: float, stop_price: float, direction: TradeDirection, atr: float = None, atr_percent: float = None) -> Tuple[int, float]:
-        """
-        Calculate position size based on risk management rules with volatility and market regime adjustment.
-        
-        Args:
-            entry_price: Entry price for the trade
-            stop_price: Stop loss price
-            direction: LONG or SHORT
-            atr: Average True Range in dollars (optional, for volatility adjustment)
-            atr_percent: ATR as percentage of price (optional)
-        
-        Returns:
-            (shares, risk_amount)
-        """
-        # Calculate risk per share
+        """Calculate position size based on risk management rules with volatility and market regime adjustment."""
         risk_per_share = abs(entry_price - stop_price)
-        
         if risk_per_share <= 0:
             return 0, 0
-        
-        # Volatility-adjusted sizing
         adjusted_max_risk = self.risk_params.max_risk_per_trade
         volatility_multiplier = 1.0
-        
         if self.risk_params.use_volatility_sizing and atr_percent:
-            # Adjust position size based on volatility
-            # Lower volatility (ATR% < 2%) = can take larger position
-            # Higher volatility (ATR% > 4%) = should take smaller position
-            # Normal volatility (2-3%) = standard sizing
             if atr_percent < 1.5:
-                volatility_multiplier = 1.3  # Low vol - can size up
+                volatility_multiplier = 1.3
             elif atr_percent < 2.5:
-                volatility_multiplier = 1.1  # Normal-low vol
+                volatility_multiplier = 1.1
             elif atr_percent < 3.5:
-                volatility_multiplier = 1.0  # Normal vol
+                volatility_multiplier = 1.0
             elif atr_percent < 5.0:
-                volatility_multiplier = 0.8  # High vol - size down
+                volatility_multiplier = 0.8
             else:
-                volatility_multiplier = 0.6  # Very high vol - significant reduction
-            
-            # Apply volatility scale factor
+                volatility_multiplier = 0.6
             volatility_multiplier *= self.risk_params.volatility_scale_factor
             adjusted_max_risk = self.risk_params.max_risk_per_trade * volatility_multiplier
-        
-        # =====================================================================
-        # MARKET REGIME ADJUSTMENT
-        # =====================================================================
-        # Adjust position sizing based on current market regime
         regime_multiplier = 1.0
-        
         if self._current_regime:
             base_regime_multiplier = self._regime_position_multipliers.get(self._current_regime, 1.0)
-            
-            # For CONFIRMED_DOWN regime, allow normal sizing for SHORT trades
-            # since shorts benefit from down markets
             if self._current_regime == "CONFIRMED_DOWN" and direction == TradeDirection.SHORT:
-                regime_multiplier = 1.0  # Full sizing for shorts in down market
-            # For RISK_ON regime, slightly reduce short sizing (counter-trend)
+                regime_multiplier = 1.0
             elif self._current_regime == "RISK_ON" and direction == TradeDirection.SHORT:
-                regime_multiplier = 0.7  # Reduce shorts in up market (counter-trend)
+                regime_multiplier = 0.7
             else:
                 regime_multiplier = base_regime_multiplier
-            
             adjusted_max_risk *= regime_multiplier
-            
             if regime_multiplier < 1.0:
                 logger.debug(f"Position size adjusted by regime ({self._current_regime}): {regime_multiplier:.0%}")
-        # =====================================================================
-        
-        # Calculate max shares based on adjusted risk per trade
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
-        
-        # Calculate max shares based on max position size
         max_position_value = self.risk_params.starting_capital * (self.risk_params.max_position_pct / 100)
         max_shares_by_capital = int(max_position_value / entry_price)
-        
-        # Take the minimum
-        shares = min(max_shares_by_risk, max_shares_by_capital)
-        
-        # Ensure at least 1 share
-        shares = max(shares, 1)
-        
-        # Calculate actual risk
+        shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
         risk_amount = shares * risk_per_share
-        
-        # Cap risk at max per trade (using adjusted max)
         if risk_amount > adjusted_max_risk:
             shares = int(adjusted_max_risk / risk_per_share)
             risk_amount = shares * risk_per_share
-        
         return shares, risk_amount
     
     def calculate_atr_based_stop(self, entry_price: float, direction: TradeDirection, atr: float, setup_type: str = None) -> float:
-        """
-        Calculate stop loss based on ATR with setup-specific adjustments.
-        
-        Args:
-            entry_price: Entry price for the trade
-            direction: LONG or SHORT
-            atr: Average True Range in dollars
-            setup_type: Optional setup type for custom multiplier
-        
-        Returns:
-            Stop price
-        """
-        # Setup-specific ATR multipliers
+        """Calculate stop loss based on ATR with setup-specific multiplier."""
         setup_multipliers = {
-            'rubber_band': 1.0,      # Tighter stops for mean reversion
-            'squeeze': 1.5,          # Medium stops for squeeze plays
-            'breakout': 1.5,         # Standard stops for breakouts
-            'vwap_bounce': 1.0,      # Tight stops for VWAP plays
-            'gap_fade': 1.25,        # Moderate stops for gap fades
-            'relative_strength': 1.5, # Standard stops
-            'mean_reversion': 1.0,   # Tight stops for MR
-            'orb': 1.25,             # Moderate stops for ORB
+            'rubber_band': 1.0, 'squeeze': 1.5, 'breakout': 1.5, 'vwap_bounce': 1.0,
+            'gap_fade': 1.25, 'relative_strength': 1.5, 'mean_reversion': 1.0, 'orb': 1.25,
         }
-        
         multiplier = setup_multipliers.get(setup_type, self.risk_params.base_atr_multiplier)
-        
-        # Clamp multiplier within bounds
-        multiplier = max(self.risk_params.min_atr_multiplier, 
-                        min(multiplier, self.risk_params.max_atr_multiplier))
-        
+        multiplier = max(self.risk_params.min_atr_multiplier, min(multiplier, self.risk_params.max_atr_multiplier))
         stop_distance = atr * multiplier
-        
         if direction == TradeDirection.LONG:
             return entry_price - stop_distance
         else:
@@ -2248,347 +2180,29 @@ class TradingBotService:
     # ==================== ENHANCED INTELLIGENCE GATHERING ====================
     
     async def _gather_trade_intelligence(self, symbol: str, alert: Dict) -> Dict[str, Any]:
-        """
-        Gather comprehensive intelligence for trade evaluation.
-        This is what makes the bot "smart" - it uses the same data sources as the AI assistant.
-        """
-        intelligence = {
-            "symbol": symbol,
-            "gathered_at": datetime.now(timezone.utc).isoformat(),
-            "news": None,
-            "technicals": None,
-            "market_context": None,
-            "quality_metrics": None,
-            "warnings": [],
-            "enhancements": []
-        }
-        
-        try:
-            # Run intelligence gathering in parallel for speed
-            tasks = []
-            
-            # 1. Get recent news (critical for informed trading)
-            if self.web_research:
-                tasks.append(self._get_news_intelligence(symbol))
-            else:
-                tasks.append(asyncio.coroutine(lambda: None)())
-            
-            # 2. Get technical analysis
-            if self.technical_service:
-                tasks.append(self._get_technical_intelligence(symbol))
-            else:
-                tasks.append(asyncio.coroutine(lambda: None)())
-            
-            # 3. Get quality metrics
-            if self.quality_service:
-                tasks.append(self._get_quality_intelligence(symbol))
-            else:
-                tasks.append(asyncio.coroutine(lambda: None)())
-            
-            # Execute all in parallel with timeout
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=10.0  # 10 second max for intelligence gathering
-                )
-                
-                if len(results) > 0 and results[0] and not isinstance(results[0], Exception):
-                    intelligence["news"] = results[0]
-                if len(results) > 1 and results[1] and not isinstance(results[1], Exception):
-                    intelligence["technicals"] = results[1]
-                if len(results) > 2 and results[2] and not isinstance(results[2], Exception):
-                    intelligence["quality_metrics"] = results[2]
-                    
-            except asyncio.TimeoutError:
-                intelligence["warnings"].append("Intelligence gathering timed out - proceeding with basic data")
-                logger.warning(f"Intelligence gathering timeout for {symbol}")
-            
-            # Analyze gathered intelligence for warnings and enhancements
-            self._analyze_intelligence(intelligence, alert)
-            
-        except Exception as e:
-            logger.error(f"Intelligence gathering error for {symbol}: {e}")
-            intelligence["warnings"].append(f"Error gathering intelligence: {str(e)}")
-        
-        return intelligence
-    
-    async def _get_news_intelligence(self, symbol: str) -> Optional[Dict]:
-        """Get recent news that could impact the trade - prioritizes IB news"""
-        try:
-            # Try unified news service first (prioritizes IB historical news)
-            try:
-                from services.news_service import get_news_service
-                news_service = get_news_service()
-                news_items = await news_service.get_ticker_news(symbol, max_items=5)
-                
-                if news_items and not news_items[0].get("is_placeholder"):
-                    headlines = [n.get("headline", "") for n in news_items]
-                    sentiments = [n.get("sentiment", "neutral") for n in news_items]
-                    
-                    # Count sentiment
-                    bullish = sentiments.count("bullish")
-                    bearish = sentiments.count("bearish")
-                    
-                    if bullish > bearish:
-                        overall_sentiment = "bullish"
-                    elif bearish > bullish:
-                        overall_sentiment = "bearish"
-                    else:
-                        overall_sentiment = "neutral"
-                    
-                    return {
-                        "has_news": True,
-                        "summary": f"Found {len(news_items)} recent news items for {symbol}",
-                        "headlines": headlines[:5],
-                        "sentiment": overall_sentiment,
-                        "source": news_items[0].get("source_type", "unknown"),
-                        "key_topics": []
-                    }
-            except Exception as e:
-                logger.debug(f"News service failed, falling back to Tavily: {e}")
-            
-            # Fallback to Tavily for web search if news service fails
-            result = await self.web_research.tavily.search_financial(
-                f"{symbol} stock news latest",
-                max_results=3
-            )
-            
-            news_data = {
-                "has_news": len(result.results) > 0,
-                "summary": result.answer[:500] if result.answer else None,
-                "headlines": [r.title for r in result.results[:3]],
-                "sentiment": self._analyze_news_sentiment(result),
-                "key_topics": self._extract_news_topics(result),
-                "source": "tavily"
-            }
-            
-            return news_data
-            
-        except Exception as e:
-            logger.warning(f"News intelligence error for {symbol}: {e}")
-            return None
-    
-    async def _get_technical_intelligence(self, symbol: str) -> Optional[Dict]:
-        """Get real-time technical analysis"""
-        try:
-            snapshot = await self.technical_service.get_technical_snapshot(symbol)
-            
-            if not snapshot:
-                return None
-            
-            # Determine volume trend based on RVOL
-            volume_trend = "normal"
-            if snapshot.rvol >= 2.0:
-                volume_trend = "high"
-            elif snapshot.rvol < 0.5:
-                volume_trend = "low"
-            
-            # Generate signals based on technical conditions
-            signals = []
-            if snapshot.above_vwap and snapshot.above_ema9:
-                signals.append("bullish_structure")
-            if snapshot.rsi_14 > 70:
-                signals.append("overbought")
-            elif snapshot.rsi_14 < 30:
-                signals.append("oversold")
-            if snapshot.extended_from_ema9:
-                signals.append("extended")
-            if snapshot.holding_gap:
-                signals.append("gap_hold")
-            
-            return {
-                "trend": snapshot.trend or "neutral",
-                "momentum": snapshot.rsi_14 or 50,
-                "support_levels": [snapshot.support] if snapshot.support else [],
-                "resistance_levels": [snapshot.resistance] if snapshot.resistance else [],
-                "volume_trend": volume_trend,
-                "signals": signals
-            }
-            
-        except Exception as e:
-            logger.warning(f"Technical intelligence error for {symbol}: {e}")
-            return None
-    
-    async def _get_quality_intelligence(self, symbol: str) -> Optional[Dict]:
-        """Get quality score and metrics"""
-        try:
-            # Get quality metrics first
-            metrics = await self.quality_service.get_quality_metrics(symbol)
-            
-            if not metrics or metrics.data_quality == "low":
-                return None
-            
-            # Calculate the quality score
-            score = self.quality_service.calculate_quality_score(metrics)
-            
-            # Build strengths and weaknesses based on scores
-            strengths = []
-            weaknesses = []
-            
-            if score.accruals_score and score.accruals_score > 60:
-                strengths.append("Low earnings manipulation risk")
-            elif score.accruals_score and score.accruals_score < 40:
-                weaknesses.append("High accruals concern")
-                
-            if score.roe_score and score.roe_score > 60:
-                strengths.append("Strong return on equity")
-            elif score.roe_score and score.roe_score < 40:
-                weaknesses.append("Weak profitability")
-                
-            if score.cfa_score and score.cfa_score > 60:
-                strengths.append("Good cash flow generation")
-            elif score.cfa_score and score.cfa_score < 40:
-                weaknesses.append("Poor cash conversion")
-                
-            if score.da_score and score.da_score > 60:
-                strengths.append("Conservative leverage")
-            elif score.da_score and score.da_score < 40:
-                weaknesses.append("High debt levels")
-            
-            return {
-                "quality_score": score.percentile_rank or 50,
-                "grade": score.grade or "C",
-                "strengths": strengths,
-                "weaknesses": weaknesses
-            }
-            
-        except Exception as e:
-            logger.warning(f"Quality intelligence error for {symbol}: {e}")
-            return None
+        """Delegates to TradeIntelligence module."""
+        self._trade_intel.set_services(
+            web_research=self.web_research,
+            technical_service=self._realtime_tech,
+            quality_service=getattr(self, '_quality_service', None),
+        )
+        return await self._trade_intel.gather(symbol, alert)
     
     def _analyze_news_sentiment(self, news_result) -> str:
-        """Analyze sentiment from news results"""
-        if not news_result or not news_result.answer:
-            return "neutral"
-        
-        answer_lower = news_result.answer.lower()
-        
-        # Positive indicators
-        positive = ["surge", "rally", "gain", "beat", "upgrade", "buy", "bullish", "strong", "positive"]
-        negative = ["drop", "fall", "miss", "downgrade", "sell", "bearish", "weak", "negative", "crash"]
-        
-        pos_count = sum(1 for word in positive if word in answer_lower)
-        neg_count = sum(1 for word in negative if word in answer_lower)
-        
-        if pos_count > neg_count + 1:
-            return "positive"
-        elif neg_count > pos_count + 1:
-            return "negative"
-        return "neutral"
+        """Delegates to TradeIntelligence module."""
+        return self._trade_intel._analyze_news_sentiment(news_result)
     
     def _extract_news_topics(self, news_result) -> List[str]:
-        """Extract key topics from news"""
-        topics = []
-        if news_result and news_result.answer:
-            answer_lower = news_result.answer.lower()
-            
-            topic_map = {
-                "earnings": ["earnings", "revenue", "profit", "quarterly"],
-                "analyst": ["analyst", "upgrade", "downgrade", "rating", "target"],
-                "product": ["product", "launch", "announce", "release"],
-                "legal": ["lawsuit", "legal", "sec", "investigation"],
-                "merger": ["merger", "acquisition", "deal", "buyout"],
-                "macro": ["fed", "rate", "inflation", "economy"]
-            }
-            
-            for topic, keywords in topic_map.items():
-                if any(kw in answer_lower for kw in keywords):
-                    topics.append(topic)
-        
-        return topics[:3]  # Top 3 topics
+        """Delegates to TradeIntelligence module."""
+        return self._trade_intel._extract_news_topics(news_result)
     
     def _analyze_intelligence(self, intelligence: Dict, alert: Dict):
-        """Analyze gathered intelligence and add warnings/enhancements"""
-        warnings = intelligence["warnings"]
-        enhancements = intelligence["enhancements"]
-        
-        # News analysis
-        news = intelligence.get("news")
-        if news:
-            if news.get("sentiment") == "negative":
-                warnings.append("⚠️ Negative news sentiment detected")
-            elif news.get("sentiment") == "positive":
-                enhancements.append("✅ Positive news sentiment")
-            
-            topics = news.get("key_topics", [])
-            if "earnings" in topics:
-                warnings.append("⚠️ Earnings-related news - volatility likely")
-            if "legal" in topics:
-                warnings.append("⚠️ Legal/regulatory news detected")
-            if "analyst" in topics:
-                enhancements.append("✅ Analyst coverage - increased visibility")
-        
-        # Technical analysis
-        technicals = intelligence.get("technicals")
-        if technicals:
-            direction = alert.get("direction", "long")
-            trend = technicals.get("trend", "neutral")
-            
-            # Check if trade aligns with trend
-            if direction == "long" and trend == "down":
-                warnings.append("⚠️ Trading against downtrend")
-            elif direction == "short" and trend == "up":
-                warnings.append("⚠️ Shorting against uptrend")
-            elif (direction == "long" and trend == "up") or (direction == "short" and trend == "down"):
-                enhancements.append("✅ Trade aligns with trend")
-            
-            # RSI extremes
-            rsi = technicals.get("momentum", 50)
-            if rsi > 70 and direction == "long":
-                warnings.append(f"⚠️ RSI overbought ({rsi:.0f})")
-            elif rsi < 30 and direction == "short":
-                warnings.append(f"⚠️ RSI oversold ({rsi:.0f})")
-            
-            # Volume
-            vol_trend = technicals.get("volume_trend", "normal")
-            if vol_trend == "high":
-                enhancements.append("✅ High volume confirms move")
-            elif vol_trend == "low":
-                warnings.append("⚠️ Low volume - watch for false breakout")
-        
-        # Quality metrics
-        quality = intelligence.get("quality_metrics")
-        if quality:
-            score = quality.get("quality_score", 50)
-            if score >= 80:
-                enhancements.append(f"✅ High quality setup ({score}/100)")
-            elif score < 50:
-                warnings.append(f"⚠️ Low quality score ({score}/100)")
+        """Delegates to TradeIntelligence module."""
+        self._trade_intel.analyze(intelligence, alert)
     
     def _calculate_intelligence_adjustment(self, intelligence: Dict) -> int:
-        """
-        Calculate score adjustment based on intelligence.
-        Returns a value to add/subtract from the base quality score.
-        """
-        adjustment = 0
-        
-        # News sentiment
-        news = intelligence.get("news")
-        if news:
-            sentiment = news.get("sentiment", "neutral")
-            if sentiment == "positive":
-                adjustment += 5
-            elif sentiment == "negative":
-                adjustment -= 10  # Negative news is more impactful
-        
-        # Technical alignment
-        technicals = intelligence.get("technicals")
-        if technicals:
-            vol_trend = technicals.get("volume_trend", "normal")
-            if vol_trend == "high":
-                adjustment += 5
-            elif vol_trend == "low":
-                adjustment -= 5
-        
-        # Warnings count
-        warnings = intelligence.get("warnings", [])
-        adjustment -= len(warnings) * 3  # Each warning reduces score
-        
-        # Enhancements count
-        enhancements = intelligence.get("enhancements", [])
-        adjustment += len(enhancements) * 2  # Each enhancement increases score
-        
-        return adjustment
+        """Delegates to TradeIntelligence module."""
+        return self._trade_intel.calculate_adjustment(intelligence)
     
     def _build_entry_context(
         self, alert: Dict, intelligence: Dict, regime: str,
@@ -3288,115 +2902,24 @@ class TradingBotService:
         logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
 
     async def _update_trailing_stop(self, trade: BotTrade):
-        """
-        Update trailing stop based on targets hit:
-        - Target 1 hit: Move stop to breakeven (entry price)
-        - Target 2 hit: Start trailing stop (follows price by trail_pct)
-        """
-        targets_hit = trade.scale_out_config.get('targets_hit', [])
-        trailing_config = trade.trailing_stop_config
-        current_mode = trailing_config.get('mode', 'original')
-        
-        # Check if we need to upgrade stop mode
-        if 1 in targets_hit and current_mode == 'original':
-            # Target 2 hit (index 1) - start trailing
-            self._activate_trailing_stop(trade)
-        elif 0 in targets_hit and current_mode == 'original':
-            # Target 1 hit (index 0) - move to breakeven
-            self._move_stop_to_breakeven(trade)
-        
-        # Update trailing stop if in trailing mode
-        if current_mode == 'trailing':
-            self._update_trail_position(trade)
-    
+        """Delegates to StopManager module."""
+        await self._stop_manager.update_trailing_stop(trade)
+
     def _move_stop_to_breakeven(self, trade: BotTrade):
-        """Move stop to breakeven (entry price) after Target 1 hit"""
-        trailing_config = trade.trailing_stop_config
-        old_stop = trailing_config.get('current_stop', trade.stop_price)
-        new_stop = trade.fill_price  # Breakeven = entry price
-        
-        # Only move stop if it's an improvement
-        if trade.direction == TradeDirection.LONG:
-            if new_stop > old_stop:
-                trailing_config['current_stop'] = round(new_stop, 2)
-                trailing_config['mode'] = 'breakeven'
-                self._record_stop_adjustment(trade, old_stop, new_stop, 'breakeven')
-                logger.info(f"BREAKEVEN STOP: {trade.symbol} stop moved from ${old_stop:.2f} to ${new_stop:.2f}")
-        else:  # SHORT
-            if new_stop < old_stop:
-                trailing_config['current_stop'] = round(new_stop, 2)
-                trailing_config['mode'] = 'breakeven'
-                self._record_stop_adjustment(trade, old_stop, new_stop, 'breakeven')
-                logger.info(f"BREAKEVEN STOP: {trade.symbol} stop moved from ${old_stop:.2f} to ${new_stop:.2f}")
-    
+        """Delegates to StopManager module."""
+        self._stop_manager._move_stop_to_breakeven(trade)
+
     def _activate_trailing_stop(self, trade: BotTrade):
-        """Activate trailing stop after Target 2 hit"""
-        trailing_config = trade.trailing_stop_config
-        old_stop = trailing_config.get('current_stop', trade.stop_price)
-        
-        # Initialize high/low water mark
-        if trade.direction == TradeDirection.LONG:
-            trailing_config['high_water_mark'] = trade.current_price
-            # Calculate initial trailing stop
-            trail_pct = trailing_config.get('trail_pct', 0.02)
-            new_stop = round(trade.current_price * (1 - trail_pct), 2)
-            # Don't move stop down
-            new_stop = max(new_stop, old_stop)
-        else:  # SHORT
-            trailing_config['low_water_mark'] = trade.current_price
-            trail_pct = trailing_config.get('trail_pct', 0.02)
-            new_stop = round(trade.current_price * (1 + trail_pct), 2)
-            # Don't move stop up
-            new_stop = min(new_stop, old_stop)
-        
-        trailing_config['current_stop'] = new_stop
-        trailing_config['mode'] = 'trailing'
-        
-        if new_stop != old_stop:
-            self._record_stop_adjustment(trade, old_stop, new_stop, 'trailing_activated')
-            logger.info(f"TRAILING STOP ACTIVATED: {trade.symbol} stop at ${new_stop:.2f} (trailing {trail_pct*100:.1f}%)")
-    
+        """Delegates to StopManager module."""
+        self._stop_manager._activate_trailing_stop(trade)
+
     def _update_trail_position(self, trade: BotTrade):
-        """Update the trailing stop position based on price movement"""
-        trailing_config = trade.trailing_stop_config
-        trail_pct = trailing_config.get('trail_pct', 0.02)
-        old_stop = trailing_config.get('current_stop', trade.stop_price)
-        
-        if trade.direction == TradeDirection.LONG:
-            # Update high water mark
-            high_water = trailing_config.get('high_water_mark', trade.current_price)
-            if trade.current_price > high_water:
-                trailing_config['high_water_mark'] = trade.current_price
-                # Calculate new trailing stop
-                new_stop = round(trade.current_price * (1 - trail_pct), 2)
-                # Only move stop up (never down for longs)
-                if new_stop > old_stop:
-                    trailing_config['current_stop'] = new_stop
-                    self._record_stop_adjustment(trade, old_stop, new_stop, 'trail_up')
-                    logger.info(f"TRAILING STOP MOVED: {trade.symbol} stop raised to ${new_stop:.2f} (high: ${trade.current_price:.2f})")
-        else:  # SHORT
-            # Update low water mark
-            low_water = trailing_config.get('low_water_mark', trade.current_price)
-            if trade.current_price < low_water:
-                trailing_config['low_water_mark'] = trade.current_price
-                # Calculate new trailing stop
-                new_stop = round(trade.current_price * (1 + trail_pct), 2)
-                # Only move stop down (never up for shorts)
-                if new_stop < old_stop:
-                    trailing_config['current_stop'] = new_stop
-                    self._record_stop_adjustment(trade, old_stop, new_stop, 'trail_down')
-                    logger.info(f"TRAILING STOP MOVED: {trade.symbol} stop lowered to ${new_stop:.2f} (low: ${trade.current_price:.2f})")
-    
+        """Delegates to StopManager module."""
+        self._stop_manager._update_trail_position(trade)
+
     def _record_stop_adjustment(self, trade: BotTrade, old_stop: float, new_stop: float, reason: str):
-        """Record a stop adjustment in the trailing stop history"""
-        adjustment = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'old_stop': old_stop,
-            'new_stop': new_stop,
-            'reason': reason,
-            'price_at_adjustment': trade.current_price
-        }
-        trade.trailing_stop_config.setdefault('stop_adjustments', []).append(adjustment)
+        """Delegates to StopManager module."""
+        self._stop_manager._record_stop_adjustment(trade, old_stop, new_stop, reason)
 
 
     async def _check_and_execute_scale_out(self, trade: BotTrade):

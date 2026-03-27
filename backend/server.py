@@ -2972,6 +2972,238 @@ async def stream_filter_thoughts():
         await asyncio.sleep(10)  # Every 10 seconds
 
 
+async def stream_order_queue():
+    """Push order queue status via WebSocket (replaces 3s polling)."""
+    await asyncio.sleep(8)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                from services.ib_execution_service import get_ib_execution_service
+                exec_svc = get_ib_execution_service()
+                if exec_svc:
+                    queue_data = exec_svc.get_queue_status()
+                else:
+                    queue_data = {"pending": [], "active": [], "completed": [], "queue_size": 0}
+                data_hash = hash(str(queue_data.get("queue_size", 0)) + str(len(queue_data.get("active", []))))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "order_queue",
+                        "data": queue_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"Order queue stream error: {e}")
+        await asyncio.sleep(3)
+
+
+async def stream_risk_status():
+    """Push dynamic risk status via WebSocket (replaces 5-10s polling)."""
+    await asyncio.sleep(12)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                from services.dynamic_risk_service import get_dynamic_risk_service
+                risk_svc = get_dynamic_risk_service()
+                if risk_svc:
+                    status = risk_svc.get_status()
+                else:
+                    status = {}
+                status_hash = hash(str(status.get("current_mode")) + str(status.get("daily_pnl", 0)))
+                if status_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "risk_status",
+                        "data": status,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = status_hash
+            except Exception as e:
+                print(f"Risk status stream error: {e}")
+        await asyncio.sleep(5)
+
+
+async def stream_sentcom_data():
+    """Push SentCom intelligence data via WebSocket (replaces 8 separate polling hooks)."""
+    await asyncio.sleep(15)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                sentcom_data = {}
+                # SentCom status
+                try:
+                    from services.sentcom_engine import get_sentcom_engine
+                    engine = get_sentcom_engine()
+                    if engine:
+                        sentcom_data["status"] = engine.get_status()
+                        sentcom_data["stream"] = engine.get_stream(limit=50)
+                except Exception:
+                    pass
+                # Positions from IB pushed data
+                try:
+                    pushed = db.get("ib_pushed_data", {})
+                    if hasattr(pushed, 'find_one'):
+                        latest = pushed.find_one(sort=[("timestamp", -1)], projection={"_id": 0})
+                        sentcom_data["positions"] = latest if latest else {}
+                    else:
+                        sentcom_data["positions"] = {}
+                except Exception:
+                    sentcom_data["positions"] = {}
+                # Market context snapshot
+                try:
+                    from services.market_context_service import get_market_context_service
+                    mcs = get_market_context_service()
+                    if mcs:
+                        sentcom_data["market_context"] = mcs.get_snapshot()
+                except Exception:
+                    pass
+
+                data_hash = hash(str(sentcom_data.get("status", {}).get("last_updated", "")) + str(len(sentcom_data.get("stream", []))))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "sentcom_data",
+                        "data": sentcom_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"SentCom stream error: {e}")
+        await asyncio.sleep(10)
+
+
+async def stream_market_intel():
+    """Push market intel data via WebSocket (replaces 60s polling)."""
+    await asyncio.sleep(20)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                intel_data = {}
+                try:
+                    schedule = market_intel_service.get_schedule()
+                    intel_data["schedule"] = schedule
+                except Exception:
+                    pass
+                try:
+                    reports = market_intel_service.get_reports(limit=5)
+                    intel_data["reports"] = reports
+                except Exception:
+                    pass
+                try:
+                    current = market_intel_service.get_current_report()
+                    intel_data["current"] = current
+                except Exception:
+                    pass
+                data_hash = hash(str(intel_data.get("current", {}).get("timestamp", "")) + str(len(intel_data.get("reports", []))))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "market_intel",
+                        "data": intel_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"Market intel stream error: {e}")
+        await asyncio.sleep(30)
+
+
+async def stream_data_collection():
+    """Push data collection status via WebSocket (replaces 15s polling)."""
+    await asyncio.sleep(10)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                collection_data = {}
+                try:
+                    from services.ib_historical_collector import get_ib_collector
+                    collector = get_ib_collector()
+                    if collector:
+                        progress = await collector.get_queue_progress_detailed()
+                        collection_data["progress"] = progress
+                except Exception:
+                    pass
+                try:
+                    coverage = db["ib_historical_data"].aggregate([
+                        {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                        {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
+                    ])
+                    for doc in coverage:
+                        collection_data["coverage"] = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
+                except Exception:
+                    pass
+
+                data_hash = hash(str(collection_data.get("progress", {}).get("active_collections", [])))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "data_collection",
+                        "data": collection_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"Data collection stream error: {e}")
+        await asyncio.sleep(15)
+
+
+async def stream_focus_mode():
+    """Push focus mode state via WebSocket (replaces 5s polling)."""
+    await asyncio.sleep(5)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                mode_data = {}
+                try:
+                    mode_doc = db["focus_mode"].find_one(sort=[("updated_at", -1)], projection={"_id": 0})
+                    mode_data = mode_doc if mode_doc else {"mode": "normal"}
+                except Exception:
+                    mode_data = {"mode": "normal"}
+                
+                data_hash = hash(str(mode_data.get("mode", "")) + str(mode_data.get("updated_at", "")))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "focus_mode",
+                        "data": mode_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"Focus mode stream error: {e}")
+        await asyncio.sleep(5)
+
+
+async def stream_simulator():
+    """Push simulator status + alerts via WebSocket (replaces dual polling)."""
+    await asyncio.sleep(8)
+    last_hash = None
+    while True:
+        if manager.active_connections:
+            try:
+                sim_data = {}
+                try:
+                    from services.simulator_service import get_simulator_service
+                    sim_svc = get_simulator_service()
+                    if sim_svc:
+                        sim_data["status"] = sim_svc.get_status()
+                        sim_data["alerts"] = sim_svc.get_alerts(limit=20)
+                except Exception:
+                    pass
+                data_hash = hash(str(sim_data.get("status", {}).get("is_running", False)) + str(len(sim_data.get("alerts", []))))
+                if data_hash != last_hash:
+                    await manager.broadcast({
+                        "type": "simulator",
+                        "data": sim_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_hash = data_hash
+            except Exception as e:
+                print(f"Simulator stream error: {e}")
+        await asyncio.sleep(5)
+
+
 async def _weekly_adv_recalc_loop():
     """
     Background task: recalculate ADV cache from IB daily bars every Sunday at 10 PM ET.
@@ -3033,6 +3265,13 @@ async def startup_event():
     asyncio.create_task(stream_training_status())
     asyncio.create_task(stream_market_regime())
     asyncio.create_task(stream_filter_thoughts())
+    asyncio.create_task(stream_order_queue())
+    asyncio.create_task(stream_risk_status())
+    asyncio.create_task(stream_sentcom_data())
+    asyncio.create_task(stream_market_intel())
+    asyncio.create_task(stream_data_collection())
+    asyncio.create_task(stream_focus_mode())
+    asyncio.create_task(stream_simulator())
     print("WebSocket streaming: 12 push types (quotes, ib_status, bot_status, scanner_status, bot_trades, scanner_alerts, smart_watchlist, coaching, confidence_gate, training, regime, filter_thoughts)")
     
     # Initialize web research service with database for credit tracking

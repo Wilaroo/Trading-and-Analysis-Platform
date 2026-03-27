@@ -29,6 +29,14 @@ export function WebSocketDataProvider({ children, wsMessage }) {
     marketRegime: null,
     filterThoughts: [],
     sentcomStream: [],
+    // New WS-pushed types (Phase 2 migration)
+    orderQueue: null,
+    riskStatus: null,
+    sentcomData: null,
+    marketIntel: null,
+    dataCollection: null,
+    focusMode: null,
+    simulator: null,
   });
 
   // Track last update timestamps for each type
@@ -85,6 +93,27 @@ export function WebSocketDataProvider({ children, wsMessage }) {
         case 'sentcom_stream':
           return { ...prev, sentcomStream: message.data || [] };
 
+        case 'order_queue':
+          return { ...prev, orderQueue: message.data };
+
+        case 'risk_status':
+          return { ...prev, riskStatus: message.data };
+
+        case 'sentcom_data':
+          return { ...prev, sentcomData: message.data };
+
+        case 'market_intel':
+          return { ...prev, marketIntel: message.data };
+
+        case 'data_collection':
+          return { ...prev, dataCollection: message.data };
+
+        case 'focus_mode':
+          return { ...prev, focusMode: message.data };
+
+        case 'simulator':
+          return { ...prev, simulator: message.data };
+
         default:
           return prev;
       }
@@ -128,6 +157,13 @@ export function useWsData() {
       marketRegime: null,
       filterThoughts: [],
       sentcomStream: [],
+      orderQueue: null,
+      riskStatus: null,
+      sentcomData: null,
+      marketIntel: null,
+      dataCollection: null,
+      focusMode: null,
+      simulator: null,
       lastUpdate: {},
     };
   }

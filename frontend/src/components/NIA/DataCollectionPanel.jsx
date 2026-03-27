@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner';
 import DataHeatmap from './DataHeatmap';
 import api from '../../utils/api';
+import { useWsData } from '../../contexts/WebSocketDataContext';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -47,6 +48,8 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
     { value: 180, label: '6 Months' },
     { value: 365, label: '1 Year' }
   ];
+
+  const { dataCollection: wsDataCollection } = useWsData();
 
   useEffect(() => {
     let isMounted = true;
@@ -106,10 +109,28 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
       }
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
-    return () => { isMounted = false; clearInterval(interval); };
+    fetchData(); // Initial fetch only — WS handles updates
+    return () => { isMounted = false; };
   }, []);
+
+  // Subscribe to WS data collection updates (replaces 15s polling)
+  useEffect(() => {
+    if (!wsDataCollection) return;
+    if (wsDataCollection.progress) {
+      const p = wsDataCollection.progress;
+      const newProgress = {
+        by_bar_size: p.by_bar_size || [],
+        active_collections: p.active_collections || [],
+        overall: p.overall || {}
+      };
+      setDetailedProgress(newProgress);
+    }
+    if (wsDataCollection.coverage) {
+      setDataCoverage(prev => ({ ...prev, ...wsDataCollection.coverage }));
+      setLastDataChange(new Date());
+    }
+    setLoadingCoverage(false);
+  }, [wsDataCollection]);
 
   const hasActiveCollections = detailedProgress.active_collections?.length > 0;
 

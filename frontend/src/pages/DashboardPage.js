@@ -22,6 +22,7 @@ import {
 } from 'recharts';
 import api from '../utils/api';
 import { useTrainingMode } from '../contexts';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 // ===================== COMPONENTS =====================
 const Card = ({ children, className = '', onClick, hover = true }) => (
@@ -97,41 +98,30 @@ const AlertItem = ({ alert }) => (
   </motion.div>
 );
 
-// Simple Market Overview Card (replacing TradingView to avoid error overlay)
+// Simple Market Overview Card — uses WS quotes with REST fallback
 const MarketOverviewCard = ({ symbol = 'SPY' }) => {
   const [quote, setQuote] = useState(null);
-  const { getPollingInterval } = useTrainingMode();
-  const isVisibleRef = useRef(document.visibilityState === 'visible');
-  
+  const { quotes: wsQuotes } = useWsData();
+
+  // Use WS quote data when available
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      const wasHidden = !isVisibleRef.current;
-      isVisibleRef.current = document.visibilityState === 'visible';
-      if (isVisibleRef.current && wasHidden) {
-        fetchQuote();
+    if (wsQuotes?.[symbol]) {
+      setQuote(wsQuotes[symbol]);
+    }
+  }, [wsQuotes, symbol]);
+
+  // Initial REST fetch as fallback
+  useEffect(() => {
+    const fetchQuote = async () => {
+      try {
+        const res = await api.get(`/api/quotes/${symbol}`);
+        setQuote(res.data);
+      } catch (e) {
+        // Silently ignore quote fetch errors
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
-  const fetchQuote = async () => {
-    try {
-      const res = await api.get(`/api/quotes/${symbol}`);
-      setQuote(res.data);
-    } catch (e) {
-      // Silently ignore quote fetch errors - common during market close
-    }
-  };
-  
-  useEffect(() => {
     fetchQuote();
-    const interval = getPollingInterval(30000, false);
-    const timer = setInterval(() => {
-      if (isVisibleRef.current) fetchQuote();
-    }, interval);
-    return () => clearInterval(timer);
-  }, [symbol, getPollingInterval]);
+  }, [symbol]);
   
   return (
     <div className="h-full flex flex-col items-center justify-center">

@@ -7,6 +7,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api, { safeGet, safePost } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 import { 
   Search, TrendingUp, TrendingDown, AlertTriangle, Activity, 
   Target, Eye, Zap, Brain, RefreshCw, Filter, CheckCircle,
@@ -28,13 +29,16 @@ const formatTime = (timestamp) => {
   });
 };
 
-// Hook for fetching S.O.C. stream data
-export const useSOCStream = (pollInterval = 3000) => {
+// Hook for fetching S.O.C. stream data — uses WebSocket with initial fetch fallback
+export const useSOCStream = () => {
   const [thoughts, setThoughts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const lastDataRef = useRef('');
+
+  // Import WS data
+  const wsData = useWsData();
 
   const fetchThoughts = useCallback(async () => {
     try {
@@ -47,14 +51,12 @@ export const useSOCStream = (pollInterval = 3000) => {
           m.action_type !== 'user_message'
         );
         
-        // Only update state if data actually changed
         const newDataStr = JSON.stringify(socMessages.map(m => m.id || m.timestamp));
         if (newDataStr !== lastDataRef.current) {
           lastDataRef.current = newDataStr;
           setThoughts(socMessages);
         }
         
-        // Always mark as connected and update timestamp on successful fetch
         setIsConnected(true);
         setLastUpdate(new Date());
       }
@@ -62,16 +64,34 @@ export const useSOCStream = (pollInterval = 3000) => {
       console.error('Error fetching S.O.C. stream:', err);
       setIsConnected(false);
     } finally {
-      // Only set loading false on initial load, not on subsequent polls
       setLoading(false);
     }
   }, []);
 
+  // Initial fetch only (no polling)
   useEffect(() => {
     fetchThoughts();
-    const interval = setInterval(fetchThoughts, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchThoughts, pollInterval]);
+  }, [fetchThoughts]);
+
+  // Subscribe to WS updates
+  useEffect(() => {
+    if (!wsData?.sentcomData?.stream) return;
+    const stream = wsData.sentcomData.stream;
+    if (!Array.isArray(stream)) return;
+    const socMessages = stream.filter(m => 
+      m.type !== 'chat' && 
+      m.action_type !== 'chat_response' && 
+      m.action_type !== 'user_message'
+    );
+    const newDataStr = JSON.stringify(socMessages.map(m => m.id || m.timestamp));
+    if (newDataStr !== lastDataRef.current) {
+      lastDataRef.current = newDataStr;
+      setThoughts(socMessages);
+      setIsConnected(true);
+      setLastUpdate(new Date());
+      setLoading(false);
+    }
+  }, [wsData?.sentcomData]);
 
   return { thoughts, loading, isConnected, lastUpdate, refresh: fetchThoughts };
 };

@@ -420,7 +420,18 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Confidence Gate Tuner**: Once live trade decisions accumulate, auto-calibrate skip/reduce/go thresholds by analyzing which combinations produce the best results for your actual trading style
 
 ### P3 - Future
-- Complete WebSocket migration for remaining ~20+ polling components (beyond NIA panels)
+- ~~Complete WebSocket migration for remaining ~20+ polling components~~ **DONE (Mar 27, 2026)**
+  - Added 7 new backend WS push types: `order_queue`, `risk_status`, `sentcom_data`, `market_intel`, `data_collection`, `focus_mode`, `simulator`
+  - Migrated 13 frontend components from setInterval polling to WebSocket subscription
+  - Components: StreamOfConsciousness, DynamicRiskPanel, TradingBotPanel (order queue), SimulatorControl, NewDashboard, MarketIntelPanel, LiveAlertsPanel, DataCollectionPanel, FocusModeContext, useSentCom.js (8 hooks), useTickerModal, DashboardPage
+  - ~36 → 25 remaining setInterval calls (all are job polling, UI timers, heartbeats — appropriate)
+  - Estimated reduction: ~400 HTTP requests/min → near zero polling traffic
+
+- **Refactored `trading_bot_service.py`** (Mar 27, 2026)
+  - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic
+  - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring
+  - Main file: 4,444 → 3,966 lines (478 lines extracted into modules)
+  - Public API unchanged — delegation wrappers maintain backward compatibility
 - Migrate trading_bot_service.py to use extracted smart_filter.py module (delegation instead of inline)
 - Further refactor trading_bot_service.py (4,300+ lines → trade_executor, position_manager, learning_loop, stop_manager, risk_calculator modules)
 

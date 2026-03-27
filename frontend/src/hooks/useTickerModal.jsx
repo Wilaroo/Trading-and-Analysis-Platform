@@ -7,6 +7,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import EnhancedTickerModal from '../components/EnhancedTickerModal';
 import api, { safeGet, safePost } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const TickerModalContext = createContext(null);
 
@@ -33,12 +34,19 @@ export const TickerModalProvider = ({ children, onTrade, onAskAI }) => {
     }
   }, []);
   
-  // Refresh bot trades periodically
+  // Subscribe to WS bot trades (replaces 10s polling)
+  const { botTrades: wsBotTrades } = useWsData();
+  
   useEffect(() => {
-    fetchBotTrades();
-    const interval = setInterval(fetchBotTrades, 10000); // Every 10 seconds
-    return () => clearInterval(interval);
+    fetchBotTrades(); // Initial fetch
   }, [fetchBotTrades]);
+  
+  useEffect(() => {
+    if (wsBotTrades && wsBotTrades.length > 0) {
+      const openTrades = wsBotTrades.filter(t => t.status === 'open');
+      if (openTrades.length > 0) setBotTrades(openTrades);
+    }
+  }, [wsBotTrades]);
   
   // Open modal with a ticker
   const openTickerModal = useCallback((symbolOrTicker) => {

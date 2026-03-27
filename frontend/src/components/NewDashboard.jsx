@@ -333,19 +333,17 @@ const WatchingSetupsCard = ({ setups = [] }) => {
 const ScannerAlertsStrip = ({ alerts: propAlerts = [], onViewAll }) => {
   const { openTickerModal } = useTickerModal();
   const [fetchedAlerts, setFetchedAlerts] = useState([]);
-    // Fetch alerts via REST if not provided via WebSocket prop
+  // Use WebSocket scanner alerts — initial REST fetch as fallback
   useEffect(() => {
-    if (propAlerts.length > 0) return; // WebSocket is providing data
+    if (propAlerts.length > 0) return; // WebSocket is providing data via prop
     const fetchAlerts = async () => {
       try {
         const data = await safeGet('/api/live-scanner/alerts');
         if (data?.alerts?.length > 0) setFetchedAlerts(data.alerts);
       } catch (e) { /* silent */ }
     };
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000); // Re-fetch every 30s
-    return () => clearInterval(interval);
-  }, [propAlerts.length, API_URL]);
+    fetchAlerts(); // Initial fetch only, no polling — WS handles updates
+  }, [propAlerts.length]);
   
   const alerts = propAlerts.length > 0 ? propAlerts : fetchedAlerts;
   

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useTrainingMode } from '../contexts';
 import api, { safeGet, safePost } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 // Scenario configurations with icons and colors
 const SCENARIO_CONFIG = {
@@ -157,37 +158,28 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
     setLoading(false);
   };
 
-  // Poll status and alerts when running
-  // Reduce polling frequency during AI training to prevent resource exhaustion
+  // Poll status and alerts when running — now uses WebSocket with initial fetch
   const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  const { simulator: wsSimulator } = useWsData();
+  
+  // Subscribe to WS simulator updates (replaces polling)
+  useEffect(() => {
+    if (!wsSimulator) return;
+    if (wsSimulator.status) {
+      setStatus(wsSimulator.status);
+      if (wsSimulator.status.scenario) setSelectedScenario(wsSimulator.status.scenario);
+      if (wsSimulator.status.alert_interval) setSelectedInterval(wsSimulator.status.alert_interval);
+    }
+    if (wsSimulator.alerts && onAlertsUpdated) {
+      const alerts = wsSimulator.alerts || [];
+      if (alerts.length > 0) onAlertsUpdated(alerts);
+      setLastAlertCount(alerts.length);
+    }
+  }, [wsSimulator, onAlertsUpdated]);
   
   useEffect(() => {
-    fetchStatus();
-    
-    let statusInterval;
-    let alertsInterval;
-    
-    if (status.running) {
-      // Get adjusted intervals - slower during training
-      const statusPollInterval = getPollingInterval(5000, false); // Non-essential
-      const alertsPollInterval = getPollingInterval(3000, false); // Non-essential
-      
-      // Poll status 
-      statusInterval = setInterval(fetchStatus, statusPollInterval);
-      // Poll alerts
-      fetchAlerts(); // Initial fetch
-      alertsInterval = setInterval(fetchAlerts, alertsPollInterval);
-      
-      if (isTrainingActive) {
-        console.log(`[SimulatorControl] Training active - polling slowed to ${statusPollInterval}ms / ${alertsPollInterval}ms`);
-      }
-    }
-    
-    return () => {
-      if (statusInterval) clearInterval(statusInterval);
-      if (alertsInterval) clearInterval(alertsInterval);
-    };
-  }, [status.running, fetchStatus, fetchAlerts, getPollingInterval, isTrainingActive]);
+    fetchStatus(); // Initial fetch only
+  }, [fetchStatus]);
 
   const currentScenario = SCENARIO_CONFIG[status.scenario] || SCENARIO_CONFIG.range_bound;
   const ScenarioIcon = currentScenario.icon;

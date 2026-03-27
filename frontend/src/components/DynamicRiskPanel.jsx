@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { useDataCache } from '../contexts';
 import api, { safeGet, safePost, safeDelete } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 // Risk level colors
 const RISK_COLORS = {
@@ -32,10 +33,10 @@ const RISK_LABELS = {
   maximum: 'Maximum',
 };
 
-// Hook for dynamic risk data
-const useDynamicRisk = (pollInterval = 30000) => {
+// Hook for dynamic risk data — WS-driven with initial fetch fallback
+const useDynamicRisk = () => {
   const { getCached, setCached } = useDataCache();
-  const isFirstMount = useRef(true);
+  const { riskStatus: wsRisk } = useWsData();
   
   const cachedRisk = getCached('dynamicRiskStatus');
   const [status, setStatus] = useState(cachedRisk?.data || null);
@@ -55,20 +56,25 @@ const useDynamicRisk = (pollInterval = 30000) => {
     }
   }, [setCached]);
 
+  // Initial fetch only
   useEffect(() => {
     const cached = getCached('dynamicRiskStatus');
-    if (cached?.data && isFirstMount.current) {
+    if (cached?.data) {
       setStatus(cached.data);
       setLoading(false);
       if (cached.isStale) fetchStatus();
     } else {
       fetchStatus();
     }
-    isFirstMount.current = false;
-    
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval, getCached]);
+  }, [fetchStatus, getCached]);
+
+  // Subscribe to WS updates (replaces polling)
+  useEffect(() => {
+    if (!wsRisk) return;
+    setStatus(prev => ({ ...prev, ...wsRisk, success: true }));
+    setCached('dynamicRiskStatus', wsRisk, 30000);
+    setLoading(false);
+  }, [wsRisk, setCached]);
 
   return { status, loading, refresh: fetchStatus };
 };

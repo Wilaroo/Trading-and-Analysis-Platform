@@ -17,6 +17,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import api from '../utils/api';
+import { useWsData } from './WebSocketDataContext';
 
 const FocusModeContext = createContext(null);
 
@@ -297,33 +298,35 @@ export const FocusModeProvider = ({ children }) => {
     };
   }, [focusMode, modeStartTime, getElapsedTime, modeContext, activeJobId, progress, isChangingMode]);
   
-  // Sync with backend periodically
+  // Subscribe to WS focus mode updates (replaces 5s polling)
+  const wsFocusMode = useWsData()?.focusMode;
+  
+  useEffect(() => {
+    if (!wsFocusMode) return;
+    const backendMode = wsFocusMode.mode;
+    if (backendMode && backendMode !== focusMode) {
+      console.log(`[FocusMode] WS sync: ${focusMode} -> ${backendMode}`);
+      setFocusMode(backendMode);
+      if (wsFocusMode.start_time) setModeStartTime(new Date(wsFocusMode.start_time));
+      if (wsFocusMode.context) setModeContext(wsFocusMode.context);
+      if (wsFocusMode.job_id) setActiveJobId(wsFocusMode.job_id);
+      if (wsFocusMode.progress) setProgress(prev => ({ ...prev, ...wsFocusMode.progress }));
+    }
+  }, [wsFocusMode, focusMode]);
+
+  // Initial sync with backend on mount (delayed to let startup finish)
   useEffect(() => {
     const syncWithBackend = async () => {
       try {
         const response = await api.get('/api/focus-mode');
         if (response.data?.success) {
           const backendMode = response.data.mode;
-          
-          // If backend is in a different mode, sync to it
           if (backendMode && backendMode !== focusMode) {
-            console.log(`[FocusMode] Syncing with backend: ${focusMode} -> ${backendMode}`);
             setFocusMode(backendMode);
-            if (response.data.start_time) {
-              setModeStartTime(new Date(response.data.start_time));
-            }
-            if (response.data.context) {
-              setModeContext(response.data.context);
-            }
-            if (response.data.job_id) {
-              setActiveJobId(response.data.job_id);
-            }
-            if (response.data.progress) {
-              setProgress(prev => ({
-                ...prev,
-                ...response.data.progress
-              }));
-            }
+            if (response.data.start_time) setModeStartTime(new Date(response.data.start_time));
+            if (response.data.context) setModeContext(response.data.context);
+            if (response.data.job_id) setActiveJobId(response.data.job_id);
+            if (response.data.progress) setProgress(prev => ({ ...prev, ...response.data.progress }));
           }
         }
       } catch (e) {
@@ -331,17 +334,9 @@ export const FocusModeProvider = ({ children }) => {
       }
     };
     
-    // Delay initial sync to let startup modal finish first
     const initialDelay = setTimeout(syncWithBackend, 5000);
-    
-    // Sync every 5 seconds — focus mode is now auto-managed by backend
-    // (training/backtest/collection auto-activate, job completion auto-restores)
-    const interval = setInterval(syncWithBackend, 5000);
-    return () => {
-      clearTimeout(initialDelay);
-      clearInterval(interval);
-    };
-  }, [focusMode]);
+    return () => clearTimeout(initialDelay);
+  }, []);
   
   return (
     <FocusModeContext.Provider value={{

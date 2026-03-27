@@ -15,7 +15,7 @@ import { useWsData } from '../contexts/WebSocketDataContext';
 /**
  * Hook for AI Insights data (shadow decisions, predictions, etc.)
  */
-export const useAIInsights = (pollInterval = 60000) => {
+export const useAIInsights = () => {
   const [shadowDecisions, setShadowDecisions] = useState([]);
   const [shadowPerformance, setShadowPerformance] = useState(null);
   const [timeseriesStatus, setTimeseriesStatus] = useState(null);
@@ -33,7 +33,6 @@ export const useAIInsights = (pollInterval = 60000) => {
         safeGet('/api/ai-modules/timeseries/predictions?limit=10')
       ]);
 
-      // Handle rate limiting (safeGet returns null on 429)
       if ([decisionsData, performanceData, timeseriesData, accuracyData, predictionsData].some(d => d === null)) {
         return;
       }
@@ -51,10 +50,8 @@ export const useAIInsights = (pollInterval = 60000) => {
   }, []);
 
   useEffect(() => {
-    fetchInsights();
-    const interval = setInterval(fetchInsights, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchInsights, pollInterval]);
+    fetchInsights(); // Initial fetch only — data changes infrequently
+  }, [fetchInsights]);
 
   return { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh: fetchInsights };
 };
@@ -62,7 +59,7 @@ export const useAIInsights = (pollInterval = 60000) => {
 /**
  * Hook for market session status (pre-market, open, closed, etc.)
  */
-export const useMarketSession = (pollInterval = 30000) => {
+export const useMarketSession = () => {
   const [session, setSession] = useState({ name: 'LOADING', is_open: false });
   const [loading, setLoading] = useState(true);
 
@@ -80,10 +77,8 @@ export const useMarketSession = (pollInterval = 30000) => {
   }, []);
 
   useEffect(() => {
-    fetchSession();
-    const interval = setInterval(fetchSession, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchSession, pollInterval]);
+    fetchSession(); // Initial fetch only — session changes infrequently
+  }, [fetchSession]);
 
   return { session, loading, refresh: fetchSession };
 };
@@ -91,9 +86,9 @@ export const useMarketSession = (pollInterval = 30000) => {
 /**
  * Hook for SentCom status with caching
  */
-export const useSentComStatus = (pollInterval = 60000) => {
+export const useSentComStatus = () => {
   const { getCached, setCached } = useDataCache();
-  const isFirstMount = useRef(true);
+  const { sentcomData: wsSentcom } = useWsData();
   
   const cachedStatus = getCached('sentcomStatus');
   const [status, setStatus] = useState(cachedStatus?.data || null);
@@ -117,20 +112,22 @@ export const useSentComStatus = (pollInterval = 60000) => {
 
   useEffect(() => {
     const cached = getCached('sentcomStatus');
-    if (cached?.data && isFirstMount.current) {
+    if (cached?.data) {
       setStatus(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchStatus();
-      }
+      if (cached.isStale) fetchStatus();
     } else {
       fetchStatus();
     }
-    isFirstMount.current = false;
-    
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval, getCached]);
+  }, [fetchStatus, getCached]);
+
+  // Subscribe to WS SentCom status updates (replaces 60s polling)
+  useEffect(() => {
+    if (!wsSentcom?.status) return;
+    setStatus(wsSentcom.status);
+    setCached('sentcomStatus', wsSentcom.status, 30000);
+    setLoading(false);
+  }, [wsSentcom?.status, setCached]);
 
   return { status, loading, error, refresh: fetchStatus };
 };
@@ -138,9 +135,9 @@ export const useSentComStatus = (pollInterval = 60000) => {
 /**
  * Hook for SentCom stream of consciousness messages
  */
-export const useSentComStream = (pollInterval = 45000) => {
+export const useSentComStream = () => {
   const { getCached, setCached } = useDataCache();
-  const isFirstMount = useRef(true);
+  const { sentcomData: wsSentcom } = useWsData();
   
   const cachedStream = getCached('sentcomStream');
   const [messages, setMessages] = useState(cachedStream?.data || []);
@@ -154,7 +151,6 @@ export const useSentComStream = (pollInterval = 45000) => {
         safeGet('/api/sentcom/chats?limit=20')
       ]);
 
-      // Handle rate limiting
       if (streamData === null || chatData === null) return;
 
       const streamMessages = (streamData.success && streamData.messages) || [];
@@ -190,20 +186,28 @@ export const useSentComStream = (pollInterval = 45000) => {
 
   useEffect(() => {
     const cached = getCached('sentcomStream');
-    if (cached?.data && isFirstMount.current) {
+    if (cached?.data) {
       setMessages(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchStream();
-      }
+      if (cached.isStale) fetchStream();
     } else {
       fetchStream();
     }
-    isFirstMount.current = false;
-    
-    const interval = setInterval(fetchStream, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStream, pollInterval, getCached]);
+  }, [fetchStream, getCached]);
+
+  // Subscribe to WS SentCom stream (replaces 45s polling)
+  useEffect(() => {
+    if (!wsSentcom?.stream || !Array.isArray(wsSentcom.stream)) return;
+    const streamMessages = wsSentcom.stream.map(m => ({ ...m, source: 'stream' }));
+    if (streamMessages.length > 0) {
+      setMessages(prev => {
+        const merged = [...streamMessages, ...prev.filter(p => p.source === 'chat')];
+        const unique = merged.filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i);
+        return unique.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 30);
+      });
+      setLoading(false);
+    }
+  }, [wsSentcom?.stream]);
 
   return { messages, loading, refresh: fetchStream };
 };
@@ -211,9 +215,9 @@ export const useSentComStream = (pollInterval = 45000) => {
 /**
  * Hook for SentCom positions with caching
  */
-export const useSentComPositions = (pollInterval = 30000) => {
+export const useSentComPositions = () => {
   const { getCached, setCached } = useDataCache();
-  const isFirstMount = useRef(true);
+  const { sentcomData: wsSentcom } = useWsData();
   
   const cachedPositions = getCached('sentcomPositions');
   const [positions, setPositions] = useState(cachedPositions?.data || []);
@@ -222,7 +226,7 @@ export const useSentComPositions = (pollInterval = 30000) => {
   const fetchPositions = useCallback(async () => {
     try {
       const data = await safeGet('/api/ib/pushed-data');
-      if (data === null) return; // Rate limited
+      if (data === null) return;
       
       if (data.positions) {
         const positionsArray = Object.values(data.positions);
@@ -238,20 +242,26 @@ export const useSentComPositions = (pollInterval = 30000) => {
 
   useEffect(() => {
     const cached = getCached('sentcomPositions');
-    if (cached?.data && isFirstMount.current) {
+    if (cached?.data) {
       setPositions(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchPositions();
-      }
+      if (cached.isStale) fetchPositions();
     } else {
       fetchPositions();
     }
-    isFirstMount.current = false;
-    
-    const interval = setInterval(fetchPositions, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchPositions, pollInterval, getCached]);
+  }, [fetchPositions, getCached]);
+
+  // Subscribe to WS positions data (replaces 30s polling)
+  useEffect(() => {
+    if (!wsSentcom?.positions) return;
+    const p = wsSentcom.positions;
+    if (p.positions) {
+      const positionsArray = Object.values(p.positions);
+      setPositions(positionsArray);
+      setCached('sentcomPositions', positionsArray, 15000);
+      setLoading(false);
+    }
+  }, [wsSentcom?.positions, setCached]);
 
   return { positions, loading, refresh: fetchPositions };
 };
@@ -259,7 +269,7 @@ export const useSentComPositions = (pollInterval = 30000) => {
 /**
  * Hook for active trading setups
  */
-export const useSentComSetups = (pollInterval = 30000) => {
+export const useSentComSetups = () => {
   const [setups, setSetups] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -279,10 +289,8 @@ export const useSentComSetups = (pollInterval = 30000) => {
   }, []);
 
   useEffect(() => {
-    fetchSetups();
-    const interval = setInterval(fetchSetups, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchSetups, pollInterval]);
+    fetchSetups(); // Initial fetch only — setups change infrequently
+  }, [fetchSetups]);
 
   return { setups, loading, refresh: fetchSetups };
 };
@@ -290,9 +298,10 @@ export const useSentComSetups = (pollInterval = 30000) => {
 /**
  * Hook for market context data
  */
-export const useSentComContext = (pollInterval = 30000) => {
+export const useSentComContext = () => {
   const [context, setContext] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { sentcomData: wsSentcom } = useWsData();
 
   const fetchContext = useCallback(async () => {
     try {
@@ -310,10 +319,15 @@ export const useSentComContext = (pollInterval = 30000) => {
   }, []);
 
   useEffect(() => {
-    fetchContext();
-    const interval = setInterval(fetchContext, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchContext, pollInterval]);
+    fetchContext(); // Initial fetch only
+  }, [fetchContext]);
+
+  // Subscribe to WS market context (replaces 30s polling)
+  useEffect(() => {
+    if (!wsSentcom?.market_context) return;
+    setContext(prev => ({ ...prev, ...wsSentcom.market_context, success: true }));
+    setLoading(false);
+  }, [wsSentcom?.market_context]);
 
   return { context, loading, refresh: fetchContext };
 };
@@ -496,7 +510,7 @@ export const useIBConnectionStatus = (pollInterval = 3000) => {
 /**
  * Hook for AI modules status and control
  */
-export const useAIModules = (pollInterval = 10000) => {
+export const useAIModules = () => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
@@ -547,10 +561,8 @@ export const useAIModules = (pollInterval = 10000) => {
   }, [fetchStatus]);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval]);
+    fetchStatus(); // Initial fetch only — refresh after toggle actions
+  }, [fetchStatus]);
 
   return { status, loading, actionLoading, toggleModule, setGlobalShadowMode, refresh: fetchStatus };
 };

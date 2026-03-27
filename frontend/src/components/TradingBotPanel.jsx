@@ -831,7 +831,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   }, [fetchTrades, fetchStatus]);
   
   // Initial load
-  const { botStatus: wsBotStatus, botTrades: wsBotTrades, scannerAlerts: wsAlerts } = useWsData();
+  const { botStatus: wsBotStatus, botTrades: wsBotTrades, scannerAlerts: wsAlerts, orderQueue: wsOrderQueue } = useWsData();
 
   // Use WebSocket data when available
   useEffect(() => {
@@ -854,6 +854,18 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     if (wsAlerts && wsAlerts.length > 0) setLiveSignals(wsAlerts.slice(0, 8));
   }, [wsAlerts]);
 
+  // Subscribe to WS order queue (replaces 3s polling)
+  useEffect(() => {
+    if (!wsOrderQueue) return;
+    setOrderQueue({
+      pending: wsOrderQueue.pending_count || wsOrderQueue.pending?.length || 0,
+      executing: wsOrderQueue.executing_count || wsOrderQueue.active?.length || 0,
+      completed: wsOrderQueue.completed_count || wsOrderQueue.completed?.length || 0,
+      pusher_active: wsOrderQueue.pusher_active || false,
+      last_poll: wsOrderQueue.last_poll
+    });
+  }, [wsOrderQueue]);
+
   useEffect(() => {
     fetchStatus();
     fetchTrades();
@@ -872,12 +884,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     };
     fetchSignals();
     
-    // Poll order queue frequently (needs near-real-time for confirmations)
-    const orderQueueInterval = setInterval(fetchOrderQueue, 3000);
-    
-    return () => {
-      clearInterval(orderQueueInterval);
-    };
+    // No more order queue polling — WebSocket handles it
   }, [fetchStatus, fetchTrades, fetchOrderQueue]);
   
   const isRunning = status?.running;
