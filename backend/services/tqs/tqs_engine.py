@@ -294,7 +294,11 @@ class TQSEngine:
         time_of_day: Optional[str] = None,
         # Execution context
         planned_position_size: int = 100,
-        account_value: float = 100000.0
+        account_value: float = 100000.0,
+        # AI model signals (from Confidence Gate pipeline)
+        ai_model_direction: Optional[str] = None,
+        ai_model_confidence: Optional[float] = None,
+        ai_model_agrees: Optional[bool] = None,
     ) -> TQSResult:
         """
         Calculate complete Trade Quality Score for a trade idea.
@@ -364,7 +368,10 @@ class TQSEngine:
                 direction=direction,
                 setup_type=setup_type,
                 market_regime=market_regime,
-                time_of_day=time_of_day
+                time_of_day=time_of_day,
+                ai_model_direction=ai_model_direction,
+                ai_model_confidence=ai_model_confidence,
+                ai_model_agrees=ai_model_agrees,
             )
             result.pillar_grades["context"] = result.context_score.grade
             

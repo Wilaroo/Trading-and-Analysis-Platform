@@ -122,16 +122,21 @@ class ContextQualityService:
         sector: Optional[str] = None,
         sector_rank: Optional[int] = None,
         is_sector_leader: Optional[bool] = None,
-        time_of_day: Optional[str] = None
+        time_of_day: Optional[str] = None,
+        # AI model signals (from Confidence Gate pipeline)
+        ai_model_direction: Optional[str] = None,  # "up", "down", "flat"
+        ai_model_confidence: Optional[float] = None,  # 0.0-1.0
+        ai_model_agrees: Optional[bool] = None,  # Does AI agree with trade direction?
     ) -> ContextQualityScore:
         """
         Calculate context quality score (0-100).
         
         Components:
-        - Market regime fit (30%): Setup matches market conditions
-        - Time of day (25%): Optimal trading window
+        - Market regime fit (25%): Setup matches market conditions
+        - Time of day (20%): Optimal trading window
         - Sector context (20%): Sector strength alignment
         - VIX regime (15%): Volatility environment
+        - AI model alignment (10%): ML models agree with direction
         - Day of week (10%): Historical patterns
         """
         result = ContextQualityScore()
@@ -336,13 +341,34 @@ class ContextQualityService:
             result.factors.append("Wednesday - historically best trading day (+)")
         elif result.day_of_week == 4:
             result.factors.append("Friday - EOW effects may impact")
+        
+        # 6. AI Model Alignment Score (10% weight)
+        # Does the ML model agree with the proposed trade direction?
+        ai_score = 50  # Neutral default (no model data)
+        if ai_model_agrees is not None and ai_model_confidence is not None:
+            if ai_model_agrees and ai_model_confidence >= 0.6:
+                ai_score = 90
+                result.factors.append(f"AI model CONFIRMS {direction} ({ai_model_confidence:.0%} conf) (++)")
+            elif ai_model_agrees:
+                ai_score = 70
+                result.factors.append(f"AI model leans {direction} ({ai_model_confidence:.0%} conf) (+)")
+            elif ai_model_direction == "flat":
+                ai_score = 45
+                result.factors.append(f"AI model sees no edge (flat) (-)")
+            elif not ai_model_agrees and ai_model_confidence >= 0.6:
+                ai_score = 20
+                result.factors.append(f"AI model DISAGREES — predicts {ai_model_direction} ({ai_model_confidence:.0%} conf) (--)")
+            else:
+                ai_score = 35
+                result.factors.append(f"AI model weakly disagrees (-)")
             
-        # Calculate weighted total
+        # Calculate weighted total (updated weights to include AI alignment)
         result.score = (
-            result.regime_score * 0.30 +
-            result.time_score * 0.25 +
+            result.regime_score * 0.25 +
+            result.time_score * 0.20 +
             result.sector_score * 0.20 +
             result.vix_score * 0.15 +
+            ai_score * 0.10 +
             result.day_score * 0.10
         )
         
