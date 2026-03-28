@@ -1596,6 +1596,11 @@ class IBDataPusher:
         _rate_window = []  # list of (timestamp, count) tuples
         _RATE_WINDOW_SECS = 300  # 5-minute rolling window
         
+        # ETA smoothing (prevents wild swings)
+        _smoothed_eta_hours = None  # exponential moving average of ETA
+        _ETA_ALPHA = 0.3           # smoothing factor: 0.3 = 30% new, 70% previous
+        _last_known_remaining = None  # last successful remaining count (avoid fallback guessing)
+        
         # Adaptive rate limiting
         base_batch_delay = 3  # seconds between batches (was 10→6→3, 0 pacing violations)
         current_batch_delay = base_batch_delay
@@ -1672,10 +1677,24 @@ class IBDataPusher:
                         cutoff = current_time - _RATE_WINDOW_SECS
                         _rate_window[:] = [(t, c) for t, c in _rate_window if t >= cutoff]
                         window_total = sum(c for _, c in _rate_window)
-                        window_span = current_time - _rate_window[0][0] if _rate_window else 0
                         
-                        if window_span > 30:  # Need at least 30s of data for meaningful rate
-                            rolling_rate = window_total / (window_span / 3600)
+                        # FIX: Calculate "active span" — exclude gaps > 60s (timeout/retry periods)
+                        # This prevents dead time from dragging down the rate
+                        if len(_rate_window) >= 2:
+                            active_span = 0
+                            for i in range(1, len(_rate_window)):
+                                gap = _rate_window[i][0] - _rate_window[i-1][0]
+                                active_span += min(gap, 60)  # Cap any single gap at 60s
+                            # Add time since last entry (capped)
+                            time_since_last = current_time - _rate_window[-1][0]
+                            active_span += min(time_since_last, 60)
+                        elif len(_rate_window) == 1:
+                            active_span = min(current_time - _rate_window[0][0], 60)
+                        else:
+                            active_span = 0
+                        
+                        if active_span > 30:  # Need at least 30s of active data
+                            rolling_rate = window_total / (active_span / 3600)
                         elif elapsed > 0:
                             # Fallback to lifetime avg if window too small
                             rolling_rate = requests_completed / (elapsed / 3600)
@@ -1694,10 +1713,26 @@ class IBDataPusher:
                                         bs = bs_info.get("bar_size", "")
                                         if my_bar_sizes is None or bs in my_bar_sizes:
                                             remaining += bs_info.get("pending", 0)
+                                    _last_known_remaining = remaining  # Cache successful count
+                                elif _last_known_remaining is not None:
+                                    # FIX: Use last known remaining instead of wild 80K guess
+                                    remaining = max(0, _last_known_remaining - batch_completed)
                                 else:
-                                    remaining = max(0, 80000 - requests_completed)  # fallback
+                                    remaining = max(0, 80000 - requests_completed)  # true first-time fallback
                                 
-                                eta_hours = remaining / rolling_rate
+                                raw_eta_hours = remaining / rolling_rate
+                                
+                                # FIX: Smooth the ETA with exponential moving average
+                                # Prevents a single bad window from causing 36hrs → 9.9 days swings
+                                if _smoothed_eta_hours is None:
+                                    _smoothed_eta_hours = raw_eta_hours
+                                else:
+                                    _smoothed_eta_hours = (
+                                        _ETA_ALPHA * raw_eta_hours + 
+                                        (1 - _ETA_ALPHA) * _smoothed_eta_hours
+                                    )
+                                
+                                eta_hours = _smoothed_eta_hours
                                 if eta_hours < 1:
                                     eta_str = f"{eta_hours * 60:.0f} min"
                                 elif eta_hours < 48:
@@ -1717,7 +1752,7 @@ class IBDataPusher:
                         logger.info(f"  Failed: {requests_failed}")
                         logger.info(f"  Dead symbols skipped: {len(self._dead_symbols)}")
                         logger.info(f"  Pacing violations: {pacing_violations}")
-                        logger.info(f"  Rate: {rolling_rate:.0f} requests/hour (5-min rolling)")
+                        logger.info(f"  Rate: {rolling_rate:.0f} requests/hour (5-min active)")
                         logger.info(f"  ETA remaining: {eta_str}")
                         logger.info(f"  Current batch delay: {current_batch_delay:.1f}s")
                         logger.info(f"  Running: {elapsed/60:.1f} minutes")
