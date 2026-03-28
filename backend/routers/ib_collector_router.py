@@ -1522,6 +1522,27 @@ async def clear_pending_queue():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@router.post("/queue/deduplicate")
+async def deduplicate_queue():
+    """
+    Find and remove duplicate pending requests from the collection queue.
+    
+    Duplicates = same (symbol, bar_size, end_date) with status "pending".
+    Keeps the oldest request per group, removes newer duplicates.
+    Safe to run at any time — does not affect claimed or completed requests.
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        result = queue_service.deduplicate_queue()
+        return result
+    except Exception as e:
+        logger.error(f"Error deduplicating queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/history")
 async def get_job_history(limit: int = 10):
     """Get history of collection jobs."""

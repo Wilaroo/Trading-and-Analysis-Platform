@@ -34,6 +34,11 @@ class HistoricalDataQueueService:
             self.collection.create_index("status")
             self.collection.create_index("created_at")
             self.collection.create_index([("status", 1), ("created_at", 1)])
+            # Compound index for dedup queries: (symbol, bar_size, end_date, status)
+            self.collection.create_index(
+                [("symbol", 1), ("bar_size", 1), ("end_date", 1), ("status", 1)],
+                name="dedup_idx"
+            )
         except Exception as e:
             logger.warning(f"Error creating indexes: {e}")
     
@@ -298,6 +303,93 @@ class HistoricalDataQueueService:
                 "cleared": 0
             }
     
+    def deduplicate_queue(self) -> Dict:
+        """
+        Find and remove duplicate pending requests.
+        
+        Duplicates = same (symbol, bar_size, end_date) with status "pending".
+        Keeps the OLDEST request (first queued), removes newer duplicates.
+        
+        Returns:
+            Dict with dedup stats
+        """
+        try:
+            # Find groups of pending requests with the same (symbol, bar_size, end_date)
+            # that have more than 1 entry
+            pipeline = [
+                {"$match": {"status": "pending"}},
+                {"$group": {
+                    "_id": {
+                        "symbol": "$symbol",
+                        "bar_size": "$bar_size",
+                        "end_date": {"$ifNull": ["$end_date", ""]},
+                    },
+                    "count": {"$sum": 1},
+                    "request_ids": {"$push": "$request_id"},
+                    "oldest_created": {"$min": "$created_at"},
+                }},
+                {"$match": {"count": {"$gt": 1}}},
+            ]
+            
+            duplicate_groups = list(self.collection.aggregate(pipeline, allowDiskUse=True))
+            
+            if not duplicate_groups:
+                return {
+                    "success": True,
+                    "duplicates_found": 0,
+                    "duplicates_removed": 0,
+                    "message": "No duplicates found"
+                }
+            
+            # For each group, keep the oldest, delete the rest
+            ids_to_delete = []
+            for group in duplicate_groups:
+                request_ids = group["request_ids"]
+                oldest = group["oldest_created"]
+                
+                # Find the one to keep (oldest created_at)
+                keeper = self.collection.find_one(
+                    {
+                        "request_id": {"$in": request_ids},
+                        "created_at": oldest,
+                    },
+                    {"request_id": 1}
+                )
+                keeper_id = keeper["request_id"] if keeper else request_ids[0]
+                
+                # Mark the rest for deletion
+                for rid in request_ids:
+                    if rid != keeper_id:
+                        ids_to_delete.append(rid)
+            
+            # Batch delete duplicates
+            removed = 0
+            if ids_to_delete:
+                result = self.collection.delete_many({
+                    "request_id": {"$in": ids_to_delete}
+                })
+                removed = result.deleted_count
+            
+            logger.info(
+                f"Dedup: found {len(duplicate_groups)} duplicate groups, "
+                f"removed {removed} duplicate requests"
+            )
+            
+            return {
+                "success": True,
+                "duplicates_found": len(duplicate_groups),
+                "duplicates_removed": removed,
+                "message": f"Removed {removed} duplicate pending requests"
+            }
+        except Exception as e:
+            logger.error(f"Error deduplicating queue: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "duplicates_found": 0,
+                "duplicates_removed": 0,
+            }
+    
     # =========================================================================
     # ASYNC BATCH COLLECTION METHODS
     # =========================================================================
@@ -306,6 +398,7 @@ class HistoricalDataQueueService:
                               bar_size: str = "1 day", job_id: str = None) -> Dict:
         """
         Create requests for multiple symbols in batch (fast, no blocking).
+        Skips symbols that already have a pending/claimed request for this bar_size.
         
         Args:
             symbols: List of symbols to fetch
@@ -317,18 +410,36 @@ class HistoricalDataQueueService:
             Dict with batch stats
         """
         if not symbols:
-            return {"created": 0, "request_ids": []}
+            return {"created": 0, "skipped": 0, "request_ids": []}
+        
+        # Pre-fetch existing pending/claimed symbols for this bar_size to dedup
+        existing = set()
+        try:
+            cursor = self.collection.find(
+                {"bar_size": bar_size, "status": {"$in": ["pending", "claimed"]}},
+                {"symbol": 1, "_id": 0}
+            )
+            existing = {doc["symbol"] for doc in cursor}
+        except Exception:
+            pass  # If lookup fails, proceed without dedup (safe fallback)
         
         request_ids = []
         requests_to_insert = []
+        skipped = 0
         
         for symbol in symbols:
+            sym = symbol.upper()
+            if sym in existing:
+                skipped += 1
+                continue
+                
             request_id = f"hist_{uuid.uuid4().hex[:12]}"
             request_ids.append(request_id)
+            existing.add(sym)  # Prevent intra-batch duplicates
             
             requests_to_insert.append({
                 "request_id": request_id,
-                "symbol": symbol.upper(),
+                "symbol": sym,
                 "duration": duration,
                 "bar_size": bar_size,
                 "job_id": job_id,  # Group by job for tracking
@@ -343,10 +454,11 @@ class HistoricalDataQueueService:
         # Batch insert for efficiency
         if requests_to_insert:
             self.collection.insert_many(requests_to_insert)
-            logger.info(f"Created {len(requests_to_insert)} batch requests for job {job_id}")
+            logger.info(f"Created {len(requests_to_insert)} batch requests for job {job_id} (skipped {skipped} existing)")
         
         return {
             "created": len(request_ids),
+            "skipped": skipped,
             "request_ids": request_ids,
             "job_id": job_id
         }

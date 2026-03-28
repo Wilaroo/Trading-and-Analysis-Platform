@@ -1477,7 +1477,7 @@ class IBHistoricalCollector:
         if use_max_lookback:
             logger.info(f"Chaining stats: {chain_stats}")
         
-        # Queue all requests
+        # Queue all requests (create_request has built-in dedup via skip_if_pending)
         from services.historical_data_queue_service import get_historical_data_queue_service
         queue_service = get_historical_data_queue_service()
         total_queued = 0
@@ -1490,6 +1490,14 @@ class IBHistoricalCollector:
                 end_date=end_date,
             )
             total_queued += 1
+        
+        # Auto-dedup: clean up any duplicates that slipped through
+        # (e.g., from chained requests with slightly different end_dates)
+        dedup_result = queue_service.deduplicate_queue()
+        dedup_removed = dedup_result.get("duplicates_removed", 0)
+        if dedup_removed > 0:
+            logger.info(f"Auto-dedup removed {dedup_removed} duplicate queue entries")
+            total_queued -= dedup_removed
         
         logger.info(f"Queued {total_queued} requests across {len(symbols_with_adv)} symbols")
         
