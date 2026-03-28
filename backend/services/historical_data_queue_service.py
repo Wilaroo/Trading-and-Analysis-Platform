@@ -107,12 +107,9 @@ class HistoricalDataQueueService:
         """
         Get pending requests for the IB Data Pusher to fulfill.
         
-        IMPORTANT: Returns ALL pending timeframes for a SINGLE symbol first,
-        then moves to the next symbol. This ensures complete per-stock coverage
-        even if collection is interrupted.
-        
-        Strategy: Pick the symbol with the most pending requests, return all its
-        pending timeframes (up to limit).
+        Strategy: Complete all pending timeframes for one symbol first,
+        then fill remaining batch slots with the next symbol(s).
+        This ensures per-stock coverage while maximizing batch utilization.
         
         Args:
             limit: Max requests to return
@@ -127,35 +124,6 @@ class HistoricalDataQueueService:
         if bar_sizes:
             match_filter["bar_size"] = {"$in": bar_sizes}
         
-        # First, find a symbol that has pending requests
-        pipeline = [
-            {"$match": match_filter},
-            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-        ]
-        
-        # If symbol partitioning, get multiple candidates and filter by hash
-        if symbol_partition:
-            part_idx, part_total = symbol_partition
-            pipeline.append({"$limit": 50})  # Get top 50 candidates
-            result = list(self.collection.aggregate(pipeline))
-            # Filter to symbols that hash to this partition
-            result = [r for r in result if hash(r["_id"]) % part_total == part_idx]
-            if not result:
-                return []
-            target_symbol = result[0]["_id"]
-        else:
-            pipeline.append({"$limit": 1})
-            result = list(self.collection.aggregate(pipeline))
-            if not result:
-                return []
-            target_symbol = result[0]["_id"]
-        
-        # Get all pending requests for this symbol (ordered by timeframe priority)
-        find_filter = {"status": "pending", "symbol": target_symbol}
-        if bar_sizes:
-            find_filter["bar_size"] = {"$in": bar_sizes}
-        
         # Priority: 1 day first (most useful), then 1 hour, 5 mins, etc.
         timeframe_priority = {
             "1 day": 0,
@@ -167,17 +135,50 @@ class HistoricalDataQueueService:
             "1 min": 6
         }
         
-        cursor = self.collection.find(
-            find_filter,
-            {"_id": 0}
-        ).limit(limit)
+        # Find symbols with pending requests, ordered by most pending first
+        pipeline = [
+            {"$match": match_filter},
+            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ]
         
-        requests = list(cursor)
+        # If symbol partitioning, get candidates and filter by hash
+        if symbol_partition:
+            part_idx, part_total = symbol_partition
+            pipeline.append({"$limit": 50})
+            candidates = list(self.collection.aggregate(pipeline))
+            candidates = [r for r in candidates if hash(r["_id"]) % part_total == part_idx]
+        else:
+            # Get enough candidates to fill the batch
+            pipeline.append({"$limit": 10})
+            candidates = list(self.collection.aggregate(pipeline))
         
-        # Sort by timeframe priority
-        requests.sort(key=lambda x: timeframe_priority.get(x.get("bar_size", ""), 99))
+        if not candidates:
+            return []
         
-        return requests
+        # Fill batch from multiple symbols until we hit the limit
+        all_requests = []
+        for candidate in candidates:
+            if len(all_requests) >= limit:
+                break
+            
+            remaining_slots = limit - len(all_requests)
+            target_symbol = candidate["_id"]
+            
+            find_filter = {"status": "pending", "symbol": target_symbol}
+            if bar_sizes:
+                find_filter["bar_size"] = {"$in": bar_sizes}
+            
+            cursor = self.collection.find(
+                find_filter,
+                {"_id": 0}
+            ).limit(remaining_slots)
+            
+            symbol_requests = list(cursor)
+            symbol_requests.sort(key=lambda x: timeframe_priority.get(x.get("bar_size", ""), 99))
+            all_requests.extend(symbol_requests)
+        
+        return all_requests
     
     def claim_request(self, request_id: str) -> bool:
         """
