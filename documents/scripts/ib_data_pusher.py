@@ -1961,7 +1961,7 @@ class IBDataPusher:
         if symbol in self._dead_symbols:
             # Claim + report skip in one shot (no IB call needed)
             try:
-                self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=10)
+                self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=30)
             except:
                 pass
             self._report_historical_data_result(
@@ -1977,7 +1977,7 @@ class IBDataPusher:
         
         try:
             # Claim the request
-            claim_result = self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=15)
+            claim_result = self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=30)
             
             if not claim_result:
                 return False  # Already claimed
@@ -2319,7 +2319,7 @@ class IBDataPusher:
         
         try:
             # Claim the request first (prevents duplicate fetching)
-            claim_result = self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=15)
+            claim_result = self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=30)
             
             if not claim_result:
                 # Already claimed by another worker - not a failure, just skip
