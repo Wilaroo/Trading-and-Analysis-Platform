@@ -1174,18 +1174,22 @@ async def get_queue_progress(job_id: Optional[str] = None):
         }
 
 
+# Cache for queue-progress-detailed (avoids 3+ collectors each triggering heavy aggregation)
+_queue_progress_cache = {"data": None, "expires": 0}
+
 @router.get("/queue-progress-detailed")
 async def get_queue_progress_detailed():
     """
     Get detailed queue progress broken down by bar_size.
-    
-    Returns progress for each type of data being collected (1 min, 5 mins, 1 day, etc.)
-    so you can see exactly what's happening with each collection type.
-    
-    Response includes:
-    - **by_bar_size**: List of progress for each bar_size
-    - **active_collections**: Only bar_sizes with pending/in-progress work
+    Cached for 30 seconds to avoid 3+ collectors hammering Atlas with aggregations.
     """
+    import time as _time
+    global _queue_progress_cache
+    
+    now = _time.time()
+    if _queue_progress_cache["data"] and now < _queue_progress_cache["expires"]:
+        return _queue_progress_cache["data"]
+    
     try:
         from services.historical_data_queue_service import get_historical_data_queue_service
         queue_service = get_historical_data_queue_service()
@@ -1193,11 +1197,16 @@ async def get_queue_progress_detailed():
         detailed = queue_service.get_queue_stats_by_bar_size()
         overall = queue_service.get_overall_queue_stats()
         
-        return {
+        result = {
             "success": True,
             "overall": overall,
             **detailed
         }
+        
+        # Cache for 30 seconds
+        _queue_progress_cache = {"data": result, "expires": now + 30}
+        
+        return result
     except Exception as e:
         logger.error(f"Error getting detailed queue progress: {e}")
         return {

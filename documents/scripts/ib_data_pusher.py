@@ -1590,7 +1590,7 @@ class IBDataPusher:
         requests_failed = 0
         pacing_violations = 0
         last_status_update = 0
-        status_update_interval = 30  # Show status every 30 seconds
+        status_update_interval = 60  # Show status every 60s (was 30 — reduces Atlas load with 3+ collectors)
         
         # Rolling rate tracker (5-minute window)
         _rate_window = []  # list of (timestamp, count) tuples
@@ -1602,7 +1602,7 @@ class IBDataPusher:
         _last_known_remaining = None  # last successful remaining count (avoid fallback guessing)
         
         # Adaptive rate limiting
-        base_batch_delay = 3  # seconds between batches (was 10→6→3, 0 pacing violations)
+        base_batch_delay = 1.5  # seconds between batches (was 3.0 — 0 pacing violations = safe to go faster)
         current_batch_delay = base_batch_delay
         
         logger.info("")
@@ -1612,7 +1612,7 @@ class IBDataPusher:
         logger.info("  Live trading: PAUSED")
         logger.info("  Order execution: DISABLED")
         logger.info("  Target rate: ~2500 requests/hour")
-        logger.info("  Strategy: 6-request bursts with adaptive pacing")
+        logger.info("  Strategy: 6-request bursts with aggressive pacing (1.5s delay)")
         logger.info("=" * 60)
         logger.info("")
         
@@ -1704,7 +1704,7 @@ class IBDataPusher:
                         # ETA calculation — fetch actual pending count for THIS instance's bar_sizes
                         if rolling_rate > 0:
                             try:
-                                progress = self.api.get_safe("/api/ib-collector/queue-progress-detailed", timeout=10)
+                                progress = self.api.get_safe("/api/ib-collector/queue-progress-detailed", timeout=30)
                                 if progress and progress.get("by_bar_size"):
                                     # Sum pending only for bar_sizes this instance handles
                                     my_bar_sizes = set(self._collection_bar_sizes) if self._collection_bar_sizes else None
@@ -1847,7 +1847,7 @@ class IBDataPusher:
                 idx, total = self._collection_partition
                 pending_url += f"&partition={idx}&partition_total={total}"
             
-            result = self.api.get_safe(pending_url, timeout=20)
+            result = self.api.get_safe(pending_url, timeout=30)
             
             if not result:
                 return None
