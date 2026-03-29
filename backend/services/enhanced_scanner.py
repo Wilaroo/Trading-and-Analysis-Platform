@@ -1664,6 +1664,17 @@ class EnhancedBackgroundScanner:
         
         while self._running:
             try:
+                # Check if collection mode is active — pause scanning to free backend resources
+                try:
+                    from routers.ib import _collection_mode_status
+                    if _collection_mode_status.get("active", False):
+                        if self._scan_count % 60 == 0:
+                            logger.info("📦 Enhanced scanner paused — collection mode active")
+                        await asyncio.sleep(60)
+                        continue
+                except ImportError:
+                    pass
+                
                 now = datetime.now(timezone.utc)
                 if self._last_scan_time:
                     elapsed = (now - self._last_scan_time).total_seconds()
