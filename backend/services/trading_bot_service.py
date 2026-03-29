@@ -1195,14 +1195,14 @@ class TradingBotService:
             try:
                 # Check if collection mode is active — suppress scanning to free backend resources
                 try:
-                    from routers.ib import _collection_mode_status
-                    if _collection_mode_status.get("active", False):
+                    from services.collection_mode import is_active as _collection_active
+                    if _collection_active():
                         if scan_count % 120 == 0:  # Log every ~60 min
                             print("📦 [TradingBot] Collection mode active — scanning paused to free resources")
                         await asyncio.sleep(self._scan_interval)
                         scan_count += 1
                         continue
-                except ImportError:
+                except Exception:
                     pass
                 
                 # Update account value from IB if connected

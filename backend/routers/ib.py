@@ -5236,7 +5236,10 @@ async def start_collection_mode(data: dict):
         "elapsed_minutes": 0,
         "last_update": datetime.now(timezone.utc).isoformat()
     }
-    logger.info("Collection mode STARTED")
+    # Activate shared collection mode flag (checked by scanners)
+    from services.collection_mode import activate
+    activate()
+    logger.info("Collection mode STARTED — scanner and bot paused")
     return {"success": True, "message": "Collection mode started"}
 
 
@@ -5267,7 +5270,10 @@ async def stop_collection_mode(data: dict):
         "stopped_at": data.get("stopped_at"),
         "last_update": datetime.now(timezone.utc).isoformat()
     })
-    logger.info(f"Collection mode STOPPED - Completed: {data.get('completed')}, Failed: {data.get('failed')}")
+    # Deactivate shared collection mode flag (resumes scanners)
+    from services.collection_mode import deactivate
+    deactivate()
+    logger.info(f"Collection mode STOPPED — scanner and bot resumed. Completed: {data.get('completed')}, Failed: {data.get('failed')}")
     return {"success": True, "message": "Collection mode stopped"}
 
 
