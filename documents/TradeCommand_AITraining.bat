@@ -333,15 +333,15 @@ timeout /t 1 /nobreak >nul
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     :: Collector 1: Daily + Weekly (fastest to complete, ~12K requests)
-    start "COLLECTOR-1 Daily" cmd /k "%SCRIPTS_DIR%\run_collector1.bat"
+    start "COLLECTOR-1 15min" cmd /k "%SCRIPTS_DIR%\run_collector1.bat"
     echo        Collector 1 started: Daily/Weekly (client ID: 16)
 
     :: Collector 2: Hourly + 30min + 15min (~46K requests)
-    start "COLLECTOR-2 Hourly" cmd /k "%SCRIPTS_DIR%\run_collector2.bat"
+    start "COLLECTOR-2 5min+30min" cmd /k "%SCRIPTS_DIR%\run_collector2.bat"
     echo        Collector 2 started: Hourly/Mins (client ID: 17)
 
     :: Collector 3: 5-min only (~21K requests, heaviest per-request)
-    start "COLLECTOR-3 5min" cmd /k "%SCRIPTS_DIR%\run_collector3.bat"
+    start "COLLECTOR-3 Hourly+Daily" cmd /k "%SCRIPTS_DIR%\run_collector3.bat"
     echo        Collector 3 started: 5-Min (client ID: 18)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
@@ -375,9 +375,9 @@ echo    +-------------------------------------------------+
 echo    ^|  GREEN       [BACKEND]      API Server (8001)   ^|
 echo    ^|  CYAN        [FRONTEND]     React UI (3000)     ^|
 echo    ^|  YELLOW      [IB PUSHER]    Market Data Feed    ^|
-echo    ^|  DARK YELLOW [COLLECTOR-1]  Daily/Weekly        ^|
-echo    ^|  LIGHT RED   [COLLECTOR-2]  Hourly/15m/30m      ^|
-echo    ^|  AQUA        [COLLECTOR-3]  5-Minute Data       ^|
+echo    ^|  DARK YELLOW [COLLECTOR-1]  15-Min Data          ^|
+echo    ^|  LIGHT RED   [COLLECTOR-2]  5-Min + 30-Min Data  ^|
+echo    ^|  AQUA        [COLLECTOR-3]  Hourly+Daily+Rem     ^|
 echo    ^|  PURPLE      [WORKER]       Background Jobs     ^|
 echo    ^|  GRAY        [OLLAMA]       AI Model Server     ^|
 echo    +-------------------------------------------------+
