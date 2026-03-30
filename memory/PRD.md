@@ -671,10 +671,12 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 ### P1
 - Twitter/X Social Stream Widget for Command Center
 - Auto-Optimize AI Settings (confidence threshold sweeping)
+- Chat integration with snapshot annotations (click annotation → ask AI for reasoning)
 
 ### P2 (Future)
 - Confidence Gate Tuner UI (after 50-100 live trades accumulated)
 - Smart Templates based on historical AI performance
+- Trade Review AI Annotation (what AI would have done differently)
 - Post-Development Local DB Migration to NVMe
 
 ### Phase 4: AI-Enhanced Performance Dashboard (**DONE** — Mar 30, 2026)
@@ -688,6 +690,33 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Removed `JobManager` widget from AICoachTab's right sidebar (both new + classic layouts)
 - Background job info remains accessible in NIA tab via DataCollectionPanel
 - Frees up Command Center real estate for trading-relevant widgets
+
+### Trade Chart Snapshots with AI Annotations (Mar 30, 2026)
+- **Backend Service**: `services/trade_snapshot_service.py` — Auto-generates annotated candlestick charts
+  - Renders OHLCV charts via `mplfinance` with entry/exit markers, stop lines, target levels
+  - AI annotations: confidence gate decisions, market regime, smart filter, TQS, technicals
+  - Scale-out and stop adjustment markers
+  - Fallback line chart when historical bars unavailable
+  - Charts stored as base64 PNG (~50KB each) in `trade_snapshots` MongoDB collection
+- **API Router**: `routers/trade_snapshots.py` (sync endpoints to avoid event loop blocking)
+  - `GET /api/trades/snapshots` — List all snapshots (metadata only)
+  - `GET /api/trades/snapshots/{trade_id}?source=bot` — Get snapshot with chart image
+  - `GET /api/trades/snapshots/{trade_id}/image` — Raw PNG response
+  - `POST /api/trades/snapshots/{trade_id}/generate` — Generate/regenerate snapshot
+  - `POST /api/trades/snapshots/batch?limit=50` — Batch generate for closed trades
+- **Auto-Trigger Hooks**: Snapshot auto-generates on trade close
+  - Bot trades: `position_manager.py` → `close_trade()` method
+  - Manual trades: `trade_journal.py` → `close_trade()` method
+- **Frontend**: `TradeSnapshotViewer` component in `TradeJournalPage.js`
+  - Camera icon on closed trade rows to toggle snapshot view
+  - Base64 chart image display with metadata overlay
+  - AI Decision Timeline with expandable annotation cards (entry, exit, scale_out, stop_adjust, gate_decision)
+  - Generate/Regenerate buttons
+- **Testing**: 12/12 pytest tests pass, code review passed (iteration_121.json)
+- **Status**: 15 snapshots generated in MongoDB
+
+### P0 (Next)
+- Chat integration with annotations: Click annotation → ask AI for detailed explanation
 
 
 ### Known Issues
