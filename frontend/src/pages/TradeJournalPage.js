@@ -50,10 +50,11 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [activeAnnotation, setActiveAnnotation] = useState(null);
-  const [aiExplanation, setAiExplanation] = useState({});  // { [index]: { text, loading, error } }
-  const [chatThread, setChatThread] = useState([]);  // inline chat messages
+  const [aiExplanation, setAiExplanation] = useState({});
+  const [chatThread, setChatThread] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [hindsight, setHindsight] = useState({ data: null, narrative: '', loading: false, error: null });
   const chatInputRef = useRef(null);
 
   const fetchSnapshot = useCallback(async () => {
@@ -138,6 +139,25 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
       setChatThread(prev => [...prev, { role: 'assistant', text: 'Unable to reach AI. Try again later.' }]);
     } finally {
       setChatLoading(false);
+    }
+  };
+
+  const fetchHindsight = async () => {
+    setHindsight({ data: null, narrative: '', loading: true, error: null });
+    try {
+      const res = await api.post(`/api/trades/snapshots/${tradeId}/hindsight?source=${source}`);
+      if (res.data?.success) {
+        setHindsight({
+          data: res.data.hindsight.data,
+          narrative: res.data.hindsight.narrative,
+          loading: false,
+          error: null
+        });
+      } else {
+        setHindsight({ data: null, narrative: '', loading: false, error: 'Analysis unavailable' });
+      }
+    } catch (err) {
+      setHindsight({ data: null, narrative: '', loading: false, error: 'Failed to generate analysis' });
     }
   };
 
@@ -409,6 +429,124 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
           </div>
         </div>
       )}
+
+      {/* What I'd Do Differently — Hindsight Analysis */}
+      <div className="space-y-2" data-testid={`hindsight-section-${tradeId}`}>
+        {!hindsight.data && !hindsight.loading && (
+          <button
+            onClick={fetchHindsight}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs font-medium hover:bg-amber-500/10 transition-all"
+            data-testid={`hindsight-btn-${tradeId}`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            What I'd Do Differently
+          </button>
+        )}
+
+        {hindsight.loading && (
+          <div className="flex items-center gap-2 py-3 px-4 rounded-lg bg-amber-500/5 border border-amber-500/20 text-amber-400 text-xs">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            Analyzing trade against current model knowledge...
+          </div>
+        )}
+
+        {hindsight.data && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-lg border border-amber-500/20 bg-amber-500/5 overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/10 bg-amber-500/10">
+              <Activity className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-xs font-bold text-amber-400">Hindsight Analysis</span>
+              <span className="text-[10px] text-amber-500/60 ml-auto">vs current model</span>
+            </div>
+
+            <div className="p-3 space-y-3">
+              {/* Data cards */}
+              <div className="grid grid-cols-3 gap-2">
+                {/* Similar trades stat */}
+                <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
+                  <div className="text-[10px] text-zinc-500">Similar Trades</div>
+                  <div className="text-sm font-bold text-white">{hindsight.data.similar_trades?.count || 0}</div>
+                  <div className={`text-[10px] font-medium ${
+                    (hindsight.data.similar_trades?.win_rate || 0) >= 55 ? 'text-emerald-400' : 
+                    (hindsight.data.similar_trades?.win_rate || 0) >= 45 ? 'text-amber-400' : 'text-red-400'
+                  }`}>
+                    {hindsight.data.similar_trades?.win_rate || 0}% WR
+                  </div>
+                </div>
+
+                {/* Gate stance */}
+                <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
+                  <div className="text-[10px] text-zinc-500">Gate Today</div>
+                  <div className={`text-sm font-bold ${
+                    hindsight.data.current_gate_stance?.would_take_today === 'GO' ? 'text-emerald-400' :
+                    hindsight.data.current_gate_stance?.would_take_today === 'REDUCE' ? 'text-amber-400' : 'text-red-400'
+                  }`}>
+                    {hindsight.data.current_gate_stance?.would_take_today || '?'}
+                  </div>
+                  <div className="text-[10px] text-zinc-500">
+                    {hindsight.data.current_gate_stance?.avg_confidence || 0}% conf
+                  </div>
+                </div>
+
+                {/* Learning loop */}
+                <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
+                  <div className="text-[10px] text-zinc-500">Outcomes Tracked</div>
+                  <div className="text-sm font-bold text-white">{hindsight.data.learning_loop?.total_outcomes_tracked || 0}</div>
+                  <div className="text-[10px] text-zinc-500">
+                    {hindsight.data.learning_loop?.win_rate_from_outcomes || 0}% WR
+                  </div>
+                </div>
+              </div>
+
+              {/* Improvements list */}
+              {hindsight.data.improvements?.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-semibold text-amber-400">Key Takeaways:</div>
+                  {hindsight.data.improvements.map((imp, ii) => (
+                    <div key={ii} className="flex items-start gap-1.5 text-[11px] text-zinc-300 leading-relaxed">
+                      <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+                      <span>{imp}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* AI Narrative */}
+              {hindsight.narrative && (
+                <div className="pt-2 border-t border-amber-500/10">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <span className="text-[10px] font-semibold text-amber-400">AI Self-Review</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                    {hindsight.narrative}
+                  </p>
+                </div>
+              )}
+
+              {/* Refresh button */}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={fetchHindsight}
+                  disabled={hindsight.loading}
+                  className="flex items-center gap-1 text-[10px] text-amber-500/60 hover:text-amber-400 transition-colors"
+                >
+                  <RefreshCw className={`w-2.5 h-2.5 ${hindsight.loading ? 'animate-spin' : ''}`} />
+                  Re-analyze
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {hindsight.error && (
+          <p className="text-[10px] text-red-400 px-1">{hindsight.error}</p>
+        )}
+      </div>
 
       {/* Regenerate button */}
       <div className="flex justify-end">

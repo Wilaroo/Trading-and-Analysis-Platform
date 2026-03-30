@@ -216,6 +216,225 @@ def get_chat_context(trade_id: str, request: ExplainRequest, source: str = "bot"
     }
 
 
+@router.post("/{trade_id}/hindsight")
+def hindsight_analysis(trade_id: str, source: str = "bot"):
+    """
+    'What I'd Do Differently' — AI-powered hindsight analysis comparing
+    the actual trade outcome against current model knowledge.
+    """
+    if not snapshot_service:
+        raise HTTPException(500, "Snapshot service not initialized")
+
+    snap = snapshot_service.get_snapshot(trade_id, source)
+    if not snap:
+        raise HTTPException(404, "No snapshot found for this trade")
+
+    # Build hindsight data from DB
+    hindsight_data = _build_hindsight_data(snap, snapshot_service.db)
+
+    # Build LLM prompt
+    prompt = _build_hindsight_prompt(snap, hindsight_data)
+
+    # Get AI analysis
+    ai_narrative = _call_llm_sync(prompt, "hindsight analysis")
+
+    return {
+        "success": True,
+        "hindsight": {
+            "narrative": ai_narrative,
+            "data": hindsight_data,
+            "trade_id": trade_id,
+            "symbol": snap.get("symbol"),
+            "setup_type": snap.get("setup_type"),
+            "pnl": snap.get("pnl"),
+        }
+    }
+
+
+def _build_hindsight_data(snap: dict, db) -> dict:
+    """Build structured hindsight data from trade outcomes, gate logs, and similar trades."""
+    setup_type = snap.get("setup_type", "")
+    direction = snap.get("direction", "long")
+    pnl = snap.get("pnl", 0)
+    close_reason = snap.get("close_reason", "")
+
+    data = {
+        "trade_outcome": "WIN" if pnl > 0 else "LOSS" if pnl < 0 else "BREAKEVEN",
+        "pnl": pnl,
+        "close_reason": close_reason,
+    }
+
+    # 1. Similar trades performance (same setup_type, same direction)
+    similar_trades = list(db.strategy_performance.find(
+        {"strategy": setup_type, "direction": direction},
+        {"_id": 0, "realized_pnl": 1, "pnl_pct": 1, "quality_score": 1, "close_reason": 1, "risk_reward_ratio": 1}
+    ).limit(100))
+
+    if similar_trades:
+        wins = [t for t in similar_trades if t.get("realized_pnl", 0) > 0]
+        losses = [t for t in similar_trades if t.get("realized_pnl", 0) < 0]
+        total = len(similar_trades)
+        win_rate = len(wins) / total * 100 if total > 0 else 0
+        avg_win = sum(t.get("realized_pnl", 0) for t in wins) / len(wins) if wins else 0
+        avg_loss = sum(t.get("realized_pnl", 0) for t in losses) / len(losses) if losses else 0
+        avg_rr = sum(t.get("risk_reward_ratio", 0) for t in similar_trades if t.get("risk_reward_ratio")) / max(1, len([t for t in similar_trades if t.get("risk_reward_ratio")]))
+
+        data["similar_trades"] = {
+            "count": total,
+            "win_rate": round(win_rate, 1),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "avg_risk_reward": round(avg_rr, 2),
+            "common_close_reasons": _top_values([t.get("close_reason", "") for t in similar_trades if t.get("close_reason")]),
+        }
+    else:
+        data["similar_trades"] = {"count": 0, "win_rate": 0}
+
+    # 2. Recent gate decisions for this setup
+    recent_gates = list(db.confidence_gate_log.find(
+        {"setup_type": setup_type},
+        {"_id": 0, "decision": 1, "confidence_score": 1, "reasoning": 1, "regime_state": 1, "trading_mode": 1}
+    ).sort("timestamp", -1).limit(20))
+
+    if recent_gates:
+        decisions = [g.get("decision", "") for g in recent_gates]
+        go_count = decisions.count("GO")
+        reduce_count = decisions.count("REDUCE")
+        skip_count = decisions.count("SKIP")
+        avg_conf = sum(g.get("confidence_score", 0) for g in recent_gates) / len(recent_gates)
+        latest_mode = recent_gates[0].get("trading_mode", "")
+        latest_regime = recent_gates[0].get("regime_state", "")
+
+        data["current_gate_stance"] = {
+            "recent_decisions": {"GO": go_count, "REDUCE": reduce_count, "SKIP": skip_count},
+            "avg_confidence": round(avg_conf, 1),
+            "current_mode": latest_mode,
+            "current_regime": latest_regime,
+            "would_take_today": "GO" if avg_conf >= 65 else "REDUCE" if avg_conf >= 45 else "SKIP",
+        }
+    else:
+        data["current_gate_stance"] = {"recent_decisions": {}, "avg_confidence": 0, "would_take_today": "NO DATA"}
+
+    # 3. Learning loop feedback (trade_outcomes for this setup)
+    outcomes = list(db.trade_outcomes.find(
+        {"setup_type": setup_type},
+        {"_id": 0, "outcome": 1, "pnl_percent": 1, "context": 1}
+    ).limit(20))
+
+    if outcomes:
+        outcome_wins = len([o for o in outcomes if o.get("outcome") == "won"])
+        outcome_total = len(outcomes)
+        data["learning_loop"] = {
+            "total_outcomes_tracked": outcome_total,
+            "win_rate_from_outcomes": round(outcome_wins / outcome_total * 100, 1) if outcome_total > 0 else 0,
+            "has_model_feedback": any(o.get("context", {}).get("model_prediction") for o in outcomes),
+        }
+    else:
+        data["learning_loop"] = {"total_outcomes_tracked": 0}
+
+    # 4. What specifically would change
+    improvements = []
+    sim_wr = data.get("similar_trades", {}).get("win_rate", 0)
+    gate_stance = data.get("current_gate_stance", {})
+    
+    if pnl < 0:
+        # Loss analysis
+        if close_reason == "stop_loss" and data.get("similar_trades", {}).get("avg_risk_reward", 0) > 1.5:
+            improvements.append("Stop may have been too tight — similar winning trades had avg R:R of {:.1f}".format(data["similar_trades"]["avg_risk_reward"]))
+        if gate_stance.get("would_take_today") == "SKIP":
+            improvements.append("Current gate would SKIP this setup — model has learned to be more selective here")
+        elif gate_stance.get("would_take_today") == "REDUCE":
+            improvements.append("Current gate would REDUCE position size — limiting exposure on uncertain setups")
+        if sim_wr < 45 and sim_wr > 0:
+            improvements.append("This setup has a {:.0f}% win rate — consider avoiding or requiring higher confidence".format(sim_wr))
+        if gate_stance.get("avg_confidence", 0) > 0 and gate_stance.get("avg_confidence", 0) < 50:
+            improvements.append("Low gate confidence ({:.0f}%) — would benefit from tighter entry criteria".format(gate_stance["avg_confidence"]))
+    else:
+        # Win analysis — was it optimal?
+        annotations = snap.get("annotations", [])
+        exit_ann = next((a for a in annotations if a.get("type") == "exit"), None)
+        if exit_ann:
+            reasons = exit_ann.get("reasons", [])
+            mfe_note = [r for r in reasons if "MFE" in r and "<50%" in r]
+            if mfe_note:
+                improvements.append("Only captured a fraction of MFE — trailing stop or scale-out could have captured more")
+        if gate_stance.get("avg_confidence", 0) > 70:
+            improvements.append("Gate confidence is high ({:.0f}%) — could size up on this setup for bigger wins".format(gate_stance["avg_confidence"]))
+        if gate_stance.get("would_take_today") == "REDUCE":
+            improvements.append("Despite this win, gate currently says REDUCE for this setup — may be a less reliable edge now")
+        if gate_stance.get("would_take_today") == "SKIP":
+            improvements.append("Gate now recommends SKIP for this setup — edge may have deteriorated since this trade")
+        if sim_wr < 40 and sim_wr > 0:
+            improvements.append("This setup's win rate is low ({:.0f}%) — this win may be an outlier rather than repeatable edge".format(sim_wr))
+        if sim_wr >= 60:
+            improvements.append("Strong {:.0f}% win rate on this setup — a reliable edge worth sizing into".format(sim_wr))
+
+    if not improvements:
+        if pnl > 0:
+            improvements.append("Trade executed well within current model parameters")
+        else:
+            improvements.append("Model is still learning from this type of trade — more data needed")
+
+    data["improvements"] = improvements
+    return data
+
+
+def _build_hindsight_prompt(snap: dict, data: dict) -> str:
+    """Build the LLM prompt for hindsight analysis."""
+    symbol = snap.get("symbol", "?")
+    setup = snap.get("setup_type", "?")
+    direction = snap.get("direction", "long").upper()
+    pnl = snap.get("pnl", 0)
+    outcome = data.get("trade_outcome", "?")
+    close_reason = snap.get("close_reason", "?")
+
+    similar = data.get("similar_trades", {})
+    gate = data.get("current_gate_stance", {})
+    loop = data.get("learning_loop", {})
+    improvements = data.get("improvements", [])
+
+    prompt = (
+        f"You are an AI trading bot performing a hindsight self-review of a completed trade.\n"
+        f"You must be honest and analytical. Use 'we' voice. Be specific about what you'd change.\n\n"
+        f"TRADE REVIEWED:\n"
+        f"  {symbol} {direction} ({setup}) — {outcome} ${pnl:+.2f}\n"
+        f"  Entry: ${snap.get('entry_price', 0):.2f} → Exit: ${snap.get('exit_price', 0):.2f}\n"
+        f"  Close reason: {close_reason}\n\n"
+        f"SIMILAR TRADES PERFORMANCE ({similar.get('count', 0)} trades same setup/direction):\n"
+        f"  Win rate: {similar.get('win_rate', 0):.1f}%\n"
+        f"  Avg winner: ${similar.get('avg_win', 0):.2f} | Avg loser: ${similar.get('avg_loss', 0):.2f}\n"
+        f"  Avg R:R: {similar.get('avg_risk_reward', 0):.2f}\n\n"
+        f"CURRENT CONFIDENCE GATE STANCE (what we'd do TODAY for this setup):\n"
+        f"  Recent decisions: {gate.get('recent_decisions', {})}\n"
+        f"  Avg confidence: {gate.get('avg_confidence', 0):.0f}%\n"
+        f"  Current regime: {gate.get('current_regime', '?')}\n"
+        f"  Would take today: {gate.get('would_take_today', '?')}\n\n"
+        f"LEARNING LOOP STATUS:\n"
+        f"  Outcomes tracked: {loop.get('total_outcomes_tracked', 0)}\n"
+        f"  Win rate from outcomes: {loop.get('win_rate_from_outcomes', 0):.1f}%\n"
+        f"  Has model feedback: {loop.get('has_model_feedback', False)}\n\n"
+        f"IDENTIFIED IMPROVEMENTS:\n"
+    )
+    for imp in improvements:
+        prompt += f"  - {imp}\n"
+
+    prompt += (
+        "\nWrite a concise hindsight analysis (3-4 paragraphs) covering:\n"
+        "1. Was this trade consistent with our current knowledge? Would we take it again today?\n"
+        "2. What specific parameter changes (gate threshold, position size, stop placement, targets) would improve the outcome?\n"
+        "3. What has the model learned from similar trades since this one?\n"
+        "4. A 1-sentence 'verdict' at the end: what we'd do differently next time.\n"
+        "Be specific, data-driven, and actionable. Don't be vague."
+    )
+    return prompt
+
+
+def _top_values(items: list, top_n: int = 3) -> list:
+    """Get top N most common values from a list."""
+    from collections import Counter
+    return [v for v, _ in Counter(items).most_common(top_n)]
+
+
 def _call_llm_sync(prompt: str, context: str) -> str:
     """
     Call Ollama/GPT-OSS synchronously for annotation explanations.
