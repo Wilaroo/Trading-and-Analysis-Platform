@@ -633,7 +633,21 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/backend/routers/trades.py` - `GET /unified` endpoint (reads bot_trades directly from MongoDB)
 - `/app/frontend/src/pages/TradeJournalPage.js` - `sourceFilter` state, unified data loading, bot-aware TradeRow
 
-### SOC + Chat Bubble Overlay Redesign (**DONE** — Mar 30, 2026)
+### Command Center Layout Rework (**DONE** — Mar 30, 2026)
+- Reworked Command Center layout:
+  1. Status Header (top)
+  2. Full-width SOC + chat bubble (SentCom component)
+  3. Below SentCom (in NewDashboard.jsx): Positions panel (left, col-span-7) + Scanner panel (right, col-span-5)
+- Removed old ScannerAlertsStrip horizontal card layout
+- DetailedPositionsPanel shows: entry/current/P&L, setup/style/timeframe, stop/distance, AI context, holding time, MFE/MAE, R:R, monitoring alerts
+- ScannerAlertsPanel shows: live scanner alerts + "Watching" setups section
+- Positions and alerts data fetched independently in NewDashboard with 15s polling
+
+### Key Files (Layout Rework)
+- `/app/frontend/src/components/NewDashboard.jsx` - Dashboard layout with data fetching for positions/alerts/setups
+- `/app/frontend/src/components/DetailedPositionsPanel.jsx` (NEW)
+- `/app/frontend/src/components/ScannerAlertsPanel.jsx` (NEW)
+- `/app/frontend/src/components/SentCom.jsx` - Reverted to SOC + chat bubble only (no panels inside)
 - Replaced 50/50 SOC/Chat split with SOC taking 100% of the panel
 - Chat is now a floating purple bubble (bottom-right corner of SOC panel)
 - Clicking bubble expands a 360×420px mini chat window overlaying the SOC
