@@ -30,6 +30,8 @@ import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import ChatBubbleOverlay from './ChatBubbleOverlay';
+import DetailedPositionsPanel from './DetailedPositionsPanel';
+import ScannerAlertsPanel from './ScannerAlertsPanel';
 import StatusDot from './StatusDot';
 import api, { safeGet, safePost } from '../utils/api';
 import { useWsData } from '../contexts/WebSocketDataContext';
@@ -3316,66 +3318,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
           )}
         </AnimatePresence>
 
-        {/* Main Content - Full Width Neural Split */}
+        {/* Main Content */}
         <div className="relative p-3 space-y-3">
-          {/* Top Row - Positions Summary (Compact Horizontal) */}
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-2">
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent pointer-events-none" />
-            <div className="relative">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center">
-                    <Target className="w-2.5 h-2.5 text-emerald-400" />
-                  </div>
-                  <span className="text-xs font-bold text-white">Positions</span>
-                  <span className="text-[10px] text-zinc-500">({positions.length})</span>
-                </div>
-                <span className={`text-sm font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                </span>
-              </div>
-              
-              {positionsLoading && positions.length === 0 ? (
-                <div className="flex items-center justify-center py-2">
-                  <Loader className="w-4 h-4 text-cyan-400 animate-spin" />
-                </div>
-              ) : positions.length === 0 ? (
-                <div className="flex items-center justify-center py-2 gap-1.5">
-                  <Eye className="w-3.5 h-3.5 text-zinc-600" />
-                  <p className="text-[10px] text-zinc-500">No open positions - scanning...</p>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                  {positions.slice(0, 8).map((pos, i) => (
-                    <div 
-                      key={pos.symbol || i}
-                      onClick={() => setSelectedPosition(pos)}
-                      className="flex-shrink-0 p-2 rounded-lg bg-black/40 border border-white/5 hover:border-white/20 cursor-pointer transition-all min-w-[120px]"
-                    >
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="font-bold text-white text-xs">{pos.symbol}</span>
-                        <span className={`text-[10px] font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {pos.pnl >= 0 ? '+' : ''}{pos.pnl_percent?.toFixed(1) || '0'}%
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-[9px]">
-                        <span className="text-zinc-400">${pos.current_price?.toFixed(2) || '—'}</span>
-                        <span className={`font-medium ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {positions.length > 8 && (
-                    <div className="flex-shrink-0 p-2 rounded-lg bg-black/20 border border-white/5 min-w-[60px] flex items-center justify-center">
-                      <span className="text-[10px] text-zinc-500">+{positions.length - 8}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Full Width S.O.C. with floating Chat Bubble Overlay */}
           <div className="relative rounded-2xl border border-white/10 overflow-hidden" style={{ height: '500px' }} data-testid="neural-split-container">
             {/* SOC takes 100% */}
@@ -3392,6 +3336,30 @@ const SentCom = ({ compact = false, embedded = false }) => {
               loading={chatLoading}
               quickActionLoading={quickActionLoading}
             />
+          </div>
+
+          {/* Below SOC: Positions (Left) + Scanner Alerts (Right) */}
+          <div className="grid grid-cols-12 gap-3">
+            {/* Left: Detailed Positions Panel */}
+            <div className="col-span-7">
+              <DetailedPositionsPanel
+                positions={positions}
+                totalPnl={totalPnl}
+                loading={positionsLoading}
+                alerts={alerts}
+                onSelectPosition={setSelectedPosition}
+              />
+            </div>
+            
+            {/* Right: Scanner Alerts + Setups */}
+            <div className="col-span-5">
+              <ScannerAlertsPanel
+                alerts={alerts}
+                setups={setups}
+                alertsLoading={alertsLoading}
+                setupsLoading={setupsLoading}
+              />
+            </div>
           </div>
           
           {/* Stop Fix Panel - Shows when risky stops detected */}

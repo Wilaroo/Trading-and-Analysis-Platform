@@ -832,7 +832,7 @@ class SentComService:
                 "source": "demo",
                 "multiplier": risk_mult,
                 "vix": vix_level,
-                "reasoning": f"Position sizing adjusted based on current volatility environment."
+                "reasoning": "Position sizing adjusted based on current volatility environment."
             }
         ))
         
@@ -1133,7 +1133,7 @@ class SentComService:
             elif "NoneType" in str(e) or "not found" in str(e).lower():
                 error_response = "We're still initializing our systems. Give us a moment and try again."
             else:
-                error_response = f"We ran into an issue processing that. Let's try again in a moment."
+                error_response = "We ran into an issue processing that. Let's try again in a moment."
             
             return {
                 "success": False,
@@ -1262,10 +1262,21 @@ class SentComService:
                             "target_prices": trade.get("target_prices", []),
                             "status": trade.get("status", "open"),
                             "setup_type": trade.get("setup_type", "unknown"),
+                            "setup_variant": trade.get("setup_variant", ""),
+                            "trade_style": trade.get("trade_style", ""),
                             "entry_time": trade.get("executed_at"),
                             "trade_id": trade.get("id"),
                             "source": "bot",
-                            "notes": trade.get("notes", "")
+                            "notes": trade.get("notes", ""),
+                            "quality_score": trade.get("quality_score", 0),
+                            "quality_grade": trade.get("quality_grade", ""),
+                            "smb_grade": trade.get("smb_grade", ""),
+                            "mfe_pct": trade.get("mfe_pct", 0),
+                            "mae_pct": trade.get("mae_pct", 0),
+                            "ai_context": trade.get("ai_context"),
+                            "market_regime": trade.get("market_regime", ""),
+                            "close_reason": trade.get("close_reason"),
+                            "timeframe": trade.get("timeframe", ""),
                         })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
@@ -1410,7 +1421,7 @@ class SentComService:
                     "confidence": 65,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": "position_analysis",
-                    "note": f"Winner pulling back - scale opportunity"
+                    "note": "Winner pulling back - scale opportunity"
                 })
             
             # If position is near breakeven after being down, momentum setup
@@ -1425,7 +1436,7 @@ class SentComService:
                     "confidence": 55,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": "position_analysis",
-                    "note": f"Reclaiming - momentum add"
+                    "note": "Reclaiming - momentum add"
                 })
         
         # Source 3: Check scanner service for recent alerts
