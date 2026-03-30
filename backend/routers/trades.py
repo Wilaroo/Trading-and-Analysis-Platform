@@ -28,6 +28,7 @@ class TradeCreate(BaseModel):
     take_profit: Optional[float] = None
     notes: Optional[str] = ""
     tags: Optional[List[str]] = []
+    source: Optional[str] = "manual"  # manual, bot, ib
 
 
 class TradeClose(BaseModel):
@@ -117,6 +118,53 @@ async def get_open_trades():
         "trades": trades,
         "count": len(trades)
     }
+
+
+@router.get("/ai/learning-stats")
+async def get_ai_learning_stats():
+    """
+    Get AI learning loop stats derived from journal trades.
+    Shows how journal trades feed back into the AI.
+    """
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    try:
+        from services.learning_loop_service import get_learning_loop_service
+        learning = get_learning_loop_service()
+        
+        if learning._trade_outcomes_col is None:
+            return {"success": True, "stats": {"journal_outcomes": 0}}
+        
+        journal_count = learning._trade_outcomes_col.count_documents({"source": "trade_journal"})
+        
+        pipeline = [
+            {"$match": {"source": "trade_journal"}},
+            {"$group": {
+                "_id": "$outcome",
+                "count": {"$sum": 1},
+                "total_pnl": {"$sum": "$pnl"},
+            }}
+        ]
+        outcome_stats = list(learning._trade_outcomes_col.aggregate(pipeline))
+        
+        stats = {
+            "journal_outcomes": journal_count,
+            "outcomes": {r["_id"]: {"count": r["count"], "pnl": round(r["total_pnl"], 2)} for r in outcome_stats}
+        }
+        
+        try:
+            from services.ai_modules.confidence_gate import get_confidence_gate
+            gate = get_confidence_gate()
+            gate_accuracy = gate.get_decision_accuracy(limit=200)
+            if gate_accuracy.get("has_data"):
+                stats["confidence_gate_accuracy"] = gate_accuracy["decisions"]
+        except Exception:
+            pass
+        
+        return {"success": True, "stats": stats}
+    except Exception as e:
+        return {"success": True, "stats": {"journal_outcomes": 0, "error": str(e)}}
 
 
 @router.get("/performance")
@@ -234,6 +282,26 @@ async def delete_trade(trade_id: str):
         raise HTTPException(400, "Cannot delete closed trades or trade not found")
     
     return {"success": True, "message": "Trade deleted"}
+
+
+# ==================== AI ENRICHMENT ====================
+
+@router.post("/{trade_id}/enrich-ai")
+async def enrich_trade_with_ai(trade_id: str):
+    """
+    Capture current AI state and attach to a trade.
+    Runs Confidence Gate evaluation, model predictions, and TQS scoring.
+    """
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    try:
+        result = await trade_journal_service.enrich_trade_with_ai(trade_id)
+        return {"success": True, "trade": result}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ==================== TRADE TEMPLATES ====================

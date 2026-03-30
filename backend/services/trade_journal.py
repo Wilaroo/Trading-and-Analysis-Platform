@@ -1,13 +1,20 @@
 """
 Trade Journal & Strategy Performance Tracking Service
 Tracks trades, links them to strategies and market contexts,
-and calculates performance metrics
+and calculates performance metrics.
+
+AI Integration:
+- Trades can be enriched with AI context (Confidence Gate, model predictions, TQS)
+- On close, outcomes feed into the Learning Loop and Confidence Gate for auto-calibration
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 from pymongo import MongoClient
 from bson import ObjectId
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TradeJournalService:
     """Service for logging trades and tracking strategy performance"""
@@ -65,6 +72,8 @@ class TradeJournalService:
             "pnl": None,
             "pnl_percent": None,
             "holding_days": None,
+            "source": trade_data.get("source", "manual"),  # manual, bot, ib
+            "ai_context": trade_data.get("ai_context"),  # Populated by enrich-ai endpoint
             "created_at": now.isoformat(),
             "updated_at": now.isoformat()
         }
@@ -76,7 +85,7 @@ class TradeJournalService:
         return {k: v for k, v in trade.items() if k != "_id"}
     
     async def close_trade(self, trade_id: str, exit_price: float, notes: str = "") -> Dict:
-        """Close an open trade and calculate P&L"""
+        """Close an open trade, calculate P&L, and feed AI learning loop"""
         trade = self.trades_col.find_one({"_id": ObjectId(trade_id)})
         
         if not trade:
@@ -101,6 +110,14 @@ class TradeJournalService:
             pnl = (entry_price - exit_price) * shares
             pnl_percent = ((entry_price - exit_price) / entry_price) * 100
         
+        # Determine outcome for learning loop
+        if abs(pnl_percent) < 0.1:
+            outcome = "breakeven"
+        elif pnl > 0:
+            outcome = "won"
+        else:
+            outcome = "lost"
+        
         # Update trade
         update_data = {
             "status": "closed",
@@ -110,6 +127,7 @@ class TradeJournalService:
             "pnl_percent": round(pnl_percent, 2),
             "holding_days": holding_days,
             "exit_notes": notes,
+            "outcome": outcome,
             "updated_at": now.isoformat()
         }
         
@@ -125,6 +143,9 @@ class TradeJournalService:
             pnl,
             pnl_percent
         )
+        
+        # Feed AI Learning Loop (write to trade_outcomes)
+        await self._feed_learning_loop(trade, exit_price, pnl, pnl_percent, outcome, now)
         
         return {**{k: v for k, v in trade.items() if k != "_id"}, **update_data, "id": trade_id}
     
@@ -180,6 +201,178 @@ class TradeJournalService:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             })
     
+    async def _feed_learning_loop(
+        self,
+        trade: Dict,
+        exit_price: float,
+        pnl: float,
+        pnl_percent: float,
+        outcome: str,
+        exit_time: datetime
+    ):
+        """Feed the AI learning loop with trade outcome data"""
+        try:
+            from services.learning_loop_service import get_learning_loop_service
+            learning = get_learning_loop_service()
+            
+            if learning._trade_outcomes_col is None:
+                logger.debug("Learning loop DB not initialized, skipping feed")
+                return
+            
+            symbol = trade.get("symbol", "")
+            setup_type = trade.get("strategy_id", "MANUAL")
+            direction = trade.get("direction", "long")
+            entry_price = trade.get("entry_price", 0)
+            stop_loss = trade.get("stop_loss") or (entry_price * 0.98 if direction == "long" else entry_price * 1.02)
+            take_profit = trade.get("take_profit") or (entry_price * 1.04 if direction == "long" else entry_price * 0.96)
+            
+            # Map outcome to learning loop format
+            outcome_map = {"won": "won", "lost": "lost", "breakeven": "breakeven"}
+            ll_outcome = outcome_map.get(outcome, "breakeven")
+            
+            # Write directly to trade_outcomes collection
+            trade_outcome_doc = {
+                "id": f"journal_{str(trade.get('_id', ''))[:8]}_{datetime.now(timezone.utc).strftime('%H%M%S')}",
+                "alert_id": f"journal_manual_{symbol}",
+                "bot_trade_id": f"journal_{str(trade.get('_id', ''))}",
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "strategy_name": trade.get("strategy_name", ""),
+                "direction": direction,
+                "trade_style": trade.get("market_context", "manual"),
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "stop_price": stop_loss,
+                "target_price": take_profit,
+                "outcome": ll_outcome,
+                "pnl": round(pnl, 2),
+                "pnl_percent": round(pnl_percent, 2),
+                "actual_r": round(
+                    (exit_price - entry_price) / abs(entry_price - stop_loss), 2
+                ) if abs(entry_price - stop_loss) > 0 else 0,
+                "source": "trade_journal",
+                "entry_time": trade.get("entry_date", ""),
+                "exit_time": exit_time.isoformat(),
+                "context": {
+                    "market_regime": trade.get("market_context", "UNKNOWN"),
+                },
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed": False,
+            }
+            
+            # Include AI context if the trade was enriched
+            ai_ctx = trade.get("ai_context")
+            if ai_ctx:
+                trade_outcome_doc["context"]["confidence_gate"] = ai_ctx.get("confidence_gate")
+                trade_outcome_doc["context"]["tqs_score"] = ai_ctx.get("tqs_score")
+                trade_outcome_doc["context"]["model_prediction"] = ai_ctx.get("model_prediction")
+            
+            learning._trade_outcomes_col.insert_one(trade_outcome_doc)
+            logger.info(f"Journal trade fed to learning loop: {symbol} {ll_outcome} ${pnl:.2f}")
+            
+            # Also update Confidence Gate outcome tracking
+            try:
+                from services.ai_modules.confidence_gate import get_confidence_gate
+                gate = get_confidence_gate()
+                gate_outcome = "win" if ll_outcome == "won" else ("loss" if ll_outcome == "lost" else "scratch")
+                await gate.record_trade_outcome(
+                    symbol=symbol,
+                    setup_type=setup_type,
+                    outcome=gate_outcome,
+                    pnl=pnl,
+                )
+            except Exception as e:
+                logger.debug(f"Confidence gate outcome update skipped: {e}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to feed learning loop (non-critical): {e}")
+    
+    async def enrich_trade_with_ai(self, trade_id: str) -> Dict:
+        """
+        Capture current AI state and attach it to a trade.
+        Called when user clicks 'Enrich with AI' on a trade entry.
+        Captures: Confidence Gate evaluation, model predictions, TQS score.
+        """
+        trade = self.trades_col.find_one({"_id": ObjectId(trade_id)}, {"_id": 0})
+        if not trade:
+            raise ValueError("Trade not found")
+        
+        ai_context = {}
+        symbol = trade["symbol"]
+        setup_type = trade.get("strategy_id", "MANUAL")
+        direction = trade.get("direction", "long")
+        
+        # 1. Run Confidence Gate evaluation
+        try:
+            from services.ai_modules.confidence_gate import get_confidence_gate
+            gate = get_confidence_gate()
+            if gate._db is not None:
+                gate_result = await gate.evaluate(
+                    symbol=symbol,
+                    setup_type=setup_type,
+                    direction=direction,
+                    quality_score=70,
+                    entry_price=trade.get("entry_price", 0),
+                    stop_price=trade.get("stop_loss") or 0,
+                )
+                ai_context["confidence_gate"] = {
+                    "decision": gate_result.get("decision", ""),
+                    "confidence_score": gate_result.get("confidence_score", 0),
+                    "position_multiplier": gate_result.get("position_multiplier", 1.0),
+                    "trading_mode": gate_result.get("trading_mode", ""),
+                    "reasoning": gate_result.get("reasoning", [])[:5],
+                    "regime_state": gate_result.get("regime_state", ""),
+                    "ai_regime": gate_result.get("ai_regime", ""),
+                }
+                if gate_result.get("live_prediction"):
+                    pred = gate_result["live_prediction"]
+                    ai_context["model_prediction"] = {
+                        "direction": pred.get("direction", "flat"),
+                        "confidence": pred.get("confidence", 0),
+                        "model_used": pred.get("model_used", ""),
+                    }
+                if gate_result.get("learning_feedback", {}).get("has_data"):
+                    fb = gate_result["learning_feedback"]
+                    ai_context["learning_feedback"] = {
+                        "points": fb.get("points", 0),
+                        "reasoning": fb.get("reasoning", ""),
+                    }
+        except Exception as e:
+            logger.debug(f"Confidence gate enrichment failed: {e}")
+        
+        # 2. Get TQS score if available
+        try:
+            from services.tqs.tqs_engine import get_tqs_engine
+            tqs_engine = get_tqs_engine()
+            if tqs_engine:
+                tqs_result = await tqs_engine.calculate_tqs(
+                    symbol=symbol,
+                    setup_type=setup_type,
+                    direction=direction,
+                )
+                if tqs_result:
+                    ai_context["tqs_score"] = round(tqs_result.score, 1)
+                    ai_context["tqs_grade"] = tqs_result.grade
+                    ai_context["tqs_action"] = tqs_result.action
+        except Exception as e:
+            logger.debug(f"TQS enrichment failed: {e}")
+        
+        ai_context["enriched_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # Save to trade
+        self.trades_col.update_one(
+            {"_id": ObjectId(trade_id)},
+            {"$set": {
+                "ai_context": ai_context,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        # Return the full updated trade
+        updated = self.trades_col.find_one({"_id": ObjectId(trade_id)}, {"_id": 0})
+        updated["id"] = trade_id
+        return updated
+
     async def get_trades(
         self, 
         status: str = None, 

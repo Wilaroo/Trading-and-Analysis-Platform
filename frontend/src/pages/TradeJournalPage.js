@@ -62,7 +62,64 @@ const ContextBadge = ({ context, size = 'sm' }) => {
   );
 };
 
-// Performance Stat Card
+// AI Context Badge Component
+const AIContextBadge = ({ aiContext }) => {
+  if (!aiContext) return null;
+  
+  const gate = aiContext.confidence_gate;
+  const prediction = aiContext.model_prediction;
+  const tqsScore = aiContext.tqs_score;
+  
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+      {gate && (
+        <span
+          data-testid="ai-gate-badge"
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+            gate.decision === 'GO' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+            gate.decision === 'REDUCE' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+            'bg-red-500/20 text-red-400 border-red-500/30'
+          }`}
+          title={gate.reasoning?.join(' | ') || ''}
+        >
+          <Zap className="w-3 h-3" />
+          Gate: {gate.decision} ({gate.confidence_score}%)
+        </span>
+      )}
+      {prediction && (
+        <span
+          data-testid="ai-prediction-badge"
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+            prediction.direction === 'up' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+            prediction.direction === 'down' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+            'bg-zinc-500/20 text-zinc-400 border-zinc-500/30'
+          }`}
+        >
+          <BarChart3 className="w-3 h-3" />
+          Model: {prediction.direction?.toUpperCase()} ({(prediction.confidence * 100).toFixed(0)}%)
+        </span>
+      )}
+      {tqsScore != null && (
+        <span
+          data-testid="ai-tqs-badge"
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
+            tqsScore >= 70 ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+            tqsScore >= 50 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+            'bg-red-500/20 text-red-400 border-red-500/30'
+          }`}
+        >
+          <Award className="w-3 h-3" />
+          TQS: {tqsScore} ({aiContext.tqs_grade || ''})
+        </span>
+      )}
+      {gate?.trading_mode && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/5 text-zinc-400 border border-white/10">
+          Mode: {gate.trading_mode}
+        </span>
+      )}
+    </div>
+  );
+};
 const StatCard = ({ label, value, icon: Icon, color = 'primary', subtext }) => (
   <Card className={`bg-gradient-to-br from-${color}/10 to-${color}/5`}>
     <div className="flex items-center justify-between">
@@ -87,15 +144,25 @@ const StatCard = ({ label, value, icon: Icon, color = 'primary', subtext }) => (
 );
 
 // Trade Row Component
-const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
+const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI }) => {
   const isOpen = trade.status === 'open';
   const isProfitable = trade.pnl > 0;
   const [showNotesInput, setShowNotesInput] = useState(false);
   const [localNotes, setLocalNotes] = useState(trade.notes || '');
+  const [enriching, setEnriching] = useState(false);
   
   const handleSaveNotes = () => {
     onUpdateNotes(trade.id, localNotes);
     setShowNotesInput(false);
+  };
+
+  const handleEnrich = async () => {
+    setEnriching(true);
+    try {
+      await onEnrichAI(trade.id);
+    } finally {
+      setEnriching(false);
+    }
   };
   
   return (
@@ -105,6 +172,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
       className={`bg-white/5 rounded-lg p-4 border ${
         isOpen ? 'border-primary/30' : isProfitable ? 'border-green-500/20' : 'border-red-500/20'
       }`}
+      data-testid={`trade-row-${trade.id}`}
     >
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -135,7 +203,17 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
               }`}>
                 {trade.status?.toUpperCase()}
               </span>
+              {trade.source && trade.source !== 'manual' && (
+                <span className={`text-xs px-2 py-0.5 rounded ${
+                  trade.source === 'bot' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                }`}>
+                  {trade.source.toUpperCase()}
+                </span>
+              )}
             </div>
+            
+            {/* AI Context Badges */}
+            <AIContextBadge aiContext={trade.ai_context} />
             
             <div className="flex items-center gap-4 mt-2 text-sm">
               <span className="text-zinc-400">
@@ -234,9 +312,21 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
                   onClick={() => onClose(trade)}
                   className="p-2 text-green-400 hover:bg-green-500/20 rounded-lg transition-colors"
                   title="Close Trade"
+                  data-testid={`close-trade-${trade.id}`}
                 >
                   <CheckCircle className="w-4 h-4" />
                 </button>
+                {!trade.ai_context && (
+                  <button
+                    onClick={handleEnrich}
+                    className={`p-2 text-amber-400 hover:bg-amber-500/20 rounded-lg transition-colors ${enriching ? 'animate-pulse' : ''}`}
+                    title="Enrich with AI Context"
+                    disabled={enriching}
+                    data-testid={`enrich-ai-${trade.id}`}
+                  >
+                    <Zap className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowNotesInput(true)}
                   className="p-2 text-zinc-400 hover:bg-white/10 rounded-lg transition-colors"
@@ -251,6 +341,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
                 onClick={() => onDelete(trade.id)}
                 className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
                 title="Delete"
+                data-testid={`delete-trade-${trade.id}`}
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -639,15 +730,17 @@ const TradeJournalPage = () => {
   
   const [closePrice, setClosePrice] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
+  const [aiStats, setAiStats] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tradesRes, perfRes, matrixRes, templatesRes] = await Promise.all([
+      const [tradesRes, perfRes, matrixRes, templatesRes, aiStatsRes] = await Promise.all([
         api.get('/api/trades', { params: { status: filter !== 'all' ? filter : undefined } }),
         api.get('/api/trades/performance'),
         api.get('/api/trades/performance/matrix'),
-        api.get('/api/trades/templates/list')
+        api.get('/api/trades/templates/list'),
+        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } }))
       ]);
       
       const tradesData = tradesRes.data.trades || [];
@@ -658,6 +751,7 @@ const TradeJournalPage = () => {
       setPerformance(perfData);
       setMatrix(matrixData);
       setTemplates(templatesRes.data.templates || []);
+      setAiStats(aiStatsRes.data?.stats || null);
       
       // Cache in AppState for persistence across tab switches
       setAppData('journalTrades', tradesData);
@@ -768,6 +862,15 @@ const TradeJournalPage = () => {
     }
   };
 
+  const handleEnrichAI = async (tradeId) => {
+    try {
+      await api.post(`/api/trades/${tradeId}/enrich-ai`);
+      loadData();
+    } catch (err) {
+      console.error('Failed to enrich trade with AI:', err);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in" data-testid="trade-journal-page">
       {/* Header */}
@@ -875,6 +978,43 @@ const TradeJournalPage = () => {
         </div>
       )}
 
+      {/* AI Learning Loop Integration Status */}
+      {aiStats && aiStats.journal_outcomes > 0 && (
+        <Card hover={false} className="border-amber-500/20">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold flex items-center gap-2 text-sm">
+              <Zap className="w-4 h-4 text-amber-400" />
+              AI Learning Loop — Journal Feed
+            </h3>
+            <span className="text-xs text-zinc-500">{aiStats.journal_outcomes} trades fed to AI</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {aiStats.outcomes && Object.entries(aiStats.outcomes).map(([outcome, data]) => (
+              <div key={outcome} className="bg-white/5 rounded-lg p-3">
+                <p className="text-xs text-zinc-500 uppercase">{outcome}</p>
+                <p className={`text-lg font-bold ${outcome === 'won' ? 'text-green-400' : outcome === 'lost' ? 'text-red-400' : 'text-zinc-400'}`}>
+                  {data.count}
+                </p>
+                <p className={`text-xs ${data.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  ${data.pnl?.toFixed(0)}
+                </p>
+              </div>
+            ))}
+            {aiStats.confidence_gate_accuracy && Object.entries(aiStats.confidence_gate_accuracy).map(([decision, data]) => (
+              <div key={decision} className="bg-white/5 rounded-lg p-3">
+                <p className="text-xs text-zinc-500 uppercase">Gate {decision}</p>
+                <p className="text-lg font-bold text-primary">
+                  {(data.win_rate * 100).toFixed(0)}%
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {data.total} decisions
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Context Breakdown */}
       {performance?.context_breakdown && Object.keys(performance.context_breakdown).length > 0 && (
         <Card hover={false}>
@@ -945,6 +1085,7 @@ const TradeJournalPage = () => {
                 onEdit={() => {}}
                 onDelete={handleDeleteTrade}
                 onUpdateNotes={handleUpdateNotes}
+                onEnrichAI={handleEnrichAI}
               />
             ))}
           </div>
