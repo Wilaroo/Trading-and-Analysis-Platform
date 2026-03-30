@@ -730,6 +730,19 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Sends follow-up questions to `POST /api/sentcom/chat` for full conversational flow
 - **Testing**: 31/31 pytest tests pass (iteration_122.json)
 
+### "What I'd Do Differently" Hindsight Analysis (Mar 30, 2026)
+- **Backend**: `POST /api/trades/snapshots/{trade_id}/hindsight` endpoint
+  - `_build_hindsight_data()` — Queries strategy_performance (similar trades), confidence_gate_log (current gate stance), trade_outcomes (learning loop), builds data-driven improvements list
+  - `_build_hindsight_prompt()` — Creates structured LLM prompt comparing actual outcome vs current model knowledge
+  - Improvements logic handles wins (sizing up, low WR outliers, gate deterioration) and losses (tight stops, SKIP/REDUCE recommendations, low WR)
+- **Frontend**: "What I'd Do Differently" button in TradeSnapshotViewer
+  - Amber-styled button → loading state → analysis panel with:
+    - 3 data cards: Similar Trades (count + win rate), Gate Today (GO/REDUCE/SKIP + confidence), Outcomes Tracked
+    - Key Takeaways list with AlertTriangle icons
+    - AI Self-Review narrative from Ollama/GPT-OSS (or structured fallback)
+    - Re-analyze button
+- **Testing**: 23/23 pytest tests pass (iteration_123.json)
+
 ### P0 (Next)
 - (All P0 items complete)
 
