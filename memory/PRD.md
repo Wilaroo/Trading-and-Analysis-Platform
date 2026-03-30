@@ -599,3 +599,46 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/frontend/src/components/NIA/SentComIntelligencePanel.jsx` - SentCom Intelligence UI (NEW)
 - `/app/documents/scripts/ib_data_pusher.py` - Local IB fetcher (updated for end_date)
 - `/app/documents/scripts/import_vendor_data.py` - Vendor bulk import
+
+## Session 7 (Current - Mar 30, 2026) — Trade Journal AI Integration
+
+### Phase 1: Wire Journal → AI Learning Loop (**DONE**)
+- Modified `trade_journal.py` → `close_trade()` now writes to `trade_outcomes` collection via `_feed_learning_loop()`
+- Closed journal trades automatically feed the Learning Loop and Confidence Gate outcome tracker
+- New `source` field on trades: `manual`, `bot`, `ib`
+- New `outcome` field on close: `won`, `lost`, `breakeven`
+
+### Phase 2: AI Context on Trade Records (**DONE**)
+- New `POST /api/trades/{id}/enrich-ai` endpoint captures current AI state:
+  - Confidence Gate decision (GO/REDUCE/SKIP), confidence score, position multiplier, trading mode
+  - Model predictions (direction, confidence, model used)
+  - TQS score and grade (Trade Quality Score)
+- `ai_context` stored on trade document, displayed as badges in frontend
+- New `GET /api/trades/ai/learning-stats` endpoint shows journal-sourced outcomes and Confidence Gate accuracy
+- Frontend: `AIContextBadge` component renders Gate/Prediction/TQS badges on trade rows
+- Frontend: "Enrich with AI" (Zap icon) button on open trades without AI context
+- Frontend: AI Learning Loop stats panel shows when journal outcomes exist
+
+### Key Files Updated
+- `/app/backend/services/trade_journal.py` - `_feed_learning_loop()`, `enrich_trade_with_ai()` (NEW methods)
+- `/app/backend/routers/trades.py` - `POST /{id}/enrich-ai`, `GET /ai/learning-stats` (NEW endpoints)
+- `/app/frontend/src/pages/TradeJournalPage.js` - `AIContextBadge`, `onEnrichAI`, AI stats panel (NEW components)
+
+## Prioritized Backlog
+
+### P0 (Next)
+- Phase 3: Unified Trade View — Merge bot trades into main Trade Log with source indicator
+- Phase 4: AI-Enhanced Performance Dashboard — AI accuracy per strategy, gate stats, learning insights
+
+### P1
+- Twitter/X Social Stream Widget for Command Center
+- Auto-Optimize AI Settings (confidence threshold sweeping)
+
+### P2 (Future)
+- Confidence Gate Tuner UI (after 50-100 live trades accumulated)
+- Smart Templates based on historical AI performance
+- Post-Development Local DB Migration to NVMe
+
+### Known Issues
+- Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
+- Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)
