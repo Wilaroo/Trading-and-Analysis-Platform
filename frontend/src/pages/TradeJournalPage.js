@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   BookOpen,
@@ -50,6 +50,11 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [activeAnnotation, setActiveAnnotation] = useState(null);
+  const [aiExplanation, setAiExplanation] = useState({});  // { [index]: { text, loading, error } }
+  const [chatThread, setChatThread] = useState([]);  // inline chat messages
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatInputRef = useRef(null);
 
   const fetchSnapshot = useCallback(async () => {
     setLoading(true);
@@ -82,6 +87,57 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
       setError('Failed to generate snapshot');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const explainAnnotation = async (index, customQuestion) => {
+    setAiExplanation(prev => ({ ...prev, [index]: { text: '', loading: true, error: null } }));
+    try {
+      const res = await api.post(`/api/trades/snapshots/${tradeId}/explain?source=${source}`, {
+        annotation_index: index,
+        question: customQuestion || null
+      });
+      if (res.data?.success) {
+        setAiExplanation(prev => ({ ...prev, [index]: { text: res.data.explanation, loading: false, error: null } }));
+      } else {
+        setAiExplanation(prev => ({ ...prev, [index]: { text: '', loading: false, error: 'AI explanation unavailable' } }));
+      }
+    } catch (err) {
+      setAiExplanation(prev => ({ ...prev, [index]: { text: '', loading: false, error: 'Failed to get explanation' } }));
+    }
+  };
+
+  const openInChat = async (index) => {
+    // Build context and send to SentCom chat inline
+    try {
+      const res = await api.post(`/api/trades/snapshots/${tradeId}/chat-context?source=${source}`, {
+        annotation_index: index,
+      });
+      if (res.data?.success) {
+        const contextMsg = res.data.chat_message;
+        setChatThread([{ role: 'context', text: contextMsg }]);
+        setTimeout(() => chatInputRef.current?.focus(), 150);
+      }
+    } catch (err) {
+      console.error('Failed to build chat context:', err);
+    }
+  };
+
+  const sendChatMessage = async (message) => {
+    if (!message?.trim() || chatLoading) return;
+    const userMsg = message.trim();
+    setChatThread(prev => [...prev, { role: 'user', text: userMsg }]);
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const res = await api.post('/api/sentcom/chat', { message: userMsg });
+      const reply = res.data?.response || 'Processing...';
+      setChatThread(prev => [...prev, { role: 'assistant', text: reply }]);
+    } catch (err) {
+      setChatThread(prev => [...prev, { role: 'assistant', text: 'Unable to reach AI. Try again later.' }]);
+    } finally {
+      setChatLoading(false);
     }
   };
 
@@ -166,17 +222,21 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
             {annotations.map((ann, i) => {
               const style = ANNOTATION_COLORS[ann.type] || ANNOTATION_COLORS.entry;
               const isActive = activeAnnotation === i;
+              const explanation = aiExplanation[i];
 
               return (
                 <div
                   key={i}
-                  className={`rounded-lg border transition-all cursor-pointer ${style.bg} ${style.border} ${
+                  className={`rounded-lg border transition-all ${style.bg} ${style.border} ${
                     isActive ? 'ring-1 ring-white/20' : ''
                   }`}
-                  onClick={() => setActiveAnnotation(isActive ? null : i)}
                   data-testid={`annotation-${ann.type}-${i}`}
                 >
-                  <div className="flex items-center gap-2 px-3 py-2">
+                  {/* Annotation header - clickable */}
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 cursor-pointer"
+                    onClick={() => setActiveAnnotation(isActive ? null : i)}
+                  >
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
                     <span className={`text-xs font-bold ${style.text}`}>{ann.label}</span>
                     {ann.price > 0 && (
@@ -188,26 +248,86 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                         {new Date(ann.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     )}
-                    {ann.reasons?.length > 0 && (
-                      <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${isActive ? 'rotate-180' : ''}`} />
-                    )}
+                    <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${isActive ? 'rotate-180' : ''}`} />
                   </div>
 
-                  {/* Expanded reasons */}
+                  {/* Expanded content */}
                   <AnimatePresence>
-                    {isActive && ann.reasons?.length > 0 && (
+                    {isActive && (
                       <motion.div
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="px-3 pb-2 pt-0.5 space-y-0.5 border-t border-white/5">
-                          {ann.reasons.map((reason, ri) => (
-                            <p key={ri} className="text-[11px] text-zinc-400 leading-relaxed pl-4">
-                              {reason}
-                            </p>
-                          ))}
+                        <div className="px-3 pb-3 pt-0.5 border-t border-white/5 space-y-2">
+                          {/* Recorded reasons */}
+                          {ann.reasons?.length > 0 && (
+                            <div className="space-y-0.5">
+                              {ann.reasons.map((reason, ri) => (
+                                <p key={ri} className="text-[11px] text-zinc-400 leading-relaxed pl-4">
+                                  {reason}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* AI Explanation section */}
+                          {explanation?.text && (
+                            <div className="mt-2 p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                              <div className="flex items-center gap-1.5 mb-1.5">
+                                <Zap className="w-3 h-3 text-cyan-400" />
+                                <span className="text-[10px] font-semibold text-cyan-400">AI Analysis</span>
+                              </div>
+                              <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                                {explanation.text}
+                              </p>
+                            </div>
+                          )}
+
+                          {explanation?.error && (
+                            <p className="text-[10px] text-red-400 pl-4">{explanation.error}</p>
+                          )}
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); explainAnnotation(i); }}
+                              disabled={explanation?.loading}
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all ${
+                                explanation?.loading
+                                  ? 'bg-cyan-500/10 text-cyan-500/50 cursor-wait'
+                                  : 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/20'
+                              }`}
+                              data-testid={`ask-ai-${ann.type}-${i}`}
+                            >
+                              {explanation?.loading ? (
+                                <>
+                                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                  Analyzing...
+                                </>
+                              ) : explanation?.text ? (
+                                <>
+                                  <Zap className="w-2.5 h-2.5" />
+                                  Re-analyze
+                                </>
+                              ) : (
+                                <>
+                                  <Zap className="w-2.5 h-2.5" />
+                                  Ask AI
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openInChat(i); }}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 border border-violet-500/20 transition-all"
+                              data-testid={`chat-about-${ann.type}-${i}`}
+                            >
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              Ask More in Chat
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -215,6 +335,77 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Inline Chat Thread — contextual conversation about this trade */}
+      {chatThread.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3" data-testid={`snapshot-chat-${tradeId}`}>
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-violet-400">
+            <MessageSquare className="w-3 h-3" />
+            Trade Discussion
+          </div>
+
+          {/* Messages */}
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {chatThread.map((msg, mi) => (
+              <div key={mi} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                {msg.role !== 'user' && (
+                  <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
+                    msg.role === 'context' ? 'bg-violet-500/20' : 'bg-cyan-500/20'
+                  }`}>
+                    {msg.role === 'context' ? <Target className="w-2.5 h-2.5 text-violet-400" /> : <Zap className="w-2.5 h-2.5 text-cyan-400" />}
+                  </div>
+                )}
+                <div className={`rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed max-w-[85%] ${
+                  msg.role === 'user'
+                    ? 'bg-cyan-500/20 text-cyan-200'
+                    : msg.role === 'context'
+                    ? 'bg-violet-500/10 text-zinc-400 italic'
+                    : 'bg-white/5 text-zinc-300'
+                }`}>
+                  {msg.role === 'context' ? (
+                    <span className="text-[10px]">{msg.text}</span>
+                  ) : (
+                    <span className="whitespace-pre-wrap">{msg.text}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex gap-2">
+                <div className="w-5 h-5 rounded bg-cyan-500/20 flex items-center justify-center">
+                  <RefreshCw className="w-2.5 h-2.5 text-cyan-400 animate-spin" />
+                </div>
+                <div className="bg-white/5 rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-500">
+                  Thinking...
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Chat input */}
+          <div className="flex gap-2 mt-1">
+            <input
+              ref={chatInputRef}
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendChatMessage(chatInput); }}
+              placeholder="Ask a follow-up about this trade..."
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/40"
+              disabled={chatLoading}
+              data-testid={`snapshot-chat-input-${tradeId}`}
+            />
+            <button
+              onClick={() => sendChatMessage(chatInput)}
+              disabled={chatLoading || !chatInput.trim()}
+              className="px-2 py-1 bg-violet-500/20 text-violet-400 rounded-lg hover:bg-violet-500/30 transition-colors disabled:opacity-40"
+              data-testid={`snapshot-chat-send-${tradeId}`}
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}

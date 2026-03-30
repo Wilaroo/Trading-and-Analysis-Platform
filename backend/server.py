@@ -104,7 +104,7 @@ from routers.system_router import router as system_router, init_system_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from routers.ai_training import router as ai_training_router
 from routers.short_data import router as short_data_router
-from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service
+from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service, init_snapshot_assistant
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.focus_mode_manager import focus_mode_manager
@@ -236,6 +236,7 @@ init_trade_journal_service(trade_journal_service)
 from services.trade_snapshot_service import TradeSnapshotService
 trade_snapshot_service = TradeSnapshotService(db)
 init_snapshot_service(trade_snapshot_service)
+init_snapshot_assistant(assistant_service)
 
 # Wire snapshot service into trade journal for auto-generation on manual trade close
 trade_journal_service._snapshot_service = trade_snapshot_service
