@@ -242,7 +242,38 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
             <p className="text-xs text-zinc-500 mt-2">
               {new Date(trade.entry_date).toLocaleDateString()} 
               {trade.holding_days !== null && ` • ${trade.holding_days} day${trade.holding_days !== 1 ? 's' : ''}`}
+              {trade.close_reason && (
+                <span className="ml-2 text-zinc-400">
+                  • Closed: <span className="text-white">{trade.close_reason.replace(/_/g, ' ')}</span>
+                </span>
+              )}
             </p>
+            
+            {/* Bot trade extra details */}
+            {trade.source === 'bot' && (trade.quality_grade || trade.trade_style) && (
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                {trade.quality_grade && (
+                  <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
+                    Grade: {trade.quality_grade}
+                  </span>
+                )}
+                {trade.trade_style && (
+                  <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
+                    {trade.trade_style.replace(/_/g, ' ')}
+                  </span>
+                )}
+                {trade.mfe_pct > 0 && (
+                  <span className="text-xs text-green-400">
+                    MFE: +{trade.mfe_pct?.toFixed(2)}%
+                  </span>
+                )}
+                {trade.mae_pct < 0 && (
+                  <span className="text-xs text-red-400">
+                    MAE: {trade.mae_pct?.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            )}
             
             {/* Notes Section */}
             {showNotesInput ? (
@@ -306,7 +337,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
           )}
           
           <div className="flex items-center gap-2">
-            {isOpen && (
+            {isOpen && trade.source !== 'bot' && (
               <>
                 <button
                   onClick={() => onClose(trade)}
@@ -336,7 +367,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
                 </button>
               </>
             )}
-            {isOpen && (
+            {isOpen && trade.source !== 'bot' && (
               <button
                 onClick={() => onDelete(trade.id)}
                 className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
@@ -346,7 +377,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
-            {!isOpen && (
+            {!isOpen && trade.source !== 'bot' && (
               <button
                 onClick={() => setShowNotesInput(true)}
                 className="p-2 text-zinc-400 hover:bg-white/10 rounded-lg transition-colors"
@@ -711,6 +742,7 @@ const TradeJournalPage = () => {
   const [showNewTrade, setShowNewTrade] = useState(false);
   const [showCloseTrade, setShowCloseTrade] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all'); // all, manual, bot
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   
@@ -735,8 +767,12 @@ const TradeJournalPage = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const params = {};
+      if (filter !== 'all') params.status = filter;
+      if (sourceFilter !== 'all') params.source = sourceFilter;
+
       const [tradesRes, perfRes, matrixRes, templatesRes, aiStatsRes] = await Promise.all([
-        api.get('/api/trades', { params: { status: filter !== 'all' ? filter : undefined } }),
+        api.get('/api/trades/unified', { params }),
         api.get('/api/trades/performance'),
         api.get('/api/trades/performance/matrix'),
         api.get('/api/trades/templates/list'),
@@ -762,7 +798,7 @@ const TradeJournalPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filter, setAppData]);
+  }, [filter, sourceFilter, setAppData]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -1046,20 +1082,44 @@ const TradeJournalPage = () => {
       </Card>
 
       {/* Filter Tabs */}
-      <div className="flex gap-2">
-        {['all', 'open', 'closed'].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              filter === f
-                ? 'bg-primary/20 text-primary border border-primary/30'
-                : 'bg-white/5 text-zinc-400 hover:bg-white/10'
-            }`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex gap-2">
+          {['all', 'open', 'closed'].map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              data-testid={`filter-status-${f}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                filter === f
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'bg-white/5 text-zinc-400 hover:bg-white/10'
+              }`}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="h-6 w-px bg-white/10" />
+        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+          {[
+            { id: 'all', label: 'All Sources' },
+            { id: 'manual', label: 'Manual' },
+            { id: 'bot', label: 'Bot' }
+          ].map((sf) => (
+            <button
+              key={sf.id}
+              onClick={() => setSourceFilter(sf.id)}
+              data-testid={`filter-source-${sf.id}`}
+              className={`px-3 py-1 text-xs rounded-md transition-all ${
+                sourceFilter === sf.id
+                  ? sf.id === 'bot' ? 'bg-purple-500/20 text-purple-400' : sf.id === 'manual' ? 'bg-blue-500/20 text-blue-400' : 'bg-primary text-black'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              {sf.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Trades List */}

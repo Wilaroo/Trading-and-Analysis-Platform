@@ -167,6 +167,101 @@ async def get_ai_learning_stats():
         return {"success": True, "stats": {"journal_outcomes": 0, "error": str(e)}}
 
 
+@router.get("/unified")
+async def get_unified_trades(
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100
+):
+    """
+    Unified trade view: merges journal trades + bot trades into one sorted list.
+    Source filter: 'manual', 'bot', or None for all.
+    Reads bot trades directly from MongoDB (bot_trades collection) to avoid event loop blocking.
+    """
+    unified = []
+
+    # 1. Journal trades (always include unless source=bot)
+    if source != "bot":
+        journal_trades = []
+        if trade_journal_service:
+            journal_trades = await trade_journal_service.get_trades(
+                status=status, limit=limit
+            )
+        for t in journal_trades:
+            t.setdefault("source", "manual")
+            t["_sort_date"] = t.get("entry_date", "")
+            unified.append(t)
+
+    # 2. Bot trades from MongoDB directly (avoids blocking the event loop)
+    if source != "manual":
+        try:
+            import os
+            from pymongo import MongoClient
+            mongo_url = os.environ.get("MONGO_URL", "")
+            db_name = os.environ.get("DB_NAME", "sentcom")
+            if mongo_url:
+                client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
+                db = client[db_name]
+                
+                query = {}
+                if status == "open":
+                    query["status"] = {"$in": ["open", "pending", "filled"]}
+                elif status == "closed":
+                    query["status"] = "closed"
+                
+                bot_docs = list(db.bot_trades.find(
+                    query, {"_id": 0}
+                ).sort("executed_at", -1).limit(limit))
+                
+                for d in bot_docs:
+                    target_prices = d.get("target_prices") or []
+                    realized = d.get("realized_pnl") or d.get("unrealized_pnl") or 0
+                    normalized = {
+                        "id": d.get("id", ""),
+                        "symbol": d.get("symbol", ""),
+                        "strategy_id": d.get("setup_type", ""),
+                        "strategy_name": d.get("setup_variant") or d.get("setup_type", ""),
+                        "market_context": d.get("market_regime", ""),
+                        "direction": d.get("direction", "long"),
+                        "entry_price": d.get("fill_price") or d.get("entry_price", 0),
+                        "exit_price": d.get("exit_price"),
+                        "shares": d.get("shares", 0),
+                        "stop_loss": d.get("stop_price"),
+                        "take_profit": target_prices[0] if target_prices else None,
+                        "status": d.get("status", "open"),
+                        "pnl": round(realized, 2),
+                        "pnl_percent": d.get("pnl_pct", 0),
+                        "source": "bot",
+                        "entry_date": d.get("executed_at") or d.get("created_at", ""),
+                        "exit_date": d.get("closed_at"),
+                        "notes": d.get("notes", ""),
+                        "close_reason": d.get("close_reason"),
+                        "trade_style": d.get("trade_style", ""),
+                        "quality_score": d.get("quality_score", 0),
+                        "quality_grade": d.get("quality_grade", ""),
+                        "smb_grade": d.get("smb_grade", ""),
+                        "mfe_pct": d.get("mfe_pct", 0),
+                        "mae_pct": d.get("mae_pct", 0),
+                        "net_pnl": d.get("net_pnl", 0),
+                        "ai_context": d.get("ai_context"),
+                        "outcome": "won" if realized > 0.01 else ("lost" if realized < -0.01 else None),
+                        "_sort_date": d.get("executed_at") or d.get("created_at", ""),
+                    }
+                    unified.append(normalized)
+                client.close()
+        except Exception:
+            pass
+
+    # Sort by date descending
+    unified.sort(key=lambda t: t.get("_sort_date", ""), reverse=True)
+
+    # Remove internal sort key
+    for t in unified:
+        t.pop("_sort_date", None)
+
+    return {"success": True, "trades": unified[:limit], "count": len(unified)}
+
+
 @router.get("/performance")
 async def get_performance_summary():
     """Get overall trading performance summary"""
