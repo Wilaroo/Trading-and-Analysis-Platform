@@ -29,6 +29,7 @@ import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
+import ChatBubbleOverlay from './ChatBubbleOverlay';
 import StatusDot from './StatusDot';
 import api, { safeGet, safePost } from '../utils/api';
 import { useWsData } from '../contexts/WebSocketDataContext';
@@ -3375,24 +3376,22 @@ const SentCom = ({ compact = false, embedded = false }) => {
             </div>
           </div>
 
-          {/* Full Width Neural Split: S.O.C. + Conversation */}
-          <div className="grid grid-cols-12 gap-0 rounded-2xl border border-white/10" style={{ height: '500px' }} data-testid="neural-split-container">
-            {/* Left: SentCom S.O.C. (Stream of Consciousness) - 40% */}
-            <div className="col-span-5 h-full overflow-hidden">
+          {/* Full Width S.O.C. with floating Chat Bubble Overlay */}
+          <div className="relative rounded-2xl border border-white/10 overflow-hidden" style={{ height: '500px' }} data-testid="neural-split-container">
+            {/* SOC takes 100% */}
+            <div className="h-full overflow-hidden">
               <StreamOfConsciousness />
             </div>
             
-            {/* Right: Conversation Panel - 60% */}
-            <div className="col-span-7 border-l border-white/10 h-full overflow-hidden">
-              <ConversationPanel
-                messages={chatOnlyMessages}
-                onSendMessage={handleChat}
-                onQuickAction={handleQuickAction}
-                onCheckTrade={handleCheckTrade}
-                loading={chatLoading}
-                quickActionLoading={quickActionLoading}
-              />
-            </div>
+            {/* Floating Chat Bubble Overlay */}
+            <ChatBubbleOverlay
+              messages={chatOnlyMessages}
+              onSendMessage={handleChat}
+              onQuickAction={handleQuickAction}
+              onCheckTrade={handleCheckTrade}
+              loading={chatLoading}
+              quickActionLoading={quickActionLoading}
+            />
           </div>
           
           {/* Stop Fix Panel - Shows when risky stops detected */}
