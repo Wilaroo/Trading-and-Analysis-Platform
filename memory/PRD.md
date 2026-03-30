@@ -619,15 +619,26 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Frontend: "Enrich with AI" (Zap icon) button on open trades without AI context
 - Frontend: AI Learning Loop stats panel shows when journal outcomes exist
 
-### Key Files Updated
-- `/app/backend/services/trade_journal.py` - `_feed_learning_loop()`, `enrich_trade_with_ai()` (NEW methods)
-- `/app/backend/routers/trades.py` - `POST /{id}/enrich-ai`, `GET /ai/learning-stats` (NEW endpoints)
-- `/app/frontend/src/pages/TradeJournalPage.js` - `AIContextBadge`, `onEnrichAI`, AI stats panel (NEW components)
+### Phase 3: Unified Trade View (**DONE** — Mar 30, 2026)
+- New `GET /api/trades/unified` endpoint merges journal trades + bot trades from MongoDB `bot_trades` collection
+- Source filter: `?source=manual` or `?source=bot` or all
+- Status filter: `?status=open` or `?status=closed`
+- Bot trades normalized to same schema as journal trades with extra fields: `quality_grade`, `trade_style`, `close_reason`, `smb_grade`, `mfe_pct`, `mae_pct`
+- Frontend: Source filter toggle (All Sources / Manual / Bot) in Trade Log tab
+- Frontend: Bot trades display extra badges (grade, style, close reason, MFE/MAE)
+- Frontend: Bot trades are read-only (no close/delete/enrich buttons)
+- 116 total trades visible (5 manual + 95 bot + 16 older manual)
+
+### Key Files Updated (Phase 3)
+- `/app/backend/routers/trades.py` - `GET /unified` endpoint (reads bot_trades directly from MongoDB)
+- `/app/frontend/src/pages/TradeJournalPage.js` - `sourceFilter` state, unified data loading, bot-aware TradeRow
+
+## Saved Enhancement Ideas
+- **Trade Review AI Annotation**: After closing a trade, the AI automatically annotates what it would have done differently (e.g., "Gate said REDUCE but trade won +$300 — Gate was too conservative in TRENDING context"). Accelerates learning feedback loop and Gate calibration.
 
 ## Prioritized Backlog
 
 ### P0 (Next)
-- Phase 3: Unified Trade View — Merge bot trades into main Trade Log with source indicator
 - Phase 4: AI-Enhanced Performance Dashboard — AI accuracy per strategy, gate stats, learning insights
 
 ### P1
