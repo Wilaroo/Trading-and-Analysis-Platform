@@ -6,7 +6,6 @@ import MarketRegimeWidget from '../MarketRegimeWidget';
 import NewDashboard from '../NewDashboard';
 import BriefMeModal from '../BriefMeModal';
 import SentCom from '../SentCom';
-import JobManager from '../JobManager';
 import { useTickerModal } from '../../hooks/useTickerModal';
 import api, { safeGet, safePost } from '../../utils/api';
 
@@ -161,9 +160,6 @@ const AICoachTab = ({
               onNavigateToHub={handleNavigateToHub}
             />
             
-            {/* Background Jobs - Data Collection & Backtesting */}
-            <JobManager compact={true} />
-            
             {/* Market Regime Widget */}
             <MarketRegimeWidget 
               className="h-full"
@@ -204,9 +200,6 @@ const AICoachTab = ({
           <LearningInsightsWidget 
             onNavigateToHub={handleNavigateToHub}
           />
-          
-          {/* Background Jobs - Data Collection & Backtesting */}
-          <JobManager compact={true} />
           
           {/* Scanner & Watchlist - Compact mode (skip redundant MarketIntel) */}
           <RightSidebar 

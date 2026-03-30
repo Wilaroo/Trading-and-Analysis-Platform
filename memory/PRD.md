@@ -665,8 +665,8 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ## Prioritized Backlog
 
-### P0 (Next)
-- Phase 4: AI-Enhanced Performance Dashboard — AI accuracy per strategy, gate stats, learning insights
+### P0 (Completed)
+- Phase 4: AI-Enhanced Performance Dashboard — AI accuracy per strategy, gate stats, learning insights (**DONE** — Mar 30, 2026)
 
 ### P1
 - Twitter/X Social Stream Widget for Command Center
@@ -676,6 +676,19 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Confidence Gate Tuner UI (after 50-100 live trades accumulated)
 - Smart Templates based on historical AI performance
 - Post-Development Local DB Migration to NVMe
+
+### Phase 4: AI-Enhanced Performance Dashboard (**DONE** — Mar 30, 2026)
+- New `GET /api/trades/ai/strategy-insights` endpoint: per-strategy win rate, gate stats (GO/REDUCE/SKIP distribution), edge trend (improving/stable/declining)
+- Enriched `PerformanceMatrix` component with `aiInsights` prop rendering AI Performance by Strategy section
+- Strategy insight cards with gate decision distribution bar and edge trend indicator
+- AI Learning Loop panel shows journal-sourced outcomes and Confidence Gate accuracy
+- All endpoints converted to sync `def` to avoid event loop blocking in container
+
+### UI Cleanup: Removed Background Job Widget from Command Center (Mar 30, 2026)
+- Removed `JobManager` widget from AICoachTab's right sidebar (both new + classic layouts)
+- Background job info remains accessible in NIA tab via DataCollectionPanel
+- Frees up Command Center real estate for trading-relevant widgets
+
 
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
