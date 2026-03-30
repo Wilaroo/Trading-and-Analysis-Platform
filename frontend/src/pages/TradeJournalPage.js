@@ -20,15 +20,224 @@ import {
   Award,
   AlertTriangle,
   ChevronDown,
+  ChevronUp,
   FileText,
   Zap,
   Map,
   Briefcase,
-  Filter
+  Filter,
+  Camera,
+  Image,
+  Clock,
+  MessageSquare
 } from 'lucide-react';
-import api from '../utils/api';
+import api, { safeGet } from '../utils/api';
 import { useAppState } from '../contexts/AppStateContext';
 import { PlaybookTab, DRCTab, GamePlanTab, WeeklyReportTab } from '../components/Journal';
+
+// ─── Trade Snapshot Viewer ────────────────────────────────────────
+const ANNOTATION_COLORS = {
+  entry: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  exit: { bg: 'bg-white/5', border: 'border-white/10', text: 'text-white', dot: 'bg-white' },
+  scale_out: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-400' },
+  stop_adjust: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-400' },
+  gate_decision: { bg: 'bg-violet-500/10', border: 'border-violet-500/30', text: 'text-violet-400', dot: 'bg-violet-400' },
+};
+
+const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
+  const [snapshot, setSnapshot] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const [activeAnnotation, setActiveAnnotation] = useState(null);
+
+  const fetchSnapshot = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await safeGet(`/api/trades/snapshots/${tradeId}?source=${source}`);
+      if (data?.success && data.snapshot) {
+        setSnapshot(data.snapshot);
+      } else {
+        setSnapshot(null);
+      }
+    } catch (err) {
+      setError('Failed to load snapshot');
+    } finally {
+      setLoading(false);
+    }
+  }, [tradeId, source]);
+
+  const generateSnapshot = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await api.post(`/api/trades/snapshots/${tradeId}/generate?source=${source}`);
+      if (res.data?.success) {
+        await fetchSnapshot();
+      } else {
+        setError(res.data?.error || 'Generation failed');
+      }
+    } catch (err) {
+      setError('Failed to generate snapshot');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSnapshot();
+  }, [fetchSnapshot]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-zinc-500 text-sm">
+        <RefreshCw className="w-4 h-4 animate-spin" />
+        Loading snapshot...
+      </div>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <div className="flex items-center justify-between py-3 px-4 bg-white/5 rounded-lg border border-dashed border-white/10">
+        <div className="flex items-center gap-2 text-zinc-500 text-sm">
+          <Camera className="w-4 h-4" />
+          <span>No chart snapshot yet</span>
+        </div>
+        <button
+          onClick={generateSnapshot}
+          disabled={generating}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            generating
+              ? 'bg-white/5 text-zinc-500 cursor-wait'
+              : 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 border border-cyan-500/30'
+          }`}
+          data-testid={`generate-snapshot-${tradeId}`}
+        >
+          {generating ? (
+            <>
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              <Camera className="w-3 h-3" />
+              Generate Snapshot
+            </>
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  const annotations = snapshot.annotations || [];
+
+  return (
+    <div className="space-y-3" data-testid={`snapshot-viewer-${tradeId}`}>
+      {/* Chart Image */}
+      {snapshot.chart_image && (
+        <div className="relative rounded-lg overflow-hidden border border-white/10 bg-[#0a0a0a]">
+          <img
+            src={`data:image/png;base64,${snapshot.chart_image}`}
+            alt={`${snapshot.symbol} trade chart`}
+            className="w-full h-auto"
+            data-testid={`snapshot-chart-${tradeId}`}
+          />
+          {/* Chart metadata overlay */}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
+            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+              <span>{snapshot.timeframe} chart</span>
+              <span>{snapshot.bars_count > 0 ? `${snapshot.bars_count} bars` : 'Entry/Exit view'}</span>
+              <span>Generated {new Date(snapshot.generated_at).toLocaleDateString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Decision Timeline */}
+      {annotations.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-zinc-400 font-medium px-1">
+            <MessageSquare className="w-3 h-3" />
+            AI Decision Timeline
+          </div>
+          <div className="space-y-1">
+            {annotations.map((ann, i) => {
+              const style = ANNOTATION_COLORS[ann.type] || ANNOTATION_COLORS.entry;
+              const isActive = activeAnnotation === i;
+
+              return (
+                <div
+                  key={i}
+                  className={`rounded-lg border transition-all cursor-pointer ${style.bg} ${style.border} ${
+                    isActive ? 'ring-1 ring-white/20' : ''
+                  }`}
+                  onClick={() => setActiveAnnotation(isActive ? null : i)}
+                  data-testid={`annotation-${ann.type}-${i}`}
+                >
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
+                    <span className={`text-xs font-bold ${style.text}`}>{ann.label}</span>
+                    {ann.price > 0 && (
+                      <span className="text-xs font-mono text-zinc-400">${ann.price?.toFixed(2)}</span>
+                    )}
+                    {ann.time && (
+                      <span className="text-[10px] text-zinc-500 ml-auto flex items-center gap-1">
+                        <Clock className="w-2.5 h-2.5" />
+                        {new Date(ann.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                    {ann.reasons?.length > 0 && (
+                      <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${isActive ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
+
+                  {/* Expanded reasons */}
+                  <AnimatePresence>
+                    {isActive && ann.reasons?.length > 0 && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-3 pb-2 pt-0.5 space-y-0.5 border-t border-white/5">
+                          {ann.reasons.map((reason, ri) => (
+                            <p key={ri} className="text-[11px] text-zinc-400 leading-relaxed pl-4">
+                              {reason}
+                            </p>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate button */}
+      <div className="flex justify-end">
+        <button
+          onClick={generateSnapshot}
+          disabled={generating}
+          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          data-testid={`regenerate-snapshot-${tradeId}`}
+        >
+          <RefreshCw className={`w-2.5 h-2.5 ${generating ? 'animate-spin' : ''}`} />
+          {generating ? 'Regenerating...' : 'Regenerate'}
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-400 px-1">{error}</p>
+      )}
+    </div>
+  );
+};
 
 const Card = ({ children, className = '', hover = true }) => (
   <div className={`bg-paper rounded-lg p-4 border border-white/10 ${
@@ -150,6 +359,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
   const [showNotesInput, setShowNotesInput] = useState(false);
   const [localNotes, setLocalNotes] = useState(trade.notes || '');
   const [enriching, setEnriching] = useState(false);
+  const [showSnapshot, setShowSnapshot] = useState(false);
   
   const handleSaveNotes = () => {
     onUpdateNotes(trade.id, localNotes);
@@ -337,6 +547,19 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
           )}
           
           <div className="flex items-center gap-2">
+            {/* Chart Snapshot toggle - available for all closed trades */}
+            {!isOpen && (
+              <button
+                onClick={() => setShowSnapshot(!showSnapshot)}
+                className={`p-2 rounded-lg transition-colors ${
+                  showSnapshot ? 'text-cyan-400 bg-cyan-500/20' : 'text-zinc-400 hover:bg-white/10'
+                }`}
+                title={showSnapshot ? 'Hide Chart Snapshot' : 'View Chart Snapshot'}
+                data-testid={`toggle-snapshot-${trade.id}`}
+              >
+                <Camera className="w-4 h-4" />
+              </button>
+            )}
             {isOpen && trade.source !== 'bot' && (
               <>
                 <button
@@ -389,6 +612,26 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
           </div>
         </div>
       </div>
+      
+      {/* Chart Snapshot Viewer - Expandable */}
+      <AnimatePresence>
+        {showSnapshot && !isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="overflow-hidden border-t border-white/5"
+          >
+            <div className="p-4 bg-[#0a0a0a]/50">
+              <TradeSnapshotViewer
+                tradeId={trade.id}
+                source={trade.source || 'manual'}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

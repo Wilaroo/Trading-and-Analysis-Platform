@@ -104,6 +104,7 @@ from routers.system_router import router as system_router, init_system_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from routers.ai_training import router as ai_training_router
 from routers.short_data import router as short_data_router
+from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.focus_mode_manager import focus_mode_manager
@@ -230,6 +231,15 @@ if not strategy_service.is_seeded():
 init_notification_service(notification_service)
 init_market_context_service(market_context_service)
 init_trade_journal_service(trade_journal_service)
+
+# Trade Snapshot Service
+from services.trade_snapshot_service import TradeSnapshotService
+trade_snapshot_service = TradeSnapshotService(db)
+init_snapshot_service(trade_snapshot_service)
+
+# Wire snapshot service into trade journal for auto-generation on manual trade close
+trade_journal_service._snapshot_service = trade_snapshot_service
+
 init_catalyst_service(catalyst_scoring_service, stock_service)
 init_trading_rules(trading_rules_engine)
 init_ib_service(ib_service)
@@ -438,6 +448,7 @@ app.include_router(learning_connectors_router)  # Learning Connectors - Data flo
 app.include_router(ib_collector_router)  # IB Historical Data Collector
 app.include_router(ai_training_router)  # AI Bulk Training Pipeline
 app.include_router(short_data_router)  # Short Interest Data (IB + FINRA)
+app.include_router(trade_snapshots_router)  # Trade Chart Snapshots with AI Annotations
 app.include_router(data_storage_router)  # Data Storage Management
 app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
@@ -612,7 +623,9 @@ print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/b
 
 # Wire Trade Journal to Trading Bot for auto-recording
 trading_bot.set_trade_journal(trade_journal_service)
+trading_bot._snapshot_service = trade_snapshot_service
 print("  - Trade Journal: Auto-recording enabled for bot trades")
+print("  - Trade Snapshots: Auto-generation enabled for closed trades")
 
 # ===================== AI CONFIDENCE GATE =====================
 from services.ai_modules.confidence_gate import init_confidence_gate

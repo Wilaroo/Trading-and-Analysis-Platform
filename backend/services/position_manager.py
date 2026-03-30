@@ -456,6 +456,16 @@ class PositionManager:
             # Log to regime performance tracking
             await bot._log_trade_to_regime_performance(trade)
 
+            # Auto-generate chart snapshot with AI annotations
+            try:
+                from services.trade_snapshot_service import TradeSnapshotService
+                snapshot_svc = getattr(bot, '_snapshot_service', None)
+                if snapshot_svc:
+                    asyncio.create_task(snapshot_svc.generate_snapshot(trade.id, "bot"))
+                    logger.info(f"Snapshot generation triggered for {trade.symbol} ({trade.id})")
+            except Exception as e:
+                logger.warning(f"Failed to trigger snapshot generation: {e}")
+
             logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
             return True
 

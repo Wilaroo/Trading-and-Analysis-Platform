@@ -147,6 +147,15 @@ class TradeJournalService:
         # Feed AI Learning Loop (write to trade_outcomes)
         await self._feed_learning_loop(trade, exit_price, pnl, pnl_percent, outcome, now)
         
+        # Auto-generate chart snapshot with AI annotations
+        try:
+            if hasattr(self, '_snapshot_service') and self._snapshot_service:
+                import asyncio
+                asyncio.create_task(self._snapshot_service.generate_snapshot(trade_id, "manual"))
+                logger.info(f"Snapshot generation triggered for manual trade {trade_id}")
+        except Exception as e:
+            logger.warning(f"Failed to trigger snapshot for manual trade: {e}")
+        
         return {**{k: v for k, v in trade.items() if k != "_id"}, **update_data, "id": trade_id}
     
     async def _update_strategy_performance(
