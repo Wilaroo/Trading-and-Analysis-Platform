@@ -394,7 +394,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
 };
 
 // Performance Matrix Component
-const PerformanceMatrix = ({ matrix }) => {
+const PerformanceMatrix = ({ matrix, aiInsights }) => {
   if (!matrix || !matrix.top_combinations || matrix.top_combinations.length === 0) {
     return (
       <div className="text-center py-8 text-zinc-500">
@@ -412,34 +412,69 @@ const PerformanceMatrix = ({ matrix }) => {
         Best Strategy-Context Combinations
       </h3>
       <div className="space-y-2">
-        {matrix.top_combinations.slice(0, 5).map((combo, idx) => (
-          <div key={idx} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
-            <div className="flex items-center gap-3">
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                idx === 0 ? 'bg-yellow-500 text-black' :
-                idx === 1 ? 'bg-zinc-400 text-black' :
-                idx === 2 ? 'bg-amber-700 text-white' :
-                'bg-zinc-700 text-white'
-              }`}>
-                {idx + 1}
-              </span>
-              <div>
-                <span className="font-medium">{combo.strategy}</span>
-                <span className="text-zinc-500 mx-2">in</span>
-                <ContextBadge context={combo.context} />
+        {matrix.top_combinations.slice(0, 5).map((combo, idx) => {
+          const stratInsight = aiInsights?.[combo.strategy];
+          const edgeTrend = stratInsight?.edge_trend;
+          return (
+            <div key={idx} className="bg-white/5 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                    idx === 0 ? 'bg-yellow-500 text-black' :
+                    idx === 1 ? 'bg-zinc-400 text-black' :
+                    idx === 2 ? 'bg-amber-700 text-white' :
+                    'bg-zinc-700 text-white'
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <span className="font-medium">{combo.strategy}</span>
+                    <span className="text-zinc-500 mx-2">in</span>
+                    <ContextBadge context={combo.context} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-sm text-green-400">{combo.win_rate}% win</p>
+                    <p className="text-xs text-zinc-500">{combo.trades} trades</p>
+                  </div>
+                  <div className={`text-right ${combo.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {combo.avg_pnl_percent >= 0 ? '+' : ''}{combo.avg_pnl_percent?.toFixed(1)}%
+                  </div>
+                </div>
               </div>
+              {/* AI Metrics Row */}
+              {(combo.ai_win_rate || combo.gate_go > 0 || edgeTrend) && (
+                <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5 flex-wrap">
+                  {combo.ai_win_rate > 0 && (
+                    <span className="text-[10px] flex items-center gap-1 text-violet-400">
+                      <Zap className="w-3 h-3" />
+                      AI WR: {combo.ai_win_rate}%
+                    </span>
+                  )}
+                  {(combo.gate_go > 0 || combo.gate_reduce > 0) && (
+                    <span className="text-[10px] text-zinc-400">
+                      Gate: <span className="text-green-400">{combo.gate_go || 0} GO</span>
+                      {combo.gate_reduce > 0 && <span className="text-amber-400 ml-1">{combo.gate_reduce} RED</span>}
+                    </span>
+                  )}
+                  {edgeTrend?.trend && (
+                    <span className={`text-[10px] flex items-center gap-1 ${
+                      edgeTrend.trend === 'improving' ? 'text-green-400' :
+                      edgeTrend.trend === 'declining' ? 'text-red-400' :
+                      'text-zinc-500'
+                    }`}>
+                      {edgeTrend.trend === 'improving' ? <TrendingUp className="w-3 h-3" /> :
+                       edgeTrend.trend === 'declining' ? <TrendingDown className="w-3 h-3" /> :
+                       <Activity className="w-3 h-3" />}
+                      Edge: {edgeTrend.trend} ({edgeTrend.delta > 0 ? '+' : ''}{edgeTrend.delta}%)
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-sm text-green-400">{combo.win_rate}% win</p>
-                <p className="text-xs text-zinc-500">{combo.trades} trades</p>
-              </div>
-              <div className={`text-right ${combo.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {combo.avg_pnl_percent >= 0 ? '+' : ''}{combo.avg_pnl_percent?.toFixed(1)}%
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       
       {matrix.worst_combinations && matrix.worst_combinations.length > 0 && (
@@ -449,19 +484,108 @@ const PerformanceMatrix = ({ matrix }) => {
             Avoid These Combinations
           </h3>
           <div className="space-y-2">
-            {matrix.worst_combinations.slice(0, 3).map((combo, idx) => (
-              <div key={idx} className="flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-lg p-3">
-                <div className="flex items-center gap-3">
-                  <span className="font-medium">{combo.strategy}</span>
-                  <span className="text-zinc-500">in</span>
-                  <ContextBadge context={combo.context} />
+            {matrix.worst_combinations.slice(0, 3).map((combo, idx) => {
+              const stratInsight = aiInsights?.[combo.strategy];
+              const edgeTrend = stratInsight?.edge_trend;
+              return (
+                <div key={idx} className="bg-red-500/5 border border-red-500/20 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{combo.strategy}</span>
+                      <span className="text-zinc-500">in</span>
+                      <ContextBadge context={combo.context} />
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <p className="text-sm text-red-400">{combo.win_rate}% win</p>
+                      <p className={`${combo.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {combo.avg_pnl_percent >= 0 ? '+' : ''}{combo.avg_pnl_percent?.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                  {edgeTrend?.trend && (
+                    <div className="mt-2 pt-2 border-t border-red-500/10">
+                      <span className={`text-[10px] flex items-center gap-1 ${
+                        edgeTrend.trend === 'declining' ? 'text-red-400' : 'text-zinc-500'
+                      }`}>
+                        {edgeTrend.trend === 'declining' ? <TrendingDown className="w-3 h-3" /> : <Activity className="w-3 h-3" />}
+                        Edge: {edgeTrend.trend} ({edgeTrend.delta > 0 ? '+' : ''}{edgeTrend.delta}%)
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-4">
-                  <p className="text-sm text-red-400">{combo.win_rate}% win</p>
-                  <p className={`${combo.avg_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {combo.avg_pnl_percent >= 0 ? '+' : ''}{combo.avg_pnl_percent?.toFixed(1)}%
-                  </p>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Per-Strategy AI Insights */}
+      {aiInsights && Object.keys(aiInsights).length > 0 && (
+        <>
+          <h3 className="font-semibold flex items-center gap-2 mt-6">
+            <Zap className="w-5 h-5 text-violet-400" />
+            AI Performance by Strategy
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Object.entries(aiInsights).filter(([_, v]) => v.total_trades >= 2).sort((a, b) => b[1].total_trades - a[1].total_trades).map(([strategy, data]) => (
+              <div key={strategy} className="bg-white/5 rounded-lg p-3 border border-white/5" data-testid={`ai-strategy-${strategy}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm">{strategy}</span>
+                  <span className={`text-sm font-bold ${data.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+                    {data.win_rate}%
+                  </span>
                 </div>
+                <div className="grid grid-cols-3 gap-2 mb-2 text-center">
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase">Trades</p>
+                    <p className="text-xs font-bold text-white">{data.total_trades}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase">W/L</p>
+                    <p className="text-xs"><span className="text-green-400">{data.wins}</span>/<span className="text-red-400">{data.losses}</span></p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase">Avg P&L</p>
+                    <p className={`text-xs font-bold ${data.avg_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      ${data.avg_pnl?.toFixed(0)}
+                    </p>
+                  </div>
+                </div>
+                {/* Gate distribution bar */}
+                {data.gate_stats?.total > 0 && (
+                  <div className="mb-2">
+                    <p className="text-[9px] text-zinc-600 uppercase mb-1">Gate Decisions</p>
+                    <div className="flex h-2 rounded-full overflow-hidden bg-zinc-800">
+                      {data.gate_stats.GO > 0 && (
+                        <div className="bg-green-500 h-full" style={{ width: `${(data.gate_stats.GO / data.gate_stats.total * 100)}%` }} title={`GO: ${data.gate_stats.GO}`} />
+                      )}
+                      {data.gate_stats.REDUCE > 0 && (
+                        <div className="bg-amber-500 h-full" style={{ width: `${(data.gate_stats.REDUCE / data.gate_stats.total * 100)}%` }} title={`REDUCE: ${data.gate_stats.REDUCE}`} />
+                      )}
+                      {data.gate_stats.SKIP > 0 && (
+                        <div className="bg-red-500 h-full" style={{ width: `${(data.gate_stats.SKIP / data.gate_stats.total * 100)}%` }} title={`SKIP: ${data.gate_stats.SKIP}`} />
+                      )}
+                    </div>
+                    <div className="flex justify-between mt-0.5">
+                      <span className="text-[8px] text-green-400">{data.gate_stats.GO || 0} GO</span>
+                      <span className="text-[8px] text-amber-400">{data.gate_stats.REDUCE || 0} RED</span>
+                      <span className="text-[8px] text-red-400">{data.gate_stats.SKIP || 0} SKIP</span>
+                    </div>
+                  </div>
+                )}
+                {/* Edge trend */}
+                {data.edge_trend?.trend && (
+                  <div className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-md ${
+                    data.edge_trend.trend === 'improving' ? 'bg-green-500/10 text-green-400' :
+                    data.edge_trend.trend === 'declining' ? 'bg-red-500/10 text-red-400' :
+                    'bg-zinc-500/10 text-zinc-400'
+                  }`}>
+                    {data.edge_trend.trend === 'improving' ? <TrendingUp className="w-3 h-3" /> :
+                     data.edge_trend.trend === 'declining' ? <TrendingDown className="w-3 h-3" /> :
+                     <Activity className="w-3 h-3" />}
+                    Edge {data.edge_trend.trend}: {data.edge_trend.recent_win_rate}% recent vs {data.edge_trend.older_win_rate}% older
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -763,6 +887,7 @@ const TradeJournalPage = () => {
   const [closePrice, setClosePrice] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
   const [aiStats, setAiStats] = useState(null);
+  const [aiInsights, setAiInsights] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -771,12 +896,13 @@ const TradeJournalPage = () => {
       if (filter !== 'all') params.status = filter;
       if (sourceFilter !== 'all') params.source = sourceFilter;
 
-      const [tradesRes, perfRes, matrixRes, templatesRes, aiStatsRes] = await Promise.all([
+      const [tradesRes, perfRes, matrixRes, templatesRes, aiStatsRes, aiInsightsRes] = await Promise.all([
         api.get('/api/trades/unified', { params }),
         api.get('/api/trades/performance'),
         api.get('/api/trades/performance/matrix'),
         api.get('/api/trades/templates/list'),
-        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } }))
+        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } })),
+        api.get('/api/trades/ai/strategy-insights').catch(() => ({ data: { insights: {} } }))
       ]);
       
       const tradesData = tradesRes.data.trades || [];
@@ -788,6 +914,7 @@ const TradeJournalPage = () => {
       setMatrix(matrixData);
       setTemplates(templatesRes.data.templates || []);
       setAiStats(aiStatsRes.data?.stats || null);
+      setAiInsights(aiInsightsRes.data?.insights || null);
       
       // Cache in AppState for persistence across tab switches
       setAppData('journalTrades', tradesData);
@@ -1078,7 +1205,7 @@ const TradeJournalPage = () => {
 
       {/* Strategy-Context Matrix */}
       <Card hover={false}>
-        <PerformanceMatrix matrix={matrix} />
+        <PerformanceMatrix matrix={matrix} aiInsights={aiInsights} />
       </Card>
 
       {/* Filter Tabs */}

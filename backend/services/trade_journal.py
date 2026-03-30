@@ -535,18 +535,18 @@ class TradeJournalService:
     
     async def get_strategy_context_matrix(self) -> Dict:
         """
-        Get a matrix showing strategy performance across different market contexts
-        This helps identify which strategies work best in which contexts
+        Get a matrix showing strategy performance across different market contexts,
+        enriched with AI metrics (gate accuracy, prediction accuracy, edge trend).
         """
         perfs = list(self.performance_col.find({}, {"_id": 0}))
         
-        # Build matrix
+        # Build base matrix from strategy_performance collection
         matrix = {}
         strategies = set()
         contexts = set()
         
         for perf in perfs:
-            strategy_id = perf["strategy_id"]
+            strategy_id = perf.get("strategy_id", "unknown")
             context = perf.get("market_context", "ALL")
             
             strategies.add(strategy_id)
@@ -562,18 +562,77 @@ class TradeJournalService:
                 "total_pnl": perf.get("total_pnl", 0)
             }
         
+        # Enrich with AI metrics from trade_outcomes
+        ai_metrics_by_strategy = {}
+        try:
+            from services.learning_loop_service import get_learning_loop_service
+            learning = get_learning_loop_service()
+            if learning._trade_outcomes_col is not None:
+                pipeline = [
+                    {"$group": {
+                        "_id": {
+                            "setup": "$setup_type",
+                            "regime": "$context.market_regime"
+                        },
+                        "total": {"$sum": 1},
+                        "wins": {"$sum": {"$cond": [{"$eq": ["$outcome", "won"]}, 1, 0]}},
+                        "losses": {"$sum": {"$cond": [{"$eq": ["$outcome", "lost"]}, 1, 0]}},
+                        "total_pnl": {"$sum": "$pnl"},
+                        "avg_pnl": {"$avg": "$pnl"},
+                        "gate_go": {"$sum": {"$cond": [{"$eq": ["$context.confidence_gate.decision", "GO"]}, 1, 0]}},
+                        "gate_reduce": {"$sum": {"$cond": [{"$eq": ["$context.confidence_gate.decision", "REDUCE"]}, 1, 0]}},
+                        "gate_skip": {"$sum": {"$cond": [{"$eq": ["$context.confidence_gate.decision", "SKIP"]}, 1, 0]}},
+                    }}
+                ]
+                ai_results = list(learning._trade_outcomes_col.aggregate(pipeline))
+                for r in ai_results:
+                    setup = r["_id"].get("setup", "")
+                    regime = r["_id"].get("regime", "ALL")
+                    if setup not in ai_metrics_by_strategy:
+                        ai_metrics_by_strategy[setup] = {}
+                    total = r["total"]
+                    wins = r["wins"]
+                    ai_metrics_by_strategy[setup][regime] = {
+                        "ai_trades": total,
+                        "ai_win_rate": round((wins / total * 100), 1) if total > 0 else 0,
+                        "ai_avg_pnl": round(r["avg_pnl"], 2) if r["avg_pnl"] else 0,
+                        "gate_go": r.get("gate_go", 0),
+                        "gate_reduce": r.get("gate_reduce", 0),
+                        "gate_skip": r.get("gate_skip", 0),
+                    }
+        except Exception as e:
+            logger.debug(f"AI metrics enrichment skipped: {e}")
+        
+        # Merge AI metrics into matrix
+        for strategy, ctx_data in matrix.items():
+            for context, metrics in ctx_data.items():
+                ai = ai_metrics_by_strategy.get(strategy, {}).get(context, {})
+                if ai:
+                    metrics["ai_trades"] = ai.get("ai_trades", 0)
+                    metrics["ai_win_rate"] = ai.get("ai_win_rate", 0)
+                    metrics["ai_avg_pnl"] = ai.get("ai_avg_pnl", 0)
+                    metrics["gate_go"] = ai.get("gate_go", 0)
+                    metrics["gate_reduce"] = ai.get("gate_reduce", 0)
+                    metrics["gate_skip"] = ai.get("gate_skip", 0)
+        
         # Find best strategy-context combinations
         best_combos = []
         for strategy, ctx_data in matrix.items():
             for context, metrics in ctx_data.items():
-                if metrics["total_trades"] >= 3:  # Minimum 3 trades for significance
-                    best_combos.append({
+                if metrics["total_trades"] >= 3:
+                    combo = {
                         "strategy": strategy,
                         "context": context,
                         "win_rate": metrics["win_rate"],
                         "avg_pnl_percent": metrics["avg_pnl_percent"],
-                        "trades": metrics["total_trades"]
-                    })
+                        "trades": metrics["total_trades"],
+                    }
+                    ai = ai_metrics_by_strategy.get(strategy, {}).get(context, {})
+                    if ai:
+                        combo["ai_win_rate"] = ai.get("ai_win_rate", 0)
+                        combo["gate_go"] = ai.get("gate_go", 0)
+                        combo["gate_reduce"] = ai.get("gate_reduce", 0)
+                    best_combos.append(combo)
         
         best_combos.sort(key=lambda x: (x["win_rate"], x["avg_pnl_percent"]), reverse=True)
         
@@ -582,7 +641,8 @@ class TradeJournalService:
             "strategies": sorted(list(strategies)),
             "contexts": sorted(list(contexts)),
             "top_combinations": best_combos[:10],
-            "worst_combinations": best_combos[-5:] if len(best_combos) > 5 else []
+            "worst_combinations": best_combos[-5:] if len(best_combos) > 5 else [],
+            "ai_strategy_metrics": ai_metrics_by_strategy,
         }
     
     # ==================== TRADE TEMPLATES ====================

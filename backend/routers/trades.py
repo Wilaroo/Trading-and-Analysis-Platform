@@ -121,23 +121,24 @@ async def get_open_trades():
 
 
 @router.get("/ai/learning-stats")
-async def get_ai_learning_stats():
+def get_ai_learning_stats():
     """
     Get AI learning loop stats derived from journal trades.
-    Shows how journal trades feed back into the AI.
+    Sync endpoint — FastAPI runs in thread pool automatically.
     """
-    if not trade_journal_service:
-        raise HTTPException(500, "Trade journal service not initialized")
-    
     try:
-        from services.learning_loop_service import get_learning_loop_service
-        learning = get_learning_loop_service()
-        
-        if learning._trade_outcomes_col is None:
+        import os
+        from pymongo import MongoClient
+        mongo_url = os.environ.get("MONGO_URL", "")
+        db_name = os.environ.get("DB_NAME", "sentcom")
+        if not mongo_url:
             return {"success": True, "stats": {"journal_outcomes": 0}}
-        
-        journal_count = learning._trade_outcomes_col.count_documents({"source": "trade_journal"})
-        
+
+        client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
+        db = client[db_name]
+
+        journal_count = db.trade_outcomes.count_documents({"source": "trade_journal"})
+
         pipeline = [
             {"$match": {"source": "trade_journal"}},
             {"$group": {
@@ -146,13 +147,13 @@ async def get_ai_learning_stats():
                 "total_pnl": {"$sum": "$pnl"},
             }}
         ]
-        outcome_stats = list(learning._trade_outcomes_col.aggregate(pipeline))
-        
+        outcome_stats = list(db.trade_outcomes.aggregate(pipeline))
+
         stats = {
             "journal_outcomes": journal_count,
             "outcomes": {r["_id"]: {"count": r["count"], "pnl": round(r["total_pnl"], 2)} for r in outcome_stats}
         }
-        
+
         try:
             from services.ai_modules.confidence_gate import get_confidence_gate
             gate = get_confidence_gate()
@@ -161,10 +162,112 @@ async def get_ai_learning_stats():
                 stats["confidence_gate_accuracy"] = gate_accuracy["decisions"]
         except Exception:
             pass
-        
+
+        client.close()
         return {"success": True, "stats": stats}
     except Exception as e:
         return {"success": True, "stats": {"journal_outcomes": 0, "error": str(e)}}
+
+
+@router.get("/ai/strategy-insights")
+def get_ai_strategy_insights():
+    """
+    Per-strategy AI performance breakdown.
+    Sync endpoint — FastAPI runs in thread pool automatically.
+    """
+    try:
+        import os
+        from pymongo import MongoClient
+        mongo_url = os.environ.get("MONGO_URL", "")
+        db_name = os.environ.get("DB_NAME", "sentcom")
+        if not mongo_url:
+            return {"success": True, "insights": {}}
+
+        client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
+        db = client[db_name]
+
+        pipeline = [
+            {"$group": {
+                "_id": "$setup_type",
+                "total": {"$sum": 1},
+                "wins": {"$sum": {"$cond": [{"$eq": ["$outcome", "won"]}, 1, 0]}},
+                "losses": {"$sum": {"$cond": [{"$eq": ["$outcome", "lost"]}, 1, 0]}},
+                "total_pnl": {"$sum": "$pnl"},
+                "avg_pnl": {"$avg": "$pnl"},
+                "journal_count": {"$sum": {"$cond": [{"$eq": ["$source", "trade_journal"]}, 1, 0]}},
+                "bot_count": {"$sum": {"$cond": [{"$ne": ["$source", "trade_journal"]}, 1, 0]}},
+            }}
+        ]
+        outcome_results = list(db.trade_outcomes.aggregate(pipeline))
+
+        gate_pipeline = [
+            {"$group": {
+                "_id": {"setup": "$setup_type", "decision": "$decision"},
+                "count": {"$sum": 1},
+            }}
+        ]
+        gate_results = list(db.confidence_gate_log.aggregate(gate_pipeline))
+
+        gate_by_strategy = {}
+        for g in gate_results:
+            setup = g["_id"].get("setup", "unknown")
+            decision = g["_id"].get("decision", "unknown")
+            # Guard against non-string keys from MongoDB
+            if not isinstance(setup, str):
+                setup = str(setup) if setup else "unknown"
+            if not isinstance(decision, str):
+                decision = str(decision) if decision else "unknown"
+            if setup not in gate_by_strategy:
+                gate_by_strategy[setup] = {"GO": 0, "REDUCE": 0, "SKIP": 0, "total": 0}
+            gate_by_strategy[setup][decision] = gate_by_strategy[setup].get(decision, 0) + g["count"]
+            gate_by_strategy[setup]["total"] += g["count"]
+
+        edge_trends = {}
+        for r in outcome_results:
+            setup = r["_id"]
+            if not isinstance(setup, str):
+                setup = str(setup) if setup else "unknown"
+            if r["total"] >= 6:
+                recent = list(db.trade_outcomes.find(
+                    {"setup_type": setup}, {"_id": 0, "outcome": 1}
+                ).sort("created_at", -1).limit(max(r["total"] // 2, 3)))
+                older = list(db.trade_outcomes.find(
+                    {"setup_type": setup}, {"_id": 0, "outcome": 1}
+                ).sort("created_at", 1).limit(max(r["total"] // 2, 3)))
+
+                recent_wr = sum(1 for t in recent if t.get("outcome") == "won") / len(recent) * 100 if recent else 0
+                older_wr = sum(1 for t in older if t.get("outcome") == "won") / len(older) * 100 if older else 0
+                edge_trends[setup] = {
+                    "recent_win_rate": round(recent_wr, 1),
+                    "older_win_rate": round(older_wr, 1),
+                    "trend": "improving" if recent_wr > older_wr + 5 else ("declining" if recent_wr < older_wr - 5 else "stable"),
+                    "delta": round(recent_wr - older_wr, 1),
+                }
+
+        insights = {}
+        for r in outcome_results:
+            setup = r["_id"] or "unknown"
+            if not isinstance(setup, str):
+                setup = str(setup) if setup else "unknown"
+            total = r["total"]
+            wins = r["wins"]
+            insights[setup] = {
+                "total_trades": total,
+                "wins": wins,
+                "losses": r["losses"],
+                "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
+                "total_pnl": round(r["total_pnl"], 2),
+                "avg_pnl": round(r["avg_pnl"], 2) if r["avg_pnl"] else 0,
+                "journal_trades": r.get("journal_count", 0),
+                "bot_trades": r.get("bot_count", 0),
+                "gate_stats": gate_by_strategy.get(setup, {}),
+                "edge_trend": edge_trends.get(setup, {}),
+            }
+
+        client.close()
+        return {"success": True, "insights": insights}
+    except Exception as e:
+        return {"success": True, "insights": {}, "error": str(e)}
 
 
 @router.get("/unified")
@@ -175,9 +278,9 @@ async def get_unified_trades(
 ):
     """
     Unified trade view: merges journal trades + bot trades into one sorted list.
-    Source filter: 'manual', 'bot', or None for all.
-    Reads bot trades directly from MongoDB (bot_trades collection) to avoid event loop blocking.
+    Runs bot trades query in thread pool to avoid blocking the event loop.
     """
+    import asyncio
     unified = []
 
     # 1. Journal trades (always include unless source=bot)
@@ -192,65 +295,67 @@ async def get_unified_trades(
             t["_sort_date"] = t.get("entry_date", "")
             unified.append(t)
 
-    # 2. Bot trades from MongoDB directly (avoids blocking the event loop)
+    # 2. Bot trades from MongoDB directly (in thread pool)
     if source != "manual":
-        try:
-            import os
-            from pymongo import MongoClient
-            mongo_url = os.environ.get("MONGO_URL", "")
-            db_name = os.environ.get("DB_NAME", "sentcom")
-            if mongo_url:
-                client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
-                db = client[db_name]
-                
-                query = {}
-                if status == "open":
-                    query["status"] = {"$in": ["open", "pending", "filled"]}
-                elif status == "closed":
-                    query["status"] = "closed"
-                
-                bot_docs = list(db.bot_trades.find(
-                    query, {"_id": 0}
-                ).sort("executed_at", -1).limit(limit))
-                
-                for d in bot_docs:
-                    target_prices = d.get("target_prices") or []
-                    realized = d.get("realized_pnl") or d.get("unrealized_pnl") or 0
-                    normalized = {
-                        "id": d.get("id", ""),
-                        "symbol": d.get("symbol", ""),
-                        "strategy_id": d.get("setup_type", ""),
-                        "strategy_name": d.get("setup_variant") or d.get("setup_type", ""),
-                        "market_context": d.get("market_regime", ""),
-                        "direction": d.get("direction", "long"),
-                        "entry_price": d.get("fill_price") or d.get("entry_price", 0),
-                        "exit_price": d.get("exit_price"),
-                        "shares": d.get("shares", 0),
-                        "stop_loss": d.get("stop_price"),
-                        "take_profit": target_prices[0] if target_prices else None,
-                        "status": d.get("status", "open"),
-                        "pnl": round(realized, 2),
-                        "pnl_percent": d.get("pnl_pct", 0),
-                        "source": "bot",
-                        "entry_date": d.get("executed_at") or d.get("created_at", ""),
-                        "exit_date": d.get("closed_at"),
-                        "notes": d.get("notes", ""),
-                        "close_reason": d.get("close_reason"),
-                        "trade_style": d.get("trade_style", ""),
-                        "quality_score": d.get("quality_score", 0),
-                        "quality_grade": d.get("quality_grade", ""),
-                        "smb_grade": d.get("smb_grade", ""),
-                        "mfe_pct": d.get("mfe_pct", 0),
-                        "mae_pct": d.get("mae_pct", 0),
-                        "net_pnl": d.get("net_pnl", 0),
-                        "ai_context": d.get("ai_context"),
-                        "outcome": "won" if realized > 0.01 else ("lost" if realized < -0.01 else None),
-                        "_sort_date": d.get("executed_at") or d.get("created_at", ""),
-                    }
-                    unified.append(normalized)
-                client.close()
-        except Exception:
-            pass
+        def _fetch_bot_trades():
+            bot_list = []
+            try:
+                import os
+                from pymongo import MongoClient
+                mongo_url = os.environ.get("MONGO_URL", "")
+                db_name = os.environ.get("DB_NAME", "sentcom")
+                if mongo_url:
+                    client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
+                    db = client[db_name]
+                    query = {}
+                    if status == "open":
+                        query["status"] = {"$in": ["open", "pending", "filled"]}
+                    elif status == "closed":
+                        query["status"] = "closed"
+                    bot_docs = list(db.bot_trades.find(
+                        query, {"_id": 0}
+                    ).sort("executed_at", -1).limit(limit))
+                    for d in bot_docs:
+                        target_prices = d.get("target_prices") or []
+                        realized = d.get("realized_pnl") or d.get("unrealized_pnl") or 0
+                        bot_list.append({
+                            "id": d.get("id", ""),
+                            "symbol": d.get("symbol", ""),
+                            "strategy_id": d.get("setup_type", ""),
+                            "strategy_name": d.get("setup_variant") or d.get("setup_type", ""),
+                            "market_context": d.get("market_regime", ""),
+                            "direction": d.get("direction", "long"),
+                            "entry_price": d.get("fill_price") or d.get("entry_price", 0),
+                            "exit_price": d.get("exit_price"),
+                            "shares": d.get("shares", 0),
+                            "stop_loss": d.get("stop_price"),
+                            "take_profit": target_prices[0] if target_prices else None,
+                            "status": d.get("status", "open"),
+                            "pnl": round(realized, 2),
+                            "pnl_percent": d.get("pnl_pct", 0),
+                            "source": "bot",
+                            "entry_date": d.get("executed_at") or d.get("created_at", ""),
+                            "exit_date": d.get("closed_at"),
+                            "notes": d.get("notes", ""),
+                            "close_reason": d.get("close_reason"),
+                            "trade_style": d.get("trade_style", ""),
+                            "quality_score": d.get("quality_score", 0),
+                            "quality_grade": d.get("quality_grade", ""),
+                            "smb_grade": d.get("smb_grade", ""),
+                            "mfe_pct": d.get("mfe_pct", 0),
+                            "mae_pct": d.get("mae_pct", 0),
+                            "net_pnl": d.get("net_pnl", 0),
+                            "ai_context": d.get("ai_context"),
+                            "outcome": "won" if realized > 0.01 else ("lost" if realized < -0.01 else None),
+                            "_sort_date": d.get("executed_at") or d.get("created_at", ""),
+                        })
+                    client.close()
+            except Exception:
+                pass
+            return bot_list
+
+        bot_trades = await asyncio.to_thread(_fetch_bot_trades)
+        unified.extend(bot_trades)
 
     # Sort by date descending
     unified.sort(key=lambda t: t.get("_sort_date", ""), reverse=True)
