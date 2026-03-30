@@ -668,6 +668,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 ### P0 (Completed)
 - Phase 4: AI-Enhanced Performance Dashboard — AI accuracy per strategy, gate stats, learning insights (**DONE** — Mar 30, 2026)
 
+### Trade Journal Tab Merge: IB Account → Trade Log (Mar 30, 2026)
+- Removed standalone "IB Account" tab from Trade Journal
+- Merged IB Account Summary (Net Liquidation, Buying Power, Daily P&L, Unrealized P&L) into top of Trade Log
+- Merged Current Positions table into Trade Log as collapsible `<details>` section
+- IB data loads non-blocking alongside trade data
+- Tab list now: Trade Log, Weekly Report, Playbooks, Daily Report Card, Game Plan
+
 ### P1
 - Twitter/X Social Stream Widget for Command Center
 - Auto-Optimize AI Settings (confidence threshold sweeping)

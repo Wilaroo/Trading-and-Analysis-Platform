@@ -1242,189 +1242,6 @@ const TemplateSelector = ({ templates, onSelect, selectedTemplate }) => {
 };
 
 // ===================== IB ACCOUNT HISTORY TAB =====================
-const IBAccountHistoryTab = () => {
-  const [positions, setPositions] = useState([]);
-  const [account, setAccount] = useState(null);
-  const [trades, setTrades] = useState([]);
-  const [botTrades, setBotTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, bot, ib, manual
-  
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Load IB account summary
-      const [accountRes, portfolioRes, botTradesRes, journalRes] = await Promise.all([
-        api.get('/api/ib/account/summary').catch(() => ({ data: {} })),
-        api.get('/api/portfolio').catch(() => ({ data: { positions: [] } })),
-        api.get('/api/trading-bot/trades').catch(() => ({ data: { trades: [] } })),
-        api.get('/api/journal/trades').catch(() => ({ data: [] }))
-      ]);
-      
-      setAccount(accountRes.data);
-      setPositions(portfolioRes.data.positions || []);
-      setBotTrades(botTradesRes.data.trades || []);
-      setTrades(journalRes.data || []);
-    } catch (err) {
-      console.error('Failed to load IB data:', err);
-    }
-    setLoading(false);
-  }, []);
-  
-  useEffect(() => { loadData(); }, [loadData]);
-  
-  // Combine and filter trades
-  const allTrades = [
-    ...botTrades.map(t => ({ ...t, source: 'bot' })),
-    ...trades.map(t => ({ ...t, source: 'journal' }))
-  ].sort((a, b) => new Date(b.entry_time || b.date) - new Date(a.entry_time || a.date));
-  
-  const filteredTrades = filter === 'all' ? allTrades : allTrades.filter(t => t.source === filter);
-  
-  return (
-    <div className="space-y-6">
-      {/* Account Summary */}
-      {account && account.net_liquidation > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <p className="text-xs text-zinc-500 uppercase">Net Liquidation</p>
-            <p className="text-2xl font-bold text-primary">${account.net_liquidation?.toLocaleString()}</p>
-            <p className="text-xs text-zinc-500">Account: {account.account_id}</p>
-          </Card>
-          <Card>
-            <p className="text-xs text-zinc-500 uppercase">Buying Power</p>
-            <p className="text-2xl font-bold text-blue-400">${account.buying_power?.toLocaleString()}</p>
-          </Card>
-          <Card>
-            <p className="text-xs text-zinc-500 uppercase">Daily P&L</p>
-            <p className={`text-2xl font-bold ${account.daily_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              ${account.daily_pnl?.toLocaleString() || '0.00'}
-            </p>
-            <p className={`text-xs ${account.daily_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {account.daily_pnl_percent >= 0 ? '+' : ''}{account.daily_pnl_percent?.toFixed(2)}%
-            </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-zinc-500 uppercase">Unrealized P&L</p>
-            <p className={`text-2xl font-bold ${account.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              ${account.unrealized_pnl?.toLocaleString() || '0.00'}
-            </p>
-          </Card>
-        </div>
-      )}
-      
-      {/* Current Positions */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold flex items-center gap-2">
-            <Briefcase className="w-5 h-5 text-primary" />
-            Current Positions ({positions.length})
-          </h3>
-          <button onClick={loadData} className="text-zinc-400 hover:text-white">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-        
-        {positions.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-zinc-500 border-b border-white/10">
-                <tr>
-                  <th className="text-left py-2">Symbol</th>
-                  <th className="text-right py-2">Shares</th>
-                  <th className="text-right py-2">Avg Cost</th>
-                  <th className="text-right py-2">Current</th>
-                  <th className="text-right py-2">Market Value</th>
-                  <th className="text-right py-2">P&L</th>
-                  <th className="text-right py-2">P&L %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((pos, idx) => {
-                  const pnl = pos.unrealized_pnl || pos.gain_loss || 0;
-                  const pnlPct = pos.gain_loss_percent || (pos.current_price && pos.avg_cost ? ((pos.current_price - pos.avg_cost) / pos.avg_cost * 100) : 0);
-                  return (
-                    <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-2 font-mono font-bold">{pos.symbol}</td>
-                      <td className="text-right py-2">{pos.shares?.toLocaleString()}</td>
-                      <td className="text-right py-2 font-mono">${pos.avg_cost?.toFixed(2)}</td>
-                      <td className="text-right py-2 font-mono">${pos.current_price?.toFixed(2) || '-'}</td>
-                      <td className="text-right py-2 font-mono">${pos.market_value?.toLocaleString() || '-'}</td>
-                      <td className={`text-right py-2 font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${pnl?.toLocaleString()}
-                      </td>
-                      <td className={`text-right py-2 ${pnlPct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {pnlPct >= 0 ? '+' : ''}{pnlPct?.toFixed(2)}%
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-zinc-500 text-center py-4">No positions</p>
-        )}
-      </Card>
-      
-      {/* Combined Trade History */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-primary" />
-            Trade History
-          </h3>
-          <div className="flex gap-1 bg-white/5 rounded-lg p-1">
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'bot', label: 'Bot' },
-              { id: 'journal', label: 'Manual' }
-            ].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={`px-3 py-1 text-xs rounded-md transition-all ${
-                  filter === f.id ? 'bg-primary text-black' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        
-        {filteredTrades.length > 0 ? (
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {filteredTrades.slice(0, 50).map((trade, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-all">
-                <div className="flex items-center gap-3">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    trade.source === 'bot' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {trade.source === 'bot' ? 'BOT' : 'MANUAL'}
-                  </span>
-                  <div>
-                    <p className="font-mono font-bold">{trade.symbol}</p>
-                    <p className="text-xs text-zinc-500">{new Date(trade.entry_time || trade.date).toLocaleDateString()}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={`font-mono ${(trade.pnl || trade.net_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    ${(trade.pnl || trade.net_pnl || 0).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-zinc-500">{trade.direction || trade.side}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-zinc-500 text-center py-4">No trades found</p>
-        )}
-      </Card>
-    </div>
-  );
-};
-
 // ===================== TRADE JOURNAL PAGE =====================
 const TradeJournalPage = () => {
   const { getData, setData: setAppData } = useAppState();
@@ -1460,6 +1277,8 @@ const TradeJournalPage = () => {
   const [closeNotes, setCloseNotes] = useState('');
   const [aiStats, setAiStats] = useState(null);
   const [aiInsights, setAiInsights] = useState(null);
+  const [ibAccount, setIbAccount] = useState(null);
+  const [ibPositions, setIbPositions] = useState([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1476,6 +1295,15 @@ const TradeJournalPage = () => {
         api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } })),
         api.get('/api/trades/ai/strategy-insights').catch(() => ({ data: { insights: {} } }))
       ]);
+
+      // Load IB account data in parallel (non-blocking)
+      Promise.all([
+        api.get('/api/ib/account/summary').catch(() => ({ data: null })),
+        api.get('/api/portfolio').catch(() => ({ data: { positions: [] } }))
+      ]).then(([acctRes, portRes]) => {
+        if (acctRes.data && acctRes.data.net_liquidation > 0) setIbAccount(acctRes.data);
+        setIbPositions(portRes.data?.positions || []);
+      });
       
       const tradesData = tradesRes.data.trades || [];
       const perfData = perfRes.data;
@@ -1639,7 +1467,6 @@ const TradeJournalPage = () => {
       <div className="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/10 w-fit overflow-x-auto">
         {[
           { id: 'trades', label: 'Trade Log', icon: BarChart3 },
-          { id: 'ib-history', label: 'IB Account', icon: Briefcase },
           { id: 'weekly', label: 'Weekly Report', icon: Calendar },
           { id: 'playbook', label: 'Playbooks', icon: BookOpen },
           { id: 'drc', label: 'Daily Report Card', icon: FileText },
@@ -1667,14 +1494,86 @@ const TradeJournalPage = () => {
       {activeTab === 'gameplan' && <GamePlanTab />}
       {activeTab === 'weekly' && <WeeklyReportTab />}
       
-      {/* IB Account History Tab */}
-      {activeTab === 'ib-history' && (
-        <IBAccountHistoryTab />
-      )}
-
       {/* Original Trade Log Content (only show when trades tab is active) */}
       {activeTab === 'trades' && (
         <>
+          {/* IB Account Summary — merged from IB Account tab */}
+          {ibAccount && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="ib-account-summary">
+              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Net Liquidation</p>
+                <p className="text-xl font-bold text-primary">${ibAccount.net_liquidation?.toLocaleString()}</p>
+                <p className="text-[10px] text-zinc-500">{ibAccount.account_id}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Buying Power</p>
+                <p className="text-xl font-bold text-blue-400">${ibAccount.buying_power?.toLocaleString()}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Daily P&L</p>
+                <p className={`text-xl font-bold ${(ibAccount.daily_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  ${ibAccount.daily_pnl?.toLocaleString() || '0.00'}
+                </p>
+                <p className={`text-[10px] ${(ibAccount.daily_pnl_percent || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {(ibAccount.daily_pnl_percent || 0) >= 0 ? '+' : ''}{ibAccount.daily_pnl_percent?.toFixed(2)}%
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Unrealized P&L</p>
+                <p className={`text-xl font-bold ${(ibAccount.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  ${ibAccount.unrealized_pnl?.toLocaleString() || '0.00'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Current Positions — collapsed by default */}
+          {ibPositions.length > 0 && (
+            <details className="group" data-testid="ib-positions-section">
+              <summary className="flex items-center gap-2 cursor-pointer text-sm font-medium text-zinc-400 hover:text-white transition-colors py-2">
+                <Briefcase className="w-4 h-4" />
+                <span>Open Positions ({ibPositions.length})</span>
+                <ChevronDown className="w-3.5 h-3.5 ml-auto transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="mt-2 overflow-x-auto rounded-lg border border-white/10 bg-white/5">
+                <table className="w-full text-sm">
+                  <thead className="text-[10px] text-zinc-500 uppercase border-b border-white/10">
+                    <tr>
+                      <th className="text-left px-3 py-2">Symbol</th>
+                      <th className="text-right px-3 py-2">Shares</th>
+                      <th className="text-right px-3 py-2">Avg Cost</th>
+                      <th className="text-right px-3 py-2">Current</th>
+                      <th className="text-right px-3 py-2">Value</th>
+                      <th className="text-right px-3 py-2">P&L</th>
+                      <th className="text-right px-3 py-2">P&L %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ibPositions.map((pos, idx) => {
+                      const positionPnl = pos.unrealized_pnl || pos.gain_loss || 0;
+                      const positionPnlPct = pos.gain_loss_percent || (pos.current_price && pos.avg_cost ? ((pos.current_price - pos.avg_cost) / pos.avg_cost * 100) : 0);
+                      return (
+                        <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
+                          <td className="px-3 py-2 font-mono font-bold text-white">{pos.symbol}</td>
+                          <td className="text-right px-3 py-2 text-zinc-300">{pos.shares?.toLocaleString()}</td>
+                          <td className="text-right px-3 py-2 font-mono text-zinc-400">${pos.avg_cost?.toFixed(2)}</td>
+                          <td className="text-right px-3 py-2 font-mono text-zinc-300">${pos.current_price?.toFixed(2) || '-'}</td>
+                          <td className="text-right px-3 py-2 font-mono text-zinc-400">${pos.market_value?.toLocaleString() || '-'}</td>
+                          <td className={`text-right px-3 py-2 font-mono ${positionPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            ${positionPnl?.toLocaleString()}
+                          </td>
+                          <td className={`text-right px-3 py-2 ${positionPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {positionPnlPct >= 0 ? '+' : ''}{positionPnlPct?.toFixed(2)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+
           {/* Performance Summary */}
           {performance && (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
