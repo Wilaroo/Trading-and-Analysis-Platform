@@ -67,7 +67,8 @@ class TradeSnapshotService:
         # 4. Fetch OHLCV bars for the chart
         symbol = trade.get("symbol", "")
         timeframe = self._select_chart_timeframe(trade, entry_time, exit_time)
-        bars = self._fetch_bars(symbol, timeframe, entry_time, exit_time)
+        bars = self._fetch_bars(symbol, timeframe, entry_time, exit_time, trade)
+        bars_synthetic = bars is not None and hasattr(bars, 'attrs') and bars.attrs.get('synthetic', False)
 
         # 5. Generate chart image
         chart_base64 = self._render_chart(
@@ -99,6 +100,7 @@ class TradeSnapshotService:
             "chart_image": chart_base64,
             "annotations": annotations,
             "bars_count": len(bars) if bars is not None and not bars.empty else 0,
+            "bars_source": "synthetic" if bars_synthetic else ("historical" if bars is not None and not bars.empty else "none"),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -245,7 +247,7 @@ class TradeSnapshotService:
         else:
             return "1 day"
 
-    def _fetch_bars(self, symbol: str, timeframe: str, entry_time: datetime, exit_time: datetime) -> Optional[pd.DataFrame]:
+    def _fetch_bars(self, symbol: str, timeframe: str, entry_time: datetime, exit_time: datetime, trade_data: Optional[Dict] = None) -> Optional[pd.DataFrame]:
         """Fetch OHLCV bars from MongoDB for the chart timeframe."""
         # Add padding: 20% before entry and 10% after exit for context
         duration = exit_time - entry_time
@@ -280,13 +282,154 @@ class TradeSnapshotService:
                     b["date"] = b.pop("timestamp")
 
         if not bars:
-            return None
+            return self._generate_synthetic_bars(trade_data, entry_time, exit_time, timeframe)
 
         df = pd.DataFrame(bars)
         df["date"] = pd.to_datetime(df["date"], utc=True)
         df = df.set_index("date")
         df = df[["open", "high", "low", "close", "volume"]].astype(float)
         df = df.dropna()
+        return df
+
+    def _generate_synthetic_bars(self, trade: Dict, entry_time: datetime, exit_time: datetime, timeframe: str) -> pd.DataFrame:
+        """Generate realistic synthetic OHLCV bars from trade data when historical bars unavailable."""
+        entry_price = trade.get("fill_price") or trade.get("entry_price", 0)
+        exit_price = trade.get("exit_price") or entry_price
+        stop_price = trade.get("stop_price", 0)
+        targets = trade.get("target_prices", [])
+        direction = trade.get("direction", "long")
+        mfe_pct = trade.get("mfe_pct", 0)
+        mae_pct = trade.get("mae_pct", 0)
+
+        if not entry_price or entry_price == 0:
+            return None
+
+        # Determine bar interval in minutes
+        tf_minutes = {
+            "1 min": 1, "5 mins": 5, "15 mins": 15,
+            "30 mins": 30, "1 hour": 60, "1 day": 1440
+        }
+        interval = timedelta(minutes=tf_minutes.get(timeframe, 5))
+
+        # Calculate number of bars
+        duration = exit_time - entry_time
+        if duration.total_seconds() < 60:
+            duration = timedelta(minutes=10)
+        padding_before = max(duration * 0.3, timedelta(minutes=interval.total_seconds() / 60 * 5))
+        padding_after = max(duration * 0.15, timedelta(minutes=interval.total_seconds() / 60 * 3))
+        chart_start = entry_time - padding_before
+        chart_end = exit_time + padding_after
+
+        total_seconds = (chart_end - chart_start).total_seconds()
+        n_bars = max(int(total_seconds / interval.total_seconds()), 20)
+        n_bars = min(n_bars, 200)  # Cap at 200 bars
+
+        # Price range from trade data
+        price_high = max(entry_price, exit_price)
+        price_low = min(entry_price, exit_price)
+        if mfe_pct > 0:
+            price_high = max(price_high, entry_price * (1 + abs(mfe_pct) / 100))
+        if mae_pct < 0:
+            price_low = min(price_low, entry_price * (1 - abs(mae_pct) / 100))
+        if stop_price and stop_price > 0:
+            price_low = min(price_low, stop_price * 0.998)
+        for tp in (targets or [])[:3]:
+            if tp and tp > 0:
+                price_high = max(price_high, tp * 1.002)
+
+        price_range = price_high - price_low
+        if price_range < entry_price * 0.001:
+            price_range = entry_price * 0.02  # Min 2% range
+            price_low = entry_price - price_range * 0.4
+            price_high = entry_price + price_range * 0.6
+
+        # Generate price path using random walk biased toward trade direction
+        np.random.seed(hash(trade.get("id", "")) % 2**31)
+
+        # Phase 1: Pre-entry (approach the entry price)
+        entry_bar_idx = int(n_bars * 0.25)  # Entry happens ~25% into chart
+        exit_bar_idx = int(n_bars * 0.80)  # Exit happens ~80% into chart
+        exit_bar_idx = max(exit_bar_idx, entry_bar_idx + 5)
+
+        prices = np.zeros(n_bars)
+        # Start before entry — slight drift toward entry price
+        pre_start = entry_price + np.random.uniform(-price_range * 0.15, price_range * 0.15)
+        for i in range(entry_bar_idx):
+            t = i / max(entry_bar_idx, 1)
+            # Interpolate toward entry_price with noise
+            drift = pre_start + (entry_price - pre_start) * t
+            noise = np.random.normal(0, price_range * 0.02)
+            prices[i] = drift + noise
+
+        # Set entry bar
+        prices[entry_bar_idx] = entry_price
+
+        # Phase 2: Trade active (move toward exit with MFE/MAE dynamics)
+        trade_bars = exit_bar_idx - entry_bar_idx
+        for i in range(entry_bar_idx + 1, exit_bar_idx):
+            t = (i - entry_bar_idx) / max(trade_bars, 1)
+
+            # Create a path that hits MFE then moves toward exit
+            if direction == "long":
+                if t < 0.4:
+                    # Move toward MFE
+                    mfe_target = price_high
+                    target = entry_price + (mfe_target - entry_price) * (t / 0.4)
+                elif t < 0.6:
+                    # Pullback from MFE
+                    pullback = price_high - (price_high - exit_price) * ((t - 0.4) / 0.2)
+                    target = pullback
+                else:
+                    # Drift toward exit
+                    target = prices[i - 1] + (exit_price - prices[i - 1]) * ((t - 0.6) / 0.4)
+            else:
+                # Short trades — inverse
+                if t < 0.4:
+                    target = entry_price - (entry_price - price_low) * (t / 0.4)
+                elif t < 0.6:
+                    target = price_low + (exit_price - price_low) * ((t - 0.4) / 0.2)
+                else:
+                    target = prices[i - 1] + (exit_price - prices[i - 1]) * ((t - 0.6) / 0.4)
+
+            noise = np.random.normal(0, price_range * 0.015)
+            prices[i] = target + noise
+
+        # Set exit bar
+        prices[exit_bar_idx] = exit_price
+
+        # Phase 3: Post-exit (slight drift)
+        for i in range(exit_bar_idx + 1, n_bars):
+            drift = np.random.normal(0, price_range * 0.01)
+            prices[i] = prices[i - 1] + drift
+
+        # Generate OHLCV from price path
+        dates = [chart_start + interval * i for i in range(n_bars)]
+        ohlcv_data = []
+        bar_volatility = price_range * 0.008  # Per-bar volatility
+
+        for i in range(n_bars):
+            close = prices[i]
+            # Random OHLC around the close
+            wick_up = abs(np.random.normal(0, bar_volatility))
+            wick_down = abs(np.random.normal(0, bar_volatility))
+            body = np.random.normal(0, bar_volatility * 0.6)
+
+            open_p = close - body
+            high = max(open_p, close) + wick_up
+            low = min(open_p, close) - wick_down
+            volume = int(np.random.exponential(50000) + 10000)
+
+            ohlcv_data.append({
+                "open": round(open_p, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+                "volume": volume
+            })
+
+        df = pd.DataFrame(ohlcv_data, index=pd.DatetimeIndex(dates, tz='UTC'))
+        df.index.name = "date"
+        df.attrs['synthetic'] = True
         return df
 
     def _build_annotations(self, trade: Dict, source: str) -> List[Dict]:

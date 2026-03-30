@@ -148,7 +148,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
             <div className="flex items-center justify-between text-[10px] text-zinc-400">
               <span>{snapshot.timeframe} chart</span>
-              <span>{snapshot.bars_count > 0 ? `${snapshot.bars_count} bars` : 'Entry/Exit view'}</span>
+              <span>{snapshot.bars_count > 0 ? `${snapshot.bars_count} bars` : 'No data'}{snapshot.bars_source === 'synthetic' ? ' (simulated)' : snapshot.bars_source === 'historical' ? ' (live data)' : ''}</span>
               <span>Generated {new Date(snapshot.generated_at).toLocaleDateString()}</span>
             </div>
           </div>

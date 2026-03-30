@@ -696,8 +696,11 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Renders OHLCV charts via `mplfinance` with entry/exit markers, stop lines, target levels
   - AI annotations: confidence gate decisions, market regime, smart filter, TQS, technicals
   - Scale-out and stop adjustment markers
-  - Fallback line chart when historical bars unavailable
-  - Charts stored as base64 PNG (~50KB each) in `trade_snapshots` MongoDB collection
+  - Fallback synthetic candlestick generator when historical bars unavailable
+  - Generates realistic OHLCV data from trade's entry/exit/stop/target/MFE/MAE data
+  - Auto-upgrades to real bars when IB Gateway historical data available
+  - Charts stored as base64 PNG (~75KB each) in `trade_snapshots` MongoDB collection
+  - **204 snapshots generated** across all closed bot trades with candlestick charts
 - **API Router**: `routers/trade_snapshots.py` (sync endpoints to avoid event loop blocking)
   - `GET /api/trades/snapshots` — List all snapshots (metadata only)
   - `GET /api/trades/snapshots/{trade_id}?source=bot` — Get snapshot with chart image
