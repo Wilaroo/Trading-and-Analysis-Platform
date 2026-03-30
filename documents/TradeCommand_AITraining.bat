@@ -327,6 +327,26 @@ echo.
 :: =====================================================
 echo [9/11] Starting Historical Data Collectors (3 instances)...
 
+:: IMPORTANT: Wait for backend to be fully healthy before starting collectors
+:: This prevents massive retry queues when backend is still initializing
+echo        Verifying backend is ready for collectors...
+set COLLECTOR_HEALTH=0
+:collector_health_loop
+set /a COLLECTOR_HEALTH+=1
+if %COLLECTOR_HEALTH% GTR 15 (
+    echo        [WARN] Backend not confirmed ready - starting collectors anyway
+    goto start_collectors
+)
+curl -s -f -m 5 %LOCAL_BACKEND%/api/health >nul 2>&1
+if %errorlevel%==0 (
+    echo        Backend confirmed healthy - starting collectors!
+    goto start_collectors
+)
+echo        Waiting for backend... (%COLLECTOR_HEALTH%/15)
+timeout /t 3 /nobreak >nul
+goto collector_health_loop
+
+:start_collectors
 :: Kill existing collectors if running
 taskkill /F /FI "WINDOWTITLE eq *COLLECTOR*" >nul 2>&1
 timeout /t 1 /nobreak >nul
