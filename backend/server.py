@@ -236,7 +236,6 @@ init_trade_journal_service(trade_journal_service)
 from services.trade_snapshot_service import TradeSnapshotService
 trade_snapshot_service = TradeSnapshotService(db)
 init_snapshot_service(trade_snapshot_service)
-init_snapshot_assistant(assistant_service)
 
 # Wire snapshot service into trade journal for auto-generation on manual trade close
 trade_journal_service._snapshot_service = trade_snapshot_service
@@ -248,6 +247,7 @@ init_strategy_service(strategy_service)
 init_quality_router(quality_service, ib_service)
 assistant_service = init_assistant_service(db)
 init_assistant_router(assistant_service)
+init_snapshot_assistant(assistant_service)  # Must come after assistant_service is created
 news_service = init_news_service(ib_service)
 scheduler_service = init_scheduler_service()
 scheduler_service.start()
