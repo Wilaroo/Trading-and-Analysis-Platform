@@ -716,10 +716,22 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - AI Decision Timeline with expandable annotation cards (entry, exit, scale_out, stop_adjust, gate_decision)
   - Generate/Regenerate buttons
 - **Testing**: 12/12 pytest tests pass, code review passed (iteration_121.json)
-- **Status**: 15 snapshots generated in MongoDB
+- **Status**: 204 snapshots generated in MongoDB
+
+### Annotation AI Explain + Chat Integration (Mar 30, 2026)
+- **Backend**: Two new endpoints in `routers/trade_snapshots.py`:
+  - `POST /api/trades/snapshots/{trade_id}/explain` — AI-powered annotation explanation via Ollama/GPT-OSS
+  - `POST /api/trades/snapshots/{trade_id}/chat-context` — Pre-formatted context message for SentCom chat
+  - `_call_llm_sync()` — Ollama HTTP proxy → Direct Ollama → Emergent LLM → structured fallback
+- **Frontend**: Enhanced `TradeSnapshotViewer` in `TradeJournalPage.js`:
+  - **"Ask AI" button** on each expanded annotation → inline AI explanation panel (cyan styling)
+  - **"Ask More in Chat" button** → opens inline mini-chat thread with SentCom AI
+  - Inline chat thread with context message, user messages, assistant replies, and input field
+  - Sends follow-up questions to `POST /api/sentcom/chat` for full conversational flow
+- **Testing**: 31/31 pytest tests pass (iteration_122.json)
 
 ### P0 (Next)
-- Chat integration with annotations: Click annotation → ask AI for detailed explanation
+- (All P0 items complete)
 
 
 ### Known Issues
