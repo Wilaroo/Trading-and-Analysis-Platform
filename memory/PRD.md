@@ -633,6 +633,19 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/backend/routers/trades.py` - `GET /unified` endpoint (reads bot_trades directly from MongoDB)
 - `/app/frontend/src/pages/TradeJournalPage.js` - `sourceFilter` state, unified data loading, bot-aware TradeRow
 
+### SOC + Chat Bubble Overlay Redesign (**DONE** — Mar 30, 2026)
+- Replaced 50/50 SOC/Chat split with SOC taking 100% of the panel
+- Chat is now a floating purple bubble (bottom-right corner of SOC panel)
+- Clicking bubble expands a 360×420px mini chat window overlaying the SOC
+- Chat window: header, quick action pills (Performance/News/Brief/Rules/Summary), messages, input
+- Minimize button collapses back to bubble
+- Unread badge shows when AI responds while chat is minimized
+- SOC continues scrolling uninterrupted behind the overlay
+
+### Key Files (Chat Bubble)
+- `/app/frontend/src/components/ChatBubbleOverlay.jsx` (NEW)
+- `/app/frontend/src/components/SentCom.jsx` - Modified embedded view to use full-width SOC + ChatBubbleOverlay
+
 ## Saved Enhancement Ideas
 - **Trade Review AI Annotation**: After closing a trade, the AI automatically annotates what it would have done differently (e.g., "Gate said REDUCE but trade won +$300 — Gate was too conservative in TRENDING context"). Accelerates learning feedback loop and Gate calibration.
 
