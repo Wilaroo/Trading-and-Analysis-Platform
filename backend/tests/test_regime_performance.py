@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://tqs-engine-1.preview.emergentagent.com"
+        api_url = "https://learn-loop-connect.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",
