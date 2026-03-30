@@ -22,6 +22,8 @@ import {
 // Import new components
 import BotPerformanceChart from './BotPerformanceChart';
 import SentCom from './SentCom';
+import DetailedPositionsPanel from './DetailedPositionsPanel';
+import ScannerAlertsPanel from './ScannerAlertsPanel';
 import { useTickerModal } from '../hooks/useTickerModal';
 import SystemStatusBar from './SystemStatusBar';
 import api, { safeGet, safePost } from '../utils/api';
@@ -467,6 +469,15 @@ const NewDashboard = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // Positions and alerts state for the panels below SentCom
+  const [positions, setPositions] = useState([]);
+  const [positionsLoading, setPositionsLoading] = useState(false);
+  const [totalPnl, setTotalPnl] = useState(0);
+  const [liveAlerts, setLiveAlerts] = useState([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [liveSetups, setLiveSetups] = useState([]);
+  const [setupsLoading, setSetupsLoading] = useState(false);
+  
   // Fetch dashboard data from API
   const fetchDashboardData = useCallback(async () => {
     setIsLoading(true);
@@ -531,6 +542,49 @@ const NewDashboard = ({
       console.error('Failed to fetch order queue:', err);
     }
   }, []);
+
+  // Fetch positions for the detailed panel
+  const fetchPositions = useCallback(async () => {
+    setPositionsLoading(true);
+    try {
+      const data = await safeGet('/api/sentcom/positions');
+      if (data?.positions) {
+        setPositions(data.positions);
+        const pnl = data.positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+        setTotalPnl(pnl);
+      }
+    } catch (err) {
+      console.error('Failed to fetch positions:', err);
+    } finally {
+      setPositionsLoading(false);
+    }
+  }, []);
+
+  // Fetch scanner alerts
+  const fetchAlerts = useCallback(async () => {
+    setAlertsLoading(true);
+    try {
+      const data = await safeGet('/api/live-scanner/alerts');
+      if (data?.alerts) setLiveAlerts(data.alerts);
+    } catch (err) {
+      console.error('Failed to fetch alerts:', err);
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, []);
+
+  // Fetch setups watching
+  const fetchSetups = useCallback(async () => {
+    setSetupsLoading(true);
+    try {
+      const data = await safeGet('/api/sentcom/setups');
+      if (data?.setups) setLiveSetups(data.setups);
+    } catch (err) {
+      console.error('Failed to fetch setups:', err);
+    } finally {
+      setSetupsLoading(false);
+    }
+  }, []);
   
   // Initial fetch and auto-refresh
   // Only poll for data NOT available via WebSocket props
@@ -538,9 +592,10 @@ const NewDashboard = ({
     // Account data and dashboard data still need REST — no WS equivalent
     fetchAccountData();
     fetchDashboardData();
-    
-    // Order queue is now WS-pushed in some setups, but still poll as fallback
     fetchOrderQueue();
+    fetchPositions();
+    fetchAlerts();
+    fetchSetups();
     
     // Dashboard data refresh at 30s (reduced from 15s — WS handles real-time updates)
     const cleanupDashboard = safePolling(fetchDashboardData, 30000, { immediate: false });
@@ -548,13 +603,22 @@ const NewDashboard = ({
     const cleanupAccount = safePolling(fetchAccountData, 30000, { immediate: false, essential: true });
     // Order queue at 30s (was 15s)
     const cleanupOrders = safePolling(fetchOrderQueue, 30000, { immediate: false, essential: true });
+    // Positions at 15s (more real-time since it's the star of the show)
+    const cleanupPositions = safePolling(fetchPositions, 15000, { immediate: false, essential: true });
+    // Alerts at 15s
+    const cleanupAlerts = safePolling(fetchAlerts, 15000, { immediate: false });
+    // Setups at 30s
+    const cleanupSetups = safePolling(fetchSetups, 30000, { immediate: false });
     
     return () => {
       cleanupDashboard();
       cleanupAccount();
       cleanupOrders();
+      cleanupPositions();
+      cleanupAlerts();
+      cleanupSetups();
     };
-  }, [fetchDashboardData, fetchAccountData, fetchOrderQueue]);
+  }, [fetchDashboardData, fetchAccountData, fetchOrderQueue, fetchPositions, fetchAlerts, fetchSetups]);
   
   // Merge prop data with API data (props take precedence if provided)
   const effectiveBotStatus = botStatus || dashboardData?.bot_status;
@@ -588,7 +652,6 @@ const NewDashboard = ({
         {/* Left Column (8 cols) - SentCom takes full width */}
         <div className="col-span-8">
           {/* SentCom Embedded (Unified AI Command Center) */}
-          {/* Now includes Positions + Setups panels - no duplicates below */}
           <SentCom embedded={true} />
         </div>
         
@@ -607,11 +670,29 @@ const NewDashboard = ({
         </div>
       </div>
       
-      {/* Scanner Alerts Strip */}
-      <ScannerAlertsStrip 
-        alerts={scannerAlerts}
-        onViewAll={onViewAllAlerts}
-      />
+      {/* Below SentCom: Positions (Left) + Scanner Alerts (Right) */}
+      <div className="grid grid-cols-12 gap-3">
+        {/* Left: Detailed Positions Panel */}
+        <div className="col-span-7">
+          <DetailedPositionsPanel
+            positions={positions}
+            totalPnl={totalPnl}
+            loading={positionsLoading}
+            alerts={liveAlerts.length > 0 ? liveAlerts : scannerAlerts}
+            onSelectPosition={() => {}}
+          />
+        </div>
+        
+        {/* Right: Scanner Alerts + Setups */}
+        <div className="col-span-5">
+          <ScannerAlertsPanel
+            alerts={liveAlerts.length > 0 ? liveAlerts : scannerAlerts}
+            setups={liveSetups.length > 0 ? liveSetups : effectiveWatchingSetups}
+            alertsLoading={alertsLoading}
+            setupsLoading={setupsLoading}
+          />
+        </div>
+      </div>
     </div>
   );
 };

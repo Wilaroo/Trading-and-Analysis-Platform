@@ -30,8 +30,6 @@ import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import ChatBubbleOverlay from './ChatBubbleOverlay';
-import DetailedPositionsPanel from './DetailedPositionsPanel';
-import ScannerAlertsPanel from './ScannerAlertsPanel';
 import StatusDot from './StatusDot';
 import api, { safeGet, safePost } from '../utils/api';
 import { useWsData } from '../contexts/WebSocketDataContext';
@@ -3336,30 +3334,6 @@ const SentCom = ({ compact = false, embedded = false }) => {
               loading={chatLoading}
               quickActionLoading={quickActionLoading}
             />
-          </div>
-
-          {/* Below SOC: Positions (Left) + Scanner Alerts (Right) */}
-          <div className="grid grid-cols-12 gap-3">
-            {/* Left: Detailed Positions Panel */}
-            <div className="col-span-7">
-              <DetailedPositionsPanel
-                positions={positions}
-                totalPnl={totalPnl}
-                loading={positionsLoading}
-                alerts={alerts}
-                onSelectPosition={setSelectedPosition}
-              />
-            </div>
-            
-            {/* Right: Scanner Alerts + Setups */}
-            <div className="col-span-5">
-              <ScannerAlertsPanel
-                alerts={alerts}
-                setups={setups}
-                alertsLoading={alertsLoading}
-                setupsLoading={setupsLoading}
-              />
-            </div>
           </div>
           
           {/* Stop Fix Panel - Shows when risky stops detected */}
