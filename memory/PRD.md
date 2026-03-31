@@ -810,6 +810,20 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Testing**: All API endpoints verified (iteration_126.json), UI verified via screenshot, graceful degradation in container (no torchvision/GPU)
 
 
+
+### Training Pipeline Phases 2, 7, 8 — Fully Wired (**DONE** — Mar 31, 2026)
+- **Phase 2 (Long Setup-Specific)**: Now trains 17 LightGBM models inline (SCALP, ORB, GAP_AND_GO, VWAP, BREAKOUT, RANGE, MEAN_REVERSION, REVERSAL, TREND_CONTINUATION, MOMENTUM × respective bar_sizes). Uses forward-looking target: `(closes[i+fh] - closes[i]) / closes[i]`. Extracts base (46) + setup-specific features per setup type. Was previously a deferred stub.
+- **Phase 7 (Regime-Conditional)**: Trains 28 regime-variant models (7 bar_sizes × 4 regimes: bull_trend, bear_trend, range_bound, high_vol). Uses SPY daily data from `RegimeFeatureProvider` for regime classification per sample date. Binary target (UP/DOWN). Minimum 200 samples per regime or falls back to generic model. Was previously a stub.
+- **Phase 8 (Ensemble Meta-Learner)**: Trains 10 ensemble models (one per setup type). Uses daily bars as anchor timeframe. Runs raw predictions from pre-trained generic sub-models (no DB logging) + setup-specific models. Stacks 18 ensemble features via `extract_ensemble_features()`. 3-class target (UP/FLAT/DOWN). Was previously a stub.
+- **Bug Fix**: Phase 2.5 (Short Setup) target calculation corrected — `closes[i-fh]` (backward-looking) → `closes[i+fh]` (forward-looking).
+- **Model Inventory Fix**: `trained_models` lookup changed from `doc.get("model_name")` to `doc.get("name", doc.get("model_name"))` and metrics from `doc.get("accuracy")` to `doc.get("metrics", {}).get("accuracy", ...)` to correctly detect trained models.
+- **count_total_models()**: Updated from 69 → 108 (added setup_long=17, regime=28, ensemble=10, fixed setup count).
+- **Default Phases**: Added "regime" and "ensemble" to default phase list (run before CNN Phase 9).
+- **UI**: Added `regime_conditional` category with `GitBranch` icon (teal) to NIA TrainingPipelinePanel.
+- **Testing**: 18/18 tests passed (iteration_127.json). Backend + frontend verified.
+- **Total Pipeline Models**: 108 LightGBM + 10-16 CNN = ~118-124 models trained by "Train All"
+
+
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
 - Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)
