@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="24" time="56.211" timestamp="2026-03-31T20:12:50.774106+00:00" hostname="agent-env-c91754be-46ad-4e63-b857-b627adde2fc5"><testcase classname="tests.test_training_progress_dashboard.TestPhaseConfigs" name="test_phase_configs_has_10_entries" time="2.280" /><testcase classname="tests.test_training_progress_dashboard.TestPhaseConfigs" name="test_phase_configs_keys" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestPhaseConfigs" name="test_phase_configs_structure" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestPhaseConfigs" name="test_phase_configs_order_values" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestPhaseConfigs" name="test_phase_configs_expected_models" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_status_class_exists" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_status_init_has_phase_history" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_update_auto_starts_phase" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_update_auto_ends_previous_phase" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_add_completed_increments_models_trained" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_add_completed_computes_avg_accuracy" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingPipelineStatus" name="test_add_error_increments_models_failed" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingStatusAPI" name="test_status_returns_success" time="30.032"><failure message="requests.exceptions.ReadTimeout: HTTPConnectionPool(host='localhost', port=8001): Read timed out. (read timeout=30)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:534: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:571: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1415: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:330: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:291: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:644: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:841: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:490: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:787: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:536: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:367: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPConnectionPool(host='localhost', port=8001): Read timed out. (read timeout=30)
+
+During handling of the above exception, another exception occurred:
+tests/test_training_progress_dashboard.py:163: in test_status_returns_success
+    response = requests.get(f"{BASE_URL}/api/ai-training/status", timeout=30)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/api.py:73: in get
+    return request("get", url, params=params, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/api.py:59: in request
+    return session.request(method=method, url=url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:589: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:703: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:690: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPConnectionPool(host='localhost', port=8001): Read timed out. (read timeout=30)</failure></testcase><testcase classname="tests.test_training_progress_dashboard.TestTrainingStatusAPI" name="test_status_has_task_status" time="23.276" /><testcase classname="tests.test_training_progress_dashboard.TestTrainingStatusAPI" name="test_status_has_pipeline_status_field" time="0.080" /><testcase classname="tests.test_training_progress_dashboard.TestModelInventoryAPI" name="test_inventory_returns_success" time="0.083" /><testcase classname="tests.test_training_progress_dashboard.TestModelInventoryAPI" name="test_inventory_total_defined_is_108" time="0.077" /><testcase classname="tests.test_training_progress_dashboard.TestModelInventoryAPI" name="test_inventory_has_9_categories" time="0.080" /><testcase classname="tests.test_training_progress_dashboard.TestModelInventoryAPI" name="test_inventory_regime_conditional_has_28_models" time="0.078" /><testcase classname="tests.test_training_progress_dashboard.TestFrontendConstants" name="test_all_phases_has_10_entries" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestFrontendConstants" name="test_phase_tracker_component_exists" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestFrontendConstants" name="test_phase_row_has_data_testid" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestFrontendConstants" name="test_auto_poll_useeffect_exists" time="0.000" /><testcase classname="tests.test_training_progress_dashboard.TestFrontendConstants" name="test_no_tdz_error_isTraining_declared_before_use" time="0.000" /></testsuite></testsuites>

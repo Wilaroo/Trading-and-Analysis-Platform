@@ -45,6 +45,227 @@ const CATEGORY_COLORS = {
   cnn_visual: 'text-fuchsia-400',
 };
 
+// All training phases in execution order
+const ALL_PHASES = [
+  { key: 'generic_directional', label: 'Generic Directional', num: '1', expected: 7 },
+  { key: 'setup_specific', label: 'Setup-Specific (Long)', num: '2', expected: 17 },
+  { key: 'short_setup_specific', label: 'Setup-Specific (Short)', num: '2.5', expected: 17 },
+  { key: 'volatility_prediction', label: 'Volatility Prediction', num: '3', expected: 7 },
+  { key: 'exit_timing', label: 'Exit Timing', num: '4', expected: 10 },
+  { key: 'sector_relative', label: 'Sector-Relative', num: '5', expected: 3 },
+  { key: 'risk_of_ruin', label: 'Risk-of-Ruin', num: '6', expected: 6 },
+  { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
+  { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
+  { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 13 },
+];
+
+const formatDuration = (seconds) => {
+  if (!seconds || seconds <= 0) return '—';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+};
+
+const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
+  const status = phaseData?.status || 'pending';
+  const trained = phaseData?.models_trained || 0;
+  const failed = phaseData?.models_failed || 0;
+  const expected = phaseData?.expected_models || phase.expected;
+  const avgAcc = phaseData?.avg_accuracy || 0;
+  const elapsed = phaseData?.elapsed_seconds || 0;
+
+  return (
+    <div
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-300 ${
+        isActive ? 'bg-cyan-500/5 border border-cyan-500/20' : 'border border-transparent'
+      }`}
+      data-testid={`phase-row-${phase.key}`}
+    >
+      {/* Status indicator */}
+      <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+        {status === 'done' ? (
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        ) : isActive ? (
+          <div className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse" />
+        ) : (
+          <Circle className="w-3.5 h-3.5 text-zinc-700" />
+        )}
+      </div>
+
+      {/* Phase info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+            isActive ? 'bg-cyan-500/15 text-cyan-400' : status === 'done' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800 text-zinc-600'
+          }`}>
+            {phase.num}
+          </span>
+          <span className={`text-xs ${isActive ? 'text-white font-medium' : status === 'done' ? 'text-zinc-300' : 'text-zinc-600'}`}>
+            {phase.label}
+          </span>
+        </div>
+        {isActive && currentModel && (
+          <div className="text-[10px] text-cyan-400/70 font-mono mt-0.5 truncate pl-6">
+            {currentModel}
+          </div>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {(status === 'done' || isActive) && (
+          <>
+            <span className={`text-[10px] font-mono ${isActive ? 'text-cyan-400' : 'text-zinc-400'}`}>
+              {trained}/{expected}
+            </span>
+            {avgAcc > 0 && (
+              <span className={`text-[10px] font-mono ${avgAcc > 0.6 ? 'text-emerald-400' : avgAcc > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
+                {(avgAcc * 100).toFixed(1)}%
+              </span>
+            )}
+            {status === 'done' && elapsed > 0 && (
+              <span className="text-[10px] text-zinc-600 font-mono">{formatDuration(elapsed)}</span>
+            )}
+          </>
+        )}
+        {isActive && trained > 0 && (
+          <div className="w-12 h-1 bg-white/5 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-cyan-500 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(100, (trained / expected) * 100)}%` }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
+  const phaseHistory = pipelineStatus?.pipeline_status?.phase_history || {};
+  const currentPhase = pipelineStatus?.pipeline_status?.phase;
+  const currentModel = pipelineStatus?.pipeline_status?.current_model;
+  const startedAt = pipelineStatus?.pipeline_status?.started_at;
+
+  // Calculate elapsed and ETA
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!isTraining || !startedAt) {
+      setElapsed(0);
+      return;
+    }
+    const start = new Date(startedAt).getTime();
+    const tick = () => setElapsed((Date.now() - start) / 1000);
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [isTraining, startedAt]);
+
+  // Calculate ETA from completed phases
+  const completedPhases = Object.values(phaseHistory).filter(p => p.status === 'done');
+  const totalElapsedPhases = completedPhases.reduce((s, p) => s + (p.elapsed_seconds || 0), 0);
+  const completedModelsInPhases = completedPhases.reduce((s, p) => s + (p.models_trained || 0), 0);
+  const totalExpectedModels = ALL_PHASES.reduce((s, p) => s + p.expected, 0);
+  const remainingModels = totalExpectedModels - completedModelsInPhases;
+
+  let eta = 0;
+  if (completedModelsInPhases > 0 && remainingModels > 0) {
+    const avgTimePerModel = totalElapsedPhases / completedModelsInPhases;
+    eta = avgTimePerModel * remainingModels;
+  }
+
+  if (!isTraining && completedPhases.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border border-white/5 bg-white/[0.02] overflow-hidden" data-testid="phase-tracker">
+      {/* Header with timer */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.01]">
+        <div className="flex items-center gap-2">
+          {isTraining ? (
+            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          )}
+          <span className="text-sm font-medium text-white">
+            {isTraining ? 'Training in progress' : 'Training complete'}
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          {elapsed > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3 text-zinc-500" />
+              <span className="text-xs font-mono text-zinc-300">{formatDuration(elapsed)}</span>
+            </div>
+          )}
+          {isTraining && eta > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500 uppercase">ETA</span>
+              <span className="text-xs font-mono text-amber-400">~{formatDuration(eta)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Overall progress bar */}
+      <div className="px-4 py-2 border-b border-white/5">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] text-zinc-500">Overall Progress</span>
+          <span className="text-[10px] font-mono text-zinc-400">
+            {pipelineStatus?.pipeline_status?.models_completed || 0} / {pipelineStatus?.pipeline_status?.models_total || totalExpectedModels} models
+          </span>
+        </div>
+        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full transition-all duration-700"
+            style={{
+              width: `${Math.min(100, ((pipelineStatus?.pipeline_status?.models_completed || 0) / (pipelineStatus?.pipeline_status?.models_total || totalExpectedModels)) * 100)}%`,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Phase list */}
+      <div className="px-1 py-1 space-y-0.5 max-h-[340px] overflow-auto">
+        {ALL_PHASES.map((phase) => (
+          <PhaseRow
+            key={phase.key}
+            phase={phase}
+            phaseData={phaseHistory[phase.key]}
+            isActive={isTraining && currentPhase === phase.key}
+            currentModel={currentPhase === phase.key ? currentModel : null}
+          />
+        ))}
+      </div>
+
+      {/* Completed summary */}
+      {!isTraining && completedPhases.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-white/5 bg-emerald-500/[0.03]">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-sm font-bold text-emerald-400">{completedModelsInPhases}</div>
+              <div className="text-[10px] text-zinc-500">Trained</div>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-red-400">
+                {completedPhases.reduce((s, p) => s + (p.models_failed || 0), 0)}
+              </div>
+              <div className="text-[10px] text-zinc-500">Failed</div>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-zinc-300">{formatDuration(totalElapsedPhases)}</div>
+              <div className="text-[10px] text-zinc-500">Total Time</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 const MetricBar = memo(({ value, max = 1, color = 'bg-cyan-500' }) => {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
@@ -218,6 +439,16 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     fetchData();
   }, [fetchData]);
 
+  const regimeStyle = REGIME_COLORS[regime?.regime] || REGIME_COLORS.unknown;
+  const isTraining = pipelineStatus?.task_status === 'running';
+
+  // Auto-poll during training for detailed phase progress
+  useEffect(() => {
+    if (!isTraining) return;
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [isTraining, fetchData]);
+
   const handleStartTraining = useCallback(async () => {
     try {
       setStarting(true);
@@ -246,10 +477,6 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       toast.error('Failed to stop training');
     }
   }, [fetchData]);
-
-  const regimeStyle = REGIME_COLORS[regime?.regime] || REGIME_COLORS.unknown;
-  const isTraining = pipelineStatus?.task_status === 'running';
-  const pipelinePhase = pipelineStatus?.pipeline_status?.phase;
 
   return (
     <div className="mt-6" data-testid="training-pipeline-panel">
@@ -288,21 +515,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         </div>
       </div>
 
-      {/* Training Status Banner */}
-      {isTraining && pipelinePhase && (
-        <div className="mb-4 p-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 flex items-center gap-3" data-testid="training-status-banner">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-          <div>
-            <span className="text-sm text-white">Training in progress</span>
-            <span className="text-xs text-zinc-400 ml-2">Phase: {pipelinePhase}</span>
-            {pipelineStatus?.pipeline_status?.current_model && (
-              <span className="text-xs text-cyan-400 ml-2 font-mono">{pipelineStatus.pipeline_status.current_model}</span>
-            )}
-          </div>
-          <div className="ml-auto text-xs text-zinc-400">
-            {pipelineStatus?.pipeline_status?.models_completed || 0}/{pipelineStatus?.pipeline_status?.models_total || '?'} models
-          </div>
-        </div>
+      {/* Phase-by-Phase Progress Tracker */}
+      {(isTraining || pipelineStatus?.pipeline_status?.phase_history) && (
+        <PhaseTracker
+          pipelineStatus={pipelineStatus}
+          isTraining={isTraining}
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -464,8 +682,8 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
             </div>
           )}
 
-          {/* Recent Training Results */}
-          {pipelineStatus?.last_result && (
+          {/* Recent Training Results (fallback when no phase tracker) */}
+          {pipelineStatus?.last_result && !pipelineStatus?.pipeline_status?.phase_history && (
             <div className="p-3 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="training-results">
               <h4 className="text-xs text-zinc-400 uppercase tracking-wider mb-2">Last Training Run</h4>
               <div className="grid grid-cols-3 gap-2 text-center">

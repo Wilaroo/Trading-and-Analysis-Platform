@@ -60,12 +60,27 @@ ALL_SHORT_SETUP_TYPES = [
 # Minimum training samples to proceed with training
 MIN_TRAINING_SAMPLES = 200
 
+# Phase configuration for progress tracking
+PHASE_CONFIGS = {
+    "generic_directional": {"label": "Generic Directional", "order": 1, "expected_models": 7, "phase_num": "1"},
+    "setup_specific": {"label": "Setup-Specific (Long)", "order": 2, "expected_models": 17, "phase_num": "2"},
+    "short_setup_specific": {"label": "Setup-Specific (Short)", "order": 3, "expected_models": 17, "phase_num": "2.5"},
+    "volatility_prediction": {"label": "Volatility Prediction", "order": 4, "expected_models": 7, "phase_num": "3"},
+    "exit_timing": {"label": "Exit Timing", "order": 5, "expected_models": 10, "phase_num": "4"},
+    "sector_relative": {"label": "Sector-Relative", "order": 6, "expected_models": 3, "phase_num": "5"},
+    "risk_of_ruin": {"label": "Risk-of-Ruin", "order": 7, "expected_models": 6, "phase_num": "6"},
+    "regime_conditional": {"label": "Regime-Conditional", "order": 8, "expected_models": 28, "phase_num": "7"},
+    "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 9, "expected_models": 10, "phase_num": "8"},
+    "cnn_patterns": {"label": "CNN Chart Patterns", "order": 10, "expected_models": 13, "phase_num": "9"},
+}
+
 
 class TrainingPipelineStatus:
-    """Track and persist pipeline training progress."""
+    """Track and persist pipeline training progress with per-phase granularity."""
 
     def __init__(self, db=None):
         self._db = db
+        self._current_phase = None
         self._status = {
             "phase": "idle",
             "current_model": "",
@@ -75,19 +90,43 @@ class TrainingPipelineStatus:
             "started_at": None,
             "errors": [],
             "completed_models": [],
+            "phase_history": {},
         }
 
     def update(self, **kwargs):
+        new_phase = kwargs.get("phase")
+        if new_phase and new_phase != self._current_phase:
+            # Auto-end previous phase
+            if self._current_phase and self._current_phase in self._status["phase_history"]:
+                ph = self._status["phase_history"][self._current_phase]
+                if ph["status"] == "running":
+                    ph["status"] = "done"
+                    ph["ended_at"] = datetime.now(timezone.utc).isoformat()
+                    started = datetime.fromisoformat(ph["started_at"])
+                    ph["elapsed_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
+
+            # Auto-start new phase (if it's a real training phase)
+            if new_phase in PHASE_CONFIGS:
+                config = PHASE_CONFIGS[new_phase]
+                self._status["phase_history"][new_phase] = {
+                    "label": config["label"],
+                    "order": config["order"],
+                    "phase_num": config["phase_num"],
+                    "status": "running",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "ended_at": None,
+                    "expected_models": config["expected_models"],
+                    "models_trained": 0,
+                    "models_failed": 0,
+                    "total_accuracy": 0.0,
+                    "avg_accuracy": 0.0,
+                    "elapsed_seconds": 0,
+                }
+
+            self._current_phase = new_phase
+
         self._status.update(kwargs)
-        if self._db:
-            try:
-                self._db["training_pipeline_status"].update_one(
-                    {"_id": "pipeline"},
-                    {"$set": {**self._status, "updated_at": datetime.now(timezone.utc).isoformat()}},
-                    upsert=True,
-                )
-            except Exception:
-                pass
+        self._persist()
 
     def get_status(self) -> Dict:
         return dict(self._status)
@@ -99,7 +138,15 @@ class TrainingPipelineStatus:
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
         self._status["models_completed"] = len(self._status["completed_models"])
-        self.update()
+
+        # Update current phase stats
+        ph = self._status["phase_history"].get(self._current_phase)
+        if ph:
+            ph["models_trained"] += 1
+            ph["total_accuracy"] += accuracy
+            ph["avg_accuracy"] = ph["total_accuracy"] / ph["models_trained"]
+
+        self._persist()
 
     def add_error(self, model_name: str, error: str):
         self._status["errors"].append({
@@ -107,7 +154,21 @@ class TrainingPipelineStatus:
             "error": error,
             "at": datetime.now(timezone.utc).isoformat(),
         })
-        self.update()
+        ph = self._status["phase_history"].get(self._current_phase)
+        if ph:
+            ph["models_failed"] += 1
+        self._persist()
+
+    def _persist(self):
+        if self._db:
+            try:
+                self._db["training_pipeline_status"].update_one(
+                    {"_id": "pipeline"},
+                    {"$set": {**self._status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True,
+                )
+            except Exception:
+                pass
 
 
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
