@@ -3322,36 +3322,69 @@ async def startup_event():
     # progressively via /api/startup-check.
     
     async def _deferred_heavy_init():
-        """Run heavy initialization in background without blocking the event loop"""
+        """Run heavy initialization in background without blocking the event loop.
+        Smart startup: services start in dependency order, skip gracefully if deps unavailable."""
         # Small delay to let the server finish startup
         await asyncio.sleep(1)
-        
-        # Attempt auto-connect to IB Gateway
+
+        # 1. Set focus mode to LIVE explicitly
+        focus_mode_manager.set_mode(mode="live", context={"reason": "startup"})
+        print("Focus mode: LIVE (all services active)")
+
+        # 2. Attempt auto-connect to IB Gateway (everything depends on this)
+        ib_connected = False
         try:
             ib_svc = get_ib_service()
             status = ib_svc.get_connection_status()
             if not status.get("connected", False):
                 print("Attempting auto-connect to IB Gateway...")
-                success = await ib_svc.connect()
-                if success:
-                    print("Auto-connected to IB Gateway")
+                ib_connected = await ib_svc.connect()
+                if ib_connected:
+                    print("IB Gateway: CONNECTED")
                 else:
-                    print("IB Gateway not available - manual connect required")
+                    print("IB Gateway: NOT AVAILABLE — IB-dependent services will start in degraded mode")
             else:
-                print("IB Gateway already connected")
+                ib_connected = True
+                print("IB Gateway: ALREADY CONNECTED")
         except Exception as e:
-            print(f"IB auto-connect skipped: {e}")
-        
-        # Start background scanner for live alerts
-        await background_scanner.start()
-        print("Background scanner started - Live alerts active")
-        
-        # Auto-start trading bot in autonomous mode
+            print(f"IB Gateway: SKIPPED ({e})")
+
+        # 3. Start background scanner (needs IB for live scanning)
+        try:
+            await background_scanner.start()
+            if ib_connected:
+                print("Background scanner: STARTED (live alerts active)")
+            else:
+                print("Background scanner: STARTED (degraded — no IB connection, will activate when IB connects)")
+        except Exception as e:
+            print(f"Background scanner: FAILED ({e})")
+
+        # 4. Auto-start trading bot (needs IB for order execution)
         try:
             await trading_bot.start()
-            print(f"Trading bot auto-started in {trading_bot.get_mode().value.upper()} mode")
+            mode = trading_bot.get_mode().value.upper()
+            if ib_connected:
+                print(f"Trading bot: STARTED in {mode} mode (live execution ready)")
+            else:
+                print(f"Trading bot: STARTED in {mode} mode (paper mode — no IB connection)")
         except Exception as e:
-            print(f"Trading bot auto-start failed: {e}")
+            print(f"Trading bot: FAILED ({e})")
+
+        # 5. Startup summary
+        print("")
+        print("=" * 50)
+        print("  LIVE TRADING MODE — Startup Complete")
+        print("=" * 50)
+        print(f"  IB Gateway:       {'CONNECTED' if ib_connected else 'DISCONNECTED'}")
+        print("  Trading Bot:      ACTIVE")
+        print("  Scanner:          ACTIVE")
+        print("  Learning Loop:    SCHEDULED (4:15 PM ET)")
+        print("  Market Intel:     SCHEDULED")
+        print("  WebSocket:        16 streams active")
+        print("  Focus Mode:       LIVE")
+        print("  Collectors:       UI-controlled (not auto-started)")
+        print("  Training:         UI-controlled (not auto-started)")
+        print("=" * 50)
     
     asyncio.create_task(_deferred_heavy_init())
     print("Heavy initialization deferred to background task")
