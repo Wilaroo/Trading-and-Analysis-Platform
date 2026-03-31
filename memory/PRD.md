@@ -839,6 +839,18 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 
 
+### UI Merge: AICommandCenter into TrainingPipelinePanel (**DONE** — Mar 31, 2026)
+- **Removed AICommandCenter** as a standalone section on the NIA page. Previously, "Setup Models" (with "Train All") and "Live Performance" were in a separate panel from "AI Training Pipeline" (with "Start Training"), causing confusion about which button to press.
+- **Merged Setup Models** into TrainingPipelinePanel as a collapsible subsection. The 17 setup cards with per-setup validation results + "Train All" button are now nested under a "Setup Models / 5-Phase Validation" collapsible header within the unified pipeline panel.
+- **Market Regime** is now collapsible within the pipeline panel (saves vertical space).
+- **GPU status + Model summary** moved to a compact horizontal bar above Setup Models.
+- **Result**: Single unified "AI Training Pipeline" section with clear hierarchy:
+  - "Start Training" → full 10-phase pipeline (128 models)
+  - "Train All" → setup-specific 5-phase validation only (17 profiles)
+  - "Start Per-Stock Collection" → Data & Backtesting → Collect tab
+- **Files modified**: `TrainingPipelinePanel.jsx`, `NIA/index.jsx`. `AICommandCenter.jsx` is no longer rendered.
+- **Cleanup**: Removed `aiData`, `memoizedConnectors`, `memoizedThresholds`, `handleRunCalibrations`, `handlePromote` from NIA/index.jsx.
+
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
 - Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)

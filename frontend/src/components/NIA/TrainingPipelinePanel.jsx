@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../utils/api';
+import SetupModelsPanel from './SetupModelsPanel';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -392,6 +393,8 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const [gpuInfo, setGpuInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [showSetupModels, setShowSetupModels] = useState(true);
+  const [showRegime, setShowRegime] = useState(false);
 
   // Use WebSocket data when available
   useEffect(() => {
@@ -523,116 +526,127 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         />
       )}
 
+      {/* GPU Status + Model Summary (full width) */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        {gpuInfo && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="gpu-status-bar">
+            <div className="w-5 h-5 rounded-md bg-fuchsia-500/15 flex items-center justify-center flex-shrink-0">
+              {gpuInfo.cuda ? <Monitor className="w-3 h-3 text-fuchsia-400" /> : <Cpu className="w-3 h-3 text-zinc-500" />}
+            </div>
+            <span className="text-xs text-white truncate">{gpuInfo.cuda ? gpuInfo.gpu : 'CPU'}</span>
+            <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
+              {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
+            </span>
+          </div>
+        )}
+        {inventory && (
+          <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.02] flex-1" data-testid="model-summary">
+            <span className="text-xs text-zinc-400">Models Trained</span>
+            <span className="text-sm font-mono text-white">
+              {(inventory.total_trained || 0) + cnnModels.length} / {(inventory.total_defined || 0) + 20}
+            </span>
+            <div className="flex-1 max-w-xs">
+              <MetricBar value={(inventory.total_trained || 0) + cnnModels.length} max={(inventory.total_defined || 0) + 20} color="bg-emerald-500" />
+            </div>
+            {inventory.total_trained === 0 && cnnModels.length === 0 && (
+              <span className="text-xs text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Untrained</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Setup Models — 5-Phase Auto-Validation (collapsible) */}
+      <div className="mb-4 rounded-lg border border-white/5 bg-white/[0.02] overflow-hidden" data-testid="setup-models-section">
+        <button
+          onClick={() => setShowSetupModels(!showSetupModels)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.03] transition-colors"
+          data-testid="setup-models-toggle"
+        >
+          <div className="flex items-center gap-2.5">
+            <Target className="w-4 h-4 text-violet-400" />
+            <span className="text-sm font-medium text-white">Setup Models</span>
+            <span className="text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">5-Phase Validation</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${showSetupModels ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+        {showSetupModels && (
+          <div className="px-4 pb-4 border-t border-white/5">
+            <SetupModelsPanel embedded />
+          </div>
+        )}
+      </div>
+
+      {/* Model Categories + Market Regime */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left Column: Live Regime */}
+        {/* Left Column: Live Regime (collapsible) */}
         <div className="lg:col-span-1 space-y-3">
-          {/* Regime Badge */}
-          <div className={`p-4 rounded-lg border ${regimeStyle.border} ${regimeStyle.bg}`} data-testid="regime-badge">
-            <div className="flex items-center justify-between mb-3">
+          <div className={`rounded-lg border ${regimeStyle.border} ${regimeStyle.bg} overflow-hidden`} data-testid="regime-badge">
+            <button
+              onClick={() => setShowRegime(!showRegime)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:brightness-110 transition-all"
+              data-testid="regime-toggle"
+            >
               <span className="text-xs text-zinc-400 uppercase tracking-wider">Market Regime</span>
-              <span className={`text-sm font-bold ${regimeStyle.text}`}>
-                {regimeStyle.label}
-              </span>
-            </div>
-            {regime?.regime === 'bull_trend' && <TrendingUp className={`w-8 h-8 ${regimeStyle.text} opacity-30 absolute top-2 right-2`} />}
-            {regime?.regime === 'bear_trend' && <TrendingDown className={`w-8 h-8 ${regimeStyle.text} opacity-30 absolute top-2 right-2`} />}
-
-            {/* Index Cards */}
-            <div className="space-y-2">
-              {regime?.indexes && Object.entries(regime.indexes).map(([name, data]) => (
-                <IndexCard key={name} name={name} data={data} />
-              ))}
-            </div>
-
-            {/* Cross-Correlations */}
-            {regime?.cross && (
-              <div className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">Correlations & Rotation</span>
-                <div className="grid grid-cols-2 gap-1.5 mt-1">
-                  {[
-                    { label: 'SPY-QQQ', value: regime.cross.spy_qqq_corr },
-                    { label: 'SPY-IWM', value: regime.cross.spy_iwm_corr },
-                    { label: 'QQQ-IWM', value: regime.cross.qqq_iwm_corr },
-                  ].map(({ label, value }) => (
-                    <div key={label} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
-                      <span className="text-zinc-500">{label}</span>
-                      <span className={`font-mono ${value > 0.7 ? 'text-emerald-400' : value < 0.3 ? 'text-red-400' : 'text-amber-400'}`}>
-                        {value?.toFixed(2)}
-                      </span>
-                    </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-bold ${regimeStyle.text}`}>{regimeStyle.label}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${showRegime ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            {showRegime && (
+              <div className="px-4 pb-4 border-t border-white/5">
+                {/* Index Cards */}
+                <div className="space-y-2 mt-3">
+                  {regime?.indexes && Object.entries(regime.indexes).map(([name, data]) => (
+                    <IndexCard key={name} name={name} data={data} />
                   ))}
                 </div>
-                <div className="space-y-1 mt-2">
-                  {[
-                    { label: 'Growth vs Market', key: 'rotation_qqq_spy', desc: 'QQQ-SPY' },
-                    { label: 'Small vs Large', key: 'rotation_iwm_spy', desc: 'IWM-SPY' },
-                    { label: 'Growth vs Value', key: 'rotation_qqq_iwm', desc: 'QQQ-IWM' },
-                  ].map(({ label, key, desc }) => {
-                    const val = regime.cross[key] || 0;
-                    return (
-                      <div key={key} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
-                        <span className="text-zinc-500">{label}</span>
-                        <span className={`font-mono ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {val > 0 ? '+' : ''}{(val * 100).toFixed(2)}%
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+
+                {/* Cross-Correlations */}
+                {regime?.cross && (
+                  <div className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
+                    <span className="text-xs text-zinc-500 uppercase tracking-wider">Correlations & Rotation</span>
+                    <div className="grid grid-cols-2 gap-1.5 mt-1">
+                      {[
+                        { label: 'SPY-QQQ', value: regime.cross.spy_qqq_corr },
+                        { label: 'SPY-IWM', value: regime.cross.spy_iwm_corr },
+                        { label: 'QQQ-IWM', value: regime.cross.qqq_iwm_corr },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
+                          <span className="text-zinc-500">{label}</span>
+                          <span className={`font-mono ${value > 0.7 ? 'text-emerald-400' : value < 0.3 ? 'text-red-400' : 'text-amber-400'}`}>
+                            {value?.toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1 mt-2">
+                      {[
+                        { label: 'Growth vs Market', key: 'rotation_qqq_spy' },
+                        { label: 'Small vs Large', key: 'rotation_iwm_spy' },
+                        { label: 'Growth vs Value', key: 'rotation_qqq_iwm' },
+                      ].map(({ label, key }) => {
+                        const val = regime.cross[key] || 0;
+                        return (
+                          <div key={key} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
+                            <span className="text-zinc-500">{label}</span>
+                            <span className={`font-mono ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {val > 0 ? '+' : ''}{(val * 100).toFixed(2)}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Right Column: Model Inventory */}
+        {/* Right Column: Model Categories */}
         <div className="lg:col-span-2 space-y-3">
-          {/* GPU Status Bar */}
-          {gpuInfo && (
-            <div className="flex items-center gap-3 p-2.5 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="gpu-status-bar">
-              <div className="w-6 h-6 rounded-md bg-fuchsia-500/15 flex items-center justify-center flex-shrink-0">
-                {gpuInfo.cuda ? <Monitor className="w-3.5 h-3.5 text-fuchsia-400" /> : <Cpu className="w-3.5 h-3.5 text-zinc-500" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-white truncate">{gpuInfo.cuda ? gpuInfo.gpu : 'CPU Mode'}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
-                    {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
-                  </span>
-                </div>
-                {gpuInfo.vram_mb > 0 && (
-                  <span className="text-[10px] text-zinc-500">{(gpuInfo.vram_mb / 1024).toFixed(0)} GB VRAM</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className="text-[10px] text-zinc-500">CNN Models:</span>
-                <span className={`text-xs font-mono ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-500'}`}>
-                  {cnnModels.length}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Summary Bar */}
-          {inventory && (
-            <div className="flex items-center gap-4 p-3 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="model-summary">
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-zinc-400">Models Trained</span>
-                  <span className="text-sm font-mono text-white">
-                    {(inventory.total_trained || 0) + cnnModels.length} / {(inventory.total_defined || 0) + 20}
-                  </span>
-                </div>
-                <MetricBar value={(inventory.total_trained || 0) + cnnModels.length} max={(inventory.total_defined || 0) + 20} color="bg-emerald-500" />
-              </div>
-              {inventory.total_trained === 0 && cnnModels.length === 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-400">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>No models trained yet</span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Category List */}
           <div className="space-y-2" data-testid="model-categories">
             {inventory?.categories && Object.entries(inventory.categories).map(([key, cat]) => (

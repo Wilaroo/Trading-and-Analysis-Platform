@@ -15,7 +15,6 @@ import api from '../../utils/api';
 import { useDataCache, useTrainingMode } from '../../contexts';
 
 import QuickStatsBar from './QuickStatsBar';
-import AICommandCenter from './AICommandCenter';
 import DataBacktestingPanel from './DataBacktestingPanel';
 import StrategyPerformancePanel from './StrategyPerformancePanel';
 import TrainingPipelinePanel from './TrainingPipelinePanel';
@@ -236,43 +235,9 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
     return () => clearInterval(interval);
   }, [fetchAllData, getCached, getPollingInterval, isTrainingActive]);
 
-  const handlePromote = useCallback(async (strategyName, targetPhase) => {
-    try {
-      const res = await api.post('/api/strategy-promotion/promote', {
-        strategy_name: strategyName,
-        target_phase: targetPhase,
-        approved_by: 'user'
-      });
-      if (res.data?.success) {
-        toast.success(`${strategyName} promoted to ${targetPhase}`);
-        fetchAllData();
-      } else {
-        toast.error(res.data?.error || 'Promotion failed');
-      }
-    } catch (err) {
-      toast.error('Failed to promote strategy');
-    }
-  }, [fetchAllData]);
-
-  const handleRunCalibrations = useCallback(async () => {
-    try {
-      toast.info('Running all calibrations...');
-      const res = await api.post('/api/learning-connectors/sync/run-all-calibrations');
-      if (res.data?.success) {
-        toast.success(`Calibrations complete. ${res.data.applied_calibrations || 0} applied.`);
-        fetchAllData();
-      } else {
-        toast.warning('Some calibrations had issues');
-      }
-    } catch (err) {
-      toast.error('Failed to run calibrations');
-    }
-  }, [fetchAllData]);
-
   const handleRefresh = useCallback(() => fetchAllData(), [fetchAllData]);
   const noopCallback = useCallback(() => {}, []);
 
-  // Memoized data slices
   const quickStatsData = useMemo(() => ({
     simulationJobs: data.simulationJobs,
     collectionQueue: data.collectionQueue,
@@ -283,22 +248,10 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
     dataSource: data.dataSource,
   }), [data.simulationJobs, data.collectionQueue, data.candidates, data.historicalBars, data.connectorSummary, data.setupModelsStatus, data.dataSource]);
 
-  const aiData = useMemo(() => ({
-    bullWinRate: data.bullWinRate,
-    bullDebates: data.bullDebates,
-    bearWinRate: data.bearWinRate,
-    bearDebates: data.bearDebates,
-    riskInterventions: data.riskInterventions,
-    riskSaved: data.riskSaved,
-    aiAdvisorWeight: data.aiAdvisorWeight,
-  }), [data.bullWinRate, data.bullDebates, data.bearWinRate, data.bearDebates, data.riskInterventions, data.riskSaved, data.aiAdvisorWeight]);
-
   const memoizedPhases = useMemo(() => data.phases, [data.phases]);
   const memoizedCandidates = useMemo(() => data.candidates, [data.candidates]);
   const memoizedSimulationJobs = useMemo(() => data.simulationJobs, [data.simulationJobs]);
   const memoizedReportCard = useMemo(() => data.reportCard, [data.reportCard]);
-  const memoizedConnectors = useMemo(() => data.connectors, [data.connectors]);
-  const memoizedThresholds = useMemo(() => data.thresholds, [data.thresholds]);
 
   return (
     <div className="h-full overflow-auto p-4" style={{ background: 'var(--bg-primary)' }} data-testid="nia-page">
@@ -336,16 +289,7 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       {/* 1. Quick Stats Bar — system status at a glance */}
       <QuickStatsBar data={quickStatsData} />
 
-      {/* 2. AI Command Center — setup models + live performance */}
-      <AICommandCenter
-        aiData={aiData}
-        connectors={memoizedConnectors}
-        thresholds={memoizedThresholds}
-        onRefresh={handleRefresh}
-        onRunCalibrations={handleRunCalibrations}
-      />
-
-      {/* 2.5 Training Pipeline — model inventory, regime, training controls */}
+      {/* 2. AI Training Pipeline — unified training hub: setup models + model inventory + regime */}
       <TrainingPipelinePanel onRefresh={handleRefresh} wsTrainingStatus={wsTrainingStatus} wsMarketRegime={wsMarketRegime} />
 
       {/* 2.75 SentCom Intelligence — confidence gate decisions, trading mode */}
@@ -364,7 +308,7 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
         candidates={memoizedCandidates}
         reportCard={memoizedReportCard}
         loading={stableLoading}
-        onPromote={handlePromote}
+        onPromote={noopCallback}
         onDemote={noopCallback}
       />
 
