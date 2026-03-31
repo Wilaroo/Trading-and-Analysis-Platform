@@ -9,7 +9,7 @@ import requests
 import os
 
 # Get API URL from environment
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://lightgbm-pipeline.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ai-trading-bot-84.preview.emergentagent.com').rstrip('/')
 
 
 class TestRegimePerformanceEndpoints:

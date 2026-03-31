@@ -75,6 +75,7 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
   const status = phaseData?.status || 'pending';
   const trained = phaseData?.models_trained || 0;
   const failed = phaseData?.models_failed || 0;
+  const skipped = phaseData?.models_skipped || 0;
   const expected = phaseData?.expected_models || phase.expected;
   const avgAcc = phaseData?.avg_accuracy || 0;
   const elapsed = phaseData?.elapsed_seconds || 0;
@@ -112,6 +113,9 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
         {(status === 'done' || isActive) && (
           <>
             <span className={`text-[10px] font-mono ${isActive ? 'text-cyan-400' : 'text-zinc-400'}`}>{trained}/{expected}</span>
+            {skipped > 0 && (
+              <span className="text-[9px] font-mono text-zinc-600" title="Skipped (already trained)">({skipped} cached)</span>
+            )}
             {avgAcc > 0 && (
               <span className={`text-[10px] font-mono ${avgAcc > 0.6 ? 'text-emerald-400' : avgAcc > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
                 {(avgAcc * 100).toFixed(1)}%
