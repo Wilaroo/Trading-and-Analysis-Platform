@@ -169,9 +169,6 @@ async def get_data_coverage():
                 "latest_date": str(r["latest_date"])[:10] if r.get("latest_date") else None,
             })
         
-        # Build a lookup for date ranges per bar_size (for tier-level display)
-        tf_date_lookup = {r["timeframe"]: r for r in timeframe_stats}
-        
         # OPTIMIZED: Get tier counts in single query each
         tier_stats = []
         total_gaps = 0
@@ -188,17 +185,33 @@ async def get_data_coverage():
             
             timeframe_coverage = []
             for tf in tier_config["timeframes"]:
-                # OPTIMIZED: Use aggregation count instead of distinct
+                # Per-tier per-timeframe: symbol count + bar count + date range in one aggregation
                 pipeline = [
                     {"$match": {
                         "symbol": {"$in": list(tier_symbols_set)},
                         "bar_size": tf
                     }},
-                    {"$group": {"_id": "$symbol"}},
-                    {"$count": "total"}
+                    {"$group": {
+                        "_id": "$symbol",
+                        "bar_count": {"$sum": 1},
+                        "min_date": {"$min": "$date"},
+                        "max_date": {"$max": "$date"},
+                    }},
+                    {"$group": {
+                        "_id": None,
+                        "total_symbols": {"$sum": 1},
+                        "total_bars": {"$sum": "$bar_count"},
+                        "earliest": {"$min": "$min_date"},
+                        "latest": {"$max": "$max_date"},
+                    }}
                 ]
                 result = list(data_col.aggregate(pipeline, allowDiskUse=True))
-                symbols_with_data_count = result[0]["total"] if result else 0
+                agg = result[0] if result else {}
+                
+                symbols_with_data_count = agg.get("total_symbols", 0)
+                tier_bars = agg.get("total_bars", 0)
+                earliest = agg.get("earliest")
+                latest = agg.get("latest")
                 
                 coverage_pct = (symbols_with_data_count / tier_symbol_count * 100) if tier_symbol_count > 0 else 0
                 missing = tier_symbol_count - symbols_with_data_count
@@ -206,7 +219,6 @@ async def get_data_coverage():
                 if missing > 0:
                     total_gaps += 1
                 
-                tf_dates = tf_date_lookup.get(tf, {})
                 timeframe_coverage.append({
                     "timeframe": tf,
                     "symbols_with_data": symbols_with_data_count,
@@ -214,9 +226,9 @@ async def get_data_coverage():
                     "coverage_pct": round(coverage_pct, 1),
                     "missing": missing,
                     "needs_fill": missing > 0,
-                    "total_bars": tf_dates.get("total_bars", 0),
-                    "earliest_date": tf_dates.get("earliest_date"),
-                    "latest_date": tf_dates.get("latest_date"),
+                    "total_bars": tier_bars,
+                    "earliest_date": str(earliest)[:10] if earliest else None,
+                    "latest_date": str(latest)[:10] if latest else None,
                 })
             
             tier_stats.append({

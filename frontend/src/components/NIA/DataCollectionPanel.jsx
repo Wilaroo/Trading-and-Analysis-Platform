@@ -7,7 +7,7 @@ import {
   Calendar, BarChart3, XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api from '../../utils/api';
+import { api } from '../../utils/api';
 import { useWsData } from '../../contexts/WebSocketDataContext';
 
 const TIER_META = {
