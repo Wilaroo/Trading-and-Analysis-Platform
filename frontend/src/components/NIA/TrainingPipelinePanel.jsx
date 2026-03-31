@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   Brain, Play, Square, RefreshCw, TrendingUp, TrendingDown,
   Activity, Shield, Clock, Target, BarChart3, Layers, AlertTriangle,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, Zap
+  CheckCircle2, Circle, ChevronDown, ChevronRight, Zap, Eye, Cpu, Monitor
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../utils/api';
@@ -28,6 +28,7 @@ const CATEGORY_ICONS = {
   gap_fill: Zap,
   risk_of_ruin: Shield,
   ensemble: Layers,
+  cnn_visual: Eye,
 };
 
 const CATEGORY_COLORS = {
@@ -39,6 +40,7 @@ const CATEGORY_COLORS = {
   gap_fill: 'text-orange-400',
   risk_of_ruin: 'text-red-400',
   ensemble: 'text-pink-400',
+  cnn_visual: 'text-fuchsia-400',
 };
 
 const MetricBar = memo(({ value, max = 1, color = 'bg-cyan-500' }) => {
@@ -163,6 +165,8 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const [regime, setRegime] = useState(null);
   const [inventory, setInventory] = useState(null);
   const [pipelineStatus, setPipelineStatus] = useState(null);
+  const [cnnModels, setCnnModels] = useState([]);
+  const [gpuInfo, setGpuInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
 
@@ -177,10 +181,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
 
   const fetchData = useCallback(async () => {
     try {
-      const [regimeRes, inventoryRes, statusRes] = await Promise.allSettled([
+      const [regimeRes, inventoryRes, statusRes, cnnRes, gpuRes] = await Promise.allSettled([
         api.get('/api/ai-training/regime-live'),
         api.get('/api/ai-training/model-inventory'),
         api.get('/api/ai-training/status'),
+        api.get('/api/ai-training/cnn/models'),
+        api.get('/api/ai-training/gpu-status'),
       ]);
 
       if (regimeRes.status === 'fulfilled' && regimeRes.value.data?.success) {
@@ -191,6 +197,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       }
       if (statusRes.status === 'fulfilled' && statusRes.value.data?.success) {
         setPipelineStatus(statusRes.value.data);
+      }
+      if (cnnRes.status === 'fulfilled' && cnnRes.value.data?.success) {
+        setCnnModels(cnnRes.value.data.models || []);
+      }
+      if (gpuRes.status === 'fulfilled' && gpuRes.value.data?.success) {
+        setGpuInfo(gpuRes.value.data.gpu);
       }
     } catch (err) {
       console.error('Training panel fetch error:', err);
@@ -354,17 +366,45 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
 
         {/* Right Column: Model Inventory */}
         <div className="lg:col-span-2 space-y-3">
+          {/* GPU Status Bar */}
+          {gpuInfo && (
+            <div className="flex items-center gap-3 p-2.5 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="gpu-status-bar">
+              <div className="w-6 h-6 rounded-md bg-fuchsia-500/15 flex items-center justify-center flex-shrink-0">
+                {gpuInfo.cuda ? <Monitor className="w-3.5 h-3.5 text-fuchsia-400" /> : <Cpu className="w-3.5 h-3.5 text-zinc-500" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-white truncate">{gpuInfo.cuda ? gpuInfo.gpu : 'CPU Mode'}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
+                    {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
+                  </span>
+                </div>
+                {gpuInfo.vram_mb > 0 && (
+                  <span className="text-[10px] text-zinc-500">{(gpuInfo.vram_mb / 1024).toFixed(0)} GB VRAM</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="text-[10px] text-zinc-500">CNN Models:</span>
+                <span className={`text-xs font-mono ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-500'}`}>
+                  {cnnModels.length}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Summary Bar */}
           {inventory && (
             <div className="flex items-center gap-4 p-3 rounded-lg border border-white/5 bg-white/[0.02]" data-testid="model-summary">
               <div className="flex-1">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-zinc-400">Models Trained</span>
-                  <span className="text-sm font-mono text-white">{inventory.total_trained} / {inventory.total_defined}</span>
+                  <span className="text-sm font-mono text-white">
+                    {(inventory.total_trained || 0) + cnnModels.length} / {(inventory.total_defined || 0) + 20}
+                  </span>
                 </div>
-                <MetricBar value={inventory.total_trained} max={inventory.total_defined} color="bg-emerald-500" />
+                <MetricBar value={(inventory.total_trained || 0) + cnnModels.length} max={(inventory.total_defined || 0) + 20} color="bg-emerald-500" />
               </div>
-              {inventory.total_trained === 0 && (
+              {inventory.total_trained === 0 && cnnModels.length === 0 && (
                 <div className="flex items-center gap-1.5 text-xs text-amber-400">
                   <AlertTriangle className="w-3.5 h-3.5" />
                   <span>No models trained yet</span>
@@ -378,7 +418,49 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
             {inventory?.categories && Object.entries(inventory.categories).map(([key, cat]) => (
               <CategoryRow key={key} categoryKey={key} category={cat} />
             ))}
+
+            {/* CNN Visual Patterns Category */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors" data-testid="cnn-category-row">
+              <div className="flex items-center gap-2.5">
+                <Eye className="w-4 h-4 text-fuchsia-400" />
+                <div>
+                  <span className="text-xs font-medium text-white">CNN Visual Patterns</span>
+                  <span className="text-[10px] text-zinc-500 ml-2">Phase 9 &middot; ResNet-18</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-mono ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-500'}`}>
+                  {cnnModels.length} trained
+                </span>
+                {cnnModels.length > 0 && (
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    avg acc: {(cnnModels.reduce((sum, m) => sum + (m.metrics?.accuracy || 0), 0) / cnnModels.length * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
+
+          {/* CNN Model Details (if any trained) */}
+          {cnnModels.length > 0 && (
+            <div className="p-3 rounded-lg border border-fuchsia-500/10 bg-fuchsia-500/[0.03]" data-testid="cnn-model-details">
+              <h4 className="text-xs text-fuchsia-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Eye className="w-3 h-3" /> CNN Models
+              </h4>
+              <div className="space-y-1.5">
+                {cnnModels.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-white/[0.02]">
+                    <span className="text-zinc-300 font-mono">{m.model_name || `${m.setup_type}/${m.bar_size}`}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-fuchsia-400 font-mono">{((m.metrics?.accuracy || 0) * 100).toFixed(1)}%</span>
+                      <span className="text-zinc-500">AUC: {(m.metrics?.win_auc || 0).toFixed(3)}</span>
+                      <span className="text-zinc-600 text-[10px]">{m.metrics?.total_samples || 0} samples</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Recent Training Results */}
           {pipelineStatus?.last_result && (

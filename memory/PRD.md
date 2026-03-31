@@ -801,7 +801,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **.bat Updates**: `TradeCommand_AITraining.bat` (CNN status check), `InstallML_GPU.bat` (CNN dependencies), `WeekendAuto.bat` (auto-queue CNN training)
 - **GPU**: Designed for RTX 5060 Ti (16GB VRAM), auto-detects CUDA, falls back to CPU gracefully
 - **Training**: ~15-25 min on GPU for ResNet-18 (25 epochs, early stopping, ReduceLROnPlateau scheduler)
-- **Testing**: All API endpoints verified (iteration_126.json), graceful degradation in container (no torchvision/GPU)
+- **NIA Tab UI**: CNN integrated into existing Training Pipeline panel:
+  - GPU status bar (device name, CUDA badge, VRAM, CNN model count)
+  - "CNN Visual Patterns" category row (Phase 9 · ResNet-18, trained count, avg accuracy)
+  - CNN model details panel (per-model: name, accuracy, AUC, sample count) when models exist
+  - Model summary bar includes CNN models in total count
+  - "Start Training" runs CNN as Phase 9 alongside all LightGBM phases
+- **Testing**: All API endpoints verified (iteration_126.json), UI verified via screenshot, graceful degradation in container (no torchvision/GPU)
 
 
 ### Known Issues
