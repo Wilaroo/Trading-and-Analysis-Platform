@@ -330,49 +330,58 @@ async def get_model_inventory():
         from services.ai_modules.ensemble_model import ENSEMBLE_MODEL_CONFIGS
 
         categories = {
+            "setup_specific": {
+                "label": "Setup-Specific",
+                "description": "Per setup type trade signals (Long + Short)",
+                "group": "signal",
+                "models": [],
+            },
+            "ensemble": {
+                "label": "Ensemble Meta-Learner",
+                "description": "Stacks multi-timeframe signals into final GO/NO-GO",
+                "group": "signal",
+                "models": [],
+            },
             "generic_directional": {
                 "label": "Generic Directional",
                 "description": "Predicts UP/DOWN per timeframe",
-                "models": [],
-            },
-            "setup_specific": {
-                "label": "Setup-Specific",
-                "description": "Per setup type + timeframe",
+                "group": "support",
                 "models": [],
             },
             "volatility": {
                 "label": "Volatility Prediction",
                 "description": "Predicts high/low vol for position sizing",
+                "group": "support",
                 "models": [],
             },
             "exit_timing": {
                 "label": "Exit Timing",
                 "description": "Predicts optimal holding period",
+                "group": "support",
                 "models": [],
             },
             "sector_relative": {
                 "label": "Sector-Relative",
                 "description": "Outperform/underperform vs sector ETF",
+                "group": "support",
                 "models": [],
             },
             "gap_fill": {
                 "label": "Gap Fill Probability",
                 "description": "Gap fill vs continuation prediction",
+                "group": "support",
                 "models": [],
             },
             "risk_of_ruin": {
                 "label": "Risk-of-Ruin",
                 "description": "Stop-loss hit probability",
-                "models": [],
-            },
-            "ensemble": {
-                "label": "Ensemble Meta-Learner",
-                "description": "Stacks multi-timeframe signals",
+                "group": "support",
                 "models": [],
             },
             "regime_conditional": {
                 "label": "Regime-Conditional",
                 "description": "Per-regime model variants (bull/bear/range/high_vol)",
+                "group": "support",
                 "models": [],
             },
         }

@@ -865,6 +865,15 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Removed**: 3-tab navigation, lookback period selector, symbol filter cards, skip recent toggle, max symbols dropdown, estimated time display, DataHeatmap component usage.
 - **Chaining confirmed**: `fill_gaps` → `run_per_stock_collection(use_max_lookback=True)` → `generate_chain_requests()` — steps backward in time from earliest existing bar to IB max history limit per timeframe.
 
+### Model Inventory Streamlined: Trade Signal Generators + Support Models (**DONE** — Mar 31, 2026)
+- **Removed SetupModelsPanel** entirely — no more 10 setup cards with "Train All" button.
+- **Categorized all 128+ models into two groups**:
+  - **Trade Signal Generators**: setup_specific (34 long+short), ensemble (10), CNN (20) — models that directly produce trade decisions
+  - **Support Models**: generic_directional (7), volatility (7), exit_timing (10), sector_relative (3), risk_of_ruin (6), regime_conditional (28), gap_fill — contextual inputs for sizing/risk/regime
+- **Backend**: Added `group` field ("signal" or "support") to each category in `/api/ai-training/model-inventory`
+- **Frontend**: Model inventory now shows two clearly labeled sections with group headers. Each category has inline progress bars and accuracy. No more separate "Train All" button — just "Start Training" for the full pipeline.
+- **Validation plan**: Setup-specific + ensemble models will be validated automatically post-training (future phase 10). Support models don't need individual validation — if the ensemble validates, they're working.
+
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
 - Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)
