@@ -872,7 +872,16 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - **Support Models**: generic_directional (7), volatility (7), exit_timing (10), sector_relative (3), risk_of_ruin (6), regime_conditional (28), gap_fill — contextual inputs for sizing/risk/regime
 - **Backend**: Added `group` field ("signal" or "support") to each category in `/api/ai-training/model-inventory`
 - **Frontend**: Model inventory now shows two clearly labeled sections with group headers. Each category has inline progress bars and accuracy. No more separate "Train All" button — just "Start Training" for the full pipeline.
-- **Validation plan**: Setup-specific + ensemble models will be validated automatically post-training (future phase 10). Support models don't need individual validation — if the ensemble validates, they're working.
+
+### Phase 10: Auto-Validation Wired Into Pipeline (**DONE** — Mar 31, 2026)
+- **Added Phase 10 "Auto-Validation"** to `training_pipeline.py`. After all 9 training phases complete, the pipeline automatically:
+  1. Runs per-model validation (Phases 1-3: AI Comparison → Monte Carlo → Walk-Forward) on all setup_specific models (long + short) that were trained
+  2. Runs batch validation (Phases 4-5: Multi-Strategy comparison → Market-Wide scan) on the base setup types
+  3. Stores results in `model_validations` collection with promote/reject decisions
+- **Backend model-inventory** now returns validation status per setup_type (promoted count, rejected count, phases_passed per model)
+- **Frontend PhaseTracker** shows Phase 10 progress during training, including per-model validation status
+- **Frontend CategoryRow** shows validation badges: "X/Y validated" with color (green=all promoted, amber=partial, red=none)
+- **No manual validation needed** — "Start Training" handles everything end-to-end including validation
 
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)

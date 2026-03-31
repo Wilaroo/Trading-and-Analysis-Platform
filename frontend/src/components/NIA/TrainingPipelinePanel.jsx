@@ -58,6 +58,7 @@ const ALL_PHASES = [
   { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
   { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
   { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 13 },
+  { key: 'auto_validation', label: 'Auto-Validation', num: '10', expected: 34 },
 ];
 
 const formatDuration = (seconds) => {
@@ -277,6 +278,7 @@ const CategoryRow = memo(({ categoryKey, category }) => {
   const totalCount = models.length;
   const trainedModels = models.filter(m => m.accuracy);
   const avgAccuracy = trainedModels.length > 0 ? trainedModels.reduce((sum, m) => sum + m.accuracy, 0) / trainedModels.length : 0;
+  const validation = category.validation;
 
   return (
     <div className="border border-white/5 rounded-lg overflow-hidden" data-testid={`category-${categoryKey}`}>
@@ -288,6 +290,14 @@ const CategoryRow = memo(({ categoryKey, category }) => {
         <div className="flex items-center gap-2">
           <Icon className={`w-3.5 h-3.5 ${color}`} />
           <span className="text-xs font-medium text-white">{category.label}</span>
+          {validation && validation.total_validated > 0 && (
+            <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+              validation.promoted === validation.total_validated ? 'bg-emerald-500/15 text-emerald-400' :
+              validation.promoted > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
+            }`} data-testid={`validation-badge-${categoryKey}`}>
+              {validation.promoted}/{validation.total_validated} validated
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
@@ -307,24 +317,32 @@ const CategoryRow = memo(({ categoryKey, category }) => {
       {expanded && (
         <div className="border-t border-white/5 p-2 space-y-0.5 max-h-60 overflow-auto">
           <p className="text-[10px] text-zinc-500 px-2 mb-1">{category.description}</p>
-          {models.map((m) => (
-            <div key={m.name} className="flex items-center justify-between px-2 py-1 rounded hover:bg-white/[0.02]" data-testid={`model-row-${m.name}`}>
-              <div className="flex items-center gap-1.5">
-                {m.trained ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Circle className="w-3 h-3 text-zinc-700" />}
-                <span className="text-[10px] text-zinc-300 font-mono">{m.name}</span>
+          {models.map((m) => {
+            const valStatus = validation?.per_setup?.[m.setup_type || m.name];
+            return (
+              <div key={m.name} className="flex items-center justify-between px-2 py-1 rounded hover:bg-white/[0.02]" data-testid={`model-row-${m.name}`}>
+                <div className="flex items-center gap-1.5">
+                  {m.trained ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Circle className="w-3 h-3 text-zinc-700" />}
+                  <span className="text-[10px] text-zinc-300 font-mono">{m.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {m.accuracy > 0 && (
+                    <span className={`text-[10px] font-mono ${m.accuracy > 0.6 ? 'text-emerald-400' : m.accuracy > 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {(m.accuracy * 100).toFixed(1)}%
+                    </span>
+                  )}
+                  {m.training_samples > 0 && (
+                    <span className="text-[9px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
+                  )}
+                  {valStatus && (
+                    <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${
+                      valStatus.status === 'promoted' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+                    }`}>{valStatus.phases_passed}/3</span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {m.accuracy > 0 && (
-                  <span className={`text-[10px] font-mono ${m.accuracy > 0.6 ? 'text-emerald-400' : m.accuracy > 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
-                    {(m.accuracy * 100).toFixed(1)}%
-                  </span>
-                )}
-                {m.training_samples > 0 && (
-                  <span className="text-[9px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

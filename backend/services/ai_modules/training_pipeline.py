@@ -72,6 +72,7 @@ PHASE_CONFIGS = {
     "regime_conditional": {"label": "Regime-Conditional", "order": 8, "expected_models": 28, "phase_num": "7"},
     "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 9, "expected_models": 10, "phase_num": "8"},
     "cnn_patterns": {"label": "CNN Chart Patterns", "order": 10, "expected_models": 13, "phase_num": "9"},
+    "auto_validation": {"label": "Auto-Validation", "order": 11, "expected_models": 34, "phase_num": "10"},
 }
 
 
@@ -246,8 +247,9 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn"]
+        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn", "validate"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
+        # "validate" runs 5-Phase Auto-Validation on setup_specific + ensemble models
 
     if bar_sizes is None:
         bar_sizes = list(BAR_SIZE_CONFIGS.keys())
@@ -1361,6 +1363,140 @@ async def run_training_pipeline(
             except Exception as e:
                 logger.error(f"CNN phase failed: {e}", exc_info=True)
                 results["cnn_training"] = {"error": str(e)}
+
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 10: Auto-Validation (5-Phase pipeline on Trade Signal Generators)
+        # ══════════════════════════════════════════════════════════════════════
+        if "validate" in phases and len(results["models_trained"]) > 0:
+            phase_key = "auto_validation"
+            status.start_phase(phase_key, 34)  # 17 long + 17 short setup types
+            status.update(phase=phase_key, current_model="Initializing validation...")
+            logger.info("Phase 10: Starting Auto-Validation of Trade Signal Generators")
+
+            try:
+                from services.ai_modules.post_training_validator import validate_trained_model, run_batch_validation
+                from services.slow_learning.advanced_backtest_engine import get_advanced_backtest_engine
+
+                backtest_engine = get_advanced_backtest_engine()
+
+                # Get timeseries service for model rollback capability
+                timeseries_service = None
+                try:
+                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+                    timeseries_service = TimeSeriesGBM.get_instance() if hasattr(TimeSeriesGBM, 'get_instance') else None
+                except Exception:
+                    logger.warning("Could not get timeseries service for validation rollback — continuing without rollback support")
+
+                # Determine which setup types were actually trained in this run
+                trained_long_setups = [m.split("/")[0] for m in results["models_trained"] if "/" in m and not m.startswith("SHORT_") and m.split("/")[0] in ALL_SETUP_TYPES]
+                trained_short_setups = [m.split("/")[0] for m in results["models_trained"] if "/" in m and m.startswith("SHORT_")]
+                all_trained_setups = list(set(trained_long_setups + trained_short_setups))
+
+                if not all_trained_setups:
+                    # Fall back to all known setup types if we can't parse from results
+                    all_trained_setups = ALL_SETUP_TYPES + ALL_SHORT_SETUP_TYPES
+
+                validated_count = 0
+                validation_results = []
+                promoted_count = 0
+                rejected_count = 0
+
+                # Per-model validation (Phases 1-3: AI Comparison, Monte Carlo, Walk-Forward)
+                for setup_type in all_trained_setups:
+                    if status._status.get("phase") == "cancelled":
+                        break
+
+                    # Find the bar_size this model was trained on (default to "5 mins")
+                    bar_size = "5 mins"
+                    for m_name in results["models_trained"]:
+                        if m_name.startswith(f"{setup_type}/"):
+                            bar_size = m_name.split("/")[1] if "/" in m_name else "5 mins"
+                            break
+
+                    status.update(current_model=f"Validating {setup_type}/{bar_size}")
+                    logger.info(f"[VALIDATE] Phase 10: Validating {setup_type}/{bar_size}")
+
+                    try:
+                        training_result = {"metrics": {"accuracy": 0}}
+                        # Find accuracy from training results
+                        for m_name in results["models_trained"]:
+                            if m_name.startswith(f"{setup_type}/"):
+                                # Try to find accuracy in phase history
+                                for ph_key, ph_data in results.get("phase_results", {}).items():
+                                    if isinstance(ph_data, dict):
+                                        for model_res in ph_data.get("model_results", []):
+                                            if isinstance(model_res, dict) and model_res.get("model_name", "").startswith(setup_type):
+                                                training_result["metrics"]["accuracy"] = model_res.get("accuracy", 0)
+                                                break
+                                break
+
+                        val_result = await validate_trained_model(
+                            db=db,
+                            timeseries_service=timeseries_service,
+                            backtest_engine=backtest_engine,
+                            setup_type=setup_type,
+                            bar_size=bar_size,
+                            training_result=training_result,
+                        )
+                        validation_results.append(val_result)
+                        if val_result.get("status") == "promoted":
+                            promoted_count += 1
+                        else:
+                            rejected_count += 1
+                        validated_count += 1
+                        status.model_done(phase_key, f"val_{setup_type}",
+                                          accuracy=val_result.get("training_accuracy", 0),
+                                          extra={"phases_passed": val_result.get("phases_passed", 0), "status": val_result.get("status", "unknown")})
+                    except Exception as e:
+                        logger.error(f"[VALIDATE] Failed to validate {setup_type}: {e}")
+                        status.model_failed(phase_key, f"val_{setup_type}", str(e))
+                        rejected_count += 1
+
+                # Batch validation (Phases 4-5: Multi-Strategy + Market-Wide)
+                if len(all_trained_setups) >= 2:
+                    status.update(current_model="Batch validation (Multi-Strategy + Market-Wide)")
+                    try:
+                        # Only validate the base (non-SHORT) setup types for batch
+                        base_setups = [s for s in all_trained_setups if not s.startswith("SHORT_")]
+                        if len(base_setups) >= 2:
+                            batch_result = await run_batch_validation(
+                                db=db,
+                                backtest_engine=backtest_engine,
+                                trained_setup_types=base_setups[:10],  # Cap at 10 for performance
+                            )
+                            results["batch_validation"] = {
+                                "multi_strategy": batch_result.get("multi_strategy"),
+                                "market_wide_count": len(batch_result.get("market_wide", [])),
+                                "duration_seconds": batch_result.get("total_duration_seconds", 0),
+                            }
+                    except Exception as e:
+                        logger.error(f"[VALIDATE] Batch validation failed: {e}")
+                        results["batch_validation"] = {"error": str(e)}
+
+                status.end_phase(phase_key)
+                results["validation_summary"] = {
+                    "total_validated": validated_count,
+                    "promoted": promoted_count,
+                    "rejected": rejected_count,
+                    "results": [{
+                        "setup_type": r.get("setup_type"),
+                        "status": r.get("status"),
+                        "phases_passed": r.get("phases_passed", 0),
+                    } for r in validation_results],
+                }
+                logger.info(
+                    f"Phase 10 Auto-Validation complete: {validated_count} validated, "
+                    f"{promoted_count} promoted, {rejected_count} rejected"
+                )
+
+            except ImportError as e:
+                logger.error(f"Phase 10 skipped — missing dependencies: {e}")
+                status.end_phase(phase_key)
+                results["validation_summary"] = {"error": f"Dependencies missing: {e}"}
+            except Exception as e:
+                logger.error(f"Phase 10 Auto-Validation error: {e}", exc_info=True)
+                status.end_phase(phase_key)
+                results["validation_summary"] = {"error": str(e)}
 
         # ── Done ──
         results["completed_at"] = datetime.now(timezone.utc).isoformat()

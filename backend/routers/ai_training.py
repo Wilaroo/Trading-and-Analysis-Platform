@@ -444,6 +444,46 @@ async def get_model_inventory():
             for c in categories.values()
         )
 
+        # Validation status for signal generators (setup_specific + ensemble)
+        validation_summary = {"setup_specific": {}, "ensemble": {}}
+        try:
+            if mongo_db is not None:
+                val_col = mongo_db["model_validations"]
+            # Get latest validation per setup_type
+            pipeline = [
+                {"$sort": {"validated_at": -1}},
+                {"$group": {
+                    "_id": "$setup_type",
+                    "status": {"$first": "$status"},
+                    "phases_passed": {"$first": "$phases_passed"},
+                    "validated_at": {"$first": "$validated_at"},
+                    "training_accuracy": {"$first": "$training_accuracy"},
+                }},
+            ]
+            for doc in val_col.aggregate(pipeline):
+                setup_type = doc["_id"]
+                validation_summary["setup_specific"][setup_type] = {
+                    "status": doc.get("status", "unknown"),
+                    "phases_passed": doc.get("phases_passed", 0),
+                    "validated_at": doc.get("validated_at"),
+                    "training_accuracy": doc.get("training_accuracy", 0),
+                }
+
+            # Count promoted/rejected
+            promoted = sum(1 for v in validation_summary["setup_specific"].values() if v["status"] == "promoted")
+            rejected = sum(1 for v in validation_summary["setup_specific"].values() if v["status"] == "rejected")
+            total_validated = len(validation_summary["setup_specific"])
+
+            # Attach to setup_specific category
+            categories["setup_specific"]["validation"] = {
+                "total_validated": total_validated,
+                "promoted": promoted,
+                "rejected": rejected,
+                "per_setup": validation_summary["setup_specific"],
+            }
+        except Exception as e:
+            logger.debug(f"Validation summary fetch error: {e}")
+
         return {
             "success": True,
             "total_defined": total_defined,
