@@ -826,6 +826,14 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 ### Training Progress Dashboard (**DONE** — Mar 31, 2026)
 - **Backend**: Added `PHASE_CONFIGS` (10 phases with labels, order, expected models). Enhanced `TrainingPipelineStatus` to auto-detect phase transitions via `update(phase=X)` — automatically ends previous phase and starts new phase. Tracks per-phase: `models_trained`, `models_failed`, `avg_accuracy` (running average), `elapsed_seconds`. Zero changes needed to existing pipeline code (auto-transitions leverage existing `status.update()` calls).
 - **Frontend**: Built `PhaseTracker` component showing all 10 phases as a vertical tracker with done/running/pending indicators, per-phase accuracy + model count, elapsed time per phase, running progress bar for current phase, and current model name. Added `ElapsedTimer` with live clock + ETA calculation based on model completion rate. Auto-polls every 5s during training.
+
+### Collector/Training Focus Mode + Bat File Update (**DONE** — Mar 31, 2026)
+- **Removed auto-start of 3 collector instances** from `TradeCommand_AITraining.bat` (Step 9 removed, now 9 steps total). Collectors are now UI-started only via NIA page or Command Center.
+- **Added focus mode to REST training endpoint**: `POST /api/ai-training/start` now calls `focus_mode_manager.set_mode("training")` before starting pipeline, and `reset_to_live()` in `finally` block when complete. Non-essential services (trading bot, scanner, learning loop) pause during training.
+- **Collection already had focus mode**: Internal collection via `ib_collector_router.py` calls `_activate_collecting_mode()` / `_restore_live_mode()`.
+- **Bat READY message**: Updated with Focus Mode documentation showing COLLECTING and TRAINING mode behavior.
+- **Testing**: 25/25 passed (iteration_129.json).
+
 - **Fixed**: Phase 2.5 target calculation TDZ ordering bug in TrainingPipelinePanel (isTraining declared before useEffect dependency).
 - **Testing**: 23/24 passed (iteration_128.json). 1 timeout due to container IB saturation (not a code bug).
 
