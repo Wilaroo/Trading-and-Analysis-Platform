@@ -24,6 +24,7 @@ import BotPerformanceChart from './BotPerformanceChart';
 import SentCom from './SentCom';
 import DetailedPositionsPanel from './DetailedPositionsPanel';
 import ScannerAlertsPanel from './ScannerAlertsPanel';
+import SocialFeedWidget from './SocialFeedWidget';
 import { useTickerModal } from '../hooks/useTickerModal';
 import SystemStatusBar from './SystemStatusBar';
 import api, { safeGet, safePost } from '../utils/api';
@@ -693,6 +694,9 @@ const NewDashboard = ({
           />
         </div>
       </div>
+      
+      {/* Social Feed - Twitter/X handles with AI sentiment */}
+      <SocialFeedWidget />
     </div>
   );
 };

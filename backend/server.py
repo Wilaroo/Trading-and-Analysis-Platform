@@ -105,6 +105,8 @@ from routers.dashboard_router import router as dashboard_router, init_dashboard_
 from routers.ai_training import router as ai_training_router
 from routers.short_data import router as short_data_router
 from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service, init_snapshot_assistant
+from routers.social_feed import router as social_feed_router, init_social_feed_router
+from services.social_feed_service import init_social_feed_service
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.focus_mode_manager import focus_mode_manager
@@ -236,6 +238,10 @@ init_trade_journal_service(trade_journal_service)
 from services.trade_snapshot_service import TradeSnapshotService
 trade_snapshot_service = TradeSnapshotService(db)
 init_snapshot_service(trade_snapshot_service)
+
+# Initialize Social Feed service
+social_feed_service = init_social_feed_service(db)
+init_social_feed_router(social_feed_service)
 
 # Wire snapshot service into trade journal for auto-generation on manual trade close
 trade_journal_service._snapshot_service = trade_snapshot_service
@@ -450,6 +456,7 @@ app.include_router(ib_collector_router)  # IB Historical Data Collector
 app.include_router(ai_training_router)  # AI Bulk Training Pipeline
 app.include_router(short_data_router)  # Short Interest Data (IB + FINRA)
 app.include_router(trade_snapshots_router)  # Trade Chart Snapshots with AI Annotations
+app.include_router(social_feed_router)  # Twitter/X Social Feed & AI Sentiment
 app.include_router(data_storage_router)  # Data Storage Management
 app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
