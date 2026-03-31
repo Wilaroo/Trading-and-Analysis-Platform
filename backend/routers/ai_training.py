@@ -529,3 +529,139 @@ async def get_confidence_gate_accuracy(limit: int = 100):
     except Exception as e:
         logger.error(f"Confidence gate accuracy error: {e}")
         return {"success": False, "error": str(e)}
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# CNN Chart Pattern Training Endpoints
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/cnn/start")
+async def start_cnn_training(
+    setup_type: str = "ALL",
+    bar_size: str = None,
+    max_symbols: int = None,
+):
+    """
+    Queue a CNN chart pattern training job.
+    
+    Args:
+        setup_type: "ALL" or specific setup (e.g., "BREAKOUT", "SCALP")
+        bar_size: Optional specific bar size (e.g., "1 day", "5 mins")
+        max_symbols: Limit symbols for faster training (None = all)
+    """
+    try:
+        from services.job_queue_manager import job_queue_manager, JobType
+        
+        params = {"setup_type": setup_type.upper()}
+        if bar_size:
+            params["bar_size"] = bar_size
+        if max_symbols:
+            params["max_symbols"] = max_symbols
+        
+        result = await job_queue_manager.create_job(
+            job_type=JobType.CNN_TRAINING.value,
+            params=params,
+            metadata={"description": f"CNN training: {setup_type}" + (f"/{bar_size}" if bar_size else " (all profiles)")}
+        )
+        
+        if result.get("success"):
+            job = result.get("job", {})
+            return {
+                "success": True,
+                "job_id": job.get("job_id"),
+                "message": f"CNN training job queued for {setup_type}",
+                "params": params,
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to create job")}
+    except Exception as e:
+        logger.error(f"CNN training start error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/cnn/models")
+def get_cnn_models():
+    """List all trained CNN models with their metrics."""
+    try:
+        from server import db as mongo_db
+        from services.ai_modules.chart_pattern_cnn import list_cnn_models
+        if mongo_db is None:
+            return {"success": False, "error": "Database not available"}
+        models = list_cnn_models(mongo_db)
+        return {"success": True, "models": models, "count": len(models)}
+    except Exception as e:
+        logger.error(f"CNN models list error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/cnn/predict/{symbol}")
+def cnn_predict(symbol: str, bar_size: str = "1 day", setup_type: str = "BREAKOUT"):
+    """
+    Run CNN inference on a symbol's current chart.
+    
+    Generates a chart image from the latest bars and runs the CNN model.
+    Returns pattern classification and win probability.
+    """
+    try:
+        from server import db as mongo_db
+        from services.ai_modules.chart_pattern_cnn import (
+            load_model_from_db, predict_from_image, CNN_WINDOW_SIZES, DEFAULT_WINDOW_SIZE
+        )
+        from services.ai_modules.chart_image_generator import generate_live_chart_tensor
+
+        if mongo_db is None:
+            return {"success": False, "error": "Database not available"}
+        
+        # Load the trained model
+        model, metadata = load_model_from_db(mongo_db, setup_type, bar_size)
+        if model is None:
+            return {
+                "success": False,
+                "error": f"No CNN model found for {setup_type}/{bar_size}. Train one first."
+            }
+        
+        # Generate chart tensor from latest bars
+        window_size = CNN_WINDOW_SIZES.get(setup_type, DEFAULT_WINDOW_SIZE)
+        tensor, chart_meta = generate_live_chart_tensor(mongo_db, symbol, bar_size, window_size)
+        
+        if tensor is None:
+            return {
+                "success": False,
+                "error": f"Insufficient bar data for {symbol}/{bar_size}"
+            }
+        
+        # Run prediction
+        prediction = predict_from_image(model, tensor)
+        prediction["symbol"] = symbol
+        prediction["bar_size"] = bar_size
+        prediction["setup_type"] = setup_type
+        prediction["model_accuracy"] = metadata.get("metrics", {}).get("accuracy", 0)
+        prediction["chart_meta"] = chart_meta
+        
+        return {"success": True, "prediction": prediction}
+        
+    except Exception as e:
+        logger.error(f"CNN prediction error for {symbol}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/gpu-status")
+def get_gpu_status():
+    """Get GPU information and CUDA availability."""
+    try:
+        from services.ai_modules.chart_pattern_cnn import get_gpu_info
+        info = get_gpu_info()
+        
+        # Try to get current GPU memory usage
+        try:
+            import torch
+            if torch.cuda.is_available():
+                info["vram_used_mb"] = torch.cuda.memory_allocated() // (1024 * 1024)
+                info["vram_reserved_mb"] = torch.cuda.memory_reserved() // (1024 * 1024)
+        except Exception:
+            pass
+        
+        return {"success": True, "gpu": info}
+    except Exception as e:
+        return {"success": True, "gpu": {"gpu": "Unknown", "cuda": False, "error": str(e)}}

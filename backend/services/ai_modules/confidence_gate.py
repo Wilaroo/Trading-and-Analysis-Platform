@@ -260,6 +260,38 @@ class ConfidenceGate:
             if learning_adjustment.get("multiplier_adj"):
                 position_multiplier *= learning_adjustment["multiplier_adj"]
 
+        # --- 4b. CNN VISUAL PATTERN SIGNAL ---
+        # If a trained CNN model exists for this setup, get its visual prediction
+        cnn_signal = await self._get_cnn_signal(symbol, setup_type, direction)
+        if cnn_signal.get("has_prediction"):
+            cnn_win_prob = cnn_signal["win_probability"]
+            cnn_pattern = cnn_signal["pattern"]
+            cnn_conf = cnn_signal["pattern_confidence"]
+
+            if cnn_win_prob >= 0.65:
+                confidence_points += 12
+                reasoning.append(
+                    f"CNN visual analysis: HIGH win probability ({cnn_win_prob:.0%}) — "
+                    f"pattern '{cnn_pattern}' ({cnn_conf:.0%} conf)"
+                )
+            elif cnn_win_prob >= 0.50:
+                confidence_points += 5
+                reasoning.append(
+                    f"CNN visual analysis: moderate win probability ({cnn_win_prob:.0%}) — "
+                    f"pattern '{cnn_pattern}'"
+                )
+            elif cnn_win_prob < 0.35:
+                confidence_points -= 10
+                position_multiplier *= 0.8
+                reasoning.append(
+                    f"CNN visual analysis: LOW win probability ({cnn_win_prob:.0%}) — "
+                    f"chart looks unfavorable, reducing size 20%"
+                )
+            else:
+                reasoning.append(
+                    f"CNN visual analysis: neutral ({cnn_win_prob:.0%}) — no strong visual signal"
+                )
+
         # --- 5. DETERMINE DECISION ---
         confidence_score = max(0, min(100, confidence_points))
 
@@ -643,6 +675,70 @@ class ConfidenceGate:
             
         except Exception as e:
             logger.debug(f"Live prediction failed (non-critical): {e}")
+            return result
+
+    async def _get_cnn_signal(self, symbol: str, setup_type: str, direction: str) -> Dict[str, Any]:
+        """
+        Get CNN visual pattern analysis for the current chart.
+        
+        Loads the trained CNN model for this setup type and generates a prediction
+        from the latest bar data. Returns pattern classification and win probability.
+        """
+        result = {"has_prediction": False}
+
+        try:
+            import asyncio
+            from services.ai_modules.chart_pattern_cnn import (
+                load_model_from_db, predict_from_image,
+                CNN_WINDOW_SIZES, DEFAULT_WINDOW_SIZE
+            )
+            from services.ai_modules.chart_image_generator import generate_live_chart_tensor
+
+            if self._db is None:
+                return result
+
+            def _run_cnn():
+                try:
+                    from services.ai_modules.setup_training_config import SETUP_TRAINING_PROFILES
+                    profiles = SETUP_TRAINING_PROFILES.get(setup_type, [])
+                    bar_size = "1 day"
+                    if profiles:
+                        bar_size = profiles[0]["bar_size"]
+
+                    model, metadata = load_model_from_db(self._db, setup_type, bar_size)
+                    if model is None:
+                        return None
+
+                    window_size = CNN_WINDOW_SIZES.get(setup_type, DEFAULT_WINDOW_SIZE)
+                    tensor, chart_meta = generate_live_chart_tensor(
+                        self._db, symbol, bar_size, window_size
+                    )
+                    if tensor is None:
+                        return None
+
+                    prediction = predict_from_image(model, tensor)
+                    prediction["model_accuracy"] = metadata.get("metrics", {}).get("accuracy", 0)
+                    return prediction
+                except Exception as e:
+                    logger.debug(f"CNN inference failed for {symbol}/{setup_type}: {e}")
+                    return None
+
+            loop = asyncio.get_event_loop()
+            prediction = await loop.run_in_executor(None, _run_cnn)
+
+            if prediction is None:
+                return result
+
+            result["has_prediction"] = True
+            result["pattern"] = prediction.get("pattern", "UNKNOWN")
+            result["pattern_confidence"] = prediction.get("pattern_confidence", 0)
+            result["win_probability"] = prediction.get("win_probability", 0.5)
+            result["top_patterns"] = prediction.get("top_patterns", [])
+            result["model_accuracy"] = prediction.get("model_accuracy", 0)
+            return result
+
+        except Exception as e:
+            logger.debug(f"CNN signal failed (non-critical): {e}")
             return result
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):

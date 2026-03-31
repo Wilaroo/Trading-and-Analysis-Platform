@@ -79,8 +79,17 @@ if exist "%SCRIPT_DIR%weekend_batch.py" (
     
     if %errorlevel%==0 (
         echo.
+        echo [CNN] Starting CNN Chart Pattern Training...
+        curl -s -X POST "%CLOUD_URL%/api/ai-training/cnn/start?setup_type=ALL" -H "Content-Type: application/json" >nul 2>&1
+        if %errorlevel%==0 (
+            echo [CNN] CNN training job queued successfully
+        ) else (
+            echo [CNN] CNN training queue failed - will retry next weekend
+        )
+        echo.
         echo ============================================
         echo    WEEKEND AUTO COMPLETE!
+        echo    (CNN training running in background)
         echo ============================================
     ) else (
         echo.

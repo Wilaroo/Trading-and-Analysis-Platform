@@ -756,6 +756,48 @@ def _get_backtest_engine(db, timeseries_service):
 
 
 
+async def process_cnn_training_job(job: dict, db) -> dict:
+    """Process a CNN chart pattern training job.
+    
+    Job params:
+        - setup_type: str (e.g., 'BREAKOUT', 'SCALP', or 'ALL')
+        - bar_size: str (optional — if omitted, trains all profiles for that setup)
+        - max_symbols: int (optional — limit symbols for faster training)
+    """
+    params = job.get('params', {})
+    job_id = job['job_id']
+    
+    logger.info(f"Processing CNN training job {job_id}")
+    logger.info(f"Parameters: {params}")
+    
+    setup_type = params.get('setup_type', 'ALL').upper()
+    bar_size = params.get('bar_size')
+    max_symbols = params.get('max_symbols')
+    
+    try:
+        from services.ai_modules.cnn_training_pipeline import run_cnn_training
+        
+        async def progress_cb(pct, msg):
+            await job_queue_manager.update_progress(job_id, percent=pct, message=msg)
+        
+        result = await run_cnn_training(
+            db=db,
+            setup_type=setup_type,
+            bar_size=bar_size,
+            max_symbols=max_symbols,
+            progress_callback=progress_cb,
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"CNN training job failed: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
 async def process_job(job: dict, db) -> dict:
     """Route job to appropriate processor."""
     job_type = job.get('job_type')
@@ -766,6 +808,7 @@ async def process_job(job: dict, db) -> dict:
         JobType.DATA_COLLECTION.value: process_data_collection_job,
         JobType.BACKTEST.value: process_backtest_job,
         JobType.CALIBRATION.value: process_calibration_job,
+        JobType.CNN_TRAINING.value: process_cnn_training_job,
     }
     
     processor = processors.get(job_type)

@@ -182,7 +182,7 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk"]
+        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "cnn"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
 
     if bar_sizes is None:
@@ -832,6 +832,47 @@ async def run_training_pipeline(
             logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
             logger.info("Ensemble training requires Phase 1-7 models to be trained first "
                         "(needs their predictions as input features).")
+
+        # ── Phase 9: CNN Chart Pattern Training ──
+        if "cnn" in phases:
+            status.update(phase="cnn_patterns")
+            logger.info("=== Phase 9: Training CNN Chart Pattern Models ===")
+            try:
+                from services.ai_modules.cnn_training_pipeline import run_cnn_training
+
+                async def cnn_progress(pct, msg):
+                    status.update(current_model=msg)
+
+                cnn_result = await run_cnn_training(
+                    db=db,
+                    setup_type="ALL",
+                    progress_callback=cnn_progress,
+                )
+
+                if cnn_result.get("success"):
+                    cnn_trained = cnn_result.get("trained", 0)
+                    cnn_skipped = cnn_result.get("skipped", 0)
+                    logger.info(f"CNN training complete: {cnn_trained} trained, {cnn_skipped} skipped")
+                    results["cnn_training"] = {
+                        "trained": cnn_trained,
+                        "skipped": cnn_skipped,
+                        "elapsed": cnn_result.get("elapsed_seconds", 0),
+                        "gpu_info": cnn_result.get("gpu_info", {}),
+                    }
+                    for model_name, model_result in cnn_result.get("models", {}).items():
+                        if model_result.get("success"):
+                            acc = model_result.get("metrics", {}).get("accuracy", 0)
+                            results["models_trained"].append({"name": model_name, "accuracy": acc, "type": "cnn"})
+                            status.add_completed(model_name, acc)
+                        else:
+                            results["models_failed"].append({"name": model_name, "reason": model_result.get("error", ""), "type": "cnn"})
+                else:
+                    logger.warning(f"CNN training failed: {cnn_result.get('error', 'Unknown')}")
+                    results["cnn_training"] = {"error": cnn_result.get("error")}
+
+            except Exception as e:
+                logger.error(f"CNN phase failed: {e}", exc_info=True)
+                results["cnn_training"] = {"error": str(e)}
 
         # ── Done ──
         results["completed_at"] = datetime.now(timezone.utc).isoformat()

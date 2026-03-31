@@ -27,6 +27,7 @@ class JobType(str, Enum):
     DATA_COLLECTION = "data_collection"
     BACKTEST = "backtest"
     CALIBRATION = "calibration"
+    CNN_TRAINING = "cnn_training"
 
 
 class JobStatus(str, Enum):

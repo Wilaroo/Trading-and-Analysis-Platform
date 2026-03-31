@@ -59,6 +59,9 @@ where yarn >nul 2>&1 && echo        Yarn: OK || (echo        Installing yarn... 
 :: Check GPU for ML training
 python -c "import torch; print(f'        GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_mem // 1024**3}GB)') if torch.cuda.is_available() else print('        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
 
+:: Check CNN dependencies (torchvision + PIL)
+python -c "import torchvision; from PIL import Image; print('        CNN Models: READY (torchvision + PIL)')" 2>nul || echo        CNN Models: NOT INSTALLED (run InstallML_GPU.bat)
+
 :: Check LightGBM + GPU support
 python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('        LightGBM: GPU ENABLED')" 2>nul
 if %errorlevel% neq 0 (
@@ -483,6 +486,16 @@ del "%TEMP%\queue_check.tmp" 2>nul
 echo.
 echo ------- ML TRAINING STATUS -------
 python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('LightGBM GPU:  ENABLED')" 2>nul || echo LightGBM GPU:  DISABLED (CPU mode)
+python -c "import torch; print(f'PyTorch CUDA:  {\"ENABLED (\" + torch.cuda.get_device_name(0) + \")\" if torch.cuda.is_available() else \"DISABLED (CPU)\"}')" 2>nul || echo PyTorch CUDA:  NOT INSTALLED
+python -c "import torchvision; print('CNN Pipeline:  READY')" 2>nul || echo CNN Pipeline:  NOT INSTALLED
+curl -s -f -m 5 %LOCAL_BACKEND%/api/ai-training/cnn/models 2>nul | findstr "count" >nul 2>&1
+if %errorlevel%==0 (
+    for /f "tokens=2 delims=:," %%a in ('curl -s %LOCAL_BACKEND%/api/ai-training/cnn/models 2^>nul ^| findstr "count"') do (
+        echo CNN Models:    %%a trained
+    )
+) else (
+    echo CNN Models:    No models trained yet
+)
 curl -s -f -m 5 %LOCAL_BACKEND%/api/ai-modules/timeseries/available-data 2>nul | findstr "total_bars" >nul 2>&1
 if %errorlevel%==0 (
     echo Training Data: AVAILABLE

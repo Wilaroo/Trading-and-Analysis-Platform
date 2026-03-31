@@ -44,14 +44,24 @@ echo [4/5] Installing NLP/Embedding libraries...
 pip install transformers sentence-transformers
 echo.
 
-echo [5/5] Installing ChromaDB (vector database)...
-pip install chromadb
+echo [5/5] Installing CNN + Image Processing libraries...
+pip install Pillow mplfinance
 echo.
 
 echo ============================================
 echo   Verifying GPU Setup...
 echo ============================================
 python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}' if torch.cuda.is_available() else 'No GPU detected')"
+echo.
+
+echo ============================================
+echo   Testing CNN Pipeline...
+echo ============================================
+python -c "import torchvision; from PIL import Image; import mplfinance; print('CNN Pipeline: ALL DEPENDENCIES READY')" 2>nul
+if %errorlevel% neq 0 (
+    echo [WARN] Some CNN dependencies missing. Reinstalling...
+    pip install torchvision Pillow mplfinance
+)
 echo.
 
 echo ============================================
@@ -77,8 +87,10 @@ echo.
 echo Your RTX 5060 Ti is ready for ML training!
 echo.
 echo Next steps:
-echo 1. Run StartLocal.bat to start the app
+echo 1. Run TradeCommand_AITraining.bat to start the app
 echo 2. Go to NIA tab in the app
-echo 3. Click "Train All" to train models
+echo 3. Click "Train All" to train LightGBM models
+echo 4. Click "Train CNN" to train chart pattern CNN models
+echo 5. CNN models will also auto-train during Weekend Auto batch
 echo.
 pause
