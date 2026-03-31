@@ -12,8 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Default handles the user wants to follow
 DEFAULT_HANDLES = [
-    {"handle": "faststocknewss", "label": "Fast Stock News", "category": "news", "description": "Breaking stock market news and headlines"},
-    {"handle": "Deltaone", "label": "DeltaOne", "category": "news", "description": "Real-time macro and market-moving headlines"},
+    {"handle": "faststocknewss", "label": "Fast Stock News", "category": "news", "description": "Breaking stock market news and headlines", "priority": 1},
+    {"handle": "Deltaone", "label": "DeltaOne", "category": "news", "description": "Real-time macro and market-moving headlines", "priority": 2},
+    {"handle": "unusual_whales", "label": "Unusual Whales", "category": "flow", "description": "Unusual options activity and dark pool flow alerts", "priority": 3},
+    {"handle": "TruthTrumpPosts", "label": "Trump Posts", "category": "political", "description": "Truth Social posts from Donald Trump - market-moving political commentary", "priority": 4},
     {"handle": "TheShortBear", "label": "The Short Bear", "category": "short-seller", "description": "Short-selling research and bearish analysis"},
     {"handle": "OracleNYSE", "label": "Oracle NYSE", "category": "analysis", "description": "NYSE flow analysis and trade ideas"},
     {"handle": "ttvresearch", "label": "TTV Research", "category": "research", "description": "Technical and fundamental research"},
@@ -30,7 +32,6 @@ DEFAULT_HANDLES = [
     {"handle": "InvestorsLive", "label": "InvestorsLive", "category": "trading", "description": "Day trading and small-cap momentum plays"},
     {"handle": "TheShortSniper", "label": "The Short Sniper", "category": "short-seller", "description": "Short-selling focused trade ideas"},
     {"handle": "TheOneLanceB", "label": "Lance B", "category": "trading", "description": "Day trading and market commentary"},
-    {"handle": "unusual_whales", "label": "Unusual Whales", "category": "flow", "description": "Unusual options activity and dark pool flow alerts"},
 ]
 
 CATEGORY_COLORS = {
@@ -42,6 +43,7 @@ CATEGORY_COLORS = {
     "earnings": "#06b6d4",     # cyan
     "education": "#ec4899",    # pink
     "flow": "#f97316",         # orange
+    "political": "#dc2626",    # red-600
 }
 
 
@@ -53,16 +55,20 @@ class SocialFeedService:
         self._ensure_defaults()
 
     def _ensure_defaults(self):
-        """Ensure default handles exist in DB."""
+        """Ensure default handles exist in DB. Re-seed if handle list changed."""
         if self.config_collection is None:
             return
         existing = self.config_collection.find_one({"_id": "handles_config"})
-        if not existing:
-            self.config_collection.insert_one({
-                "_id": "handles_config",
-                "handles": DEFAULT_HANDLES,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })
+        if not existing or len(existing.get("handles", [])) != len(DEFAULT_HANDLES):
+            self.config_collection.replace_one(
+                {"_id": "handles_config"},
+                {
+                    "_id": "handles_config",
+                    "handles": DEFAULT_HANDLES,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                },
+                upsert=True
+            )
 
     def get_handles(self) -> List[Dict]:
         """Get configured handles list."""
