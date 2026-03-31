@@ -851,6 +851,20 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Files modified**: `TrainingPipelinePanel.jsx`, `NIA/index.jsx`. `AICommandCenter.jsx` is no longer rendered.
 - **Cleanup**: Removed `aiData`, `memoizedConnectors`, `memoizedThresholds`, `handleRunCalibrations`, `handlePromote` from NIA/index.jsx.
 
+### Data Collection Panel Simplification (**DONE** — Mar 31, 2026)
+- **Rewrote `DataCollectionPanel.jsx`** from 3-tab layout (Coverage/Collect/Progress) into a single unified panel:
+  - **One "Collect Data" button** — calls `fill_gaps` API with `use_max_lookback=true` + `enable_priority=true`. Automatically detects gaps, chains requests for max IB lookback per timeframe, enables priority mode.
+  - **Tier breakdown display** — Intraday (500K+ ADV), Swing (100K-500K), Investment (50K-100K), each showing:
+    - Per-timeframe rows with progress bars (coverage %)
+    - Symbol counts (covered/needed)
+    - Total bars per timeframe
+    - Date range (earliest → latest) showing data depth and freshness
+  - **Live collection progress** — when running, shows overall progress bar with rate, ETA, and per-timeframe mini progress bars
+  - **Stop button** — cancels all pending requests
+- **Backend enhancement**: `/api/ib-collector/data-coverage` now returns `earliest_date`, `latest_date`, and `total_bars` per tier-timeframe (added to the existing aggregation pipeline).
+- **Removed**: 3-tab navigation, lookback period selector, symbol filter cards, skip recent toggle, max symbols dropdown, estimated time display, DataHeatmap component usage.
+- **Chaining confirmed**: `fill_gaps` → `run_per_stock_collection(use_max_lookback=True)` → `generate_chain_requests()` — steps backward in time from earliest existing bar to IB max history limit per timeframe.
+
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
 - Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)

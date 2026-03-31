@@ -139,16 +139,20 @@ async def get_data_coverage():
         
         all_timeframes = ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]
         
-        # OPTIMIZED: Single aggregation for all timeframes
+        # OPTIMIZED: Single aggregation for all timeframes — includes date ranges + bar counts
         pipeline = [
             {"$group": {
                 "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
-                "bar_count": {"$sum": 1}
+                "bar_count": {"$sum": 1},
+                "min_date": {"$min": "$date"},
+                "max_date": {"$max": "$date"},
             }},
             {"$group": {
                 "_id": "$_id.bar_size",
                 "symbol_count": {"$sum": 1},
-                "total_bars": {"$sum": "$bar_count"}
+                "total_bars": {"$sum": "$bar_count"},
+                "earliest_date": {"$min": "$min_date"},
+                "latest_date": {"$max": "$max_date"},
             }}
         ]
         
@@ -160,8 +164,13 @@ async def get_data_coverage():
             timeframe_stats.append({
                 "timeframe": tf,
                 "symbols": r.get("symbol_count", 0),
-                "total_bars": r.get("total_bars", 0)
+                "total_bars": r.get("total_bars", 0),
+                "earliest_date": str(r["earliest_date"])[:10] if r.get("earliest_date") else None,
+                "latest_date": str(r["latest_date"])[:10] if r.get("latest_date") else None,
             })
+        
+        # Build a lookup for date ranges per bar_size (for tier-level display)
+        tf_date_lookup = {r["timeframe"]: r for r in timeframe_stats}
         
         # OPTIMIZED: Get tier counts in single query each
         tier_stats = []
@@ -180,7 +189,6 @@ async def get_data_coverage():
             timeframe_coverage = []
             for tf in tier_config["timeframes"]:
                 # OPTIMIZED: Use aggregation count instead of distinct
-                # This is faster for large datasets
                 pipeline = [
                     {"$match": {
                         "symbol": {"$in": list(tier_symbols_set)},
@@ -198,13 +206,17 @@ async def get_data_coverage():
                 if missing > 0:
                     total_gaps += 1
                 
+                tf_dates = tf_date_lookup.get(tf, {})
                 timeframe_coverage.append({
                     "timeframe": tf,
                     "symbols_with_data": symbols_with_data_count,
                     "symbols_needed": tier_symbol_count,
                     "coverage_pct": round(coverage_pct, 1),
                     "missing": missing,
-                    "needs_fill": missing > 0
+                    "needs_fill": missing > 0,
+                    "total_bars": tf_dates.get("total_bars", 0),
+                    "earliest_date": tf_dates.get("earliest_date"),
+                    "latest_date": tf_dates.get("latest_date"),
                 })
             
             tier_stats.append({

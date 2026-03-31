@@ -1,59 +1,61 @@
-import React, { useState, useEffect, useRef, memo } from 'react';
+import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Database, Download, Zap, TrendingUp, Layers,
   ChevronUp, ChevronDown, Globe, Loader, RefreshCw,
-  AlertTriangle, AlertCircle, CheckCircle, Clock, Play
+  AlertTriangle, CheckCircle, Clock, Play, Square,
+  Calendar, BarChart3, XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
-import DataHeatmap from './DataHeatmap';
 import api from '../../utils/api';
 import { useWsData } from '../../contexts/WebSocketDataContext';
 
-const API_BASE = process.env.REACT_APP_BACKEND_URL;
+const TIER_META = {
+  intraday: { icon: Zap, label: 'Intraday', adv: '500K+ ADV', borderClass: 'border-cyan-500/10', bgClass: 'bg-cyan-500/[0.02]', iconClass: 'text-cyan-400', barClass: 'bg-cyan-500' },
+  swing: { icon: TrendingUp, label: 'Swing', adv: '100K-500K ADV', borderClass: 'border-violet-500/10', bgClass: 'bg-violet-500/[0.02]', iconClass: 'text-violet-400', barClass: 'bg-violet-500' },
+  investment: { icon: Layers, label: 'Investment', adv: '50K-100K ADV', borderClass: 'border-amber-500/10', bgClass: 'bg-amber-500/[0.02]', iconClass: 'text-amber-400', barClass: 'bg-amber-500' },
+};
+
+const formatBars = (n) => {
+  if (!n) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return n.toLocaleString();
+};
+
+const formatDate = (d) => {
+  if (!d) return '--';
+  try {
+    const date = new Date(d);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    const mo = date.toLocaleString('en', { month: 'short' });
+    const yr = date.getFullYear();
+    if (yr === now.getFullYear()) return `${mo} ${date.getDate()}`;
+    return `${mo} ${yr}`;
+  } catch { return d?.slice(0, 10) || '--'; }
+};
 
 const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const [expanded, setExpanded] = useState(true);
-  const [lookbackDays, setLookbackDays] = useState(30);
-  const [tier, setTier] = useState('all');
-  const [skipRecent, setSkipRecent] = useState(true);
-  const [recentThreshold, setRecentThreshold] = useState(7);
-  const [maxSymbols, setMaxSymbols] = useState(null);
   const [collecting, setCollecting] = useState(false);
-  const [activeTab, setActiveTab] = useState('coverage');
-
-  const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
   const [cancelling, setCancelling] = useState(false);
   const [dataCoverage, setDataCoverage] = useState(null);
   const [loadingCoverage, setLoadingCoverage] = useState(true);
-  const [lastDataChange, setLastDataChange] = useState(null);
   const [collectionMode, setCollectionMode] = useState(null);
   const [priorityCollection, setPriorityCollection] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
-  const [fillingGaps, setFillingGaps] = useState(false);
-
+  const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
   const lastDataRef = useRef(null);
-
-  const tierOptions = [
-    { value: 'all', label: 'All Tiers', description: 'Intraday + Swing + Investment stocks', icon: Globe, adv: '50K+ shares/day', timeframes: 'All applicable per stock' },
-    { value: 'intraday', label: 'Intraday', description: 'High volume day trading stocks', icon: Zap, adv: '500K+ shares/day', timeframes: '1min, 5min, 15min, 1hr, 1day' },
-    { value: 'swing', label: 'Swing', description: 'Medium volume swing stocks', icon: TrendingUp, adv: '100K+ shares/day', timeframes: '5min, 30min, 1hr, 1day' },
-    { value: 'investment', label: 'Investment', description: 'Lower volume position stocks', icon: Layers, adv: '50K+ shares/day', timeframes: '1hr, 1day, 1week' }
-  ];
-
-  const lookbackPresets = [
-    { value: 5, label: '5 Days' },
-    { value: 30, label: '30 Days' },
-    { value: 90, label: '90 Days' },
-    { value: 180, label: '6 Months' },
-    { value: 365, label: '1 Year' }
-  ];
 
   const { dataCollection: wsDataCollection } = useWsData();
 
   useEffect(() => {
     let isMounted = true;
-
     const fetchData = async () => {
       if (!isMounted) return;
       try {
@@ -62,91 +64,71 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
           api.get('/api/ib-collector/data-coverage'),
           api.get('/api/ib/collection-mode/status')
         ]);
-
         if (!isMounted) return;
 
         if (progressRes.status === 'fulfilled' && progressRes.value.data?.success) {
           const data = progressRes.value.data;
-          const newProgress = {
+          setDetailedProgress({
             by_bar_size: data.by_bar_size || [],
             active_collections: data.active_collections || [],
             overall: data.overall || {}
-          };
-          const newProgressStr = JSON.stringify(newProgress);
-          if (lastDataRef.current?.progress !== newProgressStr) {
-            lastDataRef.current = { ...lastDataRef.current, progress: newProgressStr };
-            setDetailedProgress(newProgress);
-          }
+          });
         }
-
         if (coverageRes.status === 'fulfilled' && coverageRes.value.data?.success) {
-          const data = coverageRes.value.data;
-          const newCoverageStr = JSON.stringify(data);
-          if (lastDataRef.current?.coverage !== newCoverageStr) {
-            lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
-            setDataCoverage(data);
-            setLastDataChange(new Date());
-          }
+          setDataCoverage(coverageRes.value.data);
         }
-
         if (collectionModeRes.status === 'fulfilled') {
           setCollectionMode(collectionModeRes.value.data);
         }
-
         try {
           const priorityRes = await api.get('/api/ib/priority-collection/status');
           if (priorityRes.data) {
             setPriorityCollection(priorityRes.data.priority_collection || false);
             setPendingRequests(priorityRes.data.queue?.pending || 0);
           }
-        } catch (err) {
-          console.debug('Could not fetch priority status:', err);
-        }
+        } catch {}
       } catch (err) {
         console.error('Error fetching collection data:', err);
       } finally {
         if (isMounted) setLoadingCoverage(false);
       }
     };
-
-    fetchData(); // Initial fetch only — WS handles updates
+    fetchData();
     return () => { isMounted = false; };
   }, []);
 
-  // Subscribe to WS data collection updates (replaces 15s polling)
   useEffect(() => {
     if (!wsDataCollection) return;
     if (wsDataCollection.progress) {
       const p = wsDataCollection.progress;
-      const newProgress = {
+      setDetailedProgress({
         by_bar_size: p.by_bar_size || [],
         active_collections: p.active_collections || [],
         overall: p.overall || {}
-      };
-      setDetailedProgress(newProgress);
+      });
     }
     if (wsDataCollection.coverage) {
       setDataCoverage(prev => ({ ...prev, ...wsDataCollection.coverage }));
-      setLastDataChange(new Date());
     }
     setLoadingCoverage(false);
   }, [wsDataCollection]);
 
   const hasActiveCollections = detailedProgress.active_collections?.length > 0;
+  const queueActive = collectionMode?.queue?.pending > 0;
+  const isRunning = hasActiveCollections || queueActive;
 
-  const startCollection = async () => {
+  const handleCollectData = useCallback(async () => {
     setCollecting(true);
     try {
-      const params = new URLSearchParams({
-        lookback_days: lookbackDays.toString(),
-        skip_recent: skipRecent.toString(),
-        recent_days_threshold: recentThreshold.toString()
-      });
-      if (maxSymbols) params.append('max_symbols', maxSymbols.toString());
-
-      const res = await api.post(`/api/ib-collector/per-stock-collection?${params}`);
+      const params = new URLSearchParams({ use_max_lookback: 'true', enable_priority: 'true' });
+      const res = await api.post(`/api/ib-collector/fill-gaps?${params}`);
       if (res.data?.success) {
-        toast.success(`Collection started: ${res.data.symbols} symbols, ${res.data.total_requests} requests queued`);
+        if (res.data.gaps_found === 0) {
+          toast.success('No gaps found! Data coverage is complete.');
+        } else {
+          toast.success(`Collecting ${res.data.gaps_found} gaps across ${res.data.total_unique_symbols} symbols`);
+          if (res.data.priority_collection) setPriorityCollection(true);
+        }
         if (onRefresh) onRefresh();
       } else {
         toast.error(res.data?.error || 'Failed to start collection');
@@ -156,9 +138,9 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
     } finally {
       setCollecting(false);
     }
-  };
+  }, [onRefresh]);
 
-  const handleCancelAll = async () => {
+  const handleCancel = useCallback(async () => {
     setCancelling(true);
     try {
       const res = await api.post('/api/ib-collector/cancel-all-pending');
@@ -166,64 +148,92 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
         toast.info(`Cancelled ${res.data.cancelled} pending requests`);
         if (onRefresh) onRefresh();
       }
-    } catch (err) {
+    } catch {
       toast.error('Error cancelling');
     } finally {
       setCancelling(false);
     }
-  };
+  }, [onRefresh]);
 
-  const handleFillGaps = async () => {
-    setFillingGaps(true);
-    try {
-      const params = new URLSearchParams({ use_max_lookback: 'true', enable_priority: 'true' });
-      if (tier !== 'all') params.append('tier_filter', tier);
+  const totalBars = dataCoverage?.by_timeframe?.reduce((s, t) => s + (t.total_bars || 0), 0) || 0;
+  const totalSymbols = dataCoverage?.adv_cache?.total_symbols || 0;
+  const totalGaps = dataCoverage?.total_gaps || 0;
+  const queue = collectionMode?.queue;
 
-      const res = await api.post(`/api/ib-collector/fill-gaps?${params}`);
-      if (res.data?.success) {
-        if (res.data.gaps_found === 0) {
-          toast.success('No gaps found! Your data coverage is complete.');
-        } else {
-          const priorityMsg = res.data.priority_collection ? ' Priority mode enabled for faster collection.' : '';
-          toast.success(`Started filling ${res.data.gaps_found} gaps across ${res.data.total_unique_symbols} symbols.${priorityMsg}`);
-          if (res.data.priority_collection) setPriorityCollection(true);
-          setActiveTab('progress');
-        }
-        if (onRefresh) onRefresh();
-      } else {
-        toast.error(res.data?.error || 'Failed to start gap fill');
-      }
-    } catch (err) {
-      toast.error('Error starting gap fill');
-    } finally {
-      setFillingGaps(false);
-    }
-  };
+  const content = (
+    <>
+      {/* Header Row: Action button + stats */}
+      <div className="flex items-center gap-3 flex-wrap" data-testid="collection-header">
+        <button
+          onClick={handleCollectData}
+          disabled={collecting || hasActiveCollections}
+          className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2
+            ${collecting || hasActiveCollections
+              ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+              : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20'
+            }`}
+          data-testid="collect-data-btn"
+        >
+          {collecting ? <><Loader className="w-4 h-4 animate-spin" /> Starting...</> : <><Play className="w-4 h-4" /> Collect Data</>}
+        </button>
 
-  const handleTogglePriority = async () => {
-    try {
-      const endpoint = priorityCollection
-        ? '/api/ib/priority-collection/disable'
-        : '/api/ib/priority-collection/enable';
-      const res = await api.post(endpoint);
-      if (res.data?.success) {
-        setPriorityCollection(res.data.priority_collection);
-        toast.success(res.data.message);
-      } else {
-        toast.error('Failed to toggle priority collection');
-      }
-    } catch (err) {
-      toast.error('Error toggling priority');
-    }
-  };
+        {isRunning && (
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="px-3 py-2.5 rounded-lg text-sm font-medium bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            data-testid="cancel-collection-btn"
+          >
+            {cancelling ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+            Stop
+          </button>
+        )}
 
-  const estimatedTime = () => {
-    const requestsPerSymbol = tier === 'intraday' ? 5 : tier === 'swing' ? 4 : tier === 'investment' ? 3 : 4;
-    const symbolCount = maxSymbols || 500;
-    const totalRequests = symbolCount * requestsPerSymbol;
-    const hours = (totalRequests * 3) / 3600;
-    return hours < 1 ? `~${Math.round(hours * 60)} mins` : `~${hours.toFixed(1)} hours`;
-  };
+        <div className="flex items-center gap-4 ml-auto text-xs">
+          <span className="text-zinc-500">{totalSymbols.toLocaleString()} symbols</span>
+          <span className="text-zinc-500">{formatBars(totalBars)} bars</span>
+          {totalGaps > 0 && (
+            <span className="text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {totalGaps} gaps</span>
+          )}
+          {totalGaps === 0 && totalSymbols > 0 && (
+            <span className="text-emerald-400 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Complete</span>
+          )}
+          <button onClick={onRefresh} className="p-1.5 rounded hover:bg-white/5 text-zinc-500 hover:text-zinc-300 transition-colors" data-testid="refresh-coverage-btn">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Collection Progress (when active) */}
+      {isRunning && queue && (
+        <CollectionProgress queue={queue} collectionMode={collectionMode} detailedProgress={detailedProgress} priorityCollection={priorityCollection} />
+      )}
+
+      {/* Loading state */}
+      {loadingCoverage && (
+        <div className="flex items-center justify-center py-8"><Loader className="w-5 h-5 text-cyan-400 animate-spin" /></div>
+      )}
+
+      {/* Tier Breakdown */}
+      {!loadingCoverage && dataCoverage?.by_tier && (
+        <div className="space-y-3" data-testid="tier-breakdown">
+          {dataCoverage.by_tier.map((tier) => (
+            <TierSection key={tier.tier} tier={tier} progressByBarSize={detailedProgress.by_bar_size} />
+          ))}
+        </div>
+      )}
+
+      {/* No data state */}
+      {!loadingCoverage && totalSymbols === 0 && (
+        <div className="text-center py-6 text-zinc-500 text-sm">
+          <Database className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+          No symbols in ADV cache. Click <span className="text-cyan-400">Collect Data</span> to start.
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) return <div className="space-y-4 mt-3">{content}</div>;
 
   return (
     <div className="bg-gradient-to-br from-zinc-900/80 to-black/60 rounded-2xl border border-white/10 overflow-hidden mb-4" data-testid="data-collection-panel">
@@ -238,20 +248,14 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
           </div>
           <div>
             <h3 className="text-sm font-bold text-white">Historical Data Collection</h3>
-            <p className="text-[10px] text-zinc-500">Per-stock multi-timeframe &bull; Smart ADV filtering</p>
+            <p className="text-[10px] text-zinc-500">Smart gap-fill with max IB lookback &bull; Per-stock chaining</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {hasActiveCollections && (
-            <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">WEB COLLECTING</span>
-          )}
-          {!hasActiveCollections && collectionMode?.queue?.pending > 0 && (
-            <span className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">SCRIPT ACTIVE</span>
-          )}
+          {isRunning && <span className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">COLLECTING</span>}
           {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
         </div>
       </div>
-
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -259,132 +263,9 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
+            className="p-4 space-y-4"
           >
-            {/* Collection Mode Banner */}
-            {collectionMode?.collection_mode?.active && (
-              <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/30 flex items-center justify-center animate-pulse">
-                    <Download className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-amber-400">DATA COLLECTION ACTIVE</span>
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/30 text-[9px] text-emerald-300 font-medium">TRADING CONTINUES</span>
-                    </div>
-                    <div className="flex items-center gap-4 mt-1 text-[10px] text-zinc-400">
-                      <span>Completed: <span className="text-emerald-400 font-medium">{collectionMode.collection_mode.completed?.toLocaleString() || 0}</span></span>
-                      <span>Rate: <span className="text-cyan-400 font-medium">{Math.round(collectionMode.collection_mode.rate_per_hour || 0)}/hr</span></span>
-                      <span>Running: <span className="text-zinc-300">{Math.round(collectionMode.collection_mode.elapsed_minutes || 0)} min</span></span>
-                    </div>
-                    {collectionMode.queue && (
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between text-[10px] mb-1">
-                          <span className="text-zinc-500">Progress</span>
-                          <span className="text-zinc-400">{collectionMode.queue.progress_pct}%</span>
-                        </div>
-                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500" style={{ width: `${collectionMode.queue.progress_pct || 0}%` }} />
-                        </div>
-                        <div className="flex items-center justify-between text-[9px] text-zinc-500 mt-1">
-                          <span>{collectionMode.queue.completed?.toLocaleString()} / {collectionMode.queue.total?.toLocaleString()}</span>
-                          <span>{collectionMode.queue.pending?.toLocaleString()} remaining</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Priority Collection Status */}
-            <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-r from-zinc-900/80 to-black/80 border border-white/10">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${priorityCollection ? 'bg-amber-500/20 border border-amber-500/30' : 'bg-emerald-500/20 border border-emerald-500/30'}`}>
-                    {priorityCollection ? <Download className="w-4 h-4 text-amber-400" /> : <Zap className="w-4 h-4 text-emerald-400" />}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-white">{priorityCollection ? 'Priority Collection' : 'Normal Trading'}</span>
-                      {priorityCollection && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[9px] text-amber-400 font-medium animate-pulse">FAST MODE</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-zinc-500">
-                      {priorityCollection
-                        ? `Prioritizing historical data \u2022 ${pendingRequests.toLocaleString()} pending \u2022 Auto-disables when done`
-                        : 'Live quotes active \u2022 Background collection at low priority'}
-                    </p>
-                  </div>
-                </div>
-                {pendingRequests > 0 && (
-                  <button
-                    onClick={handleTogglePriority}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all ${priorityCollection ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700' : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30'}`}
-                  >
-                    {priorityCollection ? 'Slow Down' : 'Speed Up'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Tab Navigation */}
-            <div className="flex border-b border-white/10 mt-1">
-              {['coverage', 'collect', 'progress'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${activeTab === tab ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' : 'text-zinc-500 hover:text-zinc-300'}`}
-                  data-testid={`collection-tab-${tab}`}
-                >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  {tab === 'progress' && hasActiveCollections && <span className="ml-1 w-2 h-2 bg-amber-400 rounded-full inline-block animate-pulse" />}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-4">
-              {activeTab === 'coverage' ? (
-                <CoverageTab
-                  loadingCoverage={loadingCoverage}
-                  dataCoverage={dataCoverage}
-                  lastDataChange={lastDataChange}
-                  detailedProgress={detailedProgress}
-                  fillingGaps={fillingGaps}
-                  hasActiveCollections={hasActiveCollections}
-                  onFillGaps={handleFillGaps}
-                  onRefresh={onRefresh}
-                />
-              ) : activeTab === 'progress' ? (
-                <ProgressTab
-                  collectionMode={collectionMode}
-                  detailedProgress={detailedProgress}
-                  hasActiveCollections={hasActiveCollections}
-                  cancelling={cancelling}
-                  onCancelAll={handleCancelAll}
-                />
-              ) : (
-                <CollectTab
-                  lookbackDays={lookbackDays}
-                  setLookbackDays={setLookbackDays}
-                  lookbackPresets={lookbackPresets}
-                  tier={tier}
-                  setTier={setTier}
-                  tierOptions={tierOptions}
-                  skipRecent={skipRecent}
-                  setSkipRecent={setSkipRecent}
-                  recentThreshold={recentThreshold}
-                  setRecentThreshold={setRecentThreshold}
-                  maxSymbols={maxSymbols}
-                  setMaxSymbols={setMaxSymbols}
-                  estimatedTime={estimatedTime}
-                  collecting={collecting}
-                  hasActiveCollections={hasActiveCollections}
-                  onStartCollection={startCollection}
-                />
-              )}
-            </div>
+            {content}
           </motion.div>
         )}
       </AnimatePresence>
@@ -392,272 +273,151 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   );
 });
 
-/* ===== Coverage Sub-Tab ===== */
-const CoverageTab = memo(({ loadingCoverage, dataCoverage, lastDataChange, detailedProgress, fillingGaps, hasActiveCollections, onFillGaps, onRefresh }) => {
-  if (loadingCoverage) {
-    return <div className="flex items-center justify-center py-8"><Loader className="w-6 h-6 text-cyan-400 animate-spin" /></div>;
-  }
-  if (!dataCoverage) {
-    return (
-      <div className="text-center py-8">
-        <AlertCircle className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-        <p className="text-zinc-500 text-sm">Could not load coverage data</p>
-        <p className="text-zinc-600 text-xs mt-1">Make sure the backend is running</p>
-      </div>
-    );
-  }
+/* ===== Collection Progress Bar ===== */
+const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, priorityCollection }) => {
+  const pct = queue.progress_pct || 0;
+  const rate = collectionMode?.collection_mode?.rate_per_hour || 0;
+  const pending = queue.pending || 0;
+  const completed = queue.completed || 0;
+  const total = queue.total || 0;
+  const eta = rate > 0 ? Math.round(pending / rate) : null;
 
   return (
-    <div className="space-y-4">
-      {/* Heatmap Visual */}
-      <DataHeatmap dataCoverage={dataCoverage} queueProgress={{ by_bar_size: detailedProgress.by_bar_size }} />
-
-      {/* Action Buttons */}
-      <div className="flex gap-2">
-        {dataCoverage.total_gaps > 0 && (
-          <button
-            onClick={onFillGaps}
-            disabled={fillingGaps || hasActiveCollections}
-            className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:from-emerald-500/30 hover:to-cyan-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            data-testid="fill-gaps-btn"
-          >
-            {fillingGaps ? <><Loader className="w-3 h-3 animate-spin" /> Starting...</> : <><Zap className="w-3 h-3" /> Fill Gaps ({dataCoverage.total_gaps})</>}
-          </button>
-        )}
-        <button
-          onClick={onRefresh}
-          className={`${dataCoverage.total_gaps > 0 ? 'flex-1' : 'w-full'} py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 text-xs font-medium hover:bg-white/10 transition-colors flex items-center justify-center gap-2`}
-        >
-          <RefreshCw className="w-3 h-3" /> Refresh
-        </button>
+    <div className="p-3 rounded-xl bg-gradient-to-r from-cyan-500/5 to-blue-500/5 border border-cyan-500/20" data-testid="collection-progress">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Download className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <span className="text-xs font-medium text-cyan-400">
+            {collectionMode?.collection_mode?.active ? 'Collecting' : 'Script Processing'}
+          </span>
+          {priorityCollection && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[9px] text-amber-400 font-medium">PRIORITY</span>}
+        </div>
+        <div className="flex items-center gap-3 text-[10px] text-zinc-400">
+          {rate > 0 && <span>{Math.round(rate)}/hr</span>}
+          {eta !== null && <span>ETA: ~{eta < 1 ? '<1' : eta}h</span>}
+          <span className="text-cyan-400 font-mono">{pct}%</span>
+        </div>
+      </div>
+      <div className="h-2 bg-black/50 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500 rounded-full" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="flex items-center justify-between mt-1.5 text-[10px] text-zinc-500">
+        <span>{completed.toLocaleString()} / {total.toLocaleString()} requests</span>
+        <span>{pending.toLocaleString()} remaining</span>
       </div>
 
-      {dataCoverage.total_gaps === 0 && dataCoverage.adv_cache?.total_symbols > 0 && (
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-          <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
-          <p className="text-xs text-emerald-400 font-medium">Data coverage complete!</p>
-          <p className="text-[10px] text-zinc-500 mt-1">All tiers and timeframes have data</p>
-        </div>
-      )}
-
-      {dataCoverage.adv_cache?.total_symbols === 0 && (
-        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
-          <Database className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-          <p className="text-xs text-amber-400 font-medium">No symbols in ADV cache</p>
-          <p className="text-[10px] text-zinc-500 mt-1">Run a data collection from the "Collect" tab to populate the cache</p>
+      {/* Per-timeframe mini progress */}
+      {detailedProgress.by_bar_size?.length > 0 && (
+        <div className="mt-3 pt-2 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-2">
+          {detailedProgress.by_bar_size.map((bs, i) => {
+            const bsPct = bs.progress_pct || 0;
+            return (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-500 w-12 truncate">{bs.bar_size}</span>
+                <div className="flex-1 h-1 bg-black/40 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${bsPct >= 90 ? 'bg-emerald-500' : bsPct >= 50 ? 'bg-cyan-500' : 'bg-amber-500'}`} style={{ width: `${bsPct}%` }} />
+                </div>
+                <span className={`text-[9px] font-mono ${bsPct >= 90 ? 'text-emerald-400' : 'text-zinc-500'}`}>{bsPct}%</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 });
 
-/* ===== Progress Sub-Tab ===== */
-const ProgressTab = memo(({ collectionMode, detailedProgress, hasActiveCollections, cancelling, onCancelAll }) => (
-  <div className="space-y-4">
-    <div className="p-3 rounded-xl bg-gradient-to-r from-zinc-900 to-black border border-white/10">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-zinc-400">Collection Queue Status</span>
-        <div className="flex items-center gap-2">
-          {collectionMode?.queue?.pending > 0 && !collectionMode?.collection_mode?.active && (
-            <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">SCRIPT COLLECTING</span>
-          )}
-          {collectionMode?.collection_mode?.active && (
-            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">WEB COLLECTING</span>
-          )}
+/* ===== Tier Section ===== */
+const TierSection = memo(({ tier, progressByBarSize }) => {
+  const meta = TIER_META[tier.tier] || { icon: Globe, label: tier.tier, adv: '', borderClass: 'border-zinc-500/10', bgClass: 'bg-zinc-500/[0.02]', iconClass: 'text-zinc-400', barClass: 'bg-zinc-500' };
+  const Icon = meta.icon;
+  const tierBars = tier.timeframes.reduce((s, tf) => s + (tf.total_bars || 0), 0);
+  const allCovered = tier.timeframes.every(tf => tf.coverage_pct >= 100);
+
+  // Build progress lookup
+  const progressLookup = {};
+  (progressByBarSize || []).forEach(p => { progressLookup[p.bar_size] = p; });
+
+  return (
+    <div className={`rounded-xl border ${meta.borderClass} ${meta.bgClass} overflow-hidden`} data-testid={`tier-${tier.tier}`}>
+      {/* Tier Header */}
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <Icon className={`w-4 h-4 ${meta.iconClass}`} />
+          <span className="text-sm font-semibold text-white">{meta.label}</span>
+          <span className="text-[10px] text-zinc-500">{meta.adv}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-zinc-400">{tier.total_symbols} symbols</span>
+          <span className="text-zinc-500">{formatBars(tierBars)} bars</span>
+          {allCovered && <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />}
         </div>
       </div>
-      {collectionMode?.queue && (
-        <>
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {[
-              { val: collectionMode.queue.completed, label: 'Completed', color: 'text-emerald-400' },
-              { val: collectionMode.queue.pending, label: 'Pending', color: 'text-amber-400' },
-              { val: collectionMode.queue.failed || 0, label: 'Failed', color: 'text-rose-400' },
-              { val: `${collectionMode.queue.progress_pct}%`, label: 'Complete', color: 'text-cyan-400' },
-            ].map((s) => (
-              <div key={s.label} className="text-center p-2 rounded-lg bg-black/40">
-                <p className={`text-lg font-bold ${s.color}`}>{typeof s.val === 'number' ? s.val?.toLocaleString() : s.val}</p>
-                <p className="text-[9px] text-zinc-500">{s.label}</p>
-              </div>
-            ))}
-          </div>
-          <div className="h-2 bg-black/50 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-500" style={{ width: `${collectionMode.queue.progress_pct || 0}%` }} />
-          </div>
-          {collectionMode?.queue?.pending > 0 && (
-            <div className="flex items-center justify-between mt-2 text-[10px] text-zinc-500">
-              {collectionMode?.collection_mode?.active && collectionMode.collection_mode.rate_per_hour > 0 ? (
-                <>
-                  <span>Rate: {Math.round(collectionMode.collection_mode.rate_per_hour)}/hour</span>
-                  <span>ETA: ~{Math.round(collectionMode.queue.pending / collectionMode.collection_mode.rate_per_hour)} hours</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-cyan-400">Script collection active</span>
-                  <span>~{Math.round(collectionMode.queue.pending / 360)} hours @ ~6/min</span>
-                </>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
 
-    {detailedProgress.by_bar_size?.length > 0 && (
-      <div>
-        <p className="text-xs font-medium text-zinc-400 mb-2">Progress by Timeframe</p>
-        <div className="space-y-2">
-          {detailedProgress.by_bar_size.map((bs, i) => {
-            const pct = bs.progress_pct || 0;
-            const isActive = bs.is_active;
-            return (
-              <div key={i} className={`p-2 rounded-lg border ${isActive ? 'bg-black/40 border-cyan-500/20' : 'bg-black/20 border-white/5'}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-white">{bs.bar_size}</span>
-                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
-                  </div>
-                  <div className="flex items-center gap-3 text-[10px]">
-                    <span className="text-emerald-400">{bs.completed?.toLocaleString()} done</span>
-                    {bs.pending > 0 && <span className="text-amber-400">{bs.pending?.toLocaleString()} pending</span>}
-                    {bs.failed > 0 && <span className="text-rose-400">{bs.failed} failed</span>}
-                    <span className={`font-medium ${pct >= 90 ? 'text-emerald-400' : pct >= 50 ? 'text-cyan-400' : 'text-amber-400'}`}>{pct}%</span>
-                  </div>
-                </div>
-                <div className="h-1.5 bg-black/50 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-300 ${pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-cyan-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
-                </div>
-                {isActive && bs.eta_display && (
-                  <div className="flex items-center justify-between mt-1 text-[9px] text-zinc-500">
-                    <span>{bs.symbols_per_minute?.toFixed(1)} symbols/min</span>
-                    <span>ETA: {bs.eta_display}</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    )}
-
-    {hasActiveCollections && (
-      <button
-        onClick={onCancelAll}
-        disabled={cancelling}
-        className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
-      >
-        {cancelling ? 'Cancelling...' : 'Cancel Web Collections'}
-      </button>
-    )}
-
-    {!collectionMode?.queue?.total && !detailedProgress.by_bar_size?.length && (
-      <div className="text-center py-6">
-        <CheckCircle className="w-8 h-8 text-emerald-500/50 mx-auto mb-2" />
-        <p className="text-zinc-500 text-sm">No data collection queued</p>
-        <p className="text-zinc-600 text-xs mt-1">Queue data from the "Collect" tab</p>
-        <p className="text-zinc-600 text-xs">or run <code className="bg-black/40 px-1 rounded">StartCollection.bat</code> for full-speed mode</p>
-      </div>
-    )}
-  </div>
-));
-
-/* ===== Collect Sub-Tab ===== */
-const CollectTab = memo(({ lookbackDays, setLookbackDays, lookbackPresets, tier, setTier, tierOptions, skipRecent, setSkipRecent, recentThreshold, setRecentThreshold, maxSymbols, setMaxSymbols, estimatedTime, collecting, hasActiveCollections, onStartCollection }) => (
-  <div className="space-y-4">
-    <div>
-      <label className="text-xs font-medium text-zinc-400 mb-2 block">Lookback Period</label>
-      <div className="grid grid-cols-5 gap-2">
-        {lookbackPresets.map(preset => (
-          <button
-            key={preset.value}
-            onClick={() => setLookbackDays(preset.value)}
-            className={`p-2 rounded-lg border text-center transition-all ${lookbackDays === preset.value ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' : 'bg-black/30 border-white/10 text-zinc-400 hover:border-white/20'}`}
-          >
-            <p className="text-xs font-bold">{preset.label}</p>
-          </button>
+      {/* Timeframe Rows */}
+      <div className="border-t border-white/5">
+        {tier.timeframes.map((tf) => (
+          <TimeframeRow key={tf.timeframe} tf={tf} barColorClass={meta.barClass} progress={progressLookup[tf.timeframe]} />
         ))}
       </div>
     </div>
+  );
+});
 
-    <div>
-      <label className="text-xs font-medium text-zinc-400 mb-2 block">Symbol Filter (ADV Tier)</label>
-      <div className="grid grid-cols-2 gap-2">
-        {tierOptions.map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => setTier(opt.value)}
-            className={`p-3 rounded-xl border text-left transition-all ${tier === opt.value ? 'bg-cyan-500/10 border-cyan-500/50' : 'bg-black/30 border-white/10 hover:border-white/20'}`}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <opt.icon className={`w-4 h-4 ${tier === opt.value ? 'text-cyan-400' : 'text-zinc-500'}`} />
-              <span className={`text-sm font-bold ${tier === opt.value ? 'text-cyan-400' : 'text-white'}`}>{opt.label}</span>
-            </div>
-            <p className="text-[10px] text-zinc-500">{opt.adv}</p>
-            <p className="text-[9px] text-zinc-600 mt-1">{opt.timeframes}</p>
-          </button>
-        ))}
+/* ===== Timeframe Row ===== */
+const TimeframeRow = memo(({ tf, barColorClass, progress }) => {
+  const pct = tf.coverage_pct || 0;
+  const isComplete = pct >= 100;
+  const isCollecting = progress?.is_active;
+  const barColor = isComplete ? 'bg-emerald-500' : pct >= 75 ? barColorClass : pct >= 25 ? 'bg-amber-500' : 'bg-rose-500';
+
+  return (
+    <div className={`flex items-center gap-3 px-4 py-2 border-b border-white/[0.03] last:border-b-0 hover:bg-white/[0.02] transition-colors ${isCollecting ? 'bg-cyan-500/[0.03]' : ''}`} data-testid={`tf-row-${tf.timeframe.replace(/\s/g, '-')}`}>
+      {/* Timeframe label */}
+      <div className="w-16 flex-shrink-0">
+        <span className="text-xs font-mono text-white">{tf.timeframe}</span>
+        {isCollecting && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block animate-pulse" />}
       </div>
-    </div>
 
-    <div className="p-3 rounded-xl bg-black/20 border border-white/5 space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-medium text-white">Skip Recent Data</p>
-          <p className="text-[10px] text-zinc-500">Don't re-fetch symbols collected within threshold</p>
+      {/* Progress bar */}
+      <div className="flex-1 max-w-[200px]">
+        <div className="h-2 bg-black/40 rounded-full overflow-hidden">
+          <div className={`h-full ${barColor} transition-all duration-500 rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} />
         </div>
-        <button
-          onClick={() => setSkipRecent(!skipRecent)}
-          className={`w-10 h-5 rounded-full transition-colors ${skipRecent ? 'bg-cyan-500' : 'bg-zinc-700'}`}
-        >
-          <div className={`w-4 h-4 rounded-full bg-white transition-transform ${skipRecent ? 'translate-x-5' : 'translate-x-0.5'}`} />
-        </button>
       </div>
-      {skipRecent && (
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-zinc-500">Threshold:</span>
-          <select value={recentThreshold} onChange={(e) => setRecentThreshold(parseInt(e.target.value))} className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white">
-            <option value={1}>1 day</option><option value={3}>3 days</option><option value={7}>7 days</option><option value={14}>14 days</option><option value={30}>30 days</option>
-          </select>
+
+      {/* Coverage fraction */}
+      <div className="w-20 text-right flex-shrink-0">
+        <span className={`text-xs font-mono ${isComplete ? 'text-emerald-400' : 'text-zinc-300'}`}>
+          {tf.symbols_with_data}/{tf.symbols_needed}
+        </span>
+      </div>
+
+      {/* Bars */}
+      <div className="w-16 text-right flex-shrink-0">
+        <span className="text-[10px] text-zinc-500 font-mono">{formatBars(tf.total_bars)}</span>
+      </div>
+
+      {/* Date range */}
+      <div className="w-36 flex-shrink-0 text-right">
+        {tf.earliest_date ? (
+          <span className="text-[10px] text-zinc-500">
+            <Calendar className="w-2.5 h-2.5 inline mr-0.5 opacity-50" />
+            {formatDate(tf.earliest_date)} <span className="text-zinc-600 mx-0.5">&rarr;</span> {formatDate(tf.latest_date)}
+          </span>
+        ) : (
+          <span className="text-[10px] text-zinc-600">No data</span>
+        )}
+      </div>
+
+      {/* Collection progress for this timeframe */}
+      {progress && progress.pending > 0 && (
+        <div className="w-16 flex-shrink-0 text-right">
+          <span className="text-[9px] text-cyan-400 font-mono">{progress.progress_pct || 0}%</span>
         </div>
       )}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-zinc-500">Max symbols:</span>
-        <select value={maxSymbols || 'all'} onChange={(e) => setMaxSymbols(e.target.value === 'all' ? null : parseInt(e.target.value))} className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white">
-          <option value="all">All</option><option value={50}>50</option><option value={100}>100</option><option value={250}>250</option><option value={500}>500</option><option value={1000}>1000</option>
-        </select>
-      </div>
     </div>
-
-    <div className="flex items-center justify-between p-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
-      <div className="flex items-center gap-2"><Clock className="w-4 h-4 text-blue-400" /><span className="text-xs text-blue-400">Estimated time:</span></div>
-      <span className="text-sm font-bold text-blue-400">{estimatedTime()}</span>
-    </div>
-
-    <button
-      onClick={onStartCollection}
-      disabled={collecting || hasActiveCollections}
-      className={`w-full py-3 rounded-xl font-medium text-sm transition-all ${collecting || hasActiveCollections ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20'}`}
-      data-testid="start-collection-btn"
-    >
-      {collecting ? (
-        <span className="flex items-center justify-center gap-2"><Loader className="w-4 h-4 animate-spin" /> Starting...</span>
-      ) : hasActiveCollections ? (
-        'Collection in progress...'
-      ) : (
-        <span className="flex items-center justify-center gap-2"><Play className="w-4 h-4" /> Start Per-Stock Collection</span>
-      )}
-    </button>
-
-    <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-      <div className="flex items-start gap-2">
-        <CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5" />
-        <div className="text-[10px] text-emerald-400/80">
-          <p className="font-medium mb-1">Per-Stock Collection</p>
-          <p>Each stock gets ALL its applicable timeframes collected before moving to the next. This ensures complete data for each symbol.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-));
+  );
+});
 
 export default DataCollectionPanel;
