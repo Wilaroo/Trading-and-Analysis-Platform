@@ -768,6 +768,10 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - `GET /api/social-feed/analyses` — Recent analyses history
 - **Frontend Widget**: `components/SocialFeedWidget.jsx` — TweetDeck-style multi-panel layout
   - **Wall View (DEFAULT)**: 4 embedded Twitter timelines side-by-side for prioritized handles, each panel has swap dropdown to change to any other handle
+    - **Auto-refresh**: Panels auto-reload every 90 seconds with category-colored border pulse/glow animation
+    - **Live indicators**: Green pulsing dot on each panel + "LIVE WALL" badge with animated ping dot
+    - **Manual refresh**: Per-panel refresh button + global "Refresh All" button
+    - **Time-ago display**: Each panel shows "just now" / "30s ago" / etc. since last refresh
   - **Feed View**: Single embedded timeline with scrollable handle chip selector
   - **Ticker View**: 4-column grid of all 20 handles with category colors and P1-P4 priority badges
   - **AI Analyze Panel**: Paste tweet text → get sentiment (BULLISH/BEARISH/NEUTRAL), confidence, market impact, tickers, action

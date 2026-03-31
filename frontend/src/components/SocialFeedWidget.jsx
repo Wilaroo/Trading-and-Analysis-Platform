@@ -9,15 +9,17 @@
  * Prioritized handles: @faststocknewss, @Deltaone, @unusual_whales, @TruthTrumpPosts
  * AI Sentiment Analysis: Paste tweet text for AI-powered analysis.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain, ChevronLeft, ChevronRight, Maximize2, Minimize2,
   ChevronDown, TrendingUp, TrendingDown, Minus, AlertTriangle,
   Loader, Zap, BarChart3, LayoutGrid,
-  MessageSquare, ExternalLink, ArrowLeftRight
+  MessageSquare, ExternalLink, ArrowLeftRight, RefreshCw
 } from 'lucide-react';
 import { safeGet, safePost } from '../utils/api';
+
+const REFRESH_INTERVAL_MS = 90000; // 90 seconds
 
 const CATEGORY_COLORS = {
   news: '#3b82f6',
@@ -44,7 +46,7 @@ const XLogo = ({ className = "w-3 h-3", style = {} }) => (
 );
 
 // ── Twitter Embed ──────────────────────────────────────────────
-const TwitterTimeline = ({ handle, height = 450 }) => {
+const TwitterTimeline = ({ handle, height = 450, refreshKey = 0 }) => {
   const containerRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -89,7 +91,7 @@ const TwitterTimeline = ({ handle, height = 450 }) => {
     }
 
     return () => { if (container) container.innerHTML = ''; };
-  }, [handle, height]);
+  }, [handle, height, refreshKey]);
 
   return (
     <div className="relative" style={{ minHeight: 200 }} data-testid={`twitter-timeline-${handle}`}>
@@ -165,23 +167,82 @@ const PanelSwapDropdown = ({ currentHandle, allHandles, wallHandles, onSwap }) =
   );
 };
 
+// ── Time-ago helper ────────────────────────────────────────────
+const timeAgo = (ts) => {
+  if (!ts) return '';
+  const secs = Math.floor((Date.now() - ts) / 1000);
+  if (secs < 10) return 'just now';
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  return `${Math.floor(secs / 3600)}h ago`;
+};
+
 // ── Wall Panel (single column in TweetDeck) ────────────────────
-const WallPanel = ({ handle, allHandles, wallHandles, onSwap, panelHeight }) => {
+const WallPanel = ({ handle, allHandles, wallHandles, onSwap, panelHeight, refreshSignal }) => {
   const info = allHandles.find(h => h.handle === handle);
   const catColor = CATEGORY_COLORS[info?.category] || '#6b7280';
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [lastRefresh, setLastRefresh] = useState(Date.now());
+  const [isPulsing, setIsPulsing] = useState(false);
+  const [timeAgoText, setTimeAgoText] = useState('just now');
+
+  // Auto-refresh on interval
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshKey(k => k + 1);
+      setLastRefresh(Date.now());
+      setIsPulsing(true);
+      setTimeout(() => setIsPulsing(false), 2000);
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [handle]);
+
+  // External refresh signal (from "Refresh All")
+  useEffect(() => {
+    if (refreshSignal > 0) {
+      setRefreshKey(k => k + 1);
+      setLastRefresh(Date.now());
+      setIsPulsing(true);
+      setTimeout(() => setIsPulsing(false), 2000);
+    }
+  }, [refreshSignal]);
+
+  // Update time-ago text every 10s
+  useEffect(() => {
+    const t = setInterval(() => setTimeAgoText(timeAgo(lastRefresh)), 10000);
+    setTimeAgoText(timeAgo(lastRefresh));
+    return () => clearInterval(t);
+  }, [lastRefresh]);
+
+  const handleManualRefresh = () => {
+    setRefreshKey(k => k + 1);
+    setLastRefresh(Date.now());
+    setIsPulsing(true);
+    setTimeout(() => setIsPulsing(false), 2000);
+  };
 
   return (
     <div
-      className="flex flex-col bg-zinc-900/70 border border-zinc-800/80 rounded-lg overflow-hidden"
+      className={`flex flex-col bg-zinc-900/70 rounded-lg overflow-hidden transition-all duration-500 ${
+        isPulsing ? 'shadow-lg' : ''
+      }`}
+      style={{
+        border: isPulsing
+          ? `1.5px solid ${catColor}`
+          : '1px solid rgba(63, 63, 70, 0.5)',
+        boxShadow: isPulsing ? `0 0 16px ${catColor}30, inset 0 0 8px ${catColor}08` : 'none',
+      }}
       data-testid={`wall-panel-${handle}`}
     >
       {/* Panel header */}
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-800/80 bg-zinc-900">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+          <div className="relative w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
             style={{ backgroundColor: `${catColor}20`, border: `1px solid ${catColor}40` }}
           >
             <XLogo className="w-2.5 h-2.5" style={{ color: catColor }} />
+            {/* Live dot */}
+            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           </div>
           <a
             href={`https://x.com/${handle}`}
@@ -197,17 +258,37 @@ const WallPanel = ({ handle, allHandles, wallHandles, onSwap, panelHeight }) => 
             {info?.category}
           </span>
         </div>
-        <PanelSwapDropdown
-          currentHandle={handle}
-          allHandles={allHandles}
-          wallHandles={wallHandles}
-          onSwap={(newHandle) => onSwap(handle, newHandle)}
-        />
+        <div className="flex items-center gap-1">
+          <span className="text-[8px] text-zinc-600 font-mono" data-testid={`refresh-time-${handle}`}>
+            {timeAgoText}
+          </span>
+          <button
+            onClick={handleManualRefresh}
+            className="p-0.5 rounded text-zinc-500 hover:text-emerald-400 transition-colors"
+            title="Refresh feed"
+            data-testid={`panel-refresh-${handle}`}
+          >
+            <RefreshCw className={`w-3 h-3 ${isPulsing ? 'animate-spin text-emerald-400' : ''}`} />
+          </button>
+          <PanelSwapDropdown
+            currentHandle={handle}
+            allHandles={allHandles}
+            wallHandles={wallHandles}
+            onSwap={(newHandle) => onSwap(handle, newHandle)}
+          />
+        </div>
       </div>
+
+      {/* Refresh pulse bar */}
+      {isPulsing && (
+        <div className="h-0.5 w-full overflow-hidden">
+          <div className="h-full animate-pulse rounded-full" style={{ backgroundColor: catColor, opacity: 0.6 }} />
+        </div>
+      )}
 
       {/* Timeline */}
       <div className="flex-1 overflow-hidden" style={{ height: panelHeight }}>
-        <TwitterTimeline handle={handle} height={panelHeight} />
+        <TwitterTimeline handle={handle} height={panelHeight} refreshKey={refreshKey} />
       </div>
     </div>
   );
@@ -324,6 +405,7 @@ const SocialFeedWidget = () => {
   const [analyzeText, setAnalyzeText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [sentimentResult, setSentimentResult] = useState(null);
+  const [refreshSignal, setRefreshSignal] = useState(0);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -381,7 +463,11 @@ const SocialFeedWidget = () => {
             {handles.length} HANDLES
           </span>
           {viewMode === 'wall' && (
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
+              </span>
               LIVE WALL
             </span>
           )}
@@ -420,6 +506,18 @@ const SocialFeedWidget = () => {
               </button>
             ))}
           </div>
+
+          {/* Refresh All (wall mode only) */}
+          {viewMode === 'wall' && (
+            <button
+              onClick={() => setRefreshSignal(s => s + 1)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-zinc-800/60 text-zinc-400 hover:text-emerald-400 border border-zinc-700/50 transition-all"
+              title="Refresh all panels"
+              data-testid="social-feed-refresh-all"
+            >
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          )}
 
           {/* Collapse */}
           <button
@@ -489,6 +587,7 @@ const SocialFeedWidget = () => {
                       wallHandles={wallHandles}
                       onSwap={handleSwapPanel}
                       panelHeight={420}
+                      refreshSignal={refreshSignal}
                     />
                   ))}
                 </div>
