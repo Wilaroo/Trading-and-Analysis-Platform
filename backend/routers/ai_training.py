@@ -301,11 +301,14 @@ async def get_model_inventory():
         trained_models = {}
         if mongo_db is not None:
             for doc in mongo_db["timeseries_models"].find({}, {"_id": 0, "model_data": 0}):
-                trained_models[doc.get("model_name", "")] = {
-                    "accuracy": doc.get("accuracy", 0),
-                    "training_samples": doc.get("training_samples", 0),
-                    "promoted_at": doc.get("promoted_at", ""),
-                }
+                model_name = doc.get("name", doc.get("model_name", ""))
+                if model_name:
+                    metrics = doc.get("metrics", {})
+                    trained_models[model_name] = {
+                        "accuracy": metrics.get("accuracy", doc.get("accuracy", 0)),
+                        "training_samples": metrics.get("training_samples", doc.get("training_samples", 0)),
+                        "promoted_at": doc.get("saved_at", doc.get("promoted_at", "")),
+                    }
 
         from services.ai_modules.volatility_model import VOL_MODEL_CONFIGS
         from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS
@@ -355,6 +358,11 @@ async def get_model_inventory():
                 "description": "Stacks multi-timeframe signals",
                 "models": [],
             },
+            "regime_conditional": {
+                "label": "Regime-Conditional",
+                "description": "Per-regime model variants (bull/bear/range/high_vol)",
+                "models": [],
+            },
         }
 
         # Generic directional
@@ -392,6 +400,18 @@ async def get_model_inventory():
                 name = cfg["model_name"]
                 categories[category_key]["models"].append({
                     "name": name, "config_key": key,
+                    "trained": name in trained_models,
+                    **(trained_models.get(name, {})),
+                })
+
+        # Regime-conditional model variants (generic directional x 4 regimes)
+        from services.ai_modules.regime_conditional_model import ALL_REGIMES, get_regime_model_name
+        for bs in ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]:
+            base_name = f"direction_predictor_{bs.replace(' ', '_')}"
+            for regime in ALL_REGIMES:
+                name = get_regime_model_name(base_name, regime)
+                categories["regime_conditional"]["models"].append({
+                    "name": name, "bar_size": bs, "regime": regime,
                     "trained": name in trained_models,
                     **(trained_models.get(name, {})),
                 })

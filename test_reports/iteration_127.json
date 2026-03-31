@@ -1,0 +1,65 @@
+{
+  "summary": "Training Pipeline Phases 2, 7, 8 implementation testing complete. All 18 backend tests passed. Verified model inventory returns 108 total models across 9 categories with correct naming patterns for regime_conditional and ensemble models.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_training_pipeline_phases.py",
+    "/app/test_reports/pytest/pytest_training_pipeline_phases.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "VERIFIED: GET /api/ai-training/model-inventory returns 108 total_defined models",
+    "VERIFIED: 9 categories present: generic_directional (7), setup_specific (34), volatility (7), exit_timing (10), sector_relative (3), gap_fill (3), risk_of_ruin (6), ensemble (10), regime_conditional (28)",
+    "VERIFIED: GET /api/ai-training/status returns success:true with task_status:idle",
+    "VERIFIED: GET /api/ai-training/gpu-status returns valid JSON (CPU mode)",
+    "VERIFIED: count_total_models() returns 108",
+    "VERIFIED: Default phases list includes 'regime' and 'ensemble' in training_pipeline.py",
+    "VERIFIED: regime_conditional models have correct naming pattern: direction_predictor_{bar_size}_{regime}",
+    "VERIFIED: ensemble models have correct naming pattern: ensemble_{setup_type}",
+    "VERIFIED: ALL_REGIMES has 4 regimes: bull_trend, bear_trend, range_bound, high_vol",
+    "VERIFIED: ENSEMBLE_MODEL_CONFIGS has 10 entries",
+    "VERIFIED: STACKED_TIMEFRAMES has 3 timeframes: 1 day, 1 hour, 5 mins",
+    "VERIFIED: Frontend TrainingPipelinePanel.jsx has GitBranch import (line 9)",
+    "VERIFIED: Frontend has regime_conditional in CATEGORY_ICONS (line 31) and CATEGORY_COLORS (line 44)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_training_pipeline_phases.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "N/A - no auth required for these endpoints",
+  "seed_data_creation": "N/A",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 (Long Setup-Specific), Phase 7 (Regime-Conditional), and Phase 8 (Ensemble Meta-Learner) are fully implemented in training_pipeline.py. Model inventory endpoint returns 108 models across 9 categories. IB Gateway not available in container (expected). PyTorch/torchvision not installed (lazy-loaded, expected to fail gracefully).",
+  "mocked_api_note": "Ollama LLM is mocked in container. IB Gateway not available in container.",
+  "tests_passed": [
+    "test_model_inventory_returns_success",
+    "test_model_inventory_total_defined_is_108",
+    "test_model_inventory_has_9_categories",
+    "test_model_inventory_category_counts",
+    "test_regime_conditional_naming_pattern",
+    "test_ensemble_naming_pattern",
+    "test_status_returns_success",
+    "test_gpu_status_returns_valid_json",
+    "test_count_total_models_returns_108",
+    "test_default_phases_include_regime",
+    "test_default_phases_from_source",
+    "test_all_regimes_constant",
+    "test_classify_regime_for_date_exists",
+    "test_get_regime_model_name_function",
+    "test_ensemble_model_configs_has_10_entries",
+    "test_ensemble_feature_names_exists",
+    "test_extract_ensemble_features_function",
+    "test_stacked_timeframes_constant"
+  ]
+}

@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   Brain, Play, Square, RefreshCw, TrendingUp, TrendingDown,
   Activity, Shield, Clock, Target, BarChart3, Layers, AlertTriangle,
-  CheckCircle2, Circle, ChevronDown, ChevronRight, Zap, Eye, Cpu, Monitor
+  CheckCircle2, Circle, ChevronDown, ChevronRight, Zap, Eye, Cpu, Monitor, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../utils/api';
@@ -28,6 +28,7 @@ const CATEGORY_ICONS = {
   gap_fill: Zap,
   risk_of_ruin: Shield,
   ensemble: Layers,
+  regime_conditional: GitBranch,
   cnn_visual: Eye,
 };
 
@@ -40,6 +41,7 @@ const CATEGORY_COLORS = {
   gap_fill: 'text-orange-400',
   risk_of_ruin: 'text-red-400',
   ensemble: 'text-pink-400',
+  regime_conditional: 'text-teal-400',
   cnn_visual: 'text-fuchsia-400',
 };
 

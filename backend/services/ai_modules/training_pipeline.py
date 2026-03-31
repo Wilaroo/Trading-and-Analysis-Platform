@@ -152,14 +152,17 @@ def count_total_models() -> int:
     """Count total models that will be trained."""
     from services.ai_modules.setup_training_config import get_all_profile_count, SETUP_TRAINING_PROFILES
     generic = len(BAR_SIZE_CONFIGS)  # 7
-    setup_specific = 16  # Long setup profiles
-    short_specific = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if k.startswith("SHORT_"))
+    setup_long = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if not k.startswith("SHORT_"))  # 17
+    setup_short = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if k.startswith("SHORT_"))  # 17
     volatility = len(BAR_SIZE_CONFIGS)  # 7
     exit_timing = len(ALL_SETUP_TYPES)  # 10
     sector_relative = 3  # daily, hourly, 5min
     gap_fill = 3  # 5min, 1min, 15min
     risk_of_ruin = 6  # 1min through daily
-    return generic + setup_specific + short_specific + volatility + exit_timing + sector_relative + gap_fill + risk_of_ruin
+    regime_conditional = generic * len(["bull_trend", "bear_trend", "range_bound", "high_vol"])  # 7 * 4 = 28
+    ensemble = len(ALL_SETUP_TYPES)  # 10
+    return (generic + setup_long + setup_short + volatility + exit_timing +
+            sector_relative + gap_fill + risk_of_ruin + regime_conditional + ensemble)
 
 
 async def run_training_pipeline(
@@ -182,7 +185,7 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "cnn"]
+        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
 
     if bar_sizes is None:
@@ -260,13 +263,123 @@ async def run_training_pipeline(
                     results["models_failed"].append({"name": model_name, "reason": str(e)})
                     status.add_error(model_name, str(e))
 
-        # ── Phase 2: Setup-Specific Models ──
+        # ── Phase 2: Setup-Specific Models (Long) ──
         if "setup" in phases:
             status.update(phase="setup_specific")
-            logger.info("=== Phase 2: Training Setup-Specific Models ===")
-            # Delegate to existing timeseries_service setup training
-            # This is already implemented in the service
-            logger.info("Setup-specific training deferred to existing service (trigger via API)")
+            logger.info("=== Phase 2: Training Setup-Specific Models (Long) ===")
+            from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+            from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            for setup_type in ALL_SETUP_TYPES:
+                profiles = get_setup_profiles(setup_type)
+                for profile in profiles:
+                    bs = profile["bar_size"]
+                    fh = profile["forecast_horizon"]
+                    noise_thr = profile.get("noise_threshold", 0.003)
+                    num_boost = profile.get("num_boost_round", 150)
+                    model_name = get_model_name(setup_type, bs)
+                    status.update(current_model=model_name)
+
+                    try:
+                        bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                        max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                        symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                        symbols = symbols[:max_sym]
+
+                        if not symbols:
+                            logger.warning(f"No symbols available for {model_name}")
+                            continue
+
+                        # Get setup-specific feature names
+                        setup_feat_names = get_setup_feature_names(setup_type)
+                        combined_names = base_names + [f"setup_{n}" for n in setup_feat_names]
+
+                        all_X = []
+                        all_y = []
+
+                        for sym in symbols:
+                            bars = await load_symbol_bars(db, sym, bs)
+                            if len(bars) < 70 + fh:
+                                continue
+
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+
+                            for i in range(50, len(bars) - fh):
+                                # Base features
+                                window = bars[i - 49: i + 1][::-1]
+                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                                if fs is None:
+                                    continue
+                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                                # Setup-specific features
+                                o_window = opens[max(0, i - 49): i + 1][::-1]
+                                h_window = highs[max(0, i - 49): i + 1][::-1]
+                                l_window = lows[max(0, i - 49): i + 1][::-1]
+                                c_window = closes[max(0, i - 49): i + 1][::-1]
+                                v_window = volumes[max(0, i - 49): i + 1][::-1]
+
+                                setup_feats = get_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
+                                setup_vec = [setup_feats.get(f, 0.0) for f in setup_feat_names]
+
+                                # Target: future return over forecast horizon (forward-looking)
+                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+
+                                if abs(future_return) < noise_thr:
+                                    target = 1  # FLAT
+                                elif future_return > 0:
+                                    target = 2  # UP
+                                else:
+                                    target = 0  # DOWN
+
+                                all_X.append(base_vec + setup_vec)
+                                all_y.append(target)
+
+                        if len(all_X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient training data for {model_name}: {len(all_X)}")
+                            results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
+                            continue
+
+                        X = np.array(all_X)
+                        y = np.array(all_y)
+                        logger.info(
+                            f"Training {model_name}: {len(X)} samples, {len(combined_names)} features, "
+                            f"UP={np.sum(y==2)}, FLAT={np.sum(y==1)}, DOWN={np.sum(y==0)}"
+                        )
+
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                        model.set_db(db)
+                        metrics = model.train_from_features(
+                            X, y, combined_names,
+                            num_boost_round=num_boost,
+                            early_stopping_rounds=15,
+                            num_classes=3,
+                        )
+
+                        if metrics and metrics.accuracy > 0:
+                            results["models_trained"].append({
+                                "name": model_name,
+                                "accuracy": metrics.accuracy,
+                                "samples": metrics.training_samples,
+                            })
+                            results["total_samples"] += metrics.training_samples
+                            status.add_completed(model_name, metrics.accuracy)
+                        else:
+                            results["models_failed"].append({"name": model_name, "reason": "Low accuracy or no metrics"})
+
+                    except Exception as e:
+                        logger.error(f"Failed to train {model_name}: {e}")
+                        results["models_failed"].append({"name": model_name, "reason": str(e)})
+                        status.add_error(model_name, str(e))
 
         # ── Phase 2.5: Short Setup-Specific Models ──
         if "short" in phases:
@@ -340,7 +453,7 @@ async def run_training_pipeline(
 
                                 # Target: For SHORT models, "positive outcome" = price goes DOWN
                                 # Use inverted return: positive return = price dropped
-                                future_return = (closes[i] - closes[i - fh]) / closes[i] if closes[i] > 0 else 0
+                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
                                 # Invert: if future_return is negative (price went down), that's good for shorts
                                 inverted_return = -future_return
 
@@ -823,15 +936,329 @@ async def run_training_pipeline(
         if "regime" in phases:
             status.update(phase="regime_conditional")
             logger.info("=== Phase 7: Training Regime-Conditional Models ===")
-            logger.info("Regime-conditional training will split existing training data by detected regime "
-                        "and train regime-specific variants. This runs after all base models.")
+            from services.ai_modules.regime_conditional_model import (
+                ALL_REGIMES, classify_regime_for_date, get_regime_model_name,
+                MIN_REGIME_SAMPLES,
+            )
+            from services.ai_modules.regime_features import RegimeFeatureProvider
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            # Preload SPY daily data for regime classification
+            regime_provider = RegimeFeatureProvider(db)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, regime_provider.preload_index_daily)
+            spy_data = regime_provider._data.get("spy", {})
+
+            if not spy_data or spy_data.get("closes") is None or len(spy_data.get("closes", [])) < 30:
+                logger.warning("Insufficient SPY data for regime classification — skipping Phase 7")
+            else:
+                # Train regime-conditional variants of Generic Directional models
+                for bs in bar_sizes:
+                    config = BAR_SIZE_CONFIGS.get(bs)
+                    if not config:
+                        continue
+
+                    base_model_name = f"direction_predictor_{bs.replace(' ', '_')}"
+                    fh = config["forecast_horizon"]
+
+                    try:
+                        max_sym = max_symbols_override or config["max_symbols"]
+                        symbols = await get_available_symbols(db, bs, config["min_bars_per_symbol"])
+                        symbols = symbols[:max_sym]
+
+                        if not symbols:
+                            continue
+
+                        # Collect all samples and classify by regime
+                        regime_samples = {r: {"X": [], "y": []} for r in ALL_REGIMES}
+
+                        for sym in symbols:
+                            bars = await load_symbol_bars(db, sym, bs)
+                            if len(bars) < 70 + fh:
+                                continue
+
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+
+                            for i in range(50, len(bars) - fh):
+                                window = bars[i - 49: i + 1][::-1]
+                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                                if fs is None:
+                                    continue
+                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                                # Classify regime at this date
+                                bar_date = str(bars[i].get("date", ""))
+                                regime = classify_regime_for_date(spy_data, bar_date)
+
+                                # Target: future return (binary UP/DOWN)
+                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                                target = 1 if future_return > 0 else 0
+
+                                regime_samples[regime]["X"].append(base_vec)
+                                regime_samples[regime]["y"].append(target)
+
+                        # Train one model per regime
+                        for regime in ALL_REGIMES:
+                            X_list = regime_samples[regime]["X"]
+                            y_list = regime_samples[regime]["y"]
+
+                            if len(X_list) < MIN_REGIME_SAMPLES:
+                                logger.info(
+                                    f"Skipping {base_model_name}_{regime}: only {len(X_list)} samples "
+                                    f"(need {MIN_REGIME_SAMPLES})"
+                                )
+                                continue
+
+                            X = np.array(X_list)
+                            y = np.array(y_list)
+                            regime_model_name = get_regime_model_name(base_model_name, regime)
+                            status.update(current_model=regime_model_name)
+
+                            logger.info(
+                                f"Training {regime_model_name}: {len(X)} samples, "
+                                f"UP={np.sum(y==1)}, DOWN={np.sum(y==0)}"
+                            )
+
+                            model = TimeSeriesGBM(model_name=regime_model_name, forecast_horizon=fh)
+                            model.set_db(db)
+                            metrics = model.train_from_features(
+                                X, y, base_names,
+                                num_boost_round=150,
+                                early_stopping_rounds=15,
+                                num_classes=2,
+                            )
+
+                            if metrics and metrics.accuracy > 0:
+                                results["models_trained"].append({
+                                    "name": regime_model_name,
+                                    "accuracy": metrics.accuracy,
+                                    "samples": metrics.training_samples,
+                                    "regime": regime,
+                                })
+                                results["total_samples"] += metrics.training_samples
+                                status.add_completed(regime_model_name, metrics.accuracy)
+                            else:
+                                results["models_failed"].append({
+                                    "name": regime_model_name,
+                                    "reason": "Low accuracy or no metrics",
+                                })
+
+                    except Exception as e:
+                        logger.error(f"Regime training failed for {bs}: {e}")
+                        results["models_failed"].append({"name": f"regime_{bs}", "reason": str(e)})
+                        status.add_error(f"regime_{bs}", str(e))
 
         # ── Phase 8: Ensemble Meta-Learner (depends on Phase 1-7) ──
         if "ensemble" in phases:
             status.update(phase="ensemble_meta")
             logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
-            logger.info("Ensemble training requires Phase 1-7 models to be trained first "
-                        "(needs their predictions as input features).")
+            from services.ai_modules.ensemble_model import (
+                ENSEMBLE_MODEL_CONFIGS, ENSEMBLE_FEATURE_NAMES,
+                extract_ensemble_features, STACKED_TIMEFRAMES,
+            )
+            from services.ai_modules.setup_training_config import (
+                get_setup_profiles as _get_ens_profiles,
+                get_model_name as _get_ens_model_name,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            # Load generic sub-models for each stacked timeframe
+            sub_models = {}
+            for tf in STACKED_TIMEFRAMES:
+                tf_model_name = f"direction_predictor_{tf.replace(' ', '_')}"
+                tf_fh = BAR_SIZE_CONFIGS.get(tf, {}).get("forecast_horizon", 5)
+                m = TimeSeriesGBM(model_name=tf_model_name, forecast_horizon=tf_fh)
+                m.set_db(db)
+                if m._model is not None:
+                    sub_models[tf] = m
+                    logger.info(f"Loaded sub-model: {tf_model_name}")
+                else:
+                    logger.warning(f"Sub-model {tf_model_name} not trained — ensemble will use neutral predictions")
+
+            if not sub_models:
+                logger.warning("No sub-models available — skipping ensemble training")
+            else:
+                # Use daily bars as anchor timeframe for ensemble training
+                anchor_bs = "1 day"
+                anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
+
+                symbols = await get_available_symbols(db, anchor_bs, 100)
+                symbols = symbols[:3000]
+
+                for setup_type, ens_config in ENSEMBLE_MODEL_CONFIGS.items():
+                    model_name = ens_config["model_name"]
+                    status.update(current_model=model_name)
+
+                    try:
+                        # Load setup-specific model if daily variant exists
+                        setup_model = None
+                        setup_profiles = _get_ens_profiles(setup_type)
+                        for prof in setup_profiles:
+                            if prof["bar_size"] == anchor_bs:
+                                sname = _get_ens_model_name(setup_type, anchor_bs)
+                                sm = TimeSeriesGBM(model_name=sname, forecast_horizon=prof["forecast_horizon"])
+                                sm.set_db(db)
+                                if sm._model is not None:
+                                    setup_model = sm
+                                    logger.info(f"Loaded setup sub-model: {sname}")
+                                break
+
+                        all_X = []
+                        all_y = []
+
+                        for sym in symbols:
+                            bars = await load_symbol_bars(db, sym, anchor_bs)
+                            if len(bars) < 70 + anchor_fh:
+                                continue
+
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+
+                            for i in range(50, len(bars) - anchor_fh):
+                                window = bars[i - 49: i + 1][::-1]
+                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                                if fs is None:
+                                    continue
+
+                                # Get raw predictions from each sub-model (no DB logging)
+                                predictions = {}
+                                for tf, sm in sub_models.items():
+                                    try:
+                                        feat_vec = np.array([[
+                                            fs.features.get(f, 0.0) for f in sm._feature_names
+                                        ]])
+                                        raw_pred = sm._model.predict(feat_vec)
+
+                                        if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
+                                            probs = raw_pred[0]
+                                            prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
+                                            prob_down = float(probs[0])
+                                            conf = float(max(probs) - 1.0 / len(probs))
+                                            direction = "up" if np.argmax(probs) == 2 else (
+                                                "down" if np.argmax(probs) == 0 else "flat"
+                                            )
+                                        else:
+                                            prob_up = float(raw_pred[0])
+                                            prob_down = 1.0 - prob_up
+                                            conf = abs(prob_up - 0.5) * 2
+                                            direction = "up" if prob_up > 0.52 else (
+                                                "down" if prob_down > 0.55 else "flat"
+                                            )
+
+                                        predictions[tf] = {
+                                            "prob_up": prob_up,
+                                            "prob_down": prob_down,
+                                            "confidence": max(0, conf),
+                                            "direction": direction,
+                                        }
+                                    except Exception:
+                                        pass
+
+                                # Get setup model prediction (raw, no DB logging)
+                                setup_preds = []
+                                if setup_model:
+                                    try:
+                                        feat_vec = np.array([[
+                                            fs.features.get(f, 0.0)
+                                            for f in setup_model._feature_names
+                                        ]])
+                                        raw_pred = setup_model._model.predict(feat_vec)
+
+                                        if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
+                                            probs = raw_pred[0]
+                                            prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
+                                            prob_down = float(probs[0])
+                                            conf = float(max(probs) - 1.0 / len(probs))
+                                            direction = "up" if np.argmax(probs) == 2 else (
+                                                "down" if np.argmax(probs) == 0 else "flat"
+                                            )
+                                        else:
+                                            prob_up = float(raw_pred[0])
+                                            prob_down = 1.0 - prob_up
+                                            conf = abs(prob_up - 0.5) * 2
+                                            direction = "up" if prob_up > 0.52 else (
+                                                "down" if prob_down > 0.55 else "flat"
+                                            )
+
+                                        setup_preds.append({
+                                            "prob_up": prob_up,
+                                            "prob_down": prob_down,
+                                            "confidence": max(0, conf),
+                                            "direction": direction,
+                                        })
+                                    except Exception:
+                                        pass
+
+                                # Extract ensemble features from stacked predictions
+                                ens_feats = extract_ensemble_features(
+                                    predictions, setup_preds or None
+                                )
+                                feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
+
+                                # Target: future return over daily forecast horizon
+                                future_return = (
+                                    (closes[i + anchor_fh] - closes[i]) / closes[i]
+                                    if closes[i] > 0 else 0
+                                )
+                                if future_return > 0.003:
+                                    target = 2  # UP
+                                elif future_return < -0.003:
+                                    target = 0  # DOWN
+                                else:
+                                    target = 1  # FLAT
+
+                                all_X.append(feat_vec)
+                                all_y.append(target)
+
+                        if len(all_X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient ensemble data for {model_name}: {len(all_X)}")
+                            results["models_failed"].append({
+                                "name": model_name, "reason": "Insufficient data",
+                            })
+                            continue
+
+                        X = np.array(all_X)
+                        y = np.array(all_y)
+                        logger.info(
+                            f"Training {model_name}: {len(X)} samples, "
+                            f"UP={np.sum(y==2)}, FLAT={np.sum(y==1)}, DOWN={np.sum(y==0)}"
+                        )
+
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=anchor_fh)
+                        model.set_db(db)
+                        metrics = model.train_from_features(
+                            X, y, ENSEMBLE_FEATURE_NAMES,
+                            num_boost_round=120,
+                            early_stopping_rounds=15,
+                            num_classes=3,
+                        )
+
+                        if metrics and metrics.accuracy > 0:
+                            results["models_trained"].append({
+                                "name": model_name,
+                                "accuracy": metrics.accuracy,
+                                "samples": metrics.training_samples,
+                                "type": "ensemble",
+                            })
+                            results["total_samples"] += metrics.training_samples
+                            status.add_completed(model_name, metrics.accuracy)
+                        else:
+                            results["models_failed"].append({
+                                "name": model_name,
+                                "reason": "Low accuracy or no metrics",
+                            })
+
+                    except Exception as e:
+                        logger.error(f"Ensemble training failed for {model_name}: {e}")
+                        results["models_failed"].append({"name": model_name, "reason": str(e)})
+                        status.add_error(model_name, str(e))
 
         # ── Phase 9: CNN Chart Pattern Training ──
         if "cnn" in phases:
