@@ -47,22 +47,34 @@ async def start_training(request: TrainingRequest):
             raise HTTPException(status_code=503, detail="Database not connected")
 
         from services.ai_modules.training_pipeline import run_training_pipeline
+        from services.focus_mode_manager import focus_mode_manager
+
+        # Activate TRAINING focus mode — pauses non-essential services
+        focus_mode_manager.set_mode(
+            mode="training",
+            context={"phases": request.phases, "bar_sizes": request.bar_sizes},
+        )
 
         async def _run():
             global _last_result
-            _last_result = await run_training_pipeline(
-                db=mongo_db,
-                phases=request.phases,
-                bar_sizes=request.bar_sizes,
-                max_symbols_override=request.max_symbols,
-            )
+            try:
+                _last_result = await run_training_pipeline(
+                    db=mongo_db,
+                    phases=request.phases,
+                    bar_sizes=request.bar_sizes,
+                    max_symbols_override=request.max_symbols,
+                )
+            finally:
+                # Restore LIVE mode when training finishes (success or failure)
+                focus_mode_manager.reset_to_live(result=_last_result)
 
         _training_task = asyncio.create_task(_run())
 
         return {
             "success": True,
-            "message": "Training pipeline started",
-            "phases": request.phases or ["generic", "setup", "volatility", "exit", "sector", "gap_fill", "risk"],
+            "message": "Training pipeline started (TRAINING focus mode activated)",
+            "focus_mode": "training",
+            "phases": request.phases or ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn"],
             "bar_sizes": request.bar_sizes or "all",
         }
 

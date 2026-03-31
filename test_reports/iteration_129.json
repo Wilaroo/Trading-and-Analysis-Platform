@@ -1,0 +1,72 @@
+{
+  "summary": "Focus Mode + AI Training Integration testing complete. All 25 tests passed. Verified: (1) POST /api/ai-training/start imports and calls focus_mode_manager.set_mode('training'), (2) Response includes focus_mode: 'training', (3) _run() has reset_to_live() in finally block, (4) GET /api/focus-mode returns mode:'live' by default, (5) GET /api/ai-training/status returns success:true, (6) GET /api/ai-training/model-inventory returns 108 total_defined, (7) Bat file has no collector auto-start, contains focus mode docs, has 9 steps.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_focus_mode_ai_training.py",
+    "/app/test_reports/pytest/pytest_focus_mode_ai_training.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "VERIFIED: ai_training.py imports focus_mode_manager from services.focus_mode_manager",
+    "VERIFIED: start_training() calls focus_mode_manager.set_mode(mode='training', context={...})",
+    "VERIFIED: Response includes 'focus_mode': 'training' in the return dict",
+    "VERIFIED: _run() async task has 'finally:' block with focus_mode_manager.reset_to_live(result=_last_result)",
+    "VERIFIED: GET /api/focus-mode returns success:true, mode:'live', is_live:true by default",
+    "VERIFIED: GET /api/ai-training/status returns success:true, task_status:'idle'",
+    "VERIFIED: GET /api/ai-training/model-inventory returns total_defined:108",
+    "VERIFIED: Bat file does NOT contain 'run_collector1', 'run_collector2', 'run_collector3'",
+    "VERIFIED: Bat file does NOT contain 'STEP 9: START HISTORICAL DATA COLLECTORS'",
+    "VERIFIED: Bat file contains 'Collectors start from UI', 'COLLECTING mode', 'TRAINING mode'",
+    "VERIFIED: Bat file has steps [8/9] and [9/9] (9 total steps)",
+    "VERIFIED: focus_mode_manager.py has set_mode(), reset_to_live(), COLLECTING and TRAINING modes"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_focus_mode_ai_training.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "N/A - no auth required for these endpoints",
+  "seed_data_creation": "N/A",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Focus Mode integration with AI Training is fully implemented. POST /api/ai-training/start sets TRAINING focus mode before starting pipeline and resets to LIVE in finally block. Bat file has 9 steps with collectors removed from auto-start (now UI-controlled). IB Gateway and Ollama LLM are MOCKED/unavailable in container.",
+  "mocked_api_note": "Ollama LLM and IB Gateway are MOCKED/unavailable in container",
+  "tests_passed": [
+    "test_focus_mode_returns_success",
+    "test_focus_mode_returns_mode_field",
+    "test_focus_mode_default_is_live",
+    "test_focus_mode_has_is_live_field",
+    "test_status_returns_success",
+    "test_status_has_task_status",
+    "test_model_inventory_returns_success",
+    "test_model_inventory_total_defined_is_108",
+    "test_start_training_code_imports_focus_mode_manager",
+    "test_start_training_code_calls_set_mode_training",
+    "test_start_training_code_has_reset_to_live_in_finally",
+    "test_start_training_response_includes_focus_mode",
+    "test_bat_file_exists",
+    "test_bat_file_no_run_collector1",
+    "test_bat_file_no_run_collector2",
+    "test_bat_file_no_run_collector3",
+    "test_bat_file_no_step_9_collectors",
+    "test_bat_file_contains_collectors_start_from_ui",
+    "test_bat_file_contains_collecting_mode",
+    "test_bat_file_contains_training_mode",
+    "test_bat_file_step_count_is_9",
+    "test_focus_mode_manager_has_set_mode",
+    "test_focus_mode_manager_has_reset_to_live",
+    "test_focus_mode_manager_has_collecting_mode",
+    "test_focus_mode_manager_has_training_mode"
+  ],
+  "tests_failed": []
+}

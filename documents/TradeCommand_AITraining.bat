@@ -286,7 +286,7 @@ echo.
 :: =====================================================
 :: STEP 8: START BACKGROUND WORKER (for training/collection)
 :: =====================================================
-echo [8/11] Starting Background Worker...
+echo [8/9] Starting Background Worker...
 
 :: Kill existing worker
 taskkill /F /FI "WINDOWTITLE eq TradeCommand Worker*" >nul 2>&1
@@ -326,67 +326,18 @@ if exist "%BACKEND_DIR%\worker.py" (
 echo.
 
 :: =====================================================
-:: STEP 9: START HISTORICAL DATA COLLECTORS (3 INSTANCES)
+:: STEP 9: WAIT FOR FRONTEND + OPEN BROWSER
 :: =====================================================
-echo [9/11] Starting Historical Data Collectors (3 instances)...
-
-:: IMPORTANT: Wait for backend to be fully healthy before starting collectors
-:: This prevents massive retry queues when backend is still initializing
-echo        Verifying backend is ready for collectors...
-set COLLECTOR_HEALTH=0
-:collector_health_loop
-set /a COLLECTOR_HEALTH+=1
-if %COLLECTOR_HEALTH% GTR 15 (
-    echo        [WARN] Backend not confirmed ready - starting collectors anyway
-    goto start_collectors
-)
-curl -s -f -m 5 %LOCAL_BACKEND%/api/health >nul 2>&1
-if %errorlevel%==0 (
-    echo        Backend confirmed healthy - starting collectors!
-    goto start_collectors
-)
-echo        Waiting for backend... (%COLLECTOR_HEALTH%/15)
-timeout /t 3 /nobreak >nul
-goto collector_health_loop
-
-:start_collectors
-:: Kill existing collectors if running
-taskkill /F /FI "WINDOWTITLE eq *COLLECTOR*" >nul 2>&1
-timeout /t 1 /nobreak >nul
-
-if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
-    :: Collector 1: Daily + Weekly (fastest to complete, ~12K requests)
-    start "COLLECTOR-1 15min" cmd /k "%SCRIPTS_DIR%\run_collector1.bat"
-    echo        Collector 1 started: Daily/Weekly (client ID: 16)
-
-    :: Collector 2: Hourly + 30min + 15min (~46K requests)
-    start "COLLECTOR-2 5min+30min" cmd /k "%SCRIPTS_DIR%\run_collector2.bat"
-    echo        Collector 2 started: Hourly/Mins (client ID: 17)
-
-    :: Collector 3: 5-min only (~21K requests, heaviest per-request)
-    start "COLLECTOR-3 Hourly+Daily" cmd /k "%SCRIPTS_DIR%\run_collector3.bat"
-    echo        Collector 3 started: 5-Min (client ID: 18)
-) else (
-    echo        [SKIP] ib_data_pusher.py not found
-)
-echo.
-
-:: =====================================================
-:: STEP 10: WAIT FOR FRONTEND
-:: =====================================================
-echo [10/11] Waiting for frontend to compile...
+echo [9/9] Waiting for frontend to compile...
 timeout /t 20 /nobreak >nul
 echo.
 
-:: =====================================================
-:: STEP 11: OPEN BROWSER
-:: =====================================================
-echo [11/11] Opening TradeCommand...
+echo Opening TradeCommand...
 start "" "%LOCAL_FRONTEND%"
 
 echo.
 echo ============================================
-echo      TRADECOMMAND READY FOR AI TRAINING!
+echo      TRADECOMMAND READY!
 echo ============================================
 echo.
 echo    Frontend: %LOCAL_FRONTEND%
@@ -398,24 +349,31 @@ echo    +-------------------------------------------------+
 echo    ^|  GREEN       [BACKEND]      API Server (8001)   ^|
 echo    ^|  CYAN        [FRONTEND]     React UI (3000)     ^|
 echo    ^|  YELLOW      [IB PUSHER]    Market Data Feed    ^|
-echo    ^|  DARK YELLOW [COLLECTOR-1]  15-Min Data          ^|
-echo    ^|  LIGHT RED   [COLLECTOR-2]  5-Min + 30-Min Data  ^|
-echo    ^|  AQUA        [COLLECTOR-3]  Hourly+Daily+Rem     ^|
 echo    ^|  PURPLE      [WORKER]       Background Jobs     ^|
 echo    ^|  GRAY        [OLLAMA]       AI Model Server     ^|
 echo    +-------------------------------------------------+
 echo.
-echo    ML Training Ready:
+echo    Focus Mode System (UI-controlled):
+echo    +-------------------------------------------------+
+echo    ^|  Start Collection:  NIA page or Command Center  ^|
+echo    ^|    - Sets COLLECTING mode automatically          ^|
+echo    ^|    - Pauses: trading bot, scanner, learning loop ^|
+echo    ^|    - Prioritizes: IB data collection             ^|
+echo    ^|    - Restores LIVE mode when done                ^|
+echo    ^|                                                  ^|
+echo    ^|  Start Training:    NIA page "Train All"         ^|
+echo    ^|    - Sets TRAINING mode automatically            ^|
+echo    ^|    - Pauses: all IB streaming, scanner, bot      ^|
+echo    ^|    - GPU + CPU dedicated to model training       ^|
+echo    ^|    - Restores LIVE mode when done                ^|
+echo    +-------------------------------------------------+
+echo.
+echo    ML Ready:
 echo    * LightGBM with GPU acceleration (auto-detected)
+echo    * CNN pipeline (torchvision + PIL)
 echo    * Backend in stable mode (no auto-reload)
 echo    * Background Worker running for isolated jobs
-echo    * 3 Historical Collectors running (~79K queue)
-echo    * Go to NIA page to train models
-echo.
-echo    Focus Mode System:
-echo    * Click "Live" dropdown in header to switch modes
-echo    * Training mode pauses non-essential services
-echo    * Worker processes jobs without blocking main app
+echo    * Collectors start from UI (not auto-started)
 echo.
 echo ============================================
 echo.
@@ -468,17 +426,24 @@ if "%ERRORLEVEL%"=="0" (
     echo Worker:      NOT RUNNING
 )
 
-:: Collector status
+:: Focus Mode Status
 echo.
-echo ------- DATA COLLECTION STATUS -------
-echo Collectors: 3 instances (Daily, Hourly, 5min)
+echo ------- FOCUS MODE STATUS -------
+curl -s -f -m 5 %LOCAL_BACKEND%/api/focus-mode 2>nul > "%TEMP%\focus_check.tmp"
+if %errorlevel%==0 (
+    for /f "tokens=2 delims=:,}" %%a in ('findstr "mode" "%TEMP%\focus_check.tmp"') do echo Current Mode:  %%~a
+) else (
+    echo Focus Mode:  Unable to check
+)
+del "%TEMP%\focus_check.tmp" 2>nul
+
+:: Collection Queue Status
 curl -s -f -m 5 %LOCAL_BACKEND%/api/ib-collector/queue-progress 2>nul > "%TEMP%\queue_check.tmp"
 if %errorlevel%==0 (
-    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Pending:       %%a
-    for /f "tokens=2 delims=:," %%a in ('findstr "claimed" "%TEMP%\queue_check.tmp"') do echo Claimed:       %%a
-    for /f "tokens=2 delims=:," %%a in ('findstr "completed" "%TEMP%\queue_check.tmp"') do echo Completed:     %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Collection Pending:  %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "completed" "%TEMP%\queue_check.tmp"') do echo Collection Done:     %%a
 ) else (
-    echo Queue: Unable to check
+    echo Collection:  No active jobs
 )
 del "%TEMP%\queue_check.tmp" 2>nul
 
