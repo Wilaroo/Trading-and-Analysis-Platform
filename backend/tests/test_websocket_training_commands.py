@@ -19,7 +19,7 @@ import websockets
 from urllib.parse import urlparse
 
 # Get the backend URL from environment
-BACKEND_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ai-trading-bot-82.preview.emergentagent.com')
+BACKEND_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ai-broker-lab.preview.emergentagent.com')
 
 def get_websocket_url():
     """Convert HTTP URL to WebSocket URL with /api/ws/quotes path"""
