@@ -676,7 +676,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Tab list now: Trade Log, Weekly Report, Playbooks, Daily Report Card, Game Plan
 
 ### P1
-- Twitter/X Social Stream Widget for Command Center
+- ~~Twitter/X Social Stream Widget for Command Center~~ **DONE (Mar 31, 2026)**
 - Auto-Optimize AI Settings (confidence threshold sweeping)
 - Chat integration with snapshot annotations (click annotation → ask AI for reasoning)
 
@@ -752,6 +752,29 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ### P0 (Next)
 - (All P0 items complete)
+
+### Twitter/X Social Stream Widget (**DONE** — Mar 31, 2026)
+- **Backend Service**: `services/social_feed_service.py`
+  - Manages 19 configured Twitter/X handles with categories (news, short-seller, trading, analysis, research, earnings, education, flow)
+  - AI sentiment analysis on pasted tweet text via LLM fallback chain (Ollama → Emergent LLM → keyword analysis)
+  - Handle CRUD: add/remove handles, stored in MongoDB `social_feed_config` collection
+  - Analyses stored in `social_feed_analyses` collection for history
+- **API Router**: `routers/social_feed.py` (sync endpoints)
+  - `GET /api/social-feed/handles` — Get configured handles list (19 default)
+  - `POST /api/social-feed/handles` — Add new handle
+  - `DELETE /api/social-feed/handles/{handle}` — Remove handle
+  - `POST /api/social-feed/analyze` — AI sentiment analysis on pasted text
+  - `GET /api/social-feed/analyses` — Recent analyses history
+- **Frontend Widget**: `components/SocialFeedWidget.jsx`
+  - **Feed View**: Embedded Twitter timelines via `platform.twitter.com/widgets.js` with handle selector
+  - **Ticker View**: 4-column grid of all 19 handles with category-colored X logos
+  - **AI Analyze Panel**: Paste tweet text → get sentiment (BULLISH/BEARISH/NEUTRAL), confidence, market impact, tickers, action
+  - Scrollable handle chip bar with category colors
+  - Collapse/expand toggle, view mode toggle
+  - Fallback to local default handles when API is slow
+- **Integration**: Placed in `NewDashboard.jsx` below Positions/Scanner panels in Command Center
+- **Testing**: 16/16 pytest tests pass (iteration_124.json), full frontend UI verification
+- **Handles configured**: @faststocknewss, @Deltaone, @TheShortBear, @OracleNYSE, @ttvresearch, @TradetheMatrix1, @ResearchGrizzly, @HindendburgRes, @Qullamaggie, @CitronResearch, @eWhispers, @PaulJSingh, @sspencer_smb, @szaman, @alphatrends, @InvestorsLive, @TheShortSniper, @TheOneLanceB, @unusual_whales
 
 
 ### Known Issues
