@@ -677,6 +677,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ### P1
 - ~~Twitter/X Social Stream Widget for Command Center~~ **DONE (Mar 31, 2026)**
+- ~~CNN Chart Pattern Detection System~~ **DONE (Mar 31, 2026)**
 - Auto-Optimize AI Settings (confidence threshold sweeping)
 - Chat integration with snapshot annotations (click annotation → ask AI for reasoning)
 
@@ -779,6 +780,28 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Fallback to local default handles when API is slow
 - **Integration**: Placed in `NewDashboard.jsx` below Positions/Scanner panels in Command Center
 - **Testing**: All tests pass (iteration_124.json initial, iteration_125.json wall view enhancement)
+
+
+### CNN Chart Pattern Detection System (**DONE** — Mar 31, 2026)
+- **Architecture**: ResNet-18 transfer learning with dual prediction heads (pattern classification + win probability)
+- **New Backend Modules**:
+  - `ai_modules/chart_pattern_cnn.py` — Model definition, GPU auto-detect, inference, MongoDB persistence
+  - `ai_modules/chart_image_generator.py` — OHLCV bars → 224x224 candlestick chart images via mplfinance
+  - `ai_modules/cnn_training_pipeline.py` — Full pipeline: generate images → label via setup_pattern_detector → train → validate → save
+- **Training Pipeline Integration**: Added as **Phase 9** in the existing 8-phase `training_pipeline.py`
+- **Worker Integration**: `CNN_TRAINING` job type added to `worker.py` and `JobType` enum
+- **Confidence Gate Integration**: CNN visual pattern signal (Phase 4b) in `confidence_gate.py` — contributes ±12 confidence points + position size adjustment
+- **API Endpoints** (added to `routers/ai_training.py`):
+  - `POST /api/ai-training/cnn/start` — Queue CNN training job (setup_type, bar_size, max_symbols)
+  - `GET /api/ai-training/cnn/models` — List trained CNN models with metrics
+  - `GET /api/ai-training/cnn/predict/{symbol}` — Run CNN inference on a symbol's chart
+  - `GET /api/ai-training/gpu-status` — GPU/CUDA information
+- **Setup-Specific Window Sizes**: SCALP=35, ORB=40, BREAKOUT=80, SWING=100, etc. (16 configurations)
+- **17 Pattern Classes**: SCALP, ORB, GAP_AND_GO, VWAP, BREAKOUT, RANGE, MEAN_REVERSION, REVERSAL, TREND_CONTINUATION, MOMENTUM + 6 short variants + UNKNOWN
+- **.bat Updates**: `TradeCommand_AITraining.bat` (CNN status check), `InstallML_GPU.bat` (CNN dependencies), `WeekendAuto.bat` (auto-queue CNN training)
+- **GPU**: Designed for RTX 5060 Ti (16GB VRAM), auto-detects CUDA, falls back to CPU gracefully
+- **Training**: ~15-25 min on GPU for ResNet-18 (25 epochs, early stopping, ReduceLROnPlateau scheduler)
+- **Testing**: All API endpoints verified (iteration_126.json), graceful degradation in container (no torchvision/GPU)
 
 
 ### Known Issues
