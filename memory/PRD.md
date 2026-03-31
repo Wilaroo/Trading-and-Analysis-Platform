@@ -823,6 +823,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Testing**: 18/18 tests passed (iteration_127.json). Backend + frontend verified.
 - **Total Pipeline Models**: 108 LightGBM + 10-16 CNN = ~118-124 models trained by "Train All"
 
+### Training Progress Dashboard (**DONE** — Mar 31, 2026)
+- **Backend**: Added `PHASE_CONFIGS` (10 phases with labels, order, expected models). Enhanced `TrainingPipelineStatus` to auto-detect phase transitions via `update(phase=X)` — automatically ends previous phase and starts new phase. Tracks per-phase: `models_trained`, `models_failed`, `avg_accuracy` (running average), `elapsed_seconds`. Zero changes needed to existing pipeline code (auto-transitions leverage existing `status.update()` calls).
+- **Frontend**: Built `PhaseTracker` component showing all 10 phases as a vertical tracker with done/running/pending indicators, per-phase accuracy + model count, elapsed time per phase, running progress bar for current phase, and current model name. Added `ElapsedTimer` with live clock + ETA calculation based on model completion rate. Auto-polls every 5s during training.
+- **Fixed**: Phase 2.5 target calculation TDZ ordering bug in TrainingPipelinePanel (isTraining declared before useEffect dependency).
+- **Testing**: 23/24 passed (iteration_128.json). 1 timeout due to container IB saturation (not a code bug).
+
+
 
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
