@@ -755,26 +755,26 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ### Twitter/X Social Stream Widget (**DONE** — Mar 31, 2026)
 - **Backend Service**: `services/social_feed_service.py`
-  - Manages 19 configured Twitter/X handles with categories (news, short-seller, trading, analysis, research, earnings, education, flow)
+  - Manages 20 configured Twitter/X handles with categories (news, short-seller, trading, analysis, research, earnings, education, flow, political)
+  - 4 prioritized handles: @faststocknewss (P1), @Deltaone (P2), @unusual_whales (P3), @TruthTrumpPosts (P4)
   - AI sentiment analysis on pasted tweet text via LLM fallback chain (Ollama → Emergent LLM → keyword analysis)
   - Handle CRUD: add/remove handles, stored in MongoDB `social_feed_config` collection
-  - Analyses stored in `social_feed_analyses` collection for history
+  - Auto re-seeds defaults when handle count changes
 - **API Router**: `routers/social_feed.py` (sync endpoints)
-  - `GET /api/social-feed/handles` — Get configured handles list (19 default)
+  - `GET /api/social-feed/handles` — Get configured handles list (20 with priority field)
   - `POST /api/social-feed/handles` — Add new handle
   - `DELETE /api/social-feed/handles/{handle}` — Remove handle
   - `POST /api/social-feed/analyze` — AI sentiment analysis on pasted text
   - `GET /api/social-feed/analyses` — Recent analyses history
-- **Frontend Widget**: `components/SocialFeedWidget.jsx`
-  - **Feed View**: Embedded Twitter timelines via `platform.twitter.com/widgets.js` with handle selector
-  - **Ticker View**: 4-column grid of all 19 handles with category-colored X logos
+- **Frontend Widget**: `components/SocialFeedWidget.jsx` — TweetDeck-style multi-panel layout
+  - **Wall View (DEFAULT)**: 4 embedded Twitter timelines side-by-side for prioritized handles, each panel has swap dropdown to change to any other handle
+  - **Feed View**: Single embedded timeline with scrollable handle chip selector
+  - **Ticker View**: 4-column grid of all 20 handles with category colors and P1-P4 priority badges
   - **AI Analyze Panel**: Paste tweet text → get sentiment (BULLISH/BEARISH/NEUTRAL), confidence, market impact, tickers, action
-  - Scrollable handle chip bar with category colors
-  - Collapse/expand toggle, view mode toggle
+  - Collapse/expand toggle, view mode toggle (Wall/Feed/Ticker)
   - Fallback to local default handles when API is slow
 - **Integration**: Placed in `NewDashboard.jsx` below Positions/Scanner panels in Command Center
-- **Testing**: 16/16 pytest tests pass (iteration_124.json), full frontend UI verification
-- **Handles configured**: @faststocknewss, @Deltaone, @TheShortBear, @OracleNYSE, @ttvresearch, @TradetheMatrix1, @ResearchGrizzly, @HindendburgRes, @Qullamaggie, @CitronResearch, @eWhispers, @PaulJSingh, @sspencer_smb, @szaman, @alphatrends, @InvestorsLive, @TheShortSniper, @TheOneLanceB, @unusual_whales
+- **Testing**: All tests pass (iteration_124.json initial, iteration_125.json wall view enhancement)
 
 
 ### Known Issues
