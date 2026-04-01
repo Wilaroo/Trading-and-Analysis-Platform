@@ -414,15 +414,24 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     return () => clearInterval(interval);
   }, [isTraining, fetchData]);
 
+  // Get direct backend URL to bypass the CRA dev server proxy.
+  // The proxy shares browser connections with WebSockets, causing the 6-connection
+  // limit to block POST requests. Going directly to the backend port avoids this.
+  const getDirectBackendUrl = useCallback(() => {
+    const envUrl = process.env.REACT_APP_BACKEND_URL;
+    if (envUrl) return envUrl; // Production or preview — use configured URL
+    // Local dev: bypass CRA proxy by going directly to backend port
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return `http://${window.location.hostname}:8001`;
+    }
+    return ''; // Fallback to relative URL (proxy)
+  }, []);
+
   const handleStartTraining = useCallback(async () => {
     try {
       setStarting(true);
-      // Use raw fetch() to bypass axios throttler and send POST immediately.
-      // Don't manipulate the throttler here — the backend activates focus mode,
-      // which triggers a WebSocket broadcast, which TrainingModeContext picks up
-      // and calls setTrainingActive(true) → throttler.pause() naturally.
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-      const response = await fetch(`${backendUrl}/api/ai-training/start`, {
+      const directUrl = getDirectBackendUrl();
+      const response = await fetch(`${directUrl}/api/ai-training/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -431,7 +440,6 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       const data = await response.json();
       if (data?.success) {
         toast.success('Training pipeline started');
-        // Don't call fetchData() immediately — throttler will be paused soon by WS
       } else {
         toast.error(data?.error || 'Failed to start training');
       }
@@ -442,12 +450,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     } finally {
       setStarting(false);
     }
-  }, []);
+  }, [getDirectBackendUrl]);
 
   const handleStopTraining = useCallback(async () => {
     try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-      const response = await fetch(`${backendUrl}/api/ai-training/stop`, {
+      const directUrl = getDirectBackendUrl();
+      const response = await fetch(`${directUrl}/api/ai-training/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(15000),
@@ -456,7 +464,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       if (data?.success) { toast.success('Training stopped'); }
       else { toast.error(data?.message || 'No training in progress'); }
     } catch { toast.error('Failed to stop training — check if backend is running'); }
-  }, []);
+  }, [getDirectBackendUrl]);
 
   // Split categories into Trade Signal Generators vs Support Models
   const signalCategories = [];
