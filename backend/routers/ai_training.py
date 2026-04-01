@@ -7,6 +7,7 @@ and view results. All training runs asynchronously in the background.
 
 import logging
 import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -35,25 +36,43 @@ async def start_training(request: TrainingRequest):
     global _training_task, _last_result
 
     if _training_task and not _training_task.done():
-        return {
-            "success": False,
-            "error": "Training already in progress",
-            "status": "running",
-        }
+        # Double-check: if the task has been running for more than 6 hours, it's stale
+        if hasattr(_training_task, '_start_time'):
+            elapsed = datetime.now(timezone.utc) - _training_task._start_time
+            if elapsed > timedelta(hours=6):
+                logger.warning(f"Stale training task detected (running {elapsed}), cancelling...")
+                _training_task.cancel()
+                _training_task = None
+            else:
+                return {
+                    "success": False,
+                    "error": f"Training already in progress (running for {int(elapsed.total_seconds())}s)",
+                    "status": "running",
+                }
+        else:
+            return {
+                "success": False,
+                "error": "Training already in progress",
+                "status": "running",
+            }
 
     try:
         from server import db as mongo_db
         if mongo_db is None:
-            return {"success": False, "error": "Database not connected"}
+            logger.error("Training start failed: Database not connected (db is None)")
+            return {"success": False, "error": "Database not connected — check MongoDB connection"}
 
         from services.ai_modules.training_pipeline import run_training_pipeline
         from services.focus_mode_manager import focus_mode_manager
 
         # Activate TRAINING focus mode — pauses non-essential services
-        focus_mode_manager.set_mode(
-            mode="training",
-            context={"phases": request.phases, "bar_sizes": request.bar_sizes},
-        )
+        try:
+            focus_mode_manager.set_mode(
+                mode="training",
+                context={"phases": request.phases, "bar_sizes": request.bar_sizes},
+            )
+        except Exception as fm_err:
+            logger.warning(f"Focus mode activation failed (non-fatal): {fm_err}")
 
         async def _run():
             global _last_result
@@ -69,9 +88,13 @@ async def start_training(request: TrainingRequest):
                 _last_result = {"error": str(run_err)}
             finally:
                 # Restore LIVE mode when training finishes (success or failure)
-                focus_mode_manager.reset_to_live(result=_last_result)
+                try:
+                    focus_mode_manager.reset_to_live(result=_last_result)
+                except Exception:
+                    pass
 
         _training_task = asyncio.create_task(_run())
+        _training_task._start_time = datetime.now(timezone.utc)
 
         phases_list = request.phases or [
             "generic", "setup", "short", "volatility", "exit",

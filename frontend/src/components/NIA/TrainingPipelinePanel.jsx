@@ -417,7 +417,10 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       const res = await api.post('/api/ai-training/start', {});
       if (res.data?.success) { toast.success('Training pipeline started'); fetchData(); }
       else toast.error(res.data?.error || 'Failed to start training');
-    } catch { toast.error('Failed to start training pipeline'); }
+    } catch (err) {
+      console.error('[TrainingPipeline] Start error:', err);
+      toast.error(`Failed to start training: ${err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Network error'}`);
+    }
     finally { setStarting(false); }
   }, [fetchData]);
 
