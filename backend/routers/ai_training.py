@@ -7,7 +7,9 @@ and view results. All training runs asynchronously in the background.
 
 import logging
 import asyncio
-import threading
+import subprocess
+import sys
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
@@ -18,10 +20,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ai-training", tags=["AI Training"])
 
 
-class _TrainingThread(threading.Thread):
-    """Thread wrapper that provides asyncio.Task-like interface (.done()) for backwards compat."""
+class _TrainingProcess:
+    """Wrapper around subprocess.Popen that provides .done() interface."""
+    def __init__(self, proc, start_time=None):
+        self._proc = proc
+        self._start_time = start_time or datetime.now(timezone.utc)
+
     def done(self):
-        return not self.is_alive()
+        return self._proc.poll() is not None
+
+    def terminate(self):
+        if self._proc.poll() is None:
+            self._proc.terminate()
 
 # Global training task reference
 _training_task: Optional[asyncio.Task] = None
@@ -34,6 +44,33 @@ class TrainingRequest(BaseModel):
     max_symbols: Optional[int] = None
 
 
+async def _monitor_training_process(task: _TrainingProcess):
+    """Lightweight monitor that checks the subprocess every 10s and restores focus mode when done."""
+    global _last_result
+    while not task.done():
+        await asyncio.sleep(10)
+
+    # Subprocess finished — read result from MongoDB and restore focus mode
+    logger.info("[TRAINING] Subprocess finished, restoring LIVE mode")
+    try:
+        from server import db as mongo_db
+        if mongo_db is not None:
+            result_doc = await asyncio.to_thread(
+                mongo_db["training_pipeline_result"].find_one,
+                {"_id": "latest"}, {"_id": 0}
+            )
+            if result_doc:
+                _last_result = result_doc.get("result")
+    except Exception as e:
+        logger.warning(f"[TRAINING] Failed to read result: {e}")
+
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.reset_to_live(result=_last_result)
+    except Exception:
+        pass
+
+
 @router.post("/start")
 async def start_training(request: TrainingRequest):
     """
@@ -43,11 +80,11 @@ async def start_training(request: TrainingRequest):
     global _training_task, _last_result
 
     if _training_task and not _training_task.done():
-        # Double-check: if the task has been running for more than 6 hours, it's stale
         if hasattr(_training_task, '_start_time'):
             elapsed = datetime.now(timezone.utc) - _training_task._start_time
             if elapsed > timedelta(hours=6):
-                logger.warning(f"Stale training task detected (running {elapsed}), cancelling...")
+                logger.warning(f"Stale training process detected (running {elapsed}), terminating...")
+                _training_task.terminate()
                 _training_task = None
             else:
                 return {
@@ -63,12 +100,6 @@ async def start_training(request: TrainingRequest):
             }
 
     try:
-        from server import db as mongo_db
-        if mongo_db is None:
-            logger.error("Training start failed: Database not connected (db is None)")
-            return {"success": False, "error": "Database not connected — check MongoDB connection"}
-
-        from services.ai_modules.training_pipeline import run_training_pipeline
         from services.focus_mode_manager import focus_mode_manager
 
         # Activate TRAINING focus mode — pauses non-essential services
@@ -80,38 +111,36 @@ async def start_training(request: TrainingRequest):
         except Exception as fm_err:
             logger.warning(f"Focus mode activation failed (non-fatal): {fm_err}")
 
-        def _training_thread_target():
-            """Run the entire training pipeline in an isolated thread with its own event loop.
-            This ensures training can NEVER block the main FastAPI event loop."""
-            global _last_result
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                logger.info("[TRAINING THREAD] Starting pipeline in isolated thread...")
-                _last_result = loop.run_until_complete(
-                    run_training_pipeline(
-                        db=mongo_db,
-                        phases=request.phases,
-                        bar_sizes=request.bar_sizes,
-                        max_symbols_override=request.max_symbols,
-                    )
-                )
-                logger.info("[TRAINING THREAD] Pipeline completed successfully")
-            except Exception as run_err:
-                logger.error(f"[TRAINING THREAD] Pipeline error: {run_err}", exc_info=True)
-                _last_result = {"error": str(run_err)}
-            finally:
-                loop.close()
-                try:
-                    focus_mode_manager.reset_to_live(result=_last_result)
-                    logger.info("[TRAINING THREAD] Focus mode reset to LIVE")
-                except Exception:
-                    pass
+        # Build subprocess command
+        mongo_url = os.environ.get("MONGO_URL", "")
+        db_name = os.environ.get("DB_NAME", "sentcom")
+        if not mongo_url:
+            return {"success": False, "error": "MONGO_URL not configured"}
 
-        # Wrap thread in a task-like interface for backwards compatibility
-        _training_task = _TrainingThread(target=_training_thread_target, daemon=True)
-        _training_task._start_time = datetime.now(timezone.utc)
-        _training_task.start()
+        cmd = [
+            sys.executable, "-m", "services.ai_modules.training_subprocess",
+            "--mongo-url", mongo_url,
+            "--db-name", db_name,
+        ]
+        if request.phases:
+            cmd.extend(["--phases", ",".join(request.phases)])
+        if request.bar_sizes:
+            cmd.extend(["--bar-sizes", ",".join(request.bar_sizes)])
+        if request.max_symbols:
+            cmd.extend(["--max-symbols", str(request.max_symbols)])
+
+        # Launch in a completely separate process — zero GIL/import lock interference
+        logger.info(f"[TRAINING] Launching subprocess: {' '.join(cmd[:4])}...")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # /app/backend
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        _training_task = _TrainingProcess(proc)
+
+        # Start a background task to monitor the subprocess and restore focus mode when done
+        asyncio.create_task(_monitor_training_process(_training_task))
 
         phases_list = request.phases or [
             "generic", "setup", "short", "volatility", "exit",
@@ -151,8 +180,6 @@ async def get_training_status():
         if _training_task:
             if _training_task.done():
                 task_status = "completed"
-                if _training_task.exception():
-                    task_status = "failed"
             else:
                 task_status = "running"
 
@@ -188,16 +215,15 @@ async def stop_training():
     global _training_task
 
     if _training_task and not _training_task.done():
-        # For threads, we can't cancel directly — but we can restore focus mode
-        # and the pipeline will stop at the next checkpoint
-        logger.info("[TRAINING] Stop requested — restoring LIVE mode")
+        logger.info("[TRAINING] Stop requested — terminating subprocess")
+        _training_task.terminate()
         try:
             from services.focus_mode_manager import focus_mode_manager
             focus_mode_manager.reset_to_live(result={"stopped": "manual"})
         except Exception:
             pass
         _training_task = None
-        return {"success": True, "message": "Training stop requested, focus mode restored to LIVE"}
+        return {"success": True, "message": "Training process terminated, focus mode restored to LIVE"}
 
     return {"success": False, "message": "No training in progress"}
 
