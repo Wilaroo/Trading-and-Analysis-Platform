@@ -48,13 +48,13 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 500},
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 1000},
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 1000},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 1000},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2000},
-    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 5000},
-    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 5000},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 150},
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 200},
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 250},
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 300},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 400},
+    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 500},
+    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 500},
 }
 
 # Setup types defined in the system

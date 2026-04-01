@@ -134,7 +134,9 @@ class TimeSeriesGBM:
         DEFAULT_PARAMS["device"] = "gpu"
         DEFAULT_PARAMS["gpu_platform_id"] = 0
         DEFAULT_PARAMS["gpu_device_id"] = 0
-        logger.info("LightGBM will use GPU acceleration")
+        logger.info("✓ LightGBM GPU acceleration ENABLED")
+    else:
+        logger.warning("✗ LightGBM GPU not available - using CPU (training will be slower)")
     
     # Prediction threshold for "up" classification
     # Higher threshold = more precise but lower recall
