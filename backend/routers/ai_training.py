@@ -44,7 +44,7 @@ async def start_training(request: TrainingRequest):
     try:
         from server import db as mongo_db
         if mongo_db is None:
-            raise HTTPException(status_code=503, detail="Database not connected")
+            return {"success": False, "error": "Database not connected"}
 
         from services.ai_modules.training_pipeline import run_training_pipeline
         from services.focus_mode_manager import focus_mode_manager
@@ -64,23 +64,31 @@ async def start_training(request: TrainingRequest):
                     bar_sizes=request.bar_sizes,
                     max_symbols_override=request.max_symbols,
                 )
+            except Exception as run_err:
+                logger.error(f"Training pipeline runtime error: {run_err}", exc_info=True)
+                _last_result = {"error": str(run_err)}
             finally:
                 # Restore LIVE mode when training finishes (success or failure)
                 focus_mode_manager.reset_to_live(result=_last_result)
 
         _training_task = asyncio.create_task(_run())
 
+        phases_list = request.phases or [
+            "generic", "setup", "short", "volatility", "exit",
+            "sector", "gap_fill", "risk", "regime", "ensemble", "cnn", "validate",
+        ]
+
         return {
             "success": True,
             "message": "Training pipeline started (TRAINING focus mode activated)",
             "focus_mode": "training",
-            "phases": request.phases or ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn"],
-            "bar_sizes": request.bar_sizes or "all",
+            "phases": phases_list,
+            "bar_sizes": request.bar_sizes if request.bar_sizes else "all",
         }
 
     except Exception as e:
-        logger.error(f"Failed to start training: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to start training: {e}", exc_info=True)
+        return {"success": False, "error": f"Failed to start training: {str(e)}"}
 
 
 @router.get("/status")
