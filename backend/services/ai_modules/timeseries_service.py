@@ -1605,15 +1605,18 @@ class TimeSeriesAIService:
         setup_status = {}
         for st, model in self._setup_models.items():
             try:
+                # Convert tuple keys to strings for JSON serialization
+                key = f"{st[0]}_{st[1]}" if isinstance(st, tuple) else str(st)
                 s = model.get_status()
-                setup_status[st] = {
+                setup_status[key] = {
                     "trained": s.get("trained", False),
                     "version": s.get("version"),
                     "accuracy": s.get("metrics", {}).get("accuracy"),
                     "training_samples": s.get("metrics", {}).get("training_samples"),
                 }
             except Exception:
-                setup_status[st] = {"trained": False}
+                key = f"{st[0]}_{st[1]}" if isinstance(st, tuple) else str(st)
+                setup_status[key] = {"trained": False}
         
         return {
             "service": "timeseries_ai",
