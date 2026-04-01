@@ -32,6 +32,12 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+
+async def _run_in_thread(func, *args, **kwargs):
+    """Run a blocking function in thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
 # ── Constants ──────────────────────────────────────────────
 
 # Bar sizes and their training configs
@@ -335,7 +341,7 @@ async def run_training_pipeline(
                         continue
 
                     logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols")
-                    metrics = model.train(bars_by_symbol)
+                    metrics = await _run_in_thread(model.train, bars_by_symbol)
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({
@@ -448,7 +454,8 @@ async def run_training_pipeline(
 
                         model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
                         model.set_db(db)
-                        metrics = model.train_from_features(
+                        metrics = await _run_in_thread(
+                            model.train_from_features,
                             X, y, combined_names,
                             num_boost_round=num_boost,
                             early_stopping_rounds=15,
@@ -571,7 +578,8 @@ async def run_training_pipeline(
 
                         model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
                         model.set_db(db)
-                        metrics = model.train_from_features(
+                        metrics = await _run_in_thread(
+                            model.train_from_features,
                             X, y, combined_names,
                             num_boost_round=num_boost,
                             early_stopping_rounds=15,
@@ -689,7 +697,8 @@ async def run_training_pipeline(
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
                     model.set_db(db)
-                    metrics = model.train_from_features(
+                    metrics = await _run_in_thread(
+                        model.train_from_features,
                         X, y, combined_names,
                         num_boost_round=150,
                         early_stopping_rounds=15,
@@ -799,7 +808,8 @@ async def run_training_pipeline(
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_horizon)
                     model.set_db(db)
-                    metrics = model.train_from_features(
+                    metrics = await _run_in_thread(
+                        model.train_from_features,
                         X, y_classes, combined_names,
                         num_boost_round=150,
                         early_stopping_rounds=15,
@@ -913,7 +923,7 @@ async def run_training_pipeline(
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
                     model.set_db(db)
-                    metrics = model.train_from_features(X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+                    metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
@@ -1007,7 +1017,7 @@ async def run_training_pipeline(
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars)
                     model.set_db(db)
-                    metrics = model.train_from_features(X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+                    metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
@@ -1112,7 +1122,8 @@ async def run_training_pipeline(
 
                             model = TimeSeriesGBM(model_name=regime_model_name, forecast_horizon=fh)
                             model.set_db(db)
-                            metrics = model.train_from_features(
+                            metrics = await _run_in_thread(
+                                model.train_from_features,
                                 X, y, base_names,
                                 num_boost_round=150,
                                 early_stopping_rounds=15,
@@ -1320,7 +1331,8 @@ async def run_training_pipeline(
 
                         model = TimeSeriesGBM(model_name=model_name, forecast_horizon=anchor_fh)
                         model.set_db(db)
-                        metrics = model.train_from_features(
+                        metrics = await _run_in_thread(
+                            model.train_from_features,
                             X, y, ENSEMBLE_FEATURE_NAMES,
                             num_boost_round=120,
                             early_stopping_rounds=15,
