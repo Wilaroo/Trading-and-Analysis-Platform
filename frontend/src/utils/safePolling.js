@@ -4,7 +4,8 @@
  * Replaces raw setInterval with:
  * 1. Random stagger on first call (prevents thundering herd)
  * 2. Tab visibility awareness (skips polls when tab is hidden)
- * 3. Proper cleanup
+ * 3. Training mode awareness (skips non-essential polls during training)
+ * 4. Proper cleanup
  * 
  * Usage:
  *   useEffect(() => {
@@ -14,6 +15,19 @@
  */
 
 let globalStaggerCounter = 0;
+let _trainingActive = false;
+
+/**
+ * Set global training mode flag. When active, non-essential polls are skipped
+ * and essential polls run at 5x slower intervals.
+ */
+export function setTrainingActive(active) {
+  _trainingActive = active;
+}
+
+export function isTrainingActive() {
+  return _trainingActive;
+}
 
 /**
  * Creates a visibility-aware, staggered polling timer
@@ -50,6 +64,10 @@ export function safePolling(callback, interval, options = {}) {
     if (cleaned) return;
     // Skip if tab is hidden (unless essential)
     if (visibilityAware && !essential && document.visibilityState === 'hidden') {
+      return;
+    }
+    // Skip non-essential polls during training to free up backend resources
+    if (_trainingActive && !essential) {
       return;
     }
     callback();

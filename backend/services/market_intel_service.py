@@ -1072,6 +1072,15 @@ DATA CONTEXT:
             except ImportError:
                 from backports.zoneinfo import ZoneInfo
 
+            # Skip report generation during training to free up resources
+            try:
+                from services.focus_mode_manager import focus_mode_manager
+                if not focus_mode_manager.should_run_task('market_intel'):
+                    await asyncio.sleep(60)
+                    continue
+            except Exception:
+                pass
+
             now_et = datetime.now(ZoneInfo("America/New_York"))
             today_key = now_et.strftime("%Y-%m-%d")
 

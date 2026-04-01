@@ -9,6 +9,7 @@
 
 import React, { createContext, useContext, useCallback, useEffect } from 'react';
 import { useFocusMode, FOCUS_MODES } from './FocusModeContext';
+import { setTrainingActive } from '../utils/safePolling';
 
 const TrainingModeContext = createContext(null);
 
@@ -20,6 +21,12 @@ export const TrainingModeProvider = ({ children }) => {
   const isTrainingActive = focusMode.focusMode === 'training';
   const trainingType = isTrainingActive ? focusMode.modeContext?.trainingType : null;
   const trainingProgress = focusMode.progress;
+
+  // Sync the global safePolling flag with training state
+  useEffect(() => {
+    setTrainingActive(isTrainingActive);
+    return () => setTrainingActive(false);
+  }, [isTrainingActive]);
 
   /**
    * Start training mode - sets focus mode to 'training'
