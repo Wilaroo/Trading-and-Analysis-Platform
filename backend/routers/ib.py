@@ -407,8 +407,9 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
     global _pushed_ib_data
     
     try:
-        # Update stored data
-        _pushed_ib_data["last_update"] = request.timestamp
+        # Use server-side UTC timestamp for consistent staleness checks
+        # (IB Pusher sends local time, but staleness checks compare with UTC)
+        _pushed_ib_data["last_update"] = datetime.now(timezone.utc).isoformat()
         _pushed_ib_data["connected"] = True
         
         # Merge quotes

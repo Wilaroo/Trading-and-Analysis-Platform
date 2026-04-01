@@ -18,7 +18,7 @@ const SystemStatusContext = createContext(null);
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 async function directGet(path) {
   try {
-    const res = await fetch(`${API_URL}${path}`, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`${API_URL}${path}`, { signal: AbortSignal.timeout(20000) });
     if (res.ok) return await res.json();
     return null;
   } catch {
@@ -154,7 +154,7 @@ export const SystemStatusProvider = ({ children }) => {
           if (data.last_update) {
             const lastUpdate = new Date(data.last_update);
             const ageSeconds = (Date.now() - lastUpdate.getTime()) / 1000;
-            connected = connected && ageSeconds < 60;
+            connected = connected && ageSeconds < 120;  // 120s tolerance for startup/network delays
           }
         } else {
           connected = data.status === 'healthy' || data.status === 'ok' || data.healthy || true;
