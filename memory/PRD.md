@@ -883,6 +883,18 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Frontend CategoryRow** shows validation badges: "X/Y validated" with color (green=all promoted, amber=partial, red=none)
 - **No manual validation needed** — "Start Training" handles everything end-to-end including validation
 
+
+### Skip/Resume Logic Removed (**DONE** — Feb 2026)
+- **Removed all skip/resume logic** from `training_pipeline.py` per user request
+  - Removed `is_model_trained()` function, `load_previous_run()`, `is_phase_complete()`, `get_completed_model_names()`, `add_skipped()` methods
+  - Removed resume detection block and `already_completed` set
+  - Removed per-model skip checks from all 10 phases
+  - Removed `models_skipped` from phase tracking and summary
+- **Fixed 4 syntax errors** (F702 `continue` not properly in loop) in Phases 4, 5, 6 caused by misaligned `try/except` blocks
+- **Fixed indentation** across Phases 2, 2.5, 4, 5, 6 where `try` blocks were outside their `for` loops
+- **Fixed Phase 7, 8, 9** where imports/code ran outside the intended `else` block
+- Pipeline now always trains all models fresh on every run
+
 ### Known Issues
 - Backend event loop occasionally blocks during IB connection retries (known httpx self-calling timeout issue)
 - Old trades (pre-January 2026) missing `source` and `outcome` fields (not critical)

@@ -94,39 +94,6 @@ class TrainingPipelineStatus:
             "phase_history": {},
         }
 
-    def load_previous_run(self) -> bool:
-        """Load previous run status from MongoDB. Returns True if an interrupted run was found."""
-        if not self._db:
-            return False
-        try:
-            doc = self._db["training_pipeline_status"].find_one({"_id": "pipeline"}, {"_id": 0})
-            if doc and doc.get("phase") not in ("idle", "completed", "cancelled", "error", None):
-                self._status = {
-                    "phase": doc.get("phase", "idle"),
-                    "current_model": doc.get("current_model", ""),
-                    "models_completed": doc.get("models_completed", 0),
-                    "models_total": doc.get("models_total", 0),
-                    "current_phase_progress": doc.get("current_phase_progress", 0),
-                    "started_at": doc.get("started_at"),
-                    "errors": doc.get("errors", []),
-                    "completed_models": doc.get("completed_models", []),
-                    "phase_history": doc.get("phase_history", {}),
-                }
-                logger.info(f"Loaded interrupted pipeline run — last phase: {doc.get('phase')}, models completed: {doc.get('models_completed', 0)}")
-                return True
-        except Exception as e:
-            logger.warning(f"Could not load previous run: {e}")
-        return False
-
-    def is_phase_complete(self, phase_key: str) -> bool:
-        """Check if a phase was already completed in a previous run."""
-        ph = self._status.get("phase_history", {}).get(phase_key)
-        return ph is not None and ph.get("status") == "done"
-
-    def get_completed_model_names(self) -> set:
-        """Get set of model names already completed (for skip logic)."""
-        return {m["name"] for m in self._status.get("completed_models", []) if isinstance(m, dict)}
-
     def update(self, **kwargs):
         new_phase = kwargs.get("phase")
         if new_phase and new_phase != self._current_phase:
@@ -152,7 +119,6 @@ class TrainingPipelineStatus:
                     "expected_models": config["expected_models"],
                     "models_trained": 0,
                     "models_failed": 0,
-                    "models_skipped": 0,
                     "total_accuracy": 0.0,
                     "avg_accuracy": 0.0,
                     "elapsed_seconds": 0,
@@ -202,25 +168,6 @@ class TrainingPipelineStatus:
 
         self._persist()
 
-    def add_skipped(self, model_name: str, accuracy: float):
-        """Record a model that was skipped (already trained)."""
-        self._status["completed_models"].append({
-            "name": model_name,
-            "accuracy": accuracy,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "skipped": True,
-        })
-        self._status["models_completed"] = len(self._status["completed_models"])
-
-        ph = self._status["phase_history"].get(self._current_phase)
-        if ph:
-            ph["models_skipped"] = ph.get("models_skipped", 0) + 1
-            ph["models_trained"] += 1
-            ph["total_accuracy"] += accuracy
-            ph["avg_accuracy"] = ph["total_accuracy"] / ph["models_trained"]
-
-        self._persist()
-
     def model_done(self, phase_key: str, model_name: str, accuracy: float = 0, extra: dict = None):
         """Record a model completion for a specific phase (used by validation)."""
         self.add_completed(model_name, accuracy)
@@ -250,23 +197,6 @@ class TrainingPipelineStatus:
                 )
             except Exception:
                 pass
-
-
-def is_model_trained(db, model_name: str, min_accuracy: float = 0.0) -> tuple:
-    """Check if a model is already trained in MongoDB.
-    Returns (is_trained, accuracy) tuple."""
-    try:
-        doc = db["timeseries_models"].find_one(
-            {"name": model_name, "model_data": {"$exists": True}},
-            {"metrics.accuracy": 1, "_id": 0}
-        )
-        if doc:
-            acc = doc.get("metrics", {}).get("accuracy", 0)
-            if acc >= min_accuracy:
-                return True, acc
-    except Exception:
-        pass
-    return False, 0.0
 
 
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
@@ -354,17 +284,10 @@ async def run_training_pipeline(
     status = TrainingPipelineStatus(db)
     total = count_total_models()
 
-    # ── Resume Detection ──
-    # Check if there's an interrupted previous run we can resume
-    resumed = status.load_previous_run()
-    already_completed = status.get_completed_model_names() if resumed else set()
-    if resumed:
-        logger.info(f"Resuming pipeline — {len(already_completed)} models already completed, skipping them")
-
     status.update(
         phase="starting",
         models_total=total,
-        started_at=status._status.get("started_at") or datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(timezone.utc).isoformat(),
     )
 
     results = {
@@ -378,103 +301,79 @@ async def run_training_pipeline(
     try:
         # ── Phase 1: Generic Directional Models ──
         if "generic" in phases:
-            if resumed and status.is_phase_complete("generic_directional"):
-                logger.info("Phase 1 already complete — skipping")
-            else:
-                status.update(phase="generic_directional")
-                logger.info("=== Phase 1: Training Generic Directional Models ===")
-                for bs in bar_sizes:
-                    config = BAR_SIZE_CONFIGS.get(bs)
-                    if not config:
+            status.update(phase="generic_directional")
+            logger.info("=== Phase 1: Training Generic Directional Models ===")
+            for bs in bar_sizes:
+                config = BAR_SIZE_CONFIGS.get(bs)
+                if not config:
+                    continue
+                model_name = f"direction_predictor_{bs.replace(' ', '_')}"
+                status.update(current_model=model_name)
+                try:
+                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+                    from services.ai_modules.timeseries_features import get_feature_engineer
+
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=config["forecast_horizon"])
+                    model.set_db(db)
+
+                    max_sym = max_symbols_override or config["max_symbols"]
+                    symbols = await get_available_symbols(db, bs, config["min_bars_per_symbol"])
+                    symbols = symbols[:max_sym]
+
+                    if not symbols:
+                        logger.warning(f"No symbols available for {bs}")
                         continue
-                    model_name = f"direction_predictor_{bs.replace(' ', '_')}"
 
-                    # Skip if already trained
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
+                    bars_by_symbol = {}
+                    for sym in symbols:
+                        bars = await load_symbol_bars(db, sym, bs)
+                        if len(bars) >= config["min_bars_per_symbol"]:
+                            bars_by_symbol[sym] = bars
+
+                    if len(bars_by_symbol) < 5:
+                        logger.warning(f"Too few symbols with data for {bs}: {len(bars_by_symbol)}")
                         continue
 
-                    status.update(current_model=model_name)
-                    try:
-                        from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                        from services.ai_modules.timeseries_features import get_feature_engineer
+                    logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols")
+                    metrics = model.train(bars_by_symbol)
 
-                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=config["forecast_horizon"])
-                        model.set_db(db)
+                    if metrics and metrics.accuracy > 0:
+                        results["models_trained"].append({
+                            "name": model_name,
+                            "accuracy": metrics.accuracy,
+                            "samples": metrics.training_samples,
+                        })
+                        results["total_samples"] += metrics.training_samples
+                        status.add_completed(model_name, metrics.accuracy)
+                    else:
+                        results["models_failed"].append({"name": model_name, "reason": "Low accuracy or no metrics"})
 
-                        max_sym = max_symbols_override or config["max_symbols"]
-                        symbols = await get_available_symbols(db, bs, config["min_bars_per_symbol"])
-                        symbols = symbols[:max_sym]
-
-                        if not symbols:
-                            logger.warning(f"No symbols available for {bs}")
-                            continue
-
-                        bars_by_symbol = {}
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, bs)
-                            if len(bars) >= config["min_bars_per_symbol"]:
-                                bars_by_symbol[sym] = bars
-
-                        if len(bars_by_symbol) < 5:
-                            logger.warning(f"Too few symbols with data for {bs}: {len(bars_by_symbol)}")
-                            continue
-
-                        logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols")
-                        metrics = model.train(bars_by_symbol)
-
-                        if metrics and metrics.accuracy > 0:
-                            results["models_trained"].append({
-                                "name": model_name,
-                                "accuracy": metrics.accuracy,
-                                "samples": metrics.training_samples,
-                            })
-                            results["total_samples"] += metrics.training_samples
-                            status.add_completed(model_name, metrics.accuracy)
-                        else:
-                            results["models_failed"].append({"name": model_name, "reason": "Low accuracy or no metrics"})
-
-                    except Exception as e:
-                        logger.error(f"Failed to train {model_name}: {e}")
-                        results["models_failed"].append({"name": model_name, "reason": str(e)})
-                        status.add_error(model_name, str(e))
+                except Exception as e:
+                    logger.error(f"Failed to train {model_name}: {e}")
+                    results["models_failed"].append({"name": model_name, "reason": str(e)})
+                    status.add_error(model_name, str(e))
 
         # ── Phase 2: Setup-Specific Models (Long) ──
         if "setup" in phases:
-            if resumed and status.is_phase_complete("setup_specific"):
-                logger.info("Phase 2 already complete — skipping")
-            else:
-                status.update(phase="setup_specific")
-                logger.info("=== Phase 2: Training Setup-Specific Models (Long) ===")
-                from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
-                from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
+            status.update(phase="setup_specific")
+            logger.info("=== Phase 2: Training Setup-Specific Models (Long) ===")
+            from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+            from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
 
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
 
-                for setup_type in ALL_SETUP_TYPES:
-                    profiles = get_setup_profiles(setup_type)
-                    for profile in profiles:
-                        bs = profile["bar_size"]
-                        fh = profile["forecast_horizon"]
-                        noise_thr = profile.get("noise_threshold", 0.003)
-                        num_boost = profile.get("num_boost_round", 150)
-                        model_name = get_model_name(setup_type, bs)
-
-                        # Skip if already trained
-                        trained, existing_acc = is_model_trained(db, model_name)
-                        if trained and model_name in already_completed:
-                            logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                            status.add_skipped(model_name, existing_acc)
-                            results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                            continue
-
-                        status.update(current_model=model_name)
+            for setup_type in ALL_SETUP_TYPES:
+                profiles = get_setup_profiles(setup_type)
+                for profile in profiles:
+                    bs = profile["bar_size"]
+                    fh = profile["forecast_horizon"]
+                    noise_thr = profile.get("noise_threshold", 0.003)
+                    num_boost = profile.get("num_boost_round", 150)
+                    model_name = get_model_name(setup_type, bs)
+                    status.update(current_model=model_name)
 
                     try:
                         bs_config = BAR_SIZE_CONFIGS.get(bs, {})
@@ -574,40 +473,28 @@ async def run_training_pipeline(
 
         # ── Phase 2.5: Short Setup-Specific Models ──
         if "short" in phases:
-            if resumed and status.is_phase_complete("short_setup_specific"):
-                logger.info("Phase 2.5 already complete — skipping")
-            else:
-                status.update(phase="short_setup_specific")
-                logger.info("=== Phase 2.5: Training SHORT Setup-Specific Models ===")
-                from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
-                from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
-                from services.ai_modules.advanced_targets import compute_advanced_target
+            status.update(phase="short_setup_specific")
+            logger.info("=== Phase 2.5: Training SHORT Setup-Specific Models ===")
+            from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+            from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.advanced_targets import compute_advanced_target
 
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
 
-                for setup_type in ALL_SHORT_SETUP_TYPES:
-                    profiles = get_setup_profiles(setup_type)
-                    for profile in profiles:
-                        bs = profile["bar_size"]
-                        fh = profile["forecast_horizon"]
-                        noise_thr = profile.get("noise_threshold", 0.003)
-                        num_boost = profile.get("num_boost_round", 150)
-                        model_name = get_model_name(setup_type, bs)
-                        max_sym = profile.get("max_symbols", 2500)
-                        max_bars = profile.get("max_bars_per_symbol", 5000)
-
-                        # Skip if already trained
-                        trained, existing_acc = is_model_trained(db, model_name)
-                        if trained and model_name in already_completed:
-                            logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                            status.add_skipped(model_name, existing_acc)
-                            results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                            continue
-
-                        status.update(current_model=model_name)
+            for setup_type in ALL_SHORT_SETUP_TYPES:
+                profiles = get_setup_profiles(setup_type)
+                for profile in profiles:
+                    bs = profile["bar_size"]
+                    fh = profile["forecast_horizon"]
+                    noise_thr = profile.get("noise_threshold", 0.003)
+                    num_boost = profile.get("num_boost_round", 150)
+                    model_name = get_model_name(setup_type, bs)
+                    max_sym = profile.get("max_symbols", 2500)
+                    max_bars = profile.get("max_bars_per_symbol", 5000)
+                    status.update(current_model=model_name)
 
                     try:
                         symbols = await get_available_symbols(db, bs, 100)
@@ -663,9 +550,9 @@ async def run_training_pipeline(
                                 if abs(inverted_return) < noise_thr:
                                     target = 1  # FLAT
                                 elif inverted_return > 0:
-                                    target = 2  # DOWN (good for short) → maps to "up" in model terms
+                                    target = 2  # DOWN (good for short)
                                 else:
-                                    target = 0  # UP (bad for short) → maps to "down" in model terms
+                                    target = 0  # UP (bad for short)
 
                                 all_X.append(base_vec + short_vec)
                                 all_y.append(target)
@@ -710,158 +597,134 @@ async def run_training_pipeline(
 
         # ── Phase 3: Volatility Prediction Models ──
         if "volatility" in phases:
-            if resumed and status.is_phase_complete("volatility_prediction"):
-                logger.info("Phase 3 already complete — skipping")
-            else:
-                status.update(phase="volatility_prediction")
-                logger.info("=== Phase 3: Training Volatility Prediction Models ===")
-                from services.ai_modules.volatility_model import (
-                    VOL_MODEL_CONFIGS, VOL_FEATURE_NAMES,
-                    compute_vol_specific_features, compute_vol_target,
-                )
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
-                from services.ai_modules.regime_features import (
-                    RegimeFeatureProvider, REGIME_FEATURE_NAMES,
-                )
+            status.update(phase="volatility_prediction")
+            logger.info("=== Phase 3: Training Volatility Prediction Models ===")
+            from services.ai_modules.volatility_model import (
+                VOL_MODEL_CONFIGS, VOL_FEATURE_NAMES,
+                compute_vol_specific_features, compute_vol_target,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.regime_features import (
+                RegimeFeatureProvider, REGIME_FEATURE_NAMES,
+            )
 
-                regime_provider = RegimeFeatureProvider(db)
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, regime_provider.preload_index_daily)
+            regime_provider = RegimeFeatureProvider(db)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, regime_provider.preload_index_daily)
 
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
 
-                for bs in bar_sizes:
-                    vol_config = VOL_MODEL_CONFIGS.get(bs)
-                    if not vol_config:
+            for bs in bar_sizes:
+                vol_config = VOL_MODEL_CONFIGS.get(bs)
+                if not vol_config:
+                    continue
+
+                model_name = vol_config["model_name"]
+                fh = vol_config["forecast_horizon"]
+                status.update(current_model=model_name)
+
+                try:
+                    bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                    max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
+                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = symbols[:max_sym]
+
+                    if not symbols:
                         continue
 
-                    model_name = vol_config["model_name"]
-                    fh = vol_config["forecast_horizon"]
+                    combined_names = base_names + [f"vol_{n}" for n in VOL_FEATURE_NAMES] + REGIME_FEATURE_NAMES
+                    all_X = []
+                    all_y = []
 
-                    # Skip if already trained
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                        continue
-
-                    status.update(current_model=model_name)
-
-                    try:
-                        bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                        max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
-                        symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
-                        symbols = symbols[:max_sym]
-
-                        if not symbols:
+                    for sym in symbols:
+                        bars = await load_symbol_bars(db, sym, bs)
+                        if len(bars) < 70 + fh:
                             continue
 
-                        combined_names = base_names + [f"vol_{n}" for n in VOL_FEATURE_NAMES] + REGIME_FEATURE_NAMES
-                        all_X = []
-                        all_y = []
+                        closes = np.array([b["close"] for b in bars], dtype=float)
+                        highs = np.array([b["high"] for b in bars], dtype=float)
+                        lows = np.array([b["low"] for b in bars], dtype=float)
+                        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                        opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, bs)
-                            if len(bars) < 70 + fh:
+                        for i in range(50, len(bars) - fh):
+                            # Base features
+                            window = bars[i - 49: i + 1][::-1]
+                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                            if fs is None:
+                                continue
+                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                            # Vol-specific features
+                            c_window = closes[i - 49: i + 1][::-1]
+                            h_window = highs[i - 49: i + 1][::-1]
+                            l_window = lows[i - 49: i + 1][::-1]
+                            v_window = volumes[i - 49: i + 1][::-1]
+                            o_window = opens[i - 49: i + 1][::-1]
+                            vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
+                            vol_vec = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
+
+                            # Regime features
+                            bar_date = str(bars[i].get("date", ""))
+                            regime_feats = regime_provider.get_regime_features_for_date(bar_date)
+                            regime_vec = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
+
+                            # Target
+                            target = compute_vol_target(closes, fh, i)
+                            if target is None:
                                 continue
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+                            all_X.append(base_vec + vol_vec + regime_vec)
+                            all_y.append(target)
 
-                            for i in range(50, len(bars) - fh):
-                                # Base features
-                                window = bars[i - 49: i + 1][::-1]
-                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                if fs is None:
-                                    continue
-                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
-
-                                # Vol-specific features
-                                c_window = closes[i - 49: i + 1][::-1]
-                                h_window = highs[i - 49: i + 1][::-1]
-                                l_window = lows[i - 49: i + 1][::-1]
-                                v_window = volumes[i - 49: i + 1][::-1]
-                                o_window = opens[i - 49: i + 1][::-1]
-                                vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
-                                vol_vec = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
-
-                                # Regime features
-                                bar_date = str(bars[i].get("date", ""))
-                                regime_feats = regime_provider.get_regime_features_for_date(bar_date)
-                                regime_vec = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
-
-                                # Target
-                                target = compute_vol_target(closes, fh, i)
-                                if target is None:
-                                    continue
-
-                                all_X.append(base_vec + vol_vec + regime_vec)
-                                all_y.append(target)
-
-                        if len(all_X) < MIN_TRAINING_SAMPLES:
-                            logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
-                            continue
-
-                        X = np.array(all_X)
-                        y = np.array(all_y)
-                        logger.info(f"Training {model_name}: {len(X)} samples, {len(combined_names)} features")
-
-                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
-                        model.set_db(db)
-                        metrics = model.train_from_features(
-                            X, y, combined_names,
-                            num_boost_round=150,
-                            early_stopping_rounds=15,
-                        )
-
-                        if metrics and metrics.accuracy > 0:
-                            results["models_trained"].append({
-                                "name": model_name,
-                                "accuracy": metrics.accuracy,
-                                "samples": metrics.training_samples,
-                            })
-                            results["total_samples"] += metrics.training_samples
-                            status.add_completed(model_name, metrics.accuracy)
-
-                    except Exception as e:
-                        logger.error(f"Failed to train {model_name}: {e}")
-                        results["models_failed"].append({"name": model_name, "reason": str(e)})
-                        status.add_error(model_name, str(e))
-        if "exit" in phases:
-            if resumed and status.is_phase_complete("exit_timing"):
-                logger.info("Phase 4 already complete — skipping")
-            else:
-                status.update(phase="exit_timing")
-                logger.info("=== Phase 4: Training Exit Timing Models ===")
-                from services.ai_modules.exit_timing_model import (
-                    EXIT_MODEL_CONFIGS, EXIT_FEATURE_NAMES,
-                    compute_exit_features, compute_exit_target,
-                )
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
-
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
-
-                for setup_type, exit_config in EXIT_MODEL_CONFIGS.items():
-                    model_name = exit_config["model_name"]
-                    max_horizon = exit_config["max_horizon"]
-
-                    # Skip if already trained
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
+                    if len(all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
                         continue
 
-                    status.update(current_model=model_name)
+                    X = np.array(all_X)
+                    y = np.array(all_y)
+                    logger.info(f"Training {model_name}: {len(X)} samples, {len(combined_names)} features")
+
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                    model.set_db(db)
+                    metrics = model.train_from_features(
+                        X, y, combined_names,
+                        num_boost_round=150,
+                        early_stopping_rounds=15,
+                    )
+
+                    if metrics and metrics.accuracy > 0:
+                        results["models_trained"].append({
+                            "name": model_name,
+                            "accuracy": metrics.accuracy,
+                            "samples": metrics.training_samples,
+                        })
+                        results["total_samples"] += metrics.training_samples
+                        status.add_completed(model_name, metrics.accuracy)
+
+                except Exception as e:
+                    logger.error(f"Failed to train {model_name}: {e}")
+                    results["models_failed"].append({"name": model_name, "reason": str(e)})
+                    status.add_error(model_name, str(e))
+        if "exit" in phases:
+            status.update(phase="exit_timing")
+            logger.info("=== Phase 4: Training Exit Timing Models ===")
+            from services.ai_modules.exit_timing_model import (
+                EXIT_MODEL_CONFIGS, EXIT_FEATURE_NAMES,
+                compute_exit_features, compute_exit_target,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            for setup_type, exit_config in EXIT_MODEL_CONFIGS.items():
+                model_name = exit_config["model_name"]
+                max_horizon = exit_config["max_horizon"]
+                status.update(current_model=model_name)
 
                 try:
                     # Exit timing uses daily bars by default (setup-level decision)
@@ -959,35 +822,24 @@ async def run_training_pipeline(
 
         # ── Phase 5: Sector-Relative Models ──
         if "sector" in phases:
-            if resumed and status.is_phase_complete("sector_relative"):
-                logger.info("Phase 5 already complete — skipping")
-            else:
-                status.update(phase="sector_relative")
-                logger.info("=== Phase 5: Training Sector-Relative Models ===")
-                from services.ai_modules.sector_relative_model import (
-                    SECTOR_MODEL_CONFIGS, SECTOR_REL_FEATURE_NAMES,
-                    compute_sector_relative_features, compute_sector_relative_target,
-                    SectorMapper,
-                )
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
+            status.update(phase="sector_relative")
+            logger.info("=== Phase 5: Training Sector-Relative Models ===")
+            from services.ai_modules.sector_relative_model import (
+                SECTOR_MODEL_CONFIGS, SECTOR_REL_FEATURE_NAMES,
+                compute_sector_relative_features, compute_sector_relative_target,
+                SectorMapper,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
 
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
-                sector_mapper = SectorMapper(db)
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+            sector_mapper = SectorMapper(db)
 
-                for bs, sec_config in SECTOR_MODEL_CONFIGS.items():
-                    model_name = sec_config["model_name"]
-                    fh = sec_config["forecast_horizon"]
-
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                        continue
-
-                    status.update(current_model=model_name)
+            for bs, sec_config in SECTOR_MODEL_CONFIGS.items():
+                model_name = sec_config["model_name"]
+                fh = sec_config["forecast_horizon"]
+                status.update(current_model=model_name)
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
@@ -1075,37 +927,26 @@ async def run_training_pipeline(
 
         # ── Phase 6: Risk-of-Ruin Models ──
         if "risk" in phases:
-            if resumed and status.is_phase_complete("risk_of_ruin"):
-                logger.info("Phase 6 already complete — skipping")
-            else:
-                status.update(phase="risk_of_ruin")
-                logger.info("=== Phase 6: Training Risk-of-Ruin Models ===")
-                from services.ai_modules.risk_of_ruin_model import (
-                    RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES,
-                    compute_risk_features, compute_risk_target,
-                )
-                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                from services.ai_modules.timeseries_features import get_feature_engineer
+            status.update(phase="risk_of_ruin")
+            logger.info("=== Phase 6: Training Risk-of-Ruin Models ===")
+            from services.ai_modules.risk_of_ruin_model import (
+                RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES,
+                compute_risk_features, compute_risk_target,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
 
-                feature_engineer = get_feature_engineer()
-                base_names = feature_engineer.get_feature_names()
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
 
-                for bs in bar_sizes:
-                    risk_config = RISK_MODEL_CONFIGS.get(bs)
-                    if not risk_config:
-                        continue
+            for bs in bar_sizes:
+                risk_config = RISK_MODEL_CONFIGS.get(bs)
+                if not risk_config:
+                    continue
 
-                    model_name = risk_config["model_name"]
-                    max_bars = risk_config["max_bars"]
-
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                        continue
-
-                    status.update(current_model=model_name)
+                model_name = risk_config["model_name"]
+                max_bars = risk_config["max_bars"]
+                status.update(current_model=model_name)
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
@@ -1180,11 +1021,8 @@ async def run_training_pipeline(
 
         # ── Phase 7: Regime-Conditional (depends on Phase 1-6) ──
         if "regime" in phases:
-            if resumed and status.is_phase_complete("regime_conditional"):
-                logger.info("Phase 7 already complete — skipping")
-            else:
-                status.update(phase="regime_conditional")
-                logger.info("=== Phase 7: Training Regime-Conditional Models ===")
+            status.update(phase="regime_conditional")
+            logger.info("=== Phase 7: Training Regime-Conditional Models ===")
             from services.ai_modules.regime_conditional_model import (
                 ALL_REGIMES, classify_regime_for_date, get_regime_model_name,
                 MIN_REGIME_SAMPLES,
@@ -1265,15 +1103,6 @@ async def run_training_pipeline(
                             X = np.array(X_list)
                             y = np.array(y_list)
                             regime_model_name = get_regime_model_name(base_model_name, regime)
-
-                            # Skip if already trained
-                            trained, existing_acc = is_model_trained(db, regime_model_name)
-                            if trained and regime_model_name in already_completed:
-                                logger.info(f"Skipping {regime_model_name} — already trained (acc={existing_acc:.4f})")
-                                status.add_skipped(regime_model_name, existing_acc)
-                                results["models_trained"].append({"name": regime_model_name, "accuracy": existing_acc, "skipped": True})
-                                continue
-
                             status.update(current_model=regime_model_name)
 
                             logger.info(
@@ -1312,11 +1141,8 @@ async def run_training_pipeline(
 
         # ── Phase 8: Ensemble Meta-Learner (depends on Phase 1-7) ──
         if "ensemble" in phases:
-            if resumed and status.is_phase_complete("ensemble_meta"):
-                logger.info("Phase 8 already complete — skipping")
-            else:
-                status.update(phase="ensemble_meta")
-                logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
+            status.update(phase="ensemble_meta")
+            logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
             from services.ai_modules.ensemble_model import (
                 ENSEMBLE_MODEL_CONFIGS, ENSEMBLE_FEATURE_NAMES,
                 extract_ensemble_features, STACKED_TIMEFRAMES,
@@ -1356,15 +1182,6 @@ async def run_training_pipeline(
 
                 for setup_type, ens_config in ENSEMBLE_MODEL_CONFIGS.items():
                     model_name = ens_config["model_name"]
-
-                    # Skip if already trained
-                    trained, existing_acc = is_model_trained(db, model_name)
-                    if trained and model_name in already_completed:
-                        logger.info(f"Skipping {model_name} — already trained (acc={existing_acc:.4f})")
-                        status.add_skipped(model_name, existing_acc)
-                        results["models_trained"].append({"name": model_name, "accuracy": existing_acc, "skipped": True})
-                        continue
-
                     status.update(current_model=model_name)
 
                     try:
@@ -1532,11 +1349,8 @@ async def run_training_pipeline(
 
         # ── Phase 9: CNN Chart Pattern Training ──
         if "cnn" in phases:
-            if resumed and status.is_phase_complete("cnn_patterns"):
-                logger.info("Phase 9 already complete — skipping")
-            else:
-                status.update(phase="cnn_patterns")
-                logger.info("=== Phase 9: Training CNN Chart Pattern Models ===")
+            status.update(phase="cnn_patterns")
+            logger.info("=== Phase 9: Training CNN Chart Pattern Models ===")
             try:
                 from services.ai_modules.cnn_training_pipeline import run_cnn_training
 
@@ -1708,17 +1522,14 @@ async def run_training_pipeline(
 
         # ── Done ──
         results["completed_at"] = datetime.now(timezone.utc).isoformat()
-        models_skipped = sum(1 for m in results["models_trained"] if isinstance(m, dict) and m.get("skipped"))
         results["summary"] = {
             "models_trained": len(results["models_trained"]),
-            "models_skipped": models_skipped,
             "models_failed": len(results["models_failed"]),
             "total_samples": results["total_samples"],
         }
         status.update(phase="completed", current_model="")
         logger.info(
-            f"Training pipeline complete: {len(results['models_trained'])} trained "
-            f"({models_skipped} skipped/resumed), "
+            f"Training pipeline complete: {len(results['models_trained'])} trained, "
             f"{len(results['models_failed'])} failed, {results['total_samples']:,} total samples"
         )
 
