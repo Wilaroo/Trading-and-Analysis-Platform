@@ -3417,6 +3417,23 @@ async def startup_event():
         print("Focus mode: LIVE (all services active)")
         await asyncio.sleep(0)  # Yield to event loop
 
+        # 1.5 Reset stale AI training status from previous sessions
+        # This prevents the UI from showing a false "Starting..." state on boot
+        try:
+            stale_phases = ["starting", "running", "preparing", "training"]
+            result = await asyncio.to_thread(
+                db["training_pipeline_status"].update_one,
+                {"_id": "pipeline", "phase": {"$in": stale_phases}},
+                {"$set": {"phase": "idle", "current_model": "", "current_phase_progress": 0}},
+            )
+            if result.modified_count > 0:
+                print("AI Training: Reset stale training status to idle")
+            else:
+                print("AI Training: Status already clean (no stale state)")
+        except Exception as e:
+            print(f"AI Training: Could not reset status: {e}")
+        await asyncio.sleep(0)  # Yield to event loop
+
         # 2. Attempt auto-connect to IB Gateway (everything depends on this)
         ib_connected = False
         try:

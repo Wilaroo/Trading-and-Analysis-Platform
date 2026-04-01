@@ -49,6 +49,14 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - **Fix: `dynamic_risk_service` missing module**: Corrected import from `dynamic_risk_service` → `dynamic_risk_engine` and `get_dynamic_risk_service` → `get_dynamic_risk_engine` in `server.py` stream_risk_status.
 - **Fix: Shadow signal backlog**: Added bulk expiry of signals >5 days old in one MongoDB update_many, plus batch limit of 50 signals per scheduler run to prevent event loop starvation.
 
+### Session N+4 (WebSocket Training Commands + Stale Status Fix) — April 2026
+- **Architectural Shift**: Migrated training start/stop commands from HTTP POSTs to WebSocket messages (`start_pipeline`, `stop_pipeline`), completely bypassing browser's 6-connection HTTP limit
+- **P0 Fix: Stale training status on boot**: Added startup cleanup routine in `server.py` `_deferred_heavy_init()` that resets `training_pipeline_status` MongoDB document to "idle" if phase is stale ("starting", "running", "preparing", "training") but no actual subprocess is running. This prevents the UI from falsely showing "Starting..." state on app boot after a backend restart or crash.
+
+### Session N+5 (Current Session) — Jan 2026
+- **Continuation**: Cloned repo from GitHub, implemented the stale training status fix that was identified but not applied in previous session
+- **Fix location**: `/app/backend/server.py` lines 3420-3435 in `_deferred_heavy_init()` function
+
 ---
 
 ## P0 Issues
@@ -68,6 +76,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] **`_realtime_tech` AttributeError crashing trade evaluation** (April 2026)
 - [FIXED] **`dynamic_risk_service` module not found spamming logs** (April 2026)
 - [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026): Bulk expiry + batch limit
+- [FIXED] **Stale training status on boot** (Jan 2026): Backend startup now resets MongoDB `training_pipeline_status` to "idle" if no actual training subprocess is running
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).
