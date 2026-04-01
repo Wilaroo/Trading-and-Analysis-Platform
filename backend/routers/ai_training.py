@@ -50,8 +50,21 @@ async def _monitor_training_process(task: _TrainingProcess):
     while not task.done():
         await asyncio.sleep(10)
 
-    # Subprocess finished — read result from MongoDB and restore focus mode
-    logger.info("[TRAINING] Subprocess finished, restoring LIVE mode")
+    # Subprocess finished — log exit code and stderr
+    exit_code = task._proc.returncode
+    logger.info(f"[TRAINING] Subprocess finished with exit code: {exit_code}")
+    try:
+        stderr_output = task._proc.stderr.read().decode('utf-8', errors='replace')[-2000:]
+        stdout_output = task._proc.stdout.read().decode('utf-8', errors='replace')[-2000:]
+        if stderr_output:
+            logger.warning(f"[TRAINING] Subprocess stderr:\n{stderr_output}")
+        if stdout_output:
+            logger.info(f"[TRAINING] Subprocess stdout:\n{stdout_output}")
+    except Exception:
+        pass
+
+    # Read result from MongoDB and restore focus mode
+    logger.info("[TRAINING] Restoring LIVE mode")
     try:
         from server import db as mongo_db
         if mongo_db is not None:
@@ -137,7 +150,28 @@ async def start_training(request: TrainingRequest):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        
+        # Verify subprocess started (give it 2 seconds)
+        import time
+        time.sleep(1)
+        if proc.poll() is not None:
+            # Subprocess already exited — crashed on startup
+            stderr = proc.stderr.read().decode('utf-8', errors='replace')[-2000:]
+            stdout = proc.stdout.read().decode('utf-8', errors='replace')[-2000:]
+            logger.error(f"[TRAINING] Subprocess crashed immediately! Exit code: {proc.returncode}")
+            logger.error(f"[TRAINING] stderr: {stderr}")
+            logger.error(f"[TRAINING] stdout: {stdout}")
+            try:
+                focus_mode_manager.reset_to_live(result={"error": "subprocess crashed"})
+            except Exception:
+                pass
+            return {
+                "success": False,
+                "error": f"Training subprocess crashed on startup: {stderr[-500:] or stdout[-500:] or 'Unknown error'}",
+            }
+        
         _training_task = _TrainingProcess(proc)
+        logger.info(f"[TRAINING] Subprocess running with PID: {proc.pid}")
 
         # Start a background task to monitor the subprocess and restore focus mode when done
         asyncio.create_task(_monitor_training_process(_training_task))
@@ -177,11 +211,14 @@ async def get_training_status():
             )
 
         task_status = "idle"
+        subprocess_info = None
         if _training_task:
             if _training_task.done():
                 task_status = "completed"
+                subprocess_info = {"exit_code": _training_task._proc.returncode}
             else:
                 task_status = "running"
+                subprocess_info = {"pid": _training_task._proc.pid, "running": True}
 
         # Auto-reset stale DB status: if no in-memory task is running but DB shows
         # a non-idle phase, a previous run was interrupted. Reset to idle.
@@ -201,6 +238,7 @@ async def get_training_status():
         return {
             "success": True,
             "task_status": task_status,
+            "subprocess": subprocess_info,
             "pipeline_status": status_doc,
             "last_result": _last_result,
         }
