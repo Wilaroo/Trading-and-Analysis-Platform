@@ -389,8 +389,17 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         api.get('/api/ai-training/cnn/models'),
         api.get('/api/ai-training/gpu-status'),
       ]);
+      
+      // Debug logging
+      console.log('[TrainingPanel] inventoryRes:', inventoryRes);
+      
       if (regimeRes.status === 'fulfilled' && regimeRes.value.data?.success) setRegime(regimeRes.value.data);
-      if (inventoryRes.status === 'fulfilled' && inventoryRes.value.data?.success) setInventory(inventoryRes.value.data);
+      if (inventoryRes.status === 'fulfilled' && inventoryRes.value.data?.success) {
+        console.log('[TrainingPanel] Setting inventory:', inventoryRes.value.data);
+        setInventory(inventoryRes.value.data);
+      } else {
+        console.warn('[TrainingPanel] Inventory fetch failed or returned unsuccessful:', inventoryRes);
+      }
       if (statusRes.status === 'fulfilled' && statusRes.value.data?.success) setPipelineStatus(statusRes.value.data);
       if (cnnRes.status === 'fulfilled' && cnnRes.value.data?.success) setCnnModels(cnnRes.value.data.models || []);
       if (gpuRes.status === 'fulfilled' && gpuRes.value.data?.success) setGpuInfo(gpuRes.value.data.gpu);
