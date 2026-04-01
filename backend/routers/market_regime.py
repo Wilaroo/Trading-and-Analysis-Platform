@@ -377,7 +377,7 @@ async def get_regime_performance(regime: Optional[str] = Query(None, description
                 stats["best_setup"] = best_setup
         
         # Or try database directly
-        elif _db:
+        elif _db is not None:
             trades_col = _db.get_collection("bot_trades")
             pipeline = [
                 {"$match": {"status": "closed"}},

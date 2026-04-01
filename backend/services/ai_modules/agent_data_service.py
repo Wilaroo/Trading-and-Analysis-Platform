@@ -107,7 +107,7 @@ class AgentDataService:
         self._db = db
         logger.info("AgentDataService connected to database")
         
-    async def get_symbol_context(self, symbol: str, days: int = 90) -> SymbolContext:
+    def get_symbol_context(self, symbol: str, days: int = 90) -> SymbolContext:
         """
         Get historical context for a specific symbol.
         
@@ -186,7 +186,7 @@ class AgentDataService:
             
         return ctx
         
-    async def get_setup_type_context(self, setup_type: str, days: int = 90) -> SetupTypeContext:
+    def get_setup_type_context(self, setup_type: str, days: int = 90) -> SetupTypeContext:
         """
         Get historical context for a setup type.
         
@@ -298,7 +298,7 @@ class AgentDataService:
             logger.warning(f"Error getting historical bars for {symbol}: {e}")
             return []
             
-    async def get_user_trading_stats(self, days: int = 90) -> Dict[str, Any]:
+    def get_user_trading_stats(self, days: int = 90) -> Dict[str, Any]:
         """
         Get user's overall trading statistics.
         """
@@ -351,7 +351,7 @@ class AgentDataService:
             logger.warning(f"Error getting user trading stats: {e}")
             return {}
             
-    async def build_agent_context(
+    def build_agent_context(
         self,
         symbol: str,
         setup_type: str,
@@ -362,9 +362,9 @@ class AgentDataService:
         
         This is the main method agents should call to get all relevant context.
         """
-        symbol_ctx = await self.get_symbol_context(symbol)
-        setup_ctx = await self.get_setup_type_context(setup_type)
-        user_stats = await self.get_user_trading_stats()
+        symbol_ctx = self.get_symbol_context(symbol)
+        setup_ctx = self.get_setup_type_context(setup_type)
+        user_stats = self.get_user_trading_stats()
         
         # Build actionable insights
         insights = []

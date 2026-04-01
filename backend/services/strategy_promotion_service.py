@@ -219,7 +219,7 @@ class StrategyPromotionService:
             
         logger.info(f"Strategy '{strategy_name}' phase set to {phase.value}: {reason}")
         
-    async def record_paper_trade(
+    def record_paper_trade(
         self,
         strategy_name: str,
         symbol: str,
@@ -264,7 +264,7 @@ class StrategyPromotionService:
         
         return trade_id
         
-    async def close_paper_trade(
+    def close_paper_trade(
         self,
         trade_id: str,
         exit_price: float,
@@ -285,7 +285,7 @@ class StrategyPromotionService:
             }}
         )
         
-    async def get_strategy_performance(
+    def get_strategy_performance(
         self,
         strategy_name: str,
         phase: StrategyPhase = None,
@@ -367,7 +367,7 @@ class StrategyPromotionService:
             
         return perf
         
-    async def get_promotion_candidates(self) -> List[PromotionCandidate]:
+    def get_promotion_candidates(self) -> List[PromotionCandidate]:
         """
         Find strategies eligible for promotion to next phase.
         
@@ -401,7 +401,7 @@ class StrategyPromotionService:
                 continue
                 
             # Get performance
-            perf = await self.get_strategy_performance(strategy_name, current_phase)
+            perf = self.get_strategy_performance(strategy_name, current_phase)
             
             # Check requirements
             meets, issues = perf.meets_requirements(requirements)
@@ -423,7 +423,7 @@ class StrategyPromotionService:
         
         return candidates
         
-    async def promote_strategy(
+    def promote_strategy(
         self,
         strategy_name: str,
         target_phase: StrategyPhase,
@@ -464,7 +464,7 @@ class StrategyPromotionService:
             requirements = self.PROMOTION_REQUIREMENTS.get(req_key)
             
             if requirements:
-                perf = await self.get_strategy_performance(strategy_name, current_phase)
+                perf = self.get_strategy_performance(strategy_name, current_phase)
                 meets, issues = perf.meets_requirements(requirements)
                 
                 if not meets:
@@ -490,7 +490,7 @@ class StrategyPromotionService:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-    async def demote_strategy(
+    def demote_strategy(
         self,
         strategy_name: str,
         reason: str = "Performance degradation"

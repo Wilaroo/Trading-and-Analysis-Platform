@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import logging
+import asyncio
 
 from services.strategy_promotion_service import (
     get_strategy_promotion_service,
@@ -58,7 +59,7 @@ async def get_all_phases():
     """Get current phase for all tracked strategies"""
     try:
         service = get_strategy_promotion_service()
-        phases = service.get_all_phases()
+        phases = await asyncio.to_thread(service.get_all_phases)
         
         # Group by phase
         by_phase = {
@@ -112,7 +113,7 @@ async def get_promotion_candidates():
     """
     try:
         service = get_strategy_promotion_service()
-        candidates = await service.get_promotion_candidates()
+        candidates = await asyncio.to_thread(service.get_promotion_candidates)
         
         # Separate into ready and not-ready
         ready = [c for c in candidates if c.meets_requirements]
@@ -149,7 +150,8 @@ async def promote_strategy(request: PromoteRequest):
                 "error": f"Invalid phase: {request.target_phase}. Use: simulation, paper, live"
             }
             
-        result = await service.promote_strategy(
+        result = await asyncio.to_thread(
+            service.promote_strategy,
             strategy_name=request.strategy_name,
             target_phase=target,
             force=request.force,
@@ -170,7 +172,7 @@ async def demote_strategy(
     """Demote a strategy to a lower phase"""
     try:
         service = get_strategy_promotion_service()
-        result = await service.demote_strategy(strategy_name, reason)
+        result = await asyncio.to_thread(service.demote_strategy, strategy_name, reason)
         return result
     except Exception as e:
         logger.error(f"Error demoting strategy: {e}")
@@ -194,7 +196,7 @@ async def get_strategy_performance(
             except ValueError:
                 return {"success": False, "error": f"Invalid phase: {phase}"}
                 
-        perf = await service.get_strategy_performance(strategy_name, phase_enum, days)
+        perf = await asyncio.to_thread(service.get_strategy_performance, strategy_name, phase_enum, days)
         
         return {
             "success": True,
@@ -219,7 +221,7 @@ async def record_paper_trade(request: PaperTradeRequest):
                 "error": f"Strategy is in {phase.value} phase, not PAPER"
             }
             
-        trade_id = await service.record_paper_trade(
+        trade_id = await asyncio.to_thread(service.record_paper_trade,
             strategy_name=request.strategy_name,
             symbol=request.symbol,
             direction=request.direction,
@@ -245,7 +247,7 @@ async def close_paper_trade(request: ClosePaperTradeRequest):
     try:
         service = get_strategy_promotion_service()
         
-        await service.close_paper_trade(
+        await asyncio.to_thread(service.close_paper_trade,
             trade_id=request.trade_id,
             exit_price=request.exit_price,
             r_multiple=request.r_multiple,

@@ -14,6 +14,7 @@ as a weighted advisor, closing the learning loop.
 """
 
 import logging
+import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field
@@ -696,7 +697,8 @@ class DebateAgents:
         # Fetch historical context if not provided and service is available
         if historical_context is None and self._data_service:
             try:
-                historical_context = await self._data_service.build_agent_context(
+                historical_context = await asyncio.to_thread(
+                    self._data_service.build_agent_context,
                     symbol=symbol,
                     setup_type=setup_type,
                     direction=direction

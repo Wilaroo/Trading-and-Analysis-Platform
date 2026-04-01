@@ -250,19 +250,23 @@ async def get_applied_thresholds():
     try:
         service = get_learning_connectors()
         
-        # Get all threshold_* docs from the collection
-        thresholds = {}
-        if service._connectors_col is not None:
-            docs = list(service._connectors_col.find({"name": {"$regex": "^threshold_"}}))
-            for doc in docs:
-                setup_type = doc["name"].replace("threshold_", "")
-                thresholds[setup_type] = {
-                    "value": doc.get("value", 1.0),
-                    "win_rate_30d": doc.get("win_rate_30d", 0),
-                    "total_alerts": doc.get("total_alerts", 0),
-                    "avg_r_multiple": doc.get("avg_r_multiple", 0),
-                    "updated_at": doc.get("updated_at", "")
-                }
+        def _fetch_thresholds():
+            thresholds = {}
+            if service._connectors_col is not None:
+                docs = list(service._connectors_col.find({"name": {"$regex": "^threshold_"}}))
+                for doc in docs:
+                    setup_type = doc["name"].replace("threshold_", "")
+                    thresholds[setup_type] = {
+                        "value": doc.get("value", 1.0),
+                        "win_rate_30d": doc.get("win_rate_30d", 0),
+                        "total_alerts": doc.get("total_alerts", 0),
+                        "avg_r_multiple": doc.get("avg_r_multiple", 0),
+                        "updated_at": doc.get("updated_at", "")
+                    }
+            return thresholds
+
+        import asyncio
+        thresholds = await asyncio.to_thread(_fetch_thresholds)
                 
         return {
             "success": True,
