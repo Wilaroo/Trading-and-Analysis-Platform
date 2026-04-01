@@ -1600,7 +1600,7 @@ const AIInsightsDashboard = ({ onClose }) => {
 // ============================================================================
 
 // Hook for Market Session status
-const useMarketSession = (pollInterval = 30000) => {
+const useMarketSession = (pollInterval = 120000) => {
   const [session, setSession] = useState({ name: 'LOADING', is_open: false });
   const [loading, setLoading] = useState(true);
 
@@ -1624,7 +1624,7 @@ const useMarketSession = (pollInterval = 30000) => {
   return { session, loading, refresh: fetchSession };
 };
 
-const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avoid 429s
+const useSentComStatus = (pollInterval = 120000) => {  // HTTP backup only, WS is primary
   const { getCached, setCached } = useDataCache();
   const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
@@ -1678,7 +1678,7 @@ const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avo
   return { status, loading, error, refresh: fetchStatus };
 };
 
-const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avoid 429s
+const useSentComStream = (pollInterval = 120000) => {  // HTTP backup only, WS is primary
   const { getCached, setCached } = useDataCache();
   const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
@@ -1758,7 +1758,7 @@ const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avo
   return { messages, loading, refresh: fetchStream };
 };
 
-const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to avoid 429s
+const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup only, WS is primary
   const { getCached, setCached } = useDataCache();
   const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
@@ -1818,7 +1818,7 @@ const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to 
   return { positions, totalPnl, loading, refresh: fetchPositions };
 };
 
-const useSentComSetups = (pollInterval = 30000) => {
+const useSentComSetups = (pollInterval = 120000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1861,7 +1861,7 @@ const useSentComSetups = (pollInterval = 30000) => {
   return { setups, loading, refresh: fetchSetups };
 };
 
-const useSentComContext = (pollInterval = 30000) => {
+const useSentComContext = (pollInterval = 120000) => {
   const { getCached, setCached } = useDataCache();
   const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
@@ -1912,7 +1912,7 @@ const useSentComContext = (pollInterval = 30000) => {
   return { context, loading, refresh: fetchContext };
 };
 
-const useSentComAlerts = (pollInterval = 5000) => {
+const useSentComAlerts = (pollInterval = 60000) => {
   const { getCached, setCached } = useDataCache();
   const { scannerAlerts: wsAlerts } = useWsData();
   const isFirstMount = useRef(true);
@@ -2002,9 +2002,10 @@ const useChatHistory = () => {
   return { chatHistory, loading, refresh: fetchChatHistory };
 };
 
-// Hook for Trading Bot status and controls
-const useTradingBotControl = (pollInterval = 5000) => {
+// Hook for Trading Bot status and controls — uses WS botStatus as primary, HTTP as slow backup
+const useTradingBotControl = (pollInterval = 60000) => {
   const { getCached, setCached } = useDataCache();
+  const { botStatus: wsBotStatus } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -2018,7 +2019,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
       const data = await safeGet('/api/trading-bot/status');
       if (data.success) {
         setBotStatus(data);
-        setCached('botStatus', data, 15000); // 15 second TTL
+        setCached('botStatus', data, 30000); // 30 second TTL
       }
     } catch (err) {
       console.error('Error fetching bot status:', err);
@@ -2089,14 +2090,24 @@ const useTradingBotControl = (pollInterval = 5000) => {
     }
     isFirstMount.current = false;
     
-    return safePolling(fetchBotStatus, pollInterval, { immediate: false, essential: true });
+    return safePolling(fetchBotStatus, pollInterval, { immediate: false, essential: false });
   }, [fetchBotStatus, pollInterval, getCached]);
+
+  // WS botStatus is the primary data source — instant updates
+  useEffect(() => {
+    if (wsBotStatus) {
+      setBotStatus(prev => ({ ...prev, ...wsBotStatus, success: true }));
+      setCached('botStatus', { ...wsBotStatus, success: true }, 30000);
+      setLoading(false);
+    }
+  }, [wsBotStatus, setCached]);
 
   return { botStatus, loading, actionLoading, toggleBot, changeMode, updateRiskParams, refresh: fetchBotStatus };
 };
 
-// Hook for IB Connection status
-const useIBConnectionStatus = (pollInterval = 3000) => {
+// Hook for IB Connection status — uses WS ibStatus as primary, HTTP polling as slow backup
+const useIBConnectionStatus = (pollInterval = 60000) => {
+  const { ibStatus: wsIbStatus } = useWsData();
   const [ibConnected, setIbConnected] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -2111,15 +2122,24 @@ const useIBConnectionStatus = (pollInterval = 3000) => {
     }
   }, []);
 
+  // WS ibStatus is the primary data source — instant updates, no polling needed
   useEffect(() => {
-    return safePolling(fetchStatus, pollInterval, { essential: true });
+    if (wsIbStatus) {
+      setIbConnected(wsIbStatus.connected || false);
+      setLoading(false);
+    }
+  }, [wsIbStatus]);
+
+  // HTTP polling only as a slow fallback (every 60s)
+  useEffect(() => {
+    return safePolling(fetchStatus, pollInterval, { essential: false, immediate: true });
   }, [fetchStatus, pollInterval]);
 
   return { ibConnected, loading };
 };
 
 // Hook for AI Modules status and control
-const useAIModules = (pollInterval = 10000) => {
+const useAIModules = (pollInterval = 60000) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);

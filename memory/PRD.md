@@ -52,6 +52,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED ✅] **Thread pool exhaustion during training**: Dedicated `TRAINING_POOL` in `training_pipeline.py`.
 - [FIXED ✅] **`stream_training_status` crash**: Variable scope bug fixed.
 - [FIXED ✅] **DB backlogs cleared**: Training pipeline + focus mode reset.
+- [FIXED ✅] **Thread pool exhaustion via aggressive frontend polling**: Reduced HTTP polling from ~40 req/30s to ~8 req/30s. Migrated IB status, bot status, alerts, positions, and context to use WebSocket as primary data source with HTTP as slow backup. Key changes in SentCom.jsx (10 hooks), useCommandCenterData.js, CommandCenterPage.js, JobManager.jsx, StartupStatusDashboard.jsx.
 
 ## Prioritized Backlog
 

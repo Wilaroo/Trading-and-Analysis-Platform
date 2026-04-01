@@ -352,7 +352,7 @@ const JobManager = ({ compact = false }) => {
   // Initial load and polling
   useEffect(() => {
     loadJobs();
-    return safePolling(loadJobs, 5000, { immediate: false });
+    return safePolling(loadJobs, 30000, { immediate: false });
   }, [loadJobs]);
   
   // Create data collection job

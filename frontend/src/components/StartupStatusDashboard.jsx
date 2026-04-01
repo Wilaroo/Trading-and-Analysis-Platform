@@ -220,7 +220,7 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
       if (autoRefresh) {
         fetchStatus();
       }
-    }, 10000, { immediate: false });
+    }, 30000, { immediate: false });
   }, [fetchStatus, autoRefresh]);
   
   const toggleSection = (section) => {

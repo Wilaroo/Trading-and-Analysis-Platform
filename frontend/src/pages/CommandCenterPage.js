@@ -62,7 +62,7 @@ const CommandCenterPage = ({
     return safePolling(() => {
       checkOllama();
       fetchOllamaUsage();
-    }, 30000, { immediate: false });
+    }, 120000, { immediate: false });
   }, []);
 
   return (

@@ -547,7 +547,7 @@ export function useCommandCenterData({
   // Positions are essential - slower during training but still poll
   useEffect(() => {
     fetchAccountData();
-    const interval = getPollingInterval(30000, true);
+    const interval = getPollingInterval(60000, true);
     return safePolling(() => {
       if (!isVisibleRef.current) return;
       fetchAccountData();
