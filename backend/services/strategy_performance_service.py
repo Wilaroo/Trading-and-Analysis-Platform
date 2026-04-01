@@ -122,14 +122,14 @@ class StrategyPerformanceService:
                     "wins": wins,
                     "losses": r["losses"],
                     "win_rate": round(win_rate, 1),
-                    "total_pnl": round(r["total_pnl"], 2),
-                    "avg_pnl": round(r["avg_pnl"], 2),
-                    "avg_pnl_pct": round(r.get("avg_pnl_pct", 0), 2),
-                    "avg_rr_achieved": round(r.get("avg_rr", 0), 2),
-                    "best_trade": round(r.get("max_win", 0), 2),
-                    "worst_trade": round(r.get("max_loss", 0), 2),
-                    "avg_quality_score": round(r.get("avg_quality", 0), 1),
-                    "close_reasons": reason_counts,
+                    "total_pnl": round(r["total_pnl"] or 0, 2),
+                    "avg_pnl": round(r["avg_pnl"] or 0, 2),
+                    "avg_pnl_pct": round(r.get("avg_pnl_pct") or 0, 2),
+                    "avg_rr_achieved": round(r.get("avg_rr") or 0, 2),
+                    "best_trade": round(r.get("max_win") or 0, 2),
+                    "worst_trade": round(r.get("max_loss") or 0, 2),
+                    "avg_quality_score": round(r.get("avg_quality") or 0, 1),
+                    "close_reasons": {str(k): v for k, v in reason_counts.items()},
                     "timeframe": r.get("strategies_used", ["unknown"])[0] if r.get("strategies_used") else "unknown"
                 }
             
