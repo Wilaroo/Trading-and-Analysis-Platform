@@ -364,7 +364,15 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const [showRegime, setShowRegime] = useState(false);
 
   useEffect(() => {
-    if (wsTrainingStatus) setPipelineStatus({ task_status: wsTrainingStatus.status, ...wsTrainingStatus });
+    if (wsTrainingStatus) {
+      const phase = wsTrainingStatus.phase || 'idle';
+      const isActive = phase !== 'idle' && phase !== 'completed' && phase !== 'cancelled' && phase !== 'error';
+      setPipelineStatus(prev => ({
+        ...prev,
+        task_status: isActive ? 'running' : (phase === 'completed' ? 'completed' : 'idle'),
+        pipeline_status: wsTrainingStatus,
+      }));
+    }
   }, [wsTrainingStatus]);
 
   useEffect(() => {

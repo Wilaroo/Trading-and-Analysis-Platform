@@ -2926,23 +2926,34 @@ async def stream_training_status():
             try:
                 def _get_training_status():
                     return db["training_pipeline_status"].find_one(
-                        {}, {"_id": 0}, sort=[("started_at", -1)]
+                        {"_id": "pipeline"}, {"_id": 0}
                     )
                 status = await asyncio.to_thread(_get_training_status)
                 
-                status_hash = hash(str(status.get("status")) + str(status.get("progress"))) if status else None
+                # Build hash from actual training fields so we detect real changes
+                if status:
+                    status_hash = hash(
+                        str(status.get("phase", "")) + 
+                        str(status.get("current_model", "")) + 
+                        str(status.get("models_completed", 0)) +
+                        str(status.get("current_phase_progress", 0))
+                    )
+                else:
+                    status_hash = None
                 
                 if status_hash != last_status_hash:
                     await manager.broadcast({
                         "type": "training_status",
-                        "data": status or {"status": "idle"},
+                        "data": status or {"phase": "idle"},
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     last_status_hash = status_hash
             except Exception as e:
                 print(f"Training status stream error: {e}")
         
-        await asyncio.sleep(30)  # Every 30 seconds
+        # Poll faster during training (every 3s), slower when idle (every 30s)
+        is_training = (status.get("phase", "idle") not in ("idle", "completed", "cancelled", "error")) if status else False
+        await asyncio.sleep(3 if is_training else 30)
 
 
 async def stream_market_regime():
