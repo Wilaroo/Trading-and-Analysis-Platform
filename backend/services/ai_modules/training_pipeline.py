@@ -298,6 +298,41 @@ async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
         return []
 
 
+async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars: int = 100, batch_size: int = 20) -> Dict[str, List[Dict]]:
+    """Load bars for multiple symbols in parallel batches.
+    
+    Args:
+        db: MongoDB database
+        symbols: List of symbols to load
+        bar_size: Bar size string
+        min_bars: Minimum bars required per symbol
+        batch_size: Number of symbols to load in parallel
+        
+    Returns:
+        Dict of symbol -> bars for symbols with enough data
+    """
+    bars_by_symbol = {}
+    total_batches = (len(symbols) + batch_size - 1) // batch_size
+    
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i+batch_size]
+        batch_num = i // batch_size + 1
+        
+        # Load batch in parallel
+        tasks = [load_symbol_bars(db, sym, bar_size) for sym in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for sym, bars in zip(batch, results):
+            if isinstance(bars, Exception):
+                continue
+            if len(bars) >= min_bars:
+                bars_by_symbol[sym] = bars
+        
+        logger.info(f"[load_symbols_parallel] Batch {batch_num}/{total_batches} complete ({len(bars_by_symbol)} symbols loaded)")
+    
+    return bars_by_symbol
+
+
 def count_total_models() -> int:
     """Count total models that will be trained."""
     from services.ai_modules.setup_training_config import get_all_profile_count, SETUP_TRAINING_PROFILES
@@ -385,11 +420,10 @@ async def run_training_pipeline(
                         logger.warning(f"No symbols available for {bs}")
                         continue
 
-                    bars_by_symbol = {}
-                    for sym in symbols:
-                        bars = await load_symbol_bars(db, sym, bs)
-                        if len(bars) >= config["min_bars_per_symbol"]:
-                            bars_by_symbol[sym] = bars
+                    # Parallel batch loading for speed
+                    bars_by_symbol = await load_symbols_parallel(
+                        db, symbols, bs, config["min_bars_per_symbol"], batch_size=20
+                    )
 
                     if len(bars_by_symbol) < 5:
                         logger.warning(f"Too few symbols with data for {bs}: {len(bars_by_symbol)}")
@@ -450,13 +484,16 @@ async def run_training_pipeline(
                         setup_feat_names = get_setup_feature_names(setup_type)
                         combined_names = base_names + [f"setup_{n}" for n in setup_feat_names]
 
+                        # Pre-load all bars in parallel
+                        min_required = 70 + fh
+                        bars_by_symbol = await load_symbols_parallel(
+                            db, symbols, bs, min_bars=min_required, batch_size=20
+                        )
+                        
                         all_X = []
                         all_y = []
 
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, bs)
-                            if len(bars) < 70 + fh:
-                                continue
+                        for sym, bars in bars_by_symbol.items():
 
                             closes = np.array([b["close"] for b in bars], dtype=float)
                             highs = np.array([b["high"] for b in bars], dtype=float)
@@ -570,13 +607,16 @@ async def run_training_pipeline(
                         short_feat_names = get_short_setup_feature_names(setup_type)
                         combined_names = base_names + [f"short_{n}" for n in short_feat_names]
 
+                        # Pre-load all bars in parallel
+                        min_required = 70 + fh
+                        bars_by_symbol = await load_symbols_parallel(
+                            db, symbols, bs, min_bars=min_required, batch_size=20
+                        )
+                        
                         all_X = []
                         all_y = []
 
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, bs)
-                            if len(bars) < 70 + fh:
-                                continue
+                        for sym, bars in bars_by_symbol.items():
                             bars = bars[:max_bars]
 
                             closes = np.array([b["close"] for b in bars], dtype=float)
@@ -698,13 +738,17 @@ async def run_training_pipeline(
                         continue
 
                     combined_names = base_names + [f"vol_{n}" for n in VOL_FEATURE_NAMES] + REGIME_FEATURE_NAMES
+                    
+                    # Pre-load all bars in parallel
+                    min_required = 70 + fh
+                    bars_by_symbol = await load_symbols_parallel(
+                        db, symbols, bs, min_bars=min_required, batch_size=20
+                    )
+                    
                     all_X = []
                     all_y = []
 
-                    for sym in symbols:
-                        bars = await load_symbol_bars(db, sym, bs)
-                        if len(bars) < 70 + fh:
-                            continue
+                    for sym, bars in bars_by_symbol.items():
 
                         closes = np.array([b["close"] for b in bars], dtype=float)
                         highs = np.array([b["high"] for b in bars], dtype=float)
@@ -801,13 +845,17 @@ async def run_training_pipeline(
                         continue
 
                     combined_names = base_names + [f"exit_{n}" for n in EXIT_FEATURE_NAMES]
+                    
+                    # Pre-load all bars in parallel
+                    min_required = 70 + max_horizon
+                    bars_by_symbol = await load_symbols_parallel(
+                        db, symbols, bs, min_bars=min_required, batch_size=20
+                    )
+                    
                     all_X = []
                     all_y = []
 
-                    for sym in symbols:
-                        bars = await load_symbol_bars(db, sym, bs)
-                        if len(bars) < 70 + max_horizon:
-                            continue
+                    for sym, bars in bars_by_symbol.items():
 
                         closes = np.array([b["close"] for b in bars], dtype=float)
                         highs = np.array([b["high"] for b in bars], dtype=float)
@@ -922,16 +970,19 @@ async def run_training_pipeline(
                             }
 
                     combined_names = base_names + [f"secrel_{n}" for n in SECTOR_REL_FEATURE_NAMES]
+                    
+                    # Pre-load all symbol bars in parallel
+                    min_required = 70 + fh
+                    bars_by_symbol = await load_symbols_parallel(
+                        db, symbols, bs, min_bars=min_required, batch_size=20
+                    )
+                    
                     all_X = []
                     all_y = []
 
-                    for sym in symbols:
+                    for sym, bars in bars_by_symbol.items():
                         sector_etf = sector_mapper.get_sector_etf(sym)
                         if sector_etf is None or sector_etf not in sector_etf_bars:
-                            continue
-
-                        bars = await load_symbol_bars(db, sym, bs)
-                        if len(bars) < 70 + fh:
                             continue
 
                         stock_closes = np.array([b["close"] for b in bars], dtype=float)
@@ -1019,13 +1070,17 @@ async def run_training_pipeline(
                     symbols = symbols[:1000]
 
                     combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
+                    
+                    # Pre-load all bars in parallel
+                    min_required = 70 + max_bars
+                    bars_by_symbol = await load_symbols_parallel(
+                        db, symbols, bs, min_bars=min_required, batch_size=20
+                    )
+                    
                     all_X = []
                     all_y = []
 
-                    for sym in symbols:
-                        bars = await load_symbol_bars(db, sym, bs)
-                        if len(bars) < 70 + max_bars:
-                            continue
+                    for sym, bars in bars_by_symbol.items():
 
                         closes = np.array([b["close"] for b in bars], dtype=float)
                         highs = np.array([b["high"] for b in bars], dtype=float)
@@ -1128,10 +1183,13 @@ async def run_training_pipeline(
                         # Collect all samples and classify by regime
                         regime_samples = {r: {"X": [], "y": []} for r in ALL_REGIMES}
 
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, bs)
-                            if len(bars) < 70 + fh:
-                                continue
+                        # Pre-load all bars in parallel
+                        min_required = 70 + fh
+                        bars_by_symbol = await load_symbols_parallel(
+                            db, symbols, bs, min_bars=min_required, batch_size=20
+                        )
+
+                        for sym, bars in bars_by_symbol.items():
 
                             closes = np.array([b["close"] for b in bars], dtype=float)
 
@@ -1267,10 +1325,13 @@ async def run_training_pipeline(
                         all_X = []
                         all_y = []
 
-                        for sym in symbols:
-                            bars = await load_symbol_bars(db, sym, anchor_bs)
-                            if len(bars) < 70 + anchor_fh:
-                                continue
+                        # Pre-load all bars in parallel
+                        min_required = 70 + anchor_fh
+                        bars_by_symbol = await load_symbols_parallel(
+                            db, symbols, anchor_bs, min_bars=min_required, batch_size=20
+                        )
+
+                        for sym, bars in bars_by_symbol.items():
 
                             closes = np.array([b["close"] for b in bars], dtype=float)
 
