@@ -425,7 +425,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   useEffect(() => {
     const handleWsMessage = (event) => {
       const msg = event.detail;
+      // Debug: log all WS messages that come through
+      if (msg?.type?.includes('pipeline')) {
+        console.log('[TrainingPanel] Received WS message:', msg);
+      }
       if (msg?.type === 'pipeline_start_result') {
+        console.log('[TrainingPanel] Processing pipeline_start_result:', msg);
         setStarting(false);
         if (msg.success) {
           toast.success('Training pipeline started');

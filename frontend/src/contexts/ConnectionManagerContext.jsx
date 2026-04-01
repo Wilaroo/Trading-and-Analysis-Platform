@@ -104,6 +104,10 @@ export const ConnectionManagerProvider = ({ children }) => {
         // Handle incoming messages - broadcast to subscribers
         try {
           const data = JSON.parse(event.data);
+          // Debug: log pipeline messages
+          if (data?.type?.includes('pipeline')) {
+            console.log('[ConnectionManager] Received pipeline message from WS:', data);
+          }
           // Dispatch custom event for components to listen
           window.dispatchEvent(new CustomEvent('ws-message', { detail: data }));
         } catch (e) {
