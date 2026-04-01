@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, apiLongRunning } from '../../utils/api';
+import { requestThrottler } from '../../utils/requestThrottler';
+import { setTrainingActive } from '../../utils/safePolling';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -414,12 +416,26 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const handleStartTraining = useCallback(async () => {
     try {
       setStarting(true);
+      // Free browser connections: pause throttler to drain queued GETs
+      // and prevent new ones from being sent during training startup
+      requestThrottler.pause();
+      setTrainingActive(true);
+      // Small delay to let in-flight GETs complete and free connections
+      await new Promise(r => setTimeout(r, 300));
       const res = await apiLongRunning.post('/api/ai-training/start', {});
       if (res.data?.success) { toast.success('Training pipeline started'); fetchData(); }
-      else toast.error(res.data?.error || 'Failed to start training');
+      else {
+        toast.error(res.data?.error || 'Failed to start training');
+        // Resume if training didn't actually start
+        requestThrottler.resume();
+        setTrainingActive(false);
+      }
     } catch (err) {
       console.error('[TrainingPipeline] Start error:', err);
       toast.error(`Failed to start training: ${err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Network error'}`);
+      // Resume if training failed to start
+      requestThrottler.resume();
+      setTrainingActive(false);
     }
     finally { setStarting(false); }
   }, [fetchData]);

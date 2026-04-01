@@ -14,15 +14,23 @@
  *   }, [fetchData]);
  */
 
+import { requestThrottler } from './requestThrottler';
+
 let globalStaggerCounter = 0;
 let _trainingActive = false;
 
 /**
  * Set global training mode flag. When active, non-essential polls are skipped
  * and essential polls run at 5x slower intervals.
+ * Also pauses/resumes the request throttler to free browser connections.
  */
 export function setTrainingActive(active) {
   _trainingActive = active;
+  if (active) {
+    requestThrottler.pause();
+  } else {
+    requestThrottler.resume();
+  }
 }
 
 export function isTrainingActive() {

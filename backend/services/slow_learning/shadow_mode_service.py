@@ -231,11 +231,26 @@ class ShadowModeService:
         """
         Check pending signals against current prices and update outcomes.
         Should be called periodically (e.g., every 5 minutes during market hours).
+        Processes in batches to avoid event loop starvation.
         """
         if self._shadow_signals_col is None:
             return {"updated": 0}
-            
-        pending = list(self._shadow_signals_col.find({"status": "pending"}))
+        
+        # Step 1: Bulk-expire old signals (>5 days) in one DB call
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        expire_result = self._shadow_signals_col.update_many(
+            {"status": "pending", "signal_time": {"$lt": cutoff}},
+            {"$set": {
+                "status": "expired",
+                "outcome_time": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+        expired_count = expire_result.modified_count
+        
+        # Step 2: Process remaining pending signals in batches (max 50 per run)
+        pending = list(self._shadow_signals_col.find(
+            {"status": "pending"}
+        ).sort("signal_time", 1).limit(50))
         updated = 0
         
         for signal_doc in pending:
@@ -300,7 +315,7 @@ class ShadowModeService:
             except Exception as e:
                 logger.error(f"Error updating signal {signal.id}: {e}")
                 
-        return {"updated": updated, "pending_checked": len(pending)}
+        return {"updated": updated, "expired": expired_count, "pending_checked": len(pending)}
         
     async def _get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for a symbol"""

@@ -43,21 +43,31 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - Wrapped ai_training.py endpoints (/regime-live, /model-inventory, /status) with `asyncio.to_thread()`
 - Cleared stale training state and added auto-reset on startup
 
+### Session N+3 (Browser Connection Starvation Fix) — April 2026
+- **P0 Fix: Browser connection starvation**: Reduced `requestThrottler.js` maxConcurrent from 4→2, freeing 2 browser connections for POST/PUT/DELETE. Added `pause()`/`resume()`/`drainQueue()` methods. Training start now pauses all background GET polls before sending POST.
+- **Fix: `_realtime_tech` AttributeError**: Changed `self._realtime_tech` → `self.technical_service` (lazy property) in `trading_bot_service.py` line 1427.
+- **Fix: `dynamic_risk_service` missing module**: Corrected import from `dynamic_risk_service` → `dynamic_risk_engine` and `get_dynamic_risk_service` → `get_dynamic_risk_engine` in `server.py` stream_risk_status.
+- **Fix: Shadow signal backlog**: Added bulk expiry of signals >5 days old in one MongoDB update_many, plus batch limit of 50 signals per scheduler run to prevent event loop starvation.
+
 ---
 
 ## P0 Issues
-- [FIXED ✅] **Event loop blocking on startup**: `market_regime_engine.py` had 5 sync MongoDB calls. Wrapped in `asyncio.to_thread()`.
-- [FIXED ✅] **Status dots stuck red**: `SystemStatusContext` health checks bypassed `requestThrottler` via direct `fetch()`.
-- [FIXED ✅] **Training badge persisting forever**: `FocusModeContext` syncs with backend on mount.
-- [FIXED ✅] **Thread pool exhaustion during training**: Dedicated `TRAINING_POOL` in `training_pipeline.py`.
-- [FIXED ✅] **`stream_training_status` crash**: Variable scope bug fixed.
-- [FIXED ✅] **DB backlogs cleared**: Training pipeline + focus mode reset.
-- [FIXED ✅] **Thread pool exhaustion via aggressive frontend polling**: Reduced HTTP polling from ~40 req/30s to ~8 req/30s. Migrated IB status, bot status, alerts, positions, and context to use WebSocket as primary data source with HTTP as slow backup. Key changes in SentCom.jsx (10 hooks), useCommandCenterData.js, CommandCenterPage.js, JobManager.jsx, StartupStatusDashboard.jsx.
-- [FIXED ✅] **Startup thundering herd (IB Pusher timeout at ~10s)**: Frontend was firing 20+ HTTP requests simultaneously at t=0 on page load. Staggered initial loads across 12 seconds (2-3 req/s max). Backend: wrapped sync `bulk_write` in `short_interest_service.py` with `asyncio.to_thread`. **Critical fix**: Converted `push-data`, `pushed-data`, `health`, and `startup-check` endpoints from `async def` to `def` — they now run in the thread pool, completely immune to event loop blocking from background tasks. Files changed: SentCom.jsx (11 hooks staggered), useCommandCenterData.js (4-phase delays), short_interest_service.py, ib.py, system_router.py.
-- [FIXED ✅] **False-positive "API" red dot in TickerTape** (April 2026): Self-healing logic in SystemStatusContext. Threshold 3→5, interval 60s→90s.
-- [FIXED ✅] **Training subprocess isolation** (April 2026): Training pipeline now runs in a completely separate subprocess (own GIL, own memory). The MONGO_URL was being corrupted when passed as CLI arg — now passed via environment variable inheritance. Event loop is 100% free during training.
-- [FIXED ✅] **Event loop starvation during training** (April 2026): 13 WS streams + 4 scheduler tasks now check focus mode and pause during training. Only 3 essential streams remain active (training_status, focus_mode, system_status).
-- [FIXED ✅] **IB Pusher GET timeout** (April 2026): `/api/ib/orders/pending` was sync on event loop — wrapped in `asyncio.to_thread`. Plus `push-data`/`pushed-data` converted to `async def` (in-memory only, no thread pool needed).
+- [FIXED] Event loop blocking on startup
+- [FIXED] Status dots stuck red
+- [FIXED] Training badge persisting forever
+- [FIXED] Thread pool exhaustion during training
+- [FIXED] `stream_training_status` crash
+- [FIXED] DB backlogs cleared
+- [FIXED] Thread pool exhaustion via aggressive frontend polling
+- [FIXED] Startup thundering herd (IB Pusher timeout)
+- [FIXED] False-positive "API" red dot in TickerTape
+- [FIXED] Training subprocess isolation
+- [FIXED] Event loop starvation during training
+- [FIXED] IB Pusher GET timeout
+- [FIXED] **Browser connection starvation blocking training POST** (April 2026): `requestThrottler.js` maxConcurrent 4→2, added pause/resume/drain. `TrainingPipelinePanel.jsx` drains queue before POST. `safePolling.js` now pauses throttler when training mode activates.
+- [FIXED] **`_realtime_tech` AttributeError crashing trade evaluation** (April 2026)
+- [FIXED] **`dynamic_risk_service` module not found spamming logs** (April 2026)
+- [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026): Bulk expiry + batch limit
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).
@@ -89,6 +99,9 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - `/app/backend/routers/ai_modules.py` — AI module endpoints
 - `/app/backend/routers/strategy_promotion_router.py` — Promotion endpoints
 - `/app/backend/routers/learning_connectors_router.py` — Learning connector endpoints
+- `/app/frontend/src/utils/requestThrottler.js` — Browser connection management (max 2 concurrent GETs)
+- `/app/frontend/src/utils/safePolling.js` — Training-aware polling with throttler integration
+- `/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx` — Training start with queue drain
 
 ## Key API Endpoints
 - `POST /api/ai-training/start` — Start training pipeline

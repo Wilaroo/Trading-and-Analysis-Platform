@@ -3083,8 +3083,8 @@ async def stream_risk_status():
             continue
         if manager.active_connections:
             try:
-                from services.dynamic_risk_service import get_dynamic_risk_service
-                risk_svc = get_dynamic_risk_service()
+                from services.dynamic_risk_engine import get_dynamic_risk_engine
+                risk_svc = get_dynamic_risk_engine()
                 if risk_svc:
                     status = risk_svc.get_status()
                 else:

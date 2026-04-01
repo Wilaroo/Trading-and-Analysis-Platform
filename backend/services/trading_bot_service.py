@@ -1424,7 +1424,7 @@ class TradingBotService:
         """Delegates to TradeIntelligence module."""
         self._trade_intel.set_services(
             web_research=self.web_research,
-            technical_service=self._realtime_tech,
+            technical_service=self.technical_service,
             quality_service=getattr(self, '_quality_service', None),
         )
         return await self._trade_intel.gather(symbol, alert)
