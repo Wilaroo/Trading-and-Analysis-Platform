@@ -228,6 +228,7 @@ class TrainingPipelineStatus:
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
     """Get symbols that have enough bars for training."""
     try:
+        logger.info(f"[get_available_symbols] Querying symbols for bar_size={bar_size}, min_bars={min_bars}")
         pipeline = [
             {"$match": {"bar_size": bar_size}},
             {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
@@ -236,11 +237,20 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
         ]
 
         loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(
-            TRAINING_POOL,
-            lambda: list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+        
+        def _run_aggregation():
+            # Add maxTimeMS to prevent infinite hang
+            return list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True, maxTimeMS=120000))
+        
+        results = await asyncio.wait_for(
+            loop.run_in_executor(TRAINING_POOL, _run_aggregation),
+            timeout=180  # 3 minute timeout
         )
+        logger.info(f"[get_available_symbols] Found {len(results)} symbols for {bar_size}")
         return [r["_id"] for r in results]
+    except asyncio.TimeoutError:
+        logger.error(f"[get_available_symbols] Timeout querying symbols for {bar_size}")
+        return []
     except Exception as e:
         logger.error(f"Failed to get symbols for {bar_size}: {e}")
         return []
@@ -250,14 +260,21 @@ async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
     """Load all bars for a symbol+bar_size, sorted chronologically (oldest first)."""
     try:
         loop = asyncio.get_event_loop()
-        bars = await loop.run_in_executor(
-            TRAINING_POOL,
-            lambda: list(db["ib_historical_data"].find(
+        
+        def _run_query():
+            return list(db["ib_historical_data"].find(
                 {"symbol": symbol, "bar_size": bar_size},
                 {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-            ).sort("date", 1))
+            ).sort("date", 1).max_time_ms(60000))  # 60 second timeout
+        
+        bars = await asyncio.wait_for(
+            loop.run_in_executor(TRAINING_POOL, _run_query),
+            timeout=90  # 90 second timeout
         )
         return bars
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout loading bars for {symbol}/{bar_size}")
+        return []
     except Exception as e:
         logger.warning(f"Failed to load bars for {symbol}/{bar_size}: {e}")
         return []

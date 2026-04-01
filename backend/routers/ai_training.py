@@ -269,9 +269,32 @@ async def stop_training():
     terminated = False
     if _training_task and not _training_task.done():
         logger.info("[TRAINING] Stop requested — terminating subprocess")
-        _training_task.terminate()
+        try:
+            # Try graceful terminate first
+            _training_task.terminate()
+            # Give it 2 seconds to clean up
+            await asyncio.sleep(2)
+            # If still running, force kill
+            if not _training_task.done():
+                logger.warning("[TRAINING] Subprocess didn't terminate gracefully, force killing...")
+                _training_task._proc.kill()
+        except Exception as e:
+            logger.warning(f"[TRAINING] Error during termination: {e}")
         _training_task = None
         terminated = True
+
+    # Also reset training status in DB to idle
+    try:
+        from server import db as mongo_db
+        if mongo_db is not None:
+            await asyncio.to_thread(
+                mongo_db["training_pipeline_status"].update_one,
+                {"_id": "pipeline"},
+                {"$set": {"phase": "idle", "current_model": "", "current_phase_progress": 0}},
+            )
+            logger.info("[TRAINING] Reset training status to idle")
+    except Exception as e:
+        logger.warning(f"[TRAINING] Could not reset training status: {e}")
 
     # Always reset focus mode to LIVE, even if task was lost (e.g., backend restarted)
     try:
