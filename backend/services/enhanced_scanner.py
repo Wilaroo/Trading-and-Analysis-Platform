@@ -1675,8 +1675,16 @@ class EnhancedBackgroundScanner:
                 except Exception:
                     pass
                 
-                now = datetime.now(timezone.utc)
-                if self._last_scan_time:
+                # Check focus mode — pause during training/backtesting
+                try:
+                    from services.focus_mode_manager import focus_mode_manager
+                    if not focus_mode_manager.should_run_task('background_scanner'):
+                        if self._scan_count % 60 == 0:
+                            logger.info("Enhanced scanner paused — training/backtesting active (focus mode)")
+                        await asyncio.sleep(60)
+                        continue
+                except Exception:
+                    pass
                     elapsed = (now - self._last_scan_time).total_seconds()
                     if elapsed < self._min_scan_interval:
                         await asyncio.sleep(self._min_scan_interval - elapsed)

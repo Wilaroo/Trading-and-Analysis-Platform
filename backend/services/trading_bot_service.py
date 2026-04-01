@@ -1205,7 +1205,17 @@ class TradingBotService:
                 except Exception:
                     pass
                 
-                # Update account value from IB if connected
+                # Check focus mode — pause during training/backtesting
+                try:
+                    from services.focus_mode_manager import focus_mode_manager
+                    if not focus_mode_manager.should_run_task('trading_bot_scan'):
+                        if scan_count % 120 == 0:
+                            print("[TradingBot] Focus mode: scanning paused (training/backtesting active)")
+                        await asyncio.sleep(self._scan_interval)
+                        scan_count += 1
+                        continue
+                except Exception:
+                    pass
                 await self._update_account_from_ib()
                 
                 # Check daily loss limit (1% of account)

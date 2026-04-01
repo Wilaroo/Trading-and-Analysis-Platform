@@ -149,7 +149,13 @@ async def stop_training():
 
     if _training_task and not _training_task.done():
         _training_task.cancel()
-        return {"success": True, "message": "Training cancelled"}
+        # Restore LIVE mode since training is being stopped
+        try:
+            from services.focus_mode_manager import focus_mode_manager
+            focus_mode_manager.reset_to_live(result={"stopped": "manual"})
+        except Exception:
+            pass
+        return {"success": True, "message": "Training cancelled, focus mode restored to LIVE"}
 
     return {"success": False, "message": "No training in progress"}
 
