@@ -3124,17 +3124,17 @@ async def stream_market_intel():
             try:
                 intel_data = {}
                 try:
-                    schedule = market_intel_service.get_schedule()
+                    schedule = await asyncio.to_thread(market_intel_service.get_schedule_status)
                     intel_data["schedule"] = schedule
                 except Exception:
                     pass
                 try:
-                    reports = market_intel_service.get_reports(limit=5)
-                    intel_data["reports"] = reports
+                    reports = await asyncio.to_thread(market_intel_service.get_todays_reports)
+                    intel_data["reports"] = reports[-5:] if reports else []
                 except Exception:
                     pass
                 try:
-                    current = market_intel_service.get_current_report()
+                    current = await asyncio.to_thread(market_intel_service.get_current_report)
                     intel_data["current"] = current
                 except Exception:
                     pass
@@ -3299,8 +3299,23 @@ async def startup_event():
     # Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
+    loop.slow_callback_duration = 0.5  # Log warning if a callback takes >500ms
     
     # Start WebSocket streaming tasks (lightweight, non-blocking)
+    # Event loop health monitor — detects blocking calls
+    async def _event_loop_monitor():
+        """Periodically check event loop responsiveness. If asyncio.sleep(0) takes >500ms, something is blocking."""
+        import time
+        await asyncio.sleep(5)
+        while True:
+            t0 = time.monotonic()
+            await asyncio.sleep(0)
+            lag = time.monotonic() - t0
+            if lag > 0.5:  # 500ms threshold
+                print(f"⚠️ EVENT LOOP BLOCKED for {lag:.1f}s! Check for synchronous calls.")
+            await asyncio.sleep(2)
+    asyncio.create_task(_event_loop_monitor())
+    
     asyncio.create_task(stream_quotes())
     asyncio.create_task(stream_system_status())
     asyncio.create_task(stream_bot_trades())
