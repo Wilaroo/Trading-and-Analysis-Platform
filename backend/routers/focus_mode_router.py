@@ -49,6 +49,17 @@ async def get_focus_mode():
     }
 
 
+@router.get("/focus-mode/status")
+async def get_focus_mode_status():
+    """Get current focus mode status (alias for /focus-mode)."""
+    status = focus_mode_manager.get_status()
+    return {
+        "success": True,
+        "mode": status.get("mode", "live"),
+        **status
+    }
+
+
 @router.post("/focus-mode")
 async def set_focus_mode(request: SetFocusModeRequest):
     """Set the system focus mode."""

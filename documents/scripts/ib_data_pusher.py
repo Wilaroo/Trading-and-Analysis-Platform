@@ -1108,9 +1108,40 @@ class IBDataPusher:
         self.push_data_to_cloud()
         self.last_push_time = current_time
         
+        # Track focus mode state
+        focus_mode_paused = False
+        last_focus_check = 0
+        focus_check_interval = 30  # Check every 30 seconds
+        
         try:
             while self.running:
                 try:
+                    # Check focus mode periodically - pause IB requests during training
+                    current_time = time.time()
+                    if current_time - last_focus_check >= focus_check_interval:
+                        try:
+                            status = self.api.get_safe("/api/focus-mode/status")
+                            if status and status.get("mode") == "training":
+                                if not focus_mode_paused:
+                                    logger.info("[FOCUS MODE] Training mode detected - pausing IB requests")
+                                    focus_mode_paused = True
+                            else:
+                                if focus_mode_paused:
+                                    logger.info("[FOCUS MODE] Training complete - resuming IB requests")
+                                    focus_mode_paused = False
+                        except Exception:
+                            pass  # Ignore focus mode check errors
+                        last_focus_check = current_time
+                    
+                    # If in training mode, skip IB operations but keep connection alive
+                    if focus_mode_paused:
+                        self.ib.sleep(1.0)  # Longer sleep when paused
+                        # Still push minimal data to keep connection alive
+                        if current_time - self.last_push_time >= 30:  # Push less frequently
+                            self.push_data_to_cloud()
+                            self.last_push_time = current_time
+                        continue
+                    
                     # Let ib_insync process events (sync - no event loop conflict)
                     self.ib.sleep(0.1)
                     
@@ -1265,6 +1296,13 @@ class IBDataPusher:
                     if current_mode == "trading":
                         # Trading mode - push data, poll orders
                         self._trading_mode_tick(current_time)
+                    elif current_mode == "training":
+                        # Training mode - pause IB requests, just keep connection alive
+                        self.ib.sleep(1.0)  # Longer sleep when training
+                        # Push minimal data every 30s to keep connection status updated
+                        if current_time - self.last_push_time >= 30:
+                            self.push_data_to_cloud()
+                            self.last_push_time = current_time
                     else:
                         # Collection mode - fetch historical data
                         result = self._collection_mode_tick()
@@ -1303,6 +1341,11 @@ class IBDataPusher:
     def _check_cloud_mode(self) -> Optional[str]:
         """Check cloud for desired operating mode"""
         try:
+            # First check focus mode - training takes priority
+            focus_status = self.api.get_safe("/api/focus-mode/status", timeout=10)
+            if focus_status and focus_status.get("mode") == "training":
+                return "training"  # Return special mode that pauses IB requests
+            
             result = self.api.get_safe("/api/ib/mode", timeout=10)
             if result:
                 mode = result.get("mode", "trading")
