@@ -3147,10 +3147,12 @@ async def stream_data_collection():
                 except Exception:
                     pass
                 try:
-                    coverage = db["ib_historical_data"].aggregate([
-                        {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                        {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
-                    ])
+                    def _get_coverage():
+                        return list(db["ib_historical_data"].aggregate([
+                            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                            {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
+                        ]))
+                    coverage = await asyncio.to_thread(_get_coverage)
                     for doc in coverage:
                         collection_data["coverage"] = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
                 except Exception:
