@@ -99,10 +99,11 @@ async def get_training_status():
     try:
         from server import db as mongo_db
 
-        # Check pipeline status from DB
+        # Check pipeline status from DB (run in thread to avoid blocking event loop)
         status_doc = None
         if mongo_db is not None:
-            status_doc = mongo_db["training_pipeline_status"].find_one(
+            status_doc = await asyncio.to_thread(
+                mongo_db["training_pipeline_status"].find_one,
                 {"_id": "pipeline"}, {"_id": 0}
             )
 
@@ -251,9 +252,15 @@ async def get_live_regime():
                 real[0].get("date", ""),
             )
 
-        spy_c, spy_h, spy_l, spy_date = _load_index("SPY")
-        qqq_c, qqq_h, qqq_l, qqq_date = _load_index("QQQ")
-        iwm_c, iwm_h, iwm_l, iwm_date = _load_index("IWM")
+        # Run blocking MongoDB aggregations in thread pool to avoid freezing the event loop
+        spy_result, qqq_result, iwm_result = await asyncio.gather(
+            asyncio.to_thread(_load_index, "SPY"),
+            asyncio.to_thread(_load_index, "QQQ"),
+            asyncio.to_thread(_load_index, "IWM"),
+        )
+        spy_c, spy_h, spy_l, spy_date = spy_result
+        qqq_c, qqq_h, qqq_l, qqq_date = qqq_result
+        iwm_c, iwm_h, iwm_l, iwm_date = iwm_result
 
         regime = "unknown"
         if spy_c is not None:
@@ -317,18 +324,22 @@ async def get_model_inventory():
     try:
         from server import db as mongo_db
 
-        # Get trained models from DB
+        # Get trained models from DB (run in thread to avoid blocking event loop)
         trained_models = {}
         if mongo_db is not None:
-            for doc in mongo_db["timeseries_models"].find({}, {"_id": 0, "model_data": 0}):
-                model_name = doc.get("name", doc.get("model_name", ""))
-                if model_name:
-                    metrics = doc.get("metrics", {})
-                    trained_models[model_name] = {
-                        "accuracy": metrics.get("accuracy", doc.get("accuracy", 0)),
-                        "training_samples": metrics.get("training_samples", doc.get("training_samples", 0)),
-                        "promoted_at": doc.get("saved_at", doc.get("promoted_at", "")),
-                    }
+            def _fetch_trained_models():
+                models = {}
+                for doc in mongo_db["timeseries_models"].find({}, {"_id": 0, "model_data": 0}):
+                    model_name = doc.get("name", doc.get("model_name", ""))
+                    if model_name:
+                        metrics = doc.get("metrics", {})
+                        models[model_name] = {
+                            "accuracy": metrics.get("accuracy", doc.get("accuracy", 0)),
+                            "training_samples": metrics.get("training_samples", doc.get("training_samples", 0)),
+                            "promoted_at": doc.get("saved_at", doc.get("promoted_at", "")),
+                        }
+                return models
+            trained_models = await asyncio.to_thread(_fetch_trained_models)
 
         from services.ai_modules.volatility_model import VOL_MODEL_CONFIGS
         from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS

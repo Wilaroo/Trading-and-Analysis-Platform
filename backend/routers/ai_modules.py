@@ -933,10 +933,16 @@ async def get_timeseries_status():
         }
     
     try:
-        status = _timeseries_ai.get_status()
-        # Sanitize: ensure all dict keys are strings (fixes unhashable list key error)
-        if isinstance(status, dict) and "metrics" in status and isinstance(status["metrics"], dict):
-            status["metrics"] = {str(k): v for k, v in status["metrics"].items()}
+        import asyncio
+        status = await asyncio.to_thread(_timeseries_ai.get_status)
+
+        # Deep sanitize: convert any non-string dict keys to strings
+        def _sanitize_dict(d):
+            if not isinstance(d, dict):
+                return d
+            return {str(k): _sanitize_dict(v) for k, v in d.items()}
+
+        status = _sanitize_dict(status)
         return {"success": True, "status": status}
     except Exception as e:
         return {
