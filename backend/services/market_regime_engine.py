@@ -883,10 +883,13 @@ class MarketRegimeEngine:
             from database import get_database
             db = get_database()
             if db is not None:
-                bars = list(db["ib_historical_data"].find(
-                    {"symbol": symbol, "bar_size": "1 day"},
-                    {"_id": 0}
-                ).sort("date", -1).limit(limit))
+                def _query_bars():
+                    return list(db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0}
+                    ).sort("date", -1).limit(limit))
+                
+                bars = await asyncio.to_thread(_query_bars)
                 
                 if bars and len(bars) >= 20:
                     # Convert to expected format and reverse to chronological order
@@ -1006,23 +1009,24 @@ class MarketRegimeEngine:
                 "previous_state": regime.get("previous_state")
             }
             
-            # Upsert by date
-            collection.update_one(
-                {"date": doc["date"]},
-                {"$set": doc},
-                upsert=True
-            )
-            
             # Also store FTD state separately for persistence
             ftd_collection = self.db["market_regime_ftd"]
             ftd_doc = self.ftd_block.get_state_for_storage()
             ftd_doc["updated_at"] = datetime.now(timezone.utc)
             
-            ftd_collection.update_one(
-                {"_id": "current_ftd_state"},
-                {"$set": ftd_doc},
-                upsert=True
-            )
+            def _write_regime():
+                collection.update_one(
+                    {"date": doc["date"]},
+                    {"$set": doc},
+                    upsert=True
+                )
+                ftd_collection.update_one(
+                    {"_id": "current_ftd_state"},
+                    {"$set": ftd_doc},
+                    upsert=True
+                )
+            
+            await asyncio.to_thread(_write_regime)
             
         except Exception as e:
             print(f"Error storing regime: {e}")
@@ -1034,7 +1038,9 @@ class MarketRegimeEngine:
         
         try:
             collection = self.db["market_regime_ftd"]
-            doc = collection.find_one({"_id": "current_ftd_state"})
+            def _query_ftd():
+                return collection.find_one({"_id": "current_ftd_state"})
+            doc = await asyncio.to_thread(_query_ftd)
             if doc:
                 doc.pop("_id", None)
                 doc.pop("updated_at", None)
@@ -1053,12 +1059,13 @@ class MarketRegimeEngine:
             collection = self.db["market_regime_state"]
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             
-            cursor = collection.find(
-                {"timestamp": {"$gte": cutoff}},
-                {"_id": 0}
-            ).sort("timestamp", -1)
+            def _query_history():
+                return list(collection.find(
+                    {"timestamp": {"$gte": cutoff}},
+                    {"_id": 0}
+                ).sort("timestamp", -1))
             
-            return list(cursor)
+            return await asyncio.to_thread(_query_history)
         except Exception as e:
             print(f"Error getting history: {e}")
             return []

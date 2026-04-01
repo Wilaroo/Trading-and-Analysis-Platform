@@ -46,12 +46,12 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 ---
 
 ## P0 Issues
+- [FIXED] **Event loop blocking on startup** (ROOT CAUSE): `market_regime_engine.py` had 5 synchronous MongoDB calls (`find`, `find_one`, `update_one`) inside async methods. These blocked the event loop for 60-90s when `stream_market_regime` fired at 18s after startup. All wrapped in `asyncio.to_thread()`.
 - [FIXED] Thread pool exhaustion during training: Dedicated `ThreadPoolExecutor(max_workers=2)` in `training_pipeline.py`
-- [FIXED] `stream_training_status` crash: `UnboundLocalError` on `status` variable. Fixed initialization.
-- [FIXED] Red status indicators on startup: `SystemStatusContext` now polls every 5s during first 30s. Also re-checks when WS connects.
-- [FIXED] Training badge persisting forever: `FocusModeContext` localStorage created infinite persistence loop. Now syncs with backend `GET /api/focus-mode` on mount.
-- [FIXED] Event loop blocking during startup: Added yield points between heavy init steps.
-- [FIXED] Spammy `ib_execution_service` import error: Now prints once instead of every 3s.
+- [FIXED] `stream_training_status` crash: `UnboundLocalError` on `status` variable
+- [FIXED] Red status indicators on startup: Aggressive polling (5s for first 30s) + WS-triggered re-check
+- [FIXED] Training badge persisting forever: FocusModeContext now syncs with backend on mount
+- [FIXED] Spammy `ib_execution_service` import error: Prints once instead of every 3s
 
 ## Prioritized Backlog
 
