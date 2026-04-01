@@ -91,9 +91,9 @@ export const SystemStatusProvider = ({ children }) => {
     return initial;
   });
   
-  // Consecutive failure tracking — only go red after 3 failures
+  // Consecutive failure tracking — only go red after 5 failures
   const failureCountRef = useRef({});
-  const FAILURE_THRESHOLD = 3;
+  const FAILURE_THRESHOLD = 5;
   
   // WebSocket state (managed externally, updated here)
   const wsConnectedRef = useRef(false);
@@ -186,34 +186,95 @@ export const SystemStatusProvider = ({ children }) => {
   }, [updateStatus]);
 
   /**
-   * Check all services
+   * Check a single service and report whether the HTTP call itself succeeded
+   * (i.e. the backend responded). Used by checkAllServices for self-healing.
+   */
+  const checkServiceAndReport = useCallback(async (serviceId) => {
+    const service = SERVICES[serviceId];
+    if (!service?.checkEndpoint) return false;
+    
+    try {
+      const data = await directGet(service.checkEndpoint);
+      
+      if (data) {
+        let connected = false;
+        let message = null;
+        
+        if (serviceId === 'ibGateway') {
+          connected = data.connected === true;
+          message = data.account_id ? `Account: ${data.account_id}` : null;
+        } else if (serviceId === 'ollama') {
+          connected = data.available === true;
+          message = data.model ? `Model: ${data.model}` : null;
+        } else if (serviceId === 'ibDataPusher') {
+          connected = data.connected === true;
+          if (data.last_update) {
+            const lastUpdate = new Date(data.last_update);
+            const ageSeconds = (Date.now() - lastUpdate.getTime()) / 1000;
+            connected = connected && ageSeconds < 120;
+          }
+        } else {
+          connected = data.status === 'healthy' || data.status === 'ok' || data.healthy || true;
+        }
+        
+        updateStatus(serviceId, connected ? STATUS.CONNECTED : STATUS.DISCONNECTED, message);
+        return true; // Backend responded — proof of life
+      } else {
+        updateStatus(serviceId, STATUS.DISCONNECTED);
+        return false;
+      }
+    } catch (error) {
+      updateStatus(serviceId, STATUS.ERROR, error.message);
+      return false;
+    }
+  }, [updateStatus]);
+
+  /**
+   * Check all services — self-healing: if /api/health fails but other
+   * backend-routed checks succeed, the backend is provably alive.
    */
   const checkAllServices = useCallback(async () => {
     // Skip if tab is hidden
     if (!isVisibleRef.current) return;
     
-    // Check backend first (if backend is down, others will fail)
+    // 1. Try the primary health endpoint
+    let healthOk = false;
     try {
       const data = await directGet('/api/health');
-      if (data && (data.status === 'healthy' || data.status === 'ok')) {
+      healthOk = !!(data && (data.status === 'healthy' || data.status === 'ok'));
+    } catch {
+      healthOk = false;
+    }
+    
+    if (healthOk) {
+      updateStatus('backend', STATUS.CONNECTED);
+      updateStatus('mongodb', STATUS.CONNECTED);
+    }
+    
+    // 2. Always check other services — they also prove backend reachability
+    let anyOtherSucceeded = false;
+    const results = await Promise.allSettled([
+      checkServiceAndReport('ibGateway'),
+      checkServiceAndReport('ibDataPusher'),
+      checkServiceAndReport('ollama'),
+    ]);
+    anyOtherSucceeded = results.some(r => r.status === 'fulfilled' && r.value === true);
+    
+    // 3. Self-healing: if health failed but another backend-routed API succeeded,
+    //    the backend IS alive — reset failure counter and mark connected.
+    if (!healthOk) {
+      if (anyOtherSucceeded) {
+        // Proof of life — backend responded to a different route
+        failureCountRef.current['backend'] = 0;
         updateStatus('backend', STATUS.CONNECTED);
-        updateStatus('mongodb', STATUS.CONNECTED); // If backend is up, DB is connected
-        
-        // Check other services in parallel
-        await Promise.all([
-          checkService('ibGateway'),
-          checkService('ibDataPusher'),
-          checkService('ollama'),
-        ]);
+        updateStatus('mongodb', STATUS.CONNECTED);
       } else {
+        // Genuine failure — let the threshold logic in updateStatus decide
         updateStatus('backend', STATUS.DISCONNECTED);
         updateStatus('mongodb', STATUS.UNKNOWN);
       }
-    } catch (error) {
-      updateStatus('backend', STATUS.ERROR, error.message);
-      updateStatus('mongodb', STATUS.UNKNOWN);
     }
-  }, [checkService, updateStatus]);
+  }, [checkServiceAndReport, updateStatus]);
 
   /**
    * Get overall system health
@@ -286,12 +347,12 @@ export const SystemStatusProvider = ({ children }) => {
       }
     }, 5000);
     
-    // Then settle to every 60 seconds
+    // Then settle to every 90 seconds
     checkIntervalRef.current = setInterval(() => {
       if (isVisibleRef.current) {
         checkAllServices();
       }
-    }, 60000);
+    }, 90000);
     
     return () => {
       clearInterval(startupTimer);
