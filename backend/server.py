@@ -2924,9 +2924,11 @@ async def stream_training_status():
     while True:
         if manager.active_connections:
             try:
-                status = db["training_pipeline_status"].find_one(
-                    {}, {"_id": 0}, sort=[("started_at", -1)]
-                )
+                def _get_training_status():
+                    return db["training_pipeline_status"].find_one(
+                        {}, {"_id": 0}, sort=[("started_at", -1)]
+                    )
+                status = await asyncio.to_thread(_get_training_status)
                 
                 status_hash = hash(str(status.get("status")) + str(status.get("progress"))) if status else None
                 
@@ -3066,7 +3068,9 @@ async def stream_sentcom_data():
                 try:
                     pushed = db.get("ib_pushed_data", {})
                     if hasattr(pushed, 'find_one'):
-                        latest = pushed.find_one(sort=[("timestamp", -1)], projection={"_id": 0})
+                        def _get_pushed_positions():
+                            return pushed.find_one(sort=[("timestamp", -1)], projection={"_id": 0})
+                        latest = await asyncio.to_thread(_get_pushed_positions)
                         sentcom_data["positions"] = latest if latest else {}
                     else:
                         sentcom_data["positions"] = {}
@@ -3180,7 +3184,9 @@ async def stream_focus_mode():
             try:
                 mode_data = {}
                 try:
-                    mode_doc = db["focus_mode"].find_one(sort=[("updated_at", -1)], projection={"_id": 0})
+                    def _get_focus_mode():
+                        return db["focus_mode"].find_one(sort=[("updated_at", -1)], projection={"_id": 0})
+                    mode_doc = await asyncio.to_thread(_get_focus_mode)
                     mode_data = mode_doc if mode_doc else {"mode": "normal"}
                 except Exception:
                     mode_data = {"mode": "normal"}
