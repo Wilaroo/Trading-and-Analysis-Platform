@@ -11,9 +11,20 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { safeGet } from '../utils/api';
 
 const SystemStatusContext = createContext(null);
+
+// Direct fetch that bypasses the request throttler — health checks must never be queued
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+async function directGet(path) {
+  try {
+    const res = await fetch(`${API_URL}${path}`, { signal: AbortSignal.timeout(8000) });
+    if (res.ok) return await res.json();
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // Service definitions
 const SERVICES = {
@@ -126,8 +137,7 @@ export const SystemStatusProvider = ({ children }) => {
     if (!service?.checkEndpoint) return;
     
     try {
-      // safeGet returns response.data directly (JSON body) or null on error
-      const data = await safeGet(service.checkEndpoint);
+      const data = await directGet(service.checkEndpoint);
       
       if (data) {
         let connected = false;
@@ -168,8 +178,7 @@ export const SystemStatusProvider = ({ children }) => {
     
     // Check backend first (if backend is down, others will fail)
     try {
-      const data = await safeGet('/api/health');
-      // safeGet now returns response.data directly, or null on error
+      const data = await directGet('/api/health');
       if (data && (data.status === 'healthy' || data.status === 'ok')) {
         updateStatus('backend', STATUS.CONNECTED);
         updateStatus('mongodb', STATUS.CONNECTED); // If backend is up, DB is connected
