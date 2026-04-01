@@ -3707,6 +3707,47 @@ async def websocket_quotes(websocket: WebSocket):
                         "error": str(train_err),
                         "success": False
                     }, websocket)
+
+            elif data.get("action") == "start_pipeline":
+                # Start the full 5-phase training pipeline via WebSocket
+                # (bypasses HTTP connection pool limitation entirely)
+                try:
+                    from routers.ai_training import start_training as _start_training_endpoint
+                    result = await _start_training_endpoint()
+                    await manager.send_personal_message({
+                        "type": "pipeline_start_result",
+                        "success": result.get("success", False),
+                        "message": result.get("message", ""),
+                        "error": result.get("error", ""),
+                        "pid": result.get("pid"),
+                    }, websocket)
+                    print(f"[WS] Pipeline start result: {result.get('success')} - {result.get('message', result.get('error', ''))}")
+                except Exception as pipe_err:
+                    import traceback
+                    traceback.print_exc()
+                    await manager.send_personal_message({
+                        "type": "pipeline_start_result",
+                        "success": False,
+                        "error": str(pipe_err),
+                    }, websocket)
+
+            elif data.get("action") == "stop_pipeline":
+                # Stop the training pipeline via WebSocket
+                try:
+                    from routers.ai_training import stop_training as _stop_training_endpoint
+                    result = await _stop_training_endpoint()
+                    await manager.send_personal_message({
+                        "type": "pipeline_stop_result",
+                        "success": result.get("success", False),
+                        "message": result.get("message", ""),
+                    }, websocket)
+                    print(f"[WS] Pipeline stop result: {result.get('success')} - {result.get('message', '')}")
+                except Exception as pipe_err:
+                    await manager.send_personal_message({
+                        "type": "pipeline_stop_result",
+                        "success": False,
+                        "error": str(pipe_err),
+                    }, websocket)
     
     except WebSocketDisconnect:
         print("WebSocket client disconnected gracefully")

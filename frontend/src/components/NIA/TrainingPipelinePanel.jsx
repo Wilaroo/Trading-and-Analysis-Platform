@@ -2,7 +2,7 @@
  * Training Pipeline Panel
  * Unified AI training hub: Train All models, view inventory by group, regime status
  */
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   Brain, Play, Square, RefreshCw, TrendingUp,
   Activity, Shield, Clock, Target, BarChart3, Layers, AlertTriangle,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../utils/api';
+import { useConnectionManager } from '../../contexts/ConnectionManagerContext';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -414,57 +415,68 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     return () => clearInterval(interval);
   }, [isTraining, fetchData]);
 
-  // Get direct backend URL to bypass the CRA dev server proxy.
-  // The proxy shares browser connections with WebSockets, causing the 6-connection
-  // limit to block POST requests. Going directly to the backend port avoids this.
-  const getDirectBackendUrl = useCallback(() => {
-    const envUrl = process.env.REACT_APP_BACKEND_URL;
-    if (envUrl) return envUrl; // Production or preview — use configured URL
-    // Local dev: bypass CRA proxy by going directly to backend port
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return `http://${window.location.hostname}:8001`;
-    }
-    return ''; // Fallback to relative URL (proxy)
+  // WebSocket-based training control — bypasses the browser's 6-connection
+  // HTTP limit entirely. No new connections needed.
+  const { sendWsMessage } = useConnectionManager();
+  const startCallbackRef = useRef(null);
+  const stopCallbackRef = useRef(null);
+
+  // Listen for WebSocket responses to training commands
+  useEffect(() => {
+    const handleWsMessage = (event) => {
+      const msg = event.detail;
+      if (msg?.type === 'pipeline_start_result') {
+        setStarting(false);
+        if (msg.success) {
+          toast.success('Training pipeline started');
+        } else {
+          toast.error(msg.error || 'Failed to start training');
+        }
+        if (startCallbackRef.current) {
+          clearTimeout(startCallbackRef.current);
+          startCallbackRef.current = null;
+        }
+      } else if (msg?.type === 'pipeline_stop_result') {
+        if (msg.success) {
+          toast.success(msg.message || 'Training stopped');
+        } else {
+          toast.error(msg.error || 'Failed to stop training');
+        }
+        if (stopCallbackRef.current) {
+          clearTimeout(stopCallbackRef.current);
+          stopCallbackRef.current = null;
+        }
+      }
+    };
+    window.addEventListener('ws-message', handleWsMessage);
+    return () => window.removeEventListener('ws-message', handleWsMessage);
   }, []);
 
-  const handleStartTraining = useCallback(async () => {
-    try {
-      setStarting(true);
-      const directUrl = getDirectBackendUrl();
-      const response = await fetch(`${directUrl}/api/ai-training/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-        signal: AbortSignal.timeout(120000), // 2 min timeout
-      });
-      const data = await response.json();
-      if (data?.success) {
-        toast.success('Training pipeline started');
-      } else {
-        toast.error(data?.error || 'Failed to start training');
-      }
-    } catch (err) {
-      console.error('[TrainingPipeline] Start error:', err);
-      const msg = err?.name === 'TimeoutError' ? 'Request timed out (2 min)' : (err?.message || 'Network error');
-      toast.error(`Failed to start training: ${msg}`);
-    } finally {
+  const handleStartTraining = useCallback(() => {
+    setStarting(true);
+    const sent = sendWsMessage({ action: 'start_pipeline' });
+    if (!sent) {
       setStarting(false);
+      toast.error('WebSocket not connected — cannot start training');
+      return;
     }
-  }, [getDirectBackendUrl]);
+    // Timeout fallback in case WS response never arrives
+    startCallbackRef.current = setTimeout(() => {
+      setStarting(false);
+      toast.error('Training start timed out — check backend terminal');
+    }, 30000);
+  }, [sendWsMessage]);
 
-  const handleStopTraining = useCallback(async () => {
-    try {
-      const directUrl = getDirectBackendUrl();
-      const response = await fetch(`${directUrl}/api/ai-training/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(15000),
-      });
-      const data = await response.json();
-      if (data?.success) { toast.success('Training stopped'); }
-      else { toast.error(data?.message || 'No training in progress'); }
-    } catch { toast.error('Failed to stop training — check if backend is running'); }
-  }, [getDirectBackendUrl]);
+  const handleStopTraining = useCallback(() => {
+    const sent = sendWsMessage({ action: 'stop_pipeline' });
+    if (!sent) {
+      toast.error('WebSocket not connected — cannot stop training');
+      return;
+    }
+    stopCallbackRef.current = setTimeout(() => {
+      toast.error('Training stop timed out');
+    }, 15000);
+  }, [sendWsMessage]);
 
   // Split categories into Trade Signal Generators vs Support Models
   const signalCategories = [];
