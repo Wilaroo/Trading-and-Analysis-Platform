@@ -3729,8 +3729,17 @@ async def websocket_quotes(websocket: WebSocket):
                 # Start the full 5-phase training pipeline via WebSocket
                 # (bypasses HTTP connection pool limitation entirely)
                 try:
-                    from routers.ai_training import start_training as _start_training_endpoint
-                    result = await _start_training_endpoint()
+                    from routers.ai_training import start_training as _start_training_endpoint, TrainingRequest
+                    # Build request from WebSocket data (or use defaults)
+                    ws_phases = data.get("phases")  # Optional: list of phases
+                    ws_bar_sizes = data.get("bar_sizes")  # Optional: list of bar sizes
+                    ws_max_symbols = data.get("max_symbols")  # Optional: int
+                    training_request = TrainingRequest(
+                        phases=ws_phases,
+                        bar_sizes=ws_bar_sizes,
+                        max_symbols=ws_max_symbols
+                    )
+                    result = await _start_training_endpoint(training_request)
                     await manager.send_personal_message({
                         "type": "pipeline_start_result",
                         "success": result.get("success", False),
