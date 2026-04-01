@@ -559,33 +559,35 @@ export function useCommandCenterData({
   useEffect(() => {
     if (!connectionChecked) return;
     const init = async () => {
-      // Phase 1: Batch init (system health, alerts, smart watchlist in ONE call)
+      // Phase 1: Batch init — delayed 2s to let IB Pusher get through first
+      await new Promise(r => setTimeout(r, 2000));
       await fetchBatchInit();
       
-      // Phase 1b: Fetch credit budget (lightweight, runs in parallel)
+      // Phase 1b: Fetch credit budget (lightweight)
       fetchCreditBudget();
       
-      // Phase 2: IB-dependent data (only if connected)
+      // Phase 2: IB-dependent data (delayed further)
       if (isConnected) {
+        await new Promise(r => setTimeout(r, 2000));
         await fetchWatchlist(isConnected);
         
-        // Phase 3: Additional IB data with slight delay
+        // Phase 3: Additional IB data with more delay
         setTimeout(async () => {
           await Promise.all([
             fetchPriceAlerts(),
             fetchMarketContext(),
             fetchEnhancedAlerts(),
           ]);
-        }, 300);
+        }, 3000);
       } else {
-        // Not connected - just fetch price alerts
-        fetchPriceAlerts();
+        // Not connected - just fetch price alerts after delay
+        setTimeout(() => fetchPriceAlerts(), 3000);
       }
       
       // Phase 4: Lower priority - earnings at the end
       setTimeout(() => {
         fetchEarnings();
-      }, 1000);
+      }, 8000);
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps

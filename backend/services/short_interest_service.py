@@ -11,6 +11,7 @@ Stores data in:
 """
 
 import logging
+import asyncio
 import httpx
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -49,7 +50,9 @@ class ShortInterestService:
             ))
 
         if ops:
-            result = self.db["ib_short_data"].bulk_write(ops, ordered=False)
+            result = await asyncio.to_thread(
+                self.db["ib_short_data"].bulk_write, ops, ordered=False
+            )
             stored = result.upserted_count + result.modified_count
             logger.info(f"Stored IB short data for {stored} symbols")
             return {"stored": stored}

@@ -1067,7 +1067,10 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
   }, []);
 
   useEffect(() => {
-    return safePolling(fetchInsights, pollInterval);
+    // Delay initial 5-request burst — AI insights are non-critical
+    const timer = setTimeout(() => fetchInsights(), 12000);
+    const cleanup = safePolling(fetchInsights, pollInterval, { immediate: false });
+    return () => { clearTimeout(timer); cleanup(); };
   }, [fetchInsights, pollInterval]);
 
   return { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh: fetchInsights };
@@ -1618,7 +1621,10 @@ const useMarketSession = (pollInterval = 120000) => {
   }, []);
 
   useEffect(() => {
-    return safePolling(fetchSession, pollInterval);
+    // Delay initial fetch — market session status changes once per session
+    const timer = setTimeout(() => fetchSession(), 9000);
+    const cleanup = safePolling(fetchSession, pollInterval, { immediate: false });
+    return () => { clearTimeout(timer); cleanup(); };
   }, [fetchSession, pollInterval]);
 
   return { session, loading, refresh: fetchSession };
@@ -1651,16 +1657,15 @@ const useSentComStatus = (pollInterval = 120000) => {  // HTTP backup only, WS i
   }, [setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // WS is primary source — delay initial HTTP fetch to reduce startup burst
     const cached = getCached('sentcomStatus');
     if (cached?.data && isFirstMount.current) {
       setStatus(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchStatus();
-      }
     } else {
-      fetchStatus();
+      const timer = setTimeout(() => fetchStatus(), 6000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -1725,16 +1730,15 @@ const useSentComStream = (pollInterval = 120000) => {  // HTTP backup only, WS i
   }, [messages.length, setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // WS is primary source — delay initial HTTP fetch to reduce startup burst
     const cached = getCached('sentcomStream');
     if (cached?.data && isFirstMount.current) {
       setMessages(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchStream();
-      }
     } else {
-      fetchStream();
+      const timer = setTimeout(() => fetchStream(), 7000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -1785,17 +1789,16 @@ const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup only, WS
   }, [setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // WS is primary source — delay initial HTTP fetch to reduce startup burst
     const cached = getCached('sentcomPositions');
     if (cached?.data && isFirstMount.current) {
       setPositions(cached.data.positions || []);
       setTotalPnl(cached.data.totalPnl || 0);
       setLoading(false);
-      if (cached.isStale) {
-        fetchPositions();
-      }
     } else {
-      fetchPositions();
+      const timer = setTimeout(() => fetchPositions(), 4000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -1842,16 +1845,15 @@ const useSentComSetups = (pollInterval = 120000) => {
   }, [setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // Delay initial fetch to reduce startup burst
     const cached = getCached('sentcomSetups');
     if (cached?.data && isFirstMount.current) {
       setSetups(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchSetups();
-      }
     } else {
-      fetchSetups();
+      const timer = setTimeout(() => fetchSetups(), 5000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -1886,16 +1888,15 @@ const useSentComContext = (pollInterval = 120000) => {
   }, [setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // WS is primary source — delay initial HTTP fetch to reduce startup burst
     const cached = getCached('sentcomContext');
     if (cached?.data && isFirstMount.current) {
       setContext(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchContext();
-      }
     } else {
-      fetchContext();
+      const timer = setTimeout(() => fetchContext(), 8000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -1937,16 +1938,15 @@ const useSentComAlerts = (pollInterval = 60000) => {
   }, [setCached]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // WS is primary source — small delay to reduce startup burst
     const cached = getCached('sentcomAlerts');
     if (cached?.data && isFirstMount.current) {
       setAlerts(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchAlerts();
-      }
     } else {
-      fetchAlerts();
+      const timer = setTimeout(() => fetchAlerts(), 2000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -2077,16 +2077,16 @@ const useTradingBotControl = (pollInterval = 60000) => {
   }, [fetchBotStatus]);
 
   useEffect(() => {
-    // If we have cached data on first mount, use it immediately
+    // Use cache if available, otherwise delay HTTP fetch — WS is primary source
     const cached = getCached('botStatus');
     if (cached?.data && isFirstMount.current) {
       setBotStatus(cached.data);
       setLoading(false);
-      if (cached.isStale) {
-        fetchBotStatus();
-      }
     } else {
-      fetchBotStatus();
+      // Delay initial HTTP fetch to avoid startup burst — WS will deliver faster
+      const timer = setTimeout(() => fetchBotStatus(), 3000);
+      isFirstMount.current = false;
+      return () => clearTimeout(timer);
     }
     isFirstMount.current = false;
     
@@ -2122,6 +2122,15 @@ const useIBConnectionStatus = (pollInterval = 60000) => {
     }
   }, []);
 
+  useEffect(() => {
+    // WS ibStatus is the primary source — skip immediate HTTP fetch.
+    // Fetch once after a short delay as fallback if WS hasn't delivered yet.
+    const timer = setTimeout(() => {
+      fetchStatus();
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [fetchStatus]);
+
   // WS ibStatus is the primary data source — instant updates, no polling needed
   useEffect(() => {
     if (wsIbStatus) {
@@ -2132,7 +2141,7 @@ const useIBConnectionStatus = (pollInterval = 60000) => {
 
   // HTTP polling only as a slow fallback (every 60s)
   useEffect(() => {
-    return safePolling(fetchStatus, pollInterval, { essential: false, immediate: true });
+    return safePolling(fetchStatus, pollInterval, { essential: false, immediate: false });
   }, [fetchStatus, pollInterval]);
 
   return { ibConnected, loading };
@@ -2190,7 +2199,10 @@ const useAIModules = (pollInterval = 60000) => {
   }, [fetchStatus]);
 
   useEffect(() => {
-    return safePolling(fetchStatus, pollInterval);
+    // Delay initial fetch to reduce startup burst — AI module status changes rarely
+    const timer = setTimeout(() => fetchStatus(), 10000);
+    const cleanup = safePolling(fetchStatus, pollInterval, { immediate: false });
+    return () => { clearTimeout(timer); cleanup(); };
   }, [fetchStatus, pollInterval]);
 
   return { status, loading, actionLoading, toggleModule, setGlobalShadowMode, refresh: fetchStatus };
