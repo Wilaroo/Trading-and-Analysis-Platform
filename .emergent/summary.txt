@@ -1,42 +1,35 @@
-<analysis>Here is the handover summary for the next agent:
-
-**original_problem_statement**: 
+<analysis>**original_problem_statement**: 
 AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, CNN chart detection, and maximum Interactive Brokers (IB) historical data collection.
 *CURRENT PRODUCT REQUIREMENTS INCORPORATED:*
-1. Remove all recently implemented skip/resume logic from the AI Training Pipeline as per user request.
-2. Fix Python indentation/syntax errors causing the backend to fail.
-3. Resolve severe backend event loop freezing issues that are preventing the user from successfully starting the training pipeline locally.
+Resolve severe backend event loop freezing issues that are preventing the user from successfully starting the training pipeline locally.
 
-**User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English)
+**User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English only)
 
 **what currently exists?** 
-A full-stack AI trading bot. In this session, all buggy skip/resume logic was completely stripped from  and syntax errors were resolved. However, when the user tried to start training locally, the request timed out. The root cause was identified: the backend uses a synchronous PyMongo driver inside an async FastAPI server. Heavy background MongoDB aggregations (especially in WebSocket streamers inside  and various router endpoints) were blocking the main event loop for 15-30 seconds, causing the UI requests to timeout and the IB Pusher to disconnect. The agent just finished wrapping these blocking calls in .
+A full-stack AI trading bot utilizing FastAPI and React. The platform relies heavily on synchronous PyMongo calls inside an async FastAPI environment. Significant progress was made in this session: numerous synchronous DB calls inside routers (, ) and WebSocket streamers were pushed to the default asyncio thread pool (). CPU-intensive LightGBM model training calls were also pushed to the thread pool. Focus mode was enforced to pause trading bots during training. However, because both DB polling endpoints and multi-minute ML training tasks are using the *same default thread pool*, the pool is getting exhausted. This queues up DB requests, effectively starving the event loop and causing the IB Pusher to time out after ~1 minute of training.
 
 **Last working item**: 
-    - Last item agent was working: Wrapping synchronous heavy MongoDB aggregations in  background WebSocket tasks ( and ) with  to prevent the FastAPI event loop from freezing.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y (Linted and verified syntax, but full E2E requires the user's local IB Gateway environment).
-    - Which testing method agent to use? manual testing by user
+    - Last item agent was working: Implementing a dedicated  for the AI training pipeline in .
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? manual testing by user (Full E2E requires the user's local IB Gateway and massive MongoDB dataset).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Training pipeline fails to start (UI times out / Server Freezes) - P0
-     - Attempted fixes: 
-       1. Fixed  crashes in  (tuple dict keys) and .
-       2. Wrapped sync DB queries in , , and  with .
-       3. Cleared a stale running training state from MongoDB Atlas.
-       4. Just wrapped heavy background DB aggregations in  WebSocket streamers.
+  Issue 1: Thread Pool Exhaustion / IB Pusher Timeout during Training - P0
+     - Attempted fixes: Wrapped all  and  in . This freed the main event loop but exhausted the default thread pool (typically 8-16 workers) because LightGBM training takes minutes per model.
      - Next debug checklist: 
-       - Wait for user to save, pull, restart their local backend, and test clicking Start Training again.
-       - If it *still* fails/times out, check  and  for any remaining synchronous PyMongo calls (e.g.,  or ) that haven't been wrapped in .
-     - Why fix this issue and what will be achieved with the fix? The user cannot train models because the backend becomes completely unresponsive under load.
-     - Status: USER VERIFICATION PENDING
-     - Is recurring issue? Y (Event loop saturation)
+       - In , import .
+       - Create a dedicated executor at the module level: .
+       - Update the  helper function to use this specific pool: .
+     - Why fix this issue and what will be achieved with the fix? It separates long-running CPU tasks from the default thread pool. The default pool will remain free for  DB queries, allowing the API and WebSockets to stay responsive while training happens in the background.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y (Event loop/Thread pool saturation)
      - Should Test frontend/backend/both after fix? backend (via user local test)
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  None (Focus is strictly on the P0 unblocking issue).
+  None outside of the P0 bug fix.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
@@ -48,44 +41,44 @@ A full-stack AI trading bot. In this session, all buggy skip/resume logic was co
     - 🟡 (P2) Smart Templates from AI performance data.
     - 🟡 (P2) Model Health card: UI element tracking model staleness + Retrain Stale action.
     - 🟢 (P3) Post-Development Local DB Migration: Execute the hardware/DB migration to a local NVMe drive once development is finalized.
+    - ⚪ (Backlog) Systematic migration to Motor (async PyMongo): Remove  wrappers and use native async MongoDB driver for long-term stability.
 
 **Completed work in this session**
-- Removed all skip/resume logic from  and fixed 4 indentation/syntax errors (DONE)
-- Fixed  in  (DONE)
-- Fixed  caused by tuple dictionary keys in  (DONE)
-- Wrapped blocking MongoDB calls in  endpoints with  (DONE)
-- Cleared stale training state from DB and added auto-reset logic on startup (DONE)
-- Wrapped blocking WebSocket background DB aggregations in  with  (DONE)
+- Fixed  PyMongo crashes ( -> ) in , ,  (DONE)
+- Converted  and  async methods to sync, and wrapped heavy endpoint callers (, ) in  (DONE)
+- Wrapped 9 synchronous LightGBM  calls in  to prevent main loop blocking (DONE)
+- Wired  to actually pause  and  when training mode is active (DONE)
+- Fixed  training endpoint to properly call  focus mode (DONE)
+- Fixed Frontend bug in  where it was reading  instead of  from the WebSocket payload (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None (The primary Container Event Loop Saturation issue from previous forks was actually deeply addressed in this session by fixing the async/sync DB blocking patterns).
+   - None.
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Container Event Loop Saturation
-  - Recurrence count: 6
-  - Status: RESOLVED / USER VERIFICATION PENDING (Root cause identified as sync PyMongo calls in async context).
+  - Issue recurrence in previous fork: Container Event Loop / Thread Pool Saturation
+  - Recurrence count: 7
+  - Status: IN PROGRESS
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Asyncio / Event Loop**: The backend uses FastAPI (async) but a synchronous PyMongo driver. Direct DB calls block the thread.  is absolutely mandatory for heavy DB operations.
+- **Asyncio / Thread Pools**: FastAPI is async, PyMongo and LightGBM are sync.  uses the *default* thread pool. If you fill the default pool with multi-minute ML tasks, your DB queries will queue up and the app will freeze. You *must* separate CPU-bound ML pools from IO-bound DB pools.
 
 **key DB schema**
   - : Tracks pipeline states (, , ).
-  - : Massive collection. Aggregating this blocks the thread if not delegated.
+  - : Massive collection used for model training.
 
 **changes in tech stack**
   - N/A
 
 **All files of reference** 
-  - 
-  - 
+  -  (Needs the fix)
   - 
   - 
 
 **Areas that need refactoring**: 
-  - The codebase extensively mixes synchronous PyMongo calls inside  functions. A systematic migration to Motor (Async PyMongo) or comprehensive  wrapping is needed for long-term stability.
+  - The heavy reliance on  across the app is reaching its limits. A future migration to  (Async PyMongo) is documented in the PRD for later.
 
 **key api endpoints**
   - 
@@ -93,27 +86,26 @@ A full-stack AI trading bot. In this session, all buggy skip/resume logic was co
   - 
 
 **Critical Info for New Agent** 
-- 🚨 **SYNCHRONOUS DB WARNING**: The application uses the sync  driver. Do not write  directly inside async router functions or background tasks. You **must** wrap them: . Failure to do this freezes the server and causes the frontend/IB pusher to time out.
-- The user is testing locally. They will reply with backend logs. If the logs show Read timed out or Connection refused from the IB pusher, the backend event loop is still blocked.
+- 🚨 **THREAD POOL EXHAUSTION**: Do not just use  for AI training. You MUST create a custom  specifically for the  file.
+- The user is testing locally. They will reply with backend logs. If the logs show Read timed out from the IB pusher after ~1 minute of training, the thread pool is still exhausted.
 
 **documents and test reports created in this job** 
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. **User**: what was your skip parameters?
-2. **User**: lets not do the skip anymore.
-3. **User**: do p0 (Fix syntax errors)
-4. **User**: but why did the GPU install fail? (Local setup inquiry)
-5. **User**: ok i started training from UI and i got a toast saying failed to start training
-6. **User**: saved and pulled. same thing. failed to start training
-7. **User**: same issues still
-8. **User**: (Provides massive backend startup logs)
-9. **User**: Does the button show a loading/spinner state?--yes, starting... Does the toast appear immediately or after a long wait?--after a long wait...
-10. **User**: (Provides IB Pusher logs showing connection timeouts)
-11. **User (PENDING)**: Agent pushed a final fix to  and needs the user to pull, restart, and report if the timeout is finally resolved.
+1. **User**: Systematic migration to Motor... tell me more about this
+2. **User**: how we didnt do it this way in the first place?
+3. **User**: ok but lets save this for later (Agreed to postpone Motor migration).
+4. **User**: ok i lcicked it and it said started training... then training already in progress
+5. **User**: (Provides massive log showing IB Pusher connected for longer, but eventually timing out).
+6. **User**: make sure to kill any other training quueues
+7. **User**: also, check if clicking start training stops the unneccessary tasks
+8. **User**: and the UI is set to show the status and updates for training now?
+9. **User**: ok i thin its training but im not sure. can you see
+10. **User**: (Provides final log showing IB Pusher timing out again after ~1 minute of training due to thread pool exhaustion).
 
 **Project Health Check:**
-**Mocked/Broken Locally**: User is unable to start training due to event loop blocking. Fixes applied, awaiting user confirmation.
+**Broken Locally**: User's local backend freezes/disconnects IB Gateway about 1 minute into AI Training due to default thread pool exhaustion. 
 
 **3rd Party Integrations** 
   - Interactive Brokers (IB Gateway) — Requires User Local Environment.
@@ -124,10 +116,7 @@ A full-stack AI trading bot. In this session, all buggy skip/resume logic was co
   - Testing agent used after significant changes: NO (Testing requires local IB Gateway connection and massive local DB).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: Event loop blocking (addressed, pending verification).
-
-**Credentials to test flow:**
-Standard  variables.
+  - Known regressions: Thread pool exhaustion.
 
 **What agent forgot to execute**
-N/A - Agent correctly pivoted to debugging the severe P0 backend freeze issue based on user logs.</analysis>
+The agent correctly diagnosed the thread pool exhaustion at the very end of the context window but ran out of tokens before actually importing  and implementing the custom  in .</analysis>
