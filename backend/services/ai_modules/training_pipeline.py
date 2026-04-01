@@ -200,15 +200,29 @@ class TrainingPipelineStatus:
         self._persist()
 
     def _persist(self):
+        """Persist status to MongoDB — runs in background thread to avoid blocking the event loop."""
         if self._db is not None:
             try:
-                self._db["training_pipeline_status"].update_one(
-                    {"_id": "pipeline"},
-                    {"$set": {**self._status, "updated_at": datetime.now(timezone.utc).isoformat()}},
-                    upsert=True,
-                )
+                status_copy = {**self._status, "updated_at": datetime.now(timezone.utc).isoformat()}
+                # Deep copy phase_history to avoid mutation during write
+                if "phase_history" in status_copy:
+                    status_copy["phase_history"] = {
+                        k: dict(v) for k, v in status_copy["phase_history"].items()
+                    }
+                TRAINING_POOL.submit(self._do_persist, status_copy)
             except Exception:
                 pass
+
+    def _do_persist(self, status_snapshot):
+        """Actual DB write — runs in TRAINING_POOL thread."""
+        try:
+            self._db["training_pipeline_status"].update_one(
+                {"_id": "pipeline"},
+                {"$set": status_snapshot},
+                upsert=True,
+            )
+        except Exception:
+            pass
 
 
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
