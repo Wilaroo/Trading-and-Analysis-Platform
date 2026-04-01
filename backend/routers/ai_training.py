@@ -7,6 +7,7 @@ and view results. All training runs asynchronously in the background.
 
 import logging
 import asyncio
+import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
@@ -15,6 +16,12 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai-training", tags=["AI Training"])
+
+
+class _TrainingThread(threading.Thread):
+    """Thread wrapper that provides asyncio.Task-like interface (.done()) for backwards compat."""
+    def done(self):
+        return not self.is_alive()
 
 # Global training task reference
 _training_task: Optional[asyncio.Task] = None
@@ -41,7 +48,6 @@ async def start_training(request: TrainingRequest):
             elapsed = datetime.now(timezone.utc) - _training_task._start_time
             if elapsed > timedelta(hours=6):
                 logger.warning(f"Stale training task detected (running {elapsed}), cancelling...")
-                _training_task.cancel()
                 _training_task = None
             else:
                 return {
@@ -74,27 +80,38 @@ async def start_training(request: TrainingRequest):
         except Exception as fm_err:
             logger.warning(f"Focus mode activation failed (non-fatal): {fm_err}")
 
-        async def _run():
+        def _training_thread_target():
+            """Run the entire training pipeline in an isolated thread with its own event loop.
+            This ensures training can NEVER block the main FastAPI event loop."""
             global _last_result
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                _last_result = await run_training_pipeline(
-                    db=mongo_db,
-                    phases=request.phases,
-                    bar_sizes=request.bar_sizes,
-                    max_symbols_override=request.max_symbols,
+                logger.info("[TRAINING THREAD] Starting pipeline in isolated thread...")
+                _last_result = loop.run_until_complete(
+                    run_training_pipeline(
+                        db=mongo_db,
+                        phases=request.phases,
+                        bar_sizes=request.bar_sizes,
+                        max_symbols_override=request.max_symbols,
+                    )
                 )
+                logger.info("[TRAINING THREAD] Pipeline completed successfully")
             except Exception as run_err:
-                logger.error(f"Training pipeline runtime error: {run_err}", exc_info=True)
+                logger.error(f"[TRAINING THREAD] Pipeline error: {run_err}", exc_info=True)
                 _last_result = {"error": str(run_err)}
             finally:
-                # Restore LIVE mode when training finishes (success or failure)
+                loop.close()
                 try:
                     focus_mode_manager.reset_to_live(result=_last_result)
+                    logger.info("[TRAINING THREAD] Focus mode reset to LIVE")
                 except Exception:
                     pass
 
-        _training_task = asyncio.create_task(_run())
+        # Wrap thread in a task-like interface for backwards compatibility
+        _training_task = _TrainingThread(target=_training_thread_target, daemon=True)
         _training_task._start_time = datetime.now(timezone.utc)
+        _training_task.start()
 
         phases_list = request.phases or [
             "generic", "setup", "short", "volatility", "exit",
@@ -171,14 +188,16 @@ async def stop_training():
     global _training_task
 
     if _training_task and not _training_task.done():
-        _training_task.cancel()
-        # Restore LIVE mode since training is being stopped
+        # For threads, we can't cancel directly — but we can restore focus mode
+        # and the pipeline will stop at the next checkpoint
+        logger.info("[TRAINING] Stop requested — restoring LIVE mode")
         try:
             from services.focus_mode_manager import focus_mode_manager
             focus_mode_manager.reset_to_live(result={"stopped": "manual"})
         except Exception:
             pass
-        return {"success": True, "message": "Training cancelled, focus mode restored to LIVE"}
+        _training_task = None
+        return {"success": True, "message": "Training stop requested, focus mode restored to LIVE"}
 
     return {"success": False, "message": "No training in progress"}
 
