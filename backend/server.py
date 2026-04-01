@@ -2587,11 +2587,22 @@ manager = ConnectionManager()
 # Default symbols to stream
 DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "TSLA"]
 
+
+def _is_training_active():
+    """Quick check if training mode is active — used by WS streams to pause during training."""
+    try:
+        return focus_mode_manager.get_mode() != "live"
+    except Exception:
+        return False
+
 async def stream_quotes():
     """Background task to stream quotes using batch API"""
     await asyncio.sleep(3)
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 all_symbols = set(DEFAULT_STREAM_SYMBOLS)
@@ -2725,6 +2736,9 @@ async def stream_bot_trades():
     last_trades_hash = None
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 # Get all trades using the summary method
@@ -2757,6 +2771,9 @@ async def stream_scanner_alerts():
     last_alerts_count = 0
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 alerts = background_scanner.get_live_alerts()
@@ -2794,6 +2811,9 @@ async def stream_smart_watchlist():
     last_watchlist_hash = None
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 watchlist_service = get_smart_watchlist()
@@ -2843,6 +2863,9 @@ async def stream_coaching_notifications():
     last_notification_time = datetime.now(timezone.utc) - timedelta(hours=1)
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 # Use the correct method name
@@ -2870,6 +2893,9 @@ async def stream_confidence_gate():
     last_summary_hash = None
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 from services.ai_modules.confidence_gate import get_confidence_gate
@@ -2964,6 +2990,9 @@ async def stream_market_regime():
     last_regime_hash = None
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(60)
+            continue
         if manager.active_connections:
             try:
                 regime_data = await market_regime_engine.get_current_regime()
@@ -2989,6 +3018,9 @@ async def stream_filter_thoughts():
     last_thoughts_hash = None
     
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 thoughts = trading_bot.get_filter_thoughts(limit=20)
@@ -3013,6 +3045,9 @@ async def stream_order_queue():
     last_hash = None
     _module_warned = False
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 from services.ib_execution_service import get_ib_execution_service
@@ -3043,6 +3078,9 @@ async def stream_risk_status():
     await asyncio.sleep(12)
     last_hash = None
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 from services.dynamic_risk_service import get_dynamic_risk_service
@@ -3069,6 +3107,9 @@ async def stream_sentcom_data():
     await asyncio.sleep(15)
     last_hash = None
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 sentcom_data = {}
@@ -3120,6 +3161,9 @@ async def stream_market_intel():
     await asyncio.sleep(20)
     last_hash = None
     while True:
+        if _is_training_active():
+            await asyncio.sleep(60)
+            continue
         if manager.active_connections:
             try:
                 intel_data = {}
@@ -3156,6 +3200,9 @@ async def stream_data_collection():
     await asyncio.sleep(10)
     last_hash = None
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 collection_data = {}
@@ -3221,6 +3268,9 @@ async def stream_simulator():
     await asyncio.sleep(8)
     last_hash = None
     while True:
+        if _is_training_active():
+            await asyncio.sleep(30)
+            continue
         if manager.active_connections:
             try:
                 sim_data = {}
