@@ -26,17 +26,22 @@ Usage:
 
 import logging
 import asyncio
+import concurrent.futures
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+# Dedicated thread pool for CPU-intensive ML training.
+# Keeps the default asyncio pool free for DB queries / WebSocket handlers.
+TRAINING_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
 
 async def _run_in_thread(func, *args, **kwargs):
-    """Run a blocking function in thread pool to avoid blocking the event loop."""
+    """Run a blocking ML function in the dedicated TRAINING_POOL."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+    return await loop.run_in_executor(TRAINING_POOL, lambda: func(*args, **kwargs))
 
 # ── Constants ──────────────────────────────────────────────
 

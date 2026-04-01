@@ -46,7 +46,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 ---
 
 ## P0 Issues
-- [USER VERIFICATION PENDING] Training pipeline fails to start — event loop blocking fixes applied, awaiting local test with IB Gateway
+- [FIXED — USER VERIFICATION PENDING] Thread pool exhaustion during training: Dedicated `ThreadPoolExecutor(max_workers=2)` added to `training_pipeline.py`. ML training tasks no longer compete with DB queries for the default asyncio thread pool. IB Pusher should remain connected during training. Awaiting user local test with IB Gateway.
 
 ## Prioritized Backlog
 
