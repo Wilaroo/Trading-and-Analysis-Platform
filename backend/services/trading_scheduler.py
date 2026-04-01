@@ -246,6 +246,14 @@ class TradingScheduler:
             
     async def _run_daily_analysis(self):
         """Run daily analysis (Medium Learning services)"""
+        # Skip during training
+        try:
+            from services.focus_mode_manager import focus_mode_manager
+            if focus_mode_manager.get_mode() != "live":
+                return
+        except Exception:
+            pass
+
         start_time = datetime.now(timezone.utc)
         result = ScheduledTaskResult(
             task_type=ScheduledTaskType.DAILY_ANALYSIS.value,
@@ -313,6 +321,14 @@ class TradingScheduler:
             
     async def _run_weekly_report(self):
         """Generate weekly intelligence report"""
+        # Skip during training
+        try:
+            from services.focus_mode_manager import focus_mode_manager
+            if focus_mode_manager.get_mode() != "live":
+                return
+        except Exception:
+            pass
+
         start_time = datetime.now(timezone.utc)
         result = ScheduledTaskResult(
             task_type=ScheduledTaskType.WEEKLY_REPORT.value,
@@ -347,6 +363,14 @@ class TradingScheduler:
             
     async def _run_shadow_update(self):
         """Update shadow signal outcomes and shadow tracker decisions"""
+        # Skip during training — free up event loop and DB resources
+        try:
+            from services.focus_mode_manager import focus_mode_manager
+            if focus_mode_manager.get_mode() != "live":
+                return
+        except Exception:
+            pass
+
         # Only run during market hours
         if not self.is_market_hours():
             return
@@ -370,6 +394,14 @@ class TradingScheduler:
             
     async def _run_edge_decay_check(self):
         """Check for edge decay"""
+        # Skip during training
+        try:
+            from services.focus_mode_manager import focus_mode_manager
+            if focus_mode_manager.get_mode() != "live":
+                return
+        except Exception:
+            pass
+
         start_time = datetime.now(timezone.utc)
         result = ScheduledTaskResult(
             task_type=ScheduledTaskType.EDGE_DECAY_CHECK.value,
