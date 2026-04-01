@@ -48,7 +48,8 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 ## P0 Issues
 - [FIXED] Thread pool exhaustion during training: Dedicated `ThreadPoolExecutor(max_workers=2)` in `training_pipeline.py`
 - [FIXED] `stream_training_status` crash: `UnboundLocalError` on `status` variable. Fixed initialization.
-- [FIXED] Red status indicators on startup: `SystemStatusContext` now polls every 5s during first 30s (was 60s). Also triggers re-check when WebSocket connects.
+- [FIXED] Red status indicators on startup: `SystemStatusContext` now polls every 5s during first 30s. Also re-checks when WS connects.
+- [FIXED] Training badge persisting forever: `FocusModeContext` localStorage created infinite persistence loop. Now syncs with backend `GET /api/focus-mode` on mount.
 - [FIXED] Event loop blocking during startup: Added yield points between heavy init steps.
 - [FIXED] Spammy `ib_execution_service` import error: Now prints once instead of every 3s.
 

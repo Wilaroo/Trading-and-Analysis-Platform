@@ -111,25 +111,49 @@ export const FocusModeProvider = ({ children }) => {
   // Subscribers for mode changes
   const subscribers = useRef(new Set());
   
-  // Persist mode to localStorage
+  // Sync with backend on mount — backend is the source of truth
+  // This prevents stale localStorage from keeping "training" mode alive after a backend restart
   useEffect(() => {
-    const stored = localStorage.getItem('sentcom_focus_mode');
-    if (stored) {
+    const syncWithBackend = async () => {
       try {
-        const data = JSON.parse(stored);
-        // Only restore non-live modes if they were recent (last 30 minutes)
-        if (data.mode !== 'live' && data.timestamp) {
-          const elapsed = Date.now() - data.timestamp;
-          if (elapsed < 30 * 60 * 1000) {
-            setFocusMode(data.mode);
-            setModeStartTime(data.startTime ? new Date(data.startTime) : null);
+        const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+        const res = await fetch(`${API_URL}/api/focus-mode`);
+        if (res.ok) {
+          const data = await res.json();
+          const backendMode = data.mode || 'live';
+          // If backend says live but localStorage says training, trust the backend
+          if (backendMode === 'live' || backendMode === 'normal') {
+            setFocusMode('live');
+            setModeStartTime(null);
+            setModeContext({});
+            localStorage.removeItem('sentcom_focus_mode');
+          } else {
+            setFocusMode(backendMode);
+            setModeStartTime(new Date());
             setModeContext(data.context || {});
           }
         }
       } catch (e) {
-        console.warn('[FocusMode] Failed to restore state:', e);
+        // Backend not reachable yet — fall back to localStorage
+        const stored = localStorage.getItem('sentcom_focus_mode');
+        if (stored) {
+          try {
+            const data = JSON.parse(stored);
+            if (data.mode !== 'live' && data.timestamp) {
+              const elapsed = Date.now() - data.timestamp;
+              if (elapsed < 30 * 60 * 1000) {
+                setFocusMode(data.mode);
+                setModeStartTime(data.startTime ? new Date(data.startTime) : null);
+                setModeContext(data.context || {});
+              }
+            }
+          } catch (e2) {
+            console.warn('[FocusMode] Failed to restore state:', e2);
+          }
+        }
       }
-    }
+    };
+    syncWithBackend();
   }, []);
   
   // Save mode to localStorage when it changes
