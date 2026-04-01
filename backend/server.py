@@ -3728,6 +3728,7 @@ async def websocket_quotes(websocket: WebSocket):
             elif data.get("action") == "start_pipeline":
                 # Start the full 5-phase training pipeline via WebSocket
                 # (bypasses HTTP connection pool limitation entirely)
+                print(f"[WS] Received start_pipeline action")
                 try:
                     from routers.ai_training import start_training as _start_training_endpoint, TrainingRequest
                     # Build request from WebSocket data (or use defaults)
@@ -3739,7 +3740,9 @@ async def websocket_quotes(websocket: WebSocket):
                         bar_sizes=ws_bar_sizes,
                         max_symbols=ws_max_symbols
                     )
+                    print(f"[WS] Calling start_training endpoint...")
                     result = await _start_training_endpoint(training_request)
+                    print(f"[WS] start_training returned: {result}")
                     await manager.send_personal_message({
                         "type": "pipeline_start_result",
                         "success": result.get("success", False),
@@ -3747,7 +3750,7 @@ async def websocket_quotes(websocket: WebSocket):
                         "error": result.get("error", ""),
                         "pid": result.get("pid"),
                     }, websocket)
-                    print(f"[WS] Pipeline start result: {result.get('success')} - {result.get('message', result.get('error', ''))}")
+                    print(f"[WS] Pipeline start result sent to client: {result.get('success')} - {result.get('message', result.get('error', ''))}")
                 except Exception as pipe_err:
                     import traceback
                     traceback.print_exc()

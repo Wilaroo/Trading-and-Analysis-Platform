@@ -464,7 +464,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     startCallbackRef.current = setTimeout(() => {
       setStarting(false);
       toast.error('Training start timed out — check backend terminal');
-    }, 30000);
+    }, 60000);  // Increased to 60s for slow machine startup
   }, [sendWsMessage]);
 
   const handleStopTraining = useCallback(() => {
