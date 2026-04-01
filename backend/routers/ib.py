@@ -398,11 +398,12 @@ async def disconnect_from_ib():
 # ===================== IB Data Pusher Endpoints =====================
 
 @router.post("/push-data")
-def receive_pushed_ib_data(request: IBPushDataRequest):
+async def receive_pushed_ib_data(request: IBPushDataRequest):
     """
     Receive data pushed from local IB Data Pusher.
-    This endpoint runs as sync (def, not async def) so FastAPI executes it
-    in a thread pool — immune to event loop blocking from background tasks.
+    This endpoint runs as async because it only does in-memory dict updates
+    (microseconds). Running on the event loop keeps it immune to thread pool
+    starvation during training.
     """
     global _pushed_ib_data
     
@@ -465,10 +466,10 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
 
 
 @router.get("/pushed-data")
-def get_pushed_ib_data():
+async def get_pushed_ib_data():
     """
     Get the latest data pushed from local IB Data Pusher.
-    Runs as sync (def) to bypass event loop blocking.
+    Async because it only reads in-memory dicts — immune to thread pool starvation.
     """
     global _pushed_ib_data
     
