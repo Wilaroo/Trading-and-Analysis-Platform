@@ -33,9 +33,10 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Dedicated thread pool for CPU-intensive ML training.
-# Keeps the default asyncio pool free for DB queries / WebSocket handlers.
-TRAINING_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+# Dedicated thread pool for CPU-intensive ML training + training DB reads.
+# ALL training I/O uses this pool, keeping the default asyncio pool 100% free
+# for FastAPI endpoints (push-data, health, etc.)
+TRAINING_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
 
 async def _run_in_thread(func, *args, **kwargs):
@@ -222,7 +223,7 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
 
         loop = asyncio.get_event_loop()
         results = await loop.run_in_executor(
-            None,
+            TRAINING_POOL,
             lambda: list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
         )
         return [r["_id"] for r in results]
@@ -236,7 +237,7 @@ async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
     try:
         loop = asyncio.get_event_loop()
         bars = await loop.run_in_executor(
-            None,
+            TRAINING_POOL,
             lambda: list(db["ib_historical_data"].find(
                 {"symbol": symbol, "bar_size": bar_size},
                 {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
@@ -624,7 +625,7 @@ async def run_training_pipeline(
 
             regime_provider = RegimeFeatureProvider(db)
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, regime_provider.preload_index_daily)
+            await loop.run_in_executor(TRAINING_POOL, regime_provider.preload_index_daily)
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
@@ -1052,7 +1053,7 @@ async def run_training_pipeline(
             # Preload SPY daily data for regime classification
             regime_provider = RegimeFeatureProvider(db)
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, regime_provider.preload_index_daily)
+            await loop.run_in_executor(TRAINING_POOL, regime_provider.preload_index_daily)
             spy_data = regime_provider._data.get("spy", {})
 
             if not spy_data or spy_data.get("closes") is None or len(spy_data.get("closes", [])) < 30:
