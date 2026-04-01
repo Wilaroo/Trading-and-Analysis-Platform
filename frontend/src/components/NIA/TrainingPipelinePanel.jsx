@@ -409,7 +409,10 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
 
   useEffect(() => {
     if (!isTraining) return;
-    const interval = setInterval(fetchData, 5000);
+    // During training, rely on WebSocket for status updates (wsTrainingStatus).
+    // Skip HTTP polling since throttler is paused and GETs would be rejected.
+    // Only poll every 30s as a fallback (throttler will reject if still paused).
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [isTraining, fetchData]);
 

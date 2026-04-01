@@ -50,16 +50,15 @@ async def _monitor_training_process(task: _TrainingProcess):
     while not task.done():
         await asyncio.sleep(10)
 
-    # Subprocess finished — log exit code and stderr
+    # Subprocess finished — log exit code and output from log file
     exit_code = task._proc.returncode
     logger.info(f"[TRAINING] Subprocess finished with exit code: {exit_code}")
     try:
-        stderr_output = task._proc.stderr.read().decode('utf-8', errors='replace')[-2000:]
-        stdout_output = task._proc.stdout.read().decode('utf-8', errors='replace')[-2000:]
-        if stderr_output:
-            logger.warning(f"[TRAINING] Subprocess stderr:\n{stderr_output}")
-        if stdout_output:
-            logger.info(f"[TRAINING] Subprocess stdout:\n{stdout_output}")
+        log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log')
+        with open(log_path, 'r') as f:
+            log_output = f.read()[-2000:]
+        if log_output:
+            logger.info(f"[TRAINING] Subprocess output (last 2000 chars):\n{log_output}")
     except Exception:
         pass
 
@@ -141,28 +140,32 @@ async def start_training(request: TrainingRequest):
         proc = subprocess.Popen(
             cmd,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # /app/backend
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log'), 'w'),
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout log file
             env=env,
+            preexec_fn=lambda: os.nice(10),  # Lower CPU priority so browser stays responsive
         )
         
-        # Verify subprocess started (give it 2 seconds)
-        import time
-        time.sleep(1)
+        # Verify subprocess started (give it 2 seconds) — use async sleep to keep event loop alive
+        await asyncio.sleep(1.5)
         if proc.poll() is not None:
-            # Subprocess already exited — crashed on startup
-            stderr = proc.stderr.read().decode('utf-8', errors='replace')[-2000:]
-            stdout = proc.stdout.read().decode('utf-8', errors='replace')[-2000:]
+            # Subprocess already exited — crashed on startup. Read from log file.
+            log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log')
+            log_output = ""
+            try:
+                with open(log_path, 'r') as f:
+                    log_output = f.read()[-2000:]
+            except Exception:
+                pass
             logger.error(f"[TRAINING] Subprocess crashed immediately! Exit code: {proc.returncode}")
-            logger.error(f"[TRAINING] stderr: {stderr}")
-            logger.error(f"[TRAINING] stdout: {stdout}")
+            logger.error(f"[TRAINING] output: {log_output}")
             try:
                 focus_mode_manager.reset_to_live(result={"error": "subprocess crashed"})
             except Exception:
                 pass
             return {
                 "success": False,
-                "error": f"Training subprocess crashed on startup: {stderr[-500:] or stdout[-500:] or 'Unknown error'}",
+                "error": f"Training subprocess crashed on startup: {log_output[-500:] or 'Unknown error'}",
             }
         
         _training_task = _TrainingProcess(proc)
