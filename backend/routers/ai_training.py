@@ -116,6 +116,21 @@ async def get_training_status():
             else:
                 task_status = "running"
 
+        # Auto-reset stale DB status: if no in-memory task is running but DB shows
+        # a non-idle phase, a previous run was interrupted. Reset to idle.
+        if task_status != "running" and status_doc and mongo_db is not None:
+            db_phase = status_doc.get("phase", "idle")
+            if db_phase not in ("idle", "completed", "cancelled", "error"):
+                logger.info(f"Resetting stale pipeline status (phase was '{db_phase}' but no task running)")
+                await asyncio.to_thread(
+                    mongo_db["training_pipeline_status"].update_one,
+                    {"_id": "pipeline"},
+                    {"$set": {"phase": "idle", "current_model": "", "current_phase_progress": 0}},
+                )
+                status_doc["phase"] = "idle"
+                status_doc["current_model"] = ""
+                status_doc["current_phase_progress"] = 0
+
         return {
             "success": True,
             "task_status": task_status,
