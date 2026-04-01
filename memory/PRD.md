@@ -46,7 +46,8 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 ---
 
 ## P0 Issues
-- [FIXED — USER VERIFICATION PENDING] Thread pool exhaustion during training: Dedicated `ThreadPoolExecutor(max_workers=2)` added to `training_pipeline.py`. ML training tasks no longer compete with DB queries for the default asyncio thread pool. IB Pusher should remain connected during training. Awaiting user local test with IB Gateway.
+- [FIXED — USER VERIFICATION PENDING] Thread pool exhaustion during training: Dedicated `ThreadPoolExecutor(max_workers=2)` added to `training_pipeline.py`. ML training tasks no longer compete with DB queries for the default asyncio thread pool.
+- [FIXED] `stream_training_status` crash: `UnboundLocalError` on `status` variable when no WS clients connected at startup. Fixed by initializing `status = None` before the while loop in `server.py`.
 
 ## Prioritized Backlog
 

@@ -2920,6 +2920,7 @@ async def stream_training_status():
     await asyncio.sleep(25)
     
     last_status_hash = None
+    status = None
     
     while True:
         if manager.active_connections:
