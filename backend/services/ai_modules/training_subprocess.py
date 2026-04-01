@@ -22,22 +22,28 @@ logger = logging.getLogger("training_subprocess")
 
 def main():
     parser = argparse.ArgumentParser(description="Run AI training pipeline in isolated process")
-    parser.add_argument("--mongo-url", required=True)
-    parser.add_argument("--db-name", required=True)
     parser.add_argument("--phases", default=None, help="Comma-separated phase list")
     parser.add_argument("--bar-sizes", default=None, help="Comma-separated bar sizes")
     parser.add_argument("--max-symbols", type=int, default=None)
     args = parser.parse_args()
 
+    # Read MongoDB connection from environment (avoids shell escaping issues with special chars)
+    mongo_url = os.environ.get("TRAINING_MONGO_URL") or os.environ.get("MONGO_URL", "")
+    db_name = os.environ.get("TRAINING_DB_NAME") or os.environ.get("DB_NAME", "sentcom")
+
+    if not mongo_url:
+        logger.error("[SUBPROCESS] No MONGO_URL configured")
+        sys.exit(1)
+
     # Connect to MongoDB independently
     from pymongo import MongoClient
-    client = MongoClient(args.mongo_url, serverSelectionTimeoutMS=30000)
-    db = client[args.db_name]
+    client = MongoClient(mongo_url, serverSelectionTimeoutMS=30000)
+    db = client[db_name]
 
     # Verify connection
     try:
         db.command("ping")
-        logger.info(f"[SUBPROCESS] Connected to MongoDB: {args.db_name}")
+        logger.info(f"[SUBPROCESS] Connected to MongoDB: {db_name}")
     except Exception as e:
         logger.error(f"[SUBPROCESS] MongoDB connection failed: {e}")
         _write_result(db, {"error": f"MongoDB connection failed: {e}"})

@@ -124,17 +124,13 @@ async def start_training(request: TrainingRequest):
         except Exception as fm_err:
             logger.warning(f"Focus mode activation failed (non-fatal): {fm_err}")
 
-        # Build subprocess command
-        mongo_url = os.environ.get("MONGO_URL", "")
-        db_name = os.environ.get("DB_NAME", "sentcom")
-        if not mongo_url:
-            return {"success": False, "error": "MONGO_URL not configured"}
-
-        cmd = [
-            sys.executable, "-m", "services.ai_modules.training_subprocess",
-            "--mongo-url", mongo_url,
-            "--db-name", db_name,
-        ]
+        # Launch in a completely separate process — zero GIL/import lock interference
+        # Pass MongoDB credentials via environment (avoids shell escaping issues with special chars in URLs)
+        logger.info("[TRAINING] Launching subprocess...")
+        env = os.environ.copy()
+        # MONGO_URL and DB_NAME are already in os.environ; subprocess inherits them
+        
+        cmd = [sys.executable, "-m", "services.ai_modules.training_subprocess"]
         if request.phases:
             cmd.extend(["--phases", ",".join(request.phases)])
         if request.bar_sizes:
@@ -142,13 +138,12 @@ async def start_training(request: TrainingRequest):
         if request.max_symbols:
             cmd.extend(["--max-symbols", str(request.max_symbols)])
 
-        # Launch in a completely separate process — zero GIL/import lock interference
-        logger.info(f"[TRAINING] Launching subprocess: {' '.join(cmd[:4])}...")
         proc = subprocess.Popen(
             cmd,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # /app/backend
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
         
         # Verify subprocess started (give it 2 seconds)
