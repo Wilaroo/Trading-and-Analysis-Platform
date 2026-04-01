@@ -3193,22 +3193,17 @@ async def stream_data_collection():
 
 
 async def stream_focus_mode():
-    """Push focus mode state via WebSocket (replaces 5s polling)."""
+    """Push focus mode state via WebSocket — reads from in-memory FocusModeManager (source of truth)."""
     await asyncio.sleep(5)
     last_hash = None
     while True:
         if manager.active_connections:
             try:
-                mode_data = {}
-                try:
-                    def _get_focus_mode():
-                        return db["focus_mode"].find_one(sort=[("updated_at", -1)], projection={"_id": 0})
-                    mode_doc = await asyncio.to_thread(_get_focus_mode)
-                    mode_data = mode_doc if mode_doc else {"mode": "normal"}
-                except Exception:
-                    mode_data = {"mode": "normal"}
+                # Read from in-memory manager — this is the authoritative source
+                # (focus_mode_manager.set_mode/reset_to_live updates this immediately)
+                mode_data = focus_mode_manager.get_status()
                 
-                data_hash = hash(str(mode_data.get("mode", "")) + str(mode_data.get("updated_at", "")))
+                data_hash = hash(str(mode_data.get("mode", "")) + str(mode_data.get("start_time", "")))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "focus_mode",
