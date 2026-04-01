@@ -3035,7 +3035,7 @@ async def stream_order_queue():
                     _module_warned = True
             except Exception as e:
                 print(f"Order queue stream error: {e}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(10)  # Reduced from 3s — order queue changes slowly
 
 
 async def stream_risk_status():

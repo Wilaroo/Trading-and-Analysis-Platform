@@ -129,7 +129,7 @@ class CloudAPIClient:
         self.session = create_session()
         self.request_count = 0
         self.last_request_time = 0
-        self.min_request_interval = 2.0  # Minimum 2 seconds between requests (was 0.5)
+        self.min_request_interval = 0.5  # Minimum 0.5 seconds between requests (reduced from 2.0 — running on localhost)
         self.rate_limit_backoff = 1.0  # Additional backoff multiplier when rate limited
         self.last_429_time = 0  # Track when we last got rate limited
         
@@ -943,7 +943,7 @@ class IBDataPusher:
         
         try:
             # Use the CloudAPIClient with retry logic
-            result = self.api.post("/api/ib/push-data", payload, timeout=30)
+            result = self.api.post("/api/ib/push-data", payload, timeout=120)
             
             if result and result.get("success"):
                 logger.info(f"Push OK! Cloud received: {result.get('received', {})}")

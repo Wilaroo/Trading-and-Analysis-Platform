@@ -88,18 +88,23 @@ const AICoachTab = ({
   // Initial fetch
   // Initial fetch + fallback polling only when WS isn't providing data
   useEffect(() => {
-    fetchRegimeData();
-    fetchSessionData();
+    // Delay initial fetch to avoid startup burst
+    const timer = setTimeout(() => {
+      fetchRegimeData();
+      fetchSessionData();
+    }, 4000);
     
     // Only poll if WS isn't providing market regime
     if (!wsMarketRegime) {
-      return safePolling(() => {
+      const cleanup = safePolling(() => {
         fetchRegimeData();
         fetchSessionData();
       }, 60000, { immediate: false });
+      return () => { clearTimeout(timer); cleanup(); };
     }
     // Session still needs periodic refresh (no WS equivalent)
-    return safePolling(fetchSessionData, 60000, { immediate: false });
+    const cleanup = safePolling(fetchSessionData, 60000, { immediate: false });
+    return () => { clearTimeout(timer); cleanup(); };
   }, [fetchRegimeData, fetchSessionData, wsMarketRegime]);
   
   // Handle ticker click - opens the enhanced chart modal

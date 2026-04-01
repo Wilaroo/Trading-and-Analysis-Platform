@@ -588,30 +588,27 @@ const NewDashboard = ({
   }, []);
   
   // Initial fetch and auto-refresh
-  // Only poll for data NOT available via WebSocket props
+  // Stagger initial loads to avoid thundering herd — SentCom hooks handle most data via WS
   useEffect(() => {
-    // Account data and dashboard data still need REST — no WS equivalent
-    fetchAccountData();
-    fetchDashboardData();
-    fetchOrderQueue();
-    fetchPositions();
-    fetchAlerts();
-    fetchSetups();
+    // Phase 1: Account + dashboard (most important for UI) — delayed 3s
+    const t1 = setTimeout(() => { fetchAccountData(); fetchDashboardData(); }, 3000);
+    // Phase 2: Order queue + positions — delayed 6s (SentCom already provides via WS)
+    const t2 = setTimeout(() => { fetchOrderQueue(); fetchPositions(); }, 6000);
+    // Phase 3: Alerts + setups — delayed 10s (SentCom already provides via WS)
+    const t3 = setTimeout(() => { fetchAlerts(); fetchSetups(); }, 10000);
     
-    // Dashboard data refresh at 30s (reduced from 15s — WS handles real-time updates)
-    const cleanupDashboard = safePolling(fetchDashboardData, 30000, { immediate: false });
-    // Account data at 30s (was 15s — polling is fallback for WS)
-    const cleanupAccount = safePolling(fetchAccountData, 30000, { immediate: false, essential: true });
-    // Order queue at 30s (was 15s)
-    const cleanupOrders = safePolling(fetchOrderQueue, 30000, { immediate: false, essential: true });
-    // Positions at 15s (more real-time since it's the star of the show)
-    const cleanupPositions = safePolling(fetchPositions, 15000, { immediate: false, essential: true });
-    // Alerts at 15s
-    const cleanupAlerts = safePolling(fetchAlerts, 15000, { immediate: false });
-    // Setups at 30s
-    const cleanupSetups = safePolling(fetchSetups, 30000, { immediate: false });
+    // All polling intervals increased — WS provides real-time updates
+    const cleanupDashboard = safePolling(fetchDashboardData, 60000, { immediate: false });
+    const cleanupAccount = safePolling(fetchAccountData, 60000, { immediate: false, essential: true });
+    const cleanupOrders = safePolling(fetchOrderQueue, 60000, { immediate: false, essential: true });
+    const cleanupPositions = safePolling(fetchPositions, 60000, { immediate: false, essential: true });
+    const cleanupAlerts = safePolling(fetchAlerts, 60000, { immediate: false });
+    const cleanupSetups = safePolling(fetchSetups, 120000, { immediate: false });
     
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       cleanupDashboard();
       cleanupAccount();
       cleanupOrders();

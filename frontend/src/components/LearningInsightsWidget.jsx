@@ -86,8 +86,10 @@ const LearningInsightsWidget = ({ onNavigateToHub, className = '' }) => {
   }, []);
 
   useEffect(() => {
-    fetchData();
-    return safePolling(fetchData, 60000, { immediate: false });
+    // Delay initial fetch to reduce startup burst
+    const timer = setTimeout(() => fetchData(), 8000);
+    const cleanup = safePolling(fetchData, 60000, { immediate: false });
+    return () => { clearTimeout(timer); cleanup(); };
   }, [fetchData]);
 
   // Get top alerts (1 warning, 1 success)

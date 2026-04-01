@@ -16,7 +16,7 @@ import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, ChevronRight, Activity } from 'lucide-react';
 import api, { safeGet, safePost } from '../utils/api';
 
-const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+const AUTO_REFRESH_INTERVAL = 60000; // 60 seconds (reduced from 30s)
 
 // Custom Time Range Button
 const TimeRangeButton = ({ active, onClick, children }) => (
@@ -454,11 +454,13 @@ const BotPerformanceChart = ({
   useEffect(() => {
     // Show loading briefly for visual feedback on time range switch
     setIsLoading(true);
-    fetchEquityCurve();
+    const timer = setTimeout(() => fetchEquityCurve(), 6000);
     
     if (autoRefresh) {
-      return safePolling(fetchEquityCurve, AUTO_REFRESH_INTERVAL, { immediate: false });
+      const cleanup = safePolling(fetchEquityCurve, AUTO_REFRESH_INTERVAL, { immediate: false });
+      return () => { clearTimeout(timer); cleanup(); };
     }
+    return () => clearTimeout(timer);
   }, [fetchEquityCurve, autoRefresh]);
 
   // Generate demo data for display when no real trades

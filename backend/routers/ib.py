@@ -280,8 +280,8 @@ def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
 # ===================== Connection Endpoints =====================
 
 @router.get("/status")
-async def get_connection_status():
-    """Get IB connection status — checks both direct IB and data pusher"""
+def get_connection_status():
+    """Get IB connection status — runs as sync (def) to bypass event loop blocking."""
     if not _ib_service:
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
