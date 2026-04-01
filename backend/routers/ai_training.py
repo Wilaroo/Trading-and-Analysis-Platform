@@ -137,14 +137,30 @@ async def start_training(request: TrainingRequest):
         if request.max_symbols:
             cmd.extend(["--max-symbols", str(request.max_symbols)])
 
-        proc = subprocess.Popen(
-            cmd,
+        log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log')
+        popen_kwargs = dict(
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # /app/backend
-            stdout=open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log'), 'w'),
+            stdout=open(log_path, 'w'),
             stderr=subprocess.STDOUT,  # Merge stderr into stdout log file
             env=env,
-            preexec_fn=lambda: os.nice(10),  # Lower CPU priority so browser stays responsive
         )
+        # Lower CPU priority on POSIX systems (Linux/Mac) so browser stays responsive
+        if os.name != 'nt':
+            popen_kwargs['preexec_fn'] = lambda: os.nice(10)
+
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+
+        # On Windows, lower the subprocess priority after creation
+        if os.name == 'nt':
+            try:
+                import ctypes
+                handle = ctypes.windll.kernel32.OpenProcess(0x0200, False, proc.pid)
+                if handle:
+                    ctypes.windll.kernel32.SetPriorityClass(handle, 0x00004000)  # BELOW_NORMAL_PRIORITY_CLASS
+                    ctypes.windll.kernel32.CloseHandle(handle)
+                    logger.info(f"[TRAINING] Set subprocess {proc.pid} to BELOW_NORMAL priority")
+            except Exception as e:
+                logger.warning(f"[TRAINING] Could not lower subprocess priority: {e}")
         
         # Verify subprocess started (give it 2 seconds) — use async sleep to keep event loop alive
         await asyncio.sleep(1.5)

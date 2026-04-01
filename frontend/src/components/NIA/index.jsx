@@ -233,7 +233,10 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
     }, pollInterval);
 
     return () => clearInterval(interval);
-  }, [fetchAllData, getCached, getPollingInterval, isTrainingActive]);
+    // Note: removed isTrainingActive from deps — getPollingInterval already
+    // adjusts interval based on training mode. Re-running this effect during
+    // training would fire 15 api.get calls that all get rejected, wasting cycles.
+  }, [fetchAllData, getCached, getPollingInterval]);
 
   const handleRefresh = useCallback(() => fetchAllData(), [fetchAllData]);
   const noopCallback = useCallback(() => {}, []);

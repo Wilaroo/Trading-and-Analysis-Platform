@@ -10,9 +10,7 @@ import {
   Crosshair, Wrench
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api, apiLongRunning } from '../../utils/api';
-import { requestThrottler } from '../../utils/requestThrottler';
-import { setTrainingActive } from '../../utils/safePolling';
+import { api } from '../../utils/api';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -419,29 +417,32 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const handleStartTraining = useCallback(async () => {
     try {
       setStarting(true);
-      // Free browser connections: pause throttler to drain queued GETs
-      // and prevent new ones from being sent during training startup
-      requestThrottler.pause();
-      setTrainingActive(true);
-      // Small delay to let in-flight GETs complete and free connections
-      await new Promise(r => setTimeout(r, 300));
-      const res = await apiLongRunning.post('/api/ai-training/start', {});
-      if (res.data?.success) { toast.success('Training pipeline started'); fetchData(); }
-      else {
-        toast.error(res.data?.error || 'Failed to start training');
-        // Resume if training didn't actually start
-        requestThrottler.resume();
-        setTrainingActive(false);
+      // Use raw fetch() to bypass axios throttler and send POST immediately.
+      // Don't manipulate the throttler here — the backend activates focus mode,
+      // which triggers a WebSocket broadcast, which TrainingModeContext picks up
+      // and calls setTrainingActive(true) → throttler.pause() naturally.
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const response = await fetch(`${backendUrl}/api/ai-training/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(120000), // 2 min timeout
+      });
+      const data = await response.json();
+      if (data?.success) {
+        toast.success('Training pipeline started');
+        // Don't call fetchData() immediately — throttler will be paused soon by WS
+      } else {
+        toast.error(data?.error || 'Failed to start training');
       }
     } catch (err) {
       console.error('[TrainingPipeline] Start error:', err);
-      toast.error(`Failed to start training: ${err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Network error'}`);
-      // Resume if training failed to start
-      requestThrottler.resume();
-      setTrainingActive(false);
+      const msg = err?.name === 'TimeoutError' ? 'Request timed out (2 min)' : (err?.message || 'Network error');
+      toast.error(`Failed to start training: ${msg}`);
+    } finally {
+      setStarting(false);
     }
-    finally { setStarting(false); }
-  }, [fetchData]);
+  }, []);
 
   const handleStopTraining = useCallback(async () => {
     try {

@@ -102,8 +102,8 @@ class RequestThrottler {
   }
 }
 
-// 2 concurrent slots for background polling
-// Browser limit 6 — 2 WebSockets — 2 reserved for POST/PUT = 2 for GETs
-export const requestThrottler = new RequestThrottler(2);
+// 1 concurrent slot for background polling
+// Browser limit 6 — 2 WebSockets — 3 reserved for user actions = 1 for background GETs
+export const requestThrottler = new RequestThrottler(1);
 
 export default RequestThrottler;
