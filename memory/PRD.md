@@ -56,6 +56,9 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED ✅] **Startup thundering herd (IB Pusher timeout at ~10s)**: Frontend was firing 20+ HTTP requests simultaneously at t=0 on page load. Staggered initial loads across 12 seconds (2-3 req/s max). Backend: wrapped sync `bulk_write` in `short_interest_service.py` with `asyncio.to_thread`. **Critical fix**: Converted `push-data`, `pushed-data`, `health`, and `startup-check` endpoints from `async def` to `def` — they now run in the thread pool, completely immune to event loop blocking from background tasks. Files changed: SentCom.jsx (11 hooks staggered), useCommandCenterData.js (4-phase delays), short_interest_service.py, ib.py, system_router.py.
 - [FIXED ✅] **False-positive "API" red dot in TickerTape** (April 2026): The `InlineStatus` component in `TickerTape.js` showed API red because `checkAllServices` in `SystemStatusContext` would skip IB/Ollama checks when `/api/health` failed — losing the chance to prove backend was alive. Fix: (1) Self-healing logic — always check IB/Ollama regardless of health result; if any succeeds, reset backend failure counter. (2) Increased failure threshold from 3→5. (3) Extended polling from 60s→90s. File changed: `SystemStatusContext.jsx`.
 
+## Recent Enhancements (April 2026)
+- **Pipeline Progress Panel**: New `PipelineProgressPanel.jsx` component shows real-time per-phase progress bars during training. Reads from existing WS `training_status` stream (zero extra polling). Shows: per-phase progress bar, model count (trained/expected), average accuracy per phase, current model name, overall completion percentage. Integrated into `UnifiedAITraining.jsx`.
+
 ## Prioritized Backlog
 
 ### P1

@@ -1,6 +1,6 @@
 {
   "files": {
-    "main.css": "/static/css/main.0f43c45f.css",
+    "main.css": "/static/css/main.cc9032bb.css",
     "main.js": "/static/js/main.2a0d4071.js",
     "static/media/jetbrains-mono-latin-400-normal.woff": "/static/media/jetbrains-mono-latin-400-normal.1fef352a4021940e309a.woff",
     "static/media/playfair-display-latin-400-normal.woff": "/static/media/playfair-display-latin-400-normal.bee8cc9108d1713a64fe.woff",
@@ -71,11 +71,11 @@
     "static/media/manrope-cyrillic-ext-800-normal.woff2": "/static/media/manrope-cyrillic-ext-800-normal.fa6c2a853a401d0b7323.woff2",
     "static/media/jetbrains-mono-cyrillic-ext-400-normal.woff2": "/static/media/jetbrains-mono-cyrillic-ext-400-normal.7347c7bfed47f1ef0b25.woff2",
     "index.html": "/index.html",
-    "main.0f43c45f.css.map": "/static/css/main.0f43c45f.css.map",
+    "main.cc9032bb.css.map": "/static/css/main.cc9032bb.css.map",
     "main.2a0d4071.js.map": "/static/js/main.2a0d4071.js.map"
   },
   "entrypoints": [
-    "static/css/main.0f43c45f.css",
+    "static/css/main.cc9032bb.css",
     "static/js/main.2a0d4071.js"
   ]
 }

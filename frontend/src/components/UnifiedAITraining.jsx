@@ -42,6 +42,8 @@ import {
 import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
 import { useTrainingMode, useTrainCommand } from '../contexts';
+import { useWsData } from '../contexts/WebSocketDataContext';
+import PipelineProgressPanel from './PipelineProgressPanel';
 
 // Timeframe configurations
 const TIMEFRAME_CONFIG = {
@@ -385,6 +387,9 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   // Training mode context - notifies other components to reduce polling
   const { startTraining: notifyTrainingStart, endTraining: notifyTrainingEnd, updateProgress: notifyProgress } = useTrainingMode();
   const sendTrainCommand = useTrainCommand();
+  
+  // Real-time pipeline status from WebSocket (zero extra polling)
+  const { trainingStatus: wsPipelineStatus } = useWsData();
   
   // Data states
   const [availableData, setAvailableData] = useState(null);
@@ -1527,6 +1532,14 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                     timeframe={currentTimeframe}
                     isVisible={true}
                   />
+                )}
+              </AnimatePresence>
+
+              {/* Per-Phase Pipeline Progress - real-time from WebSocket */}
+              <AnimatePresence>
+                {wsPipelineStatus && wsPipelineStatus.phase_history && 
+                 Object.keys(wsPipelineStatus.phase_history).length > 0 && (
+                  <PipelineProgressPanel trainingStatus={wsPipelineStatus} />
                 )}
               </AnimatePresence>
 
