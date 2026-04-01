@@ -10,7 +10,7 @@ import {
   Crosshair, Wrench
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../utils/api';
+import { api, apiLongRunning } from '../../utils/api';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -414,7 +414,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const handleStartTraining = useCallback(async () => {
     try {
       setStarting(true);
-      const res = await api.post('/api/ai-training/start', {});
+      const res = await apiLongRunning.post('/api/ai-training/start', {});
       if (res.data?.success) { toast.success('Training pipeline started'); fetchData(); }
       else toast.error(res.data?.error || 'Failed to start training');
     } catch (err) {
