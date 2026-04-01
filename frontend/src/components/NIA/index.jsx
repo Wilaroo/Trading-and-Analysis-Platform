@@ -54,7 +54,7 @@ const DEFAULT_DATA = {
 
 const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
   const { getCached, setCached } = useDataCache();
-  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  const { getPollingInterval } = useTrainingMode();
   const isFirstMount = useRef(true);
   const isVisibleRef = useRef(document.visibilityState === 'visible');
 

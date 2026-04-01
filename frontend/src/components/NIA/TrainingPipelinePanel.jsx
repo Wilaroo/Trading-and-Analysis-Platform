@@ -4,13 +4,13 @@
  */
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
-  Brain, Play, Square, RefreshCw, TrendingUp, TrendingDown,
+  Brain, Play, Square, RefreshCw, TrendingUp,
   Activity, Shield, Clock, Target, BarChart3, Layers, AlertTriangle,
   CheckCircle2, Circle, ChevronDown, ChevronRight, Zap, Eye, Cpu, Monitor, GitBranch,
   Crosshair, Wrench
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../../utils/api';
+import api from '../../utils/api';
 
 const REGIME_COLORS = {
   bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
@@ -74,7 +74,7 @@ const formatDuration = (seconds) => {
 const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
   const status = phaseData?.status || 'pending';
   const trained = phaseData?.models_trained || 0;
-  const failed = phaseData?.models_failed || 0;
+  const _failed = phaseData?.models_failed || 0; // eslint-disable-line no-unused-vars
   const skipped = phaseData?.models_skipped || 0;
   const expected = phaseData?.expected_models || phase.expected;
   const avgAcc = phaseData?.avg_accuracy || 0;
@@ -446,10 +446,17 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
 
   const handleStopTraining = useCallback(async () => {
     try {
-      const res = await api.post('/api/ai-training/stop');
-      if (res.data?.success) { toast.success('Training stopped'); fetchData(); }
-    } catch { toast.error('Failed to stop training'); }
-  }, [fetchData]);
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      const response = await fetch(`${backendUrl}/api/ai-training/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await response.json();
+      if (data?.success) { toast.success('Training stopped'); }
+      else { toast.error(data?.message || 'No training in progress'); }
+    } catch { toast.error('Failed to stop training — check if backend is running'); }
+  }, []);
 
   // Split categories into Trade Signal Generators vs Support Models
   const signalCategories = [];

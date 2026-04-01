@@ -266,18 +266,25 @@ async def stop_training():
     """Cancel the running training pipeline."""
     global _training_task
 
+    terminated = False
     if _training_task and not _training_task.done():
         logger.info("[TRAINING] Stop requested — terminating subprocess")
         _training_task.terminate()
-        try:
-            from services.focus_mode_manager import focus_mode_manager
-            focus_mode_manager.reset_to_live(result={"stopped": "manual"})
-        except Exception:
-            pass
         _training_task = None
+        terminated = True
+
+    # Always reset focus mode to LIVE, even if task was lost (e.g., backend restarted)
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.reset_to_live(result={"stopped": "manual"})
+    except Exception:
+        pass
+
+    if terminated:
         return {"success": True, "message": "Training process terminated, focus mode restored to LIVE"}
 
-    return {"success": False, "message": "No training in progress"}
+    # Even if no task found, reset focus mode (handles backend restart case)
+    return {"success": True, "message": "Focus mode restored to LIVE (training process may have already ended)"}
 
 
 @router.get("/models")
