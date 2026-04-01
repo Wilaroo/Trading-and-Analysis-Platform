@@ -91,6 +91,10 @@ export const SystemStatusProvider = ({ children }) => {
     return initial;
   });
   
+  // Consecutive failure tracking — only go red after 3 failures
+  const failureCountRef = useRef({});
+  const FAILURE_THRESHOLD = 3;
+  
   // WebSocket state (managed externally, updated here)
   const wsConnectedRef = useRef(false);
   
@@ -101,9 +105,21 @@ export const SystemStatusProvider = ({ children }) => {
   const checkIntervalRef = useRef(null);
 
   /**
-   * Update a single service status
+   * Update a single service status — with consecutive failure protection
    */
   const updateStatus = useCallback((serviceId, status, message = null) => {
+    if (status === STATUS.DISCONNECTED || status === STATUS.ERROR) {
+      // Increment failure counter
+      failureCountRef.current[serviceId] = (failureCountRef.current[serviceId] || 0) + 1;
+      // Only mark red after FAILURE_THRESHOLD consecutive failures
+      if (failureCountRef.current[serviceId] < FAILURE_THRESHOLD) {
+        return; // Keep previous status (green/unknown) — don't flash red
+      }
+    } else {
+      // Reset failure counter on success
+      failureCountRef.current[serviceId] = 0;
+    }
+    
     setStatuses(prev => ({
       ...prev,
       [serviceId]: {
