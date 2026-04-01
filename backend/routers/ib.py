@@ -398,10 +398,11 @@ async def disconnect_from_ib():
 # ===================== IB Data Pusher Endpoints =====================
 
 @router.post("/push-data")
-async def receive_pushed_ib_data(request: IBPushDataRequest):
+def receive_pushed_ib_data(request: IBPushDataRequest):
     """
     Receive data pushed from local IB Data Pusher.
-    This endpoint allows the local script to push IB data to the cloud.
+    This endpoint runs as sync (def, not async def) so FastAPI executes it
+    in a thread pool — immune to event loop blocking from background tasks.
     """
     global _pushed_ib_data
     
@@ -463,10 +464,10 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
 
 
 @router.get("/pushed-data")
-async def get_pushed_ib_data():
+def get_pushed_ib_data():
     """
     Get the latest data pushed from local IB Data Pusher.
-    Returns quotes, account info, and positions.
+    Runs as sync (def) to bypass event loop blocking.
     """
     global _pushed_ib_data
     

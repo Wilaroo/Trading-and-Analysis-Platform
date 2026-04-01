@@ -53,7 +53,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED ✅] **`stream_training_status` crash**: Variable scope bug fixed.
 - [FIXED ✅] **DB backlogs cleared**: Training pipeline + focus mode reset.
 - [FIXED ✅] **Thread pool exhaustion via aggressive frontend polling**: Reduced HTTP polling from ~40 req/30s to ~8 req/30s. Migrated IB status, bot status, alerts, positions, and context to use WebSocket as primary data source with HTTP as slow backup. Key changes in SentCom.jsx (10 hooks), useCommandCenterData.js, CommandCenterPage.js, JobManager.jsx, StartupStatusDashboard.jsx.
-- [FIXED ✅] **Startup thundering herd (IB Pusher timeout at ~10s)**: Frontend was firing 20+ HTTP requests simultaneously at t=0 on page load. Staggered initial loads across 12 seconds (2-3 req/s max). Backend: wrapped sync `bulk_write` in `short_interest_service.py` with `asyncio.to_thread`. Files changed: SentCom.jsx (11 hooks staggered), useCommandCenterData.js (4-phase delays), short_interest_service.py.
+- [FIXED ✅] **Startup thundering herd (IB Pusher timeout at ~10s)**: Frontend was firing 20+ HTTP requests simultaneously at t=0 on page load. Staggered initial loads across 12 seconds (2-3 req/s max). Backend: wrapped sync `bulk_write` in `short_interest_service.py` with `asyncio.to_thread`. **Critical fix**: Converted `push-data`, `pushed-data`, `health`, and `startup-check` endpoints from `async def` to `def` — they now run in the thread pool, completely immune to event loop blocking from background tasks. Files changed: SentCom.jsx (11 hooks staggered), useCommandCenterData.js (4-phase delays), short_interest_service.py, ib.py, system_router.py.
 
 ## Prioritized Backlog
 

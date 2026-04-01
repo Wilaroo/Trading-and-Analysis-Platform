@@ -66,17 +66,17 @@ def init_system_router(
 
 
 @router.get("/api/health")
-async def health_check():
+def health_check():
+    """Sync handler runs in thread pool — immune to event loop blocking."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/api/startup-check")
-async def startup_check():
+def startup_check():
     """
     Ultra-lightweight startup check endpoint for the StartupModal.
     Returns ALL service statuses in a SINGLE call using ONLY in-memory state.
-    No heavy DB queries, no blocking operations.
-    Responds in <10ms even when event loop is under heavy load.
+    Runs as sync (def) — immune to event loop blocking.
     """
     backend_ok = True
 
