@@ -158,11 +158,24 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
   const totalElapsedPhases = completedPhases.reduce((s, p) => s + (p.elapsed_seconds || 0), 0);
   const completedModelsInPhases = completedPhases.reduce((s, p) => s + (p.models_trained || 0), 0);
   const totalExpectedModels = ALL_PHASES.reduce((s, p) => s + p.expected, 0);
-  const remainingModels = totalExpectedModels - completedModelsInPhases;
+  const modelsCompleted = pipelineStatus?.pipeline_status?.models_completed || completedModelsInPhases;
+  const remainingModels = totalExpectedModels - modelsCompleted;
 
+  // ETA calculation with fallback for first model
   let eta = 0;
-  if (completedModelsInPhases > 0 && remainingModels > 0) {
-    eta = (totalElapsedPhases / completedModelsInPhases) * remainingModels;
+  let etaSource = '';
+  if (modelsCompleted > 0 && remainingModels > 0) {
+    // Use actual average time per model
+    const avgTimePerModel = elapsed / modelsCompleted;
+    eta = avgTimePerModel * remainingModels;
+    etaSource = 'measured';
+  } else if (elapsed > 60 && remainingModels > 0) {
+    // First model still training - estimate based on typical training times
+    // Assume first model takes ~8-12 min, use elapsed as baseline for remaining
+    const estimatedFirstModelTime = Math.max(elapsed * 1.2, 480); // at least 8 min estimate
+    const avgEstimate = estimatedFirstModelTime * 0.8; // subsequent models often faster
+    eta = estimatedFirstModelTime - elapsed + (avgEstimate * (remainingModels - 1));
+    etaSource = 'estimated';
   }
 
   if (!isTraining && completedPhases.length === 0) return null;
@@ -182,9 +195,26 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
             </div>
           )}
           {isTraining && eta > 0 && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5" title={etaSource === 'estimated' ? 'Rough estimate until first model completes' : 'Based on actual training speed'}>
               <span className="text-[10px] text-zinc-500 uppercase">ETA</span>
-              <span className="text-xs font-mono text-amber-400">~{formatDuration(eta)}</span>
+              <span className={`text-xs font-mono ${etaSource === 'estimated' ? 'text-amber-400/70' : 'text-amber-400'}`}>
+                ~{formatDuration(eta)}
+                {etaSource === 'estimated' && <span className="text-[9px] text-zinc-600 ml-1">*</span>}
+              </span>
+            </div>
+          )}
+          {isTraining && modelsCompleted > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500">AVG</span>
+              <span className="text-xs font-mono text-cyan-400">{formatDuration(elapsed / modelsCompleted)}/model</span>
+            </div>
+          )}
+          {isTraining && eta > 3600 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-zinc-500">DONE</span>
+              <span className="text-xs font-mono text-emerald-400/80">
+                ~{new Date(Date.now() + eta * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
           )}
         </div>
