@@ -3011,6 +3011,7 @@ async def stream_order_queue():
     """Push order queue status via WebSocket (replaces 3s polling)."""
     await asyncio.sleep(8)
     last_hash = None
+    _module_warned = False
     while True:
         if manager.active_connections:
             try:
@@ -3028,6 +3029,10 @@ async def stream_order_queue():
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     last_hash = data_hash
+            except ImportError:
+                if not _module_warned:
+                    print("Order queue stream: ib_execution_service not available (non-critical)")
+                    _module_warned = True
             except Exception as e:
                 print(f"Order queue stream error: {e}")
         await asyncio.sleep(3)
@@ -3350,6 +3355,7 @@ async def startup_event():
         # 1. Set focus mode to LIVE explicitly
         focus_mode_manager.set_mode(mode="live", context={"reason": "startup"})
         print("Focus mode: LIVE (all services active)")
+        await asyncio.sleep(0)  # Yield to event loop
 
         # 2. Attempt auto-connect to IB Gateway (everything depends on this)
         ib_connected = False
@@ -3368,6 +3374,7 @@ async def startup_event():
                 print("IB Gateway: ALREADY CONNECTED")
         except Exception as e:
             print(f"IB Gateway: SKIPPED ({e})")
+        await asyncio.sleep(0)  # Yield to event loop
 
         # 3. Start background scanner (needs IB for live scanning)
         try:
@@ -3378,6 +3385,7 @@ async def startup_event():
                 print("Background scanner: STARTED (degraded — no IB connection, will activate when IB connects)")
         except Exception as e:
             print(f"Background scanner: FAILED ({e})")
+        await asyncio.sleep(0)  # Yield to event loop
 
         # 4. Auto-start trading bot (needs IB for order execution)
         try:

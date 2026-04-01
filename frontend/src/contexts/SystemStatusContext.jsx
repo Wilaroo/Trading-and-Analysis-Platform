@@ -103,12 +103,19 @@ export const SystemStatusProvider = ({ children }) => {
     }));
   }, []);
 
+  // Ref for checkAllServices to avoid dependency issues
+  const checkAllServicesRef = useRef(null);
+
   /**
    * Update WebSocket connection state (called from WebSocket hook)
    */
   const setWebSocketConnected = useCallback((connected) => {
     wsConnectedRef.current = connected;
     updateStatus('quotesStream', connected ? STATUS.CONNECTED : STATUS.DISCONNECTED);
+    // When WS connects, immediately re-check all other services (they're likely up too)
+    if (connected && checkAllServicesRef.current) {
+      setTimeout(() => checkAllServicesRef.current?.(), 500);
+    }
   }, [updateStatus]);
 
   /**
@@ -235,14 +242,26 @@ export const SystemStatusProvider = ({ children }) => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [checkAllServices]);
 
-  // Initial check and polling — short delay to let StartupModal complete first
+  // Initial check and polling — aggressive during startup, then relaxed
   useEffect(() => {
-    // Delay initial check by 3s - StartupModal verifies services during startup
-    const initialDelay = setTimeout(() => {
-      checkAllServices();
-    }, 3000);
+    // Keep ref in sync for WS-triggered re-checks
+    checkAllServicesRef.current = checkAllServices;
     
-    // Poll every 60 seconds (reduced from 30s — WebSocket handles real-time updates)
+    // Aggressive startup checks: every 5s for the first 30s
+    let startupChecks = 0;
+    const maxStartupChecks = 6; // 6 checks × 5s = 30s
+    
+    const startupTimer = setInterval(() => {
+      startupChecks++;
+      if (isVisibleRef.current) {
+        checkAllServices();
+      }
+      if (startupChecks >= maxStartupChecks) {
+        clearInterval(startupTimer);
+      }
+    }, 5000);
+    
+    // Then settle to every 60 seconds
     checkIntervalRef.current = setInterval(() => {
       if (isVisibleRef.current) {
         checkAllServices();
@@ -250,7 +269,7 @@ export const SystemStatusProvider = ({ children }) => {
     }, 60000);
     
     return () => {
-      clearTimeout(initialDelay);
+      clearInterval(startupTimer);
       if (checkIntervalRef.current) {
         clearInterval(checkIntervalRef.current);
       }
