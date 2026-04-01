@@ -2969,6 +2969,7 @@ async def stream_training_status():
                     status_hash = None
                 
                 if status_hash != last_status_hash:
+                    print(f"[WS Training Status] Broadcasting: phase={status.get('phase')}, model={status.get('current_model')}")
                     await manager.broadcast({
                         "type": "training_status",
                         "data": status or {"phase": "idle"},

@@ -296,6 +296,7 @@ function App() {
     
     // Training pipeline status (replaces TrainingPipelinePanel polling)
     else if (message.type === 'training_status') {
+      console.log('[App.js] Received training_status:', message.data);
       setWsTrainingStatus(message.data);
     }
     

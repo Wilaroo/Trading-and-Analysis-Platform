@@ -395,9 +395,11 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const [showRegime, setShowRegime] = useState(false);
 
   useEffect(() => {
+    console.log('[TrainingPanel] wsTrainingStatus changed:', wsTrainingStatus);
     if (wsTrainingStatus) {
       const phase = wsTrainingStatus.phase || 'idle';
       const isActive = phase !== 'idle' && phase !== 'completed' && phase !== 'cancelled' && phase !== 'error';
+      console.log('[TrainingPanel] Setting pipeline status, phase:', phase, 'isActive:', isActive);
       setPipelineStatus(prev => ({
         ...prev,
         task_status: isActive ? 'running' : (phase === 'completed' ? 'completed' : 'idle'),
