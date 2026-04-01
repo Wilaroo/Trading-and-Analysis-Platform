@@ -232,6 +232,7 @@ export const SystemStatusProvider = ({ children }) => {
   /**
    * Check all services — self-healing: if /api/health fails but other
    * backend-routed checks succeed, the backend is provably alive.
+   * Runs checks SEQUENTIALLY to avoid saturating browser's 6-connection limit.
    */
   const checkAllServices = useCallback(async () => {
     // Skip if tab is hidden
@@ -251,14 +252,14 @@ export const SystemStatusProvider = ({ children }) => {
       updateStatus('mongodb', STATUS.CONNECTED);
     }
     
-    // 2. Always check other services — they also prove backend reachability
+    // 2. Check other services SEQUENTIALLY (one at a time) to leave
+    //    browser connections free for user actions like starting training.
     let anyOtherSucceeded = false;
-    const results = await Promise.allSettled([
-      checkServiceAndReport('ibGateway'),
-      checkServiceAndReport('ibDataPusher'),
-      checkServiceAndReport('ollama'),
-    ]);
-    anyOtherSucceeded = results.some(r => r.status === 'fulfilled' && r.value === true);
+    const servicesToCheck = ['ibGateway', 'ibDataPusher', 'ollama'];
+    for (const svc of servicesToCheck) {
+      const ok = await checkServiceAndReport(svc);
+      if (ok) anyOtherSucceeded = true;
+    }
     
     // 3. Self-healing: if health failed but another backend-routed API succeeded,
     //    the backend IS alive — reset failure counter and mark connected.
@@ -333,9 +334,9 @@ export const SystemStatusProvider = ({ children }) => {
     // Keep ref in sync for WS-triggered re-checks
     checkAllServicesRef.current = checkAllServices;
     
-    // Aggressive startup checks: every 5s for the first 30s
+    // Startup checks: every 10s for the first 30s (sequential, so light on connections)
     let startupChecks = 0;
-    const maxStartupChecks = 6; // 6 checks × 5s = 30s
+    const maxStartupChecks = 3; // 3 checks × 10s = 30s
     
     const startupTimer = setInterval(() => {
       startupChecks++;
@@ -345,7 +346,7 @@ export const SystemStatusProvider = ({ children }) => {
       if (startupChecks >= maxStartupChecks) {
         clearInterval(startupTimer);
       }
-    }, 5000);
+    }, 10000);
     
     // Then settle to every 90 seconds
     checkIntervalRef.current = setInterval(() => {
