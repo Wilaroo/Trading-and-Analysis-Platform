@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+import asyncio
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 from services.data_cache import get_data_cache
@@ -1187,7 +1188,7 @@ async def get_pending_orders_endpoint():
     Get all pending orders waiting for execution.
     The local pusher polls this endpoint to get orders to execute.
     """
-    pending = get_pending_orders()
+    pending = await asyncio.to_thread(get_pending_orders)
     
     return {
         "success": True,
