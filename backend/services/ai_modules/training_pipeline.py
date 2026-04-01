@@ -188,7 +188,7 @@ class TrainingPipelineStatus:
         self._persist()
 
     def _persist(self):
-        if self._db:
+        if self._db is not None:
             try:
                 self._db["training_pipeline_status"].update_one(
                     {"_id": "pipeline"},

@@ -481,7 +481,7 @@ class HealthMonitorService:
     def _check_finnhub(self, comp: ComponentHealth):
         """Check Finnhub health (based on recent data)"""
         # Check if we have recent earnings data
-        if self._db:
+        if self._db is not None:
             try:
                 earnings_col = self._db.get("earnings_calendar")
                 if earnings_col:
