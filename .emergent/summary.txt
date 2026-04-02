@@ -2,38 +2,26 @@
 
 **User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English only)
 
-**what currently exists?** A full-stack AI trading bot utilizing FastAPI and React. The ML training pipeline runs in a separate Python subprocess to prevent event loop blocking. Training data (177M bars) is fetched from MongoDB Atlas. The system uses WebSockets to bypass browser HTTP connection limits for UI sync. Feature extraction has been heavily optimized to use vectorized NumPy operations and 12-core multiprocessing to handle training across 2,500 symbols simultaneously within a strict 16GB RAM limit.
+**what currently exists?** Full-stack AI trading bot (FastAPI + React + MongoDB) optimizing for a strict 16GB RAM limit and 12-core CPU. LightGBM GPU acceleration is now successfully enabled and verified working on the user's RTX 5060 Ti. Vectorized feature extraction and memory chunking are implemented to prevent OOM crashes, but the multiprocessing implementation is currently broken due to a scoping error.
 
 **Last working item**: 
-    - Last item agent was working: Implementing memory-efficient chunking (50 symbols/batch) and 12-core multiprocessing () in  inside . This was done to prevent the user's system (16GB RAM, 2.4GB free) from crashing while processing 2,500 symbols, maximizing their 12-core CPU.
-    - Status: USER VERIFICATION PENDING
+    - Last item agent was working: Fixing the  crash in . This crash occurs when the user clicks Start Training because the  is trying to call a worker function that was never defined at the module scope.
+    - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by user (Requires the user's local 177M-row MongoDB and local IB Gateway environment)
+    - Which testing method agent to use? manual testing by user (Requires the user's local 177M-row MongoDB, IB Gateway, and RTX 5060 Ti environment)
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: LightGBM falling back to CPU despite user having RTX 5060 Ti GPU (P1)
-  Issue 2: IB Pusher HTTP timeout warnings during training (P2)
+  Issue 1: Training pipeline crashes with  (P0)
   
   Issues Detail:
   - Issue 1: 
-     - Attempted fixes: Agent identified user has CUDA (RTX 5060 Ti) but standard Looking in indexes: https://pypi.org/simple, https://d33sy5i8bnduwe.cloudfront.net/simple/
-Requirement already satisfied: lightgbm in /root/.venv/lib/python3.11/site-packages (4.6.0)
-Requirement already satisfied: numpy>=1.17.0 in /root/.venv/lib/python3.11/site-packages (from lightgbm) (2.4.1)
-Requirement already satisfied: scipy in /root/.venv/lib/python3.11/site-packages (from lightgbm) (1.17.1) installs CPU-only version on Windows. 
-     - Next debug checklist: Provide the user with a reliable script or step-by-step instructions to compile/install LightGBM with GPU support on Windows (OpenCL/MinGW/Boost), or rewrite the config to successfully hook into existing CUDA if possible.
-     - Why fix this issue and what will be achieved with the fix? Reduces LightGBM fit time from 5-10 minutes to seconds, cutting overall pipeline training time by ~15+ hours.
-     - Status: NOT STARTED
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? backend (user manual testing)
-     - Blocked on other issue: None
-  - Issue 2:
-     - Attempted fixes: Agent temporarily halved LightGBM CPU cores () but reverted it to prioritize training speed, noting that Focus Mode is designed to pause IB requests anyway.
-     - Next debug checklist: Check if the IB Pusher's  requests for focus mode status can be handled without throwing verbose HTTP timeout logs when the FastAPI event loop is blocked by OS CPU starvation.
-     - Why fix this issue and what will be achieved with the fix? Cleans up console error noise during training.
-     - Status: NOT STARTED
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? backend
+     - Attempted fixes: The previous agent discovered that the multiprocessing  inside  is referencing a function  that does not exist in .
+     - Next debug checklist: Define  as a **top-level module function** inside . (It *must* be at the top level, outside of any class, so that Python's  can pickle it). It needs to accept the worker arguments, instantiate/use the feature engineer, and call . 
+     - Why fix this issue and what will be achieved with the fix? It completely blocks the ML training pipeline from running. Fixing it will allow the 12-core parallel feature extraction to proceed.
+     - Status: IN PROGRESS
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend (via user manual test)
      - Blocked on other issue: None
 
 **In progress Task List**:
@@ -41,11 +29,11 @@ Requirement already satisfied: scipy in /root/.venv/lib/python3.11/site-packages
   
  Task Detail:
   - Task 1: 
-     - Where to resume: Await user feedback on whether the chunked 12-core multiprocessing feature extraction runs successfully on 2,500 symbols without hitting the 16GB RAM limit or crashing.
-     - What will be achieved with this? 10-30x speedup on feature extraction, allowing the bot to train on 5x more data in the same wall-clock time.
-     - Status: USER VERIFICATION PENDING
-     - Should Test frontend/backend/both after fix? backend (manual)
-     - Blocked on something: User execution
+     - Where to resume: After fixing the , ask the user to restart and run the training pipeline again. Monitor the logs for memory usage and speed improvements.
+     - What will be achieved with this? ~10-30x speedup on feature extraction.
+     - Status: BLOCKED (On Issue 1)
+     - Should Test frontend/backend/both after fix? backend (manual user testing)
+     - Blocked on something: Issue 1 ( bug)
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
@@ -61,17 +49,18 @@ Requirement already satisfied: scipy in /root/.venv/lib/python3.11/site-packages
     - ⚪ (Backlog) Resume Training Feature: Add ability to skip already-completed models if training is interrupted.
 
 **Completed work in this session**
-- Installed missing backend pip dependencies (, , , , , ). (DONE)
-- Fixed UI WebSocket sync: Added optimistic updates, 15s grace period, and pre-wrote  to MongoDB in  to prevent button desyncs. (DONE)
-- Fixed Atlas 5-min symbol query timeout by inverting the query strategy to fetch top ADV symbols from cache first, bypassing full-collection  aggregations. (DONE)
-- Fixed critical model protection bug in : New models were falsely comparing against the daily model's 76% accuracy and archiving. Now correctly version as  and compare to their specific prior version. (DONE)
-- Scaled training  to 2,500 across all 8 phases to utilize 96% more of the user's collected 177M bars. (DONE)
-- Refactored  with  (Vectorized NumPy extraction), speeding up extraction by 4-9x. (DONE)
-- Applied  logic to  (Phases 1-7). (DONE)
-- Upgraded  to use  and memory chunking to fit inside the user's 16GB RAM while maxing out 12 CPU cores. (DONE)
+- Fixed LightGBM GPU detection: Created  and stopped the startup  scripts (, , etc.) from doing destructive pip rebuilds. GPU is now correctly detected and enabled. (DONE)
+- Fixed memory spike to 97% RAM: Added  capping in  (capped 1-min bars at 10,000) and implemented aggressive  per chunk inside . (DONE)
+- Fixed IB Pusher Timeout Warning: Corrected endpoint routing to  and fixed an infinite loop where stale order  was repeatedly retried without expiring. (DONE)
+- Fixed Python 3.11+ compatibility: Replaced deprecated  in  preventing confidence gates from failing silently. (DONE)
+- Resolved log spam: Fixed  recursive HTTP timeout, added missing  for scanner coaching, and added null-guards in . (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-None.
+- Issue 1: Phantom symbol  throwing No security definition error in IB Gateway.
+   - Debug checklist: Trace where the dynamic symbol string QUICK is being injected into the scanner/context payload (likely from a flawed sector peer list or news feed string split).
+   - Why to solve this issue and what will be achieved with this? Removes minor log spam in the IB Pusher.
+   - Should Test frontend/backend/both after fix: backend
+   - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: None.
@@ -81,76 +70,80 @@ None.
 **Code Architecture**
 /app
 ├── backend/
-│   ├── server.py                                 # WebSocket streams, status broadcast
-│   ├── routers/ai_training.py                    # Spawns training subprocess, writes initial status
-│   ├── scripts/symbol_inventory.py               # Diagnostic script created for local DB analysis
-│   ├── services/ai_modules/training_pipeline.py  # ML orchestration, Phase 1-8 loops
-│   ├── services/ai_modules/timeseries_gbm.py     # LightGBM logic, train_vectorized, multiprocessing
-│   ├── services/ai_modules/timeseries_features.py# Vectorized & bulk NumPy feature extraction
-├── frontend/src/
-│   ├── components/NIA/TrainingPipelinePanel.jsx  # UI for AI training, optimistic updates
+│   ├── scripts/
+│   │   ├── check_gpu.py                          # Diagnostic tool to verify LightGBM/CUDA availability
+│   ├── services/ai_modules/
+│   │   ├── training_pipeline.py                  # ML orchestration, memory-capped data loading
+│   │   ├── timeseries_gbm.py                     # LightGBM logic, chunked feature extraction (bug location)
+│   │   ├── timeseries_features.py                # Vectorized NumPy feature extraction
+│   ├── services/trade_intelligence.py            # Pre-trade data gathering
+│   ├── services/order_queue_service.py           # Handles IB executions and timeouts
+├── documents/
+│   ├── *.bat                                     # Windows startup scripts (fixed to avoid overwriting GPU LightGBM)
 
 **Key Technical Concepts**
-NumPy Vectorization, Python Multiprocessing (), Memory Chunking for large datasets, LightGBM (CPU), WebSocket status sync, Optimistic UI Updates, MongoDB Aggregation pipeline optimization.
+NumPy Vectorization, Python Multiprocessing ( and top-level pickling requirements), LightGBM (GPU / OpenCL), Batch scripting, Memory optimization (chunking, garbage collection, float32 conversion).
 
 **key DB schema**
   - ib_historical_data: Massive 177M row collection of OHLCV bars.
-  - symbol_adv_cache: Stores ADV for top 5000 symbols.
   - training_pipeline_status: ML progress tracker.
 
 **changes in tech stack**
-None fundamentally, but introduced native Python  to handle parallelized data transformations.
+None.
 
 **All files of reference**
+-  (Must fix )
 - 
 - 
 - 
 - 
-- 
--  (Created script for diagnostic use)
 
 **Areas that need refactoring**: 
-None immediately, but the lack of GPU-accelerated LightGBM is the main bottleneck remaining for the ML pipeline.
+None required immediately.
 
 **key api endpoints**
--  (Handles , )
 - 
 
 **Critical Info for New Agent**
-DO NOT test the backend ML functionality via the Emergent preview URL. The user must run the code locally as it requires a 177M row MongoDB Atlas collection, IB Gateway, and their RTX 5060 Ti / 12-core hardware. 
-*Memory constraints:* The user only has 16GB of RAM with ~2.4GB free. The agent just implemented memory chunking (50 symbols at a time) to prevent OOM errors while processing 2,500 symbols. Be highly mindful of memory efficiency in any further data manipulation code.
+1. **The user relies on their local hardware:** RTX 5060 Ti GPU, 12-core CPU, 16GB RAM limit. Do NOT try to test the ML pipeline using the Emergent internal container tools or API curl commands. You must provide fixes and ask the user to pull and test locally via PowerShell/Batch.
+2. **Multiprocessing Rule:** You are fixing . Because  uses  to distribute tasks across processes, the worker function  **MUST** be defined at the global, top-level scope of the module (). You cannot nest it inside a class method or another function.
+3. The user has extremely limited RAM (~2GB free at times). Ensure you do not disrupt the  capping and  logic added to the pipeline.
 
 **documents and test reports created in this job**
 -  (Updated)
-- 
 
 **Last 10 User Messages and any pending HUMAN messages**
-- User: Asked why Phase 4 loaded all 494 symbols instead of a smaller limit.
-- Agent: Found hardcoded limits (2000, 2500) overriding config. Fixed them.
-- User: Asked why 2500 is too many if they have 2700 qualifying symbols.
-- Agent: Realized vectorization makes 2500 viable. Queried DB, found 177M rows. Increased limits back to 2500.
-- User: Asked for training time estimate with new changes.
-- Agent: Estimated ~37 hours for 128 models using 5x more data.
-- User: Asked for hardware/software upgrades to speed this up locally.
-- Agent: Suggested GPU LightGBM, more RAM, and multiprocess feature extraction. Asked for user specs.
-- User: Provided specs (RTX 5060 Ti, 16GB RAM, 12 cores, 2.4GB free RAM).
-- Agent: Noted memory is tight. Implemented multiprocess extraction using 12 cores + memory chunking to stay inside 16GB limit. Warned Windows LightGBM GPU installation is complex. Instructed user to test the multiprocess update. (Pending user test execution).
+- User: Asked what to do regarding the GPU diagnostic showing  but batch files failing.
+- Agent: Realized startup  files were misconfigured and destroying the GPU install. Fixed  files.
+- User: Confirmed GPU was now correctly detected on startup as NVIDIA GeForce RTX 5060 Ti.
+- User: Noticed memory spiking to 97% immediately when starting training.
+- Agent: Realized data loader was pulling all 177M rows into RAM. Added  capping and memory chunks.
+- User: Provided local training logs showing the pipeline started successfully without OOM, but crashed immediately with .
+- Agent: Traced the issue to the missing multiprocessing worker function, but the session ended before implementing the fix.
 
 **Project Health Check:**
-Local setup is functional. Huge performance optimizations were just applied.
+Broken (Backend ML training crashes immediately on start due to missing  function).
 
 **3rd Party Integrations**
 - Interactive Brokers (IB Gateway) — Requires User Local Environment.
 - MongoDB Atlas — Cloud DB.
-- LightGBM — ML framework.
+- LightGBM — ML framework (Local GPU).
 
 **Testing status**
-- Testing agent used after significant changes: NO (Requires local environment/hardware).
+- Testing agent used after significant changes: NO (Requires user's local hardware and database).
 - Troubleshoot agent used after agent stuck in loop: NO.
 - Test files created: None.
-- Known regressions: None.
+- Known regressions: Multiprocessing crashes because the target worker function isn't defined.
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent completed the memory-chunked multiprocessing implementation but the session ended before the user could execute and verify it locally. No explicit tasks from the prompt were missed, but the user's LightGBM Windows GPU fallback needs a standalone playbook or instructions.</analysis>
+The agent realized the multiprocessing function  was missing in  but ran out of time to actually define it in the global scope before the session concluded.
+
+**Debugging checklist for current issue**
+    Issue: 
+    Backend files to check: 
+    Steps:
+    1. Create  at the absolute top level of the file (e.g., right after the imports/logger definitions).
+    2. It needs to unpack  (likely symbol, bars, feature engineer configurations).
+    3. Call the appropriate feature extraction logic (e.g., ) and return the tuple .</analysis>

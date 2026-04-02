@@ -15,7 +15,7 @@ import os
 import time
 import concurrent.futures
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://chart-detect-train.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ml-pipeline-debug-1.preview.emergentagent.com').rstrip('/')
 
 
 class TestAIComparisonStatus:
