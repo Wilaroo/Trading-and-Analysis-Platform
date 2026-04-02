@@ -199,7 +199,7 @@ class TimeSeriesGBM:
                     os.close(_old_stdout)
                 logger.info(f"LightGBM GPU support detected (param: {_key})")
                 break
-            except Exception:
+            except Exception as _gpu_err:
                 # Restore stderr/stdout if they were redirected before the error
                 try:
                     os.dup2(_old_stderr, 2)
@@ -209,8 +209,10 @@ class TimeSeriesGBM:
                     os.close(_old_stdout)
                 except Exception:
                     pass
+                logger.debug(f"LightGBM GPU test failed with key '{_key}': {_gpu_err}")
                 continue
-    except Exception:
+    except Exception as _outer_err:
+        logger.warning(f"LightGBM GPU detection error: {_outer_err}")
         pass
 
     # Default model parameters - optimized for imbalanced classification
@@ -239,8 +241,10 @@ class TimeSeriesGBM:
         DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
         DEFAULT_PARAMS["max_bin"] = 63  # Fewer bins = better GPU throughput (default 255)
         logger.info(f"LightGBM GPU acceleration ENABLED (max_bin=63, fp32)")
+        print(f"[GPU] LightGBM GPU acceleration ENABLED (device key: {_lgbm_gpu_device_key}, max_bin=63, fp32)")
     else:
         logger.warning("LightGBM GPU not available - using CPU (run gpu_setup_check.py for install instructions)")
+        print("[GPU] LightGBM GPU NOT available — training will use CPU only")
     
     # Prediction threshold for "up" classification
     # Higher threshold = more precise but lower recall

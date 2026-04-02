@@ -279,6 +279,14 @@ class QualityService:
     async def _fetch_from_yfinance(self, symbol: str) -> Optional[QualityMetrics]:
         """Fetch fundamental data from Yahoo Finance"""
         try:
+            # Skip symbols not in our known universe to prevent phantom lookups
+            try:
+                from data.index_symbols import is_valid_symbol
+                if not is_valid_symbol(symbol.upper().strip()):
+                    return None
+            except ImportError:
+                pass
+            
             ticker = yf.Ticker(symbol)
             
             metrics = QualityMetrics(symbol=symbol.upper())

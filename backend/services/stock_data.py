@@ -338,6 +338,15 @@ class StockDataService:
             import yfinance as yf
             loop = asyncio.get_event_loop()
             
+            # Skip symbols not in our known universe to prevent phantom lookups
+            # (e.g., "QUICK" leaked from text extraction hitting Yahoo API)
+            try:
+                from data.index_symbols import is_valid_symbol
+                if not is_valid_symbol(symbol.replace("$", "").upper().strip()):
+                    return None
+            except ImportError:
+                pass
+            
             # Sanitize and convert index symbols to yfinance format
             clean_symbol = symbol.replace("$", "").upper().strip()
             yf_symbol = clean_symbol
