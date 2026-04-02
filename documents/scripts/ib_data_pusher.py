@@ -2202,7 +2202,13 @@ class IBDataPusher:
         order_type = order.get("order_type", "MKT")
         limit_price = order.get("limit_price")
         stop_price = order.get("stop_price")
-        
+
+        # Skip orders that have already failed to claim multiple times
+        if not hasattr(self, '_claim_failures'):
+            self._claim_failures = {}
+        if self._claim_failures.get(order_id, 0) >= 3:
+            return  # Silently skip — backend will auto-expire it
+
         logger.info(f"[OrderQueue] Executing: {order_id} - {action} {quantity} {symbol}")
         
         try:
@@ -2210,7 +2216,12 @@ class IBDataPusher:
             claim_result = self.api.post_safe(f"/api/ib/orders/claim/{order_id}", timeout=10)
             
             if not claim_result:
-                logger.warning(f"[OrderQueue] Could not claim order {order_id}")
+                self._claim_failures[order_id] = self._claim_failures.get(order_id, 0) + 1
+                fails = self._claim_failures[order_id]
+                if fails >= 3:
+                    logger.warning(f"[OrderQueue] Order {order_id} unclaimed after {fails} attempts — skipping permanently")
+                else:
+                    logger.warning(f"[OrderQueue] Could not claim order {order_id} (attempt {fails}/3)")
                 return
             
             # Create IB contract

@@ -119,10 +119,35 @@ class OrderQueueService:
         return order_id
     
     def get_pending_orders(self) -> List[Dict]:
-        """Get all pending orders waiting for execution"""
+        """Get all pending orders waiting for execution.
+        
+        Also auto-expires CLAIMED orders older than 5 minutes — these are
+        orders that were claimed but never completed (e.g., pusher restarted
+        mid-execution). Without this cleanup they loop forever.
+        """
         if not self._initialized:
             self.initialize()
-            
+
+        # Auto-expire stale CLAIMED orders (claimed > 5 min ago, never completed)
+        try:
+            from datetime import timedelta
+            stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+            expired = self._collection.update_many(
+                {
+                    "status": OrderStatus.CLAIMED.value,
+                    "claimed_at": {"$lt": stale_cutoff},
+                },
+                {"$set": {
+                    "status": OrderStatus.EXPIRED.value,
+                    "expired_at": datetime.now(timezone.utc).isoformat(),
+                    "error": "Auto-expired: claimed but never completed within 5 minutes",
+                }},
+            )
+            if expired.modified_count > 0:
+                logger.warning(f"Auto-expired {expired.modified_count} stale CLAIMED orders")
+        except Exception as e:
+            logger.debug(f"Stale order cleanup error: {e}")
+
         orders = list(self._collection.find(
             {"status": {"$in": [OrderStatus.PENDING.value, OrderStatus.CLAIMED.value]}},
             {"_id": 0}
