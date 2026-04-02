@@ -124,7 +124,7 @@ class TimeSeriesGBM:
         "max_depth": 8,
         "is_unbalance": True,
         "verbose": -1,
-        "n_jobs": max(1, os.cpu_count() // 2),  # Use half CPU cores — leave rest for backend/IB
+        "n_jobs": -1,  # Use all CPU cores — Focus Mode pauses everything else during training
         "seed": 42,
     }
     
