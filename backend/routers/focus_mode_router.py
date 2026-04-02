@@ -51,12 +51,15 @@ async def get_focus_mode():
 
 @router.get("/focus-mode/status")
 async def get_focus_mode_status():
-    """Get current focus mode status (alias for /focus-mode)."""
-    status = focus_mode_manager.get_status()
+    """Lightweight focus mode status endpoint (used by IB Data Pusher).
+    
+    Returns minimal payload for fast responses even under heavy CPU load.
+    This is intentionally a separate endpoint from /focus-mode to keep it
+    as lightweight as possible — no extra dict merge, no success wrapper.
+    """
     return {
-        "success": True,
-        "mode": status.get("mode", "live"),
-        **status
+        "mode": focus_mode_manager.get_mode(),
+        "is_live": focus_mode_manager.mode == FocusMode.LIVE,
     }
 
 

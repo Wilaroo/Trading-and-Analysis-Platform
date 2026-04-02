@@ -12,7 +12,7 @@ echo.
 :: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
 :: Cloud platform URL
-set CLOUD_URL=https://training-pipeline-ui.preview.emergentagent.com
+set CLOUD_URL=https://chart-detect-train.preview.emergentagent.com
 
 :: GitHub repo for auto-updates
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents

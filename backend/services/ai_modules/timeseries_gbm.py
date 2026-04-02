@@ -87,29 +87,49 @@ class TimeSeriesGBM:
     MODEL_ARCHIVE_COLLECTION = "timeseries_model_archive"
     PREDICTIONS_COLLECTION = "timeseries_predictions"
     
-    # Check for GPU availability
+    # Check for CUDA GPU availability (via PyTorch if installed)
     GPU_AVAILABLE = False
+    GPU_NAME = "unknown"
     try:
         import torch
         GPU_AVAILABLE = torch.cuda.is_available()
         if GPU_AVAILABLE:
             GPU_NAME = torch.cuda.get_device_name(0)
-            logger.info(f"GPU detected: {GPU_NAME} - Will use for applicable operations")
+            logger.info(f"CUDA GPU detected: {GPU_NAME}")
     except ImportError:
         pass
-    
+
     # Auto-detect LightGBM GPU support
+    # LightGBM uses OpenCL (not native CUDA). The pip wheel must be compiled
+    # with USE_GPU=ON, or installed via conda-forge (auto-GPU since v4.4.0).
     LGBM_GPU_AVAILABLE = False
+    _lgbm_gpu_device_key = "device"  # LightGBM >= 4.x uses "device"
     try:
         import lightgbm as _lgbm
-        # Try creating a small GPU booster to test support
-        _test_params = {"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0, "verbose": -1}
-        _lgbm.Booster(_test_params)
-        LGBM_GPU_AVAILABLE = True
-        logger.info("LightGBM GPU support detected")
+        # Try both param names (older versions use "device_type", newer use "device")
+        for _key in ("device", "device_type"):
+            try:
+                _test_params = {_key: "gpu", "gpu_platform_id": 0, "gpu_device_id": 0, "verbose": -1}
+                _test_ds = _lgbm.Dataset(
+                    np.random.rand(20, 3).astype(np.float32),
+                    label=np.random.randint(0, 2, 20).astype(np.float32),
+                    free_raw_data=False,
+                )
+                _test_ds.construct()
+                _b = _lgbm.train(
+                    {**_test_params, "objective": "binary", "num_leaves": 4, "n_iterations": 1},
+                    _test_ds, num_boost_round=1,
+                )
+                LGBM_GPU_AVAILABLE = True
+                _lgbm_gpu_device_key = _key
+                del _b, _test_ds
+                logger.info(f"LightGBM GPU support detected (param: {_key})")
+                break
+            except Exception:
+                continue
     except Exception:
-        pass  # GPU not available or LightGBM not compiled with GPU support
-    
+        pass
+
     # Default model parameters - optimized for imbalanced classification
     DEFAULT_PARAMS = {
         "objective": "binary",
@@ -127,17 +147,17 @@ class TimeSeriesGBM:
         "n_jobs": -1,  # Use all CPU cores — Focus Mode pauses everything else during training
         "seed": 42,
     }
-    
-    # GPU acceleration (auto-enabled if available)
-    # To enable manually: reinstall lightgbm with GPU support:
-    #   pip install lightgbm --config-settings=cmake.define.USE_GPU=ON
+
+    # GPU acceleration (auto-enabled if LightGBM was compiled with GPU support)
     if LGBM_GPU_AVAILABLE:
-        DEFAULT_PARAMS["device"] = "gpu"
+        DEFAULT_PARAMS[_lgbm_gpu_device_key] = "gpu"
         DEFAULT_PARAMS["gpu_platform_id"] = 0
         DEFAULT_PARAMS["gpu_device_id"] = 0
-        logger.info("✓ LightGBM GPU acceleration ENABLED")
+        DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
+        DEFAULT_PARAMS["max_bin"] = 63  # Fewer bins = better GPU throughput (default 255)
+        logger.info(f"LightGBM GPU acceleration ENABLED (max_bin=63, fp32)")
     else:
-        logger.warning("✗ LightGBM GPU not available - using CPU (training will be slower)")
+        logger.warning("LightGBM GPU not available - using CPU (run gpu_setup_check.py for install instructions)")
     
     # Prediction threshold for "up" classification
     # Higher threshold = more precise but lower recall
@@ -479,55 +499,70 @@ class TimeSeriesGBM:
         early_stopping_rounds: int = 20,
     ) -> ModelMetrics:
         """
-        Vectorized training — uses extract_features_bulk() for 10-50x speedup.
-        Same model output as train(), just faster feature extraction.
+        Vectorized training with multiprocess extraction and memory-efficient chunking.
+        Uses all CPU cores for feature extraction, processes symbols in chunks to limit RAM.
         """
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        import gc
+
         if feature_engineer is None:
             from services.ai_modules.timeseries_features import get_feature_engineer
             feature_engineer = get_feature_engineer(50)
 
-        logger.info(f"Training model (vectorized) on {len(bars_by_symbol)} symbols...")
+        total_symbols = len(bars_by_symbol)
+        n_workers = max(1, os.cpu_count() - 2)  # Leave 2 cores for OS/backend
+        chunk_size = 200  # Process 200 symbols at a time to limit memory
+
+        logger.info(f"Training model (vectorized, {n_workers} workers) on {total_symbols} symbols...")
 
         all_features = []
         all_targets = []
         symbols_processed = 0
-        total_symbols = len(bars_by_symbol)
 
-        for symbol, bars in bars_by_symbol.items():
-            symbols_processed += 1
-            if symbols_processed % 10 == 0 or symbols_processed == total_symbols:
-                sample_count = sum(len(f) for f in all_features)
-                logger.info(f"[Vectorized extraction] {symbols_processed}/{total_symbols} symbols ({sample_count} samples)")
+        # Process symbols in memory-efficient chunks
+        symbol_items = list(bars_by_symbol.items())
+        for chunk_start in range(0, total_symbols, chunk_size):
+            chunk = symbol_items[chunk_start:chunk_start + chunk_size]
+            chunk_end = min(chunk_start + chunk_size, total_symbols)
 
-            if len(bars) < 50 + self.forecast_horizon:
-                continue
+            # Prepare worker args: (bars, lookback, forecast_horizon)
+            worker_args = []
+            for symbol, bars in chunk:
+                if len(bars) >= 50 + self.forecast_horizon:
+                    worker_args.append((symbol, bars, 50, self.forecast_horizon))
 
-            # Bulk extract all features for this symbol in one pass
-            feat_matrix = feature_engineer.extract_features_bulk(bars)
-            if feat_matrix is None or len(feat_matrix) == 0:
-                continue
+            # Parallel extraction across CPU cores
+            chunk_results = []
+            try:
+                with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                    futures = {pool.submit(_extract_symbol_worker, args): args[0] for args in worker_args}
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result(timeout=300)
+                            if result is not None:
+                                chunk_results.append(result)
+                        except Exception as e:
+                            logger.warning(f"Worker failed for {futures[future]}: {e}")
+            except Exception as e:
+                # Fallback to single-process if multiprocessing fails
+                logger.warning(f"Multiprocess failed ({e}), falling back to single-process")
+                for args in worker_args:
+                    result = _extract_symbol_worker(args)
+                    if result is not None:
+                        chunk_results.append(result)
 
-            # Compute targets vectorized — future return over forecast_horizon
-            closes = np.array([b["close"] for b in bars], dtype=np.float64)
-            lb = 50
-            n = len(bars)
-            n_win = n - lb + 1  # same as feat_matrix rows
+            # Collect results from this chunk
+            for feat_matrix, targets in chunk_results:
+                all_features.append(feat_matrix)
+                all_targets.append(targets)
 
-            # For each valid position t (lb-1 .. n-1), target = sign of closes[t+fh] vs closes[t]
-            # But we can only compute target where t + fh < n
-            max_target_idx = n - self.forecast_horizon
-            usable = max_target_idx - (lb - 1)  # rows with valid targets
-            if usable <= 0:
-                continue
+            symbols_processed += len(chunk)
+            sample_count = sum(len(f) for f in all_features)
+            logger.info(f"[Vectorized extraction] {symbols_processed}/{total_symbols} symbols ({sample_count} samples)")
 
-            feat_matrix = feat_matrix[:usable]
-            t_indices = np.arange(lb - 1, lb - 1 + usable)
-            future_closes = closes[t_indices + self.forecast_horizon]
-            current_closes = closes[t_indices]
-            targets = (future_closes > current_closes).astype(np.int32)  # 1=UP, 0=DOWN
-
-            all_features.append(feat_matrix)
-            all_targets.append(targets)
+            # Release raw bar data for this chunk to free memory
+            del chunk, worker_args, chunk_results
+            gc.collect()
 
         if not all_features:
             logger.warning("No training data extracted (vectorized)")
@@ -535,6 +570,10 @@ class TimeSeriesGBM:
 
         X = np.vstack(all_features)
         y = np.concatenate(all_targets)
+
+        # Release individual arrays to free memory before training
+        del all_features, all_targets
+        gc.collect()
 
         logger.info(f"Extracted {len(X)} training samples (vectorized)")
 

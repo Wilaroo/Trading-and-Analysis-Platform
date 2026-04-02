@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://training-pipeline-ui.preview.emergentagent.com"
+        api_url = "https://chart-detect-train.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

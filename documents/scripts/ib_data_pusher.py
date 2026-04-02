@@ -1120,10 +1120,10 @@ class IBDataPusher:
                     current_time = time.time()
                     if current_time - last_focus_check >= focus_check_interval:
                         try:
-                            status = self.api.get_safe("/api/focus-mode/status")
+                            status = self.api.get_safe("/api/focus-mode/status", timeout=5)
                             if status and status.get("mode") == "training":
                                 if not focus_mode_paused:
-                                    logger.info("[FOCUS MODE] Training mode detected - pausing IB requests")
+                                    logger.info("[FOCUS MODE] Training mode detected - pausing IB requests and cloud pushes")
                                     focus_mode_paused = True
                             else:
                                 if focus_mode_paused:
@@ -1133,13 +1133,11 @@ class IBDataPusher:
                             pass  # Ignore focus mode check errors
                         last_focus_check = current_time
                     
-                    # If in training mode, skip IB operations but keep connection alive
+                    # If in training mode, skip IB operations AND cloud pushes
+                    # The backend CPU is saturated by ML training — pushing data
+                    # would just timeout and fill logs with connection errors.
                     if focus_mode_paused:
-                        self.ib.sleep(1.0)  # Longer sleep when paused
-                        # Still push minimal data to keep connection alive
-                        if current_time - self.last_push_time >= 30:  # Push less frequently
-                            self.push_data_to_cloud()
-                            self.last_push_time = current_time
+                        self.ib.sleep(2.0)  # Longer sleep when paused
                         continue
                     
                     # Let ib_insync process events (sync - no event loop conflict)
@@ -1297,12 +1295,10 @@ class IBDataPusher:
                         # Trading mode - push data, poll orders
                         self._trading_mode_tick(current_time)
                     elif current_mode == "training":
-                        # Training mode - pause IB requests, just keep connection alive
-                        self.ib.sleep(1.0)  # Longer sleep when training
-                        # Push minimal data every 30s to keep connection status updated
-                        if current_time - self.last_push_time >= 30:
-                            self.push_data_to_cloud()
-                            self.last_push_time = current_time
+                        # Training mode - pause ALL IB + cloud requests.
+                        # Backend CPU is saturated by ML training — any HTTP
+                        # requests will just timeout and flood logs.
+                        self.ib.sleep(2.0)
                     else:
                         # Collection mode - fetch historical data
                         result = self._collection_mode_tick()

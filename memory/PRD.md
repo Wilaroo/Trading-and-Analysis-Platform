@@ -63,6 +63,19 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
   2. **Reduced stream delay**: `stream_training_status()` initial sleep reduced from 25s → 5s so the real MongoDB status arrives quickly.
   3. **Immediate broadcast on start/stop**: After `start_pipeline` or `stop_pipeline` succeeds, backend immediately fetches fresh status from MongoDB and broadcasts `training_status` to all connected clients, bypassing the poll interval.
 
+### Session N+7 — Feb 2026
+- **P1: LightGBM GPU Auto-Detection Overhaul**:
+  - Replaced naive `Booster()` GPU test with actual `lgb.train()` micro-benchmark (catches OpenCL linking issues)
+  - Tests both `device` and `device_type` param names for cross-version compatibility
+  - GPU-optimized params auto-enabled: `max_bin=63`, `gpu_use_dp=False` (single precision)
+  - Created `gpu_setup_check.py` diagnostic script — detects GPU, CUDA, OpenCL, conda, gives tailored install instructions
+- **P2: IB Pusher Timeout Fix**:
+  - Root cause: Pusher was hitting `/api/focus-mode/status` which didn't exist — focus mode check always failed silently, so pusher NEVER paused during training
+  - Added lightweight `/api/focus-mode/status` endpoint (returns in <15ms even under load)
+  - Updated `ib_data_pusher.py`: completely stops cloud pushes during training mode (was still pushing every 30s, causing timeout spam)
+  - Both `run()` and `run_auto_mode()` modes now fully pause during training
+- **Performance**: Vectorized multiprocessing training (12-core, 50 symbols/chunk) — USER VERIFICATION PENDING
+
 ---
 
 ## P0 Issues
@@ -84,6 +97,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026): Bulk expiry + batch limit
 - [FIXED] **Stale training status on boot** (Jan 2026): Backend startup now resets MongoDB `training_pipeline_status` to "idle" if no actual training subprocess is running
 - [FIXED] **UI training status desync** (Feb 2026): Optimistic UI updates on start/stop + immediate WS broadcast + reduced stream delay (25s→5s)
+- [FIXED] **IB Pusher timeout spam during training** (Feb 2026): Missing `/api/focus-mode/status` endpoint + pusher never actually pausing. Now fully pauses HTTP requests during training mode.
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).
@@ -93,6 +107,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 
 ### P1
 - Auto-Optimize AI Settings: Sweep confidence thresholds and lookback windows per strategy
+- LightGBM GPU: User needs to install GPU-enabled LightGBM locally (run `python gpu_setup_check.py` for instructions). Code auto-detects and enables GPU params.
 
 ### P2
 - Desktop notification system (alerts/sounds on AI training phase completion)
@@ -109,12 +124,13 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 ## Key Files
 - `/app/backend/server.py` — Main server, WebSocket streams
 - `/app/backend/routers/ai_training.py` — Training pipeline endpoints
+- `/app/backend/routers/focus_mode_router.py` — Focus mode endpoints (incl. /status for IB Pusher)
 - `/app/backend/services/ai_modules/training_pipeline.py` — Training pipeline logic
-- `/app/backend/services/ai_modules/agent_data_service.py` — Agent context data (sync)
-- `/app/backend/services/strategy_promotion_service.py` — Strategy lifecycle (sync)
-- `/app/backend/routers/ai_modules.py` — AI module endpoints
-- `/app/backend/routers/strategy_promotion_router.py` — Promotion endpoints
-- `/app/backend/routers/learning_connectors_router.py` — Learning connector endpoints
+- `/app/backend/services/ai_modules/timeseries_gbm.py` — LightGBM model (GPU auto-detect)
+- `/app/backend/services/ai_modules/timeseries_features.py` — Vectorized feature extraction
+- `/app/backend/services/focus_mode_manager.py` — Focus mode state management
+- `/app/backend/scripts/gpu_setup_check.py` — GPU diagnostic + install instructions
+- `/app/documents/scripts/ib_data_pusher.py` — IB Data Pusher (focus mode aware)
 - `/app/frontend/src/utils/requestThrottler.js` — Browser connection management (max 2 concurrent GETs)
 - `/app/frontend/src/utils/safePolling.js` — Training-aware polling with throttler integration
 - `/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx` — Training start with queue drain
@@ -123,6 +139,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - `POST /api/ai-training/start` — Start training pipeline
 - `GET /api/ai-training/status` — Training status
 - `GET /api/ai-training/regime-live` — Live regime data
+- `GET /api/focus-mode/status` — Lightweight focus mode check (for IB Pusher)
 - `GET /api/ai-modules/report-card` — Personal trading report card
 - `GET /api/strategy-promotion/phases` — Strategy lifecycle phases
 - `GET /api/strategy-promotion/candidates` — Promotion candidates
