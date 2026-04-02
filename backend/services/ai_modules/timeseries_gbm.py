@@ -155,20 +155,29 @@ class TimeSeriesGBM:
     # with USE_GPU=ON, or installed via conda-forge (auto-GPU since v4.4.0).
     LGBM_GPU_AVAILABLE = False
     _lgbm_gpu_device_key = "device"  # LightGBM >= 4.x uses "device"
+    _lgbm_gpu_device_value = "gpu"   # "cuda" (native CUDA) or "gpu" (OpenCL)
     try:
         import lightgbm as _lgbm
         import warnings as _warnings
-        # Try both param names (older versions use "device_type", newer use "device")
-        # Suppress stderr/stdout: LightGBM prints OpenCL compiler warnings when GPU
-        # is not available, which spams 30+ "1 warning generated." lines on startup.
-        for _key in ("device", "device_type"):
+        # Try CUDA first (native, faster), then OpenCL fallback.
+        # CUDA mode requires LightGBM compiled with USE_CUDA=ON.
+        # OpenCL mode uses the driver's OpenCL ICD — may silently fail on large datasets.
+        _device_modes = [
+            ("device", "cuda"),       # LightGBM 4.x CUDA (native)
+            ("device_type", "cuda"),   # LightGBM 3.x CUDA
+            ("device", "gpu"),         # LightGBM 4.x OpenCL
+            ("device_type", "gpu"),    # LightGBM 3.x OpenCL
+        ]
+        for _key, _mode in _device_modes:
             try:
                 _test_params = {
-                    _key: "gpu", "gpu_platform_id": 0, "gpu_device_id": 0,
-                    "verbose": -1, "min_data_in_leaf": 1, "min_data_in_bin": 1,
+                    _key: _mode, "verbose": -1,
+                    "min_data_in_leaf": 1, "min_data_in_bin": 1,
                 }
-                # Redirect C-level stdout/stderr BEFORE any LightGBM call to suppress
-                # both Python-level warnings and OpenCL compiler "1 warning generated." spam
+                if _mode == "gpu":
+                    _test_params["gpu_platform_id"] = 0
+                    _test_params["gpu_device_id"] = 0
+                # Redirect C-level stdout/stderr to suppress OpenCL compiler warnings
                 _devnull_fd = os.open(os.devnull, os.O_WRONLY)
                 _old_stderr = os.dup(2)
                 _old_stdout = os.dup(1)
@@ -178,18 +187,19 @@ class TimeSeriesGBM:
                     with _warnings.catch_warnings():
                         _warnings.simplefilter("ignore")
                         _test_ds = _lgbm.Dataset(
-                            np.random.rand(20, 3).astype(np.float32),
-                            label=np.random.randint(0, 2, 20).astype(np.float32),
+                            np.random.rand(100, 5).astype(np.float32),
+                            label=np.random.randint(0, 2, 100).astype(np.float32),
                             free_raw_data=False,
                         )
                         _test_ds.construct()
                         _b = _lgbm.train(
                             {**_test_params, "objective": "binary", "num_leaves": 4,
-                             "n_iterations": 1, "num_threads": 1},
-                            _test_ds, num_boost_round=1,
+                             "n_iterations": 2, "num_threads": 1},
+                            _test_ds, num_boost_round=2,
                         )
                     LGBM_GPU_AVAILABLE = True
                     _lgbm_gpu_device_key = _key
+                    _lgbm_gpu_device_value = _mode
                     del _b, _test_ds
                 finally:
                     os.dup2(_old_stderr, 2)
@@ -197,10 +207,9 @@ class TimeSeriesGBM:
                     os.close(_devnull_fd)
                     os.close(_old_stderr)
                     os.close(_old_stdout)
-                logger.info(f"LightGBM GPU support detected (param: {_key})")
+                logger.info(f"LightGBM GPU support detected (param: {_key}={_mode})")
                 break
             except Exception as _gpu_err:
-                # Restore stderr/stdout if they were redirected before the error
                 try:
                     os.dup2(_old_stderr, 2)
                     os.dup2(_old_stdout, 1)
@@ -209,7 +218,7 @@ class TimeSeriesGBM:
                     os.close(_old_stdout)
                 except Exception:
                     pass
-                logger.debug(f"LightGBM GPU test failed with key '{_key}': {_gpu_err}")
+                logger.debug(f"LightGBM GPU test failed ({_key}={_mode}): {_gpu_err}")
                 continue
     except Exception as _outer_err:
         logger.warning(f"LightGBM GPU detection error: {_outer_err}")
@@ -235,16 +244,17 @@ class TimeSeriesGBM:
 
     # GPU acceleration (auto-enabled if LightGBM was compiled with GPU support)
     if LGBM_GPU_AVAILABLE:
-        DEFAULT_PARAMS[_lgbm_gpu_device_key] = "gpu"
-        DEFAULT_PARAMS["gpu_platform_id"] = 0
-        DEFAULT_PARAMS["gpu_device_id"] = 0
-        DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
+        DEFAULT_PARAMS[_lgbm_gpu_device_key] = _lgbm_gpu_device_value
+        if _lgbm_gpu_device_value == "gpu":
+            # OpenCL-specific params
+            DEFAULT_PARAMS["gpu_platform_id"] = 0
+            DEFAULT_PARAMS["gpu_device_id"] = 0
+            DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
         DEFAULT_PARAMS["max_bin"] = 63  # Fewer bins = better GPU throughput (default 255)
-        logger.info(f"LightGBM GPU acceleration ENABLED (max_bin=63, fp32)")
-        # Only print once in the main process — avoid spam from ProcessPoolExecutor workers
+        logger.info(f"LightGBM GPU acceleration ENABLED (mode={_lgbm_gpu_device_value}, max_bin=63)")
         import multiprocessing as _mp
         if _mp.current_process().name == "MainProcess":
-            print(f"[GPU] LightGBM GPU acceleration ENABLED (device key: {_lgbm_gpu_device_key}, max_bin=63, fp32)")
+            print(f"[GPU] LightGBM {_lgbm_gpu_device_value.upper()} acceleration ENABLED (key: {_lgbm_gpu_device_key}={_lgbm_gpu_device_value}, max_bin=63)")
     else:
         logger.warning("LightGBM GPU not available - using CPU (run gpu_setup_check.py for install instructions)")
         import multiprocessing as _mp
