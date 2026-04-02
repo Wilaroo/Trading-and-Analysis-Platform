@@ -475,6 +475,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         setStarting(false);
         if (msg.success) {
           toast.success('Training pipeline started');
+          // Optimistic UI update — flip to "running" immediately so button shows "Stop Training"
+          setPipelineStatus(prev => ({
+            ...prev,
+            task_status: 'running',
+            pipeline_status: { ...(prev?.pipeline_status || {}), phase: 'starting' },
+          }));
         } else {
           toast.error(msg.error || 'Failed to start training');
         }
@@ -485,6 +491,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       } else if (msg?.type === 'pipeline_stop_result') {
         if (msg.success) {
           toast.success(msg.message || 'Training stopped');
+          // Optimistic UI update — flip back to idle immediately
+          setPipelineStatus(prev => ({
+            ...prev,
+            task_status: 'idle',
+            pipeline_status: { ...(prev?.pipeline_status || {}), phase: 'cancelled' },
+          }));
         } else {
           toast.error(msg.error || 'Failed to stop training');
         }

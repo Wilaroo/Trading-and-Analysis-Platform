@@ -53,9 +53,15 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - **Architectural Shift**: Migrated training start/stop commands from HTTP POSTs to WebSocket messages (`start_pipeline`, `stop_pipeline`), completely bypassing browser's 6-connection HTTP limit
 - **P0 Fix: Stale training status on boot**: Added startup cleanup routine in `server.py` `_deferred_heavy_init()` that resets `training_pipeline_status` MongoDB document to "idle" if phase is stale ("starting", "running", "preparing", "training") but no actual subprocess is running. This prevents the UI from falsely showing "Starting..." state on app boot after a backend restart or crash.
 
-### Session N+5 (Current Session) — Jan 2026
+### Session N+5 — Jan 2026
 - **Continuation**: Cloned repo from GitHub, implemented the stale training status fix that was identified but not applied in previous session
 - **Fix location**: `/app/backend/server.py` lines 3420-3435 in `_deferred_heavy_init()` function
+
+### Session N+6 (Current Session) — Feb 2026
+- **P0 Fix: UI Training Status Desync** — Three-pronged fix:
+  1. **Frontend optimistic update**: `TrainingPipelinePanel.jsx` now immediately sets `task_status` to `'running'`/`'idle'` on successful start/stop WS responses, so the button flips instantly without waiting for the status stream.
+  2. **Reduced stream delay**: `stream_training_status()` initial sleep reduced from 25s → 5s so the real MongoDB status arrives quickly.
+  3. **Immediate broadcast on start/stop**: After `start_pipeline` or `stop_pipeline` succeeds, backend immediately fetches fresh status from MongoDB and broadcasts `training_status` to all connected clients, bypassing the poll interval.
 
 ---
 
@@ -77,6 +83,7 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] **`dynamic_risk_service` module not found spamming logs** (April 2026)
 - [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026): Bulk expiry + batch limit
 - [FIXED] **Stale training status on boot** (Jan 2026): Backend startup now resets MongoDB `training_pipeline_status` to "idle" if no actual training subprocess is running
+- [FIXED] **UI training status desync** (Feb 2026): Optimistic UI updates on start/stop + immediate WS broadcast + reduced stream delay (25s→5s)
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).

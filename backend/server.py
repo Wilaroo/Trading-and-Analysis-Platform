@@ -2943,7 +2943,7 @@ async def stream_confidence_gate():
 
 async def stream_training_status():
     """Push AI training pipeline status via WebSocket."""
-    await asyncio.sleep(25)
+    await asyncio.sleep(5)
     
     last_status_hash = None
     status = None
@@ -3752,6 +3752,22 @@ async def websocket_quotes(websocket: WebSocket):
                         "pid": result.get("pid"),
                     }, websocket)
                     print(f"[WS] Pipeline start result sent to client: {result.get('success')} - {result.get('message', result.get('error', ''))}")
+                    # Immediately broadcast training status so all clients sync
+                    if result.get("success"):
+                        try:
+                            def _get_fresh_status():
+                                return db["training_pipeline_status"].find_one(
+                                    {"_id": "pipeline"}, {"_id": 0}
+                                )
+                            fresh = await asyncio.to_thread(_get_fresh_status)
+                            await manager.broadcast({
+                                "type": "training_status",
+                                "data": fresh or {"phase": "starting"},
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                            print(f"[WS] Immediate training_status broadcast after start: phase={fresh.get('phase') if fresh else 'starting'}")
+                        except Exception as bc_err:
+                            print(f"[WS] Failed to broadcast immediate training status: {bc_err}")
                 except Exception as pipe_err:
                     import traceback
                     traceback.print_exc()
@@ -3772,6 +3788,21 @@ async def websocket_quotes(websocket: WebSocket):
                         "message": result.get("message", ""),
                     }, websocket)
                     print(f"[WS] Pipeline stop result: {result.get('success')} - {result.get('message', '')}")
+                    # Immediately broadcast updated status so all clients sync
+                    if result.get("success"):
+                        try:
+                            def _get_stopped_status():
+                                return db["training_pipeline_status"].find_one(
+                                    {"_id": "pipeline"}, {"_id": 0}
+                                )
+                            stopped = await asyncio.to_thread(_get_stopped_status)
+                            await manager.broadcast({
+                                "type": "training_status",
+                                "data": stopped or {"phase": "idle"},
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except Exception as bc_err:
+                            print(f"[WS] Failed to broadcast stop status: {bc_err}")
                 except Exception as pipe_err:
                     await manager.send_personal_message({
                         "type": "pipeline_stop_result",
