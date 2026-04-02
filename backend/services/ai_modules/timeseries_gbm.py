@@ -331,7 +331,12 @@ class TimeSeriesGBM:
         all_features = []
         all_targets = []
         
+        symbols_processed = 0
+        total_symbols = len(bars_by_symbol)
         for symbol, bars in bars_by_symbol.items():
+            symbols_processed += 1
+            if symbols_processed % 10 == 0 or symbols_processed == total_symbols:
+                logger.info(f"[Feature extraction] {symbols_processed}/{total_symbols} symbols processed ({len(all_features)} samples so far)")
             if len(bars) < 50 + self.forecast_horizon:
                 continue
             
