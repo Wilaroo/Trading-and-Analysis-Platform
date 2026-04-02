@@ -4,7 +4,8 @@ try:
     if torch.cuda.is_available():
         name = torch.cuda.get_device_name(0)
         props = torch.cuda.get_device_properties(0)
-        gb = props.total_mem // 1073741824
+        mem = getattr(props, 'total_memory', None) or getattr(props, 'total_mem', 0)
+        gb = mem // 1073741824
         print(f"        GPU: {name} ({gb}GB)")
     else:
         print("        GPU: CPU mode (no CUDA)")
