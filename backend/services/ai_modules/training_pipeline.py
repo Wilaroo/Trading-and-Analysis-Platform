@@ -488,7 +488,7 @@ async def run_training_pipeline(
 
                     try:
                         bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                        max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                        max_sym = max_symbols_override or bs_config.get("max_symbols", 100)
                         symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                         symbols = symbols[:max_sym]
 
@@ -611,7 +611,7 @@ async def run_training_pipeline(
                     noise_thr = profile.get("noise_threshold", 0.003)
                     num_boost = profile.get("num_boost_round", 150)
                     model_name = get_model_name(setup_type, bs)
-                    max_sym = profile.get("max_symbols", 2500)
+                    max_sym = profile.get("max_symbols", BAR_SIZE_CONFIGS.get(bs, {}).get("max_symbols", 100))
                     max_bars = profile.get("max_bars_per_symbol", 5000)
                     status.update(current_model=model_name)
 
@@ -754,7 +754,7 @@ async def run_training_pipeline(
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                    max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
+                    max_sym = max_symbols_override or bs_config.get("max_symbols", 100)
                     symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                     symbols = symbols[:max_sym]
 
@@ -867,7 +867,8 @@ async def run_training_pipeline(
                     bs = "1 day"
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     symbols = await get_available_symbols(db, bs, 100)
-                    symbols = symbols[:2000]
+                    max_sym = max_symbols_override or bs_config.get("max_symbols", 100)
+                    symbols = symbols[:max_sym]
 
                     if not symbols:
                         continue
@@ -1103,7 +1104,8 @@ async def run_training_pipeline(
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
-                    symbols = symbols[:1000]
+                    max_sym = max_symbols_override or bs_config.get("max_symbols", 100)
+                    symbols = symbols[:max_sym]
 
                     combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
                     
@@ -1346,7 +1348,8 @@ async def run_training_pipeline(
                 anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
 
                 symbols = await get_available_symbols(db, anchor_bs, 100)
-                symbols = symbols[:3000]
+                max_sym = max_symbols_override or BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 100)
+                symbols = symbols[:max_sym]
 
                 for setup_type, ens_config in ENSEMBLE_MODEL_CONFIGS.items():
                     model_name = ens_config["model_name"]
