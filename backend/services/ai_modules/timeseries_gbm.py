@@ -205,8 +205,9 @@ class TimeSeriesGBM:
                 self._metrics = ModelMetrics(**doc.get("metrics", {}))
                 loaded_name = doc.get("name", "unknown")
                 logger.info(f"Loaded model '{loaded_name}' version {self._version} (requested: {self.model_name})")
-                # Update model name to reflect what was actually loaded
-                self.model_name = loaded_name
+                # Do NOT overwrite self.model_name — the fallback model provides initial weights,
+                # but the new model should save under its own name (e.g. direction_predictor_1_min)
+                # so model protection compares against the correct previous version.
             else:
                 logger.warning("No trained models found in database")
         except Exception as e:
