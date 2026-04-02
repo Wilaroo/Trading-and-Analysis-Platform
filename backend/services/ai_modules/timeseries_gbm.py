@@ -241,10 +241,15 @@ class TimeSeriesGBM:
         DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
         DEFAULT_PARAMS["max_bin"] = 63  # Fewer bins = better GPU throughput (default 255)
         logger.info(f"LightGBM GPU acceleration ENABLED (max_bin=63, fp32)")
-        print(f"[GPU] LightGBM GPU acceleration ENABLED (device key: {_lgbm_gpu_device_key}, max_bin=63, fp32)")
+        # Only print once in the main process — avoid spam from ProcessPoolExecutor workers
+        import multiprocessing as _mp
+        if _mp.current_process().name == "MainProcess":
+            print(f"[GPU] LightGBM GPU acceleration ENABLED (device key: {_lgbm_gpu_device_key}, max_bin=63, fp32)")
     else:
         logger.warning("LightGBM GPU not available - using CPU (run gpu_setup_check.py for install instructions)")
-        print("[GPU] LightGBM GPU NOT available — training will use CPU only")
+        import multiprocessing as _mp
+        if _mp.current_process().name == "MainProcess":
+            print("[GPU] LightGBM GPU NOT available — training will use CPU only")
     
     # Prediction threshold for "up" classification
     # Higher threshold = more precise but lower recall
