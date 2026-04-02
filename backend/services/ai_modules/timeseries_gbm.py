@@ -30,6 +30,53 @@ from .timeseries_features import (
 logger = logging.getLogger(__name__)
 
 
+def _extract_symbol_worker(args):
+    """
+    Top-level worker function for ProcessPoolExecutor.
+
+    Must be at module scope so pickle can serialize it across processes.
+
+    Args:
+        args: tuple of (symbol, bars, lookback, forecast_horizon)
+              - bars in chronological order (oldest first)
+
+    Returns:
+        (feature_matrix, targets) or None
+    """
+    symbol, bars, lookback, forecast_horizon = args
+    try:
+        fe = TimeSeriesFeatureEngineer(lookback)
+        feat_matrix = fe.extract_features_bulk(bars)
+        if feat_matrix is None or len(feat_matrix) == 0:
+            return None
+
+        # feat_matrix row j corresponds to bar at index (lookback - 1 + j)
+        # Target: binary — did price go up over forecast_horizon bars?
+        closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+        closes = np.where(closes == 0, 1.0, closes)
+
+        n_win = len(feat_matrix)
+        # We can only compute targets for windows where future price exists
+        usable = n_win - forecast_horizon
+        if usable < 1:
+            return None
+
+        # Current close for each window
+        base_idx = lookback - 1  # first window's bar index
+        current_prices = closes[base_idx: base_idx + usable]
+        future_prices = closes[base_idx + forecast_horizon: base_idx + forecast_horizon + usable]
+
+        targets = (future_prices > current_prices).astype(np.float32)
+
+        # Trim feature matrix to match
+        feat_matrix = feat_matrix[:usable]
+
+        return (feat_matrix, targets)
+    except Exception as e:
+        logger.warning(f"Worker error for {symbol}: {e}")
+        return None
+
+
 @dataclass
 class Prediction:
     """Model prediction result"""

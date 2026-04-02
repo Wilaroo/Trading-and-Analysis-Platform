@@ -76,6 +76,13 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
   - Both `run()` and `run_auto_mode()` modes now fully pause during training
 - **Performance**: Vectorized multiprocessing training (12-core, 50 symbols/chunk) — USER VERIFICATION PENDING
 
+### Session N+8 — Feb 2026
+- **P0 Fix: `_extract_symbol_worker` NameError crashing training pipeline**:
+  - Root cause: `train_vectorized()` used `ProcessPoolExecutor` to call `_extract_symbol_worker`, but the function was never defined
+  - Fix: Defined `_extract_symbol_worker()` at module scope in `timeseries_gbm.py` (required for pickle serialization across processes)
+  - The worker creates a `TimeSeriesFeatureEngineer`, calls `extract_features_bulk()` for vectorized extraction, computes binary targets (price up/down), and returns `(feature_matrix, targets)`
+  - Verified: pickle round-trip OK, synthetic data test passes (correct shapes, no NaN/Inf), full `train_vectorized()` end-to-end completes successfully
+
 ---
 
 ## P0 Issues
@@ -91,19 +98,20 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] Training subprocess isolation
 - [FIXED] Event loop starvation during training
 - [FIXED] IB Pusher GET timeout
-- [FIXED] **Browser connection starvation blocking training POST** (April 2026): `requestThrottler.js` maxConcurrent 4→2, added pause/resume/drain. `TrainingPipelinePanel.jsx` drains queue before POST. `safePolling.js` now pauses throttler when training mode activates.
+- [FIXED] **Browser connection starvation blocking training POST** (April 2026)
 - [FIXED] **`_realtime_tech` AttributeError crashing trade evaluation** (April 2026)
 - [FIXED] **`dynamic_risk_service` module not found spamming logs** (April 2026)
-- [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026): Bulk expiry + batch limit
-- [FIXED] **Stale training status on boot** (Jan 2026): Backend startup now resets MongoDB `training_pipeline_status` to "idle" if no actual training subprocess is running
-- [FIXED] **UI training status desync** (Feb 2026): Optimistic UI updates on start/stop + immediate WS broadcast + reduced stream delay (25s→5s)
-- [FIXED] **IB Pusher timeout spam during training** (Feb 2026): Missing `/api/focus-mode/status` endpoint + pusher never actually pausing. Now fully pauses HTTP requests during training mode.
-- [FIXED] **Stale order infinite retry loop** (Feb 2026): Order 56e5df88 looping forever. Added auto-expire for CLAIMED orders >5min + pusher blacklists after 3 failed claims.
-- [FIXED] **asyncio.coroutine crash** (Feb 2026): Python 3.13 removed `asyncio.coroutine`. Trade intelligence (news, technicals, quality) was silently failing on every trade evaluation.
-- [FIXED] **Alert reasoning loopback timeout** (Feb 2026): `ai_assistant_service.py` was HTTP-looping to itself for scanner alerts, timing out under load (50-line traceback spam). Replaced with direct in-memory access.
-- [FIXED] **Learning context .upper() on None** (Feb 2026): `strategy_performance_service.py` crashed when MongoDB aggregation returned null strategy keys.
-- [FIXED] **Market intel stream error** (Feb 2026): `server.py` line 3186 called `.get()` on None when `get_current_report()` returned null.
-- [FIXED] **_get_base_system_prompt missing** (Feb 2026): Context timeout fallback referenced non-existent method, breaking scanner coaching generation.
+- [FIXED] **Shadow signal backlog (4560+ pending)** (April 2026)
+- [FIXED] **Stale training status on boot** (Jan 2026)
+- [FIXED] **UI training status desync** (Feb 2026)
+- [FIXED] **IB Pusher timeout spam during training** (Feb 2026)
+- [FIXED] **Stale order infinite retry loop** (Feb 2026)
+- [FIXED] **asyncio.coroutine crash** (Feb 2026)
+- [FIXED] **Alert reasoning loopback timeout** (Feb 2026)
+- [FIXED] **Learning context .upper() on None** (Feb 2026)
+- [FIXED] **Market intel stream error** (Feb 2026)
+- [FIXED] **_get_base_system_prompt missing** (Feb 2026)
+- [FIXED] **`_extract_symbol_worker` NameError crashing training pipeline** (Feb 2026): Missing top-level worker function for multiprocessing
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).
