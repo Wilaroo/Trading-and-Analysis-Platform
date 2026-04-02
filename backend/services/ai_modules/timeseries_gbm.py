@@ -21,6 +21,10 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 import lightgbm as lgb
 
+# Suppress LightGBM's verbose warnings during multiprocessing worker startup
+lgb.register_logger(logging.getLogger("lightgbm"))
+logging.getLogger("lightgbm").setLevel(logging.ERROR)
+
 from .timeseries_features import (
     TimeSeriesFeatureEngineer,
     FeatureSet,
