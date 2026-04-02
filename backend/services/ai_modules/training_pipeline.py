@@ -226,42 +226,58 @@ class TrainingPipelineStatus:
 
 
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
-    """Get symbols that have enough bars for training, ranked by ADV (most liquid first)."""
+    """Get symbols that have enough bars for training, ranked by ADV (most liquid first).
+    
+    Uses a two-step approach to avoid expensive full-collection aggregation:
+    1. Get top symbols from symbol_adv_cache (small, fast, indexed)
+    2. Verify bar counts only for those candidates
+    """
     try:
         logger.info(f"[get_available_symbols] Querying symbols for bar_size={bar_size}, min_bars={min_bars}")
         
         loop = asyncio.get_event_loop()
         
-        def _run_aggregation():
-            # Step 1: Get symbols with enough bars
-            pipeline = [
-                {"$match": {"bar_size": bar_size}},
-                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                {"$match": {"count": {"$gte": min_bars}}},
-            ]
-            symbols_with_bars = list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True, maxTimeMS=120000))
-            symbol_set = {r["_id"] for r in symbols_with_bars}
+        def _run_query():
+            # Step 1: Get top symbols by ADV from the cache (fast — small collection)
+            # Fetch more candidates than we need to account for some lacking enough bars
+            candidate_limit = 500
+            adv_cursor = db["symbol_adv_cache"].find(
+                {}, {"_id": 0, "symbol": 1, "avg_volume": 1}
+            ).sort("avg_volume", -1).limit(candidate_limit)
+            adv_ranked = list(adv_cursor)
             
-            if not symbol_set:
-                return []
+            if not adv_ranked:
+                # Fallback: no ADV data — use the old aggregation approach
+                logger.warning("[get_available_symbols] No ADV cache data, falling back to aggregation")
+                pipeline = [
+                    {"$match": {"bar_size": bar_size}},
+                    {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                    {"$match": {"count": {"$gte": min_bars}}},
+                ]
+                symbols_with_bars = list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True, maxTimeMS=120000))
+                return [r["_id"] for r in symbols_with_bars]
             
-            # Step 2: Get ADV data and rank by it
-            adv_data = list(db["symbol_adv_cache"].find(
-                {"symbol": {"$in": list(symbol_set)}},
-                {"_id": 0, "symbol": 1, "avg_volume": 1}
-            ).sort("avg_volume", -1))  # Highest ADV first
+            candidate_symbols = [d["symbol"] for d in adv_ranked]
+            logger.info(f"[get_available_symbols] {len(candidate_symbols)} ADV candidates, verifying bar counts...")
             
-            # Create ordered list: symbols with ADV first (sorted), then symbols without ADV
-            ranked_symbols = [d["symbol"] for d in adv_data]
-            symbols_without_adv = symbol_set - set(ranked_symbols)
+            # Step 2: Verify bar counts for candidates using countDocuments (uses index, no scan)
+            verified = []
+            for sym in candidate_symbols:
+                try:
+                    count = db["ib_historical_data"].count_documents(
+                        {"symbol": sym, "bar_size": bar_size},
+                        maxTimeMS=5000  # 5s per symbol max
+                    )
+                    if count >= min_bars:
+                        verified.append(sym)
+                except Exception:
+                    continue  # Skip symbols that timeout
             
-            logger.info(f"[get_available_symbols] {len(ranked_symbols)} symbols with ADV data, {len(symbols_without_adv)} without")
-            
-            # Return ADV-ranked symbols first, then any remaining
-            return ranked_symbols + list(symbols_without_adv)
+            logger.info(f"[get_available_symbols] {len(verified)} symbols verified with >= {min_bars} bars")
+            return verified
         
         results = await asyncio.wait_for(
-            loop.run_in_executor(TRAINING_POOL, _run_aggregation),
+            loop.run_in_executor(TRAINING_POOL, _run_query),
             timeout=180  # 3 minute timeout
         )
         logger.info(f"[get_available_symbols] Found {len(results)} symbols for {bar_size} (ranked by ADV)")
