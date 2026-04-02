@@ -8,5 +8,5 @@ try:
         print(f"        GPU: {name} ({gb}GB)")
     else:
         print("        GPU: CPU mode (no CUDA)")
-except Exception:
-    print("        GPU: Not configured")
+except Exception as e:
+    print(f"        GPU: Not configured ({e})")
