@@ -106,26 +106,58 @@ class TimeSeriesGBM:
     _lgbm_gpu_device_key = "device"  # LightGBM >= 4.x uses "device"
     try:
         import lightgbm as _lgbm
+        import warnings as _warnings
         # Try both param names (older versions use "device_type", newer use "device")
+        # Suppress stderr/stdout: LightGBM prints OpenCL compiler warnings when GPU
+        # is not available, which spams 30+ "1 warning generated." lines on startup.
         for _key in ("device", "device_type"):
             try:
-                _test_params = {_key: "gpu", "gpu_platform_id": 0, "gpu_device_id": 0, "verbose": -1}
-                _test_ds = _lgbm.Dataset(
-                    np.random.rand(20, 3).astype(np.float32),
-                    label=np.random.randint(0, 2, 20).astype(np.float32),
-                    free_raw_data=False,
-                )
-                _test_ds.construct()
-                _b = _lgbm.train(
-                    {**_test_params, "objective": "binary", "num_leaves": 4, "n_iterations": 1},
-                    _test_ds, num_boost_round=1,
-                )
-                LGBM_GPU_AVAILABLE = True
-                _lgbm_gpu_device_key = _key
-                del _b, _test_ds
+                _test_params = {
+                    _key: "gpu", "gpu_platform_id": 0, "gpu_device_id": 0,
+                    "verbose": -1, "min_data_in_leaf": 1, "min_data_in_bin": 1,
+                }
+                # Redirect C-level stdout/stderr BEFORE any LightGBM call to suppress
+                # both Python-level warnings and OpenCL compiler "1 warning generated." spam
+                _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                _old_stderr = os.dup(2)
+                _old_stdout = os.dup(1)
+                os.dup2(_devnull_fd, 2)
+                os.dup2(_devnull_fd, 1)
+                try:
+                    with _warnings.catch_warnings():
+                        _warnings.simplefilter("ignore")
+                        _test_ds = _lgbm.Dataset(
+                            np.random.rand(20, 3).astype(np.float32),
+                            label=np.random.randint(0, 2, 20).astype(np.float32),
+                            free_raw_data=False,
+                        )
+                        _test_ds.construct()
+                        _b = _lgbm.train(
+                            {**_test_params, "objective": "binary", "num_leaves": 4,
+                             "n_iterations": 1, "num_threads": 1},
+                            _test_ds, num_boost_round=1,
+                        )
+                    LGBM_GPU_AVAILABLE = True
+                    _lgbm_gpu_device_key = _key
+                    del _b, _test_ds
+                finally:
+                    os.dup2(_old_stderr, 2)
+                    os.dup2(_old_stdout, 1)
+                    os.close(_devnull_fd)
+                    os.close(_old_stderr)
+                    os.close(_old_stdout)
                 logger.info(f"LightGBM GPU support detected (param: {_key})")
                 break
             except Exception:
+                # Restore stderr/stdout if they were redirected before the error
+                try:
+                    os.dup2(_old_stderr, 2)
+                    os.dup2(_old_stdout, 1)
+                    os.close(_devnull_fd)
+                    os.close(_old_stderr)
+                    os.close(_old_stdout)
+                except Exception:
+                    pass
                 continue
     except Exception:
         pass
