@@ -48,13 +48,13 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 200},
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 200},
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 300},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 300},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 500},
-    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 500},
-    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 500},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500},
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500},
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500},
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500},
+    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500},
+    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500},
 }
 
 # Setup types defined in the system
@@ -240,7 +240,7 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
         def _run_query():
             # Step 1: Get top symbols by ADV from the cache (fast — small collection)
             # Fetch more candidates than we need to account for some lacking enough bars
-            candidate_limit = 3000  # Get all qualifying symbols from ADV cache
+            candidate_limit = 5000  # Get all qualifying symbols from ADV cache
             adv_cursor = db["symbol_adv_cache"].find(
                 {}, {"_id": 0, "symbol": 1, "avg_volume": 1}
             ).sort("avg_volume", -1).limit(candidate_limit)
@@ -260,25 +260,45 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
             candidate_symbols = [d["symbol"] for d in adv_ranked]
             logger.info(f"[get_available_symbols] {len(candidate_symbols)} ADV candidates, verifying bar counts...")
             
-            # Step 2: Verify bar counts for candidates using countDocuments (uses index, no scan)
+            # Step 2: Verify bar counts in batches using aggregation (faster than per-symbol count)
             verified = []
-            for sym in candidate_symbols:
+            batch_size = 150  # Small enough to avoid Atlas timeouts
+            for batch_start in range(0, len(candidate_symbols), batch_size):
+                batch = candidate_symbols[batch_start:batch_start + batch_size]
                 try:
-                    count = db["ib_historical_data"].count_documents(
-                        {"symbol": sym, "bar_size": bar_size},
-                        maxTimeMS=5000  # 5s per symbol max
-                    )
-                    if count >= min_bars:
-                        verified.append(sym)
-                except Exception:
-                    continue  # Skip symbols that timeout
+                    pipeline = [
+                        {"$match": {"bar_size": bar_size, "symbol": {"$in": batch}}},
+                        {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                        {"$match": {"count": {"$gte": min_bars}}},
+                    ]
+                    results = list(db["ib_historical_data"].aggregate(
+                        pipeline, allowDiskUse=True, maxTimeMS=30000
+                    ))
+                    batch_qualified = {r["_id"] for r in results}
+                    # Maintain ADV ranking order
+                    for sym in batch:
+                        if sym in batch_qualified:
+                            verified.append(sym)
+                except Exception as e:
+                    # Fallback to per-symbol count for failed batches
+                    logger.warning(f"[get_available_symbols] Batch aggregation failed, using per-symbol fallback: {e}")
+                    for sym in batch:
+                        try:
+                            count = db["ib_historical_data"].count_documents(
+                                {"symbol": sym, "bar_size": bar_size},
+                                maxTimeMS=5000
+                            )
+                            if count >= min_bars:
+                                verified.append(sym)
+                        except Exception:
+                            continue
             
             logger.info(f"[get_available_symbols] {len(verified)} symbols verified with >= {min_bars} bars")
             return verified
         
         results = await asyncio.wait_for(
             loop.run_in_executor(TRAINING_POOL, _run_query),
-            timeout=180  # 3 minute timeout
+            timeout=600  # 10 minute timeout for full symbol verification
         )
         logger.info(f"[get_available_symbols] Found {len(results)} symbols for {bar_size} (ranked by ADV)")
         return results
