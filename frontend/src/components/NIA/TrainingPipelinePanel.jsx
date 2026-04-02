@@ -393,12 +393,19 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [showRegime, setShowRegime] = useState(false);
+  const optimisticUntilRef = useRef(0); // timestamp until which we ignore "idle" WS updates
 
   useEffect(() => {
     console.log('[TrainingPanel] wsTrainingStatus changed:', wsTrainingStatus);
     if (wsTrainingStatus) {
       const phase = wsTrainingStatus.phase || 'idle';
       const isActive = phase !== 'idle' && phase !== 'completed' && phase !== 'cancelled' && phase !== 'error';
+      // If we recently did an optimistic start, ignore stale "idle" broadcasts
+      // that arrive before the subprocess has written to MongoDB
+      if (!isActive && Date.now() < optimisticUntilRef.current) {
+        console.log('[TrainingPanel] Ignoring stale idle broadcast (optimistic grace period)');
+        return;
+      }
       console.log('[TrainingPanel] Setting pipeline status, phase:', phase, 'isActive:', isActive);
       setPipelineStatus(prev => ({
         ...prev,
@@ -432,7 +439,14 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       } else {
         console.warn('[TrainingPanel] Inventory fetch failed or returned unsuccessful:', inventoryRes);
       }
-      if (statusRes.status === 'fulfilled' && statusRes.value.data?.success) setPipelineStatus(statusRes.value.data);
+      if (statusRes.status === 'fulfilled' && statusRes.value.data?.success) {
+        // Don't overwrite optimistic "running" state with a stale HTTP response
+        if (Date.now() < optimisticUntilRef.current && statusRes.value.data?.task_status !== 'running') {
+          console.log('[TrainingPanel] Ignoring stale HTTP status (optimistic grace period)');
+        } else {
+          setPipelineStatus(statusRes.value.data);
+        }
+      }
       if (cnnRes.status === 'fulfilled' && cnnRes.value.data?.success) setCnnModels(cnnRes.value.data.models || []);
       if (gpuRes.status === 'fulfilled' && gpuRes.value.data?.success) setGpuInfo(gpuRes.value.data.gpu);
     } catch (err) {
@@ -476,6 +490,8 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         if (msg.success) {
           toast.success('Training pipeline started');
           // Optimistic UI update — flip to "running" immediately so button shows "Stop Training"
+          // Set grace period to ignore stale "idle" broadcasts for 15 seconds
+          optimisticUntilRef.current = Date.now() + 15000;
           setPipelineStatus(prev => ({
             ...prev,
             task_status: 'running',

@@ -113,6 +113,7 @@ async def start_training(request: TrainingRequest):
 
     try:
         from services.focus_mode_manager import focus_mode_manager
+        from server import db as mongo_db
 
         # Activate TRAINING focus mode — pauses non-essential services
         try:
@@ -126,6 +127,19 @@ async def start_training(request: TrainingRequest):
         # Launch in a completely separate process — zero GIL/import lock interference
         # Pass MongoDB credentials via environment (avoids shell escaping issues with special chars in URLs)
         logger.info("[TRAINING] Launching subprocess...")
+
+        # Write "starting" status to MongoDB BEFORE spawning subprocess
+        # so any immediate WS broadcast picks up the correct phase (not stale "idle")
+        try:
+            await asyncio.to_thread(
+                mongo_db["training_pipeline_status"].update_one,
+                {"_id": "pipeline"},
+                {"$set": {"phase": "starting", "started_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+        except Exception as db_err:
+            logger.warning(f"[TRAINING] Could not pre-set starting status: {db_err}")
+
         env = os.environ.copy()
         # MONGO_URL and DB_NAME are already in os.environ; subprocess inherits them
         
