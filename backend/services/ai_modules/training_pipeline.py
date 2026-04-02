@@ -63,6 +63,289 @@ BAR_SIZE_CONFIGS = {
 # Controls peak RAM: 50 symbols × ~15MB each = ~750MB of raw bar dicts at a time.
 STREAM_BATCH_SIZE = 50
 
+
+# ── Symbol Cache ──────────────────────────────────────────────
+# Avoids re-running expensive $group aggregations on 177M rows
+# for the same (bar_size, min_bars) combo across multiple phases.
+_symbol_cache: Dict[str, List[str]] = {}
+
+
+async def get_cached_symbols(db, bar_size: str, min_bars: int, max_symbols: int = 2500) -> List[str]:
+    """get_available_symbols with per-bar-size caching."""
+    key = f"{bar_size}|{min_bars}"
+    if key not in _symbol_cache:
+        _symbol_cache[key] = await get_available_symbols(db, bar_size, min_bars)
+    return _symbol_cache[key][:max_symbols]
+
+
+def clear_symbol_cache():
+    """Clear at the start/end of a full pipeline run."""
+    _symbol_cache.clear()
+
+
+# ── Multiprocessing Workers (must be at module scope for pickle) ────────
+
+def _extract_setup_long_worker(args):
+    """Phase 2 worker: extract base + setup features for one symbol across all setup types."""
+    symbol, bars, setup_configs = args
+    # setup_configs: list of (setup_type, forecast_horizon, noise_threshold)
+    from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
+    from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+
+    try:
+        fe = TimeSeriesFeatureEngineer(50)
+        base_matrix = fe.extract_features_bulk(bars)
+        if base_matrix is None:
+            return None
+
+        closes = np.array([b["close"] for b in bars], dtype=np.float32)
+        highs = np.array([b["high"] for b in bars], dtype=np.float32)
+        lows = np.array([b["low"] for b in bars], dtype=np.float32)
+        volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+        opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
+
+        results = {}
+        for setup_type, fh, noise_thr in setup_configs:
+            feat_names = get_setup_feature_names(setup_type)
+            n_setup = len(feat_names)
+            n_base = base_matrix.shape[1]
+
+            max_rows = len(bars) - 50 - fh
+            if max_rows <= 0:
+                continue
+
+            X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
+            y_buf = np.empty(max_rows, dtype=np.float32)
+            valid = 0
+
+            for i in range(50, len(bars) - fh):
+                row_idx = i - 49
+                if row_idx >= len(base_matrix):
+                    break
+
+                o_win = opens[max(0, i - 49): i + 1][::-1]
+                h_win = highs[max(0, i - 49): i + 1][::-1]
+                l_win = lows[max(0, i - 49): i + 1][::-1]
+                c_win = closes[max(0, i - 49): i + 1][::-1]
+                v_win = volumes[max(0, i - 49): i + 1][::-1]
+
+                sf = get_setup_features(setup_type, o_win, h_win, l_win, c_win, v_win)
+                setup_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
+
+                X_buf[valid, :n_base] = base_matrix[row_idx]
+                X_buf[valid, n_base:] = setup_vec
+
+                fr = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                if abs(fr) < noise_thr:
+                    y_buf[valid] = 1
+                elif fr > 0:
+                    y_buf[valid] = 2
+                else:
+                    y_buf[valid] = 0
+                valid += 1
+
+            if valid > 0:
+                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+        return results
+    except Exception as e:
+        logger.warning(f"Setup worker error for {symbol}: {e}")
+        return None
+
+
+def _extract_setup_short_worker(args):
+    """Phase 2.5 worker: extract base + short-setup features for one symbol."""
+    symbol, bars, setup_configs = args
+    from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
+    from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+
+    try:
+        fe = TimeSeriesFeatureEngineer(50)
+        base_matrix = fe.extract_features_bulk(bars)
+        if base_matrix is None:
+            return None
+
+        closes = np.array([b["close"] for b in bars], dtype=np.float32)
+        highs = np.array([b["high"] for b in bars], dtype=np.float32)
+        lows = np.array([b["low"] for b in bars], dtype=np.float32)
+        volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+        opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
+
+        results = {}
+        for setup_type, fh, noise_thr in setup_configs:
+            feat_names = get_short_setup_feature_names(setup_type)
+            n_setup = len(feat_names)
+            n_base = base_matrix.shape[1]
+
+            max_rows = len(bars) - 50 - fh
+            if max_rows <= 0:
+                continue
+
+            X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
+            y_buf = np.empty(max_rows, dtype=np.float32)
+            valid = 0
+
+            for i in range(50, len(bars) - fh):
+                row_idx = i - 49
+                if row_idx >= len(base_matrix):
+                    break
+
+                c_win = closes[max(0, i - 49): i + 1][::-1]
+                h_win = highs[max(0, i - 49): i + 1][::-1]
+                l_win = lows[max(0, i - 49): i + 1][::-1]
+                v_win = volumes[max(0, i - 49): i + 1][::-1]
+                o_win = opens[max(0, i - 49): i + 1][::-1]
+
+                sf = get_short_setup_features(setup_type, o_win, h_win, l_win, c_win, v_win)
+                short_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
+
+                X_buf[valid, :n_base] = base_matrix[row_idx]
+                X_buf[valid, n_base:] = short_vec
+
+                fr = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                inv_fr = -fr
+                if abs(inv_fr) < noise_thr:
+                    y_buf[valid] = 1
+                elif inv_fr > 0:
+                    y_buf[valid] = 2
+                else:
+                    y_buf[valid] = 0
+                valid += 1
+
+            if valid > 0:
+                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+        return results
+    except Exception as e:
+        logger.warning(f"Short setup worker error for {symbol}: {e}")
+        return None
+
+
+def _extract_exit_worker(args):
+    """Phase 4 worker: extract base + exit features for one symbol."""
+    symbol, bars, exit_configs = args
+    from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
+    from services.ai_modules.exit_features import compute_exit_features, compute_exit_target, EXIT_FEATURE_NAMES
+
+    try:
+        fe = TimeSeriesFeatureEngineer(50)
+        base_matrix = fe.extract_features_bulk(bars)
+        if base_matrix is None:
+            return None
+
+        closes = np.array([b["close"] for b in bars], dtype=np.float32)
+        highs = np.array([b["high"] for b in bars], dtype=np.float32)
+        lows = np.array([b["low"] for b in bars], dtype=np.float32)
+        volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+        n_base = base_matrix.shape[1]
+        n_exit = len(EXIT_FEATURE_NAMES)
+
+        results = {}
+        for setup_type, max_horizon in exit_configs:
+            max_rows = len(bars) - 50 - max_horizon
+            if max_rows <= 0:
+                continue
+
+            X_buf = np.empty((max_rows, n_base + n_exit), dtype=np.float32)
+            y_buf = np.empty(max_rows, dtype=np.float32)
+            valid = 0
+
+            for i in range(50, len(bars) - max_horizon):
+                row_idx = i - 49
+                if row_idx >= len(base_matrix):
+                    break
+
+                c_win = closes[i - 49: i + 1][::-1]
+                h_win = highs[i - 49: i + 1][::-1]
+                l_win = lows[i - 49: i + 1][::-1]
+                v_win = volumes[i - 49: i + 1][::-1]
+                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
+
+                ef = compute_exit_features(c_win, h_win, l_win, v_win, direction)
+                exit_vec = np.array([ef.get(f, 0.0) for f in EXIT_FEATURE_NAMES], dtype=np.float32)
+
+                target = compute_exit_target(closes, highs, lows, i, max_horizon, direction)
+                if target is None:
+                    continue
+
+                X_buf[valid, :n_base] = base_matrix[row_idx]
+                X_buf[valid, n_base:] = exit_vec
+                y_buf[valid] = target
+                valid += 1
+
+            if valid > 0:
+                results[setup_type] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+        return results
+    except Exception as e:
+        logger.warning(f"Exit worker error for {symbol}: {e}")
+        return None
+
+
+def _extract_risk_worker(args):
+    """Phase 6 worker: extract base + risk features for one symbol."""
+    symbol, bars, risk_configs = args
+    from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
+    from services.ai_modules.risk_features import compute_risk_features, compute_risk_target, RISK_FEATURE_NAMES
+
+    try:
+        fe = TimeSeriesFeatureEngineer(50)
+        base_matrix = fe.extract_features_bulk(bars)
+        if base_matrix is None:
+            return None
+
+        closes = np.array([b["close"] for b in bars], dtype=np.float32)
+        highs = np.array([b["high"] for b in bars], dtype=np.float32)
+        lows = np.array([b["low"] for b in bars], dtype=np.float32)
+        volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+        n_base = base_matrix.shape[1]
+        n_risk = len(RISK_FEATURE_NAMES)
+
+        results = {}
+        for bs_label, max_bars_horizon in risk_configs:
+            max_rows = len(bars) - 50 - max_bars_horizon
+            if max_rows <= 0:
+                continue
+
+            X_buf = np.empty((max_rows, n_base + n_risk), dtype=np.float32)
+            y_buf = np.empty(max_rows, dtype=np.float32)
+            valid = 0
+
+            for i in range(50, len(bars) - max_bars_horizon):
+                row_idx = i - 49
+                if row_idx >= len(base_matrix):
+                    break
+
+                c_win = closes[i - 24: i + 1][::-1]
+                h_win = highs[i - 24: i + 1][::-1]
+                l_win = lows[i - 24: i + 1][::-1]
+                v_win = volumes[i - 24: i + 1][::-1]
+
+                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
+                rf = compute_risk_features(c_win, h_win, l_win, v_win, direction)
+                risk_vec = np.array([rf.get(f, 0.0) for f in RISK_FEATURE_NAMES], dtype=np.float32)
+
+                atr_vals = []
+                for j in range(max(0, i - 10), i):
+                    tr = max(highs[j] - lows[j],
+                             abs(highs[j] - closes[j - 1]) if j > 0 else 0,
+                             abs(lows[j] - closes[j - 1]) if j > 0 else 0)
+                    atr_vals.append(tr)
+                atr = np.mean(atr_vals) if atr_vals else 0.01
+
+                target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars_horizon)
+                if target is None:
+                    continue
+
+                X_buf[valid, :n_base] = base_matrix[row_idx]
+                X_buf[valid, n_base:] = risk_vec
+                y_buf[valid] = target
+                valid += 1
+
+            if valid > 0:
+                results[bs_label] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+        return results
+    except Exception as e:
+        logger.warning(f"Risk worker error for {symbol}: {e}")
+        return None
+
 # Setup types defined in the system
 ALL_SETUP_TYPES = [
     "SCALP", "ORB", "GAP_AND_GO", "VWAP", "BREAKOUT",
@@ -551,6 +834,9 @@ async def run_training_pipeline(
     }
 
     try:
+        # Clear symbol cache at start of pipeline run
+        clear_symbol_cache()
+
         # ── Phase 1: Generic Directional Models ──
         if "generic" in phases:
             status.update(phase="generic_directional")
@@ -569,7 +855,7 @@ async def run_training_pipeline(
                     model.set_db(db)
 
                     max_sym = max_symbols_override or config["max_symbols"]
-                    symbols = await get_available_symbols(db, bs, config["min_bars_per_symbol"])
+                    symbols = await get_cached_symbols(db, bs, config["min_bars_per_symbol"])
                     symbols = symbols[:max_sym]
 
                     if not symbols:
@@ -620,122 +906,135 @@ async def run_training_pipeline(
         if "setup" in phases:
             status.update(phase="setup_specific")
             logger.info("=== Phase 2: Training Setup-Specific Models (Long) ===")
-            from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+            from services.ai_modules.setup_features import get_setup_feature_names
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from collections import defaultdict
+            from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
+            n_workers = max(1, os.cpu_count() - 2)
 
+            # Group all (setup_type, profile) pairs by bar_size so bars are loaded ONCE per bar_size
+            profiles_by_bs = defaultdict(list)
             for setup_type in ALL_SETUP_TYPES:
-                profiles = get_setup_profiles(setup_type)
-                for profile in profiles:
-                    bs = profile["bar_size"]
-                    fh = profile["forecast_horizon"]
-                    noise_thr = profile.get("noise_threshold", 0.003)
-                    num_boost = profile.get("num_boost_round", 150)
-                    model_name = get_model_name(setup_type, bs)
+                for profile in get_setup_profiles(setup_type):
+                    profiles_by_bs[profile["bar_size"]].append((setup_type, profile))
+
+            for bs, st_profiles in profiles_by_bs.items():
+                bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                symbols = symbols[:max_sym]
+                if not symbols:
+                    continue
+
+                # Build setup_configs for the worker: all setup types that share this bar_size
+                setup_configs = [(st, p["forecast_horizon"], p.get("noise_threshold", 0.003)) for st, p in st_profiles]
+                max_fh = max(fh for _, fh, _ in setup_configs)
+                min_required = 70 + max_fh
+
+                # Per-model accumulators {(setup_type, fh): {"X": [], "y": [], ...}}
+                model_accum = {}
+                for st, profile in st_profiles:
+                    key = (st, profile["forecast_horizon"])
+                    model_name = get_model_name(st, bs)
+                    feat_names = get_setup_feature_names(st)
+                    combined_names = base_names + [f"setup_{n}" for n in feat_names]
+                    model_accum[key] = {
+                        "X": [], "y": [], "model_name": model_name,
+                        "combined_names": combined_names,
+                        "num_boost": profile.get("num_boost_round", 150),
+                        "fh": profile["forecast_horizon"],
+                    }
                     status.update(current_model=model_name)
 
+                # Stream-load in batches, multiprocess extraction across all setup types at once
+                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    batch_bars = await load_symbols_parallel(
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                    )
+                    if not batch_bars:
+                        continue
+
+                    worker_args = [
+                        (sym, bars, setup_configs)
+                        for sym, bars in batch_bars.items()
+                        if len(bars) >= min_required
+                    ]
+
+                    chunk_results = []
                     try:
-                        bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                        max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
-                        symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
-                        symbols = symbols[:max_sym]
+                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                            futures = {pool.submit(_extract_setup_long_worker, a): a[0] for a in worker_args}
+                            for future in as_completed(futures):
+                                try:
+                                    res = future.result(timeout=300)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception as e:
+                                    logger.warning(f"Setup worker failed for {futures[future]}: {e}")
+                    except Exception as e:
+                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                        for a in worker_args:
+                            try:
+                                res = _extract_setup_long_worker(a)
+                                if res:
+                                    chunk_results.append(res)
+                            except Exception:
+                                pass
 
-                        if not symbols:
-                            logger.warning(f"No symbols available for {model_name}")
-                            continue
+                    for res_dict in chunk_results:
+                        for key, (X_chunk, y_chunk) in res_dict.items():
+                            if key in model_accum:
+                                model_accum[key]["X"].append(X_chunk)
+                                model_accum[key]["y"].append(y_chunk)
 
-                        # Get setup-specific feature names
-                        setup_feat_names = get_setup_feature_names(setup_type)
-                        combined_names = base_names + [f"setup_{n}" for n in setup_feat_names]
+                    del batch_bars, worker_args, chunk_results
+                    gc.collect()
 
-                        # Stream-load symbols in batches to limit RAM
-                        min_required = 70 + fh
-                        all_X = []
-                        all_y = []
-
-                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                            batch_bars = await load_symbols_parallel(
-                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                                max_bars=0
-                            )
-
-                            for sym, bars in batch_bars.items():
-
-                                closes = np.array([b["close"] for b in bars], dtype=float)
-                                highs = np.array([b["high"] for b in bars], dtype=float)
-                                lows = np.array([b["low"] for b in bars], dtype=float)
-                                volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                                opens = np.array([b.get("open", 0) for b in bars], dtype=float)
-
-                                # Bulk-extract base features ONCE for this symbol
-                                base_matrix = feature_engineer.extract_features_bulk(bars)
-                                if base_matrix is None:
-                                    continue
-
-                                for i in range(50, len(bars) - fh):
-                                    # Base features (from pre-computed bulk matrix)
-                                    row_idx = i - 49
-                                    if row_idx >= len(base_matrix):
-                                        break
-                                    base_vec = base_matrix[row_idx].tolist()
-
-                                    # Setup-specific features
-                                    o_window = opens[max(0, i - 49): i + 1][::-1]
-                                    h_window = highs[max(0, i - 49): i + 1][::-1]
-                                    l_window = lows[max(0, i - 49): i + 1][::-1]
-                                    c_window = closes[max(0, i - 49): i + 1][::-1]
-                                    v_window = volumes[max(0, i - 49): i + 1][::-1]
-
-                                    setup_feats = get_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
-                                    setup_vec = [setup_feats.get(f, 0.0) for f in setup_feat_names]
-
-                                    # Target: future return over forecast horizon (forward-looking)
-                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-
-                                    if abs(future_return) < noise_thr:
-                                        target = 1  # FLAT
-                                    elif future_return > 0:
-                                        target = 2  # UP
-                                    else:
-                                        target = 0  # DOWN
-
-                                    all_X.append(base_vec + setup_vec)
-                                    all_y.append(target)
-
-                            del batch_bars
-                            gc.collect()
-
-                        if len(all_X) < MIN_TRAINING_SAMPLES:
-                            logger.warning(f"Insufficient training data for {model_name}: {len(all_X)}")
+                # Train each model from accumulated numpy arrays
+                for key, data in model_accum.items():
+                    model_name = data["model_name"]
+                    status.update(current_model=model_name)
+                    try:
+                        if not data["X"]:
                             results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
                             continue
 
-                        X = np.array(all_X)
-                        y = np.array(all_y)
+                        X = np.vstack(data["X"]).astype(np.float32)
+                        y = np.concatenate(data["y"]).astype(np.float32)
+                        del data["X"], data["y"]
+
+                        if len(X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient training data for {model_name}: {len(X)}")
+                            results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
+                            continue
+
                         logger.info(
-                            f"Training {model_name}: {len(X)} samples, {len(combined_names)} features, "
+                            f"Training {model_name}: {len(X):,} samples, {len(data['combined_names'])} features, "
                             f"UP={np.sum(y==2)}, FLAT={np.sum(y==1)}, DOWN={np.sum(y==0)}"
                         )
 
-                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=data["fh"])
                         model.set_db(db)
                         metrics = await _run_in_thread(
                             model.train_from_features,
-                            X, y, combined_names,
-                            num_boost_round=num_boost,
+                            X, y, data["combined_names"],
+                            num_boost_round=data["num_boost"],
                             early_stopping_rounds=15,
                             num_classes=3,
                         )
 
+                        del X, y
+                        gc.collect()
+
                         if metrics and metrics.accuracy > 0:
                             results["models_trained"].append({
-                                "name": model_name,
-                                "accuracy": metrics.accuracy,
+                                "name": model_name, "accuracy": metrics.accuracy,
                                 "samples": metrics.training_samples,
                             })
                             results["total_samples"] += metrics.training_samples
@@ -752,128 +1051,132 @@ async def run_training_pipeline(
         if "short" in phases:
             status.update(phase="short_setup_specific")
             logger.info("=== Phase 2.5: Training SHORT Setup-Specific Models ===")
-            from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+            from services.ai_modules.short_setup_features import get_short_setup_feature_names
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
-            from services.ai_modules.advanced_targets import compute_advanced_target
+            from collections import defaultdict
+            from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
+            n_workers = max(1, os.cpu_count() - 2)
 
+            # Group by bar_size (same optimization as Phase 2)
+            profiles_by_bs = defaultdict(list)
             for setup_type in ALL_SHORT_SETUP_TYPES:
-                profiles = get_setup_profiles(setup_type)
-                for profile in profiles:
-                    bs = profile["bar_size"]
-                    fh = profile["forecast_horizon"]
-                    noise_thr = profile.get("noise_threshold", 0.003)
-                    num_boost = profile.get("num_boost_round", 150)
-                    model_name = get_model_name(setup_type, bs)
-                    max_sym = profile.get("max_symbols", BAR_SIZE_CONFIGS.get(bs, {}).get("max_symbols", 2500))
-                    max_bars = profile.get("max_bars_per_symbol", 5000)
+                for profile in get_setup_profiles(setup_type):
+                    profiles_by_bs[profile["bar_size"]].append((setup_type, profile))
+
+            for bs, st_profiles in profiles_by_bs.items():
+                bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                symbols = await get_cached_symbols(db, bs, 100)
+                symbols = symbols[:max_sym]
+                if not symbols:
+                    continue
+
+                setup_configs = [(st, p["forecast_horizon"], p.get("noise_threshold", 0.003)) for st, p in st_profiles]
+                max_fh = max(fh for _, fh, _ in setup_configs)
+                min_required = 70 + max_fh
+
+                model_accum = {}
+                for st, profile in st_profiles:
+                    key = (st, profile["forecast_horizon"])
+                    model_name = get_model_name(st, bs)
+                    feat_names = get_short_setup_feature_names(st)
+                    combined_names = base_names + [f"short_{n}" for n in feat_names]
+                    model_accum[key] = {
+                        "X": [], "y": [], "model_name": model_name,
+                        "combined_names": combined_names,
+                        "num_boost": profile.get("num_boost_round", 150),
+                        "fh": profile["forecast_horizon"],
+                    }
                     status.update(current_model=model_name)
 
+                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    batch_bars = await load_symbols_parallel(
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                    )
+                    if not batch_bars:
+                        continue
+
+                    worker_args = [
+                        (sym, bars, setup_configs)
+                        for sym, bars in batch_bars.items()
+                        if len(bars) >= min_required
+                    ]
+
+                    chunk_results = []
                     try:
-                        symbols = await get_available_symbols(db, bs, 100)
-                        symbols = symbols[:max_sym]
+                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                            futures = {pool.submit(_extract_setup_short_worker, a): a[0] for a in worker_args}
+                            for future in as_completed(futures):
+                                try:
+                                    res = future.result(timeout=300)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception as e:
+                                    logger.warning(f"Short worker failed for {futures[future]}: {e}")
+                    except Exception as e:
+                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                        for a in worker_args:
+                            try:
+                                res = _extract_setup_short_worker(a)
+                                if res:
+                                    chunk_results.append(res)
+                            except Exception:
+                                pass
 
-                        if not symbols:
-                            logger.warning(f"No symbols available for {model_name}")
-                            continue
+                    for res_dict in chunk_results:
+                        for key, (X_chunk, y_chunk) in res_dict.items():
+                            if key in model_accum:
+                                model_accum[key]["X"].append(X_chunk)
+                                model_accum[key]["y"].append(y_chunk)
 
-                        # Get short-specific feature names
-                        short_feat_names = get_short_setup_feature_names(setup_type)
-                        combined_names = base_names + [f"short_{n}" for n in short_feat_names]
+                    del batch_bars, worker_args, chunk_results
+                    gc.collect()
 
-                        # Stream-load symbols in batches to limit RAM
-                        min_required = 70 + fh
-                        all_X = []
-                        all_y = []
-
-                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                            batch_bars = await load_symbols_parallel(
-                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                                max_bars=0
-                            )
-
-                            for sym, bars in batch_bars.items():
-
-                                closes = np.array([b["close"] for b in bars], dtype=float)
-                                highs = np.array([b["high"] for b in bars], dtype=float)
-                                lows = np.array([b["low"] for b in bars], dtype=float)
-                                volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                                opens = np.array([b.get("open", 0) for b in bars], dtype=float)
-
-                                # Bulk-extract base features ONCE for this symbol
-                                base_matrix = feature_engineer.extract_features_bulk(bars)
-                                if base_matrix is None:
-                                    continue
-
-                                for i in range(50, len(bars) - fh):
-                                    # Base features (from pre-computed bulk matrix)
-                                    row_idx = i - 49
-                                    if row_idx >= len(base_matrix):
-                                        break
-                                    base_vec = base_matrix[row_idx].tolist()
-
-                                    # Short-specific features
-                                    c_window = closes[max(0, i - 49): i + 1][::-1]
-                                    h_window = highs[max(0, i - 49): i + 1][::-1]
-                                    l_window = lows[max(0, i - 49): i + 1][::-1]
-                                    v_window = volumes[max(0, i - 49): i + 1][::-1]
-                                    o_window = opens[max(0, i - 49): i + 1][::-1]
-
-                                    short_feats = get_short_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
-                                    short_vec = [short_feats.get(f, 0.0) for f in short_feat_names]
-
-                                    # Target: For SHORT models, "positive outcome" = price goes DOWN
-                                    # Use inverted return: positive return = price dropped
-                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                                    # Invert: if future_return is negative (price went down), that's good for shorts
-                                    inverted_return = -future_return
-
-                                    if abs(inverted_return) < noise_thr:
-                                        target = 1  # FLAT
-                                    elif inverted_return > 0:
-                                        target = 2  # DOWN (good for short)
-                                    else:
-                                        target = 0  # UP (bad for short)
-
-                                    all_X.append(base_vec + short_vec)
-                                    all_y.append(target)
-
-                            del batch_bars
-                            gc.collect()
-
-                        if len(all_X) < MIN_TRAINING_SAMPLES:
-                            logger.warning(f"Insufficient short training data for {model_name}: {len(all_X)}")
+                for key, data in model_accum.items():
+                    model_name = data["model_name"]
+                    status.update(current_model=model_name)
+                    try:
+                        if not data["X"]:
                             results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
                             continue
 
-                        X = np.array(all_X)
-                        y = np.array(all_y)
+                        X = np.vstack(data["X"]).astype(np.float32)
+                        y = np.concatenate(data["y"]).astype(np.float32)
+                        del data["X"], data["y"]
+
+                        if len(X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient short training data for {model_name}: {len(X)}")
+                            results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
+                            continue
+
                         logger.info(
-                            f"Training {model_name}: {len(X)} samples, {len(combined_names)} features, "
+                            f"Training {model_name}: {len(X):,} samples, {len(data['combined_names'])} features, "
                             f"DOWN(good)={np.sum(y==2)}, FLAT={np.sum(y==1)}, UP(bad)={np.sum(y==0)}"
                         )
 
-                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=data["fh"])
                         model.set_db(db)
                         metrics = await _run_in_thread(
                             model.train_from_features,
-                            X, y, combined_names,
-                            num_boost_round=num_boost,
+                            X, y, data["combined_names"],
+                            num_boost_round=data["num_boost"],
                             early_stopping_rounds=15,
                             num_classes=3,
                         )
 
+                        del X, y
+                        gc.collect()
+
                         if metrics and metrics.accuracy > 0:
                             results["models_trained"].append({
-                                "name": model_name,
-                                "accuracy": metrics.accuracy,
-                                "samples": metrics.training_samples,
-                                "direction": "short",
+                                "name": model_name, "accuracy": metrics.accuracy,
+                                "samples": metrics.training_samples, "direction": "short",
                             })
                             results["total_samples"] += metrics.training_samples
                             status.add_completed(model_name, metrics.accuracy)
@@ -918,7 +1221,7 @@ async def run_training_pipeline(
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
-                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                     symbols = symbols[:max_sym]
 
                     if not symbols:
@@ -977,7 +1280,7 @@ async def run_training_pipeline(
                                 if target is None:
                                     continue
 
-                                all_X.append(base_vec + vol_vec + regime_vec)
+                                all_X.append(np.concatenate([base_matrix[row_idx], np.array(vol_vec + regime_vec, dtype=np.float32)]))
                                 all_y.append(target)
 
                         del batch_bars
@@ -987,8 +1290,9 @@ async def run_training_pipeline(
                         logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
                         continue
 
-                    X = np.array(all_X)
-                    y = np.array(all_y)
+                    X = np.vstack(all_X).astype(np.float32)
+                    y = np.array(all_y, dtype=np.float32)
+                    del all_X, all_y
                     logger.info(f"Training {model_name}: {len(X)} samples, {len(combined_names)} features")
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
@@ -1016,130 +1320,128 @@ async def run_training_pipeline(
         if "exit" in phases:
             status.update(phase="exit_timing")
             logger.info("=== Phase 4: Training Exit Timing Models ===")
-            from services.ai_modules.exit_timing_model import (
-                EXIT_MODEL_CONFIGS, EXIT_FEATURE_NAMES,
-                compute_exit_features, compute_exit_target,
-            )
+            from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS, EXIT_FEATURE_NAMES
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
+            n_workers = max(1, os.cpu_count() - 2)
 
-            for setup_type, exit_config in EXIT_MODEL_CONFIGS.items():
-                model_name = exit_config["model_name"]
-                max_horizon = exit_config["max_horizon"]
-                status.update(current_model=model_name)
+            # All exit models use "1 day" bars — load once
+            bs = "1 day"
+            bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+            symbols = await get_cached_symbols(db, bs, 100)
+            max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
+            symbols = symbols[:max_sym]
+            combined_names = base_names + [f"exit_{n}" for n in EXIT_FEATURE_NAMES]
 
-                try:
-                    # Exit timing uses daily bars by default (setup-level decision)
-                    bs = "1 day"
-                    bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                    symbols = await get_available_symbols(db, bs, 100)
-                    max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
-                    symbols = symbols[:max_sym]
+            if symbols:
+                exit_configs = [(st, cfg["max_horizon"]) for st, cfg in EXIT_MODEL_CONFIGS.items()]
+                max_horizon = max(h for _, h in exit_configs)
+                min_required = 70 + max_horizon
 
-                    if not symbols:
+                model_accum = {}
+                for st, cfg in EXIT_MODEL_CONFIGS.items():
+                    model_accum[st] = {"X": [], "y": [], "model_name": cfg["model_name"], "max_horizon": cfg["max_horizon"]}
+                    status.update(current_model=cfg["model_name"])
+
+                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    batch_bars = await load_symbols_parallel(
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                    )
+                    if not batch_bars:
                         continue
 
-                    combined_names = base_names + [f"exit_{n}" for n in EXIT_FEATURE_NAMES]
-                    
-                    # Stream-load symbols in batches to limit RAM
-                    min_required = 70 + max_horizon
-                    all_X = []
-                    all_y = []
+                    worker_args = [
+                        (sym, bars, exit_configs)
+                        for sym, bars in batch_bars.items()
+                        if len(bars) >= min_required
+                    ]
 
-                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                        batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                            max_bars=0
+                    chunk_results = []
+                    try:
+                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                            futures = {pool.submit(_extract_exit_worker, a): a[0] for a in worker_args}
+                            for future in as_completed(futures):
+                                try:
+                                    res = future.result(timeout=300)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception as e:
+                                    logger.warning(f"Exit worker failed for {futures[future]}: {e}")
+                    except Exception as e:
+                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                        for a in worker_args:
+                            try:
+                                res = _extract_exit_worker(a)
+                                if res:
+                                    chunk_results.append(res)
+                            except Exception:
+                                pass
+
+                    for res_dict in chunk_results:
+                        for st_key, (X_chunk, y_chunk) in res_dict.items():
+                            if st_key in model_accum:
+                                model_accum[st_key]["X"].append(X_chunk)
+                                model_accum[st_key]["y"].append(y_chunk)
+
+                    del batch_bars, worker_args, chunk_results
+                    gc.collect()
+
+                for st_key, data in model_accum.items():
+                    model_name = data["model_name"]
+                    max_h = data["max_horizon"]
+                    status.update(current_model=model_name)
+                    try:
+                        if not data["X"]:
+                            results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
+                            continue
+
+                        X = np.vstack(data["X"]).astype(np.float32)
+                        y_raw = np.concatenate(data["y"]).astype(np.float32)
+                        del data["X"], data["y"]
+
+                        if len(X) < MIN_TRAINING_SAMPLES:
+                            logger.warning(f"Insufficient exit training data for {st_key}: {len(X)}")
+                            continue
+
+                        # Bucket into classes: QUICK (1-5), MEDIUM (6-15), EXTENDED (16+)
+                        y_classes = np.zeros(len(y_raw), dtype=np.float32)
+                        y_classes[y_raw <= 5] = 0
+                        y_classes[(y_raw > 5) & (y_raw <= 15)] = 1
+                        y_classes[y_raw > 15] = 2
+
+                        logger.info(
+                            f"Training {model_name}: {len(X):,} samples, "
+                            f"Quick={np.sum(y_classes==0)}, Med={np.sum(y_classes==1)}, Ext={np.sum(y_classes==2)}"
                         )
 
-                        for sym, bars in batch_bars.items():
+                        model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_h)
+                        model.set_db(db)
+                        metrics = await _run_in_thread(
+                            model.train_from_features,
+                            X, y_classes, combined_names,
+                            num_boost_round=150, early_stopping_rounds=15, num_classes=3,
+                        )
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
-                            if base_matrix is None:
-                                continue
-
-                            for i in range(50, len(bars) - max_horizon):
-                                # Base features (from pre-computed bulk matrix)
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
-                                base_vec = base_matrix[row_idx].tolist()
-
-                                # Exit-specific features
-                                c_window = closes[i - 49: i + 1][::-1]
-                                h_window = highs[i - 49: i + 1][::-1]
-                                l_window = lows[i - 49: i + 1][::-1]
-                                v_window = volumes[i - 49: i + 1][::-1]
-
-                                # Determine likely direction from recent momentum
-                                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-
-                                exit_feats = compute_exit_features(c_window, h_window, l_window, v_window, direction)
-                                exit_vec = [exit_feats.get(f, 0.0) for f in EXIT_FEATURE_NAMES]
-
-                                # Target: bars to MFE
-                                target = compute_exit_target(closes, highs, lows, i, max_horizon, direction)
-                                if target is None:
-                                    continue
-
-                                all_X.append(base_vec + exit_vec)
-                                all_y.append(target)
-
-                        del batch_bars
+                        del X, y_raw, y_classes
                         gc.collect()
 
-                    if len(all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient exit training data for {setup_type}: {len(all_X)}")
-                        continue
+                        if metrics and metrics.accuracy > 0:
+                            results["models_trained"].append({
+                                "name": model_name, "accuracy": metrics.accuracy,
+                                "samples": metrics.training_samples,
+                            })
+                            results["total_samples"] += metrics.training_samples
+                            status.add_completed(model_name, metrics.accuracy)
 
-                    X = np.array(all_X)
-                    y = np.array(all_y, dtype=float)
-
-                    # Bucket into classes for classification (easier than regression for LightGBM)
-                    # Classes: QUICK (1-5 bars), MEDIUM (6-15 bars), EXTENDED (16+ bars)
-                    y_classes = np.zeros_like(y, dtype=int)
-                    y_classes[y <= 5] = 0  # QUICK exit
-                    y_classes[(y > 5) & (y <= 15)] = 1  # MEDIUM hold
-                    y_classes[y > 15] = 2  # EXTENDED hold
-
-                    logger.info(
-                        f"Training {model_name}: {len(X)} samples, "
-                        f"Quick={np.sum(y_classes==0)}, Med={np.sum(y_classes==1)}, Ext={np.sum(y_classes==2)}"
-                    )
-
-                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_horizon)
-                    model.set_db(db)
-                    metrics = await _run_in_thread(
-                        model.train_from_features,
-                        X, y_classes, combined_names,
-                        num_boost_round=150,
-                        early_stopping_rounds=15,
-                        num_classes=3,
-                    )
-
-                    if metrics and metrics.accuracy > 0:
-                        results["models_trained"].append({
-                            "name": model_name,
-                            "accuracy": metrics.accuracy,
-                            "samples": metrics.training_samples,
-                        })
-                        results["total_samples"] += metrics.training_samples
-                        status.add_completed(model_name, metrics.accuracy)
-
-                except Exception as e:
-                    logger.error(f"Failed to train {model_name}: {e}")
-                    results["models_failed"].append({"name": model_name, "reason": str(e)})
-                    status.add_error(model_name, str(e))
+                    except Exception as e:
+                        logger.error(f"Failed to train {model_name}: {e}")
+                        results["models_failed"].append({"name": model_name, "reason": str(e)})
+                        status.add_error(model_name, str(e))
 
         # ── Phase 5: Sector-Relative Models ──
         if "sector" in phases:
@@ -1164,7 +1466,7 @@ async def run_training_pipeline(
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                     max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
                     symbols = symbols[:max_sym]
 
@@ -1217,7 +1519,6 @@ async def run_training_pipeline(
                                 row_idx = i - 49
                                 if row_idx >= len(base_matrix):
                                     break
-                                base_vec = base_matrix[row_idx].tolist()
 
                                 # Sector-relative features
                                 sc = stock_closes[max(0, i - 24): i + 1][::-1]
@@ -1232,7 +1533,7 @@ async def run_training_pipeline(
                                 if target is None:
                                     continue
 
-                                all_X.append(base_vec + sec_vec)
+                                all_X.append(np.concatenate([base_matrix[row_idx], np.array(sec_vec, dtype=np.float32)]))
                                 all_y.append(target)
 
                         del batch_bars
@@ -1242,8 +1543,9 @@ async def run_training_pipeline(
                         logger.warning(f"Insufficient sector-relative data for {bs}: {len(all_X)}")
                         continue
 
-                    X = np.array(all_X)
-                    y = np.array(all_y)
+                    X = np.vstack(all_X).astype(np.float32)
+                    y = np.array(all_y, dtype=np.float32)
+                    del all_X, all_y
                     logger.info(f"Training {model_name}: {len(X)} samples")
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
@@ -1264,15 +1566,15 @@ async def run_training_pipeline(
         if "risk" in phases:
             status.update(phase="risk_of_ruin")
             logger.info("=== Phase 6: Training Risk-of-Ruin Models ===")
-            from services.ai_modules.risk_of_ruin_model import (
-                RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES,
-                compute_risk_features, compute_risk_target,
-            )
+            from services.ai_modules.risk_of_ruin_model import RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
+            combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
+            n_workers = max(1, os.cpu_count() - 2)
 
             for bs in bar_sizes:
                 risk_config = RISK_MODEL_CONFIGS.get(bs)
@@ -1280,84 +1582,78 @@ async def run_training_pipeline(
                     continue
 
                 model_name = risk_config["model_name"]
-                max_bars = risk_config["max_bars"]
+                max_bars_horizon = risk_config["max_bars"]
                 status.update(current_model=model_name)
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                     max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
                     symbols = symbols[:max_sym]
 
-                    combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
-                    
-                    # Stream-load symbols in batches to limit RAM
-                    min_required = 70 + max_bars
+                    min_required = 70 + max_bars_horizon
+                    risk_configs_list = [(bs, max_bars_horizon)]
                     all_X = []
                     all_y = []
 
                     for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                            max_bars=0
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                         )
+                        if not batch_bars:
+                            continue
 
-                        for sym, bars in batch_bars.items():
+                        worker_args = [
+                            (sym, bars, risk_configs_list)
+                            for sym, bars in batch_bars.items()
+                            if len(bars) >= min_required
+                        ]
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                        chunk_results = []
+                        try:
+                            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                                futures = {pool.submit(_extract_risk_worker, a): a[0] for a in worker_args}
+                                for future in as_completed(futures):
+                                    try:
+                                        res = future.result(timeout=300)
+                                        if res:
+                                            chunk_results.append(res)
+                                    except Exception as e:
+                                        logger.warning(f"Risk worker failed for {futures[future]}: {e}")
+                        except Exception as e:
+                            logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                            for a in worker_args:
+                                try:
+                                    res = _extract_risk_worker(a)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception:
+                                    pass
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
-                            if base_matrix is None:
-                                continue
+                        for res_dict in chunk_results:
+                            for key, (X_chunk, y_chunk) in res_dict.items():
+                                all_X.append(X_chunk)
+                                all_y.append(y_chunk)
 
-                            for i in range(50, len(bars) - max_bars):
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
-                                base_vec = base_matrix[row_idx].tolist()
-
-                                c_window = closes[i - 24: i + 1][::-1]
-                                h_window = highs[i - 24: i + 1][::-1]
-                                l_window = lows[i - 24: i + 1][::-1]
-                                v_window = volumes[i - 24: i + 1][::-1]
-
-                                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-                                risk_feats = compute_risk_features(c_window, h_window, l_window, v_window, direction)
-                                risk_vec = [risk_feats.get(f, 0.0) for f in RISK_FEATURE_NAMES]
-
-                                # Compute ATR for stop distance
-                                atr_vals = []
-                                for j in range(max(0, i - 10), i):
-                                    tr = max(highs[j] - lows[j], abs(highs[j] - closes[j - 1]) if j > 0 else 0, abs(lows[j] - closes[j - 1]) if j > 0 else 0)
-                                    atr_vals.append(tr)
-                                atr = np.mean(atr_vals) if atr_vals else 0.01
-
-                                target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars)
-                                if target is None:
-                                    continue
-
-                                all_X.append(base_vec + risk_vec)
-                                all_y.append(target)
-
-                        del batch_bars
+                        del batch_bars, worker_args, chunk_results
                         gc.collect()
 
-                    if len(all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient risk data for {bs}: {len(all_X)}")
+                    if not all_X or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient risk data for {bs}")
                         continue
 
-                    X = np.array(all_X)
-                    y = np.array(all_y)
-                    logger.info(f"Training {model_name}: {len(X)} samples, stop_hit={np.sum(y==1)} ({np.mean(y)*100:.1f}%)")
+                    X = np.vstack(all_X).astype(np.float32)
+                    y = np.concatenate(all_y).astype(np.float32)
+                    del all_X, all_y
+                    logger.info(f"Training {model_name}: {len(X):,} samples, stop_hit={int(np.sum(y==1))} ({float(np.mean(y))*100:.1f}%)")
 
-                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars)
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars_horizon)
                     model.set_db(db)
                     metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+
+                    del X, y
+                    gc.collect()
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
@@ -1404,7 +1700,7 @@ async def run_training_pipeline(
 
                     try:
                         max_sym = max_symbols_override or config["max_symbols"]
-                        symbols = await get_available_symbols(db, bs, config["min_bars_per_symbol"])
+                        symbols = await get_cached_symbols(db, bs, config["min_bars_per_symbol"])
                         symbols = symbols[:max_sym]
 
                         if not symbols:
@@ -1436,7 +1732,7 @@ async def run_training_pipeline(
                                     row_idx = i - 49
                                     if row_idx >= len(base_matrix):
                                         break
-                                    base_vec = base_matrix[row_idx].tolist()
+                                    base_vec = base_matrix[row_idx]
 
                                     # Classify regime at this date
                                     bar_date = str(bars[i].get("date", ""))
@@ -1446,7 +1742,7 @@ async def run_training_pipeline(
                                     future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
                                     target = 1 if future_return > 0 else 0
 
-                                    regime_samples[regime]["X"].append(base_vec)
+                                    regime_samples[regime]["X"].append(base_vec.copy())
                                     regime_samples[regime]["y"].append(target)
 
                             del batch_bars
@@ -1464,8 +1760,8 @@ async def run_training_pipeline(
                                 )
                                 continue
 
-                            X = np.array(X_list)
-                            y = np.array(y_list)
+                            X = np.vstack(X_list).astype(np.float32)
+                            y = np.array(y_list, dtype=np.float32)
                             regime_model_name = get_regime_model_name(base_model_name, regime)
                             status.update(current_model=regime_model_name)
 
@@ -1542,7 +1838,7 @@ async def run_training_pipeline(
                 anchor_bs = "1 day"
                 anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
 
-                symbols = await get_available_symbols(db, anchor_bs, 100)
+                symbols = await get_cached_symbols(db, anchor_bs, 100)
                 max_sym = max_symbols_override or BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 2500)
                 symbols = symbols[:max_sym]
 
@@ -1914,5 +2210,7 @@ async def run_training_pipeline(
         logger.error(f"Training pipeline error: {e}")
         results["error"] = str(e)
         status.update(phase="error", current_model=str(e))
+    finally:
+        clear_symbol_cache()
 
     return results

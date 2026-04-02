@@ -866,14 +866,17 @@ class TimeSeriesFeatureEngineer:
             v5 = np.std(lr5, axis=1)    # length n-5
             v20 = np.std(lr20, axis=1)  # length n-20
             vr_full = np.ones(n, dtype=np.float64)
-            # v5 starts at index 5, v20 at index 20
-            # ratio at position t: v5[t-5] / v20[t-20]
-            for j in range(n_win):
-                t = idx[j]
-                i5 = t - 5
-                i20 = t - 20
-                if 0 <= i5 < len(v5) and 0 <= i20 < len(v20) and v20[i20] > 1e-10:
-                    vr_full[t] = v5[i5] / v20[i20]
+            # Vectorized: v5[t-5] / v20[t-20] for each window position t
+            i5 = idx - 5
+            i20 = idx - 20
+            valid = (i5 >= 0) & (i5 < len(v5)) & (i20 >= 0) & (i20 < len(v20))
+            valid_i5 = i5[valid]
+            valid_i20 = i20[valid]
+            denom = v20[valid_i20]
+            div_ok = denom > 1e-10
+            vr_vals = np.ones(valid.sum(), dtype=np.float64)
+            vr_vals[div_ok] = v5[valid_i5[div_ok]] / denom[div_ok]
+            vr_full[idx[valid]] = vr_vals
             F[:, fi] = vr_full[idx]; fi += 1               # volatility_ratio
         else:
             F[:, fi] = 1.0; fi += 1
@@ -910,12 +913,17 @@ class TimeSeriesFeatureEngineer:
         else:
             F[:, fi] = 0.0; fi += 1
 
-        # Higher highs / lower lows (4-bar comparison)
+        # Higher highs / lower lows (4-bar comparison) — vectorized
         hh = np.zeros(n, dtype=np.float64)
         ll = np.zeros(n, dtype=np.float64)
-        for j in range(4, n):
-            hh[j] = sum(1 for k in range(4) if highs[j - k] > highs[j - k - 1]) / 4.0
-            ll[j] = sum(1 for k in range(4) if lows[j - k] < lows[j - k - 1]) / 4.0
+        if n >= 5:
+            high_up = (np.diff(highs) > 0).astype(np.float64)
+            low_dn = (np.diff(lows) < 0).astype(np.float64)
+            if len(high_up) >= 4:
+                hw = sliding_window_view(high_up, 4)
+                lw = sliding_window_view(low_dn, 4)
+                hh[4:4 + len(hw)] = np.mean(hw, axis=1)
+                ll[4:4 + len(lw)] = np.mean(lw, axis=1)
         F[:, fi] = hh[idx]; fi += 1                        # higher_highs
         F[:, fi] = ll[idx]; fi += 1                        # lower_lows
 

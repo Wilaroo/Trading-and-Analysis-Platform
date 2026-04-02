@@ -91,6 +91,14 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
   - Peak RAM: ~750MB (one batch of raw bars) + accumulated features (float32), vs. old ~7.5GB (all raw bar dicts)
   - Verified: 120-symbol synthetic test across 3 batches produces identical results to single-batch approach
 
+- **P1: 6-Point Pipeline Optimization Overhaul**:
+  1. **Symbol Cache (#3)**: `get_cached_symbols()` caches `get_available_symbols` results per bar_size. Eliminates redundant $group aggregations over 177M rows (was running 10+ times per bar_size).
+  2. **Vectorized remaining loops (#6)**: Replaced 2 Python for-loops in `extract_features_bulk` (volatility_ratio, higher_highs/lower_lows) with numpy vectorized operations using `sliding_window_view`.
+  3. **Multiprocessing Phases 2/2.5/4/6 (#1)**: Created top-level worker functions (`_extract_setup_long_worker`, `_extract_setup_short_worker`, `_extract_exit_worker`, `_extract_risk_worker`) that distribute per-symbol extraction across 12 CPU cores via `ProcessPoolExecutor`.
+  4. **Group-by-bar-size restructure (#2)**: Phases 2/2.5 now group all setup types by bar_size and load bars ONCE per bar_size (was loading same bars 10+ times for each setup type). Base features computed once per symbol, reused across setup types.
+  5. **Numpy accumulation (#4)**: All phases now accumulate features as compact float32 numpy arrays instead of Python lists of lists (~8x memory savings during accumulation).
+  6. **CNN adaptive step (#9)**: Added adaptive step size for image generation (targets ~500 windows/symbol max), `max_bars_per_symbol` and `max_samples` parameters to prevent OOM on high-bar-count symbols.
+
 ---
 
 ## P0 Issues
