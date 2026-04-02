@@ -608,6 +608,359 @@ class TimeSeriesFeatureEngineer:
         """Get ordered list of feature names"""
         return self.FEATURE_NAMES.copy()
 
+    # =====================================================================
+    # VECTORIZED BULK EXTRACTION — computes all features for entire symbol
+    # in one pass. Used by training only. Live prediction still uses
+    # extract_features() above.
+    # =====================================================================
+
+    @staticmethod
+    def _ema_series(arr, period):
+        """Compute EMA for entire array. O(n) single pass."""
+        alpha = 2.0 / (period + 1)
+        result = np.empty_like(arr, dtype=np.float64)
+        result[0] = arr[0]
+        for i in range(1, len(arr)):
+            result[i] = alpha * arr[i] + (1 - alpha) * result[i - 1]
+        return result
+
+    @staticmethod
+    def _rsi_series(closes, period=14):
+        """Compute RSI for entire array. Returns array of same length."""
+        n = len(closes)
+        rsi = np.full(n, 50.0, dtype=np.float64)
+        if n < period + 1:
+            return rsi
+        deltas = np.diff(closes)
+        gains = np.where(deltas > 0, deltas, 0.0)
+        losses = np.where(deltas < 0, -deltas, 0.0)
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
+        if avg_loss > 0:
+            rsi[period] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+        elif avg_gain > 0:
+            rsi[period] = 100.0
+        for i in range(period + 1, n):
+            avg_gain = (avg_gain * (period - 1) + gains[i - 1]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i - 1]) / period
+            if avg_loss > 0:
+                rsi[i] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+            elif avg_gain > 0:
+                rsi[i] = 100.0
+        return rsi
+
+    def extract_features_bulk(self, bars: List[Dict]) -> Optional[np.ndarray]:
+        """
+        Vectorized feature extraction for an entire symbol's bar history.
+
+        Computes all 46 features for every valid window in one pass instead
+        of calling extract_features() per window.
+
+        Args:
+            bars: OHLCV bars in chronological order (oldest first)
+
+        Returns:
+            numpy array of shape (n_valid_windows, 46) or None
+        """
+        from numpy.lib.stride_tricks import sliding_window_view
+
+        n = len(bars)
+        lb = self.lookback  # 50
+        if n < lb + 1:
+            return None
+
+        # Convert all bars to arrays ONCE
+        opens = np.array([b.get("open", 0) for b in bars], dtype=np.float64)
+        highs = np.array([b.get("high", 0) for b in bars], dtype=np.float64)
+        lows = np.array([b.get("low", 0) for b in bars], dtype=np.float64)
+        closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+        volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float64)
+
+        closes = np.where(closes == 0, 1.0, closes)
+        opens = np.where(opens == 0, closes, opens)
+        volumes = np.where(volumes == 0, 1.0, volumes)
+
+        # Valid positions: t = lb-1 .. n-1  (n_win total)
+        n_win = n - lb + 1
+        idx = np.arange(lb - 1, n)  # absolute indices of "current bar"
+        n_feat = len(self.FEATURE_NAMES)
+        F = np.zeros((n_win, n_feat), dtype=np.float32)
+
+        def sd(a, b):
+            """Safe divide."""
+            return np.divide(a, b, out=np.zeros_like(a, dtype=np.float64),
+                             where=np.abs(b) > 1e-10)
+
+        c_t = closes[idx];  c1 = closes[idx - 1]
+        c3 = closes[idx - 3]; c5 = closes[idx - 5]; c10 = closes[idx - 10]
+        o_t = opens[idx]; h_t = highs[idx]; l_t = lows[idx]; v_t = volumes[idx]
+
+        fi = 0  # feature column index
+
+        # ── PRICE ACTION (12) ──────────────────────────────────────────
+        F[:, fi] = sd(c_t - c1, c1);  fi += 1            # return_1
+        F[:, fi] = sd(c_t - c3, c3);  fi += 1            # return_3
+        F[:, fi] = sd(c_t - c5, c5);  fi += 1            # return_5
+        F[:, fi] = sd(c_t - c10, c10); fi += 1           # return_10
+        F[:, fi] = sd(o_t - c1, c1);  fi += 1            # gap_open
+
+        rng = h_t - l_t
+        body = np.abs(c_t - o_t)
+        F[:, fi] = sd(rng, c_t);      fi += 1            # range_pct
+        F[:, fi] = sd(body, rng);      fi += 1            # body_pct
+
+        bull = c_t >= o_t
+        uw = np.where(bull, h_t - c_t, h_t - o_t)
+        lw = np.where(bull, o_t - l_t, c_t - l_t)
+        F[:, fi] = sd(uw, rng);        fi += 1            # upper_wick_pct
+        F[:, fi] = sd(lw, rng);        fi += 1            # lower_wick_pct
+        F[:, fi] = sd(h_t - o_t, o_t); fi += 1           # high_from_open
+        F[:, fi] = sd(o_t - l_t, o_t); fi += 1           # low_from_open
+        cp = sd(c_t - l_t, rng)
+        cp[rng < 1e-10] = 0.5
+        F[:, fi] = cp;                 fi += 1            # close_position
+
+        # ── VOLUME (6) ─────────────────────────────────────────────────
+        vcum = np.cumsum(np.insert(volumes, 0, 0.0))
+        avg5  = (vcum[idx] - vcum[idx - 5])  / 5.0
+        avg10 = (vcum[idx] - vcum[idx - 10]) / 10.0
+        avg20 = (vcum[idx] - vcum[idx - 20]) / 20.0
+        F[:, fi] = sd(v_t, avg5);  fi += 1               # rvol_1
+        F[:, fi] = sd(v_t, avg10); fi += 1               # rvol_5
+        F[:, fi] = sd(v_t, avg20); fi += 1               # rvol_10
+
+        F[:, fi] = sd(v_t - volumes[idx - 2], volumes[idx - 2]); fi += 1  # volume_trend_3
+        F[:, fi] = sd(v_t - volumes[idx - 4], volumes[idx - 4]); fi += 1  # volume_trend_5
+
+        # volume_price_corr (vectorized via sliding_window_view)
+        vd = np.diff(volumes)
+        pd_ = np.diff(closes)
+        if len(vd) >= 9:
+            vw = sliding_window_view(vd, 9)   # (n-10, 9)
+            pw = sliding_window_view(pd_, 9)
+            vm = vw - np.mean(vw, axis=1, keepdims=True)
+            pm = pw - np.mean(pw, axis=1, keepdims=True)
+            cov = np.mean(vm * pm, axis=1)
+            vs = np.std(vw, axis=1)
+            ps = np.std(pw, axis=1)
+            denom = vs * ps
+            corr_full = np.divide(cov, denom, out=np.zeros(len(cov), dtype=np.float64),
+                                  where=denom > 1e-10)
+            # corr_full[i] corresponds to position i+9 in closes (end of 10-bar window)
+            # Map to our idx: idx[j] = lb-1+j → corr index = idx[j] - 9
+            corr_idx = idx - 9
+            valid = (corr_idx >= 0) & (corr_idx < len(corr_full))
+            vpc = np.zeros(n_win, dtype=np.float64)
+            vpc[valid] = corr_full[corr_idx[valid]]
+            F[:, fi] = vpc
+        fi += 1  # volume_price_corr
+
+        # ── MOMENTUM (8) ───────────────────────────────────────────────
+        # RSI-14 (full series)
+        rsi_full = self._rsi_series(closes, 14)
+        F[:, fi] = rsi_full[idx]; fi += 1                 # rsi_14
+        F[:, fi] = 0.0;           fi += 1                 # rsi_change (placeholder)
+
+        # MACD (full series EMAs)
+        ema12 = self._ema_series(closes, 12)
+        ema26 = self._ema_series(closes, 26)
+        macd_line = ema12 - ema26
+        ema9_macd = self._ema_series(macd_line, 9)
+        F[:, fi] = sd(macd_line[idx] - ema9_macd[idx], c_t); fi += 1  # macd_hist
+        F[:, fi] = np.where(macd_line[idx] > ema9_macd[idx], 1.0, -1.0); fi += 1  # macd_signal_cross
+
+        # Stochastic K/D — rolling 14-bar high/low
+        if n >= 14:
+            hw = sliding_window_view(highs, 14)
+            lw = sliding_window_view(lows, 14)
+            roll_hh = np.max(hw, axis=1)   # length n-13
+            roll_ll = np.min(lw, axis=1)
+            roll_range = roll_hh - roll_ll
+            # stoch at position i+13 in original array
+            stoch_full = np.full(n, 50.0, dtype=np.float64)
+            valid_stoch = roll_range > 1e-10
+            stoch_vals = np.where(valid_stoch,
+                                  ((closes[13:] - roll_ll) / roll_range) * 100.0, 50.0)
+            stoch_full[13:] = stoch_vals
+            F[:, fi] = stoch_full[idx]; fi += 1            # stoch_k
+            F[:, fi] = stoch_full[idx]; fi += 1            # stoch_d (simplified = k)
+
+            # Williams %R
+            wr_full = np.full(n, -50.0, dtype=np.float64)
+            wr_vals = np.where(valid_stoch,
+                               ((roll_hh - closes[13:]) / roll_range) * -100.0, -50.0)
+            wr_full[13:] = wr_vals
+            F[:, fi] = wr_full[idx]; fi += 1               # williams_r
+        else:
+            F[:, fi] = 50.0; fi += 1
+            F[:, fi] = 50.0; fi += 1
+            F[:, fi] = -50.0; fi += 1
+
+        # CCI — rolling 20-bar
+        if n >= 20:
+            tp = (highs + lows + closes) / 3.0
+            tp_w = sliding_window_view(tp, 20)  # (n-19, 20)
+            tp_sma = np.mean(tp_w, axis=1)
+            tp_mad = np.mean(np.abs(tp_w - tp_sma[:, None]), axis=1)
+            cci_full = np.zeros(n, dtype=np.float64)
+            valid_cci = tp_mad > 1e-10
+            cci_full[19:] = np.where(valid_cci,
+                                     (tp[19:] - tp_sma) / (0.015 * tp_mad), 0.0)
+            F[:, fi] = cci_full[idx]; fi += 1              # cci
+        else:
+            F[:, fi] = 0.0; fi += 1
+
+        # ── VOLATILITY (6) ─────────────────────────────────────────────
+        # ATR-14
+        if n >= 15:
+            tr = np.maximum(highs[1:] - lows[1:],
+                            np.maximum(np.abs(highs[1:] - closes[:-1]),
+                                       np.abs(lows[1:] - closes[:-1])))
+            tr_w = sliding_window_view(tr, 14)
+            atr_vals = np.mean(tr_w, axis=1)  # length n-15+1
+            atr_full = np.zeros(n, dtype=np.float64)
+            atr_full[14:14 + len(atr_vals)] = atr_vals
+            F[:, fi] = sd(atr_full[idx], c_t); fi += 1    # atr_pct
+        else:
+            F[:, fi] = 0.02; fi += 1
+
+        # Bollinger Bands — 20-bar
+        if n >= 20:
+            cw = sliding_window_view(closes, 20)
+            sma20 = np.mean(cw, axis=1)
+            std20 = np.std(cw, axis=1)
+            bb_upper = sma20 + 2.0 * std20
+            bb_lower = sma20 - 2.0 * std20
+            bb_w = bb_upper - bb_lower
+
+            bb_pos_full = np.full(n, 0.5, dtype=np.float64)
+            bb_width_full = np.full(n, 0.04, dtype=np.float64)
+            valid_bb = bb_w > 1e-10
+            bb_pos_full[19:] = np.where(valid_bb, (closes[19:] - bb_lower) / bb_w, 0.5)
+            bb_width_full[19:] = np.where(sma20 > 1e-10, bb_w / sma20, 0.04)
+
+            F[:, fi] = bb_pos_full[idx];   fi += 1        # bb_position
+            F[:, fi] = bb_width_full[idx]; fi += 1        # bb_width
+        else:
+            F[:, fi] = 0.5;  fi += 1
+            F[:, fi] = 0.04; fi += 1
+
+        F[:, fi] = F[:, fi - 2];  fi += 1                 # keltner_position ≈ bb_position
+
+        # Historical volatility (10-bar log returns std, annualized)
+        if n >= 11:
+            log_ret = np.diff(np.log(np.maximum(closes, 1e-10)))
+            lr_w = sliding_window_view(log_ret, 10)
+            hvol = np.std(lr_w, axis=1) * np.sqrt(252.0)
+            hvol_full = np.full(n, 0.2, dtype=np.float64)
+            hvol_full[10:10 + len(hvol)] = hvol
+            F[:, fi] = hvol_full[idx]; fi += 1             # volatility_10
+        else:
+            F[:, fi] = 0.2; fi += 1
+
+        # Volatility ratio (5-bar vs 20-bar)
+        if n >= 21:
+            lr = np.diff(np.log(np.maximum(closes, 1e-10)))
+            lr5 = sliding_window_view(lr, 5)
+            lr20 = sliding_window_view(lr, 20)
+            v5 = np.std(lr5, axis=1)    # length n-5
+            v20 = np.std(lr20, axis=1)  # length n-20
+            vr_full = np.ones(n, dtype=np.float64)
+            # v5 starts at index 5, v20 at index 20
+            # ratio at position t: v5[t-5] / v20[t-20]
+            for j in range(n_win):
+                t = idx[j]
+                i5 = t - 5
+                i20 = t - 20
+                if 0 <= i5 < len(v5) and 0 <= i20 < len(v20) and v20[i20] > 1e-10:
+                    vr_full[t] = v5[i5] / v20[i20]
+            F[:, fi] = vr_full[idx]; fi += 1               # volatility_ratio
+        else:
+            F[:, fi] = 1.0; fi += 1
+
+        # ── TREND (6) ──────────────────────────────────────────────────
+        ema9 = self._ema_series(closes, 9)
+        ema21 = self._ema_series(closes, 21)
+        F[:, fi] = sd(c_t - ema9[idx], ema9[idx]);   fi += 1  # ema_9_distance
+        F[:, fi] = sd(c_t - ema21[idx], ema21[idx]); fi += 1  # ema_21_distance
+
+        if n >= 50:
+            cw50 = sliding_window_view(closes, 50)
+            sma50 = np.mean(cw50, axis=1)
+            sma50_full = np.zeros(n, dtype=np.float64)
+            sma50_full[49:49 + len(sma50)] = sma50
+            F[:, fi] = sd(c_t - sma50_full[idx], sma50_full[idx]); fi += 1  # sma_50_distance
+        else:
+            F[:, fi] = 0.0; fi += 1
+
+        # Trend strength (ADX-like)
+        if n >= 15:
+            up_moves = np.diff(highs)    # length n-1
+            down_moves = -np.diff(lows)
+            plus_dm = np.where((up_moves > down_moves) & (up_moves > 0), up_moves, 0.0)
+            minus_dm = np.where((down_moves > up_moves) & (down_moves > 0), down_moves, 0.0)
+            pdm_w = sliding_window_view(plus_dm, 13)   # 13 diffs over 14 bars
+            mdm_w = sliding_window_view(minus_dm, 13)
+            sum_pdm = np.sum(pdm_w, axis=1)
+            sum_mdm = np.sum(mdm_w, axis=1)
+            total = sum_pdm + sum_mdm
+            ts_full = np.zeros(n, dtype=np.float64)
+            ts_full[13:13 + len(total)] = np.where(total > 0, np.abs(sum_pdm - sum_mdm) / total, 0.0)
+            F[:, fi] = ts_full[idx]; fi += 1               # trend_strength
+        else:
+            F[:, fi] = 0.0; fi += 1
+
+        # Higher highs / lower lows (4-bar comparison)
+        hh = np.zeros(n, dtype=np.float64)
+        ll = np.zeros(n, dtype=np.float64)
+        for j in range(4, n):
+            hh[j] = sum(1 for k in range(4) if highs[j - k] > highs[j - k - 1]) / 4.0
+            ll[j] = sum(1 for k in range(4) if lows[j - k] < lows[j - k - 1]) / 4.0
+        F[:, fi] = hh[idx]; fi += 1                        # higher_highs
+        F[:, fi] = ll[idx]; fi += 1                        # lower_lows
+
+        # ── PATTERN (4) ────────────────────────────────────────────────
+        F[:, fi] = np.where((rng > 0) & (body / np.maximum(rng, 1e-10) < 0.1), 1.0, 0.0); fi += 1  # doji
+
+        lw_pat = np.minimum(o_t, c_t) - l_t
+        uw_pat = h_t - np.maximum(o_t, c_t)
+        F[:, fi] = np.where((rng > 0) & (lw_pat > 2 * body) & (uw_pat < body), 1.0, 0.0); fi += 1  # hammer
+
+        # Engulfing
+        o_1 = opens[idx - 1]; c_prev = closes[idx - 1]
+        prev_body = np.abs(c_prev - o_1)
+        bull_eng = (c_t > o_t) & (c_prev < o_1) & (body > prev_body)
+        bear_eng = (c_t < o_t) & (c_prev > o_1) & (body > prev_body)
+        F[:, fi] = np.where(bull_eng, 1.0, np.where(bear_eng, -1.0, 0.0)); fi += 1  # engulfing
+
+        # Inside bar
+        F[:, fi] = np.where((h_t < highs[idx - 1]) & (l_t > lows[idx - 1]), 1.0, 0.0); fi += 1  # inside_bar
+
+        # ── TIME (4) ───────────────────────────────────────────────────
+        hours = np.zeros(n, dtype=np.float64)
+        dows = np.full(n, 0.5, dtype=np.float64)
+        for j in range(n):
+            ts = bars[j].get("date", bars[j].get("timestamp", ""))
+            if ts:
+                try:
+                    if isinstance(ts, str):
+                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    else:
+                        dt = ts
+                    hours[j] = dt.hour
+                    dows[j] = dt.weekday() / 4.0
+                except Exception:
+                    pass
+        F[:, fi] = np.sin(2.0 * np.pi * hours[idx] / 24.0); fi += 1  # hour_sin
+        F[:, fi] = np.cos(2.0 * np.pi * hours[idx] / 24.0); fi += 1  # hour_cos
+        F[:, fi] = dows[idx]; fi += 1                       # day_of_week
+        F[:, fi] = np.where((hours[idx] >= 19) & (hours[idx] <= 20), 1.0, 0.0); fi += 1  # is_power_hour
+
+        # Final NaN/Inf cleanup
+        np.nan_to_num(F, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return F
+
 
 # Singleton
 _feature_engineer: Optional[TimeSeriesFeatureEngineer] = None

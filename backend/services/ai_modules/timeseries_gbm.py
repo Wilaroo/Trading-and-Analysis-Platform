@@ -471,6 +471,131 @@ class TimeSeriesGBM:
         
         return self._metrics
 
+    def train_vectorized(
+        self,
+        bars_by_symbol: Dict[str, List[Dict]],
+        feature_engineer=None,
+        num_boost_round: int = 200,
+        early_stopping_rounds: int = 20,
+    ) -> ModelMetrics:
+        """
+        Vectorized training — uses extract_features_bulk() for 10-50x speedup.
+        Same model output as train(), just faster feature extraction.
+        """
+        if feature_engineer is None:
+            from services.ai_modules.timeseries_features import get_feature_engineer
+            feature_engineer = get_feature_engineer(50)
+
+        logger.info(f"Training model (vectorized) on {len(bars_by_symbol)} symbols...")
+
+        all_features = []
+        all_targets = []
+        symbols_processed = 0
+        total_symbols = len(bars_by_symbol)
+
+        for symbol, bars in bars_by_symbol.items():
+            symbols_processed += 1
+            if symbols_processed % 10 == 0 or symbols_processed == total_symbols:
+                sample_count = sum(len(f) for f in all_features)
+                logger.info(f"[Vectorized extraction] {symbols_processed}/{total_symbols} symbols ({sample_count} samples)")
+
+            if len(bars) < 50 + self.forecast_horizon:
+                continue
+
+            # Bulk extract all features for this symbol in one pass
+            feat_matrix = feature_engineer.extract_features_bulk(bars)
+            if feat_matrix is None or len(feat_matrix) == 0:
+                continue
+
+            # Compute targets vectorized — future return over forecast_horizon
+            closes = np.array([b["close"] for b in bars], dtype=np.float64)
+            lb = 50
+            n = len(bars)
+            n_win = n - lb + 1  # same as feat_matrix rows
+
+            # For each valid position t (lb-1 .. n-1), target = sign of closes[t+fh] vs closes[t]
+            # But we can only compute target where t + fh < n
+            max_target_idx = n - self.forecast_horizon
+            usable = max_target_idx - (lb - 1)  # rows with valid targets
+            if usable <= 0:
+                continue
+
+            feat_matrix = feat_matrix[:usable]
+            t_indices = np.arange(lb - 1, lb - 1 + usable)
+            future_closes = closes[t_indices + self.forecast_horizon]
+            current_closes = closes[t_indices]
+            targets = (future_closes > current_closes).astype(np.int32)  # 1=UP, 0=DOWN
+
+            all_features.append(feat_matrix)
+            all_targets.append(targets)
+
+        if not all_features:
+            logger.warning("No training data extracted (vectorized)")
+            return self._metrics
+
+        X = np.vstack(all_features)
+        y = np.concatenate(all_targets)
+
+        logger.info(f"Extracted {len(X)} training samples (vectorized)")
+
+        # Filter out any rows with all zeros (failed extraction)
+        valid_rows = np.any(X != 0, axis=1)
+        X = X[valid_rows]
+        y = y[valid_rows]
+
+        unique, counts = np.unique(y, return_counts=True)
+        dist_str = ", ".join([f"{'UP' if c == 1 else 'DOWN'}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)])
+        logger.info(f"Class distribution: {dist_str}")
+
+        # Split train/validation
+        split_idx = int(len(X) * 0.8)
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+
+        feature_names = feature_engineer.get_feature_names()
+        train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names, free_raw_data=False)
+        val_data = lgb.Dataset(X_val, label=y_val, reference=train_data, free_raw_data=False)
+
+        callbacks = [lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(period=0)]
+        self._model = lgb.train(
+            {**self.DEFAULT_PARAMS, **self.params},
+            train_data,
+            num_boost_round=num_boost_round,
+            valid_sets=[val_data],
+            callbacks=callbacks,
+        )
+
+        # Evaluate
+        y_pred = self._model.predict(X_val)
+        y_pred_binary = (y_pred > 0.5).astype(int)
+        accuracy = np.mean(y_pred_binary == y_val)
+
+        up_mask = y_val == 1
+        if np.sum(up_mask) > 0:
+            precision_up = np.sum((y_pred_binary == 1) & up_mask) / max(np.sum(y_pred_binary == 1), 1)
+            recall_up = np.sum((y_pred_binary == 1) & up_mask) / np.sum(up_mask)
+            f1_up = 2 * precision_up * recall_up / max(precision_up + recall_up, 1e-10)
+        else:
+            precision_up = recall_up = f1_up = 0.0
+
+        self._metrics = ModelMetrics(
+            accuracy=round(accuracy, 4),
+            precision_up=round(precision_up, 4),
+            recall_up=round(recall_up, 4),
+            f1_up=round(f1_up, 4),
+            training_samples=len(X_train),
+            validation_samples=len(X_val),
+        )
+
+        version_parts = self._version.replace("v", "").split(".")
+        minor = int(version_parts[1]) + 1 if len(version_parts) > 1 else 1
+        self._version = f"v0.{minor}.0"
+
+        self._save_model()
+
+        logger.info(f"Training complete (vectorized): accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
+        return self._metrics
+
     def train_from_features(
         self,
         X: np.ndarray,

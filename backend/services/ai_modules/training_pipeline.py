@@ -446,7 +446,7 @@ async def run_training_pipeline(
                         continue
 
                     logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols")
-                    metrics = await _run_in_thread(model.train, bars_by_symbol)
+                    metrics = await _run_in_thread(model.train_vectorized, bars_by_symbol)
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({
@@ -517,13 +517,17 @@ async def run_training_pipeline(
                             volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
                             opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
+                                continue
+
                             for i in range(50, len(bars) - fh):
-                                # Base features
-                                window = bars[i - 49: i + 1][::-1]
-                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                if fs is None:
-                                    continue
-                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                                # Base features (from pre-computed bulk matrix)
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
 
                                 # Setup-specific features
                                 o_window = opens[max(0, i - 49): i + 1][::-1]
@@ -641,13 +645,17 @@ async def run_training_pipeline(
                             volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
                             opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
+                                continue
+
                             for i in range(50, len(bars) - fh):
-                                # Base features
-                                window = bars[i - 49: i + 1][::-1]
-                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                if fs is None:
-                                    continue
-                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                                # Base features (from pre-computed bulk matrix)
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
 
                                 # Short-specific features
                                 c_window = closes[max(0, i - 49): i + 1][::-1]
@@ -772,13 +780,17 @@ async def run_training_pipeline(
                         volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
                         opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
+                        # Bulk-extract base features ONCE for this symbol
+                        base_matrix = feature_engineer.extract_features_bulk(bars)
+                        if base_matrix is None:
+                            continue
+
                         for i in range(50, len(bars) - fh):
-                            # Base features
-                            window = bars[i - 49: i + 1][::-1]
-                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                            if fs is None:
-                                continue
-                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                            # Base features (from pre-computed bulk matrix)
+                            row_idx = i - 49
+                            if row_idx >= len(base_matrix):
+                                break
+                            base_vec = base_matrix[row_idx].tolist()
 
                             # Vol-specific features
                             c_window = closes[i - 49: i + 1][::-1]
@@ -878,13 +890,17 @@ async def run_training_pipeline(
                         lows = np.array([b["low"] for b in bars], dtype=float)
                         volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
 
+                        # Bulk-extract base features ONCE for this symbol
+                        base_matrix = feature_engineer.extract_features_bulk(bars)
+                        if base_matrix is None:
+                            continue
+
                         for i in range(50, len(bars) - max_horizon):
-                            # Base features
-                            window = bars[i - 49: i + 1][::-1]
-                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                            if fs is None:
-                                continue
-                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                            # Base features (from pre-computed bulk matrix)
+                            row_idx = i - 49
+                            if row_idx >= len(base_matrix):
+                                break
+                            base_vec = base_matrix[row_idx].tolist()
 
                             # Exit-specific features
                             c_window = closes[i - 49: i + 1][::-1]
@@ -1011,13 +1027,17 @@ async def run_training_pipeline(
                         if min_len < 70 + fh:
                             continue
 
+                        # Bulk-extract base features ONCE for this symbol
+                        base_matrix = feature_engineer.extract_features_bulk(bars)
+                        if base_matrix is None:
+                            continue
+
                         for i in range(50, min_len - fh):
-                            # Base features
-                            window = bars[i - 49: i + 1][::-1]
-                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                            if fs is None:
-                                continue
-                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                            # Base features (from pre-computed bulk matrix)
+                            row_idx = i - 49
+                            if row_idx >= len(base_matrix):
+                                break
+                            base_vec = base_matrix[row_idx].tolist()
 
                             # Sector-relative features
                             sc = stock_closes[max(0, i - 24): i + 1][::-1]
@@ -1103,12 +1123,16 @@ async def run_training_pipeline(
                         lows = np.array([b["low"] for b in bars], dtype=float)
                         volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
 
+                        # Bulk-extract base features ONCE for this symbol
+                        base_matrix = feature_engineer.extract_features_bulk(bars)
+                        if base_matrix is None:
+                            continue
+
                         for i in range(50, len(bars) - max_bars):
-                            window = bars[i - 49: i + 1][::-1]
-                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                            if fs is None:
-                                continue
-                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                            row_idx = i - 49
+                            if row_idx >= len(base_matrix):
+                                break
+                            base_vec = base_matrix[row_idx].tolist()
 
                             c_window = closes[i - 24: i + 1][::-1]
                             h_window = highs[i - 24: i + 1][::-1]
@@ -1209,12 +1233,16 @@ async def run_training_pipeline(
 
                             closes = np.array([b["close"] for b in bars], dtype=float)
 
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
+                                continue
+
                             for i in range(50, len(bars) - fh):
-                                window = bars[i - 49: i + 1][::-1]
-                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                if fs is None:
-                                    continue
-                                base_vec = [fs.features.get(f, 0.0) for f in base_names]
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
 
                                 # Classify regime at this date
                                 bar_date = str(bars[i].get("date", ""))
