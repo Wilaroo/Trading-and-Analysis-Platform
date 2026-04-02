@@ -422,9 +422,20 @@ class SmartContextEngine:
         """Extract stock symbols from message and track them for personalized scanning"""
         symbols = set()
         
-        # Pattern 1: $SYMBOL format
+        # Pattern 1: $SYMBOL format — validate against known symbols to prevent
+        # common words like $QUICK, $FAST, $RALLY leaking into the symbol tracker
         dollar_symbols = re.findall(r'\$([A-Z]{1,5})\b', message.upper())
-        symbols.update(dollar_symbols)
+        for ds in dollar_symbols:
+            if ds in self.KNOWN_SYMBOLS:
+                symbols.add(ds)
+            elif ds not in self.EXCLUDED_WORDS:
+                # Also validate against the full universe for $TICKER not in our small set
+                try:
+                    from data.index_symbols import is_valid_symbol
+                    if is_valid_symbol(ds):
+                        symbols.add(ds)
+                except ImportError:
+                    pass
         
         # Pattern 2: Known symbols
         words = message.upper().split()

@@ -221,15 +221,18 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
     if (cached?.data && isFirstMount.current) {
       setData(cached.data);
       setLoading(false);
-      if (cached.isStale) fetchAllData();
-    } else {
+      if (cached.isStale && !isTrainingActive) fetchAllData();
+    } else if (!isTrainingActive) {
+      // Skip heavy fetch (9 API calls) when effect re-runs due to training mode change
       fetchAllData();
     }
     isFirstMount.current = false;
 
     const pollInterval = getPollingInterval(60000, false);
     const interval = setInterval(() => {
-      if (isVisibleRef.current) fetchAllData();
+      // Skip fetch entirely during training — saves 9+ API calls per cycle
+      if (!isVisibleRef.current || isTrainingActive) return;
+      fetchAllData();
     }, pollInterval);
 
     return () => clearInterval(interval);

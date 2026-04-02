@@ -11,6 +11,7 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { isTrainingActive } from '../utils/safePolling';
 
 const SystemStatusContext = createContext(null);
 
@@ -237,6 +238,9 @@ export const SystemStatusProvider = ({ children }) => {
   const checkAllServices = useCallback(async () => {
     // Skip if tab is hidden
     if (!isVisibleRef.current) return;
+    
+    // Skip during training to save backend CPU — services don't change during ML training
+    if (isTrainingActive()) return;
     
     // 1. Try the primary health endpoint
     let healthOk = false;

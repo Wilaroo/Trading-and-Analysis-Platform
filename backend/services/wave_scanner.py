@@ -80,6 +80,13 @@ class WaveScanner:
         # Add recently viewed symbols to Tier 1 (max 50 to avoid bloat)
         try:
             viewed = get_viewed_symbols(max_count=50)
+            # Safety filter: only include symbols that exist in our known universe
+            # This prevents phantom symbols (e.g. "QUICK") from leaking into IB requests
+            try:
+                from data.index_symbols import is_valid_symbol
+                viewed = [s for s in viewed if is_valid_symbol(s)]
+            except ImportError:
+                pass
             tier1.extend(viewed)
             # Dedupe while preserving order
             seen = set()

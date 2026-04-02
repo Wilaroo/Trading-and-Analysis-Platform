@@ -20,7 +20,7 @@ import {
 } from './contexts';
 import { WebSocketDataProvider } from './contexts/WebSocketDataContext';
 import api from './utils/api';
-import { resetStaggerCounter } from './utils/safePolling';
+import { resetStaggerCounter, isTrainingActive as isTrainingActiveGlobal } from './utils/safePolling';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
@@ -204,6 +204,8 @@ function App() {
   useEffect(() => {
     if (!appReady) return;
     const interval = setInterval(async () => {
+      // Skip during training to save backend CPU
+      if (isTrainingActiveGlobal()) return;
       // Only poll if not getting WebSocket updates
       await checkIbConnection();
     }, 60000);  // Reduced to 60s - WebSocket handles real-time updates

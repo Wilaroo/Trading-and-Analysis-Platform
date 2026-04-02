@@ -60,6 +60,12 @@ def track_symbol_view(symbol: str, source: str = "unknown") -> bool:
     if not symbol or len(symbol) > 10:
         return False
     
+    # Validate against known universe — reject common English words and phantom symbols
+    # that could leak through text extraction (e.g., "QUICK", "FAST", "RALLY")
+    if not _is_valid_trackable_symbol(symbol):
+        logger.debug(f"Rejected invalid symbol for tracking: {symbol} (source={source})")
+        return False
+    
     # Add to in-memory cache immediately
     _viewed_symbols_cache.add(symbol)
     
@@ -82,6 +88,67 @@ def track_symbol_view(symbol: str, source: str = "unknown") -> bool:
         except Exception as e:
             logger.warning(f"Failed to track symbol view: {e}")
     
+    return False
+
+
+def _is_valid_trackable_symbol(symbol: str) -> bool:
+    """
+    Validate that a symbol is a real ticker, not a common English word.
+    Uses the index universe as the source of truth, with a blocklist fallback.
+    """
+    # Must be 1-5 uppercase alpha chars
+    if not symbol.isalpha() or len(symbol) < 1 or len(symbol) > 5:
+        return False
+    
+    # FIRST: check the known universe — most reliable. If it's a real ticker, allow it
+    # even if it happens to also be a common English word (e.g., "FAST" = Fastenal)
+    try:
+        from data.index_symbols import is_valid_symbol
+        if is_valid_symbol(symbol):
+            return True
+    except ImportError:
+        pass
+    
+    # If NOT in our universe, block common English words that look like tickers
+    _COMMON_WORD_BLOCKLIST = {
+        "QUICK", "RALLY", "TRADE", "STOCK", "SHARE", "ALERT", "PRICE",
+        "CLOSE", "ENTRY", "SHORT", "SMART", "SETUP", "BOOST", "CRASH", "TREND",
+        "SURGE", "WATCH", "CLEAR", "BASED", "ABOUT", "ABOVE", "AFTER", "BEING",
+        "BELOW", "EVERY", "FIRST", "GIVEN", "GOING", "GREAT", "SINCE", "STILL",
+        "THINK", "THOSE", "THREE", "TODAY", "TOTAL", "UNDER", "UNTIL", "WHERE",
+        "WHICH", "WHILE", "WORLD", "WOULD", "COULD", "MIGHT", "SHALL", "THEIR",
+        "NEVER", "OTHER", "THESE", "RIGHT", "SMALL", "LARGE", "EARLY", "NIGHT",
+        "QUITE", "REACH", "START", "PLACE", "POINT", "POWER", "STATE",
+        "MONEY", "ORDER", "GROUP", "ALONG", "AMONG", "CHECK", "CLASS", "LEVEL",
+        "MAJOR", "MODEL", "OFTEN", "PAPER", "TAKEN", "USING", "VALUE", "YOUNG",
+        "BREAK", "CROSS", "KNOWN", "LOCAL", "MEANS", "NOTED", "RANGE", "SOUND",
+        # Common trading jargon that isn't a real ticker
+        "LONG", "SELL", "HOLD", "CALL", "PUTS", "STOP", "GAIN", "LOSS", "RISK",
+        "BULL", "BEAR", "HIGH", "LOWS", "OPEN", "VWAP", "NEWS", "MOVE", "PLAY",
+        "EDGE", "PLAN", "EXIT", "FADE", "FLAT", "FLOW", "FUEL", "HEAT",
+        "IDEA", "JUMP", "KEEP", "KICK", "LEAD", "LEAN", "LOAD", "LOCK", "MISS",
+        "MODE", "MOOD", "MUCH", "NICE", "NOTE", "PEAK", "PICK", "PILE", "PULL",
+        "PUMP", "PUSH", "RATE", "REST", "RIDE", "RISE", "ROLL", "SAFE", "SAVE",
+        "SCAN", "SHOW", "SIDE", "SIZE", "SKIP", "SLOW", "SNAP", "SOFT",
+        "SPIN", "STEP", "SWAY", "TAKE", "TAPE", "TEST", "THIN", "TICK", "TILT",
+        "TIME", "TONE", "TOPS", "TRIM", "TURN", "VERY", "VOID", "WAIT", "WAKE",
+        "WALK", "WALL", "WARN", "WASH", "WAVE", "WEAK", "WIDE", "WILD", "WILL",
+        "WIND", "WIPE", "WORK", "WRAP", "ZERO", "ZONE",
+    }
+    
+    if symbol in _COMMON_WORD_BLOCKLIST:
+        return False
+    
+    # For symbols NOT in our universe and not blocklisted:
+    # Single-char symbols — only allow well-known ones
+    if len(symbol) == 1:
+        return symbol in {"X", "F", "C", "V", "U", "S", "O"}
+    
+    # 2-4 char symbols that passed the blocklist are likely valid tickers
+    if len(symbol) <= 4:
+        return True
+    
+    # 5-char symbols not in our universe are suspicious — reject
     return False
 
 

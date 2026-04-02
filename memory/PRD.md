@@ -99,6 +99,21 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
   5. **Numpy accumulation (#4)**: All phases now accumulate features as compact float32 numpy arrays instead of Python lists of lists (~8x memory savings during accumulation).
   6. **CNN adaptive step (#9)**: Added adaptive step size for image generation (targets ~500 windows/symbol max), `max_bars_per_symbol` and `max_samples` parameters to prevent OOM on high-bar-count symbols.
 
+### Session N+9 — Feb 2026
+- **P0 Fix: Phantom `QUICK` symbol hitting IB Gateway**:
+  - Root cause: `user_viewed_tracker.track_symbol_view()` had no validation — any string could be persisted as a "viewed symbol" and flow into the wave scanner's Tier 1, causing IB to be queried for invalid tickers every scan cycle
+  - Fix 1: Added `_is_valid_trackable_symbol()` to `user_viewed_tracker.py` — validates against the known index universe first (allows real tickers like "FAST"), then blocks common English words via a 150+ word blocklist
+  - Fix 2: Added safety filter in `wave_scanner.py` when loading viewed symbols for Tier 1 — only includes symbols that pass `is_valid_symbol()` from the index universe
+  - Fix 3: Hardened `smart_context_engine._extract_symbols()` — `$SYMBOL` extractions now validate against `KNOWN_SYMBOLS` + `is_valid_symbol()` before tracking (previously, any `$WORD` was tracked without validation)
+  - User action needed: Run `db.user_viewed_symbols.deleteMany({symbol: "QUICK"})` in MongoDB shell to clean up any existing entries
+
+- **P0 Fix: Frontend making ~20+ API calls per polling cycle during ML Training**:
+  - Fix 1: `NIA/index.jsx` — `fetchAllData()` (9 parallel API calls) now skipped entirely when `isTrainingActive`, both on effect re-run and in the polling interval
+  - Fix 2: `SystemStatusContext.jsx` — `checkAllServices()` (4 HTTP health checks) now skipped during training via `isTrainingActive()` import from safePolling
+  - Fix 3: `App.js` — IB connection polling (1 call/60s) now skipped during training
+  - Fix 4: `NIA/TrainingPipelinePanel.jsx` — HTTP fallback interval increased from 30s → 120s during training (WebSocket is the primary update mechanism)
+  - Total savings: ~14+ API calls eliminated per polling cycle during training
+
 ---
 
 ## P0 Issues
@@ -129,6 +144,9 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] **_get_base_system_prompt missing** (Feb 2026)
 - [FIXED] **`_extract_symbol_worker` NameError crashing training pipeline** (Feb 2026): Missing top-level worker function for multiprocessing
 
+- [FIXED] **Phantom QUICK symbol hitting IB Gateway** (Feb 2026): Unvalidated symbol tracking + wave scanner safety filter
+- [FIXED] **Frontend 20+ API calls during training** (Feb 2026): NIA panel, SystemStatus, App.js, TrainingPipelinePanel all gated behind training mode checks
+
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).
 - **Focus mode auto-pause**: `safePolling` globally pauses non-essential frontend polls during training. Backend streams + scheduler tasks also pause. All resume automatically when training completes via WS focus_mode broadcast.
@@ -158,12 +176,17 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - `/app/backend/services/ai_modules/training_pipeline.py` — Training pipeline logic
 - `/app/backend/services/ai_modules/timeseries_gbm.py` — LightGBM model (GPU auto-detect)
 - `/app/backend/services/ai_modules/timeseries_features.py` — Vectorized feature extraction
+- `/app/backend/services/user_viewed_tracker.py` — Symbol tracking with universe validation
+- `/app/backend/services/wave_scanner.py` — Scanner tier system with safety filtering
+- `/app/backend/services/smart_context_engine.py` — AI chat symbol extraction (validated)
 - `/app/backend/services/focus_mode_manager.py` — Focus mode state management
 - `/app/backend/scripts/gpu_setup_check.py` — GPU diagnostic + install instructions
 - `/app/documents/scripts/ib_data_pusher.py` — IB Data Pusher (focus mode aware)
 - `/app/frontend/src/utils/requestThrottler.js` — Browser connection management (max 2 concurrent GETs)
 - `/app/frontend/src/utils/safePolling.js` — Training-aware polling with throttler integration
 - `/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx` — Training start with queue drain
+- `/app/frontend/src/components/NIA/index.jsx` — NIA panel (training-gated polling)
+- `/app/frontend/src/contexts/SystemStatusContext.jsx` — System health (training-gated)
 
 ## Key API Endpoints
 - `POST /api/ai-training/start` — Start training pipeline
