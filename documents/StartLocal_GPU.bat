@@ -70,14 +70,12 @@ if %errorlevel%==0 (
     echo       GPU: Not configured (run InstallML_GPU.bat first)
 )
 
-:: Check LightGBM GPU support
-python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p)" 2>nul
-if %errorlevel%==0 (
-    echo       LightGBM: GPU ENABLED
-) else (
+:: Check LightGBM GPU support (uses lgb.train test — Booster() test is broken on v4.x)
+python -c "import lightgbm as lgb; import numpy as np; ds=lgb.Dataset(np.random.rand(20,3).astype(np.float32),label=np.random.randint(0,2,20).astype(np.float32),free_raw_data=False); ds.construct(); lgb.train({'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1,'objective':'binary','num_leaves':4,'n_iterations':1,'min_data_in_leaf':1,'min_data_in_bin':1,'num_threads':1},ds,num_boost_round=1); print('       LightGBM: GPU ENABLED')" 2>nul
+if %errorlevel% neq 0 (
     python -c "import lightgbm" >nul 2>&1
     if %errorlevel%==0 (
-        echo       LightGBM: CPU only (run InstallML_GPU.bat for GPU)
+        echo       LightGBM: CPU only (run gpu_setup_check.py for instructions)
     ) else (
         echo       LightGBM: MISSING (run InstallML_GPU.bat)
     )

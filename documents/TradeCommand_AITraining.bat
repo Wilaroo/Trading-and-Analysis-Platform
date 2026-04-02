@@ -57,36 +57,15 @@ where node >nul 2>&1 && echo        Node.js: OK || echo        Node.js: MISSING
 where yarn >nul 2>&1 && echo        Yarn: OK || (echo        Installing yarn... && npm install -g yarn >nul 2>&1)
 
 :: Check GPU for ML training
-python -c "import torch; print(f'        GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_mem // 1024**3}GB)') if torch.cuda.is_available() else print('        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
+python -c "import torch; gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else None; print(f'        GPU: {gpu} ({torch.cuda.get_device_properties(0).total_mem // 1024**3}GB)' if gpu else '        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
 
 :: Check CNN dependencies (torchvision + PIL)
 python -c "import torchvision; from PIL import Image; print('        CNN Models: READY (torchvision + PIL)')" 2>nul || echo        CNN Models: NOT INSTALLED (run InstallML_GPU.bat)
 
-:: Check LightGBM + GPU support
-python -c "import lightgbm as lgb; p={'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1}; lgb.Booster(p); print('        LightGBM: GPU ENABLED')" 2>nul
+:: Check LightGBM + GPU support (uses lgb.train test — Booster() test is broken on v4.x)
+python -c "import lightgbm as lgb; import numpy as np; ds=lgb.Dataset(np.random.rand(20,3).astype(np.float32),label=np.random.randint(0,2,20).astype(np.float32),free_raw_data=False); ds.construct(); lgb.train({'device':'gpu','gpu_platform_id':0,'gpu_device_id':0,'verbose':-1,'objective':'binary','num_leaves':4,'n_iterations':1,'min_data_in_leaf':1,'min_data_in_bin':1,'num_threads':1},ds,num_boost_round=1); print('        LightGBM: GPU ENABLED')" 2>nul
 if %errorlevel% neq 0 (
-    python -c "import lightgbm" >nul 2>&1
-    if %errorlevel%==0 (
-        echo        LightGBM: CPU only (upgrading to GPU...)
-        echo        Installing LightGBM with GPU support...
-        pip uninstall lightgbm -y >nul 2>&1
-        pip install lightgbm --config-settings=cmake.define.USE_GPU=ON 2>nul
-        if %errorlevel%==0 (
-            echo        LightGBM: GPU version installed!
-        ) else (
-            echo        LightGBM: GPU build failed, reinstalling CPU version
-            pip install lightgbm >nul 2>&1
-        )
-    ) else (
-        echo        LightGBM: MISSING - Installing with GPU support...
-        pip install lightgbm --config-settings=cmake.define.USE_GPU=ON 2>nul
-        if %errorlevel%==0 (
-            echo        LightGBM: GPU version installed!
-        ) else (
-            echo        LightGBM: GPU build failed, installing CPU version
-            pip install lightgbm >nul 2>&1
-        )
-    )
+    python -c "import lightgbm; print('        LightGBM: CPU only (GPU not compiled in — run gpu_setup_check.py for instructions)')" 2>nul || echo        LightGBM: MISSING — run: pip install lightgbm
 )
 echo.
 
