@@ -227,6 +227,7 @@ class IBDataPusher:
     
     def __init__(self, cloud_url: str, ib_host: str = "127.0.0.1", ib_port: int = 4002, client_id: int = 10):
         self.cloud_url = cloud_url.rstrip('/')
+        self.local_backend_url = "http://127.0.0.1:8001"  # Local backend for focus mode checks
         self.ib_host = ib_host
         self.ib_port = ib_port
         self.client_id = client_id
@@ -1120,7 +1121,10 @@ class IBDataPusher:
                     current_time = time.time()
                     if current_time - last_focus_check >= focus_check_interval:
                         try:
-                            status = self.api.get_safe("/api/focus-mode/status", timeout=5)
+                            # Check LOCAL backend for focus mode (training runs locally, not on cloud)
+                            import requests as _req
+                            resp = _req.get(f"{self.local_backend_url}/api/focus-mode/status", timeout=3)
+                            status = resp.json() if resp.status_code == 200 else None
                             if status and status.get("mode") == "training":
                                 if not focus_mode_paused:
                                     logger.info("[FOCUS MODE] Training mode detected - pausing IB requests and cloud pushes")
