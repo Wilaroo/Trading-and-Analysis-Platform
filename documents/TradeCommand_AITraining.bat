@@ -57,7 +57,7 @@ where node >nul 2>&1 && echo        Node.js: OK || echo        Node.js: MISSING
 where yarn >nul 2>&1 && echo        Yarn: OK || (echo        Installing yarn... && npm install -g yarn >nul 2>&1)
 
 :: Check GPU for ML training
-python -c "import torch; gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else None; print(f'        GPU: {gpu} ({torch.cuda.get_device_properties(0).total_mem // 1024**3}GB)' if gpu else '        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
+python -c "import torch; print('        GPU: ' + torch.cuda.get_device_name(0) + ' (' + str(torch.cuda.get_device_properties(0).total_mem // 1073741824) + 'GB)') if torch.cuda.is_available() else print('        GPU: CPU mode (no CUDA)')" 2>nul || echo        GPU: Not configured
 
 :: Check CNN dependencies (torchvision + PIL)
 python -c "import torchvision; from PIL import Image; print('        CNN Models: READY (torchvision + PIL)')" 2>nul || echo        CNN Models: NOT INSTALLED (run InstallML_GPU.bat)
