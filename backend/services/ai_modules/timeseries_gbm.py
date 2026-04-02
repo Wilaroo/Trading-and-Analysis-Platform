@@ -14,6 +14,7 @@ Key Features:
 import logging
 import pickle
 import base64
+import os
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
@@ -123,7 +124,7 @@ class TimeSeriesGBM:
         "max_depth": 8,
         "is_unbalance": True,
         "verbose": -1,
-        "n_jobs": -1,
+        "n_jobs": max(1, os.cpu_count() // 2),  # Use half CPU cores — leave rest for backend/IB
         "seed": 42,
     }
     

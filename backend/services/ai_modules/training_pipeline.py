@@ -52,7 +52,7 @@ BAR_SIZE_CONFIGS = {
     "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 40},
     "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 50},
     "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 50},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 75},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 50},
     "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 100},
     "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 100},
 }
