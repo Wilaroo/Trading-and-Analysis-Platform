@@ -15,7 +15,7 @@ import os
 import time
 import concurrent.futures
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://connection-queue.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://training-pipeline-ui.preview.emergentagent.com').rstrip('/')
 
 
 class TestAIComparisonStatus:

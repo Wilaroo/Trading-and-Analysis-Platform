@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://connection-queue.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://training-pipeline-ui.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""
