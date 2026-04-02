@@ -201,13 +201,20 @@ class TimeSeriesGBM:
             if doc and "model_data" in doc:
                 model_bytes = base64.b64decode(doc["model_data"])
                 self._model = pickle.loads(model_bytes)
-                self._version = doc.get("version", "v0.0.0")
-                self._metrics = ModelMetrics(**doc.get("metrics", {}))
                 loaded_name = doc.get("name", "unknown")
-                logger.info(f"Loaded model '{loaded_name}' version {self._version} (requested: {self.model_name})")
+                loaded_version = doc.get("version", "v0.0.0")
+                self._metrics = ModelMetrics(**doc.get("metrics", {}))
+                logger.info(f"Loaded model '{loaded_name}' version {loaded_version} (requested: {self.model_name})")
                 # Do NOT overwrite self.model_name — the fallback model provides initial weights,
                 # but the new model should save under its own name (e.g. direction_predictor_1_min)
                 # so model protection compares against the correct previous version.
+                if loaded_name == self.model_name:
+                    # Exact match — inherit version for proper version bumping
+                    self._version = loaded_version
+                else:
+                    # Fallback model — reset version so new model starts at v0.1.0
+                    self._version = "v0.0.0"
+                    logger.info(f"Using fallback model '{loaded_name}' for initial weights; new model '{self.model_name}' will start at v0.1.0")
             else:
                 logger.warning("No trained models found in database")
         except Exception as e:
