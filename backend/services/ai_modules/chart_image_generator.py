@@ -158,6 +158,8 @@ def generate_training_images_from_bars(
     window_size: int = 50,
     max_symbols: int = None,
     min_bars_per_symbol: int = 100,
+    max_bars_per_symbol: int = 0,
+    max_samples: int = 0,
 ) -> List[Dict]:
     """
     Generate labeled training images from IB historical bars.
@@ -175,6 +177,10 @@ def generate_training_images_from_bars(
         window_size: Number of candles per image
         max_symbols: Limit number of symbols (None = all)
         min_bars_per_symbol: Minimum bars needed to generate images
+        max_bars_per_symbol: Max bars to use per symbol (0 = unlimited).
+            Use most recent bars to keep images relevant.
+        max_samples: Stop after collecting this many total samples (0 = unlimited).
+            Prevents OOM when many symbols have deep history.
 
     Returns:
         List of training sample dicts
@@ -211,18 +217,38 @@ def generate_training_images_from_bars(
         if sym_idx % 50 == 0:
             logger.info(f"  Processing symbol {sym_idx + 1}/{len(symbols)}: {symbol}")
 
-        # Fetch all bars for this symbol, sorted by date ascending
+        # Check if we've hit the total sample cap
+        if max_samples > 0 and len(training_samples) >= max_samples:
+            logger.info(f"  Reached max_samples={max_samples}, stopping image generation")
+            break
+
+        # Fetch bars for this symbol, sorted by date ascending
         cursor = bars_col.find(
             {"symbol": symbol, "bar_size": bar_size},
             {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
         ).sort("date", 1)
-        all_bars = list(cursor)
+
+        # If max_bars_per_symbol is set, take only the most recent N bars
+        if max_bars_per_symbol > 0:
+            all_bars_raw = list(cursor)
+            all_bars = all_bars_raw[-max_bars_per_symbol:]
+            del all_bars_raw
+        else:
+            all_bars = list(cursor)
 
         if len(all_bars) < window_size + forecast_horizon:
             continue
 
         # Slide window across bars
-        step = max(window_size // 4, 5)  # 25% overlap between windows
+        # Adaptive step: wider step for symbols with more bars to control image count.
+        # Target ~500 windows max per symbol to avoid OOM on image accumulation.
+        max_windows_per_symbol = 500
+        total_possible = len(all_bars) - window_size - forecast_horizon
+        base_step = max(window_size // 4, 5)  # 25% overlap
+        if total_possible > max_windows_per_symbol * base_step:
+            step = max(total_possible // max_windows_per_symbol, base_step)
+        else:
+            step = base_step
         for i in range(0, len(all_bars) - window_size - forecast_horizon, step):
             window_bars = all_bars[i: i + window_size]
             future_bars = all_bars[i + window_size: i + window_size + forecast_horizon]
