@@ -48,13 +48,13 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500},
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500},
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500},
-    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500},
-    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 10000},
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 10000},
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 10000},
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 8000},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 5000},
+    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 0},
+    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 0},
 }
 
 # Setup types defined in the system
@@ -310,20 +310,33 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
         return []
 
 
-async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
-    """Load all bars for a symbol+bar_size, sorted chronologically (oldest first)."""
+async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) -> List[Dict]:
+    """Load bars for a symbol+bar_size, sorted chronologically (oldest first).
+    
+    Args:
+        max_bars: If > 0, only load the most recent N bars (saves memory).
+                  The query fetches newest-first then reverses to chronological order.
+    """
     try:
         loop = asyncio.get_event_loop()
         
         def _run_query():
-            return list(db["ib_historical_data"].find(
-                {"symbol": symbol, "bar_size": bar_size},
-                {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-            ).sort("date", 1).max_time_ms(60000))  # 60 second timeout
+            query = {"symbol": symbol, "bar_size": bar_size}
+            projection = {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+            
+            if max_bars > 0:
+                # Fetch most recent N bars (desc), then reverse to chronological
+                rows = list(db["ib_historical_data"].find(query, projection)
+                           .sort("date", -1).limit(max_bars).max_time_ms(60000))
+                rows.reverse()
+                return rows
+            else:
+                return list(db["ib_historical_data"].find(query, projection)
+                           .sort("date", 1).max_time_ms(60000))
         
         bars = await asyncio.wait_for(
             loop.run_in_executor(TRAINING_POOL, _run_query),
-            timeout=90  # 90 second timeout
+            timeout=90
         )
         return bars
     except asyncio.TimeoutError:
@@ -334,7 +347,7 @@ async def load_symbol_bars(db, symbol: str, bar_size: str) -> List[Dict]:
         return []
 
 
-async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars: int = 100, batch_size: int = 20) -> Dict[str, List[Dict]]:
+async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars: int = 100, batch_size: int = 20, max_bars: int = 0) -> Dict[str, List[Dict]]:
     """Load bars for multiple symbols in parallel batches.
     
     Args:
@@ -343,6 +356,7 @@ async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars:
         bar_size: Bar size string
         min_bars: Minimum bars required per symbol
         batch_size: Number of symbols to load in parallel
+        max_bars: If > 0, cap bars per symbol (most recent N bars)
         
     Returns:
         Dict of symbol -> bars for symbols with enough data
@@ -355,7 +369,7 @@ async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars:
         batch_num = i // batch_size + 1
         
         # Load batch in parallel
-        tasks = [load_symbol_bars(db, sym, bar_size) for sym in batch]
+        tasks = [load_symbol_bars(db, sym, bar_size, max_bars=max_bars) for sym in batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for sym, bars in zip(batch, results):
@@ -456,9 +470,10 @@ async def run_training_pipeline(
                         logger.warning(f"No symbols available for {bs}")
                         continue
 
-                    # Parallel batch loading for speed
+                    # Parallel batch loading for speed (capped bars per symbol to fit in RAM)
                     bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, config["min_bars_per_symbol"], batch_size=20
+                        db, symbols, bs, config["min_bars_per_symbol"], batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                     )
 
                     if len(bars_by_symbol) < 5:
@@ -523,9 +538,10 @@ async def run_training_pipeline(
                         # Pre-load all bars in parallel
                         min_required = 70 + fh
                         bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20
+                            db, symbols, bs, min_bars=min_required, batch_size=20,
+                            max_bars=config.get("max_bars", 0)
                         )
-                        
+
                         all_X = []
                         all_y = []
 
@@ -650,9 +666,10 @@ async def run_training_pipeline(
                         # Pre-load all bars in parallel
                         min_required = 70 + fh
                         bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20
+                            db, symbols, bs, min_bars=min_required, batch_size=20,
+                            max_bars=config.get("max_bars", 0)
                         )
-                        
+
                         all_X = []
                         all_y = []
 
@@ -786,7 +803,8 @@ async def run_training_pipeline(
                     # Pre-load all bars in parallel
                     min_required = 70 + fh
                     bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20
+                        db, symbols, bs, min_bars=min_required, batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                     )
                     
                     all_X = []
@@ -898,7 +916,8 @@ async def run_training_pipeline(
                     # Pre-load all bars in parallel
                     min_required = 70 + max_horizon
                     bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20
+                        db, symbols, bs, min_bars=min_required, batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                     )
                     
                     all_X = []
@@ -1028,7 +1047,8 @@ async def run_training_pipeline(
                     # Pre-load all symbol bars in parallel
                     min_required = 70 + fh
                     bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20
+                        db, symbols, bs, min_bars=min_required, batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                     )
                     
                     all_X = []
@@ -1133,7 +1153,8 @@ async def run_training_pipeline(
                     # Pre-load all bars in parallel
                     min_required = 70 + max_bars
                     bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20
+                        db, symbols, bs, min_bars=min_required, batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                     )
                     
                     all_X = []
@@ -1249,7 +1270,8 @@ async def run_training_pipeline(
                         # Pre-load all bars in parallel
                         min_required = 70 + fh
                         bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20
+                            db, symbols, bs, min_bars=min_required, batch_size=20,
+                        max_bars=config.get("max_bars", 0)
                         )
 
                         for sym, bars in bars_by_symbol.items():
@@ -1396,7 +1418,8 @@ async def run_training_pipeline(
                         # Pre-load all bars in parallel
                         min_required = 70 + anchor_fh
                         bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, anchor_bs, min_bars=min_required, batch_size=20
+                            db, symbols, anchor_bs, min_bars=min_required, batch_size=20,
+                            max_bars=BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_bars", 0)
                         )
 
                         for sym, bars in bars_by_symbol.items():

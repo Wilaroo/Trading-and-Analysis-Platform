@@ -593,6 +593,9 @@ class TimeSeriesGBM:
             logger.info(f"[Vectorized extraction] {symbols_processed}/{total_symbols} symbols ({sample_count} samples)")
 
             # Release raw bar data for this chunk to free memory
+            # Delete from the original dict so the caller's memory is freed too
+            for symbol, _ in chunk:
+                bars_by_symbol.pop(symbol, None)
             del chunk, worker_args, chunk_results
             gc.collect()
 
@@ -600,8 +603,8 @@ class TimeSeriesGBM:
             logger.warning("No training data extracted (vectorized)")
             return self._metrics
 
-        X = np.vstack(all_features)
-        y = np.concatenate(all_targets)
+        X = np.vstack(all_features).astype(np.float32)
+        y = np.concatenate(all_targets).astype(np.float32)
 
         # Release individual arrays to free memory before training
         del all_features, all_targets
