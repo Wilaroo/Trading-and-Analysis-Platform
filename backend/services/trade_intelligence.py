@@ -44,23 +44,26 @@ class TradeIntelligence:
             "enhancements": [],
         }
 
+        async def _noop():
+            return None
+
         try:
             tasks = []
 
             if self._web_research:
                 tasks.append(self._get_news_intelligence(symbol))
             else:
-                tasks.append(asyncio.coroutine(lambda: None)())
+                tasks.append(_noop())
 
             if self._technical_service:
                 tasks.append(self._get_technical_intelligence(symbol))
             else:
-                tasks.append(asyncio.coroutine(lambda: None)())
+                tasks.append(_noop())
 
             if self._quality_service:
                 tasks.append(self._get_quality_intelligence(symbol))
             else:
-                tasks.append(asyncio.coroutine(lambda: None)())
+                tasks.append(_noop())
 
             try:
                 results = await asyncio.wait_for(
