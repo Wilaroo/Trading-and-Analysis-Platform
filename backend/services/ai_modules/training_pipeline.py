@@ -27,6 +27,8 @@ Usage:
 import logging
 import asyncio
 import concurrent.futures
+import gc
+import os
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
@@ -48,14 +50,18 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 10000},
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 10000},
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 10000},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 8000},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 5000},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 0},
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 0},
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 0},
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 0},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 0},
     "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 0},
     "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 0},
 }
+
+# How many symbols to load at once before extracting and discarding raw bars.
+# Controls peak RAM: 50 symbols × ~15MB each = ~750MB of raw bar dicts at a time.
+STREAM_BATCH_SIZE = 50
 
 # Setup types defined in the system
 ALL_SETUP_TYPES = [
@@ -383,6 +389,106 @@ async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars:
     return bars_by_symbol
 
 
+async def stream_load_and_extract(
+    db,
+    symbols: List[str],
+    bar_size: str,
+    min_bars: int,
+    forecast_horizon: int,
+    lookback: int = 50,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Stream-load symbols in batches, extract features, discard raw bars.
+
+    Memory-efficient: only one batch of raw bars is in RAM at a time.
+    Accumulated feature arrays are float32 (~60% smaller than Python dicts).
+
+    Returns:
+        (X, y) numpy arrays or (None, None) if insufficient data
+    """
+    from services.ai_modules.timeseries_gbm import _extract_symbol_worker
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    n_workers = max(1, os.cpu_count() - 2)
+    all_features = []
+    all_targets = []
+    total_samples = 0
+    symbols_processed = 0
+
+    for batch_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+        batch_symbols = symbols[batch_start:batch_start + STREAM_BATCH_SIZE]
+
+        # Load only this batch of bars
+        batch_bars = await load_symbols_parallel(
+            db, batch_symbols, bar_size, min_bars=min_bars,
+            batch_size=20, max_bars=0
+        )
+
+        if not batch_bars:
+            symbols_processed += len(batch_symbols)
+            continue
+
+        # Prepare worker args
+        worker_args = []
+        for symbol, bars in batch_bars.items():
+            if len(bars) >= lookback + forecast_horizon:
+                worker_args.append((symbol, bars, lookback, forecast_horizon))
+
+        # Parallel feature extraction across CPU cores
+        chunk_results = []
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                futures = {pool.submit(_extract_symbol_worker, args): args[0] for args in worker_args}
+                for future in as_completed(futures):
+                    try:
+                        result = future.result(timeout=300)
+                        if result is not None:
+                            chunk_results.append(result)
+                    except Exception as e:
+                        logger.warning(f"Worker failed for {futures[future]}: {e}")
+        except Exception as e:
+            logger.warning(f"Multiprocess failed ({e}), falling back to single-process")
+            for args in worker_args:
+                try:
+                    result = _extract_symbol_worker(args)
+                    if result is not None:
+                        chunk_results.append(result)
+                except Exception:
+                    pass
+
+        # Accumulate compact numpy arrays
+        for feat_matrix, targets in chunk_results:
+            all_features.append(feat_matrix)
+            all_targets.append(targets)
+            total_samples += len(feat_matrix)
+
+        symbols_processed += len(batch_symbols)
+
+        # Free raw bars for this batch — the big memory savings
+        del batch_bars, worker_args, chunk_results
+        gc.collect()
+
+        logger.info(
+            f"[Stream extract] {symbols_processed}/{len(symbols)} symbols, "
+            f"{total_samples:,} samples accumulated"
+        )
+
+    if not all_features:
+        return None, None
+
+    X = np.vstack(all_features).astype(np.float32)
+    y = np.concatenate(all_targets).astype(np.float32)
+    del all_features, all_targets
+    gc.collect()
+
+    # Filter out any rows with all zeros (failed extraction)
+    valid_rows = np.any(X != 0, axis=1)
+    X = X[valid_rows]
+    y = y[valid_rows]
+
+    logger.info(f"[Stream extract] Complete: {len(X):,} valid samples from {symbols_processed} symbols")
+    return X, y
+
+
 def count_total_models() -> int:
     """Count total models that will be trained."""
     from services.ai_modules.setup_training_config import get_all_profile_count, SETUP_TRAINING_PROFILES
@@ -470,18 +576,29 @@ async def run_training_pipeline(
                         logger.warning(f"No symbols available for {bs}")
                         continue
 
-                    # Parallel batch loading for speed (capped bars per symbol to fit in RAM)
-                    bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, config["min_bars_per_symbol"], batch_size=20,
-                        max_bars=config.get("max_bars", 0)
+                    # Stream-load + extract: loads symbols in batches, extracts features,
+                    # discards raw bars immediately. No max_bars cap needed.
+                    X, y = await stream_load_and_extract(
+                        db, symbols, bs, config["min_bars_per_symbol"],
+                        config["forecast_horizon"],
                     )
 
-                    if len(bars_by_symbol) < 5:
-                        logger.warning(f"Too few symbols with data for {bs}: {len(bars_by_symbol)}")
+                    if X is None or len(X) < 100:
+                        logger.warning(f"Too few samples for {bs}: {len(X) if X is not None else 0}")
                         continue
 
-                    logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols")
-                    metrics = await _run_in_thread(model.train_vectorized, bars_by_symbol)
+                    feature_names = get_feature_engineer().get_feature_names()
+                    logger.info(f"Training {model_name}: {len(X):,} samples from {len(symbols)} symbols")
+                    metrics = await _run_in_thread(
+                        model.train_from_features,
+                        X, y, feature_names,
+                        num_boost_round=200,
+                        early_stopping_rounds=20,
+                    )
+
+                    # Free feature matrix after training
+                    del X, y
+                    gc.collect()
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({
@@ -535,58 +652,63 @@ async def run_training_pipeline(
                         setup_feat_names = get_setup_feature_names(setup_type)
                         combined_names = base_names + [f"setup_{n}" for n in setup_feat_names]
 
-                        # Pre-load all bars in parallel
+                        # Stream-load symbols in batches to limit RAM
                         min_required = 70 + fh
-                        bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20,
-                            max_bars=config.get("max_bars", 0)
-                        )
-
                         all_X = []
                         all_y = []
 
-                        for sym, bars in bars_by_symbol.items():
+                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                            batch_bars = await load_symbols_parallel(
+                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                                max_bars=0
+                            )
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+                            for sym, bars in batch_bars.items():
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
-                            if base_matrix is None:
-                                continue
+                                closes = np.array([b["close"] for b in bars], dtype=float)
+                                highs = np.array([b["high"] for b in bars], dtype=float)
+                                lows = np.array([b["low"] for b in bars], dtype=float)
+                                volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                                opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
-                            for i in range(50, len(bars) - fh):
-                                # Base features (from pre-computed bulk matrix)
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
-                                base_vec = base_matrix[row_idx].tolist()
+                                # Bulk-extract base features ONCE for this symbol
+                                base_matrix = feature_engineer.extract_features_bulk(bars)
+                                if base_matrix is None:
+                                    continue
 
-                                # Setup-specific features
-                                o_window = opens[max(0, i - 49): i + 1][::-1]
-                                h_window = highs[max(0, i - 49): i + 1][::-1]
-                                l_window = lows[max(0, i - 49): i + 1][::-1]
-                                c_window = closes[max(0, i - 49): i + 1][::-1]
-                                v_window = volumes[max(0, i - 49): i + 1][::-1]
+                                for i in range(50, len(bars) - fh):
+                                    # Base features (from pre-computed bulk matrix)
+                                    row_idx = i - 49
+                                    if row_idx >= len(base_matrix):
+                                        break
+                                    base_vec = base_matrix[row_idx].tolist()
 
-                                setup_feats = get_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
-                                setup_vec = [setup_feats.get(f, 0.0) for f in setup_feat_names]
+                                    # Setup-specific features
+                                    o_window = opens[max(0, i - 49): i + 1][::-1]
+                                    h_window = highs[max(0, i - 49): i + 1][::-1]
+                                    l_window = lows[max(0, i - 49): i + 1][::-1]
+                                    c_window = closes[max(0, i - 49): i + 1][::-1]
+                                    v_window = volumes[max(0, i - 49): i + 1][::-1]
 
-                                # Target: future return over forecast horizon (forward-looking)
-                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                                    setup_feats = get_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
+                                    setup_vec = [setup_feats.get(f, 0.0) for f in setup_feat_names]
 
-                                if abs(future_return) < noise_thr:
-                                    target = 1  # FLAT
-                                elif future_return > 0:
-                                    target = 2  # UP
-                                else:
-                                    target = 0  # DOWN
+                                    # Target: future return over forecast horizon (forward-looking)
+                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
 
-                                all_X.append(base_vec + setup_vec)
-                                all_y.append(target)
+                                    if abs(future_return) < noise_thr:
+                                        target = 1  # FLAT
+                                    elif future_return > 0:
+                                        target = 2  # UP
+                                    else:
+                                        target = 0  # DOWN
+
+                                    all_X.append(base_vec + setup_vec)
+                                    all_y.append(target)
+
+                            del batch_bars
+                            gc.collect()
 
                         if len(all_X) < MIN_TRAINING_SAMPLES:
                             logger.warning(f"Insufficient training data for {model_name}: {len(all_X)}")
@@ -663,62 +785,66 @@ async def run_training_pipeline(
                         short_feat_names = get_short_setup_feature_names(setup_type)
                         combined_names = base_names + [f"short_{n}" for n in short_feat_names]
 
-                        # Pre-load all bars in parallel
+                        # Stream-load symbols in batches to limit RAM
                         min_required = 70 + fh
-                        bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20,
-                            max_bars=config.get("max_bars", 0)
-                        )
-
                         all_X = []
                         all_y = []
 
-                        for sym, bars in bars_by_symbol.items():
-                            bars = bars[:max_bars]
+                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                            batch_bars = await load_symbols_parallel(
+                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                                max_bars=0
+                            )
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+                            for sym, bars in batch_bars.items():
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
-                            if base_matrix is None:
-                                continue
+                                closes = np.array([b["close"] for b in bars], dtype=float)
+                                highs = np.array([b["high"] for b in bars], dtype=float)
+                                lows = np.array([b["low"] for b in bars], dtype=float)
+                                volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                                opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
-                            for i in range(50, len(bars) - fh):
-                                # Base features (from pre-computed bulk matrix)
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
-                                base_vec = base_matrix[row_idx].tolist()
+                                # Bulk-extract base features ONCE for this symbol
+                                base_matrix = feature_engineer.extract_features_bulk(bars)
+                                if base_matrix is None:
+                                    continue
 
-                                # Short-specific features
-                                c_window = closes[max(0, i - 49): i + 1][::-1]
-                                h_window = highs[max(0, i - 49): i + 1][::-1]
-                                l_window = lows[max(0, i - 49): i + 1][::-1]
-                                v_window = volumes[max(0, i - 49): i + 1][::-1]
-                                o_window = opens[max(0, i - 49): i + 1][::-1]
+                                for i in range(50, len(bars) - fh):
+                                    # Base features (from pre-computed bulk matrix)
+                                    row_idx = i - 49
+                                    if row_idx >= len(base_matrix):
+                                        break
+                                    base_vec = base_matrix[row_idx].tolist()
 
-                                short_feats = get_short_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
-                                short_vec = [short_feats.get(f, 0.0) for f in short_feat_names]
+                                    # Short-specific features
+                                    c_window = closes[max(0, i - 49): i + 1][::-1]
+                                    h_window = highs[max(0, i - 49): i + 1][::-1]
+                                    l_window = lows[max(0, i - 49): i + 1][::-1]
+                                    v_window = volumes[max(0, i - 49): i + 1][::-1]
+                                    o_window = opens[max(0, i - 49): i + 1][::-1]
 
-                                # Target: For SHORT models, "positive outcome" = price goes DOWN
-                                # Use inverted return: positive return = price dropped
-                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                                # Invert: if future_return is negative (price went down), that's good for shorts
-                                inverted_return = -future_return
+                                    short_feats = get_short_setup_features(setup_type, o_window, h_window, l_window, c_window, v_window)
+                                    short_vec = [short_feats.get(f, 0.0) for f in short_feat_names]
 
-                                if abs(inverted_return) < noise_thr:
-                                    target = 1  # FLAT
-                                elif inverted_return > 0:
-                                    target = 2  # DOWN (good for short)
-                                else:
-                                    target = 0  # UP (bad for short)
+                                    # Target: For SHORT models, "positive outcome" = price goes DOWN
+                                    # Use inverted return: positive return = price dropped
+                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                                    # Invert: if future_return is negative (price went down), that's good for shorts
+                                    inverted_return = -future_return
 
-                                all_X.append(base_vec + short_vec)
-                                all_y.append(target)
+                                    if abs(inverted_return) < noise_thr:
+                                        target = 1  # FLAT
+                                    elif inverted_return > 0:
+                                        target = 2  # DOWN (good for short)
+                                    else:
+                                        target = 0  # UP (bad for short)
+
+                                    all_X.append(base_vec + short_vec)
+                                    all_y.append(target)
+
+                            del batch_bars
+                            gc.collect()
 
                         if len(all_X) < MIN_TRAINING_SAMPLES:
                             logger.warning(f"Insufficient short training data for {model_name}: {len(all_X)}")
@@ -800,57 +926,62 @@ async def run_training_pipeline(
 
                     combined_names = base_names + [f"vol_{n}" for n in VOL_FEATURE_NAMES] + REGIME_FEATURE_NAMES
                     
-                    # Pre-load all bars in parallel
+                    # Stream-load symbols in batches to limit RAM
                     min_required = 70 + fh
-                    bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20,
-                        max_bars=config.get("max_bars", 0)
-                    )
-                    
                     all_X = []
                     all_y = []
 
-                    for sym, bars in bars_by_symbol.items():
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=0
+                        )
 
-                        closes = np.array([b["close"] for b in bars], dtype=float)
-                        highs = np.array([b["high"] for b in bars], dtype=float)
-                        lows = np.array([b["low"] for b in bars], dtype=float)
-                        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                        opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+                        for sym, bars in batch_bars.items():
 
-                        # Bulk-extract base features ONCE for this symbol
-                        base_matrix = feature_engineer.extract_features_bulk(bars)
-                        if base_matrix is None:
-                            continue
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
 
-                        for i in range(50, len(bars) - fh):
-                            # Base features (from pre-computed bulk matrix)
-                            row_idx = i - 49
-                            if row_idx >= len(base_matrix):
-                                break
-                            base_vec = base_matrix[row_idx].tolist()
-
-                            # Vol-specific features
-                            c_window = closes[i - 49: i + 1][::-1]
-                            h_window = highs[i - 49: i + 1][::-1]
-                            l_window = lows[i - 49: i + 1][::-1]
-                            v_window = volumes[i - 49: i + 1][::-1]
-                            o_window = opens[i - 49: i + 1][::-1]
-                            vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
-                            vol_vec = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
-
-                            # Regime features
-                            bar_date = str(bars[i].get("date", ""))
-                            regime_feats = regime_provider.get_regime_features_for_date(bar_date)
-                            regime_vec = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
-
-                            # Target
-                            target = compute_vol_target(closes, fh, i)
-                            if target is None:
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
                                 continue
 
-                            all_X.append(base_vec + vol_vec + regime_vec)
-                            all_y.append(target)
+                            for i in range(50, len(bars) - fh):
+                                # Base features (from pre-computed bulk matrix)
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
+
+                                # Vol-specific features
+                                c_window = closes[i - 49: i + 1][::-1]
+                                h_window = highs[i - 49: i + 1][::-1]
+                                l_window = lows[i - 49: i + 1][::-1]
+                                v_window = volumes[i - 49: i + 1][::-1]
+                                o_window = opens[i - 49: i + 1][::-1]
+                                vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
+                                vol_vec = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
+
+                                # Regime features
+                                bar_date = str(bars[i].get("date", ""))
+                                regime_feats = regime_provider.get_regime_features_for_date(bar_date)
+                                regime_vec = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
+
+                                # Target
+                                target = compute_vol_target(closes, fh, i)
+                                if target is None:
+                                    continue
+
+                                all_X.append(base_vec + vol_vec + regime_vec)
+                                all_y.append(target)
+
+                        del batch_bars
+                        gc.collect()
 
                     if len(all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
@@ -913,54 +1044,59 @@ async def run_training_pipeline(
 
                     combined_names = base_names + [f"exit_{n}" for n in EXIT_FEATURE_NAMES]
                     
-                    # Pre-load all bars in parallel
+                    # Stream-load symbols in batches to limit RAM
                     min_required = 70 + max_horizon
-                    bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20,
-                        max_bars=config.get("max_bars", 0)
-                    )
-                    
                     all_X = []
                     all_y = []
 
-                    for sym, bars in bars_by_symbol.items():
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=0
+                        )
 
-                        closes = np.array([b["close"] for b in bars], dtype=float)
-                        highs = np.array([b["high"] for b in bars], dtype=float)
-                        lows = np.array([b["low"] for b in bars], dtype=float)
-                        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                        for sym, bars in batch_bars.items():
 
-                        # Bulk-extract base features ONCE for this symbol
-                        base_matrix = feature_engineer.extract_features_bulk(bars)
-                        if base_matrix is None:
-                            continue
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
 
-                        for i in range(50, len(bars) - max_horizon):
-                            # Base features (from pre-computed bulk matrix)
-                            row_idx = i - 49
-                            if row_idx >= len(base_matrix):
-                                break
-                            base_vec = base_matrix[row_idx].tolist()
-
-                            # Exit-specific features
-                            c_window = closes[i - 49: i + 1][::-1]
-                            h_window = highs[i - 49: i + 1][::-1]
-                            l_window = lows[i - 49: i + 1][::-1]
-                            v_window = volumes[i - 49: i + 1][::-1]
-
-                            # Determine likely direction from recent momentum
-                            direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-
-                            exit_feats = compute_exit_features(c_window, h_window, l_window, v_window, direction)
-                            exit_vec = [exit_feats.get(f, 0.0) for f in EXIT_FEATURE_NAMES]
-
-                            # Target: bars to MFE
-                            target = compute_exit_target(closes, highs, lows, i, max_horizon, direction)
-                            if target is None:
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
                                 continue
 
-                            all_X.append(base_vec + exit_vec)
-                            all_y.append(target)
+                            for i in range(50, len(bars) - max_horizon):
+                                # Base features (from pre-computed bulk matrix)
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
+
+                                # Exit-specific features
+                                c_window = closes[i - 49: i + 1][::-1]
+                                h_window = highs[i - 49: i + 1][::-1]
+                                l_window = lows[i - 49: i + 1][::-1]
+                                v_window = volumes[i - 49: i + 1][::-1]
+
+                                # Determine likely direction from recent momentum
+                                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
+
+                                exit_feats = compute_exit_features(c_window, h_window, l_window, v_window, direction)
+                                exit_vec = [exit_feats.get(f, 0.0) for f in EXIT_FEATURE_NAMES]
+
+                                # Target: bars to MFE
+                                target = compute_exit_target(closes, highs, lows, i, max_horizon, direction)
+                                if target is None:
+                                    continue
+
+                                all_X.append(base_vec + exit_vec)
+                                all_y.append(target)
+
+                        del batch_bars
+                        gc.collect()
 
                     if len(all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient exit training data for {setup_type}: {len(all_X)}")
@@ -1044,58 +1180,63 @@ async def run_training_pipeline(
 
                     combined_names = base_names + [f"secrel_{n}" for n in SECTOR_REL_FEATURE_NAMES]
                     
-                    # Pre-load all symbol bars in parallel
+                    # Stream-load symbols in batches to limit RAM
                     min_required = 70 + fh
-                    bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20,
-                        max_bars=config.get("max_bars", 0)
-                    )
-                    
                     all_X = []
                     all_y = []
 
-                    for sym, bars in bars_by_symbol.items():
-                        sector_etf = sector_mapper.get_sector_etf(sym)
-                        if sector_etf is None or sector_etf not in sector_etf_bars:
-                            continue
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=0
+                        )
 
-                        stock_closes = np.array([b["close"] for b in bars], dtype=float)
-                        stock_volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                        sec_data = sector_etf_bars[sector_etf]
-                        sec_closes = sec_data["closes"]
-                        sec_volumes = sec_data["volumes"]
-
-                        min_len = min(len(stock_closes), len(sec_closes))
-                        if min_len < 70 + fh:
-                            continue
-
-                        # Bulk-extract base features ONCE for this symbol
-                        base_matrix = feature_engineer.extract_features_bulk(bars)
-                        if base_matrix is None:
-                            continue
-
-                        for i in range(50, min_len - fh):
-                            # Base features (from pre-computed bulk matrix)
-                            row_idx = i - 49
-                            if row_idx >= len(base_matrix):
-                                break
-                            base_vec = base_matrix[row_idx].tolist()
-
-                            # Sector-relative features
-                            sc = stock_closes[max(0, i - 24): i + 1][::-1]
-                            sv = stock_volumes[max(0, i - 24): i + 1][::-1]
-                            ec = sec_closes[max(0, i - 24): i + 1][::-1]
-                            ev = sec_volumes[max(0, i - 24): i + 1][::-1]
-
-                            sec_feats = compute_sector_relative_features(sc, sv, ec, ev)
-                            sec_vec = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
-
-                            target = compute_sector_relative_target(stock_closes, sec_closes, i, fh)
-                            if target is None:
+                        for sym, bars in batch_bars.items():
+                            sector_etf = sector_mapper.get_sector_etf(sym)
+                            if sector_etf is None or sector_etf not in sector_etf_bars:
                                 continue
 
-                            all_X.append(base_vec + sec_vec)
-                            all_y.append(target)
+                            stock_closes = np.array([b["close"] for b in bars], dtype=float)
+                            stock_volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            sec_data = sector_etf_bars[sector_etf]
+                            sec_closes = sec_data["closes"]
+                            sec_volumes = sec_data["volumes"]
+
+                            min_len = min(len(stock_closes), len(sec_closes))
+                            if min_len < 70 + fh:
+                                continue
+
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
+                                continue
+
+                            for i in range(50, min_len - fh):
+                                # Base features (from pre-computed bulk matrix)
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
+
+                                # Sector-relative features
+                                sc = stock_closes[max(0, i - 24): i + 1][::-1]
+                                sv = stock_volumes[max(0, i - 24): i + 1][::-1]
+                                ec = sec_closes[max(0, i - 24): i + 1][::-1]
+                                ev = sec_volumes[max(0, i - 24): i + 1][::-1]
+
+                                sec_feats = compute_sector_relative_features(sc, sv, ec, ev)
+                                sec_vec = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
+
+                                target = compute_sector_relative_target(stock_closes, sec_closes, i, fh)
+                                if target is None:
+                                    continue
+
+                                all_X.append(base_vec + sec_vec)
+                                all_y.append(target)
+
+                        del batch_bars
+                        gc.collect()
 
                     if len(all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient sector-relative data for {bs}: {len(all_X)}")
@@ -1150,56 +1291,61 @@ async def run_training_pipeline(
 
                     combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
                     
-                    # Pre-load all bars in parallel
+                    # Stream-load symbols in batches to limit RAM
                     min_required = 70 + max_bars
-                    bars_by_symbol = await load_symbols_parallel(
-                        db, symbols, bs, min_bars=min_required, batch_size=20,
-                        max_bars=config.get("max_bars", 0)
-                    )
-                    
                     all_X = []
                     all_y = []
 
-                    for sym, bars in bars_by_symbol.items():
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=0
+                        )
 
-                        closes = np.array([b["close"] for b in bars], dtype=float)
-                        highs = np.array([b["high"] for b in bars], dtype=float)
-                        lows = np.array([b["low"] for b in bars], dtype=float)
-                        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                        for sym, bars in batch_bars.items():
 
-                        # Bulk-extract base features ONCE for this symbol
-                        base_matrix = feature_engineer.extract_features_bulk(bars)
-                        if base_matrix is None:
-                            continue
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
 
-                        for i in range(50, len(bars) - max_bars):
-                            row_idx = i - 49
-                            if row_idx >= len(base_matrix):
-                                break
-                            base_vec = base_matrix[row_idx].tolist()
-
-                            c_window = closes[i - 24: i + 1][::-1]
-                            h_window = highs[i - 24: i + 1][::-1]
-                            l_window = lows[i - 24: i + 1][::-1]
-                            v_window = volumes[i - 24: i + 1][::-1]
-
-                            direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-                            risk_feats = compute_risk_features(c_window, h_window, l_window, v_window, direction)
-                            risk_vec = [risk_feats.get(f, 0.0) for f in RISK_FEATURE_NAMES]
-
-                            # Compute ATR for stop distance
-                            atr_vals = []
-                            for j in range(max(0, i - 10), i):
-                                tr = max(highs[j] - lows[j], abs(highs[j] - closes[j - 1]) if j > 0 else 0, abs(lows[j] - closes[j - 1]) if j > 0 else 0)
-                                atr_vals.append(tr)
-                            atr = np.mean(atr_vals) if atr_vals else 0.01
-
-                            target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars)
-                            if target is None:
+                            # Bulk-extract base features ONCE for this symbol
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
                                 continue
 
-                            all_X.append(base_vec + risk_vec)
-                            all_y.append(target)
+                            for i in range(50, len(bars) - max_bars):
+                                row_idx = i - 49
+                                if row_idx >= len(base_matrix):
+                                    break
+                                base_vec = base_matrix[row_idx].tolist()
+
+                                c_window = closes[i - 24: i + 1][::-1]
+                                h_window = highs[i - 24: i + 1][::-1]
+                                l_window = lows[i - 24: i + 1][::-1]
+                                v_window = volumes[i - 24: i + 1][::-1]
+
+                                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
+                                risk_feats = compute_risk_features(c_window, h_window, l_window, v_window, direction)
+                                risk_vec = [risk_feats.get(f, 0.0) for f in RISK_FEATURE_NAMES]
+
+                                # Compute ATR for stop distance
+                                atr_vals = []
+                                for j in range(max(0, i - 10), i):
+                                    tr = max(highs[j] - lows[j], abs(highs[j] - closes[j - 1]) if j > 0 else 0, abs(lows[j] - closes[j - 1]) if j > 0 else 0)
+                                    atr_vals.append(tr)
+                                atr = np.mean(atr_vals) if atr_vals else 0.01
+
+                                target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars)
+                                if target is None:
+                                    continue
+
+                                all_X.append(base_vec + risk_vec)
+                                all_y.append(target)
+
+                        del batch_bars
+                        gc.collect()
 
                     if len(all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient risk data for {bs}: {len(all_X)}")
@@ -1267,38 +1413,44 @@ async def run_training_pipeline(
                         # Collect all samples and classify by regime
                         regime_samples = {r: {"X": [], "y": []} for r in ALL_REGIMES}
 
-                        # Pre-load all bars in parallel
+                        # Stream-load symbols in batches to limit RAM
                         min_required = 70 + fh
-                        bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, bs, min_bars=min_required, batch_size=20,
-                        max_bars=config.get("max_bars", 0)
-                        )
 
-                        for sym, bars in bars_by_symbol.items():
+                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                            batch_bars = await load_symbols_parallel(
+                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                                max_bars=0
+                            )
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            for sym, bars in batch_bars.items():
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
-                            if base_matrix is None:
-                                continue
+                                closes = np.array([b["close"] for b in bars], dtype=float)
 
-                            for i in range(50, len(bars) - fh):
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
-                                base_vec = base_matrix[row_idx].tolist()
+                                # Bulk-extract base features ONCE for this symbol
+                                base_matrix = feature_engineer.extract_features_bulk(bars)
+                                if base_matrix is None:
+                                    continue
 
-                                # Classify regime at this date
-                                bar_date = str(bars[i].get("date", ""))
-                                regime = classify_regime_for_date(spy_data, bar_date)
+                                for i in range(50, len(bars) - fh):
+                                    row_idx = i - 49
+                                    if row_idx >= len(base_matrix):
+                                        break
+                                    base_vec = base_matrix[row_idx].tolist()
 
-                                # Target: future return (binary UP/DOWN)
-                                future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                                target = 1 if future_return > 0 else 0
+                                    # Classify regime at this date
+                                    bar_date = str(bars[i].get("date", ""))
+                                    regime = classify_regime_for_date(spy_data, bar_date)
 
-                                regime_samples[regime]["X"].append(base_vec)
-                                regime_samples[regime]["y"].append(target)
+                                    # Target: future return (binary UP/DOWN)
+                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
+                                    target = 1 if future_return > 0 else 0
+
+                                    regime_samples[regime]["X"].append(base_vec)
+                                    regime_samples[regime]["y"].append(target)
+
+                            del batch_bars
+                            gc.collect()
 
                         # Train one model per regime
                         for regime in ALL_REGIMES:
@@ -1415,112 +1567,118 @@ async def run_training_pipeline(
                         all_X = []
                         all_y = []
 
-                        # Pre-load all bars in parallel
+                        # Stream-load symbols in batches to limit RAM
                         min_required = 70 + anchor_fh
-                        bars_by_symbol = await load_symbols_parallel(
-                            db, symbols, anchor_bs, min_bars=min_required, batch_size=20,
-                            max_bars=BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_bars", 0)
-                        )
 
-                        for sym, bars in bars_by_symbol.items():
+                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                            batch_bars = await load_symbols_parallel(
+                                db, sb_syms, anchor_bs, min_bars=min_required, batch_size=20,
+                                max_bars=0
+                            )
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            for sym, bars in batch_bars.items():
 
-                            for i in range(50, len(bars) - anchor_fh):
-                                window = bars[i - 49: i + 1][::-1]
-                                fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                if fs is None:
-                                    continue
+                                closes = np.array([b["close"] for b in bars], dtype=float)
 
-                                # Get raw predictions from each sub-model (no DB logging)
-                                predictions = {}
-                                for tf, sm in sub_models.items():
-                                    try:
-                                        feat_vec = np.array([[
-                                            fs.features.get(f, 0.0) for f in sm._feature_names
-                                        ]])
-                                        raw_pred = sm._model.predict(feat_vec)
+                                for i in range(50, len(bars) - anchor_fh):
+                                    window = bars[i - 49: i + 1][::-1]
+                                    fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                                    if fs is None:
+                                        continue
 
-                                        if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
-                                            probs = raw_pred[0]
-                                            prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
-                                            prob_down = float(probs[0])
-                                            conf = float(max(probs) - 1.0 / len(probs))
-                                            direction = "up" if np.argmax(probs) == 2 else (
-                                                "down" if np.argmax(probs) == 0 else "flat"
-                                            )
-                                        else:
-                                            prob_up = float(raw_pred[0])
-                                            prob_down = 1.0 - prob_up
-                                            conf = abs(prob_up - 0.5) * 2
-                                            direction = "up" if prob_up > 0.52 else (
-                                                "down" if prob_down > 0.55 else "flat"
-                                            )
+                                    # Get raw predictions from each sub-model (no DB logging)
+                                    predictions = {}
+                                    for tf, sm in sub_models.items():
+                                        try:
+                                            feat_vec = np.array([[
+                                                fs.features.get(f, 0.0) for f in sm._feature_names
+                                            ]])
+                                            raw_pred = sm._model.predict(feat_vec)
 
-                                        predictions[tf] = {
-                                            "prob_up": prob_up,
-                                            "prob_down": prob_down,
-                                            "confidence": max(0, conf),
-                                            "direction": direction,
-                                        }
-                                    except Exception:
-                                        pass
+                                            if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
+                                                probs = raw_pred[0]
+                                                prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
+                                                prob_down = float(probs[0])
+                                                conf = float(max(probs) - 1.0 / len(probs))
+                                                direction = "up" if np.argmax(probs) == 2 else (
+                                                    "down" if np.argmax(probs) == 0 else "flat"
+                                                )
+                                            else:
+                                                prob_up = float(raw_pred[0])
+                                                prob_down = 1.0 - prob_up
+                                                conf = abs(prob_up - 0.5) * 2
+                                                direction = "up" if prob_up > 0.52 else (
+                                                    "down" if prob_down > 0.55 else "flat"
+                                                )
 
-                                # Get setup model prediction (raw, no DB logging)
-                                setup_preds = []
-                                if setup_model:
-                                    try:
-                                        feat_vec = np.array([[
-                                            fs.features.get(f, 0.0)
-                                            for f in setup_model._feature_names
-                                        ]])
-                                        raw_pred = setup_model._model.predict(feat_vec)
+                                            predictions[tf] = {
+                                                "prob_up": prob_up,
+                                                "prob_down": prob_down,
+                                                "confidence": max(0, conf),
+                                                "direction": direction,
+                                            }
+                                        except Exception:
+                                            pass
 
-                                        if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
-                                            probs = raw_pred[0]
-                                            prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
-                                            prob_down = float(probs[0])
-                                            conf = float(max(probs) - 1.0 / len(probs))
-                                            direction = "up" if np.argmax(probs) == 2 else (
-                                                "down" if np.argmax(probs) == 0 else "flat"
-                                            )
-                                        else:
-                                            prob_up = float(raw_pred[0])
-                                            prob_down = 1.0 - prob_up
-                                            conf = abs(prob_up - 0.5) * 2
-                                            direction = "up" if prob_up > 0.52 else (
-                                                "down" if prob_down > 0.55 else "flat"
-                                            )
+                                    # Get setup model prediction (raw, no DB logging)
+                                    setup_preds = []
+                                    if setup_model:
+                                        try:
+                                            feat_vec = np.array([[
+                                                fs.features.get(f, 0.0)
+                                                for f in setup_model._feature_names
+                                            ]])
+                                            raw_pred = setup_model._model.predict(feat_vec)
 
-                                        setup_preds.append({
-                                            "prob_up": prob_up,
-                                            "prob_down": prob_down,
-                                            "confidence": max(0, conf),
-                                            "direction": direction,
-                                        })
-                                    except Exception:
-                                        pass
+                                            if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
+                                                probs = raw_pred[0]
+                                                prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
+                                                prob_down = float(probs[0])
+                                                conf = float(max(probs) - 1.0 / len(probs))
+                                                direction = "up" if np.argmax(probs) == 2 else (
+                                                    "down" if np.argmax(probs) == 0 else "flat"
+                                                )
+                                            else:
+                                                prob_up = float(raw_pred[0])
+                                                prob_down = 1.0 - prob_up
+                                                conf = abs(prob_up - 0.5) * 2
+                                                direction = "up" if prob_up > 0.52 else (
+                                                    "down" if prob_down > 0.55 else "flat"
+                                                )
 
-                                # Extract ensemble features from stacked predictions
-                                ens_feats = extract_ensemble_features(
-                                    predictions, setup_preds or None
-                                )
-                                feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
+                                            setup_preds.append({
+                                                "prob_up": prob_up,
+                                                "prob_down": prob_down,
+                                                "confidence": max(0, conf),
+                                                "direction": direction,
+                                            })
+                                        except Exception:
+                                            pass
 
-                                # Target: future return over daily forecast horizon
-                                future_return = (
-                                    (closes[i + anchor_fh] - closes[i]) / closes[i]
-                                    if closes[i] > 0 else 0
-                                )
-                                if future_return > 0.003:
-                                    target = 2  # UP
-                                elif future_return < -0.003:
-                                    target = 0  # DOWN
-                                else:
-                                    target = 1  # FLAT
+                                    # Extract ensemble features from stacked predictions
+                                    ens_feats = extract_ensemble_features(
+                                        predictions, setup_preds or None
+                                    )
+                                    feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
 
-                                all_X.append(feat_vec)
-                                all_y.append(target)
+                                    # Target: future return over daily forecast horizon
+                                    future_return = (
+                                        (closes[i + anchor_fh] - closes[i]) / closes[i]
+                                        if closes[i] > 0 else 0
+                                    )
+                                    if future_return > 0.003:
+                                        target = 2  # UP
+                                    elif future_return < -0.003:
+                                        target = 0  # DOWN
+                                    else:
+                                        target = 1  # FLAT
+
+                                    all_X.append(feat_vec)
+                                    all_y.append(target)
+
+                            del batch_bars
+                            gc.collect()
 
                         if len(all_X) < MIN_TRAINING_SAMPLES:
                             logger.warning(f"Insufficient ensemble data for {model_name}: {len(all_X)}")

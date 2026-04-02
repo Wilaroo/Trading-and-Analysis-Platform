@@ -83,6 +83,14 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
   - The worker creates a `TimeSeriesFeatureEngineer`, calls `extract_features_bulk()` for vectorized extraction, computes binary targets (price up/down), and returns `(feature_matrix, targets)`
   - Verified: pickle round-trip OK, synthetic data test passes (correct shapes, no NaN/Inf), full `train_vectorized()` end-to-end completes successfully
 
+- **P1: Stream-Load-Extract Architecture — remove max_bars cap**:
+  - Problem: `load_symbols_parallel` loaded ALL symbols' bars into RAM at once (~7.5GB+ for 2500 symbols), forcing `max_bars=10,000` cap per symbol (only ~25 trading days of 1-min data)
+  - Solution: New `stream_load_and_extract()` function loads symbols in batches of 50 (`STREAM_BATCH_SIZE`), extracts features via multiprocessing, discards raw bars immediately, accumulates only compact float32 numpy arrays
+  - Applied streaming pattern to ALL 8 training phases (generic, setup long/short, volatility, exit, sector, risk, regime, ensemble)
+  - `max_bars` set to 0 (uncapped) for ALL 7 timeframes — models now train on full history
+  - Peak RAM: ~750MB (one batch of raw bars) + accumulated features (float32), vs. old ~7.5GB (all raw bar dicts)
+  - Verified: 120-symbol synthetic test across 3 batches produces identical results to single-batch approach
+
 ---
 
 ## P0 Issues
