@@ -1197,34 +1197,19 @@ DECISION: {score_result['trade_or_skip']}
         try:
             alert = None
             
-            # First, try to get from live alerts API
-            import httpx
-            async with httpx.AsyncClient() as client:
-                response = await client.get("http://localhost:8001/api/live-scanner/alerts", timeout=5.0)
-                if response.status_code == 200:
-                    data = response.json()
-                    alerts_data = data.get("alerts", [])
-                    logger.info(f"📋 Found {len(alerts_data)} live alerts")
-                    
-                    # Find alert for this symbol
-                    for a in alerts_data:
+            # Access scanner alerts directly (avoid HTTP loopback which times out under load)
+            try:
+                from services.enhanced_scanner import get_enhanced_scanner
+                scanner = get_enhanced_scanner()
+                live_alerts = scanner.get_live_alerts() if scanner else []
+                if live_alerts:
+                    logger.info(f"📋 Found {len(live_alerts)} live alerts (direct)")
+                    for a in live_alerts:
                         if a.get("symbol") == target_symbol:
                             alert = a
                             break
-                
-                # Also check simulator alerts if not found in live alerts
-                if not alert:
-                    sim_response = await client.get("http://localhost:8001/api/simulator/alerts", timeout=5.0)
-                    if sim_response.status_code == 200:
-                        sim_data = sim_response.json()
-                        sim_alerts = sim_data.get("alerts", [])
-                        logger.info(f"📋 Found {len(sim_alerts)} simulator alerts")
-                        
-                        for a in sim_alerts:
-                            if a.get("symbol") == target_symbol:
-                                alert = a
-                                logger.info(f"✅ Found alert in simulator for {target_symbol}")
-                                break
+            except Exception:
+                pass  # Scanner not available, try DB fallback
             
             # If not found in live alerts, check MongoDB for recent alerts (last 1 hour)
             if not alert and self.db is not None:
@@ -1380,7 +1365,7 @@ DECISION: {score_result['trade_or_skip']}
             )
         except asyncio.TimeoutError:
             logger.warning("Context building timed out, using minimal context")
-            return self._get_base_system_prompt()
+            return self.SYSTEM_PROMPT
     
     async def _build_smart_context(self, user_message: str, session_id: str) -> str:
         """

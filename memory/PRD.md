@@ -98,6 +98,12 @@ The backend uses synchronous PyMongo inside async FastAPI. All DB calls in `asyn
 - [FIXED] **Stale training status on boot** (Jan 2026): Backend startup now resets MongoDB `training_pipeline_status` to "idle" if no actual training subprocess is running
 - [FIXED] **UI training status desync** (Feb 2026): Optimistic UI updates on start/stop + immediate WS broadcast + reduced stream delay (25s→5s)
 - [FIXED] **IB Pusher timeout spam during training** (Feb 2026): Missing `/api/focus-mode/status` endpoint + pusher never actually pausing. Now fully pauses HTTP requests during training mode.
+- [FIXED] **Stale order infinite retry loop** (Feb 2026): Order 56e5df88 looping forever. Added auto-expire for CLAIMED orders >5min + pusher blacklists after 3 failed claims.
+- [FIXED] **asyncio.coroutine crash** (Feb 2026): Python 3.13 removed `asyncio.coroutine`. Trade intelligence (news, technicals, quality) was silently failing on every trade evaluation.
+- [FIXED] **Alert reasoning loopback timeout** (Feb 2026): `ai_assistant_service.py` was HTTP-looping to itself for scanner alerts, timing out under load (50-line traceback spam). Replaced with direct in-memory access.
+- [FIXED] **Learning context .upper() on None** (Feb 2026): `strategy_performance_service.py` crashed when MongoDB aggregation returned null strategy keys.
+- [FIXED] **Market intel stream error** (Feb 2026): `server.py` line 3186 called `.get()` on None when `get_current_report()` returned null.
+- [FIXED] **_get_base_system_prompt missing** (Feb 2026): Context timeout fallback referenced non-existent method, breaking scanner coaching generation.
 
 ## Recent Enhancements (April 2026)
 - **Pipeline Progress Panel**: `PipelineProgressPanel.jsx` — real-time per-phase progress bars from WS training_status stream (zero extra polling).

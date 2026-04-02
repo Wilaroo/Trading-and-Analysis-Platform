@@ -3183,7 +3183,7 @@ async def stream_market_intel():
                     intel_data["current"] = current
                 except Exception:
                     pass
-                data_hash = hash(str(intel_data.get("current", {}).get("timestamp", "")) + str(len(intel_data.get("reports", []))))
+                data_hash = hash(str((intel_data.get("current") or {}).get("timestamp", "")) + str(len(intel_data.get("reports") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "market_intel",

@@ -106,7 +106,7 @@ class StrategyPerformanceService:
             results = list(col.aggregate(pipeline))
             stats = {}
             for r in results:
-                strategy = r["_id"]
+                strategy = r["_id"] or "unknown"
                 total = r["total_trades"]
                 wins = r["wins"]
                 win_rate = (wins / total * 100) if total > 0 else 0
@@ -516,7 +516,8 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
         
         # Per-strategy summary
         for strategy, perf in stats.items():
-            lines.append(f"\n{strategy.upper().replace('_',' ')} ({perf.get('timeframe','?')}):")
+            strategy_name = (strategy or "unknown").upper().replace('_',' ')
+            lines.append(f"\n{strategy_name} ({perf.get('timeframe','?')}):")
             lines.append(f"  {perf['total_trades']} trades | {perf['wins']}W/{perf['losses']}L | Win Rate: {perf['win_rate']}%")
             lines.append(f"  Total P&L: ${perf['total_pnl']:.2f} | Avg P&L: ${perf['avg_pnl']:.2f}")
             lines.append(f"  Best: ${perf['best_trade']:.2f} | Worst: ${perf['worst_trade']:.2f}")
