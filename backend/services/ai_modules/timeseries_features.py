@@ -669,6 +669,13 @@ class TimeSeriesFeatureEngineer:
         if n < lb + 1:
             return None
 
+        # Suppress divide-by-zero warnings — guarded by np.where/np.divide already
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return self._extract_features_bulk_inner(bars, n, lb, sliding_window_view)
+
+    def _extract_features_bulk_inner(self, bars, n, lb, sliding_window_view):
+        """Inner implementation (separated so np.errstate context covers all math)."""
+
         # Convert all bars to arrays ONCE
         opens = np.array([b.get("open", 0) for b in bars], dtype=np.float64)
         highs = np.array([b.get("high", 0) for b in bars], dtype=np.float64)

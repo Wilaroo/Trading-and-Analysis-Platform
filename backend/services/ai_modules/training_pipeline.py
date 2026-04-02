@@ -60,8 +60,13 @@ BAR_SIZE_CONFIGS = {
 }
 
 # How many symbols to load at once before extracting and discarding raw bars.
-# Controls peak RAM: 50 symbols × ~15MB each = ~750MB of raw bar dicts at a time.
-STREAM_BATCH_SIZE = 50
+# Controls peak RAM: 25 symbols × ~15MB each = ~375MB of raw bar dicts at a time.
+# Kept conservative to leave headroom on 16GB systems.
+STREAM_BATCH_SIZE = 25
+
+# Max parallel worker processes for feature extraction.
+# Using half the CPU cores leaves headroom for the OS, MongoDB, and the main process.
+MAX_EXTRACT_WORKERS = max(1, os.cpu_count() // 2)
 
 
 # ── Symbol Cache ──────────────────────────────────────────────
@@ -691,7 +696,7 @@ async def stream_load_and_extract(
     from services.ai_modules.timeseries_gbm import _extract_symbol_worker
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    n_workers = max(1, os.cpu_count() - 2)
+    n_workers = MAX_EXTRACT_WORKERS
     all_features = []
     all_targets = []
     total_samples = 0
@@ -915,7 +920,7 @@ async def run_training_pipeline(
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
-            n_workers = max(1, os.cpu_count() - 2)
+            n_workers = MAX_EXTRACT_WORKERS
 
             # Group all (setup_type, profile) pairs by bar_size so bars are loaded ONCE per bar_size
             profiles_by_bs = defaultdict(list)
@@ -1060,7 +1065,7 @@ async def run_training_pipeline(
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
-            n_workers = max(1, os.cpu_count() - 2)
+            n_workers = MAX_EXTRACT_WORKERS
 
             # Group by bar_size (same optimization as Phase 2)
             profiles_by_bs = defaultdict(list)
@@ -1327,7 +1332,7 @@ async def run_training_pipeline(
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
-            n_workers = max(1, os.cpu_count() - 2)
+            n_workers = MAX_EXTRACT_WORKERS
 
             # All exit models use "1 day" bars — load once
             bs = "1 day"
@@ -1574,7 +1579,7 @@ async def run_training_pipeline(
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
             combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
-            n_workers = max(1, os.cpu_count() - 2)
+            n_workers = MAX_EXTRACT_WORKERS
 
             for bs in bar_sizes:
                 risk_config = RISK_MODEL_CONFIGS.get(bs)
