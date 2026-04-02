@@ -57,7 +57,7 @@ where node >nul 2>&1 && echo        Node.js: OK || echo        Node.js: MISSING
 where yarn >nul 2>&1 && echo        Yarn: OK || (echo        Installing yarn... && npm install -g yarn >nul 2>&1)
 
 :: Check GPU for ML training
-python backend\scripts\check_gpu.py 2>nul || echo        GPU: Not configured
+python "%BACKEND_DIR%\scripts\check_gpu.py"
 
 :: Check CNN dependencies (torchvision + PIL)
 python -c "import torchvision; from PIL import Image; print('        CNN Models: READY (torchvision + PIL)')" 2>nul || echo        CNN Models: NOT INSTALLED (run InstallML_GPU.bat)
