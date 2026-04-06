@@ -1,36 +1,39 @@
-<analysis>**original_problem_statement**: AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, CNN chart detection, and maximum Interactive Brokers (IB) historical data collection. Focus on optimizing the ML training pipeline performance over 177M MongoDB rows, resolving stale AI Training status on backend startup, fixing UI desyncs, and utilizing hardware efficiently.
+<analysis>**original_problem_statement**: AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, CNN chart detection, and maximum Interactive Brokers (IB) historical data collection. Optimizing the ML training pipeline performance over 177M MongoDB rows, resolving stale AI Training status, fixing UI desyncs, and utilizing hardware efficiently. 
+*NEW HARDWARE CONTEXT:* The user has acquired an NVIDIA DGX Spark (Blackwell GB10, 128GB unified memory) to handle the massive ML workloads. The architecture is now distributed: Backend, Frontend, MongoDB, and Ollama run on the Linux-based DGX Spark, which connects over a direct 10GbE LAN link to the user's Windows PC running the IB Gateway.
 
 **User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English only)
 
-**what currently exists?** Full-stack AI trading bot (FastAPI + React + MongoDB) optimizing for a strict 16GB RAM limit and 12-core CPU. The ML pipeline has been completely restructured to use a memory-safe stream-load-extract architecture with numpy vectorization and memory chunking, allowing training on the full 177M row history without OOM crashes. The IB Data Pusher focus mode has been partially patched to respect local training mode.
+**what currently exists?**: 
+The agent successfully fixed the phantom  symbol issue (by adding strict universe validation to Yahoo Finance fetchers and the viewed symbol tracker) and resolved the frontend's aggressive polling during training mode. 
+After determining that the Windows PC's LightGBM PIP installation was falling back to CPU, the user acquired a new NVIDIA DGX Spark. The agent guided the user to configure a static 10GbE network link ( for Windows,  for Spark). On the Spark, Docker, MongoDB (via Docker), Node.js, Yarn, and Ollama are installed. The repository has been cloned, a Python  created, and all  and yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.04s. dependencies installed. 
 
 **Last working item**: 
-    - Last item agent was working: Fixing three log/performance issues identified by the user during the latest test run: 1) IB Data Pusher not pausing during training, 2) A phantom  symbol throwing No security definition errors, and 3) The frontend making ~20+ API calls every polling cycle during training mode. 
+    - Last item agent was working: Configuring the  files for the backend and frontend on the newly cloned DGX Spark repository. Since  files are gitignored, they must be recreated to wire the Spark's backend to the Windows PC's IB Gateway and the local Docker MongoDB.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by user (Requires the user's local hardware/DB environment)
+    - Which testing method agent to use? manual testing by user (Requires the user's DGX Spark hardware via SSH)
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Phantom symbol  throwing No security definition error in IB Gateway (P0)
-     - Attempted fixes: None in this fork yet.
-     - Next debug checklist: Trace where the dynamic symbol string QUICK is being injected into the scanner/context payload (likely from a flawed sector peer list or news feed string split). 
-     - Why fix this issue and what will be achieved with the fix? It causes log spam and triggers IB Error 1018 (Too many requests rate limit).
+  Issue 1: Recreate  configurations on the DGX Spark (P0)
+     - Attempted fixes: Agent asked the user to  but it does not exist.
+     - Next debug checklist: Provide the user with the exact  file contents to create on the Spark for both the  and  directories. MongoDB should point to . IB Gateway connections MUST point to the Windows PC's IP: .
+     - Why fix this issue and what will be achieved with the fix? The backend and frontend cannot start on the new DGX Spark without environment variables.
      - Status: IN PROGRESS
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? backend (via user manual test)
-     - Blocked on other issue: None
-
-  Issue 2: Frontend making aggressive ~20+ API calls per polling cycle during ML Training (P0)
-     - Attempted fixes: None in this fork yet.
-     - Next debug checklist: Check the frontend React components ( hook, , or similar focus mode polling hooks). Ensure that when focus mode is , it halts non-essential polling for reports, budgets, phase summaries, and other dashboards.
-     - Why fix this issue and what will be achieved with the fix? It bogs down the local backend CPU/event loop while the system is already maxed out executing heavy ML extraction tasks.
-     - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? frontend
+     - Should Test frontend/backend/both after fix? both
      - Blocked on other issue: None
 
-**In progress Task List**: None
+**In progress Task List**: 
+  Task 1: Swap LightGBM to XGBoost GPU (or PyTorch) for ML Training
+     - Where to resume: Once the app successfully boots on the DGX Spark, modify  or the training pipeline to use an engine that natively supports the Blackwell GPU.
+     - What will be achieved with this? Utilizing the DGX Spark's 128GB unified memory and Blackwell GPU to train on the full 200M bars in minutes instead of 154+ hours on CPU.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: Needs the DGX Spark app environment up and running first.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
@@ -41,102 +44,212 @@
     - 🟡 (P2) Gap Fill training phase: Wire existing framework into the pipeline.
     - 🟡 (P2) Smart Templates from AI performance data.
     - 🟡 (P2) Model Health card: UI element tracking model staleness + Retrain Stale action.
-    - 🟢 (P3) Post-Development Local DB Migration: Execute the hardware/DB migration to a local NVMe drive.
     - ⚪ (Backlog) Systematic migration to Motor (async PyMongo).
     - ⚪ (Backlog) Resume Training Feature: Add ability to skip already-completed models if training is interrupted.
 
 **Completed work in this session**
-- Fixed  NameError crash blocking the pipeline by declaring it globally. (DONE)
-- Implemented  across the pipeline, entirely removing  caps and allowing memory-safe chunked training over full historical data. (DONE)
-- Added adaptive step sizing and  early exits to Phase 9 CNN training image generation to prevent OOM. (DONE)
-- Implemented 6 performance optimizations: Vectorized numpy Python loops in , applied Numpy array allocations over lists, introduced , and grouped multiprocessing in Phase 2, 4, 6. (DONE)
-- Silenced harmless LightGBM and Numpy math warnings. (DONE)
-- Reduced  to 25 and  to 6 (half of CPU count) to stop 100% CPU/Memory throttling during extraction. (DONE)
-- Fixed IB Data Pusher focus mode check to poll  instead of . (DONE)
+- Fixed phantom  symbol by adding  universe checks before fetching from Yahoo Finance in  and . (DONE)
+- Fixed frontend spamming 20+ API calls per second by implementing  checks in , , , and . (DONE)
+- Configured 10Gbps direct Ethernet link between Windows PC and DGX Spark. (DONE)
+- Set up DGX Spark base dependencies: Docker, MongoDB (containerized), Node.js v20, Yarn, Ollama. (DONE)
+- Cloned repository, created Python , and installed all pip and yarn dependencies on the DGX Spark. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-- None (All recent issues have been moved to the Pending Issue list).
+- None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Phantom QUICK symbol
-  - Recurrence count: 2
-  - Status: IN PROGRESS
+  - Issue recurrence in previous fork: Phantom  symbol 
+  - Recurrence count: 3 (Resolved in this session by adding validation directly at the YFinance fetcher layer).
+  - Status: RESOLVED
 
 **Code Architecture**
-/app
-├── backend/
-│   ├── routers/
-│   │   ├── focus_mode_router.py                  # Focus mode endpoint
-│   ├── services/ai_modules/
-│   │   ├── training_pipeline.py                  # ML orchestration (Restructured for streaming)
-│   │   ├── timeseries_gbm.py                     # LightGBM logic (Warning disabled, worker fixed)
-│   │   ├── timeseries_features.py                # Vectorized NumPy extraction (Vectorized)
-│   │   ├── cnn_training_pipeline.py              # CNN data orchestration
-│   │   ├── chart_image_generator.py              # CNN adaptive sliding window
-├── documents/scripts/
-│   ├── ib_data_pusher.py                         # Push mechanism (Patched for focus mode local polling)
+Distributed Setup:
+┌─────────────────────────────────┐     ┌──────────────────────────┐
+│        DGX SPARK (Linux)        │     │   WINDOWS PC             │
+│        IP: 192.168.50.2         │     │   IP: 192.168.50.1       │
+│                                 │     │                          │
+│  ▪ FastAPI Backend (venv)       │◄───►│  ▪ IB Gateway            │
+│  ▪ MongoDB (Docker :27017)      │ LAN │  ▪ IB Data Pusher Script │
+│  ▪ Ollama                       │     │  ▪ Browser UI            │
+│  ▪ Frontend React App           │     │                          │
+└─────────────────────────────────┘     └──────────────────────────┘
 
 **Key Technical Concepts**
-NumPy Vectorization, Python Multiprocessing (), LightGBM, Memory streaming/chunking (), Fast API Focus Mode states.
+NVIDIA DGX Spark, Blackwell GB10 GPU, Unified Memory (iGPU architecture), SSH, Docker, Python , FastAPI, React, LightGBM, Distributed Networking.
 
 **key DB schema**
-  - ib_historical_data: Massive 177M row collection of OHLCV bars.
+  - : Cleaned of the invalid QUICK entries.
+  - : Holds ~200M rows.
 
 **changes in tech stack**
-None.
+- **Hardware Migration:** Code execution has moved from the Windows PC to an NVIDIA DGX Spark running Ubuntu. 
+- **Database Migration:** MongoDB moved from Atlas Cloud to a local Docker container on the DGX Spark.
+- **Python Environment:** Ubuntu 24.04 enforces PEP 668, so the backend MUST be run inside a virtual environment ().
 
 **All files of reference**
--  (Heavily updated in this session)
--  (Updated to NumPy pure vectorization)
-- 
--  (Updated URL referencing)
+-  (Added  validation)
+-  (Added validation to prevent phantom symbols)
+-  (Fixed polling)
+-  (Fixed polling)
+-  (Fixed  destructuring)
+-  (Attempted GPU mode tweaks, ultimately needs replacing/upgrading to leverage DGX)
 
 **Areas that need refactoring**: 
-Frontend polling structure needs optimization to pause heavy requests during training.
+: Currently uses LightGBM which falls back to CPU due to missing OpenCL/CUDA PIP binaries. Needs to be swapped to  (native CUDA support) or a PyTorch model to utilize the new Blackwell GPU.
 
 **key api endpoints**
-- 
+- N/A for current environment setup step.
 
 **Critical Info for New Agent**
-1. **The user relies on their local hardware:** RTX 5060 Ti GPU, 12-core CPU, 16GB RAM limit. Do NOT try to test the ML pipeline using the Emergent internal container tools or API curl commands. You must provide fixes and ask the user to pull and test locally.
-2. **Strict Limits:** The  is strictly set to 25 and  to 6 (). Do NOT increase these bounds or the user's machine will OOM and freeze again.
-3. The previous agent successfully solved the backend OOM ML pipeline crashes. Right now, the focus is entirely on squashing bugs that appeared in the local logs (phantom QUICK symbol logic trace and UI aggressive polling). 
+1. **CRITICAL HARDWARE WARNING**: DO NOT run Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  glib-networking glib-networking-common glib-networking-services
+  gsettings-desktop-schemas gstreamer1.0-gl gstreamer1.0-plugins-base
+  libcdparanoia0 libgraphene-1.0-0 libgssdp-1.6-0 libgstreamer-gl1.0-0
+  libgstreamer-plugins-bad1.0-0 libgstreamer-plugins-base1.0-0 libgudev-1.0-0
+  libgupnp-1.6-0 libgupnp-igd-1.0-4 libnice10 libnvtt2 libogg0 libopus0
+  liborc-0.4-0 libproxy1v5 libsoup-3.0-0 libsoup-3.0-common libtheora0
+  libva-drm2 libva2 libvisual-0.4-0 libvorbis0a libvorbisenc2 libvulkan1
+  libxcb-xkb1 libxkbcommon-x11-0 mesa-va-drivers mesa-vulkan-drivers
+  va-driver-all
+Suggested packages:
+  gvfs libvisual-0.4-plugins opus-tools libcuda1
+The following NEW packages will be installed:
+  glib-networking glib-networking-common glib-networking-services
+  gsettings-desktop-schemas gstreamer1.0-gl gstreamer1.0-plugins-base
+  libcdparanoia0 libgraphene-1.0-0 libgssdp-1.6-0 libgstreamer-gl1.0-0
+  libgstreamer-plugins-bad1.0-0 libgstreamer-plugins-base1.0-0 libgudev-1.0-0
+  libgupnp-1.6-0 libgupnp-igd-1.0-4 libnice10 libnvtt-bin libnvtt2 libogg0
+  libopus0 liborc-0.4-0 libproxy1v5 libsoup-3.0-0 libsoup-3.0-common
+  libtheora0 libva-drm2 libva2 libvisual-0.4-0 libvorbis0a libvorbisenc2
+  libvulkan1 libxcb-xkb1 libxkbcommon-x11-0 mesa-va-drivers
+  mesa-vulkan-drivers nvidia-vaapi-driver va-driver-all
+0 upgraded, 37 newly installed, 0 to remove and 0 not upgraded.
+Need to get 12.2 MB of archives.
+After this operation, 63.4 MB of additional disk space will be used.
+Do you want to continue? [Y/n] Abort. or  commands on the DGX Spark to try and fix GPU drivers. The previous agent broke the user's first DGX Spark by doing this, forcing them to get a replacement unit. The DGX Spark uses a highly specific unified memory/iGPU driver stack. Treat system-level packages as frozen. Install EVERYTHING at the application level (Docker, , yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.02s.).
+2. **Network Split**: The backend runs on  (Spark). It must communicate with IB Gateway running on  (Windows PC). Keep this in mind when writing the  configurations.
+3. **Virtual Environment**: Any Python command you instruct the user to run on the Spark must be prefixed with or run after .
+4. **Execution Context**: The user is SSH'd into the DGX Spark from their Windows PowerShell. Commands you provide should be executed in that SSH terminal unless explicitly stated otherwise.
 
 **documents and test reports created in this job**
 -  (Updated)
 
-**Last 10 User Messages and any pending HUMAN messages**
-- User: Uploaded a screenshot showing a GitHub push error.
-- Agent: Explained workarounds (creating a new branch, reconnecting GH app).
-- User: Pulled code, tested locally. Showed logs where pipeline started successfully but hit Numpy invalid value encountered in divide warnings and LightGBM warnings.
-- Agent: Explained warnings are cosmetic. Asked how memory/CPU are doing.
-- User: CPU and Memory immediately ran up to near 100%.
-- Agent: Silenced warnings and reduced the streaming batch size to 25, and capped worker processes to 6 (leaving room for OS).
-- User: Confirmed CPU/Memory look better. Noticed it processed top 2500 symbols.
-- Agent: Confirmed it takes top 2500 by ADV volume successfully.
-- User: Shared logs highlighting three new issues: frontend polling spam (20+ requests per second), phantom 'QUICK' symbol hitting IB, and IB Pusher not actually pausing.
-- Agent: Identified the IB pusher was checking the cloud URL for focus mode instead of the local server. Pushed a fix to  to target localhost. (Session ended before fixing QUICK symbol and Frontend polling).
+**Last 10 User Messages and any pending HUMAN messages** 
+ - *User*: error: externally-managed-environment... To install Python packages system-wide, try apt install...
+ - *Agent*: Instructed user to create and activate a .
+ - *User*: Showed  failing on .
+ - *Agent*: Told user to bypass .
+ - *User*: ok i installed the rest
+ - *Agent*: Told user to install frontend yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.07s. dependencies.
+ - *User*: Showed successful yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.03s.. Asked if they should update npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm.
+ - *Agent*: Told user to skip npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm update. Asked user to  in the backend directory.
+ - *User*: cat: .env: No such file or directory
+ - *Agent*: Tool execution to verify bash context before context limit hit.
 
 **Project Health Check:**
-Broken (Frontend spamming backend endpoints and  symbol causing IB rate-limiting).
+Broken (App environment not yet configured on the new hardware;  files missing).
 
 **3rd Party Integrations**
-- Interactive Brokers (IB Gateway) — Requires User Local Environment.
-- MongoDB Atlas — Cloud DB.
-- LightGBM — ML framework (Local GPU).
+- Interactive Brokers (IB Gateway runs on Windows PC, accessed over LAN)
+- MongoDB (Local Docker container on DGX Spark)
+- Ollama (Local installation on DGX Spark)
 
 **Testing status**
-- Testing agent used after significant changes: NO (Requires user's local hardware and database).
-- Troubleshoot agent used after agent stuck in loop: NO.
-- Test files created: None.
-- Known regressions: None.
+  - Testing agent used after significant changes: NO (Requires user's DGX Spark hardware)
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: None
+  - Known regressions: None
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent patched the IB Pusher's focus mode URL check but did not trace or fix the phantom  symbol error, nor did it implement polling throttles in the frontend components.
+The agent ran out of context exactly when it needed to provide the user with the  file templates to create on the DGX Spark.
 
 **Debugging checklist for current issue**
-    Issue: Frontend making 20+ API calls per polling cycle during training / Phantom QUICK symbol
-    Frontend files to check: Check React contexts or dashboard polling logic (e.g., ,  hooks firing , , etc. during training focus mode).
-    Backend files to check: Run a grep for  or check sector logic/news string splits in  or  where a bad split might result in  being interpreted as a ticker symbol.</analysis>
+    Issue: Missing  configurations on the DGX Spark
+    Files to check/create:
+    
+    
+    Checklist:
+    - Provide user with a command to generate the  files (e.g., using  or ).
+    - Ensure Backend  points MongoDB to .
+    - Ensure Backend  points IB Gateway IP to .
+    - Ensure Frontend  points  to .</analysis>
