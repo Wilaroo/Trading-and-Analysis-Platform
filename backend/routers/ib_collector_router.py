@@ -353,13 +353,18 @@ async def fill_gaps(
                 if not tier_symbols:
                     continue
                 
+                tier_symbol_set = set(tier_symbols)
                 symbols_to_collect[tier_name] = {}
                 
                 for tf in tier_config["timeframes"]:
-                    symbols_with_data = set(data_col.distinct("symbol", {
-                        "symbol": {"$in": tier_symbols},
-                        "bar_size": tf
-                    }))
+                    # Use aggregation pipeline instead of distinct() - much faster on 177M+ rows
+                    pipeline = [
+                        {"$match": {"bar_size": tf, "symbol": {"$in": tier_symbols}}},
+                        {"$group": {"_id": "$symbol"}}
+                    ]
+                    symbols_with_data = set(
+                        doc["_id"] for doc in data_col.aggregate(pipeline, allowDiskUse=True)
+                    )
                     
                     missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
                     
@@ -620,10 +625,14 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
             }
             
             for tf in tier_config["timeframes"]:
-                symbols_with_data = set(data_col.distinct("symbol", {
-                    "symbol": {"$in": tier_symbols},
-                    "bar_size": tf
-                }))
+                # Use aggregation pipeline instead of distinct() - much faster on 177M+ rows
+                pipeline = [
+                    {"$match": {"bar_size": tf, "symbol": {"$in": tier_symbols}}},
+                    {"$group": {"_id": "$symbol"}}
+                ]
+                symbols_with_data = set(
+                    doc["_id"] for doc in data_col.aggregate(pipeline, allowDiskUse=True)
+                )
                 
                 missing_count = tier_total - len(symbols_with_data)
                 coverage_pct = (len(symbols_with_data) / tier_total * 100) if tier_total > 0 else 0
