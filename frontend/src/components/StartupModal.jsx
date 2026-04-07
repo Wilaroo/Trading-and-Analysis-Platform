@@ -55,7 +55,7 @@ function xhrGet(url, timeout) {
 // Service definitions — visual only, checks come from consolidated endpoint
 const SERVICES = [
   { id: 'backend',    label: 'Backend API',     icon: Cpu,         required: true,  category: 'core' },
-  { id: 'websocket',  label: 'WebSocket',       icon: Wifi,        required: true,  category: 'core' },
+  { id: 'websocket',  label: 'WebSocket',       icon: Wifi,        required: false, category: 'core' },
   { id: 'database',   label: 'Database',        icon: Database,    required: true,  category: 'core' },
   { id: 'ib',         label: 'IB Gateway',      icon: TrendingUp,  required: false, category: 'trading' },
   { id: 'scanner',    label: 'Live Scanner',    icon: Activity,    required: false, category: 'trading' },
