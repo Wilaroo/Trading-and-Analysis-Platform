@@ -15,7 +15,7 @@ import sys
 # Add backend to path for direct imports
 sys.path.insert(0, '/app/backend')
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://blackwell-ml-engine.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ib-pipeline-refactor.preview.emergentagent.com').rstrip('/')
 
 
 class TestSmartFilterDelegation:
