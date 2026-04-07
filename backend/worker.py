@@ -869,6 +869,72 @@ async def process_dl_training_job(job: dict, db) -> dict:
     }
 
 
+async def process_finbert_job(job: dict, db) -> dict:
+    """Process a FinBERT news collection + scoring job.
+    
+    Job params:
+        - symbols: list of tickers (empty = auto-detect from DB)
+        - days_back: int (default 30)
+        - score_after_collect: bool (default True)
+        - batch_size: int (FinBERT scoring batch size)
+        - max_articles: int (max articles to score)
+    """
+    params = job.get('params', {})
+    job_id = job['job_id']
+    symbols = params.get('symbols', [])
+    days_back = params.get('days_back', 30)
+    score_after_collect = params.get('score_after_collect', True)
+    batch_size = params.get('batch_size', 64)
+    max_articles = params.get('max_articles', 10000)
+
+    logger.info(f"[FINBERT] Job {job_id} — symbols: {len(symbols) or 'auto'}, days_back: {days_back}")
+    results = {}
+
+    # Auto-detect symbols from DB if none provided
+    if not symbols:
+        pipeline = [
+            {"$match": {"bar_size": "1 day"}},
+            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+            {"$match": {"count": {"$gte": 50}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 100},
+        ]
+        symbols = [r["_id"] for r in db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True)]
+        logger.info(f"[FINBERT] Auto-detected {len(symbols)} symbols from DB")
+
+    # Step 1: Collect news from Finnhub
+    try:
+        await job_queue_manager.update_progress(job_id, percent=5, message=f"Collecting news for {len(symbols)} symbols...")
+        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector
+        collector = FinnhubNewsCollector(db=db)
+        results['collection'] = await collector.collect_news(symbols=symbols, days_back=days_back)
+        logger.info(f"[FINBERT] Collection: {results['collection'].get('new_articles_stored', 0)} new articles")
+    except Exception as e:
+        logger.error(f"[FINBERT] News collection failed: {e}")
+        results['collection'] = {'success': False, 'error': str(e)}
+
+    # Step 2: Score with FinBERT
+    if score_after_collect:
+        try:
+            await job_queue_manager.update_progress(job_id, percent=50, message="Scoring articles with FinBERT...")
+            from services.ai_modules.finbert_sentiment import FinBERTSentiment
+            scorer = FinBERTSentiment(db=db)
+            results['scoring'] = await scorer.score_unscored_articles(
+                batch_size=batch_size, max_articles=max_articles
+            )
+            logger.info(f"[FINBERT] Scoring: {results['scoring'].get('scored', 0)} articles scored")
+        except Exception as e:
+            logger.error(f"[FINBERT] Scoring failed: {e}")
+            results['scoring'] = {'success': False, 'error': str(e)}
+
+    await job_queue_manager.update_progress(job_id, percent=100, message="FinBERT pipeline complete")
+
+    return {
+        'success': True,
+        'results': results,
+    }
+
+
 async def process_job(job: dict, db) -> dict:
     """Route job to appropriate processor."""
     job_type = job.get('job_type')
@@ -881,6 +947,7 @@ async def process_job(job: dict, db) -> dict:
         JobType.CALIBRATION.value: process_calibration_job,
         JobType.CNN_TRAINING.value: process_cnn_training_job,
         JobType.DL_TRAINING.value: process_dl_training_job,
+        JobType.FINBERT_ANALYSIS.value: process_finbert_job,
     }
     
     processor = processors.get(job_type)

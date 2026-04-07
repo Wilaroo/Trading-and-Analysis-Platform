@@ -2029,6 +2029,205 @@ class DLTrainRequest(BaseModel):
     batch_size: Optional[int] = Field(default=256, description="Batch size")
 
 
+# ====================================================================
+# Phase 5c: FinBERT Sentiment Analysis Endpoints
+# ====================================================================
+
+class FinBERTCollectRequest(BaseModel):
+    """Request to collect news from Finnhub."""
+    symbols: List[str] = Field(default=[], description="Symbols to collect news for (empty = use universe)")
+    days_back: int = Field(default=30, description="Days of history to fetch")
+
+
+class FinBERTScoreRequest(BaseModel):
+    """Request to score unscored articles with FinBERT."""
+    batch_size: int = Field(default=64, description="Scoring batch size")
+    max_articles: int = Field(default=10000, description="Max articles to score per run")
+
+
+@router.post("/finbert/collect-news")
+async def finbert_collect_news(request: FinBERTCollectRequest = None):
+    """
+    Collect financial news from Finnhub for given symbols.
+    Requires FINNHUB_API_KEY in backend .env.
+    """
+    try:
+        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        symbols = (request.symbols if request and request.symbols else [])
+        days_back = request.days_back if request and request.days_back else 30
+
+        # If no symbols provided, pull the top-traded universe from DB
+        if not symbols:
+            pipeline = [
+                {"$match": {"bar_size": "1 day"}},
+                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                {"$match": {"count": {"$gte": 50}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 100},
+            ]
+            symbols = [r["_id"] for r in model_db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True)]
+
+        if not symbols:
+            return {"success": False, "error": "No symbols to collect news for"}
+
+        collector = FinnhubNewsCollector(db=model_db)
+        result = await collector.collect_news(symbols=symbols, days_back=days_back)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FinBERT news collection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/finbert/score-articles")
+async def finbert_score_articles(request: FinBERTScoreRequest = None):
+    """Score all unscored news articles using ProsusAI/FinBERT."""
+    try:
+        from services.ai_modules.finbert_sentiment import FinBERTSentiment
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        batch_size = request.batch_size if request and request.batch_size else 64
+        max_articles = request.max_articles if request and request.max_articles else 10000
+
+        scorer = FinBERTSentiment(db=model_db)
+        result = await scorer.score_unscored_articles(batch_size=batch_size, max_articles=max_articles)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FinBERT scoring failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/finbert/stats")
+async def finbert_stats():
+    """Get news collection and sentiment scoring statistics."""
+    try:
+        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector, FinBERTSentiment
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            return {"success": False, "error": "Database not available"}
+
+        collector = FinnhubNewsCollector(db=model_db)
+        collection_stats = collector.get_collection_stats()
+
+        # Top symbols by article count
+        top_symbols = list(model_db["news_sentiment"].aggregate([
+            {"$group": {"_id": "$symbol", "count": {"$sum": 1}, "avg_score": {"$avg": "$score"}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 20},
+        ]))
+        top_symbols_clean = [
+            {"symbol": s["_id"], "articles": s["count"], "avg_score": s.get("avg_score", 0)}
+            for s in top_symbols
+        ]
+
+        return {
+            "success": True,
+            "collection": collection_stats,
+            "top_symbols": top_symbols_clean,
+        }
+
+    except Exception as e:
+        logger.error(f"FinBERT stats failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/finbert/sentiment/{symbol}")
+async def finbert_symbol_sentiment(symbol: str, lookback_days: int = 5):
+    """Get aggregated FinBERT sentiment for a specific symbol."""
+    try:
+        from services.ai_modules.finbert_sentiment import FinBERTSentiment
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        scorer = FinBERTSentiment(db=model_db)
+        result = scorer.get_symbol_sentiment(symbol.upper(), lookback_days=lookback_days)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FinBERT sentiment lookup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/finbert/market-sentiment")
+async def finbert_market_sentiment(lookback_days: int = 3):
+    """Get broad market sentiment across all scored articles."""
+    try:
+        from services.ai_modules.finbert_sentiment import FinBERTSentiment
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        scorer = FinBERTSentiment(db=model_db)
+        result = scorer.get_market_sentiment(lookback_days=lookback_days)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FinBERT market sentiment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/finbert/run-pipeline")
+async def finbert_run_full_pipeline(request: FinBERTCollectRequest = None):
+    """
+    Queue a background job to collect news + score with FinBERT.
+    Uses the worker job queue so it doesn't block the API.
+    """
+    try:
+        from services.job_queue_manager import job_queue_manager, JobType
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        symbols = (request.symbols if request and request.symbols else [])
+        days_back = request.days_back if request and request.days_back else 30
+
+        result = await job_queue_manager.create_job(
+            job_type=JobType.FINBERT_ANALYSIS.value,
+            params={
+                "symbols": symbols,
+                "days_back": days_back,
+                "score_after_collect": True,
+                "batch_size": 64,
+                "max_articles": 10000,
+            },
+            priority=5,
+        )
+
+        return {
+            "success": result.get("success", False),
+            "job_id": result.get("job", {}).get("job_id"),
+            "message": f"FinBERT pipeline queued (collect {days_back}d news then score)",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FinBERT pipeline enqueue failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/dl/train-vae-regime")
 async def train_vae_regime(request: DLTrainRequest = None):
     """Train the VAE Regime Detection model on SPY + sector ETF data."""
@@ -2156,7 +2355,7 @@ async def train_all_dl_models(request: DLTrainRequest = None):
 
 @router.get("/dl/status")
 async def dl_model_status():
-    """Get status of all Phase 5 deep learning models."""
+    """Get status of all Phase 5 deep learning models + FinBERT."""
     model_db = _timeseries_ai._db if _timeseries_ai else None
     if model_db is None:
         return {"models": {}, "total_loaded": 0, "expected_models": []}
@@ -2175,8 +2374,18 @@ async def dl_model_status():
     except Exception as e:
         logger.error(f"Error fetching DL model status: {e}")
 
+    # FinBERT collection stats
+    finbert_stats = {}
+    try:
+        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector
+        collector = FinnhubNewsCollector(db=model_db)
+        finbert_stats = collector.get_collection_stats()
+    except Exception:
+        pass
+
     return {
         "models": status,
         "total_loaded": len(status),
         "expected_models": ["vae_regime_detector", "tft_multi_timeframe", "cnn_lstm_chart"],
+        "finbert": finbert_stats,
     }

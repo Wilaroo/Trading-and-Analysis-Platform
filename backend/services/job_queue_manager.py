@@ -29,6 +29,7 @@ class JobType(str, Enum):
     CALIBRATION = "calibration"
     CNN_TRAINING = "cnn_training"
     DL_TRAINING = "dl_training"
+    FINBERT_ANALYSIS = "finbert_analysis"
 
 
 class JobStatus(str, Enum):
