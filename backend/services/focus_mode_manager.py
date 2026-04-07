@@ -257,6 +257,13 @@ class FocusModeManager:
         Returns:
             True if task should run, False if it should be paused
         """
+        # Check training_mode_manager first (activated by worker during training jobs)
+        try:
+            from services.training_mode import training_mode_manager
+            if training_mode_manager.should_skip_task(task_name):
+                return False
+        except Exception:
+            pass
         priority = self.get_task_priority(task_name)
         return priority > 0
     

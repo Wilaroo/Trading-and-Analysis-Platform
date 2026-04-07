@@ -2592,7 +2592,11 @@ DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "T
 def _is_training_active():
     """Quick check if training mode is active — used by WS streams to pause during training."""
     try:
-        return focus_mode_manager.get_mode() != "live"
+        if focus_mode_manager.get_mode() != "live":
+            return True
+        # Also check training_mode_manager (activated by worker during train_full_universe)
+        from services.training_mode import training_mode_manager
+        return training_mode_manager.is_training_active()
     except Exception:
         return False
 
