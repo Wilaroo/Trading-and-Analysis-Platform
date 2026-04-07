@@ -2,14 +2,14 @@
 Hybrid Data Fetcher Service
 ===========================
 Provides historical market data for backtesting with intelligent source selection:
-1. Check MongoDB cache first
+1. Check MongoDB cache first (ib_historical_data — 177M+ rows)
 2. If IB Gateway connected -> use IB (free, consistent with live trading)
-3. If IB unavailable -> fall back to Alpaca (24/7 availability)
+3. No Alpaca fallback (removed to eliminate train/serve data skew)
 
 Features:
-- Rate limiting for both IB and Alpaca to stay within API limits
+- Rate limiting for IB to stay within API limits
 - Automatic caching of all fetched data
-- Works regardless of app/IB Gateway running status
+- Works regardless of IB Gateway running status
 - Background job queue for large batch requests
 """
 
@@ -82,20 +82,16 @@ class DataFetchResult:
 
 class HybridDataService:
     """
-    Intelligent data fetcher that automatically selects the best data source.
+    Intelligent data fetcher — 100% IB sourced.
     
     Priority:
-    1. MongoDB cache (instant, free)
+    1. MongoDB cache (instant, free — ib_historical_data collection)
     2. IB Gateway (free if connected, consistent with live)
-    3. Alpaca (fallback, 24/7 availability)
     """
     
     # Rate limits (conservative to stay well within limits)
     IB_RATE_LIMIT = 6  # requests per minute (IB allows ~60/10min = 6/min)
     IB_RATE_PERIOD = 60  # seconds
-    
-    ALPACA_RATE_LIMIT = 150  # requests per minute (Alpaca allows 200/min)
-    ALPACA_RATE_PERIOD = 60  # seconds
     
     # Supported timeframes
     TIMEFRAMES = {
@@ -115,25 +111,17 @@ class HybridDataService:
         self._bars_collection = None
         self._cache_stats_collection = None
         self._ib_service = None
-        self._alpaca_service = None
         
         # Rate limiters
         self._ib_rate_limiter = RateLimiter(
             max_requests=self.IB_RATE_LIMIT,
             period_seconds=self.IB_RATE_PERIOD
         )
-        self._alpaca_rate_limiter = RateLimiter(
-            max_requests=self.ALPACA_RATE_LIMIT,
-            period_seconds=self.ALPACA_RATE_PERIOD
-        )
         
         # Stats tracking
         self._stats = {
             "cache_hits": 0,
             "ib_fetches": 0,
-            "alpaca_fetches": 0,
-            "ib_rate_limited": 0,
-            "alpaca_rate_limited": 0,
             "errors": 0
         }
         
@@ -154,9 +142,8 @@ class HybridDataService:
         logger.info("HybridDataService: IB service connected")
         
     def set_alpaca_service(self, alpaca_service):
-        """Set Alpaca service reference"""
-        self._alpaca_service = alpaca_service
-        logger.info("HybridDataService: Alpaca service connected")
+        """DEPRECATED: Alpaca removed from data pipeline. Kept for interface compat."""
+        pass
     
     def _is_ib_connected(self) -> bool:
         """Check if IB Gateway is connected"""
@@ -265,35 +252,15 @@ class HybridDataService:
                             bar_count=len(ib_result["bars"])
                         )
                 else:
-                    self._stats["ib_rate_limited"] += 1
                     wait_time = self._ib_rate_limiter.wait_time()
                     logger.warning(f"IB rate limited, need to wait {wait_time:.1f}s")
         
-        # Step 3: Fall back to Alpaca
-        if preferred_source in ["auto", "alpaca"]:
-            if self._alpaca_rate_limiter.can_request():
-                alpaca_result = await self._fetch_from_alpaca(symbol, timeframe, start_dt, end_dt)
-                if alpaca_result["success"]:
-                    self._stats["alpaca_fetches"] += 1
-                    # Cache the data
-                    await self._cache_bars(symbol, timeframe, alpaca_result["bars"])
-                    return DataFetchResult(
-                        success=True,
-                        source="alpaca",
-                        bars=alpaca_result["bars"],
-                        bar_count=len(alpaca_result["bars"])
-                    )
-            else:
-                self._stats["alpaca_rate_limited"] += 1
-                wait_time = self._alpaca_rate_limiter.wait_time()
-                logger.warning(f"Alpaca rate limited, need to wait {wait_time:.1f}s")
-        
-        # All sources failed
+        # All sources exhausted (Alpaca removed from pipeline)
         self._stats["errors"] += 1
         return DataFetchResult(
             success=False,
             source="error",
-            error="Unable to fetch data from any source. IB disconnected and Alpaca unavailable or rate limited."
+            error="Unable to fetch data. IB disconnected and no cached data available."
         )
     
     async def _get_from_cache(
@@ -303,35 +270,40 @@ class HybridDataService:
         start_dt: datetime,
         end_dt: datetime
     ) -> Dict[str, Any]:
-        """Get bars from MongoDB cache"""
+        """Get bars from MongoDB ib_historical_data collection"""
         if self._bars_collection is None:
             return {"success": False, "bars": [], "bar_count": 0}
         
         try:
-            # Note: Cache TTL can be used in future for invalidation logic
-            # For now, we rely on coverage-based freshness check
+            tf_config = self.TIMEFRAMES.get(timeframe, {})
+            bar_size = tf_config.get("ib_bar_size", "1 day")
             
+            # Query ib_historical_data using its actual field names
             query = {
                 "symbol": symbol,
-                "timeframe": timeframe,
-                "timestamp": {
-                    "$gte": start_dt.isoformat(),
-                    "$lte": end_dt.isoformat()
+                "bar_size": bar_size,
+                "date": {
+                    "$gte": start_dt.strftime("%Y-%m-%d") if timeframe == "1day" else start_dt.isoformat(),
+                    "$lte": end_dt.strftime("%Y-%m-%d") if timeframe == "1day" else end_dt.isoformat()
                 }
             }
             
-            bars = list(self._bars_collection.find(query, {"_id": 0}).sort("timestamp", 1))
+            bars = list(self._bars_collection.find(query, {"_id": 0}).sort("date", 1))
+            
+            # Normalize field names for compatibility
+            for bar in bars:
+                if "date" in bar and "timestamp" not in bar:
+                    bar["timestamp"] = bar["date"]
             
             # Check if we have enough data (at least 80% of expected bars)
             if bars:
-                # Rough estimate of expected bars
                 days = (end_dt - start_dt).days
                 if timeframe == "1day":
-                    expected = days * 0.7  # ~70% trading days
+                    expected = days * 0.7
                 elif timeframe == "1hour":
-                    expected = days * 6.5  # ~6.5 hours per day
+                    expected = days * 6.5
                 else:
-                    expected = days * 78  # ~78 5-min bars per day
+                    expected = days * 78
                 
                 coverage = len(bars) / max(expected, 1)
                 
@@ -403,78 +375,6 @@ class HybridDataService:
             
         except Exception as e:
             logger.error(f"IB fetch error for {symbol}: {e}")
-            return {"success": False, "bars": [], "error": str(e)}
-    
-    async def _fetch_from_alpaca(
-        self,
-        symbol: str,
-        timeframe: str,
-        start_dt: datetime,
-        end_dt: datetime
-    ) -> Dict[str, Any]:
-        """Fetch historical data from Alpaca"""
-        try:
-            self._alpaca_rate_limiter.record_request()
-            
-            from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-            from alpaca.data.historical.stock import StockHistoricalDataClient
-            
-            api_key = os.environ.get("ALPACA_API_KEY", "")
-            secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
-            
-            if not api_key or not secret_key:
-                return {"success": False, "bars": [], "error": "Alpaca API keys not configured"}
-            
-            # Map timeframe
-            tf_config = self.TIMEFRAMES[timeframe]
-            alpaca_tf = tf_config["alpaca_tf"]
-            
-            tf_map = {
-                "1Min": TimeFrame.Minute,
-                "5Min": TimeFrame(5, TimeFrameUnit.Minute),
-                "15Min": TimeFrame(15, TimeFrameUnit.Minute),
-                "1Hour": TimeFrame.Hour,
-                "1Day": TimeFrame.Day,
-            }
-            
-            tf = tf_map.get(alpaca_tf, TimeFrame.Day)
-            
-            # Create client
-            client = StockHistoricalDataClient(api_key=api_key, secret_key=secret_key)
-            
-            request = StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=tf,
-                start=start_dt,
-                end=end_dt,
-                feed="iex"  # Free tier
-            )
-            
-            response = client.get_stock_bars(request)
-            
-            bars = []
-            bars_data = response.data if hasattr(response, 'data') else response
-            
-            if symbol in bars_data:
-                for bar in bars_data[symbol]:
-                    bars.append({
-                        "symbol": symbol,
-                        "timeframe": timeframe,
-                        "timestamp": bar.timestamp.isoformat(),
-                        "open": float(bar.open),
-                        "high": float(bar.high),
-                        "low": float(bar.low),
-                        "close": float(bar.close),
-                        "volume": int(bar.volume),
-                        "vwap": float(bar.vwap) if bar.vwap else None,
-                        "source": "alpaca"
-                    })
-            
-            return {"success": True, "bars": bars}
-            
-        except Exception as e:
-            logger.error(f"Alpaca fetch error for {symbol}: {e}")
             return {"success": False, "bars": [], "error": str(e)}
     
     async def _cache_bars(self, symbol: str, timeframe: str, bars: List[Dict]):
@@ -551,14 +451,9 @@ class HybridDataService:
         return {
             "db_connected": self._db is not None,
             "ib_connected": self._is_ib_connected(),
-            "alpaca_configured": bool(os.environ.get("ALPACA_API_KEY")),
             "ib_rate_limit": {
                 "can_request": self._ib_rate_limiter.can_request(),
                 "wait_time": self._ib_rate_limiter.wait_time()
-            },
-            "alpaca_rate_limit": {
-                "can_request": self._alpaca_rate_limiter.can_request(),
-                "wait_time": self._alpaca_rate_limiter.wait_time()
             },
             "stats": self._stats,
             "supported_timeframes": list(self.TIMEFRAMES.keys())

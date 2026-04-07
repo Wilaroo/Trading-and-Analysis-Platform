@@ -1,7 +1,8 @@
 """
-Stock Data Service - Unified interface for stock data from multiple providers
-Primary: Alpaca (free real-time), Finnhub (60 calls/min free tier)
-Fallback: Yahoo Finance, then simulated data
+Stock Data Service - Unified interface for stock data
+Primary: IB Pusher (real-time) + MongoDB ib_historical_data
+UI Enrichment: Yahoo Finance (fundamentals), Finnhub (earnings calendar, company profiles)
+Note: Alpaca, TwelveData removed from critical path to eliminate train/serve data skew
 """
 import os
 import finnhub
@@ -12,18 +13,15 @@ import random
 import asyncio
 
 class StockDataService:
-    """Unified stock data service with multiple providers and caching"""
+    """Unified stock data service — 100% IB for trading, yfinance/finnhub for UI enrichment"""
     
     def __init__(self):
-        # Alpaca service (primary provider - free real-time)
-        self._alpaca_service = None
+        # MongoDB reference for ib_historical_data queries
+        self._db = None
         
-        # Finnhub client (secondary provider - 60 calls/min)
+        # Finnhub client (UI enrichment ONLY — earnings calendar, company profiles)
         self.finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
         self.finnhub_client = finnhub.Client(api_key=self.finnhub_key) if self.finnhub_key else None
-        
-        # Twelve Data (legacy fallback - 8 calls/min)
-        self.twelvedata_key = os.environ.get("TWELVEDATA_API_KEY", "demo")
         
         # Cache settings
         self._quote_cache: Dict[str, tuple] = {}
@@ -31,15 +29,19 @@ class StockDataService:
         self._cache_ttl = 60  # seconds for quotes
         self._fundamentals_cache_ttl = 3600  # 1 hour for fundamentals
         
-        # Rate limiting
+        # Rate limiting (for Finnhub UI calls only)
         self._last_call_time = datetime.now(timezone.utc)
         self._call_count = 0
         self._rate_limit_window = 60  # seconds
         self._rate_limit_max = 55  # calls per window (leaving buffer)
     
+    def set_db(self, db):
+        """Set MongoDB connection for ib_historical_data queries"""
+        self._db = db
+    
     def set_alpaca_service(self, alpaca_service):
-        """Set the Alpaca service for real-time data"""
-        self._alpaca_service = alpaca_service
+        """DEPRECATED: Alpaca removed from trading path. Kept for interface compatibility."""
+        pass
     
     def _check_cache(self, cache: Dict, key: str, ttl: int) -> Optional[Dict]:
         """Check if cached data is still valid"""
@@ -67,7 +69,7 @@ class StockDataService:
         return True
     
     async def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote with provider fallback chain"""
+        """Get real-time quote — IB first, MongoDB bar fallback, Yahoo for UI"""
         # Sanitize symbol - remove $ prefix and clean up
         symbol = symbol.replace("$", "").upper().strip()
         
@@ -92,27 +94,13 @@ class StockDataService:
             self._set_cache(self._quote_cache, cache_key, ib_quote)
             return ib_quote
         
-        # Try Alpaca second (free real-time)
-        if self._alpaca_service:
-            quote = await self._fetch_alpaca_quote(symbol)
-            if quote:
-                self._set_cache(self._quote_cache, cache_key, quote)
-                return quote
+        # Fallback: Latest bar close from MongoDB ib_historical_data
+        mongo_quote = await self._fetch_mongodb_bar_quote(symbol)
+        if mongo_quote and mongo_quote.get('price', 0) > 0:
+            self._set_cache(self._quote_cache, cache_key, mongo_quote)
+            return mongo_quote
         
-        # Try Finnhub third (good rate limits)
-        if self.finnhub_client and await self._can_make_call():
-            quote = await self._fetch_finnhub_quote(symbol)
-            if quote:
-                self._set_cache(self._quote_cache, cache_key, quote)
-                return quote
-        
-        # Fallback to Twelve Data
-        quote = await self._fetch_twelvedata_quote(symbol)
-        if quote:
-            self._set_cache(self._quote_cache, cache_key, quote)
-            return quote
-        
-        # Fallback to Yahoo Finance
+        # Fallback to Yahoo Finance (UI display only, non-critical)
         quote = await self._fetch_yahoo_quote(symbol)
         if quote:
             self._set_cache(self._quote_cache, cache_key, quote)
@@ -194,6 +182,40 @@ class StockDataService:
         # Fallback to empty/default VIX
         return self._generate_empty_quote("VIX", "VIX data not available from IB Gateway")
     
+    async def _fetch_mongodb_bar_quote(self, symbol: str) -> Optional[Dict]:
+        """Fetch latest bar from ib_historical_data as quote fallback"""
+        if self._db is None:
+            return None
+        try:
+            bar = self._db["ib_historical_data"].find_one(
+                {"symbol": symbol.upper(), "bar_size": {"$in": ["5 mins", "1 min", "1 day"]}},
+                {"_id": 0, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1, "date": 1},
+                sort=[("date", -1)]
+            )
+            if bar and bar.get("close", 0) > 0:
+                price = bar["close"]
+                open_price = bar.get("open", price)
+                change = price - open_price
+                change_pct = (change / open_price * 100) if open_price else 0
+                return {
+                    "symbol": symbol,
+                    "price": round(price, 2),
+                    "change": round(change, 2),
+                    "change_percent": round(change_pct, 2),
+                    "volume": bar.get("volume", 0),
+                    "high": round(bar.get("high", price), 2),
+                    "low": round(bar.get("low", price), 2),
+                    "open": round(open_price, 2),
+                    "previous_close": round(open_price, 2),
+                    "bid": round(price, 2),
+                    "ask": round(price, 2),
+                    "timestamp": bar.get("date", datetime.now(timezone.utc).isoformat()),
+                    "source": "mongodb_bar"
+                }
+        except Exception as e:
+            pass
+        return None
+
     async def _fetch_ib_pushed_quote(self, symbol: str) -> Optional[Dict]:
         """Fetch quote from IB pushed data"""
         try:
@@ -229,107 +251,6 @@ class StockDataService:
         except Exception:
             pass
         
-        return None
-    
-    async def _fetch_alpaca_quote(self, symbol: str) -> Optional[Dict]:
-        """Fetch quote from Alpaca API"""
-        try:
-            quote = await self._alpaca_service.get_quote(symbol)
-            if quote and quote.get('price', 0) > 0:
-                # Convert Alpaca format to our standard format
-                price = quote['price']
-                bid = quote.get('bid', price)
-                ask = quote.get('ask', price)
-                
-                return {
-                    "symbol": symbol,
-                    "price": round(price, 2),
-                    "change": 0,  # Alpaca snapshot doesn't include change
-                    "change_percent": 0,
-                    "volume": quote.get('volume', 0),
-                    "high": round(ask, 2),  # Use ask as proxy
-                    "low": round(bid, 2),   # Use bid as proxy
-                    "open": round(price, 2),
-                    "prev_close": round(price, 2),
-                    "bid": round(bid, 2),
-                    "ask": round(ask, 2),
-                    "timestamp": quote.get('timestamp', datetime.now(timezone.utc).isoformat()),
-                    "source": "alpaca"
-                }
-        except Exception as e:
-            print(f"Alpaca quote error for {symbol}: {e}")
-        return None
-    
-    async def _fetch_finnhub_quote(self, symbol: str) -> Optional[Dict]:
-        """Fetch quote from Finnhub API"""
-        try:
-            # Run in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(
-                None, 
-                self.finnhub_client.quote, 
-                symbol
-            )
-            
-            if data and data.get('c', 0) > 0:  # 'c' is current price
-                price = data['c']
-                prev_close = data.get('pc', price)
-                change = price - prev_close
-                change_pct = (change / prev_close * 100) if prev_close else 0
-                
-                return {
-                    "symbol": symbol,
-                    "price": round(price, 2),
-                    "change": round(change, 2),
-                    "change_percent": round(change_pct, 2),
-                    "volume": 0,  # Finnhub quote doesn't include volume
-                    "high": round(data.get('h', price), 2),
-                    "low": round(data.get('l', price), 2),
-                    "open": round(data.get('o', price), 2),
-                    "prev_close": round(prev_close, 2),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "source": "finnhub"
-                }
-        except Exception as e:
-            print(f"Finnhub error for {symbol}: {e}")
-        return None
-    
-    async def _fetch_twelvedata_quote(self, symbol: str) -> Optional[Dict]:
-        """Fetch quote from Twelve Data API"""
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    "https://api.twelvedata.com/quote",
-                    params={"symbol": symbol, "apikey": self.twelvedata_key},
-                    timeout=10
-                )
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if "code" in data and data["code"] != 200:
-                        return None
-                    
-                    price = float(data.get("close", 0))
-                    prev_close = float(data.get("previous_close", price))
-                    change = float(data.get("change", 0))
-                    change_pct = float(data.get("percent_change", 0))
-                    
-                    return {
-                        "symbol": symbol,
-                        "name": data.get("name", symbol),
-                        "price": round(price, 2),
-                        "change": round(change, 2),
-                        "change_percent": round(change_pct, 2),
-                        "volume": int(data.get("volume", 0)),
-                        "high": round(float(data.get("high", price)), 2),
-                        "low": round(float(data.get("low", price)), 2),
-                        "open": round(float(data.get("open", price)), 2),
-                        "prev_close": round(prev_close, 2),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "source": "twelvedata"
-                    }
-        except Exception as e:
-            print(f"Twelve Data error for {symbol}: {e}")
         return None
     
     async def _fetch_yahoo_quote(self, symbol: str) -> Optional[Dict]:
@@ -495,49 +416,38 @@ class StockDataService:
     async def get_service_status(self) -> Dict:
         """Get status of all data services - useful for health checks"""
         status = {
-            "alpaca": {"available": False, "status": "not_configured"},
+            "ib_pusher": {"available": False, "status": "not_connected"},
+            "mongodb": {"available": self._db is not None, "status": "connected" if self._db else "not_configured"},
             "finnhub": {"available": False, "status": "not_configured"},
-            "twelvedata": {"available": False, "status": "not_configured"},
-            "yfinance": {"available": False, "status": "not_configured"},
+            "yfinance": {"available": True, "status": "available"},
             "cache": {
                 "quote_cache_size": len(self._quote_cache),
                 "fundamentals_cache_size": len(self._fundamentals_cache)
             }
         }
         
-        # Check Alpaca
-        if self._alpaca_service:
-            try:
-                alpaca_status = self._alpaca_service.get_status()
-                status["alpaca"] = {
-                    "available": alpaca_status.get("initialized", False),
-                    "status": "connected" if alpaca_status.get("initialized") else "not_initialized",
-                    "data_feed": alpaca_status.get("data_feed", "unknown")
-                }
-            except Exception as e:
-                status["alpaca"] = {"available": False, "status": f"error: {str(e)}"}
+        # Check IB Pusher
+        try:
+            from routers.ib import is_pusher_connected
+            connected = is_pusher_connected()
+            status["ib_pusher"] = {
+                "available": connected,
+                "status": "connected" if connected else "disconnected"
+            }
+        except Exception:
+            pass
         
-        # Check Finnhub
+        # Check Finnhub (UI enrichment only)
         if self.finnhub_client and self.finnhub_key:
             try:
-                # Quick test - get market status (lightweight call)
                 market_status = self.finnhub_client.market_status(exchange='US')
                 status["finnhub"] = {
                     "available": True,
-                    "status": "connected",
+                    "status": "connected (earnings/profiles only)",
                     "market_open": market_status.get("isOpen", False) if market_status else False
                 }
             except Exception as e:
                 status["finnhub"] = {"available": False, "status": f"error: {str(e)}"}
-        
-        # Check TwelveData (just check if key is configured)
-        if self.twelvedata_key and self.twelvedata_key != "demo":
-            status["twelvedata"] = {"available": True, "status": "configured"}
-        elif self.twelvedata_key == "demo":
-            status["twelvedata"] = {"available": True, "status": "demo_mode"}
-        
-        # yfinance is always available (no API key needed)
-        status["yfinance"] = {"available": True, "status": "available"}
         
         return status
     
@@ -549,26 +459,34 @@ class StockDataService:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-        # Test Alpaca with a real quote request
+        # Test IB Pusher
         try:
-            if self._alpaca_service:
-                quote = await self._alpaca_service.get_quote("AAPL")
-                results["services"]["alpaca"] = {
-                    "healthy": quote is not None and quote.get("price", 0) > 0,
-                    "latency_ms": None  # Could add timing
-                }
-            else:
-                results["services"]["alpaca"] = {"healthy": False, "reason": "not_configured"}
+            from routers.ib import is_pusher_connected, get_pushed_quotes
+            connected = is_pusher_connected()
+            results["services"]["ib_pusher"] = {
+                "healthy": connected,
+                "symbols_tracked": len(get_pushed_quotes()) if connected else 0
+            }
         except Exception as e:
-            results["services"]["alpaca"] = {"healthy": False, "reason": str(e)}
-            results["healthy"] = False
+            results["services"]["ib_pusher"] = {"healthy": False, "reason": str(e)}
         
-        # Test Finnhub
+        # Test MongoDB
+        try:
+            if self._db is not None:
+                count = self._db["ib_historical_data"].estimated_document_count()
+                results["services"]["mongodb"] = {"healthy": True, "estimated_bars": count}
+            else:
+                results["services"]["mongodb"] = {"healthy": False, "reason": "not_configured"}
+        except Exception as e:
+            results["services"]["mongodb"] = {"healthy": False, "reason": str(e)}
+        
+        # Test Finnhub (UI enrichment)
         try:
             if self.finnhub_client:
                 quote = self.finnhub_client.quote("AAPL")
                 results["services"]["finnhub"] = {
-                    "healthy": quote is not None and quote.get("c", 0) > 0
+                    "healthy": quote is not None and quote.get("c", 0) > 0,
+                    "role": "earnings_calendar_and_profiles_only"
                 }
             else:
                 results["services"]["finnhub"] = {"healthy": False, "reason": "not_configured"}
@@ -581,10 +499,10 @@ class StockDataService:
             ticker = yf.Ticker("AAPL")
             hist = ticker.history(period="1d")
             results["services"]["yfinance"] = {
-                "healthy": len(hist) > 0 or True  # yfinance is always considered available as fallback
+                "healthy": len(hist) > 0 or True,
+                "role": "ui_fundamentals_fallback"
             }
         except Exception:
-            # yfinance might fail sometimes but it's a fallback, so mark as available
             results["services"]["yfinance"] = {"healthy": True, "note": "fallback_available"}
         
         return results

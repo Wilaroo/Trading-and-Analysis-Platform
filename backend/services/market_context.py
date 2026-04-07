@@ -26,8 +26,13 @@ class MarketContextService:
     
     def __init__(self, stock_service=None):
         self.stock_service = stock_service
+        self._db = None
         self._context_cache: Dict[str, Tuple[Dict, datetime]] = {}
         self._cache_ttl = 300  # 5 minutes
+    
+    def set_db(self, db):
+        """Set MongoDB connection for ib_historical_data queries"""
+        self._db = db
     
     def _check_cache(self, symbol: str) -> Optional[Dict]:
         """Check if cached context is still valid"""
@@ -476,42 +481,22 @@ class MarketContextService:
         }
     
     async def _fetch_historical_data(self, symbol: str) -> List[Dict]:
-        """Fetch historical candle data from Finnhub"""
+        """Fetch historical candle data from ib_historical_data (MongoDB).
+        Uses IB data to match training data source (eliminates data skew)."""
         try:
-            import finnhub
-            import os
-            from datetime import datetime, timedelta
-            
-            finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
-            if not finnhub_key or finnhub_key == "demo":
-                return []
-            
-            client = finnhub.Client(api_key=finnhub_key)
-            
-            # Get last 30 days of daily candles
-            end_time = int(datetime.now().timestamp())
-            start_time = int((datetime.now() - timedelta(days=30)).timestamp())
-            
-            loop = asyncio.get_event_loop()
-            candles = await loop.run_in_executor(
-                None,
-                lambda: client.stock_candles(symbol, 'D', start_time, end_time)
-            )
-            
-            if candles and candles.get('s') == 'ok':
-                historical_data = []
-                for i in range(len(candles['c'])):
-                    historical_data.append({
-                        "date": datetime.fromtimestamp(candles['t'][i]).strftime("%Y-%m-%d"),
-                        "open": candles['o'][i],
-                        "high": candles['h'][i],
-                        "low": candles['l'][i],
-                        "close": candles['c'][i],
-                        "volume": candles['v'][i]
-                    })
-                return historical_data
-        except Exception as e:
-            print(f"Finnhub historical data error for {symbol}: {e}")
+            if self._db is not None:
+                pipeline = [
+                    {"$match": {"symbol": symbol.upper(), "bar_size": "1 day"}},
+                    {"$sort": {"date": -1}},
+                    {"$limit": 30},
+                    {"$project": {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}},
+                ]
+                bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+                if bars:
+                    bars.reverse()  # Chronological order
+                    return bars
+        except Exception:
+            pass
         
         return []
     

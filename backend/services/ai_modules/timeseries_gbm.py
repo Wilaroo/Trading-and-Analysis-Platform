@@ -1,29 +1,30 @@
 """
-LightGBM Time-Series Forecasting Model
+XGBoost Time-Series Forecasting Model (GPU-accelerated)
 
 Predicts directional price movement (up/down/flat) using features
 extracted from OHLCV data.
 
 Key Features:
-- Online learning capable (can update with new data)
+- Native CUDA GPU acceleration via XGBoost (tree_method='hist', device='cuda')
 - Probability outputs for confidence scoring
-- Model persistence to MongoDB
+- Model persistence to MongoDB (XGBoost JSON format)
 - Performance tracking and evaluation
+- Best-model protection (only promotes if accuracy improves)
+
+Replaces LightGBM (which required OpenCL, fell back to CPU on DGX Spark).
+XGBoost with native CUDA support unlocks the Blackwell GB10 GPU.
 """
 
 import logging
-import pickle
+import json
 import base64
 import os
+import io
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
-import lightgbm as lgb
-
-# Suppress LightGBM's verbose warnings during multiprocessing worker startup
-lgb.register_logger(logging.getLogger("lightgbm"))
-logging.getLogger("lightgbm").setLevel(logging.ERROR)
+import xgboost as xgb
 
 from .timeseries_features import (
     TimeSeriesFeatureEngineer,
@@ -129,9 +130,10 @@ class ModelMetrics:
 
 class TimeSeriesGBM:
     """
-    LightGBM model for directional price forecasting.
+    XGBoost model for directional price forecasting (GPU-accelerated).
     
     Predicts probability of price moving up/down over the forecast horizon.
+    Uses native CUDA via tree_method='hist' + device='cuda' on Blackwell GB10.
     """
     
     MODEL_COLLECTION = "timeseries_models"
@@ -150,119 +152,54 @@ class TimeSeriesGBM:
     except ImportError:
         pass
 
-    # Auto-detect LightGBM GPU support
-    # LightGBM uses OpenCL (not native CUDA). The pip wheel must be compiled
-    # with USE_GPU=ON, or installed via conda-forge (auto-GPU since v4.4.0).
-    LGBM_GPU_AVAILABLE = False
-    _lgbm_gpu_device_key = "device"  # LightGBM >= 4.x uses "device"
-    _lgbm_gpu_device_value = "gpu"   # "cuda" (native CUDA) or "gpu" (OpenCL)
+    # XGBoost GPU support detection
+    XGB_GPU_AVAILABLE = False
     try:
-        import lightgbm as _lgbm
-        import warnings as _warnings
-        # Try CUDA first (native, faster), then OpenCL fallback.
-        # CUDA mode requires LightGBM compiled with USE_CUDA=ON.
-        # OpenCL mode uses the driver's OpenCL ICD — may silently fail on large datasets.
-        _device_modes = [
-            ("device", "cuda"),       # LightGBM 4.x CUDA (native)
-            ("device_type", "cuda"),   # LightGBM 3.x CUDA
-            ("device", "gpu"),         # LightGBM 4.x OpenCL
-            ("device_type", "gpu"),    # LightGBM 3.x OpenCL
-        ]
-        for _key, _mode in _device_modes:
-            try:
-                _test_params = {
-                    _key: _mode, "verbose": -1,
-                    "min_data_in_leaf": 1, "min_data_in_bin": 1,
-                }
-                if _mode == "gpu":
-                    _test_params["gpu_platform_id"] = 0
-                    _test_params["gpu_device_id"] = 0
-                # Redirect C-level stdout/stderr to suppress OpenCL compiler warnings
-                _devnull_fd = os.open(os.devnull, os.O_WRONLY)
-                _old_stderr = os.dup(2)
-                _old_stdout = os.dup(1)
-                os.dup2(_devnull_fd, 2)
-                os.dup2(_devnull_fd, 1)
-                try:
-                    with _warnings.catch_warnings():
-                        _warnings.simplefilter("ignore")
-                        _test_ds = _lgbm.Dataset(
-                            np.random.rand(100, 5).astype(np.float32),
-                            label=np.random.randint(0, 2, 100).astype(np.float32),
-                            free_raw_data=False,
-                        )
-                        _test_ds.construct()
-                        _b = _lgbm.train(
-                            {**_test_params, "objective": "binary", "num_leaves": 4,
-                             "n_iterations": 2, "num_threads": 1},
-                            _test_ds, num_boost_round=2,
-                        )
-                    LGBM_GPU_AVAILABLE = True
-                    _lgbm_gpu_device_key = _key
-                    _lgbm_gpu_device_value = _mode
-                    del _b, _test_ds
-                finally:
-                    os.dup2(_old_stderr, 2)
-                    os.dup2(_old_stdout, 1)
-                    os.close(_devnull_fd)
-                    os.close(_old_stderr)
-                    os.close(_old_stdout)
-                logger.info(f"LightGBM GPU support detected (param: {_key}={_mode})")
-                break
-            except Exception as _gpu_err:
-                try:
-                    os.dup2(_old_stderr, 2)
-                    os.dup2(_old_stdout, 1)
-                    os.close(_devnull_fd)
-                    os.close(_old_stderr)
-                    os.close(_old_stdout)
-                except Exception:
-                    pass
-                logger.debug(f"LightGBM GPU test failed ({_key}={_mode}): {_gpu_err}")
-                continue
-    except Exception as _outer_err:
-        logger.warning(f"LightGBM GPU detection error: {_outer_err}")
-        pass
+        _test_X = np.random.rand(100, 5).astype(np.float32)
+        _test_y = np.random.randint(0, 2, 100).astype(np.float32)
+        _test_dm = xgb.DMatrix(_test_X, label=_test_y)
+        _test_params = {
+            'tree_method': 'hist', 'device': 'cuda',
+            'objective': 'binary:logistic', 'max_depth': 3,
+            'verbosity': 0,
+        }
+        _test_model = xgb.train(_test_params, _test_dm, num_boost_round=2)
+        XGB_GPU_AVAILABLE = True
+        del _test_model, _test_dm, _test_X, _test_y
+        logger.info("XGBoost CUDA GPU acceleration AVAILABLE")
+        import multiprocessing as _mp
+        if _mp.current_process().name == "MainProcess":
+            print("[GPU] XGBoost CUDA acceleration ENABLED")
+    except Exception as _xgb_err:
+        logger.info(f"XGBoost GPU not available ({_xgb_err}), will use CPU")
+        import multiprocessing as _mp
+        if _mp.current_process().name == "MainProcess":
+            print("[GPU] XGBoost GPU NOT available — training will use CPU")
 
-    # Default model parameters - optimized for imbalanced classification
+    # Default model parameters — optimized for XGBoost with GPU
     DEFAULT_PARAMS = {
-        "objective": "binary",
-        "metric": "auc",
-        "boosting_type": "gbdt",
-        "num_leaves": 63,
-        "learning_rate": 0.03,
-        "feature_fraction": 0.7,
-        "bagging_fraction": 0.7,
-        "bagging_freq": 5,
-        "min_data_in_leaf": 50,
+        "objective": "binary:logistic",
+        "eval_metric": "auc",
+        "tree_method": "hist",
         "max_depth": 8,
-        "is_unbalance": True,
-        "verbose": -1,
-        "n_jobs": -1,  # Use all CPU cores — Focus Mode pauses everything else during training
+        "learning_rate": 0.03,
+        "colsample_bytree": 0.7,
+        "subsample": 0.7,
+        "min_child_weight": 50,
+        "max_bin": 256,
+        "verbosity": 0,
+        "nthread": -1,
         "seed": 42,
     }
 
-    # GPU acceleration (auto-enabled if LightGBM was compiled with GPU support)
-    if LGBM_GPU_AVAILABLE:
-        DEFAULT_PARAMS[_lgbm_gpu_device_key] = _lgbm_gpu_device_value
-        if _lgbm_gpu_device_value == "gpu":
-            # OpenCL-specific params
-            DEFAULT_PARAMS["gpu_platform_id"] = 0
-            DEFAULT_PARAMS["gpu_device_id"] = 0
-            DEFAULT_PARAMS["gpu_use_dp"] = False  # Single precision — 2x faster on consumer GPUs
-        DEFAULT_PARAMS["max_bin"] = 63  # Fewer bins = better GPU throughput (default 255)
-        logger.info(f"LightGBM GPU acceleration ENABLED (mode={_lgbm_gpu_device_value}, max_bin=63)")
-        import multiprocessing as _mp
-        if _mp.current_process().name == "MainProcess":
-            print(f"[GPU] LightGBM {_lgbm_gpu_device_value.upper()} acceleration ENABLED (key: {_lgbm_gpu_device_key}={_lgbm_gpu_device_value}, max_bin=63)")
+    # Enable GPU if available
+    if XGB_GPU_AVAILABLE:
+        DEFAULT_PARAMS["device"] = "cuda"
+        logger.info("XGBoost GPU acceleration ENABLED (device=cuda, max_bin=256)")
     else:
-        logger.warning("LightGBM GPU not available - using CPU (run gpu_setup_check.py for install instructions)")
-        import multiprocessing as _mp
-        if _mp.current_process().name == "MainProcess":
-            print("[GPU] LightGBM GPU NOT available — training will use CPU only")
+        DEFAULT_PARAMS["device"] = "cpu"
     
     # Prediction threshold for "up" classification
-    # Higher threshold = more precise but lower recall
     UP_THRESHOLD = 0.52
     
     def __init__(
@@ -275,7 +212,7 @@ class TimeSeriesGBM:
         self.forecast_horizon = forecast_horizon
         self.params = params or self.DEFAULT_PARAMS.copy()
         
-        self._model: Optional[lgb.Booster] = None
+        self._model: Optional[xgb.Booster] = None
         self._feature_engineer = get_feature_engineer()
         self._feature_names = self._feature_engineer.get_feature_names()
         
@@ -285,6 +222,7 @@ class TimeSeriesGBM:
         # Metrics
         self._metrics = ModelMetrics()
         self._version = "v0.0.0"
+        self._num_classes = 2
         
     def set_db(self, db):
         """Set database connection"""
@@ -300,6 +238,8 @@ class TimeSeriesGBM:
         1. Try exact model name match
         2. Fallback to "direction_predictor_daily" (most reliable model)
         3. Fallback to any available trained model
+        
+        Supports both XGBoost JSON (new) and legacy LightGBM pickle formats.
         """
         if self._db is None:
             return
@@ -323,19 +263,37 @@ class TimeSeriesGBM:
             
             if doc and "model_data" in doc:
                 model_bytes = base64.b64decode(doc["model_data"])
-                self._model = pickle.loads(model_bytes)
+                model_format = doc.get("model_format", "pickle")  # Default to pickle for legacy
+                
+                if model_format == "xgboost_json":
+                    # New XGBoost JSON format
+                    self._model = xgb.Booster()
+                    self._model.load_model(bytearray(model_bytes))
+                else:
+                    # Legacy LightGBM pickle format — try to load via pickle
+                    # This allows transition period where old models still work for inference
+                    try:
+                        import pickle
+                        legacy_model = pickle.loads(model_bytes)
+                        # LightGBM Booster loaded — can't use directly with XGBoost
+                        # Log warning and skip (will retrain)
+                        logger.warning(
+                            f"Found legacy LightGBM model '{doc.get('name', 'unknown')}'. "
+                            f"Needs retraining with XGBoost. Skipping load."
+                        )
+                        self._model = None
+                        return
+                    except Exception:
+                        logger.warning("Could not load legacy model format")
+                        return
+                
                 loaded_name = doc.get("name", "unknown")
                 loaded_version = doc.get("version", "v0.0.0")
                 self._metrics = ModelMetrics(**doc.get("metrics", {}))
                 logger.info(f"Loaded model '{loaded_name}' version {loaded_version} (requested: {self.model_name})")
-                # Do NOT overwrite self.model_name — the fallback model provides initial weights,
-                # but the new model should save under its own name (e.g. direction_predictor_1_min)
-                # so model protection compares against the correct previous version.
                 if loaded_name == self.model_name:
-                    # Exact match — inherit version for proper version bumping
                     self._version = loaded_version
                 else:
-                    # Fallback model — reset version so new model starts at v0.1.0
                     self._version = "v0.0.0"
                     logger.info(f"Using fallback model '{loaded_name}' for initial weights; new model '{self.model_name}' will start at v0.1.0")
             else:
@@ -345,6 +303,7 @@ class TimeSeriesGBM:
             
     def _save_model(self):
         """Save model to database with best-model protection.
+        Uses XGBoost native JSON serialization (not pickle).
         
         Logic:
         1. Always archive the new model (for learning/reference)
@@ -355,7 +314,10 @@ class TimeSeriesGBM:
             return False
             
         try:
-            model_bytes = pickle.dumps(self._model)
+            # Serialize XGBoost model to JSON bytes
+            buffer = io.BytesIO()
+            self._model.save_model(buffer)
+            model_bytes = buffer.getvalue()
             model_data = base64.b64encode(model_bytes).decode("utf-8")
             new_accuracy = self._metrics.accuracy if self._metrics else 0
             
@@ -363,9 +325,11 @@ class TimeSeriesGBM:
                 "name": self.model_name,
                 "model_id": self.model_name,
                 "model_data": model_data,
+                "model_format": "xgboost_json",  # Marks this as XGBoost format
+                "engine": "xgboost",
                 "version": self._version,
                 "metrics": self._metrics.to_dict(),
-                "params": self.params,
+                "params": {k: v for k, v in self.params.items() if not callable(v)},
                 "feature_names": self._feature_names,
                 "forecast_horizon": self.forecast_horizon,
                 "saved_at": datetime.now(timezone.utc).isoformat()
@@ -530,24 +494,22 @@ class TimeSeriesGBM:
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = y[:split_idx], y[split_idx:]
         
-        # Create datasets
-        train_data = lgb.Dataset(X_train, label=y_train, feature_name=self._feature_names)
-        val_data = lgb.Dataset(X_val, label=y_val, feature_name=self._feature_names, reference=train_data)
+        # Create XGBoost DMatrix datasets
+        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=self._feature_names)
+        dval = xgb.DMatrix(X_val, label=y_val, feature_names=self._feature_names)
         
-        # Train model with more rounds
-        callbacks = [lgb.early_stopping(early_stopping_rounds)]
-        
-        self._model = lgb.train(
+        # Train model with early stopping
+        self._model = xgb.train(
             self.params,
-            train_data,
+            dtrain,
             num_boost_round=num_boost_round * 2,  # More rounds for better learning
-            valid_sets=[train_data, val_data],
-            valid_names=["train", "val"],
-            callbacks=callbacks
+            evals=[(dtrain, "train"), (dval, "val")],
+            early_stopping_rounds=early_stopping_rounds,
+            verbose_eval=False
         )
         
         # Evaluate with dynamic threshold
-        y_pred_proba = self._model.predict(X_val)
+        y_pred_proba = self._model.predict(dval)
         
         # Use class-specific threshold for better recall
         y_pred = (y_pred_proba > self.UP_THRESHOLD).astype(int)
@@ -565,9 +527,10 @@ class TimeSeriesGBM:
         f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
         
         # Feature importance
-        importance = self._model.feature_importance(importance_type="gain")
-        top_indices = np.argsort(importance)[-10:][::-1]
-        top_features = [self._feature_names[i] for i in top_indices]
+        importance_dict = self._model.get_score(importance_type="gain")
+        # Sort by gain and get top 10
+        sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_features = [f[0] for f in sorted_features]
         
         # Update metrics
         self._metrics = ModelMetrics(
@@ -697,20 +660,20 @@ class TimeSeriesGBM:
         y_train, y_val = y[:split_idx], y[split_idx:]
 
         feature_names = feature_engineer.get_feature_names()
-        train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names, free_raw_data=False)
-        val_data = lgb.Dataset(X_val, label=y_val, reference=train_data, free_raw_data=False)
+        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+        dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
-        callbacks = [lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(period=0)]
-        self._model = lgb.train(
+        self._model = xgb.train(
             {**self.DEFAULT_PARAMS, **self.params},
-            train_data,
+            dtrain,
             num_boost_round=num_boost_round,
-            valid_sets=[val_data],
-            callbacks=callbacks,
+            evals=[(dval, "val")],
+            early_stopping_rounds=early_stopping_rounds,
+            verbose_eval=False
         )
 
         # Evaluate
-        y_pred = self._model.predict(X_val)
+        y_pred = self._model.predict(dval)
         y_pred_binary = (y_pred > 0.5).astype(int)
         accuracy = np.mean(y_pred_binary == y_val)
 
@@ -789,33 +752,29 @@ class TimeSeriesGBM:
         # Configure params for multiclass if needed
         train_params = dict(self.params)
         if num_classes >= 3:
-            train_params["objective"] = "multiclass"
+            train_params["objective"] = "multi:softprob"
             train_params["num_class"] = num_classes
-            train_params["metric"] = "multi_logloss"
-            train_params.pop("is_unbalance", None)  # Not supported for multiclass
-            train_params.pop("scale_pos_weight", None)  # Not supported for multiclass
+            train_params["eval_metric"] = "mlogloss"
 
         # Split train/validation (time-ordered)
         split_idx = int(len(X) * (1 - validation_split))
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = y[:split_idx], y[split_idx:]
 
-        train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
-        val_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+        dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
-        callbacks = [lgb.early_stopping(early_stopping_rounds)]
-
-        self._model = lgb.train(
+        self._model = xgb.train(
             train_params,
-            train_data,
+            dtrain,
             num_boost_round=num_boost_round * 2,
-            valid_sets=[train_data, val_data],
-            valid_names=["train", "val"],
-            callbacks=callbacks
+            evals=[(dtrain, "train"), (dval, "val")],
+            early_stopping_rounds=early_stopping_rounds,
+            verbose_eval=False
         )
 
         # Evaluate
-        y_pred_raw = self._model.predict(X_val)
+        y_pred_raw = self._model.predict(dval)
 
         if num_classes >= 3:
             # Multiclass: y_pred_raw shape = (n_samples, num_classes)
@@ -862,9 +821,9 @@ class TimeSeriesGBM:
             recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
             f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
 
-        importance = self._model.feature_importance(importance_type="gain")
-        top_indices = np.argsort(importance)[-10:][::-1]
-        top_features = [feature_names[i] for i in top_indices if i < len(feature_names)]
+        importance_dict = self._model.get_score(importance_type="gain")
+        sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_features = [f[0] for f in sorted_features if f[0] in feature_names]
 
         self._metrics = ModelMetrics(
             accuracy=float(accuracy),
@@ -924,14 +883,16 @@ class TimeSeriesGBM:
         if feature_set is None:
             return None
             
-        # Convert to vector
+        # Convert to XGBoost DMatrix for prediction
         feature_vector = np.array([[
             feature_set.features.get(f, 0.0) 
             for f in self._feature_names
-        ]])
+        ]], dtype=np.float32)
         
-        # Predict
-        prob_up = self._model.predict(feature_vector)[0]
+        dmatrix = xgb.DMatrix(feature_vector, feature_names=self._feature_names)
+        
+        # Predict (XGBoost binary:logistic outputs probability directly)
+        prob_up = float(self._model.predict(dmatrix)[0])
         prob_down = 1 - prob_up
         
         # Determine direction using class-specific thresholds

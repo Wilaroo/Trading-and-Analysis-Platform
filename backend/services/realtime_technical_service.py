@@ -1,12 +1,15 @@
 """
 Real-Time Technical Analysis Service
-Calculates live technical indicators from Alpaca bar data:
+Calculates live technical indicators from IB data (MongoDB + IB Pusher):
 - VWAP, EMA (9, 20, 50, 200), RSI, RVOL, ATR
 - Support/Resistance levels
 - Gap percentage, price momentum
 - Pattern detection
 
-Provides the actual data needed for accurate alert detection.
+Data Sources (100% IB — zero external API dependencies):
+- Intraday bars: ib_historical_data collection in MongoDB
+- Daily bars: ib_historical_data collection in MongoDB
+- Real-time quotes: IB Pusher (via routers/ib.py)
 """
 import logging
 from datetime import datetime, timezone, timedelta
@@ -109,16 +112,15 @@ class TechnicalSnapshot:
 class RealTimeTechnicalService:
     """
     Service for calculating real-time technical indicators
-    using actual market data. 
+    using 100% IB-sourced data to eliminate train/serve data skew.
     
-    Data source priority:
-    - Current quotes: IB pushed data (primary) -> Alpaca (fallback)
-    - Daily bars (for RVOL, ATR): ib_historical_data (MongoDB) -> Alpaca (fallback)
-    - Intraday bars (for VWAP, EMA): Alpaca (real-time needed)
+    Data sources (all IB):
+    - Current quotes: IB Pusher (real-time via routers/ib.py)
+    - Daily bars: ib_historical_data in MongoDB
+    - Intraday bars: ib_historical_data in MongoDB
     """
     
     def __init__(self):
-        self._alpaca_service = None
         self._db = None
         self._cache: Dict[str, TechnicalSnapshot] = {}
         self._cache_ttl = 120  # 2 minute cache for technical data
@@ -128,13 +130,55 @@ class RealTimeTechnicalService:
     def set_db(self, db):
         """Set MongoDB connection for historical data access"""
         self._db = db
-        
-    @property
-    def alpaca(self):
-        if self._alpaca_service is None:
-            from services.alpaca_service import get_alpaca_service
-            self._alpaca_service = get_alpaca_service()
-        return self._alpaca_service
+    
+    def _get_intraday_bars_from_db(self, symbol: str, bar_size: str = "5 mins", limit: int = 78) -> Optional[List[Dict]]:
+        """Get recent intraday bars from ib_historical_data (same source as training).
+        Returns bars in chronological order (oldest first).
+        NOTE: Sync function — caller should use asyncio.to_thread() if needed."""
+        if self._db is None:
+            return None
+        try:
+            pipeline = [
+                {"$match": {"symbol": symbol.upper(), "bar_size": bar_size}},
+                {"$sort": {"date": -1}},
+                {"$limit": limit},
+                {"$project": {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}},
+            ]
+            bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+            if bars and len(bars) >= 5:
+                bars.reverse()  # Chronological order (oldest first)
+                # Rename 'date' to 'timestamp' for compatibility with indicator calculations
+                for bar in bars:
+                    bar['timestamp'] = bar.pop('date', None)
+                return bars
+        except Exception as e:
+            logger.debug(f"Error fetching intraday bars for {symbol}: {e}")
+        return None
+
+    def _check_staleness(self, bars: Optional[List[Dict]], max_age_hours: int = 24) -> bool:
+        """Check if bars are fresh enough for trading decisions.
+        Returns True if bars are STALE (too old), False if fresh."""
+        if not bars:
+            return True  # No data = stale
+        try:
+            latest_bar = bars[-1]  # Last bar (most recent)
+            latest_ts = latest_bar.get('timestamp') or latest_bar.get('date')
+            if latest_ts is None:
+                return True
+            if isinstance(latest_ts, str):
+                # Handle both ISO format and date-only format
+                if 'T' in latest_ts:
+                    latest_dt = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
+                else:
+                    latest_dt = datetime.strptime(latest_ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            elif isinstance(latest_ts, datetime):
+                latest_dt = latest_ts if latest_ts.tzinfo else latest_ts.replace(tzinfo=timezone.utc)
+            else:
+                return True
+            age = (datetime.now(timezone.utc) - latest_dt).total_seconds() / 3600
+            return age > max_age_hours
+        except Exception:
+            return True  # Error parsing = treat as stale
     
     def _get_daily_bars_from_db(self, symbol: str, limit: int = 50) -> Optional[List[Dict]]:
         """Get daily bars from ib_historical_data (fast, no API call).
@@ -180,39 +224,37 @@ class RealTimeTechnicalService:
         return None
     
     async def _get_spy_change(self) -> float:
-        """Get SPY's daily % change (cached for 2 min). Prefers IB data."""
+        """Get SPY's daily % change (cached for 2 min). Uses 100% IB data."""
         now = datetime.now(timezone.utc)
         if self._spy_cache_time and (now - self._spy_cache_time).total_seconds() < 120:
             return self._spy_change_pct
         try:
-            # Try IB first for current price
-            ib_quote = self._get_ib_quote("SPY")
-            
-            # Get historical bars from Alpaca for prev_close
-            bars = await self.alpaca.get_bars("SPY", "1Day", 2)
-            
-            if bars and len(bars) >= 2:
-                prev_close = bars[-2]["close"]
+            # Get SPY daily bars from MongoDB (IB data)
+            daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, "SPY", 3)
+            if daily_bars and len(daily_bars) >= 2:
+                prev_close = daily_bars[-2]["close"]
                 
-                # Use IB price if available, else Alpaca
+                # Use IB Pusher for current price if available
+                ib_quote = self._get_ib_quote("SPY")
                 if ib_quote and ib_quote.get("price", 0) > 0:
                     price = ib_quote["price"]
                 else:
-                    quote = await self.alpaca.get_quote("SPY")
-                    price = quote.get("price", bars[-1]["close"]) if quote else bars[-1]["close"]
+                    # Fallback to latest bar close
+                    price = daily_bars[-1]["close"]
                 
                 self._spy_change_pct = ((price - prev_close) / prev_close) * 100
                 self._spy_cache_time = now
-        except:
+        except Exception:
             pass
         return self._spy_change_pct
     
     async def get_technical_snapshot(self, symbol: str, force_refresh: bool = False) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
-        Uses IB pushed data for real-time quotes.
-        Uses ib_historical_data (MongoDB) for daily bars (RVOL, ATR).
-        Falls back to Alpaca when data not available.
+        Uses 100% IB data to match training data (eliminates train/serve skew):
+        - Quotes: IB Pusher (real-time)
+        - Intraday bars: ib_historical_data (MongoDB, 5-min)
+        - Daily bars: ib_historical_data (MongoDB, 1-day)
         """
         symbol = symbol.upper()
         
@@ -229,23 +271,36 @@ class RealTimeTechnicalService:
                 return cached
         
         try:
-            # Get intraday bars (5-min) for VWAP, EMA, intraday levels (from Alpaca - real-time needed)
-            intraday_bars = await self.alpaca.get_bars(symbol, "5Min", 78)  # ~6.5 hours of data
+            # Get intraday bars (5-min) from MongoDB — same source as training
+            intraday_bars = await asyncio.to_thread(self._get_intraday_bars_from_db, symbol, "5 mins", 78)
             
-            # Get daily bars for ATR, average volume, daily levels
-            # Priority: ib_historical_data (MongoDB) -> Alpaca API
-            # Wrap sync pymongo call in to_thread to avoid blocking event loop
+            # Staleness check: skip symbol if intraday data is too old (>24h)
+            if self._check_staleness(intraday_bars, max_age_hours=24):
+                logger.debug(f"Stale or missing intraday data for {symbol}, skipping")
+                intraday_bars = None  # Will use fallback estimates
+            
+            # Get daily bars for ATR, average volume, daily levels from MongoDB
             daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, symbol, 50)
-            if not daily_bars or len(daily_bars) < 10:
-                # Fallback to Alpaca
-                daily_bars = await self.alpaca.get_bars(symbol, "1Day", 50)
             
-            # Get current quote - prefer IB pushed data, fallback to Alpaca
+            # Get current quote - IB Pusher only (no Alpaca fallback)
             ib_quote = self._get_ib_quote(symbol)
             if ib_quote and ib_quote.get("price", 0) > 0:
                 quote = ib_quote
             else:
-                quote = await self.alpaca.get_quote(symbol)
+                # Fallback: use latest bar close from MongoDB as estimated price
+                if daily_bars and len(daily_bars) > 0:
+                    last_bar = daily_bars[-1]
+                    quote = {
+                        "symbol": symbol,
+                        "price": last_bar["close"],
+                        "bid": last_bar["close"],
+                        "ask": last_bar["close"],
+                        "volume": last_bar.get("volume", 0),
+                        "source": "mongodb_bar"
+                    }
+                else:
+                    logger.debug(f"No IB quote or MongoDB data for {symbol}")
+                    return None
             
             if not quote or not daily_bars:
                 logger.warning(f"Insufficient data for {symbol}")

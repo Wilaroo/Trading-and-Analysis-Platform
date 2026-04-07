@@ -13,8 +13,8 @@ Features:
 - Direction bias (Long/Short/Both) per setup
 
 Data Source Hierarchy:
-- QUOTES: IB pusher (primary) -> Alpaca (fallback)
-- HISTORICAL BARS: Alpaca (IB pusher doesn't provide historical)
+- QUOTES: IB pusher (primary) -> MongoDB latest bar (fallback)
+- HISTORICAL BARS: ib_historical_data in MongoDB (same source as training)
 - LEVEL 2: IB pusher (when available)
 """
 
@@ -736,7 +736,7 @@ class EnhancedBackgroundScanner:
         
         # Services
         self._technical_service = None
-        self._alpaca_service = None
+        self._alpaca_service = None  # DEPRECATED: kept for interface compat, never used
         
         # DB collections - always initialize to None first
         self.alerts_collection = None
@@ -1570,10 +1570,8 @@ class EnhancedBackgroundScanner:
     
     @property
     def alpaca_service(self):
-        if self._alpaca_service is None:
-            from services.alpaca_service import get_alpaca_service
-            self._alpaca_service = get_alpaca_service()
-        return self._alpaca_service
+        """DEPRECATED: Alpaca removed from critical path. Returns None."""
+        return None
     
     # ==================== IB DATA HELPERS ====================
     
@@ -1618,20 +1616,39 @@ class EnhancedBackgroundScanner:
     
     async def _get_quote_with_ib_priority(self, symbol: str) -> Optional[Dict]:
         """
-        Get quote with IB pusher as primary source, Alpaca as fallback.
-        This ensures scanner uses live IB data when available.
+        Get quote with IB pusher as primary source, MongoDB latest bar as fallback.
+        100% IB data — no Alpaca fallback (eliminates train/serve data skew).
         """
         # Try IB first (fast, non-async)
         ib_quote = self._get_ib_quote(symbol)
         if ib_quote and ib_quote.get("price", 0) > 0:
             return ib_quote
         
-        # Fallback to Alpaca
+        # Fallback: latest bar close from ib_historical_data
         try:
-            return await self.alpaca_service.get_quote(symbol)
+            if self.db is not None:
+                bar = self.db["ib_historical_data"].find_one(
+                    {"symbol": symbol.upper(), "bar_size": {"$in": ["5 mins", "1 min", "1 day"]}},
+                    {"_id": 0, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1, "date": 1},
+                    sort=[("date", -1)]
+                )
+                if bar and bar.get("close", 0) > 0:
+                    return {
+                        "symbol": symbol.upper(),
+                        "price": bar["close"],
+                        "bid": bar["close"],
+                        "ask": bar["close"],
+                        "volume": bar.get("volume", 0),
+                        "high": bar.get("high", bar["close"]),
+                        "low": bar.get("low", bar["close"]),
+                        "open": bar.get("open", bar["close"]),
+                        "close": bar["close"],
+                        "source": "mongodb_bar"
+                    }
         except Exception as e:
-            logger.debug(f"Alpaca quote failed for {symbol}: {e}")
-            return None
+            logger.debug(f"MongoDB bar fallback failed for {symbol}: {e}")
+        
+        return None
     
     # ==================== LIFECYCLE ====================
     
@@ -2068,16 +2085,21 @@ class EnhancedBackgroundScanner:
     
     async def _fetch_single_adv(self, symbol: str) -> int:
         """
-        Fetch ADV (Average Daily Volume) for a single symbol.
-        Note: Historical bar data still comes from Alpaca as IB pusher
-        primarily provides real-time quotes, not historical bars.
+        Fetch ADV (Average Daily Volume) for a single symbol from MongoDB.
+        Uses ib_historical_data (same source as training) instead of Alpaca.
         """
         try:
-            # Use Alpaca for historical bars (IB pusher doesn't push historical)
-            bars = await self.alpaca_service.get_bars(symbol, timeframe="1Day", limit=20)
-            if bars:
-                volumes = [bar.get("volume", 0) for bar in bars]
-                return int(sum(volumes) / len(volumes)) if volumes else 0
+            if self.db is not None:
+                pipeline = [
+                    {"$match": {"symbol": symbol.upper(), "bar_size": "1 day"}},
+                    {"$sort": {"date": -1}},
+                    {"$limit": 20},
+                    {"$project": {"_id": 0, "volume": 1}},
+                ]
+                bars = list(self.db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+                if bars:
+                    volumes = [bar.get("volume", 0) for bar in bars if bar.get("volume", 0) > 0]
+                    return int(sum(volumes) / len(volumes)) if volumes else 0
             return 0
         except Exception as e:
             logger.debug(f"ADV fetch failed for {symbol}: {e}")

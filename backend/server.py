@@ -222,7 +222,9 @@ print("End-of-Day auto-generation scheduler started (4:30 PM ET weekdays)")
 
 # Initialize Alpaca service early and wire it to stock_service
 alpaca_service = init_alpaca_service()
-stock_service.set_alpaca_service(alpaca_service)
+stock_service.set_alpaca_service(alpaca_service)  # DEPRECATED: Alpaca removed from trading path
+stock_service.set_db(db)  # Wire MongoDB for IB data queries
+market_context_service.set_db(db)  # Wire MongoDB for IB historical data
 
 # Seed strategies if not already done
 if not strategy_service.is_seeded():

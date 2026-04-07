@@ -50,7 +50,35 @@ REMOVED:
 
 ## What's Been Implemented
 
-### Session: April 8, 2026 (Current — Planning Session)
+### Session: April 8, 2026 (Fork 1 — Phase 1 + Phase 2 Implementation)
+
+#### Phase 1: Data Foundation — 100% IB Pipeline (COMPLETE)
+- **1a.** `realtime_technical_service.py`: Replaced Alpaca intraday bars with MongoDB `ib_historical_data` queries. Added `_get_intraday_bars_from_db()` method.
+- **1b.** `enhanced_scanner.py`: Replaced Alpaca quote fallback with MongoDB latest bar in `_get_quote_with_ib_priority()`. Replaced Alpaca ADV fetch with MongoDB aggregate in `_fetch_single_adv()`.
+- **1c.** `stock_data.py`: Removed Alpaca, Finnhub, and TwelveData from quote chain. Added `_fetch_mongodb_bar_quote()` as fallback between IB Pusher and Yahoo.
+- **1d.** `stock_data.py`: Removed all TwelveData methods and references.
+- **1e.** `hybrid_data_service.py`: Removed `_fetch_from_alpaca()` method and Alpaca rate limiter. Fixed `_get_from_cache()` to use correct IB field names (`bar_size`, `date`).
+- **1f.** `market_context.py`: Replaced Finnhub candles with MongoDB `ib_historical_data` query. Added `set_db()` method.
+- **1g.** Earnings calendar (Finnhub + IB cross-verification) preserved.
+- **1h.** Added staleness check: `_check_staleness()` skips symbols with bars >24h old.
+- **Wiring:** `server.py` updated to pass `db` reference to `stock_service` and `market_context_service`.
+
+#### Phase 2: XGBoost GPU Swap (COMPLETE)
+- **2a.** `timeseries_gbm.py`: Replaced `import lightgbm as lgb` with `import xgboost as xgb`.
+- **2b.** GPU detection: Auto-detects CUDA GPU via XGBoost native test (no OpenCL needed).
+- **2c.** `DEFAULT_PARAMS`: Mapped to XGBoost format (`binary:logistic`, `tree_method='hist'`, `device='cuda'`).
+- **2d.** `train()`, `train_vectorized()`, `train_from_features()`: All use `xgb.DMatrix` + `xgb.train()`.
+- **2e.** `predict()`: Uses `xgb.DMatrix` for inference.
+- **2f.** `_save_model()`: Uses XGBoost native JSON serialization (not pickle).
+- **2g.** `_load_model()`: Supports both new XGBoost JSON and legacy LightGBM pickle (graceful migration).
+- **2h.** `requirements.txt`: Updated with `xgboost==3.2.0`.
+
+#### Testing (13/13 pass)
+- Alpaca removal verified (zero references in critical paths)
+- Staleness check tested (fresh, stale, no data)
+- XGBoost params, training, serialization format, and prediction contract validated
+
+### Session: April 8, 2026 (Previous — Planning Session)
 - Complete architecture audit of data sources, scanning pipeline, and kill chain
 - Identified train/serve data skew (models train on IB, scanner uses Alpaca)
 - Identified 27-point kill chain causing potential over-filtering
@@ -78,22 +106,22 @@ REMOVED:
 
 ## Master Build Plan (7.5 Phases)
 
-### Phase 1: Data Foundation — 100% IB Pipeline [NOT STARTED]
-- 1a. Remove Alpaca from live scanning (replace intraday bars with MongoDB queries)
-- 1b. Remove Alpaca quote fallback (IB Pusher only, latest MongoDB bar as fallback)
-- 1c. Remove Finnhub from price/bar data paths (market_context.py, stock_data.py)
-- 1d. Remove TwelveData references (dead code cleanup)
-- 1e. Clean up hybrid_data_service.py (MongoDB-only)
-- 1f. Keep yfinance for UI fundamentals (cached, non-blocking)
-- 1g. Earnings calendar: Keep Finnhub + add IB per-symbol earnings as cross-check
-- 1h. Add staleness check (skip symbols with bars >24h old on intraday)
+### Phase 1: Data Foundation — 100% IB Pipeline [COMPLETE ✅]
+- 1a. Remove Alpaca from live scanning (replace intraday bars with MongoDB queries) ✅
+- 1b. Remove Alpaca quote fallback (IB Pusher only, latest MongoDB bar as fallback) ✅
+- 1c. Remove Finnhub from price/bar data paths (market_context.py, stock_data.py) ✅
+- 1d. Remove TwelveData references (dead code cleanup) ✅
+- 1e. Clean up hybrid_data_service.py (MongoDB-only) ✅
+- 1f. Keep yfinance for UI fundamentals (cached, non-blocking) ✅
+- 1g. Earnings calendar: Keep Finnhub + add IB per-symbol earnings as cross-check ✅
+- 1h. Add staleness check (skip symbols with bars >24h old on intraday) ✅
 
-### Phase 2: Training Engine — LightGBM -> XGBoost GPU [NOT STARTED]
-- 2a. Swap LightGBM to XGBoost in timeseries_gbm.py
-- 2b. Set tree_method='hist', device='cuda' for Blackwell GPU
-- 2c. Preserve pipeline contract (same input features, output format)
-- 2d. Update model serialization (XGBoost JSON format)
-- 2e. Update requirements.txt
+### Phase 2: Training Engine — LightGBM -> XGBoost GPU [COMPLETE ✅]
+- 2a. Swap LightGBM to XGBoost in timeseries_gbm.py ✅
+- 2b. Set tree_method='hist', device='cuda' for Blackwell GPU ✅
+- 2c. Preserve pipeline contract (same input features, output format) ✅
+- 2d. Update model serialization (XGBoost JSON format) ✅
+- 2e. Update requirements.txt ✅
 
 ### Phase 3: Training Optimizations [NOT STARTED]
 - 3a. Feature caching across pipeline phases
