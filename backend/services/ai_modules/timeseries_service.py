@@ -773,9 +773,13 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Model created: {model_name}, forecast_horizon={forecast_horizon}")
             sys.stdout.flush()
             
-            # Step 3: Process symbols in batches, accumulating features
-            all_features = []
-            all_targets = []
+            # Step 3: Process symbols in batches, accumulating features as numpy chunks
+            # MEMORY OPTIMIZATION: Store features as numpy float32 arrays (4 bytes/float)
+            # instead of Python lists of float objects (28 bytes/float = 9x overhead).
+            # For 43M samples x 46 features: ~8 GB (numpy) vs ~74 GB (Python lists).
+            feature_chunks = []   # List of numpy arrays, vstacked once at the end
+            target_chunks = []    # List of numpy arrays
+            total_samples = 0
             symbols_processed = 0
             symbols_with_data = 0
             total_bars_processed = 0
@@ -793,8 +797,8 @@ class TimeSeriesAIService:
                 batch_end = min(batch_start + symbol_batch_size, total_symbols)
                 batch_symbols = all_symbols[batch_start:batch_end]
                 
-                batch_features = []
-                batch_targets = []
+                batch_feat_parts = []   # numpy arrays for this batch
+                batch_tgt_parts = []
                 
                 logger.info(f"[FULL UNIVERSE] Processing batch {batch_idx + 1}/{num_batches} ({batch_start + 1}-{batch_end} of {total_symbols})")
                 sys.stdout.flush()
@@ -804,8 +808,8 @@ class TimeSeriesAIService:
                         # Check feature cache first (skip expensive extraction if cached)
                         cached = model._load_features_from_cache(symbol, bar_size)
                         if cached and cached.get("features") and cached.get("targets"):
-                            batch_features.extend(cached["features"])
-                            batch_targets.extend(cached["targets"])
+                            batch_feat_parts.append(np.array(cached["features"], dtype=np.float32))
+                            batch_tgt_parts.append(np.array(cached["targets"], dtype=np.float32))
                             symbols_with_data += 1
                             continue
                         
@@ -826,28 +830,32 @@ class TimeSeriesAIService:
                         bulk_features = feature_engineer.extract_features_bulk(bars)
                         
                         if bulk_features is not None and len(bulk_features) > forecast_horizon:
-                            import numpy as np
                             closes = np.array([b.get("close", 0) for b in bars], dtype=np.float32)
                             lb = feature_engineer.lookback  # 50
                             n_usable = min(len(bulk_features), len(closes) - lb - forecast_horizon + 1)
                             
                             if n_usable > 0:
-                                symbol_features = bulk_features[:n_usable].tolist()
-                                symbol_targets = []
-                                for i in range(n_usable):
-                                    current_idx = lb - 1 + i
-                                    future_idx = current_idx + forecast_horizon
-                                    if future_idx < len(closes) and closes[current_idx] > 0:
-                                        target_return = (closes[future_idx] - closes[current_idx]) / closes[current_idx]
-                                        symbol_targets.append(1 if target_return > 0 else 0)
-                                    else:
-                                        symbol_targets.append(0)
+                                # Keep as numpy — no .tolist() (avoids 9x memory overhead)
+                                symbol_features_np = bulk_features[:n_usable]
                                 
-                                batch_features.extend(symbol_features)
-                                batch_targets.extend(symbol_targets)
+                                # Vectorized target computation (replaces per-element loop)
+                                current_indices = np.arange(n_usable) + (lb - 1)
+                                future_indices = current_indices + forecast_horizon
+                                valid_mask = (future_indices < len(closes)) & (closes[current_indices] > 0)
+                                symbol_targets_np = np.zeros(n_usable, dtype=np.float32)
+                                if valid_mask.any():
+                                    returns = (closes[future_indices[valid_mask]] - closes[current_indices[valid_mask]]) / closes[current_indices[valid_mask]]
+                                    symbol_targets_np[valid_mask] = (returns > 0).astype(np.float32)
                                 
-                                # Save to feature cache for next training cycle
-                                model._save_features_to_cache(symbol, symbol_features, symbol_targets, bar_size)
+                                batch_feat_parts.append(symbol_features_np)
+                                batch_tgt_parts.append(symbol_targets_np)
+                                
+                                # Save to feature cache (lists needed for JSON serialization)
+                                model._save_features_to_cache(
+                                    symbol, symbol_features_np.tolist(),
+                                    symbol_targets_np.astype(int).tolist(), bar_size
+                                )
+                                del symbol_features_np, symbol_targets_np
                         
                         # Clear bars from memory after processing
                         del bars
@@ -856,9 +864,17 @@ class TimeSeriesAIService:
                         logger.warning(f"[FULL UNIVERSE] Error processing {symbol}: {e}")
                         continue
                 
-                # Accumulate batch features
-                all_features.extend(batch_features)
-                all_targets.extend(batch_targets)
+                # Consolidate batch into a single numpy chunk and accumulate
+                if batch_feat_parts:
+                    batch_X = np.vstack(batch_feat_parts)
+                    batch_y = np.concatenate(batch_tgt_parts)
+                    batch_samples = len(batch_X)
+                    feature_chunks.append(batch_X)
+                    target_chunks.append(batch_y)
+                    total_samples += batch_samples
+                else:
+                    batch_samples = 0
+                
                 symbols_processed = batch_end
                 
                 # Update status
@@ -867,16 +883,15 @@ class TimeSeriesAIService:
                     "message": f"Loaded {symbols_processed:,}/{total_symbols:,} symbols ({progress_pct:.1f}%)",
                     "symbols_processed": symbols_processed,
                     "symbols_with_data": symbols_with_data,
-                    "samples_collected": len(all_features),
+                    "samples_collected": total_samples,
                     "bars_processed": total_bars_processed
                 })
                 
-                logger.info(f"[FULL UNIVERSE] Batch {batch_idx + 1} complete: {len(batch_features):,} samples, Total: {len(all_features):,} samples")
+                logger.info(f"[FULL UNIVERSE] Batch {batch_idx + 1} complete: {batch_samples:,} samples, Total: {total_samples:,} samples")
                 sys.stdout.flush()
                 
                 # Force garbage collection after each batch
-                del batch_features
-                del batch_targets
+                del batch_feat_parts, batch_tgt_parts
                 gc.collect()
                 
                 # Log memory usage periodically for monitoring
@@ -907,24 +922,24 @@ class TimeSeriesAIService:
                         "error": "Training stopped by user",
                         "partial_progress": {
                             "symbols_processed": symbols_with_data,
-                            "samples_collected": len(all_features),
+                            "samples_collected": total_samples,
                             "bars_processed": total_bars_processed
                         }
                     }
             
             # Step 4: Train the model on accumulated features
-            logger.info(f"[FULL UNIVERSE] Step 4: Training model on {len(all_features):,} samples...")
+            logger.info(f"[FULL UNIVERSE] Step 4: Training model on {total_samples:,} samples...")
             sys.stdout.flush()
             
-            if len(all_features) < 100:  # Reduced minimum for debugging
+            if total_samples < 100:
                 return {
                     "success": False, 
-                    "error": f"Insufficient training data: {len(all_features)} samples (need 100+)"
+                    "error": f"Insufficient training data: {total_samples} samples (need 100+)"
                 }
             
             logger.info("")
             logger.info("[FULL UNIVERSE] Feature extraction complete!")
-            logger.info(f"[FULL UNIVERSE] Total samples: {len(all_features):,}")
+            logger.info(f"[FULL UNIVERSE] Total samples: {total_samples:,}")
             logger.info(f"[FULL UNIVERSE] Symbols with data: {symbols_with_data:,}")
             logger.info(f"[FULL UNIVERSE] Total bars processed: {total_bars_processed:,}")
             logger.info("")
@@ -932,18 +947,18 @@ class TimeSeriesAIService:
             sys.stdout.flush()
             
             self._training_status[bar_size]["phase"] = "training"
-            self._training_status[bar_size]["message"] = f"Training on {len(all_features):,} samples..."
+            self._training_status[bar_size]["message"] = f"Training on {total_samples:,} samples..."
             
-            # Convert to numpy arrays (float32 for GPU efficiency)
-            X = np.array(all_features, dtype=np.float32)
-            y = np.array(all_targets, dtype=np.float32)
+            # Combine numpy chunks into final arrays (single allocation, no Python list overhead)
+            X = np.vstack(feature_chunks).astype(np.float32)
+            y = np.concatenate(target_chunks).astype(np.float32)
             
             logger.info(f"[FULL UNIVERSE] Arrays created: X shape={X.shape}, y shape={y.shape}")
             sys.stdout.flush()
             
-            # Free the lists
-            del all_features
-            del all_targets
+            # Free the chunk lists
+            del feature_chunks
+            del target_chunks
             gc.collect()
             
             # Log class distribution
