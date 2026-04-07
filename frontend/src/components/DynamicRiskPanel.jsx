@@ -45,12 +45,12 @@ const useDynamicRisk = () => {
   const fetchStatus = useCallback(async () => {
     try {
       const data = await safeGet('/api/dynamic-risk/status');
-      if (data.success) {
+      if (data && data.success) {
         setStatus(data);
         setCached('dynamicRiskStatus', data, 30000);
       }
     } catch (err) {
-      console.error('Error fetching dynamic risk:', err);
+      // Silent — non-critical service
     } finally {
       setLoading(false);
     }

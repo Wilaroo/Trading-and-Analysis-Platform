@@ -2156,11 +2156,11 @@ const useAIModules = (pollInterval = 60000) => {
   const fetchStatus = useCallback(async () => {
     try {
       const data = await safeGet('/api/ai-modules/status');
-      if (data.success) {
+      if (data && data.success) {
         setStatus(data.status);
       }
     } catch (err) {
-      console.error('Error fetching AI modules status:', err);
+      // Silent — non-critical service
     } finally {
       setLoading(false);
     }
