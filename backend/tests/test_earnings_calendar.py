@@ -7,7 +7,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ib-pipeline-refactor.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ib-spark-opt.preview.emergentagent.com').rstrip('/')
 
 
 class TestEarningsCalendarAPI:

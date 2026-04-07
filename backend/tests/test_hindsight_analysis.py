@@ -11,7 +11,9 @@ from pymongo import MongoClient
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Direct MongoDB connection for testing (bypasses HTTP timeouts from IB Gateway saturation)
-MONGO_URL = os.environ.get('MONGO_URL', 'mongodb+srv://wilsonerik0_db_user:t1GH7fNMayacsZT6@sentcom.xqmcbz.mongodb.net/?appName=sentcom')
+MONGO_URL = os.environ.get('MONGO_URL')
+if not MONGO_URL:
+    raise ValueError("MONGO_URL environment variable is required")
 DB_NAME = os.environ.get('DB_NAME', 'tradecommand')
 
 

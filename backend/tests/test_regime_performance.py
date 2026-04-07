@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://ib-pipeline-refactor.preview.emergentagent.com"
+        api_url = "https://ib-spark-opt.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",
