@@ -790,8 +790,11 @@ def count_total_models() -> int:
     risk_of_ruin = 6  # 1min through daily
     regime_conditional = generic * len(["bull_trend", "bear_trend", "range_bound", "high_vol"])  # 7 * 4 = 28
     ensemble = len(ALL_SETUP_TYPES)  # 10
+    dl_models = 3  # VAE Regime, TFT, CNN-LSTM
+    finbert = 1    # FinBERT Sentiment pipeline
     return (generic + setup_long + setup_short + volatility + exit_timing +
-            sector_relative + gap_fill + risk_of_ruin + regime_conditional + ensemble)
+            sector_relative + gap_fill + risk_of_ruin + regime_conditional + ensemble +
+            dl_models + finbert)
 
 
 async def run_training_pipeline(
@@ -814,9 +817,11 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn", "validate"]
+        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn", "dl", "finbert", "validate"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
         # "validate" runs 5-Phase Auto-Validation on setup_specific + ensemble models
+        # "dl" trains Phase 5 deep learning models (VAE, TFT, CNN-LSTM)
+        # "finbert" runs FinBERT news collection + sentiment scoring
 
     if bar_sizes is None:
         bar_sizes = list(BAR_SIZE_CONFIGS.keys())
@@ -2066,14 +2071,124 @@ async def run_training_pipeline(
                 logger.error(f"CNN phase failed: {e}", exc_info=True)
                 results["cnn_training"] = {"error": str(e)}
 
+        # ── Phase 11: Deep Learning Models (VAE Regime + TFT + CNN-LSTM) ──
+        if "dl" in phases:
+            status.update(phase="deep_learning")
+            logger.info("=== Phase 11: Training Deep Learning Models ===")
+
+            dl_models_config = [
+                {
+                    "name": "vae_regime_detector",
+                    "class": "VAERegimeModel",
+                    "module": "services.ai_modules.vae_regime",
+                    "kwargs": {"epochs": 100, "batch_size": 256},
+                },
+                {
+                    "name": "tft_multi_timeframe",
+                    "class": "TFTModel",
+                    "module": "services.ai_modules.temporal_fusion_transformer",
+                    "kwargs": {"max_symbols": 500, "epochs": 50, "batch_size": 512},
+                },
+                {
+                    "name": "cnn_lstm_chart",
+                    "class": "CNNLSTMModel",
+                    "module": "services.ai_modules.cnn_lstm_model",
+                    "kwargs": {"max_symbols": 200, "epochs": 30, "batch_size": 256},
+                },
+            ]
+
+            for dl_cfg in dl_models_config:
+                model_name = dl_cfg["name"]
+                status.update(current_model=model_name)
+                try:
+                    import importlib
+                    mod = importlib.import_module(dl_cfg["module"])
+                    ModelClass = getattr(mod, dl_cfg["class"])
+                    dl_instance = ModelClass()
+                    logger.info(f"[DL] Training {model_name}...")
+                    dl_result = await dl_instance.train(db=db, **dl_cfg["kwargs"])
+
+                    if dl_result.get("success"):
+                        acc = dl_result.get("accuracy", dl_result.get("reconstruction_error", 0))
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": acc, "type": "dl"
+                        })
+                        status.add_completed(model_name, acc)
+                        logger.info(f"[DL] {model_name} trained successfully")
+                    else:
+                        error = dl_result.get("error", "Unknown DL training error")
+                        results["models_failed"].append({
+                            "name": model_name, "reason": error, "type": "dl"
+                        })
+                        status.add_error(model_name, error)
+                        logger.warning(f"[DL] {model_name} failed: {error}")
+
+                    del dl_instance
+                    gc.collect()
+
+                except Exception as e:
+                    logger.error(f"[DL] {model_name} error: {e}", exc_info=True)
+                    results["models_failed"].append({
+                        "name": model_name, "reason": str(e), "type": "dl"
+                    })
+                    status.add_error(model_name, str(e))
+
+        # ── Phase 12: FinBERT Sentiment Analysis ──
+        if "finbert" in phases:
+            status.update(phase="finbert_sentiment")
+            logger.info("=== Phase 12: FinBERT Sentiment Analysis ===")
+            status.update(current_model="finbert_news_collection")
+            try:
+                from services.ai_modules.finbert_sentiment import FinnhubNewsCollector, FinBERTSentiment
+
+                # Step 1: Collect news
+                collector = FinnhubNewsCollector(db=db)
+                logger.info("[FINBERT] Collecting news from Finnhub...")
+                # Get top symbols from training data
+                pipeline_agg = [
+                    {"$match": {"bar_size": "1 day"}},
+                    {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                    {"$match": {"count": {"$gte": 50}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 100},
+                ]
+                symbols = [r["_id"] for r in db["ib_historical_data"].aggregate(pipeline_agg, allowDiskUse=True)]
+                
+                if symbols:
+                    collect_result = await collector.collect_news(symbols=symbols, days_back=30)
+                    new_articles = collect_result.get("new_articles_stored", 0)
+                    logger.info(f"[FINBERT] Collected {new_articles} new articles")
+                else:
+                    logger.warning("[FINBERT] No symbols found for news collection")
+
+                # Step 2: Score unscored articles
+                status.update(current_model="finbert_scoring")
+                scorer = FinBERTSentiment(db=db)
+                logger.info("[FINBERT] Scoring articles...")
+                score_result = await scorer.score_unscored_articles(batch_size=64, max_articles=10000)
+                scored = score_result.get("scored", 0)
+                logger.info(f"[FINBERT] Scored {scored} articles")
+
+                results["models_trained"].append({
+                    "name": "finbert_sentiment", "accuracy": scored, "type": "finbert"
+                })
+                status.add_completed("finbert_sentiment", 1.0)
+
+            except Exception as e:
+                logger.error(f"[FINBERT] Phase failed: {e}", exc_info=True)
+                results["models_failed"].append({
+                    "name": "finbert_sentiment", "reason": str(e), "type": "finbert"
+                })
+                status.add_error("finbert_sentiment", str(e))
+
         # ══════════════════════════════════════════════════════════════════════
-        # PHASE 10: Auto-Validation (5-Phase pipeline on Trade Signal Generators)
+        # PHASE 13: Auto-Validation (5-Phase pipeline on Trade Signal Generators)
         # ══════════════════════════════════════════════════════════════════════
         if "validate" in phases and len(results["models_trained"]) > 0:
             phase_key = "auto_validation"
             status.start_phase(phase_key, 34)  # 17 long + 17 short setup types
             status.update(phase=phase_key, current_model="Initializing validation...")
-            logger.info("Phase 10: Starting Auto-Validation of Trade Signal Generators")
+            logger.info("Phase 13: Starting Auto-Validation of Trade Signal Generators")
 
             try:
                 from services.ai_modules.post_training_validator import validate_trained_model, run_batch_validation
@@ -2118,7 +2233,7 @@ async def run_training_pipeline(
                             break
 
                     status.update(current_model=f"Validating {setup_type}/{bar_size}")
-                    logger.info(f"[VALIDATE] Phase 10: Validating {setup_type}/{bar_size}")
+                    logger.info(f"[VALIDATE] Phase 13: Validating {setup_type}/{bar_size}")
 
                     try:
                         training_result = {"metrics": {"accuracy": 0}}
@@ -2185,16 +2300,16 @@ async def run_training_pipeline(
                     } for r in validation_results],
                 }
                 logger.info(
-                    f"Phase 10 Auto-Validation complete: {validated_count} validated, "
+                    f"Phase 13 Auto-Validation complete: {validated_count} validated, "
                     f"{promoted_count} promoted, {rejected_count} rejected"
                 )
 
             except ImportError as e:
-                logger.error(f"Phase 10 skipped — missing dependencies: {e}")
+                logger.error(f"Phase 13 skipped — missing dependencies: {e}")
                 status.end_phase(phase_key)
                 results["validation_summary"] = {"error": f"Dependencies missing: {e}"}
             except Exception as e:
-                logger.error(f"Phase 10 Auto-Validation error: {e}", exc_info=True)
+                logger.error(f"Phase 13 Auto-Validation error: {e}", exc_info=True)
                 status.end_phase(phase_key)
                 results["validation_summary"] = {"error": str(e)}
 

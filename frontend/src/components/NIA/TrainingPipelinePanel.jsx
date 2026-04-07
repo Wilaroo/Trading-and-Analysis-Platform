@@ -59,7 +59,9 @@ const ALL_PHASES = [
   { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
   { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
   { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 13 },
-  { key: 'auto_validation', label: 'Auto-Validation', num: '10', expected: 34 },
+  { key: 'deep_learning', label: 'Deep Learning (VAE/TFT/CNN-LSTM)', num: '11', expected: 3 },
+  { key: 'finbert_sentiment', label: 'FinBERT Sentiment', num: '12', expected: 1 },
+  { key: 'auto_validation', label: 'Auto-Validation', num: '13', expected: 34 },
 ];
 
 const formatDuration = (seconds) => {
