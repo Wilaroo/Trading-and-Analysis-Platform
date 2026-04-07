@@ -496,8 +496,9 @@ class TimeSeriesGBM:
         logger.info(f"Training model on {len(bars_by_symbol)} symbols...")
         
         # Extract features for all symbols (with caching)
-        all_features = []
-        all_targets = []
+        feature_chunks = []    # numpy arrays
+        target_chunks = []
+        total_samples = 0
         cache_hits = 0
         cache_misses = 0
         
@@ -506,15 +507,16 @@ class TimeSeriesGBM:
         for symbol, bars in bars_by_symbol.items():
             symbols_processed += 1
             if symbols_processed % 10 == 0 or symbols_processed == total_symbols:
-                logger.info(f"[Feature extraction] {symbols_processed}/{total_symbols} symbols processed ({len(all_features)} samples so far, cache: {cache_hits} hits / {cache_misses} misses)")
+                logger.info(f"[Feature extraction] {symbols_processed}/{total_symbols} symbols processed ({total_samples} samples so far, cache: {cache_hits} hits / {cache_misses} misses)")
             if len(bars) < 50 + self.forecast_horizon:
                 continue
             
             # Try loading from feature cache first
             cached = self._load_features_from_cache(symbol)
             if cached and cached.get("features") and cached.get("targets"):
-                all_features.extend(cached["features"])
-                all_targets.extend(cached["targets"])
+                feature_chunks.append(np.array(cached["features"], dtype=np.float32))
+                target_chunks.append(np.array(cached["targets"], dtype=np.float32))
+                total_samples += len(cached["features"])
                 cache_hits += 1
                 continue
             
@@ -535,33 +537,40 @@ class TimeSeriesGBM:
                 n_usable = min(len(bulk_features), len(closes) - lb - self.forecast_horizon + 1)
                 
                 if n_usable > 0:
-                    symbol_features = bulk_features[:n_usable].tolist()
-                    symbol_targets = []
-                    for i in range(n_usable):
-                        current_idx = lb - 1 + i
-                        future_idx = current_idx + self.forecast_horizon
-                        if future_idx < len(closes) and closes[current_idx] > 0:
-                            target_return = (closes[future_idx] - closes[current_idx]) / closes[current_idx]
-                            symbol_targets.append(1 if target_return > 0 else 0)
-                        else:
-                            symbol_targets.append(0)
+                    symbol_features_np = bulk_features[:n_usable]
                     
-                    all_features.extend(symbol_features)
-                    all_targets.extend(symbol_targets)
-                    # Save to cache for next training cycle
-                    self._save_features_to_cache(symbol, symbol_features, symbol_targets)
+                    # Vectorized target computation
+                    current_indices = np.arange(n_usable) + (lb - 1)
+                    future_indices = current_indices + self.forecast_horizon
+                    valid_mask = (future_indices < len(closes)) & (closes[current_indices] > 0)
+                    symbol_targets_np = np.zeros(n_usable, dtype=np.float32)
+                    if valid_mask.any():
+                        returns = (closes[future_indices[valid_mask]] - closes[current_indices[valid_mask]]) / closes[current_indices[valid_mask]]
+                        symbol_targets_np[valid_mask] = (returns > 0).astype(np.float32)
+                    
+                    feature_chunks.append(symbol_features_np)
+                    target_chunks.append(symbol_targets_np)
+                    total_samples += n_usable
+                    
+                    # Save to cache (lists needed for JSON serialization)
+                    self._save_features_to_cache(
+                        symbol, symbol_features_np.tolist(),
+                        symbol_targets_np.astype(int).tolist()
+                    )
+                    del symbol_features_np, symbol_targets_np
         
         logger.info(f"Feature cache stats: {cache_hits} hits, {cache_misses} computed fresh")
                     
-        if len(all_features) < 100:
-            logger.warning(f"Insufficient training data: {len(all_features)} samples")
+        if total_samples < 100:
+            logger.warning(f"Insufficient training data: {total_samples} samples")
             return ModelMetrics()
             
-        logger.info(f"Extracted {len(all_features)} training samples")
+        logger.info(f"Extracted {total_samples} training samples")
         
-        # Convert to numpy (float32 to halve memory on 128GB Spark)
-        X = np.array(all_features, dtype=np.float32)
-        y = np.array(all_targets, dtype=np.float32)
+        # Combine numpy chunks (no Python list overhead, no double-copy)
+        X = np.vstack(feature_chunks).astype(np.float32)
+        y = np.concatenate(target_chunks).astype(np.float32)
+        del feature_chunks, target_chunks
         
         # Log class distribution
         n_up = np.sum(y == 1)

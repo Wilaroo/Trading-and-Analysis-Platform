@@ -1965,8 +1965,9 @@ class TimeSeriesAIService:
             
             self._training_status[status_key]["message"] = f"Loading {len(symbols)} symbols..."
             
-            all_features = []
-            all_targets = []
+            all_feature_chunks = []
+            all_target_list = []
+            total_samples = 0
             total_bars_scanned = 0
             total_matches = 0
             noise_filtered = 0
@@ -1998,16 +1999,24 @@ class TimeSeriesAIService:
                         f"({total_matches} patterns, {noise_filtered} noise-filtered)"
                     )
                 
-                opens_arr = np.array([b.get('open', 0) for b in bars], dtype=float)
-                highs_arr = np.array([b.get('high', 0) for b in bars], dtype=float)
-                lows_arr = np.array([b.get('low', 0) for b in bars], dtype=float)
-                closes_arr = np.array([b.get('close', 0) for b in bars], dtype=float)
-                volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=float)
+                opens_arr = np.array([b.get('open', 0) for b in bars], dtype=np.float32)
+                highs_arr = np.array([b.get('high', 0) for b in bars], dtype=np.float32)
+                lows_arr = np.array([b.get('low', 0) for b in bars], dtype=np.float32)
+                closes_arr = np.array([b.get('close', 0) for b in bars], dtype=np.float32)
+                volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=np.float32)
                 
                 closes_arr = np.where(closes_arr == 0, 1, closes_arr)
                 opens_arr = np.where(opens_arr == 0, closes_arr, opens_arr)
                 volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
                 
+                # Pre-compute ALL base features in one vectorized pass per symbol
+                # instead of calling extract_features() per matched bar
+                bulk_features = feature_engineer.extract_features_bulk(bars)
+                if bulk_features is None:
+                    continue
+                
+                # Collect matched positions for this symbol
+                symbol_matches = []
                 for i in range(len(bars) - 50 - forecast_horizon):
                     total_bars_scanned += 1
                     
@@ -2026,8 +2035,8 @@ class TimeSeriesAIService:
                     
                     total_matches += 1
                     
-                    current_price = bars[i + 49]["close"]
-                    future_price = bars[i + 49 + forecast_horizon]["close"]
+                    current_price = closes_arr[i + 49]
+                    future_price = closes_arr[i + 49 + forecast_horizon]
                     target_return = (future_price - current_price) / current_price if current_price > 0 else 0
                     
                     if num_classes >= 3:
@@ -2043,59 +2052,66 @@ class TimeSeriesAIService:
                             continue
                         target = 1 if target_return > 0 else 0
                     
-                    window_recent_first = bars[i:i+50][::-1]
-                    feature_set = feature_engineer.extract_features(
-                        window_recent_first, symbol=symbol, include_target=False
-                    )
-                    if feature_set is None:
+                    symbol_matches.append((i, target, w_opens, w_highs, w_lows, w_closes, w_volumes))
+                
+                if not symbol_matches:
+                    del bulk_features, bars
+                    continue
+                
+                # Build combined feature vectors for all matches in this symbol
+                for i, target, w_opens, w_highs, w_lows, w_closes, w_volumes in symbol_matches:
+                    # Index into precomputed bulk features (replaces slow extract_features() call)
+                    if i >= len(bulk_features):
                         continue
+                    base_vector = bulk_features[i]
                     
-                    base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
                     setup_feats = get_setup_features(setup_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
-                    setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
+                    setup_vector = np.array([setup_feats.get(f, 0.0) for f in setup_feature_names], dtype=np.float32)
                     
                     # Layer 1: Add regime context features
                     if regime_available:
                         bar_date = str(bars[i + 49].get("timestamp", bars[i + 49].get("date", "")))
                         regime_feats = regime_provider.get_regime_features_for_date(bar_date)
-                        regime_vector = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
+                        regime_vector = np.array([regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES], dtype=np.float32)
                     else:
-                        regime_vector = []
+                        regime_vector = np.array([], dtype=np.float32)
                     
                     # Layer 2: Add multi-timeframe context features (intraday only)
                     if mtf_available:
                         bar_date = str(bars[i + 49].get("timestamp", bars[i + 49].get("date", "")))
                         mtf_feats = mtf_provider.get_mtf_features(symbol, bar_date)
-                        mtf_vector = [mtf_feats.get(f, 0.0) for f in MTF_FEATURE_NAMES]
+                        mtf_vector = np.array([mtf_feats.get(f, 0.0) for f in MTF_FEATURE_NAMES], dtype=np.float32)
                     else:
-                        mtf_vector = []
+                        mtf_vector = np.array([], dtype=np.float32)
                     
-                    combined_vector = base_vector + setup_vector + regime_vector + mtf_vector
-                    
-                    all_features.append(combined_vector)
-                    all_targets.append(target)
+                    combined = np.concatenate([base_vector, setup_vector, regime_vector, mtf_vector])
+                    all_feature_chunks.append(combined)
+                    all_target_list.append(target)
+                    total_samples += 1
+                
+                del bulk_features, bars, symbol_matches
             
-            if len(all_features) < min_samples:
+            if total_samples < min_samples:
                 msg = (f"Insufficient {setup_type}/{bar_size} patterns: "
-                       f"{len(all_features)} usable of {total_matches} detected "
+                       f"{total_samples} usable of {total_matches} detected "
                        f"({noise_filtered} noise-filtered). Need {min_samples}+.")
                 logger.warning(f"[SETUP TRAIN] {msg}")
                 self._training_status[status_key] = {"status": "error", "message": msg}
                 return {"success": False, "error": msg}
             
             logger.info(
-                f"[SETUP TRAIN] {setup_type}/{bar_size}: {len(all_features)} usable from "
+                f"[SETUP TRAIN] {setup_type}/{bar_size}: {total_samples} usable from "
                 f"{total_matches} detected ({noise_filtered} noise-filtered), "
                 f"{loaded} symbols, {total_bars_scanned:,} bars"
             )
             
             self._training_status[status_key]["message"] = (
-                f"Training {len(all_features):,} patterns..."
+                f"Training {total_samples:,} patterns..."
             )
             
-            import numpy as np
-            X = np.array(all_features)
-            y = np.array(all_targets)
+            X = np.vstack(all_feature_chunks).astype(np.float32)
+            y = np.array(all_target_list, dtype=np.float32)
+            del all_feature_chunks, all_target_list
             
             unique, counts = np.unique(y.astype(int), return_counts=True)
             class_labels = {0: "DOWN", 1: "FLAT", 2: "UP"} if num_classes >= 3 else {0: "DOWN", 1: "UP"}
@@ -2139,7 +2155,7 @@ class TimeSeriesAIService:
                     extra_meta={
                         "patterns_found": total_matches,
                         "noise_filtered": noise_filtered,
-                        "usable_samples": len(all_features),
+                        "usable_samples": total_samples,
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
                         "regime_features": regime_feat_names,
                         "regime_enabled": regime_available,
@@ -2153,14 +2169,14 @@ class TimeSeriesAIService:
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "message": (
-                    f"{metrics.accuracy*100:.1f}% accuracy, {len(all_features):,} samples, "
+                    f"{metrics.accuracy*100:.1f}% accuracy, {total_samples:,} samples, "
                     f"horizon={forecast_horizon} bars"
                 )
             }
             
             logger.info(
                 f"[SETUP TRAIN] {setup_type}/{bar_size} complete: "
-                f"{metrics.accuracy*100:.1f}% accuracy, {len(all_features)} samples"
+                f"{metrics.accuracy*100:.1f}% accuracy, {total_samples} samples"
             )
             
             return {
@@ -2173,7 +2189,7 @@ class TimeSeriesAIService:
                 "total_bars_scanned": total_bars_scanned,
                 "patterns_found": total_matches,
                 "noise_filtered": noise_filtered,
-                "usable_samples": len(all_features),
+                "usable_samples": total_samples,
                 "training_samples": metrics.training_samples,
                 "validation_samples": metrics.validation_samples,
                 "total_features": len(combined_feature_names),
