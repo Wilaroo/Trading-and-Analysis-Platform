@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"40e9f3b3c0694903972e816ad1fc4b81","collectionName":"market_intel_reports","type":"collection"}

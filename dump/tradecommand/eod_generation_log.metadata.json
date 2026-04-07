@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"date":{"$numberInt":"-1"}},"name":"date_-1"},{"v":{"$numberInt":"2"},"key":{"type":{"$numberInt":"1"},"date":{"$numberInt":"-1"}},"name":"type_1_date_-1"}],"uuid":"cbfbbb9363ef49ea809835fc614a9d21","collectionName":"eod_generation_log","type":"collection"}

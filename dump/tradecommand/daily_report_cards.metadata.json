@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"date":{"$numberInt":"-1"}},"name":"date_-1","unique":true},{"v":{"$numberInt":"2"},"key":{"overall_grade":{"$numberInt":"1"}},"name":"overall_grade_1"}],"uuid":"37f6f3df40a4481db294c156fa4a27c1","collectionName":"daily_report_cards","type":"collection"}

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"symbol":{"$numberInt":"1"}},"name":"symbol_1"},{"v":{"$numberInt":"2"},"key":{"data_date":{"$numberInt":"-1"}},"name":"data_date_-1"}],"uuid":"6a301655864d45908fa813bb5ff6d7b4","collectionName":"institutional_ownership","type":"collection"}
