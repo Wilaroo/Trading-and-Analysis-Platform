@@ -1,250 +1,118 @@
-# SentCom AI Trading Platform - PRD
+# SentCom AI Trading Platform — PRD
 
 ## Original Problem Statement
-AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, CNN chart detection, and maximum Interactive Brokers (IB) historical data collection. Optimizing the ML training pipeline performance over 177M MongoDB rows, resolving stale AI Training status, fixing UI desyncs, and utilizing hardware efficiently.
+AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serve data skew by removing Alpaca dependencies, eliminate scanning bottlenecks, refactor the subtractive confidence gate to an additive system, integrate Deep Learning models across the dual-GPU architecture (DGX Spark + Windows PC), and optimize feature extraction for 128GB DGX Spark memory.
 
-**NEW (April 2026):** Major architecture upgrade — dual Blackwell GPU distributed training, 100% IB data pipeline (removing Alpaca/Finnhub/TwelveData), XGBoost GPU swap, 5 new Deep Learning models, Confidence Gate refactor from subtractive to additive scoring, and scanner performance optimization.
+## Architecture
+- **DGX Spark** (Linux, Blackwell GPU, 128GB unified memory): Backend/Frontend + local MongoDB `tradecommand` (178M+ bars). Runs XGBoost + DL models.
+- **Windows PC** (Ryzen 7, RTX 5060 Ti): IB Gateway/Turbo Collectors + (Future) distributed DL training over LAN.
+- **Data**: 100% Interactive Brokers via local MongoDB. No Alpaca/Finnhub/TwelveData in trading paths.
 
-## Hardware Architecture
-```
-+--------------------------------------+     +--------------------------------------+
-|        DGX SPARK (Linux)             |     |       WINDOWS PC                     |
-|        IP: 192.168.50.2              |     |       IP: 192.168.50.1               |
-|                                      |     |                                      |
-|  GPU: Blackwell GB10 (128GB unified) |     |  GPU: RTX 5060 Ti 16GB GDDR7         |
-|  CPU: Grace ARM (~10 cores)          |<--->|  CPU: Ryzen 7 5800XT (8C/16T, 3.8G)  |
-|  RAM: 128GB unified                  |10GbE|  RAM: 32GB DDR4                       |
-|                                      |     |  CUDA: 13.2 / Driver: 595.79         |
-|  FastAPI Backend (venv) :8001        |     |  Mobo: ASUS PRIME X570-P (PCIe 4.0)  |
-|  MongoDB (Docker) :27017             |     |                                      |
-|  Ollama :11434                       |     |  IB Gateway :4002                     |
-|  Frontend React :3000                |     |  8x Turbo Data Collectors (planned)   |
-|                                      |     |  Live Data Pusher                     |
-|  ROLE: Heavy GBM + TFT training,     |     |  Browser UI                           |
-|        Backend, DB, Scanner           |     |  ROLE: CNN/DL training, data collect  |
-+--------------------------------------+     +--------------------------------------+
-```
+## Completed Phases
 
-## Data Architecture (Post-Cleanup)
-```
-CRITICAL PATH (100% IB — zero external dependencies):
-  IB Gateway -> IB Pusher -> Spark Backend -> MongoDB ib_historical_data (177M+ rows)
-  Scanner + AI Models + Execution all use IB-sourced data ONLY
+### Phase 1: 100% IB Data (DONE)
+- Removed Alpaca, Finnhub, TwelveData from all trading/scanning paths
+- All training and inference strictly through IB data in MongoDB
 
-UI ENRICHMENT (non-blocking, cached):
-  yfinance -> Fundamentals display (PE, revenue, margins, quality scores)
-  Finnhub -> Earnings calendar (cross-verified with IB per-symbol earnings)
-  
-REMOVED:
-  Alpaca (quotes, bars, execution) -> REPLACED by IB Pusher + MongoDB
-  TwelveData -> REMOVED (dead code)
-  Finnhub price/bar data -> REPLACED by MongoDB ib_historical_data
-```
+### Phase 2: XGBoost GPU Swap (DONE)
+- Replaced LightGBM with XGBoost (`tree_method='hist'`, `device='cuda'`)
+- Updated `timeseries_gbm.py` with XGBoost native training
 
-## Current Data Coverage (as of April 7, 2026)
-- **Total bars**: 177,394,521 in ib_historical_data
-- **ADV symbols**: 9,187
-- **Scan universe**: 1,473 unique symbols (SPY 495 + QQQ 120 + NASDAQ Ext 480 + IWM 542 + ETFs)
-- **Timeframes**: 1min, 5min, 15min, 30min, 1hour, 1day, 1week
-- **Symbol lists last updated**: Feb 11, 2026 (next rebalance: March 20, 2026)
+### Phase 3: Training Optimizations (DONE)
+- Vectorized `extract_features_bulk()` for numpy sliding windows
+- Feature caching in MongoDB
+- Batch sizes increased to 500 symbols for 128GB Spark
 
-## What's Been Implemented
+### Phase 4: Scanner Upgrade (DONE)
+- ADV-tiered scanning (Intraday > 500K, Swing > 100K, Investment > 50K)
+- 100 symbols per batch, trading-day staleness check
 
-### Session: April 8, 2026 (Fork 1 — Phase 1 + Phase 2 Implementation)
+### Phase 4.5: Confidence Gate Refactor (DONE)
+- Additive 0-100 scoring system with floor protection
+- Thresholds: GO >= 55, REDUCE >= 30, SKIP < 30
 
-#### Phase 1: Data Foundation — 100% IB Pipeline (COMPLETE)
-- **1a.** `realtime_technical_service.py`: Replaced Alpaca intraday bars with MongoDB `ib_historical_data` queries. Added `_get_intraday_bars_from_db()` method.
-- **1b.** `enhanced_scanner.py`: Replaced Alpaca quote fallback with MongoDB latest bar in `_get_quote_with_ib_priority()`. Replaced Alpaca ADV fetch with MongoDB aggregate in `_fetch_single_adv()`.
-- **1c.** `stock_data.py`: Removed Alpaca, Finnhub, and TwelveData from quote chain. Added `_fetch_mongodb_bar_quote()` as fallback between IB Pusher and Yahoo.
-- **1d.** `stock_data.py`: Removed all TwelveData methods and references.
-- **1e.** `hybrid_data_service.py`: Removed `_fetch_from_alpaca()` method and Alpaca rate limiter. Fixed `_get_from_cache()` to use correct IB field names (`bar_size`, `date`).
-- **1f.** `market_context.py`: Replaced Finnhub candles with MongoDB `ib_historical_data` query. Added `set_db()` method.
-- **1g.** Earnings calendar (Finnhub + IB cross-verification) preserved.
-- **1h.** Added staleness check: `_check_staleness()` skips symbols with bars >24h old.
-- **Wiring:** `server.py` updated to pass `db` reference to `stock_service` and `market_context_service`.
+### Phase 5a: Training Pipeline Bug Fixes (DONE — April 7, 2026)
+1. Fixed `train_full_universe()` — was still calling LightGBM, now uses XGBoost GPU
+2. Fixed 3GB memory cap → 100GB for 128GB Spark
+3. Fixed method defaults: symbol_batch_size 50→500, max_bars_per_symbol 1000→99999
+4. Fixed router defaults: max_bars 1000/2000→99999
+5. Fixed worker param passthrough for max_bars and batch_size
+6. Fixed Pydantic model defaults 100/2000→500/99999
+7. Fixed model save: XGBoost Booster uses temp file instead of BytesIO
+8. Fixed misleading model save log (archived vs promoted)
+9. Fixed stale feature cache guidance (clear before re-training)
 
-#### Phase 2: XGBoost GPU Swap (COMPLETE)
-- **2a.** `timeseries_gbm.py`: Replaced `import lightgbm as lgb` with `import xgboost as xgb`.
-- **2b.** GPU detection: Auto-detects CUDA GPU via XGBoost native test (no OpenCL needed).
-- **2c.** `DEFAULT_PARAMS`: Mapped to XGBoost format (`binary:logistic`, `tree_method='hist'`, `device='cuda'`).
-- **2d.** `train()`, `train_vectorized()`, `train_from_features()`: All use `xgb.DMatrix` + `xgb.train()`.
-- **2e.** `predict()`: Uses `xgb.DMatrix` for inference.
-- **2f.** `_save_model()`: Uses XGBoost native JSON serialization (not pickle).
-- **2g.** `_load_model()`: Supports both new XGBoost JSON and legacy LightGBM pickle (graceful migration).
-- **2h.** `requirements.txt`: Updated with `xgboost==3.2.0`.
+### Phase 5b: Deep Learning Models (DONE — April 7, 2026)
+Three new DL models created and integrated into the Confidence Gate:
 
-#### Testing (13/13 pass)
-- Alpaca removal verified (zero references in critical paths)
-- Staleness check tested (fresh, stale, no data)
-- XGBoost params, training, serialization format, and prediction contract validated
+1. **VAE Regime Detection** (`vae_regime.py`)
+   - Variational Autoencoder for unsupervised market regime labeling
+   - 5 regimes: Bull Trending, Bear Trending, High Volatility, Mean Reverting, Momentum Surge
+   - Trains on SPY + sector ETF microstructure features
+   - Confidence Gate Layer 10: max +8 / floor -5
 
-#### Phase 3: Training Optimizations (COMPLETE)
-- Feature caching: New `feature_cache` MongoDB collection stores precomputed features with 1-week TTL, auto-invalidates on feature set changes
-- Batch sizes: 5x-10x increase (1min: 5→25, 5min: 10→50, 1day: 100→500) for 128GB Spark
-- Float32 enforcement: All training arrays use `np.float32` to halve memory
-- Fixed `timeseries_service.py`: Replaced `pickle.loads/dumps` with XGBoost JSON serialization throughout
+2. **Temporal Fusion Transformer** (`temporal_fusion_transformer.py`)
+   - Multi-timeframe attention model (1min, 5min, 15min, 1hour, 1day)
+   - Variable Selection Network learns feature importance per timeframe
+   - Cross-timeframe patterns (e.g., "daily trend up + 15min pullback = continuation")
+   - Confidence Gate Layer 9: max +12 / floor -5
 
-#### Phase 4: Scanner Upgrade (COMPLETE)
-- Scan config: 100 symbols/batch (was 10), 0.1s delay (was 1s), 15s interval (was 60s)
-- **Tiered scanning**: Intraday ≥500K ADV (every ~15s), Swing ≥100K (every ~2min), Investment ≥50K (11:00 AM + 3:45 PM ET only)
-- Staleness check v2: IB Pusher-aware (live quote = never stale), market-hours-aware (counts trading days, not calendar days), handles IB date format `YYYYMMDD HH:MM:SS`
-- Investment tier ADV set to 50K per user's existing data
+3. **CNN-LSTM** (`cnn_lstm_model.py`)
+   - Temporal chart pattern recognition
+   - 1D CNN backbone + LSTM sequence processing + attention
+   - Learns pattern evolution over 5 consecutive windows
+   - Confidence Gate Layer 11: max +10 / floor -5
 
-#### Phase 4.5: Confidence Gate Refactor (COMPLETE)
-- **Additive scoring** (base 0, earn confirmation): Regime ±20/10, AI ±10/5, Consensus ±15/5, Live Model ±15/5 (accuracy-weighted), Cross-Model ±5, Quality ±10/5, Learning ±8/5, CNN ±12/5
-- **Floor protection**: Regime max -10, all others max -5 per gate
-- **Thresholds**: ≥55 GO, ≥30 REDUCE, <30 SKIP
-- `scoring_version: "additive_v1"` field in all gate log entries
-- CNN signal + cnn_signal field added to result dict
+**API Endpoints:**
+- `POST /api/ai-modules/dl/train-vae-regime`
+- `POST /api/ai-modules/dl/train-tft`
+- `POST /api/ai-modules/dl/train-cnn-lstm`
+- `POST /api/ai-modules/dl/train-all` (all 3 sequentially)
+- `GET /api/ai-modules/dl/status`
 
-#### Frontend UI Updates (COMPLETE)
-- Fixed confidence score display: removed erroneous `×100` multiplier (was showing "5500%" for score 55)
-- Updated color thresholds to match additive scoring: ≥55 green, ≥30 amber, <30 gray (was 65-75/40-50)
-- Replaced all "Alpaca" references with "IB Cache" / "IB Gateway" (QuickStatsBar, Tooltip, TickerDetailModal, CommandCenter, Dashboard)
-- Added scan tier badges (INTRADAY/SWING/INVESTMENT) to ScannerAlertsPanel and ScannerPage
-- Added additive scoring breakdown visualization to SentComIntelligencePanel (bar chart of point contributions)
-- Added "XGBoost" engine label badge to TrainingPipelinePanel
-- Confidence display shows "pts" (not %) since additive scoring is point-based
-- Fixed pre-existing StartupModal compile error (useConnection → useConnectionManager)
+**Worker Integration:** `DL_TRAINING` job type added to job queue system.
 
-### Session: April 8, 2026 (Previous — Planning Session)
-- Complete architecture audit of data sources, scanning pipeline, and kill chain
-- Identified train/serve data skew (models train on IB, scanner uses Alpaca)
-- Identified 27-point kill chain causing potential over-filtering
-- Identified Confidence Gate "subtractive scoring" problem (more models = more vetoes)
-- Documented complete 7.5-phase Master Build Plan
-- Created Architecture Decisions document
-- Created detailed Implementation Guide for forked sessions
+**Frontend:** "Train All DL Models" button added to AI Training panel.
 
-### Session: April 7, 2026
-- Created backend `.env` and frontend `.env` for DGX Spark
-- Fixed `asyncio.create_task` crash at module load
-- Fixed WebSocket startup modal blocking
-- Fixed DynamicRiskPanel and SentCom null-check spam
-- Full MongoDB migration: Atlas -> Spark local Docker (177.8M rows)
-- Optimized fill-gaps endpoint: replaced `distinct()` with aggregation pipeline
-- Fixed ib_historical_collector pacing bug
-- Created `TradeCommand_Spark_AITraining.bat`
-- 4 turbo collectors running overnight to fill all data gaps
+## Confidence Gate Scoring (Updated)
+Max theoretical: ~115 pts
+- Layer 1: Regime Check (max +20 / floor -10)
+- Layer 2: AI Regime (max +10 / floor -5)
+- Layer 3: Model Consensus (max +15 / floor -5)
+- Layer 4: Live Model Prediction (max +15 / floor -5)
+- Layer 5: Cross-Model Agreement (max +5 / floor -5)
+- Layer 6: Quality Score (max +10 / floor -5)
+- Layer 7: Learning Loop Feedback (max +8 / floor -5)
+- Layer 8: CNN Visual Pattern (max +12 / floor -5)
+- Layer 9: TFT Multi-Timeframe (max +12 / floor -5) [NEW]
+- Layer 10: VAE Regime Detection (max +8 / floor -5) [NEW]
+- Layer 11: CNN-LSTM Temporal (max +10 / floor -5) [NEW]
 
-### Previous Sessions
-- Fixed phantom `QUICK` symbol (Yahoo Finance validation)
-- Fixed frontend aggressive polling during training mode
-- Configured 10Gbps direct Ethernet link (Windows PC <-> DGX Spark)
-- Set up DGX Spark base dependencies
+## Current Status
+- XGBoost full-universe training running on Spark (7 timeframes, 178M bars)
+- DL models created, integrated into gate, API endpoints live
+- Awaiting XGBoost training completion, then DL training
 
-## Master Build Plan (7.5 Phases)
-
-### Phase 1: Data Foundation — 100% IB Pipeline [COMPLETE ✅]
-- 1a. Remove Alpaca from live scanning (replace intraday bars with MongoDB queries) ✅
-- 1b. Remove Alpaca quote fallback (IB Pusher only, latest MongoDB bar as fallback) ✅
-- 1c. Remove Finnhub from price/bar data paths (market_context.py, stock_data.py) ✅
-- 1d. Remove TwelveData references (dead code cleanup) ✅
-- 1e. Clean up hybrid_data_service.py (MongoDB-only) ✅
-- 1f. Keep yfinance for UI fundamentals (cached, non-blocking) ✅
-- 1g. Earnings calendar: Keep Finnhub + add IB per-symbol earnings as cross-check ✅
-- 1h. Add staleness check (skip symbols with bars >24h old on intraday) ✅
-
-### Phase 2: Training Engine — LightGBM -> XGBoost GPU [COMPLETE ✅]
-- 2a. Swap LightGBM to XGBoost in timeseries_gbm.py ✅
-- 2b. Set tree_method='hist', device='cuda' for Blackwell GPU ✅
-- 2c. Preserve pipeline contract (same input features, output format) ✅
-- 2d. Update model serialization (XGBoost JSON format) ✅
-- 2e. Update requirements.txt ✅
-
-### Phase 3: Training Optimizations [COMPLETE ✅]
-- 3a. Feature caching — save/load precomputed features from MongoDB `feature_cache` ✅
-- 3b. Batch sizes increased for 128GB: 1min 5→25, 5min 10→50, 15min 15→75, 1hr 50→200, 1day 100→500 ✅
-- 3c. Float32 enforcement in numpy arrays ✅
-- 3d. XGBoost memory tuning (max_bin=256) ✅
-- Fixed pickle→XGBoost JSON in timeseries_service.py model reload/save ✅
-
-### Phase 4: Scanner Upgrade [COMPLETE ✅]
-- 4a. symbols_per_batch 10 → 100 ✅
-- 4b. batch_delay 1.0s → 0.1s ✅
-- 4c. scan_interval 60s → 15s ✅
-- 4d. Tiered scanning by ADV: Intraday ≥500K (every 15s), Swing ≥100K (every 2min), Investment ≥50K (11AM + 3:45PM ET only) ✅
-- 4e. Staleness check: IB Pusher-aware + market-hours-aware (3 trading days, IB date formats, weekends) ✅
-
-### Phase 4.5: Confidence Gate Refactor [COMPLETE ✅] **CRITICAL — Done before Phase 5**
-- Subtractive (base 50) → Additive (base 0) with graduated point scales ✅
-- Floor protection: regime max -10, all others max -5 ✅
-- Thresholds: ≥55 GO, ≥30 REDUCE, <30 SKIP ✅
-- scoring_version: "additive_v1" for migration tracking ✅
-- CNN signal + learning loop capped in result ✅
-
-### Phase 5: Deep Learning Models [NOT STARTED]
-- 5a. Temporal Fusion Transformer (TFT) — Phase 11 (new)
-- 5b. CNN -> CNN-LSTM upgrade — Phase 9
-- 5c. FinBERT Sentiment — SentCom integration
-- 5d. VAE Regime Detection — Regime Engine addition
-- 5e. RL Position Sizer — Execution step
-Each model integrates into Confidence Gate as additional weighted voter
-
-### Phase 6: Distributed Training — PC Worker [NOT STARTED]
-- 6a. pc_training_worker.py for Windows PC (RTX 5060 Ti)
-- 6b. Training coordinator (Spark assigns heavy to itself, lighter to PC)
-- 6c. Model sync via MongoDB over 10GbE
-
-### Phase 7: Infrastructure & Polish [NOT STARTED]
-- 7a. Expand Turbo Collectors 4 -> 8 (client IDs 16-23)
-- 7b. systemd services on Spark (auto-boot backend/frontend/MongoDB)
-- 7c. Desktop notifications (training complete, high-priority scanner alerts)
-- 7d. Symbol list auto-refresh (quarterly rebalance from live ETF holdings)
-- 7e. Resume training feature (skip completed phases on restart)
-- 7f. Expand IB Pusher watchlist for broader coverage
-- 7g. Dynamic universe expansion (IB scanner API for real-time top movers)
-
-## Estimated Training Times (Full Pipeline)
-| Config | Time |
-|--------|------|
-| Current (LightGBM CPU) | 154+ hours (6.4 days) |
-| XGBoost GPU only | ~20 hours |
-| + Feature caching | ~12 hours |
-| + Batch optimization | ~10 hours |
-| + Dual GPU parallel | ~8-10 hours |
-| Full pipeline + all DL models | ~10-14 hours |
-
-## Key Technical Notes
-- **CRITICAL**: DO NOT run `apt install nvidia-*` or `dkms` on the DGX Spark
-- **CRITICAL**: Do not use `.distinct()` on ib_historical_data (177M+ rows, will timeout)
-- **Virtual Environment**: All Python on Spark must use `source ~/venv/bin/activate`
-- **nohup**: Always use `nohup` for backend/frontend on Spark via SSH
-- **localhost quirk**: Use `192.168.50.2` (not `localhost`) for curl on Spark
-- **IB Client IDs**: Pusher=15, Collectors=16-19 (expand to 16-23 for 8 collectors)
-- **emergentintegrations**: Not installed on Spark
-- **Train/serve skew**: Must be resolved (Phase 1) before any model retraining
+## Upcoming Tasks
+- 🟡 (P1) Phase 5c: FinBERT Sentiment — needs news data source (IB news or scraper)
+- 🟡 (P1) Phase 5d: RL Position Sizer — PPO/SAC agent for dynamic sizing
+- 🟡 (P2) Phase 6: Distributed PC Worker — training coordinator for Windows PC over LAN
+- ⚪ (P3) Phase 7: Infrastructure Polish — systemd, notifications, symbol rotation
 
 ## Key Files
-### Backend Core
-- `backend/.env` - Spark environment config
-- `backend/server.py` - FastAPI main (fixed startup crash)
-- `backend/services/trading_bot_service.py` - Bot main (27-gate pipeline)
-- `backend/services/enhanced_scanner.py` - Live market scanner (4144 lines)
-- `backend/services/smart_filter.py` - Historical win-rate filter
-- `backend/services/ai_modules/confidence_gate.py` - AI voting gate (938 lines)
-- `backend/services/ai_modules/timeseries_gbm.py` - LightGBM (-> XGBoost swap target)
-- `backend/services/ai_modules/training_pipeline.py` - 10-phase training (2222 lines)
-- `backend/services/realtime_technical_service.py` - Technical data (Alpaca removal target)
-- `backend/services/stock_data.py` - Stock data providers (cleanup target)
-- `backend/services/hybrid_data_service.py` - Hybrid data (simplification target)
-- `backend/services/alpaca_service.py` - Alpaca (keep as dormant fallback)
-- `backend/data/index_symbols.py` - 1,473-symbol universe
+- `/app/backend/services/ai_modules/timeseries_gbm.py` — XGBoost model
+- `/app/backend/services/ai_modules/timeseries_service.py` — Training orchestration
+- `/app/backend/services/ai_modules/confidence_gate.py` — Additive scoring (11 layers)
+- `/app/backend/services/ai_modules/vae_regime.py` — VAE Regime Detection [NEW]
+- `/app/backend/services/ai_modules/temporal_fusion_transformer.py` — TFT [NEW]
+- `/app/backend/services/ai_modules/cnn_lstm_model.py` — CNN-LSTM [NEW]
+- `/app/backend/routers/ai_modules.py` — Training + DL API endpoints
+- `/app/backend/worker.py` — Background job processor
+- `/app/backend/tests/test_phase3_4_45.py` — Test suite (38 tests)
 
-### Frontend Core
-- `frontend/.env` - Frontend config
-- `frontend/src/components/SentCom.jsx` - Main trading UI
-- `frontend/src/components/StartupModal.jsx` - Startup checks
-- `frontend/src/components/DynamicRiskPanel.jsx` - Risk display
-
-### Documents
-- `documents/DGX_SPARK_ENV_TEMPLATE.md` - ENV reference
-- `documents/TradeCommand_Spark_AITraining.bat` - Windows startup
-- `documents/SPARK_SYSTEMD_SETUP.md` - systemd setup guide
-- `documents/scripts/ib_historical_collector.py` - Gap fill collector
-- `documents/scripts/ib_data_pusher.py` - Live data pusher
-- `documents/MASTER_BUILD_PLAN.md` - Detailed implementation guide
-- `documents/ARCHITECTURE_DECISIONS.md` - All technical decisions documented
-
-## Kill Chain Analysis (27 Gates)
-See `/app/documents/ARCHITECTURE_DECISIONS.md` for full analysis of every point where a good trade can be missed, and the planned fixes.
+## DB Schema
+- `tradecommand.ib_historical_data` — 178M+ bars (compound index: symbol, bar_size, date)
+- `tradecommand.timeseries_models` — XGBoost models (JSON format)
+- `tradecommand.feature_cache` — Cached training features
+- `tradecommand.dl_models` — PyTorch DL models (base64 state_dict) [NEW]
+- `tradecommand.confidence_gate_log` — AI decisions (scoring_version: "additive_v1")

@@ -57,7 +57,10 @@ const ScoreBreakdown = memo(({ decision }) => {
         else if (label.includes('Live ')) label = 'Live Model';
         else if (label.includes('Cross-model')) label = 'Cross-Model';
         else if (label.includes('Quality')) label = 'Quality';
+        else if (label.includes('CNN-LSTM') || label.includes('temporal')) label = 'CNN-LSTM';
         else if (label.includes('CNN')) label = 'CNN Visual';
+        else if (label.includes('TFT')) label = 'TFT Multi-TF';
+        else if (label.includes('VAE')) label = 'VAE Regime';
         else if (label.includes('Learning') || label.includes('Historical')) label = 'Learning';
         components.push({ label, pts });
       }

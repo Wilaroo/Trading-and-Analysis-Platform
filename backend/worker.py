@@ -804,6 +804,71 @@ async def process_cnn_training_job(job: dict, db) -> dict:
         }
 
 
+async def process_dl_training_job(job: dict, db) -> dict:
+    """Process a Phase 5 Deep Learning training job.
+    
+    Job params:
+        - models: list of models to train (default: ALL)
+                  Options: "vae_regime", "tft", "cnn_lstm"
+        - max_symbols: int (for TFT and CNN-LSTM)
+        - epochs: int (training epochs per model)
+    """
+    params = job.get('params', {})
+    job_id = job['job_id']
+    models_to_train = params.get('models', ['vae_regime', 'tft', 'cnn_lstm'])
+    max_symbols = params.get('max_symbols', 500)
+    epochs = params.get('epochs', 50)
+
+    logger.info(f"[DL TRAINING] Job {job_id} — models: {models_to_train}")
+    results = {}
+
+    # 1. VAE Regime
+    if 'vae_regime' in models_to_train:
+        try:
+            await job_queue_manager.update_progress(job_id, percent=5, message="Training VAE Regime...")
+            from services.ai_modules.vae_regime import VAERegimeModel
+            vae = VAERegimeModel(db=db)
+            results['vae_regime'] = await vae.train(db=db, epochs=epochs)
+            logger.info(f"[DL TRAINING] VAE Regime: {results['vae_regime'].get('success')}")
+        except Exception as e:
+            logger.error(f"[DL TRAINING] VAE Regime failed: {e}")
+            results['vae_regime'] = {'success': False, 'error': str(e)}
+
+    # 2. TFT
+    if 'tft' in models_to_train:
+        try:
+            await job_queue_manager.update_progress(job_id, percent=30, message="Training TFT...")
+            from services.ai_modules.temporal_fusion_transformer import TFTModel
+            tft = TFTModel(db=db)
+            results['tft'] = await tft.train(db=db, max_symbols=max_symbols, epochs=epochs)
+            logger.info(f"[DL TRAINING] TFT: {results['tft'].get('success')}")
+        except Exception as e:
+            logger.error(f"[DL TRAINING] TFT failed: {e}")
+            results['tft'] = {'success': False, 'error': str(e)}
+
+    # 3. CNN-LSTM
+    if 'cnn_lstm' in models_to_train:
+        try:
+            await job_queue_manager.update_progress(job_id, percent=60, message="Training CNN-LSTM...")
+            from services.ai_modules.cnn_lstm_model import CNNLSTMModel
+            cnn_lstm = CNNLSTMModel(db=db)
+            results['cnn_lstm'] = await cnn_lstm.train(db=db, max_symbols=min(max_symbols, 200), epochs=30)
+            logger.info(f"[DL TRAINING] CNN-LSTM: {results['cnn_lstm'].get('success')}")
+        except Exception as e:
+            logger.error(f"[DL TRAINING] CNN-LSTM failed: {e}")
+            results['cnn_lstm'] = {'success': False, 'error': str(e)}
+
+    await job_queue_manager.update_progress(job_id, percent=100, message="DL training complete")
+
+    n_success = sum(1 for r in results.values() if r.get('success'))
+    return {
+        'success': n_success > 0,
+        'results': results,
+        'models_trained': n_success,
+        'total_models': len(models_to_train),
+    }
+
+
 async def process_job(job: dict, db) -> dict:
     """Route job to appropriate processor."""
     job_type = job.get('job_type')
@@ -815,6 +880,7 @@ async def process_job(job: dict, db) -> dict:
         JobType.BACKTEST.value: process_backtest_job,
         JobType.CALIBRATION.value: process_calibration_job,
         JobType.CNN_TRAINING.value: process_cnn_training_job,
+        JobType.DL_TRAINING.value: process_dl_training_job,
     }
     
     processor = processors.get(job_type)

@@ -1524,6 +1524,43 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                 </div>
               </div>
 
+              {/* Phase 5: Deep Learning Models */}
+              <div className="mt-4 mb-4">
+                <h4 className="text-sm font-medium text-zinc-300 mb-2">Phase 5: Deep Learning Models</h4>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        toast.info('Starting DL model training (VAE + TFT + CNN-LSTM)...');
+                        const { data } = await api.post('/api/ai-modules/dl/train-all', { max_symbols: 500, epochs: 50 });
+                        if (data.success) {
+                          toast.success(`DL Training complete! ${data.models_trained}/3 models trained.`);
+                        } else {
+                          toast.warning(`DL Training: ${data.models_trained}/3 succeeded. Check logs for details.`);
+                        }
+                      } catch (e) {
+                        toast.error(`DL Training failed: ${e.message}`);
+                      }
+                    }}
+                    disabled={isTraining}
+                    className={`
+                      py-2 px-4 rounded-lg font-medium text-sm flex items-center gap-2 transition-all
+                      ${isTraining
+                        ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                      }
+                    `}
+                    data-testid="train-all-dl-btn"
+                    title="Train VAE Regime + TFT + CNN-LSTM"
+                  >
+                    <Brain className="w-4 h-4" /> Train All DL Models
+                  </button>
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  <span className="text-violet-400"><strong>DL Models:</strong> VAE Regime Detection, Temporal Fusion Transformer, CNN-LSTM Pattern Recognition</span>
+                </div>
+              </div>
+
               {/* Training Progress Panel - Shows during active training */}
               <AnimatePresence>
                 {isTraining && currentTimeframe && (

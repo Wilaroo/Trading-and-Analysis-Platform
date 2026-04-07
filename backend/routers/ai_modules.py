@@ -2016,3 +2016,167 @@ async def get_batch_validation_history(limit: int = 10):
     except Exception as e:
         logger.error(f"Error getting batch validation history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ====================================================================
+# Phase 5: Deep Learning Model Training Endpoints
+# ====================================================================
+
+class DLTrainRequest(BaseModel):
+    """Request for deep learning model training"""
+    max_symbols: Optional[int] = Field(default=500, description="Max symbols to train on")
+    epochs: Optional[int] = Field(default=50, description="Training epochs")
+    batch_size: Optional[int] = Field(default=256, description="Batch size")
+
+
+@router.post("/dl/train-vae-regime")
+async def train_vae_regime(request: DLTrainRequest = None):
+    """Train the VAE Regime Detection model on SPY + sector ETF data."""
+    try:
+        from services.ai_modules.vae_regime import VAERegimeModel
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        vae = VAERegimeModel(db=model_db)
+        result = await vae.train(
+            db=model_db,
+            epochs=request.epochs if request and request.epochs else 100,
+            batch_size=request.batch_size if request and request.batch_size else 256,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"VAE Regime training failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/dl/train-tft")
+async def train_tft(request: DLTrainRequest = None):
+    """Train the Temporal Fusion Transformer on multi-timeframe data."""
+    try:
+        from services.ai_modules.temporal_fusion_transformer import TFTModel
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        tft = TFTModel(db=model_db)
+        result = await tft.train(
+            db=model_db,
+            max_symbols=request.max_symbols if request and request.max_symbols else 500,
+            epochs=request.epochs if request and request.epochs else 50,
+            batch_size=request.batch_size if request and request.batch_size else 512,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TFT training failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/dl/train-cnn-lstm")
+async def train_cnn_lstm(request: DLTrainRequest = None):
+    """Train the CNN-LSTM temporal chart pattern model."""
+    try:
+        from services.ai_modules.cnn_lstm_model import CNNLSTMModel
+
+        model_db = _timeseries_ai._db if _timeseries_ai else None
+        if model_db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+
+        model = CNNLSTMModel(db=model_db)
+        result = await model.train(
+            db=model_db,
+            max_symbols=request.max_symbols if request and request.max_symbols else 200,
+            epochs=request.epochs if request and request.epochs else 30,
+            batch_size=request.batch_size if request and request.batch_size else 256,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CNN-LSTM training failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/dl/train-all")
+async def train_all_dl_models(request: DLTrainRequest = None):
+    """Train ALL Phase 5 deep learning models sequentially."""
+    model_db = _timeseries_ai._db if _timeseries_ai else None
+    if model_db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    results = {}
+    errors = []
+
+    # 1. VAE Regime (fastest — uses only SPY + sector ETFs)
+    try:
+        from services.ai_modules.vae_regime import VAERegimeModel
+        logger.info("[DL TRAIN ALL] Starting VAE Regime training...")
+        vae = VAERegimeModel(db=model_db)
+        results["vae_regime"] = await vae.train(db=model_db, epochs=100)
+    except Exception as e:
+        errors.append(f"VAE: {e}")
+        results["vae_regime"] = {"success": False, "error": str(e)}
+
+    # 2. TFT (medium — multi-timeframe data)
+    try:
+        from services.ai_modules.temporal_fusion_transformer import TFTModel
+        logger.info("[DL TRAIN ALL] Starting TFT training...")
+        tft = TFTModel(db=model_db)
+        max_syms = request.max_symbols if request and request.max_symbols else 500
+        results["tft"] = await tft.train(db=model_db, max_symbols=max_syms, epochs=50)
+    except Exception as e:
+        errors.append(f"TFT: {e}")
+        results["tft"] = {"success": False, "error": str(e)}
+
+    # 3. CNN-LSTM (longest — sequential pattern extraction)
+    try:
+        from services.ai_modules.cnn_lstm_model import CNNLSTMModel
+        logger.info("[DL TRAIN ALL] Starting CNN-LSTM training...")
+        cnn_lstm = CNNLSTMModel(db=model_db)
+        max_syms = request.max_symbols if request and request.max_symbols else 200
+        results["cnn_lstm"] = await cnn_lstm.train(db=model_db, max_symbols=max_syms, epochs=30)
+    except Exception as e:
+        errors.append(f"CNN-LSTM: {e}")
+        results["cnn_lstm"] = {"success": False, "error": str(e)}
+
+    return {
+        "success": len(errors) == 0,
+        "results": results,
+        "errors": errors if errors else None,
+        "models_trained": sum(1 for r in results.values() if r.get("success")),
+        "total_models": 3,
+    }
+
+
+@router.get("/dl/status")
+async def dl_model_status():
+    """Get status of all Phase 5 deep learning models."""
+    model_db = _timeseries_ai._db if _timeseries_ai else None
+    if model_db is None:
+        return {"models": {}, "total_loaded": 0, "expected_models": []}
+
+    status = {}
+    try:
+        docs = list(model_db["dl_models"].find({}, {"_id": 0, "model_data": 0}))
+        for doc in docs:
+            status[doc.get("name", "unknown")] = {
+                "model_type": doc.get("model_type"),
+                "version": doc.get("version"),
+                "accuracy": doc.get("accuracy"),
+                "training_samples": doc.get("training_samples"),
+                "updated_at": doc.get("updated_at"),
+            }
+    except Exception as e:
+        logger.error(f"Error fetching DL model status: {e}")
+
+    return {
+        "models": status,
+        "total_loaded": len(status),
+        "expected_models": ["vae_regime_detector", "tft_multi_timeframe", "cnn_lstm_chart"],
+    }

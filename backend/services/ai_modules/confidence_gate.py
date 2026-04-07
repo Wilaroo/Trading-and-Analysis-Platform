@@ -14,6 +14,9 @@ Scoring Architecture (ADDITIVE — base 0, earn confirmation points):
     Layer 6: Quality Score (max +10 / floor -5)
     Layer 7: Learning Loop Feedback (max +8 / floor -5)
     Layer 8: CNN Visual Pattern (max +12 / floor -5)
+    Layer 9: TFT Multi-Timeframe (max +12 / floor -5)   [Phase 5 DL]
+    Layer 10: VAE Regime Detection (max +8 / floor -5)   [Phase 5 DL]
+    Layer 11: CNN-LSTM Temporal (max +10 / floor -5)     [Phase 5 DL]
 
 Decision Thresholds:
     >= 55 pts  → GO (full size)
@@ -140,14 +143,14 @@ class ConfidenceGate:
         elif regime_state == "CONFIRMED_UP" and direction == "short":
             confidence_points -= 10  # Floor: max -10 for regime
             position_multiplier *= 0.7
-            reasoning.append(f"Regime BULLISH — against short entry (-10, size -30%)")
+            reasoning.append("Regime BULLISH — against short entry (-10, size -30%)")
         elif regime_state == "CONFIRMED_DOWN" and direction == "long":
             confidence_points -= 10  # Floor: max -10 for regime
             position_multiplier *= 0.7
             reasoning.append(f"Regime BEARISH (score {regime_score}) — against long entry (-10, size -30%)")
         elif regime_state == "CONFIRMED_DOWN" and direction == "short":
             confidence_points += 15
-            reasoning.append(f"Regime BEARISH — aligned with short entry (+15)")
+            reasoning.append("Regime BEARISH — aligned with short entry (+15)")
         elif regime_state in ("HOLD", "NEUTRAL"):
             # Neutral regime — moderate boost if score leans our way
             if regime_score >= 60 and direction == "long":
@@ -327,9 +330,110 @@ class ConfidenceGate:
                     f"CNN visual analysis: neutral ({cnn_win_prob:.0%}) — no strong visual signal"
                 )
 
-        # --- 5. DETERMINE DECISION (Additive thresholds) ---
+        # --- 5a. TFT MULTI-TIMEFRAME SIGNAL (max +12 / floor -5) ---
+        tft_signal = await self._get_tft_signal(symbol, direction)
+        if tft_signal.get("has_prediction"):
+            tft_direction = tft_signal["direction"]
+            tft_confidence = tft_signal["confidence"]
+            tft_model_acc = tft_signal.get("model_accuracy", 0.5)
+
+            trade_is_long = direction.lower() in ("long", "buy")
+            tft_agrees = (
+                (trade_is_long and tft_direction == "up") or
+                (not trade_is_long and tft_direction == "down")
+            )
+
+            accuracy_weight = min(1.0, max(0.5, (tft_model_acc - 0.45) / 0.2))
+
+            if tft_agrees and tft_confidence >= 0.6:
+                pts = int(12 * accuracy_weight)
+                confidence_points += pts
+                tf_info = tft_signal.get("timeframe_weights", {})
+                top_tf = max(tf_info, key=tf_info.get) if tf_info else "unknown"
+                reasoning.append(
+                    f"TFT multi-timeframe CONFIRMS {direction.upper()} "
+                    f"({tft_confidence:.0%} conf, top TF: {top_tf}) (+{pts})"
+                )
+            elif tft_agrees:
+                pts = int(5 * accuracy_weight)
+                confidence_points += pts
+                reasoning.append(
+                    f"TFT leans {direction.upper()} ({tft_confidence:.0%} conf) (+{pts})"
+                )
+            elif tft_direction == "flat":
+                confidence_points -= 2
+                reasoning.append(f"TFT sees NO EDGE (flat, {tft_confidence:.0%} conf) (-2)")
+            else:
+                confidence_points -= 5
+                reasoning.append(
+                    f"TFT DISAGREES — predicts {tft_direction.upper()} "
+                    f"vs proposed {direction.upper()} (-5)"
+                )
+
+        # --- 5b. VAE REGIME SIGNAL (max +8 / floor -5) ---
+        vae_signal = await self._get_vae_regime_signal(direction)
+        if vae_signal.get("has_prediction"):
+            vae_regime = vae_signal["regime"]
+            vae_confidence = vae_signal["confidence"]
+
+            trade_is_long = direction.lower() in ("long", "buy")
+
+            if vae_regime == "bull_trending" and trade_is_long:
+                pts = min(8, int(8 * vae_confidence))
+                confidence_points += pts
+                reasoning.append(f"VAE detects BULL TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
+            elif vae_regime == "bear_trending" and not trade_is_long:
+                pts = min(8, int(8 * vae_confidence))
+                confidence_points += pts
+                reasoning.append(f"VAE detects BEAR TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
+            elif vae_regime == "momentum_surge":
+                confidence_points += 5
+                reasoning.append(f"VAE detects MOMENTUM SURGE ({vae_confidence:.0%} conf) — high conviction (+5)")
+            elif vae_regime == "high_volatility":
+                confidence_points -= 5
+                position_multiplier *= 0.85
+                reasoning.append(f"VAE detects HIGH VOLATILITY regime ({vae_confidence:.0%}) — reducing exposure (-5, size -15%)")
+            elif vae_regime == "mean_reverting":
+                reasoning.append(f"VAE detects MEAN REVERTING regime ({vae_confidence:.0%}) — neutral")
+            elif (vae_regime == "bull_trending" and not trade_is_long) or (vae_regime == "bear_trending" and trade_is_long):
+                confidence_points -= 5
+                reasoning.append(f"VAE regime {vae_regime.upper()} AGAINST {direction.upper()} (-5)")
+
+        # --- 5c. CNN-LSTM TEMPORAL SIGNAL (max +10 / floor -5) ---
+        cnn_lstm_signal = await self._get_cnn_lstm_signal(symbol, direction)
+        if cnn_lstm_signal.get("has_prediction"):
+            lstm_direction = cnn_lstm_signal["direction"]
+            lstm_win_prob = cnn_lstm_signal["win_probability"]
+            lstm_confidence = cnn_lstm_signal["confidence"]
+
+            trade_is_long = direction.lower() in ("long", "buy")
+            lstm_agrees = (
+                (trade_is_long and lstm_direction == "up") or
+                (not trade_is_long and lstm_direction == "down")
+            )
+
+            if lstm_agrees and lstm_win_prob >= 0.6:
+                confidence_points += 10
+                reasoning.append(
+                    f"CNN-LSTM temporal: HIGH win prob ({lstm_win_prob:.0%}), "
+                    f"pattern evolving favorably (+10)"
+                )
+            elif lstm_agrees and lstm_win_prob >= 0.5:
+                confidence_points += 5
+                reasoning.append(f"CNN-LSTM temporal: moderate ({lstm_win_prob:.0%}) (+5)")
+            elif not lstm_agrees and lstm_win_prob < 0.4:
+                confidence_points -= 5
+                position_multiplier *= 0.9
+                reasoning.append(
+                    f"CNN-LSTM temporal: pattern UNFAVORABLE ({lstm_win_prob:.0%}) "
+                    f"predicts {lstm_direction.upper()} (-5, size -10%)"
+                )
+            else:
+                reasoning.append(f"CNN-LSTM temporal: neutral ({lstm_win_prob:.0%})")
+
+        # --- 6. DETERMINE DECISION (Additive thresholds) ---
         # Additive scoring: base 0, earn points from confirmation
-        # Max theoretical: ~85 pts (regime 20 + AI 10 + consensus 15 + live 15 + cross 5 + quality 10 + learning 8 + CNN 12)
+        # Max theoretical: ~115 pts (regime 20 + AI 10 + consensus 15 + live 15 + cross 5 + quality 10 + learning 8 + CNN 12 + TFT 12 + VAE 8 + CNN-LSTM 10)
         # Thresholds calibrated for additive scale:
         confidence_score = max(0, min(100, confidence_points))
 
@@ -367,6 +471,9 @@ class ConfidenceGate:
             "learning_feedback": learning_adjustment if learning_adjustment.get("has_data") else None,
             "cross_model_agreement": cross_model_agreement,
             "cnn_signal": cnn_signal if cnn_signal.get("has_prediction") else None,
+            "tft_signal": tft_signal if tft_signal.get("has_prediction") else None,
+            "vae_regime_signal": vae_signal if vae_signal.get("has_prediction") else None,
+            "cnn_lstm_signal": cnn_lstm_signal if cnn_lstm_signal.get("has_prediction") else None,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -780,6 +887,135 @@ class ConfidenceGate:
 
         except Exception as e:
             logger.debug(f"CNN signal failed (non-critical): {e}")
+            return result
+
+    async def _get_tft_signal(self, symbol: str, direction: str) -> Dict[str, Any]:
+        """Get TFT multi-timeframe prediction."""
+        result = {"has_prediction": False}
+        try:
+            import asyncio
+            from services.ai_modules.temporal_fusion_transformer import TFTModel
+
+            if self._db is None:
+                return result
+
+            def _run_tft():
+                try:
+                    tft = TFTModel(db=self._db)
+                    if not tft.load_model():
+                        return None
+
+                    # Gather multi-timeframe bars for this symbol
+                    bars_by_tf = {}
+                    for tf in ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]:
+                        cursor = self._db["ib_historical_data"].find(
+                            {"symbol": symbol, "bar_size": tf},
+                            {"_id": 0, "close": 1, "high": 1, "low": 1, "volume": 1, "date": 1}
+                        ).sort("date", -1).limit(200)
+                        bars = list(cursor)
+                        if bars:
+                            bars.reverse()  # chronological order
+                            bars_by_tf[tf] = bars
+
+                    if "1 day" not in bars_by_tf:
+                        return None
+
+                    return tft.predict(bars_by_tf, symbol)
+                except Exception as e:
+                    logger.debug(f"TFT inference failed for {symbol}: {e}")
+                    return None
+
+            loop = asyncio.get_event_loop()
+            prediction = await loop.run_in_executor(None, _run_tft)
+            return prediction if prediction else result
+
+        except Exception as e:
+            logger.debug(f"TFT signal failed (non-critical): {e}")
+            return result
+
+    async def _get_vae_regime_signal(self, direction: str) -> Dict[str, Any]:
+        """Get VAE regime detection signal."""
+        result = {"has_prediction": False}
+        try:
+            import asyncio
+            from services.ai_modules.vae_regime import VAERegimeModel
+
+            if self._db is None:
+                return result
+
+            def _run_vae():
+                try:
+                    vae = VAERegimeModel(db=self._db)
+                    if not vae.load_model():
+                        return None
+
+                    # Load SPY + sector ETF bars
+                    bars_by_symbol = {}
+                    for sym in ["SPY", "QQQ", "IWM", "XLK", "XLF", "XLE"]:
+                        cursor = self._db["ib_historical_data"].find(
+                            {"symbol": sym, "bar_size": "1 day"},
+                            {"_id": 0, "close": 1, "high": 1, "low": 1, "volume": 1, "date": 1}
+                        ).sort("date", -1).limit(100)
+                        bars = list(cursor)
+                        if bars:
+                            bars.reverse()
+                            bars_by_symbol[sym] = bars
+
+                    if "SPY" not in bars_by_symbol:
+                        return None
+
+                    prediction = vae.predict(bars_by_symbol)
+                    if prediction.get("regime") != "unknown":
+                        prediction["has_prediction"] = True
+                    return prediction
+                except Exception as e:
+                    logger.debug(f"VAE regime inference failed: {e}")
+                    return None
+
+            loop = asyncio.get_event_loop()
+            prediction = await loop.run_in_executor(None, _run_vae)
+            return prediction if prediction else result
+
+        except Exception as e:
+            logger.debug(f"VAE regime signal failed (non-critical): {e}")
+            return result
+
+    async def _get_cnn_lstm_signal(self, symbol: str, direction: str) -> Dict[str, Any]:
+        """Get CNN-LSTM temporal pattern signal."""
+        result = {"has_prediction": False}
+        try:
+            import asyncio
+            from services.ai_modules.cnn_lstm_model import CNNLSTMModel
+
+            if self._db is None:
+                return result
+
+            def _run_cnn_lstm():
+                try:
+                    model = CNNLSTMModel(db=self._db)
+                    if not model.load_model():
+                        return None
+
+                    cursor = self._db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0, "close": 1, "high": 1, "low": 1, "volume": 1, "date": 1}
+                    ).sort("date", -1).limit(200)
+                    bars = list(cursor)
+                    if not bars or len(bars) < 60:
+                        return None
+
+                    bars.reverse()
+                    return model.predict(bars, symbol)
+                except Exception as e:
+                    logger.debug(f"CNN-LSTM inference failed for {symbol}: {e}")
+                    return None
+
+            loop = asyncio.get_event_loop()
+            prediction = await loop.run_in_executor(None, _run_cnn_lstm)
+            return prediction if prediction else result
+
+        except Exception as e:
+            logger.debug(f"CNN-LSTM signal failed (non-critical): {e}")
             return result
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):
