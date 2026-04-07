@@ -314,10 +314,14 @@ class TimeSeriesGBM:
             return False
             
         try:
-            # Serialize XGBoost model to JSON bytes
-            buffer = io.BytesIO()
-            self._model.save_model(buffer)
-            model_bytes = buffer.getvalue()
+            # Serialize XGBoost model to JSON via temp file (save_model requires file path)
+            import tempfile
+            import os as _os
+            tmp_path = tempfile.mktemp(suffix='.json')
+            self._model.save_model(tmp_path)
+            with open(tmp_path, 'rb') as f:
+                model_bytes = f.read()
+            _os.unlink(tmp_path)
             model_data = base64.b64encode(model_bytes).decode("utf-8")
             new_accuracy = self._metrics.accuracy if self._metrics else 0
             
