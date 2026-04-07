@@ -401,6 +401,75 @@ class TimeSeriesGBM:
             logger.warning(f"Could not fetch model history: {e}")
             return []
             
+    # --- Feature Caching (Phase 3) ---
+    FEATURE_CACHE_COLLECTION = "feature_cache"
+    
+    def _get_feature_cache_key(self, symbol: str, bar_size: str = "default") -> str:
+        """Generate a cache key for a symbol's features"""
+        return f"{symbol}_{bar_size}_{self.forecast_horizon}"
+    
+    def _save_features_to_cache(self, symbol: str, features: List[List[float]], targets: List[int], bar_size: str = "default"):
+        """Save precomputed features to MongoDB for reuse across training cycles"""
+        if self._db is None:
+            return
+        try:
+            import base64
+            import json
+            cache_key = self._get_feature_cache_key(symbol, bar_size)
+            # Store as compressed JSON bytes
+            data = json.dumps({"features": features, "targets": targets}).encode()
+            encoded = base64.b64encode(data).decode("utf-8")
+            self._db[self.FEATURE_CACHE_COLLECTION].update_one(
+                {"cache_key": cache_key},
+                {"$set": {
+                    "cache_key": cache_key,
+                    "symbol": symbol,
+                    "bar_size": bar_size,
+                    "forecast_horizon": self.forecast_horizon,
+                    "num_features": len(self._feature_names),
+                    "num_samples": len(features),
+                    "data": encoded,
+                    "cached_at": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+        except Exception as e:
+            logger.debug(f"Feature cache save failed for {symbol}: {e}")
+    
+    def _load_features_from_cache(self, symbol: str, bar_size: str = "default", max_age_hours: int = 168) -> Optional[dict]:
+        """Load precomputed features from cache. Returns None if stale or missing.
+        Default max_age is 168 hours (1 week) — features only need recomputation
+        when new bars are collected or feature engineering changes."""
+        if self._db is None:
+            return None
+        try:
+            import json
+            cache_key = self._get_feature_cache_key(symbol, bar_size)
+            doc = self._db[self.FEATURE_CACHE_COLLECTION].find_one(
+                {"cache_key": cache_key},
+                {"_id": 0}
+            )
+            if not doc or "data" not in doc:
+                return None
+            # Check staleness
+            cached_at = doc.get("cached_at", "")
+            if cached_at:
+                try:
+                    cache_time = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                    age_hours = (datetime.now(timezone.utc) - cache_time).total_seconds() / 3600
+                    if age_hours > max_age_hours:
+                        return None
+                except Exception:
+                    pass
+            # Verify feature count matches current feature set
+            if doc.get("num_features", 0) != len(self._feature_names):
+                return None
+            data = json.loads(base64.b64decode(doc["data"]))
+            return data
+        except Exception as e:
+            logger.debug(f"Feature cache load failed for {symbol}: {e}")
+            return None
+            
     def train(
         self,
         bars_by_symbol: Dict[str, List[Dict]],
@@ -422,18 +491,32 @@ class TimeSeriesGBM:
         """
         logger.info(f"Training model on {len(bars_by_symbol)} symbols...")
         
-        # Extract features for all symbols
+        # Extract features for all symbols (with caching)
         all_features = []
         all_targets = []
+        cache_hits = 0
+        cache_misses = 0
         
         symbols_processed = 0
         total_symbols = len(bars_by_symbol)
         for symbol, bars in bars_by_symbol.items():
             symbols_processed += 1
             if symbols_processed % 10 == 0 or symbols_processed == total_symbols:
-                logger.info(f"[Feature extraction] {symbols_processed}/{total_symbols} symbols processed ({len(all_features)} samples so far)")
+                logger.info(f"[Feature extraction] {symbols_processed}/{total_symbols} symbols processed ({len(all_features)} samples so far, cache: {cache_hits} hits / {cache_misses} misses)")
             if len(bars) < 50 + self.forecast_horizon:
                 continue
+            
+            # Try loading from feature cache first
+            cached = self._load_features_from_cache(symbol)
+            if cached and cached.get("features") and cached.get("targets"):
+                all_features.extend(cached["features"])
+                all_targets.extend(cached["targets"])
+                cache_hits += 1
+                continue
+            
+            cache_misses += 1
+            symbol_features = []
+            symbol_targets = []
             
             # Bars are in chronological order (oldest first)
             # We need 50 bars for features + forecast_horizon bars for target
@@ -459,20 +542,21 @@ class TimeSeriesGBM:
                     ]
                     
                     # Calculate forward-looking target
-                    # Current price is the last bar in window (most recent in window)
                     current_price = bars[i + 49]["close"]
-                    # Future price is forecast_horizon bars after the window
                     future_price = bars[i + 49 + self.forecast_horizon]["close"]
-                    
-                    # Calculate return (positive = price went up)
                     target_return = (future_price - current_price) / current_price
-                    
-                    # Binary classification: up (>0%) vs not-up
-                    # Using 0% threshold for more balanced classes
                     target = 1 if target_return > 0 else 0
                     
-                    all_features.append(feature_vector)
-                    all_targets.append(target)
+                    symbol_features.append(feature_vector)
+                    symbol_targets.append(target)
+            
+            if symbol_features:
+                all_features.extend(symbol_features)
+                all_targets.extend(symbol_targets)
+                # Save to cache for next training cycle
+                self._save_features_to_cache(symbol, symbol_features, symbol_targets)
+        
+        logger.info(f"Feature cache stats: {cache_hits} hits, {cache_misses} computed fresh")
                     
         if len(all_features) < 100:
             logger.warning(f"Insufficient training data: {len(all_features)} samples")
@@ -480,9 +564,9 @@ class TimeSeriesGBM:
             
         logger.info(f"Extracted {len(all_features)} training samples")
         
-        # Convert to numpy
-        X = np.array(all_features)
-        y = np.array(all_targets)
+        # Convert to numpy (float32 to halve memory on 128GB Spark)
+        X = np.array(all_features, dtype=np.float32)
+        y = np.array(all_targets, dtype=np.float32)
         
         # Log class distribution
         n_up = np.sum(y == 1)

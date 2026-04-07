@@ -85,9 +85,9 @@ class TestPhase1StalenessCheck:
     def test_staleness_stale_data(self):
         from services.realtime_technical_service import RealTimeTechnicalService
         svc = RealTimeTechnicalService()
-        # Stale data (48 hours old)
-        bars = [{"timestamp": (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()}]
-        assert svc._check_staleness(bars, max_age_hours=24) is True
+        # Very stale data (2 weeks old = >3 trading days)
+        bars = [{"timestamp": (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()}]
+        assert svc._check_staleness(bars) is True
 
     def test_staleness_no_data(self):
         from services.realtime_technical_service import RealTimeTechnicalService

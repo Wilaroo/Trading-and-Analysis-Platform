@@ -581,10 +581,10 @@ class EnhancedBackgroundScanner:
         self._scan_task: Optional[asyncio.Task] = None
         
         # Optimized configuration for 200+ symbols
-        self._scan_interval = 60  # seconds between full scans
-        self._symbols_per_batch = 10  # Increased for speed
-        self._batch_delay = 1  # Reduced delay
-        self._min_scan_interval = 30
+        self._scan_interval = 15  # Base interval between scan cycles (seconds)
+        self._symbols_per_batch = 100  # Process 100 symbols per batch (up from 10)
+        self._batch_delay = 0.1  # 100ms delay between batches (down from 1s)
+        self._min_scan_interval = 10
         
         # RVOL pre-filter threshold
         self._min_rvol_filter = 0.8  # Skip stocks with RVOL < 0.8
@@ -594,8 +594,21 @@ class EnhancedBackgroundScanner:
         # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
         self._min_adv_general = 100_000      # Min ADV for general/swing setups
         self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups
+        self._min_adv_investment = 50_000    # Min ADV for investment tier
         self._adv_cache: Dict[str, Tuple[int, datetime]] = {}  # Cache ADV values with timestamp
         self._adv_cache_ttl = 900  # 15 minutes (reduced from 1 hour for faster re-checks)
+        
+        # --- Tiered Scanning System ---
+        # Symbols are classified into 3 tiers based on ADV, each scanned at different frequencies
+        # Tier 1 (Intraday): ADV ≥ 500K → scanned every cycle (~15s)
+        # Tier 2 (Swing):    ADV ≥ 100K → scanned every 8th cycle (~2 min)
+        # Tier 3 (Investment): ADV ≥ 50K → scanned at 11:00 AM and 3:45 PM ET only
+        self._tier_cache: Dict[str, str] = {}  # symbol -> "intraday" | "swing" | "investment"
+        self._tier_cache_ttl = 3600  # Reclassify every hour
+        self._tier_cache_time: Optional[datetime] = None
+        self._swing_scan_frequency = 8  # Every 8th cycle (~2 min at 15s base)
+        self._investment_scan_times = [(11, 0), (15, 45)]  # 11:00 AM ET, 3:45 PM ET
+        self._last_investment_scan_hour = -1  # Track to avoid duplicate investment scans
         
         # Symbol validation - known invalid/illiquid symbols that pass through due to data errors
         # These are symbols that should NEVER generate alerts
@@ -1749,13 +1762,14 @@ class EnhancedBackgroundScanner:
     
     async def _run_optimized_scan(self):
         """
-        Run optimized scan with ADV as FIRST checkpoint.
+        Run optimized scan with ADV as FIRST checkpoint and tiered frequency.
         
         Flow:
         1. Get candidate symbols from wave scanner
-        2. FIRST FILTER: Check ADV (skip if < minimum)
-        3. SECOND FILTER: Check RVOL (skip if < threshold)
-        4. Only then: Get full snapshot and run setup checks
+        2. FIRST FILTER: Check ADV (skip if < minimum investment threshold)
+        3. TIER FILTER: Select symbols based on scan frequency tier
+        4. SECOND FILTER: Check RVOL (skip if < threshold)
+        5. Only then: Get full snapshot and run setup checks
         """
         # Reset counters
         self._symbols_skipped_rvol = 0
@@ -1767,23 +1781,27 @@ class EnhancedBackgroundScanner:
         # FIRST CHECKPOINT: Pre-filter by ADV before ANY expensive operations
         adv_filtered_symbols = await self._prefilter_by_adv(all_candidates)
         
-        self._symbols_scanned_last = len(adv_filtered_symbols)
+        # TIER FILTER: Select symbols for THIS cycle based on ADV tier
+        tiered_symbols = self._get_symbols_for_cycle(adv_filtered_symbols)
+        
+        self._symbols_scanned_last = len(tiered_symbols)
         
         logger.debug(
-            f"Scanning {len(adv_filtered_symbols)} symbols "
-            f"(ADV filtered from {len(all_candidates)}, skipped {self._symbols_skipped_adv})"
+            f"Scanning {len(tiered_symbols)} symbols this cycle "
+            f"(from {len(adv_filtered_symbols)} ADV-qualified, {len(all_candidates)} total, "
+            f"skipped ADV={self._symbols_skipped_adv})"
         )
         
         # Scan in batches with concurrent processing
-        for i in range(0, len(adv_filtered_symbols), self._symbols_per_batch):
-            batch = adv_filtered_symbols[i:i + self._symbols_per_batch]
+        for i in range(0, len(tiered_symbols), self._symbols_per_batch):
+            batch = tiered_symbols[i:i + self._symbols_per_batch]
             
             # Process batch concurrently
             tasks = [self._scan_symbol_all_setups(symbol) for symbol in batch]
             await asyncio.gather(*tasks, return_exceptions=True)
             
             # Small delay between batches
-            if i + self._symbols_per_batch < len(adv_filtered_symbols):
+            if i + self._symbols_per_batch < len(tiered_symbols):
                 await asyncio.sleep(self._batch_delay)
     
     async def _prefilter_by_adv(self, symbols: List[str]) -> List[str]:
@@ -1825,7 +1843,7 @@ class EnhancedBackgroundScanner:
                 cached_adv, cached_time = self._adv_cache[symbol]
                 if (now - cached_time).total_seconds() < self._adv_cache_ttl:
                     # Use cached value
-                    if cached_adv >= self._min_adv_general:
+                    if cached_adv >= self._min_adv_investment:  # Investment tier minimum (50K)
                         qualified_symbols.append(symbol)
                     else:
                         self._symbols_skipped_adv += 1
@@ -1844,7 +1862,7 @@ class EnhancedBackgroundScanner:
                     adv = adv_data.get(symbol, 0)
                     self._adv_cache[symbol] = (adv, now)
                     
-                    if adv >= self._min_adv_general:
+                    if adv >= self._min_adv_investment:  # Investment tier minimum (50K)
                         qualified_symbols.append(symbol)
                     else:
                         self._symbols_skipped_adv += 1
@@ -1868,6 +1886,91 @@ class EnhancedBackgroundScanner:
         
         return qualified_symbols
     
+
+    def _classify_symbol_tier(self, symbol: str) -> str:
+        """Classify a symbol into an ADV-based scan tier.
+        Returns: 'intraday' | 'swing' | 'investment'"""
+        adv = 0
+        if symbol in self._adv_cache:
+            adv, _ = self._adv_cache[symbol]
+        elif symbol in self._known_liquid_symbols:
+            adv = self._known_liquid_adv.get(symbol, self._known_liquid_default_adv)
+        
+        if adv >= self._min_adv_intraday:
+            return "intraday"
+        elif adv >= self._min_adv_general:
+            return "swing"
+        else:
+            return "investment"
+    
+    def _rebuild_tier_cache(self, symbols: List[str]):
+        """Rebuild the tier classification cache for all qualified symbols"""
+        self._tier_cache.clear()
+        for symbol in symbols:
+            self._tier_cache[symbol] = self._classify_symbol_tier(symbol)
+        self._tier_cache_time = datetime.now(timezone.utc)
+        
+        tier_counts = {"intraday": 0, "swing": 0, "investment": 0}
+        for tier in self._tier_cache.values():
+            tier_counts[tier] += 1
+        logger.info(
+            f"Tier classification: {tier_counts['intraday']} intraday, "
+            f"{tier_counts['swing']} swing, {tier_counts['investment']} investment"
+        )
+    
+    def _is_investment_scan_window(self) -> bool:
+        """Check if current time is within an investment tier scan window.
+        Investment symbols only scan at 11:00 AM ET and 3:45 PM ET."""
+        try:
+            from zoneinfo import ZoneInfo
+            et_now = datetime.now(ZoneInfo("America/New_York"))
+            current_hour = et_now.hour
+            current_minute = et_now.minute
+            
+            for scan_hour, scan_minute in self._investment_scan_times:
+                # Allow a 5-minute window around scheduled time
+                if current_hour == scan_hour and abs(current_minute - scan_minute) <= 5:
+                    # Avoid duplicate scans in the same window
+                    window_key = scan_hour * 100 + scan_minute
+                    if self._last_investment_scan_hour != window_key:
+                        self._last_investment_scan_hour = window_key
+                        return True
+            return False
+        except Exception:
+            return False
+    
+    def _get_symbols_for_cycle(self, all_qualified: List[str]) -> List[str]:
+        """Get the symbols to scan THIS cycle based on tiered frequencies.
+        
+        Tier 1 (Intraday, ADV ≥500K): Every cycle (~15s)
+        Tier 2 (Swing, ADV ≥100K): Every 8th cycle (~2 min)
+        Tier 3 (Investment, ADV ≥50K): At 11:00 AM and 3:45 PM ET only
+        """
+        # Rebuild tier cache if stale
+        now = datetime.now(timezone.utc)
+        if (self._tier_cache_time is None or 
+            (now - self._tier_cache_time).total_seconds() > self._tier_cache_ttl):
+            self._rebuild_tier_cache(all_qualified)
+        
+        symbols_this_cycle = []
+        
+        for symbol in all_qualified:
+            tier = self._tier_cache.get(symbol, self._classify_symbol_tier(symbol))
+            
+            if tier == "intraday":
+                # Always scan intraday symbols
+                symbols_this_cycle.append(symbol)
+            elif tier == "swing":
+                # Scan swing symbols every N-th cycle
+                if self._scan_count % self._swing_scan_frequency == 0:
+                    symbols_this_cycle.append(symbol)
+            elif tier == "investment":
+                # Only scan at scheduled ET times
+                if self._is_investment_scan_window():
+                    symbols_this_cycle.append(symbol)
+        
+        return symbols_this_cycle
+
     async def _batch_fetch_adv_smart(self, symbols: List[str]) -> Dict[str, int]:
         """
         Fetch ADV using IB-only data sources in priority order:

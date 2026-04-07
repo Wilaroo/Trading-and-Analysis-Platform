@@ -1,15 +1,27 @@
 """
-AI Confidence Gate
-==================
+AI Confidence Gate — Additive Ensemble Scoring System (v2)
+==========================================================
 The pre-trade intelligence layer that SentCom checks before every trade.
 
 Flow: Setup Detected → Confidence Gate → Position Sizing → Execute or Skip → Log Decision
 
-The gate evaluates:
-1. Current market regime (rule-based + AI classification)
-2. Model consensus for this setup type
-3. Position sizing recommendation based on regime + confidence
-4. GO / REDUCE / SKIP decision with full reasoning
+Scoring Architecture (ADDITIVE — base 0, earn confirmation points):
+    Layer 1: Regime Check (max +20 / floor -10)
+    Layer 2: AI Regime (max +10 / floor -5)
+    Layer 3: Model Consensus (max +15 / floor -5)
+    Layer 4: Live Model Prediction (max +15 / floor -5, weighted by accuracy)
+    Layer 5: Cross-Model Agreement (max +5 / floor -5)
+    Layer 6: Quality Score (max +10 / floor -5)
+    Layer 7: Learning Loop Feedback (max +8 / floor -5)
+    Layer 8: CNN Visual Pattern (max +12 / floor -5)
+
+Decision Thresholds:
+    >= 55 pts  → GO (full size)
+    >= 30 pts  → REDUCE (60% size)
+    <  30 pts  → SKIP
+
+Key Design: Adding more DL models creates more confirmation signals, not more kill switches.
+Floor protection (-10 max per gate) prevents any single factor from vetoing a trade.
 
 Also tracks SentCom's overall "trading mode" (Aggressive/Cautious/Defensive)
 and maintains a decision log for the UI.
@@ -87,7 +99,7 @@ class ConfidenceGate:
             }
         """
         reasoning = []
-        confidence_points = 50  # Start neutral
+        confidence_points = 0  # ADDITIVE: Start at 0, earn confirmation points
         position_multiplier = 1.0
 
         # Reset daily stats if new day
@@ -101,7 +113,7 @@ class ConfidenceGate:
         self._stats["total_evaluated"] += 1
         self._stats["today_evaluated"] += 1
 
-        # --- 1. REGIME CHECK ---
+        # --- 1. REGIME CHECK (max +20 / floor -10) ---
         regime_state = "HOLD"
         regime_score = 50
         ai_regime = "unknown"
@@ -121,37 +133,53 @@ class ConfidenceGate:
         except Exception:
             pass
 
-        # Regime contribution to confidence
+        # Regime contribution — graduated scale
         if regime_state == "CONFIRMED_UP" and direction == "long":
             confidence_points += 20
-            reasoning.append(f"Regime BULLISH (score {regime_score}) — aligned with long entry")
+            reasoning.append(f"Regime BULLISH (score {regime_score}) — strongly aligned with long (+20)")
+        elif regime_state == "CONFIRMED_UP" and direction == "short":
+            confidence_points -= 10  # Floor: max -10 for regime
+            position_multiplier *= 0.7
+            reasoning.append(f"Regime BULLISH — against short entry (-10, size -30%)")
         elif regime_state == "CONFIRMED_DOWN" and direction == "long":
-            confidence_points -= 25
-            position_multiplier *= 0.5
-            reasoning.append(f"Regime BEARISH (score {regime_score}) — against long entry, halving size")
+            confidence_points -= 10  # Floor: max -10 for regime
+            position_multiplier *= 0.7
+            reasoning.append(f"Regime BEARISH (score {regime_score}) — against long entry (-10, size -30%)")
         elif regime_state == "CONFIRMED_DOWN" and direction == "short":
             confidence_points += 15
-            reasoning.append("Regime BEARISH — aligned with short entry")
-        elif regime_state == "CONFIRMED_UP" and direction == "short":
-            confidence_points -= 20
-            position_multiplier *= 0.5
-            reasoning.append("Regime BULLISH — against short entry, halving size")
+            reasoning.append(f"Regime BEARISH — aligned with short entry (+15)")
+        elif regime_state in ("HOLD", "NEUTRAL"):
+            # Neutral regime — moderate boost if score leans our way
+            if regime_score >= 60 and direction == "long":
+                confidence_points += 10
+                reasoning.append(f"Regime leans bullish (score {regime_score}) — moderate alignment (+10)")
+            elif regime_score <= 40 and direction == "short":
+                confidence_points += 10
+                reasoning.append(f"Regime leans bearish (score {regime_score}) — moderate alignment (+10)")
+            else:
+                reasoning.append(f"Regime NEUTRAL (score {regime_score}) — no directional confirmation")
         else:
-            reasoning.append(f"Regime NEUTRAL (score {regime_score}) — no strong directional bias")
+            reasoning.append(f"Regime state '{regime_state}' (score {regime_score})")
 
-        # AI regime refinement
+        # AI regime refinement (max +10 / floor -5)
         if ai_regime == "high_vol":
-            confidence_points -= 10
-            position_multiplier *= 0.7
-            reasoning.append("AI detects HIGH VOLATILITY regime — reducing exposure 30%")
+            confidence_points -= 5  # Floor: max -5 for volatility
+            position_multiplier *= 0.8
+            reasoning.append("AI detects HIGH VOLATILITY — reducing exposure 20% (-5)")
         elif ai_regime == "bull_trend" and direction == "long":
             confidence_points += 10
-            reasoning.append("AI confirms BULL TREND — additional confidence for longs")
+            reasoning.append("AI confirms BULL TREND — confirmation for longs (+10)")
         elif ai_regime == "bear_trend" and direction == "short":
             confidence_points += 10
-            reasoning.append("AI confirms BEAR TREND — additional confidence for shorts")
+            reasoning.append("AI confirms BEAR TREND — confirmation for shorts (+10)")
+        elif ai_regime == "bull_trend" and direction == "short":
+            confidence_points -= 5  # Floor
+            reasoning.append("AI sees BULL TREND — caution on shorts (-5)")
+        elif ai_regime == "bear_trend" and direction == "long":
+            confidence_points -= 5  # Floor
+            reasoning.append("AI sees BEAR TREND — caution on longs (-5)")
 
-        # --- 2. MODEL CONSENSUS ---
+        # --- 2. MODEL CONSENSUS (max +15 / floor -5) ---
         model_signals = await self._query_model_consensus(symbol, setup_type, direction)
 
         if model_signals.get("has_models"):
@@ -160,23 +188,26 @@ class ConfidenceGate:
 
             if agreement_pct >= 0.7:
                 confidence_points += 15
-                reasoning.append(f"Model consensus STRONG ({agreement_pct:.0%} agree, avg conf {avg_confidence:.0%})")
+                reasoning.append(f"Model consensus STRONG ({agreement_pct:.0%} agree, avg conf {avg_confidence:.0%}) (+15)")
             elif agreement_pct >= 0.5:
-                confidence_points += 5
-                reasoning.append(f"Model consensus MODERATE ({agreement_pct:.0%} agree)")
+                confidence_points += 8
+                reasoning.append(f"Model consensus MODERATE ({agreement_pct:.0%} agree) (+8)")
             else:
-                confidence_points -= 10
-                reasoning.append(f"Model consensus WEAK ({agreement_pct:.0%} agree) — models disagree")
+                confidence_points -= 5  # Floor: max -5 for model disagreement
+                reasoning.append(f"Model consensus WEAK ({agreement_pct:.0%} agree) — models disagree (-5)")
         else:
             reasoning.append("No trained models for this setup — using regime + quality score only")
 
-        # --- 2b. LIVE MODEL PREDICTION ---
-        # Actually run predict_for_setup() to get real-time directional signal
+        # --- 2b. LIVE MODEL PREDICTION (max +15 / floor -5, weighted by accuracy) ---
         live_prediction = await self._get_live_prediction(symbol, setup_type, direction)
         if live_prediction.get("has_prediction"):
             pred_direction = live_prediction["direction"]
             pred_confidence = live_prediction["confidence"]
             pred_model = live_prediction.get("model_used", "unknown")
+            
+            # Weight by model accuracy (if available)
+            model_accuracy = live_prediction.get("model_accuracy", 0.55)
+            accuracy_weight = min(1.0, max(0.5, (model_accuracy - 0.45) / 0.2))  # 0.5-1.0 weight
             
             # Does the model agree with the proposed trade direction?
             trade_is_long = direction.lower() in ("long", "buy")
@@ -186,34 +217,34 @@ class ConfidenceGate:
             )
             
             if model_agrees and pred_confidence >= 0.6:
-                confidence_points += 15
+                pts = int(15 * accuracy_weight)
+                confidence_points += pts
                 reasoning.append(
-                    f"Live {pred_model} model CONFIRMS {direction.upper()} "
-                    f"({pred_direction}, {pred_confidence:.0%} conf)"
+                    f"Live {pred_model} CONFIRMS {direction.upper()} "
+                    f"({pred_direction}, {pred_confidence:.0%} conf, weight {accuracy_weight:.1f}) (+{pts})"
                 )
             elif model_agrees:
-                confidence_points += 5
+                pts = int(5 * accuracy_weight)
+                confidence_points += pts
                 reasoning.append(
-                    f"Live {pred_model} model leans {direction.upper()} "
-                    f"({pred_confidence:.0%} conf)"
+                    f"Live {pred_model} leans {direction.upper()} "
+                    f"({pred_confidence:.0%} conf) (+{pts})"
                 )
             elif pred_direction == "flat":
-                confidence_points -= 5
+                confidence_points -= 2
                 reasoning.append(
-                    f"Live {pred_model} model sees NO EDGE (flat, {pred_confidence:.0%} conf)"
+                    f"Live {pred_model} sees NO EDGE (flat, {pred_confidence:.0%} conf) (-2)"
                 )
             else:
-                # Model disagrees with proposed direction
-                confidence_points -= 15
-                position_multiplier *= 0.7
+                # Model disagrees — floor protection: max -5
+                confidence_points -= 5
+                position_multiplier *= 0.85
                 reasoning.append(
-                    f"Live {pred_model} model DISAGREES — predicts {pred_direction.upper()} "
-                    f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) — reducing size 30%"
+                    f"Live {pred_model} DISAGREES — predicts {pred_direction.upper()} "
+                    f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) (-5, size -15%)"
                 )
 
-        # --- 2c. CROSS-MODEL AGREEMENT (GAP 4) ---
-        # Compare static model consensus (Step 2) with live prediction (Step 2b).
-        # If both ran, check if they agree. Disagreement is an additional risk signal.
+        # --- 2c. CROSS-MODEL AGREEMENT (max +5 / floor -5) ---
         cross_model_agreement = None
         if model_signals.get("has_models") and live_prediction.get("has_prediction"):
             consensus_agrees = model_signals.get("agreement_pct", 0) >= 0.5
@@ -228,40 +259,44 @@ class ConfidenceGate:
                 reasoning.append("Cross-model: consensus + live prediction ALIGNED (+5)")
             elif not consensus_agrees and not live_agrees:
                 cross_model_agreement = "both_disagree"
-                confidence_points -= 10
-                position_multiplier *= 0.8
-                reasoning.append("Cross-model: consensus + live prediction BOTH AGAINST — reducing size 20%")
+                confidence_points -= 5  # Floor
+                position_multiplier *= 0.9
+                reasoning.append("Cross-model: consensus + live BOTH AGAINST (-5, size -10%)")
             else:
                 cross_model_agreement = "mixed"
-                # Mixed signals — no additional adjustment but note it
                 reasoning.append(
                     f"Cross-model: MIXED signals (consensus {'agrees' if consensus_agrees else 'disagrees'}, "
                     f"live {'agrees' if live_agrees else 'disagrees'})"
                 )
 
-        # --- 3. QUALITY SCORE ---
+        # --- 3. QUALITY SCORE (max +10 / floor -5) ---
         if quality_score >= 80:
             confidence_points += 10
-            reasoning.append(f"Quality score HIGH ({quality_score})")
+            reasoning.append(f"Quality score HIGH ({quality_score}) (+10)")
         elif quality_score >= 60:
             confidence_points += 5
-        elif quality_score < 40:
-            confidence_points -= 10
-            reasoning.append(f"Quality score LOW ({quality_score}) — weaker setup")
+            reasoning.append(f"Quality score GOOD ({quality_score}) (+5)")
+        elif quality_score >= 40:
+            # Neutral — no points
+            reasoning.append(f"Quality score AVERAGE ({quality_score})")
+        else:
+            confidence_points -= 5  # Floor
+            reasoning.append(f"Quality score LOW ({quality_score}) — weaker setup (-5)")
 
-        # --- 4. LEARNING LOOP FEEDBACK ---
+        # --- 4. LEARNING LOOP FEEDBACK (max +8 / floor -5) ---
         # Query historical win rate for this specific setup + regime + time context
-        # This closes the loop: real outcomes dynamically adjust the gate
         learning_adjustment = await self._get_learning_feedback(setup_type, regime_state)
         if learning_adjustment["has_data"]:
-            confidence_points += learning_adjustment["points"]
+            # Cap the learning loop contribution with floor protection
+            pts = learning_adjustment["points"]
+            pts = max(-5, min(8, pts))  # Floor -5, cap +8
+            confidence_points += pts
             if learning_adjustment["reasoning"]:
                 reasoning.append(learning_adjustment["reasoning"])
             if learning_adjustment.get("multiplier_adj"):
                 position_multiplier *= learning_adjustment["multiplier_adj"]
 
-        # --- 4b. CNN VISUAL PATTERN SIGNAL ---
-        # If a trained CNN model exists for this setup, get its visual prediction
+        # --- 4b. CNN VISUAL PATTERN SIGNAL (max +12 / floor -5) ---
         cnn_signal = await self._get_cnn_signal(symbol, setup_type, direction)
         if cnn_signal.get("has_prediction"):
             cnn_win_prob = cnn_signal["win_probability"]
@@ -272,34 +307,37 @@ class ConfidenceGate:
                 confidence_points += 12
                 reasoning.append(
                     f"CNN visual analysis: HIGH win probability ({cnn_win_prob:.0%}) — "
-                    f"pattern '{cnn_pattern}' ({cnn_conf:.0%} conf)"
+                    f"pattern '{cnn_pattern}' ({cnn_conf:.0%} conf) (+12)"
                 )
             elif cnn_win_prob >= 0.50:
                 confidence_points += 5
                 reasoning.append(
                     f"CNN visual analysis: moderate win probability ({cnn_win_prob:.0%}) — "
-                    f"pattern '{cnn_pattern}'"
+                    f"pattern '{cnn_pattern}' (+5)"
                 )
             elif cnn_win_prob < 0.35:
-                confidence_points -= 10
-                position_multiplier *= 0.8
+                confidence_points -= 5  # Floor: max -5
+                position_multiplier *= 0.9
                 reasoning.append(
                     f"CNN visual analysis: LOW win probability ({cnn_win_prob:.0%}) — "
-                    f"chart looks unfavorable, reducing size 20%"
+                    f"chart looks unfavorable (-5, size -10%)"
                 )
             else:
                 reasoning.append(
                     f"CNN visual analysis: neutral ({cnn_win_prob:.0%}) — no strong visual signal"
                 )
 
-        # --- 5. DETERMINE DECISION ---
+        # --- 5. DETERMINE DECISION (Additive thresholds) ---
+        # Additive scoring: base 0, earn points from confirmation
+        # Max theoretical: ~85 pts (regime 20 + AI 10 + consensus 15 + live 15 + cross 5 + quality 10 + learning 8 + CNN 12)
+        # Thresholds calibrated for additive scale:
         confidence_score = max(0, min(100, confidence_points))
 
-        if confidence_score >= 65:
+        if confidence_score >= 55:
             decision = "GO"
             self._stats["go_count"] += 1
             self._stats["today_go"] += 1
-        elif confidence_score >= 40:
+        elif confidence_score >= 30:
             decision = "REDUCE"
             position_multiplier *= 0.6
             self._stats["reduce_count"] += 1
@@ -309,7 +347,7 @@ class ConfidenceGate:
             position_multiplier = 0
             self._stats["skip_count"] += 1
             self._stats["today_skip"] += 1
-            reasoning.append(f"Low confidence ({confidence_score}) — skipping trade")
+            reasoning.append(f"Insufficient confirmation ({confidence_score}) — skipping trade")
 
         # Update trading mode based on recent patterns
         self._update_trading_mode(regime_state, ai_regime, regime_score)
@@ -317,6 +355,7 @@ class ConfidenceGate:
         result = {
             "decision": decision,
             "confidence_score": confidence_score,
+            "scoring_version": "additive_v1",  # Track scoring system version for migration
             "regime_state": regime_state,
             "regime_score": regime_score,
             "ai_regime": ai_regime,
@@ -327,6 +366,7 @@ class ConfidenceGate:
             "live_prediction": live_prediction if live_prediction.get("has_prediction") else None,
             "learning_feedback": learning_adjustment if learning_adjustment.get("has_data") else None,
             "cross_model_agreement": cross_model_agreement,
+            "cnn_signal": cnn_signal if cnn_signal.get("has_prediction") else None,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -343,6 +383,7 @@ class ConfidenceGate:
                 self._db["confidence_gate_log"].insert_one({
                     **{k: v for k, v in result.items() if k != "model_signals"},
                     "model_signal_summary": model_signals.get("summary", ""),
+                    "scoring_version": "additive_v1",  # Distinguish from legacy subtractive logs
                     # GAP 5 fields: enable correlating gate decisions with trade outcomes
                     "outcome_tracked": False,  # Set to True when trade outcome is recorded
                     "trade_outcome": None,      # Filled by learning loop: "win", "loss", "scratch"

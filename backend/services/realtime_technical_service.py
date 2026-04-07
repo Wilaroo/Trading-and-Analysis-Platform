@@ -157,6 +157,12 @@ class RealTimeTechnicalService:
 
     def _check_staleness(self, bars: Optional[List[Dict]], max_age_hours: int = 24) -> bool:
         """Check if bars are fresh enough for trading decisions.
+        
+        Two-layer freshness check:
+        Layer 1: If IB Pusher has a live quote for the symbol → NEVER stale
+        Layer 2: Check bar age using TRADING DAYS (accounts for weekends/holidays)
+                 3 trading days threshold instead of calendar hours
+        
         Returns True if bars are STALE (too old), False if fresh."""
         if not bars:
             return True  # No data = stale
@@ -165,18 +171,44 @@ class RealTimeTechnicalService:
             latest_ts = latest_bar.get('timestamp') or latest_bar.get('date')
             if latest_ts is None:
                 return True
+            
+            # Parse the date (handle IB's various formats)
             if isinstance(latest_ts, str):
-                # Handle both ISO format and date-only format
-                if 'T' in latest_ts:
-                    latest_dt = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
+                # IB format: "20260407 09:35:00" or "20260407" or ISO
+                ts = latest_ts.strip()
+                if 'T' in ts:
+                    latest_dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                elif len(ts) >= 8 and ts[:8].isdigit():
+                    # IB format: YYYYMMDD or YYYYMMDD HH:MM:SS
+                    date_part = ts[:8]
+                    latest_dt = datetime.strptime(date_part, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    if len(ts) > 8:
+                        try:
+                            latest_dt = datetime.strptime(ts[:17], "%Y%m%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        except ValueError:
+                            pass
                 else:
-                    latest_dt = datetime.strptime(latest_ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    # Try YYYY-MM-DD
+                    latest_dt = datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
             elif isinstance(latest_ts, datetime):
                 latest_dt = latest_ts if latest_ts.tzinfo else latest_ts.replace(tzinfo=timezone.utc)
             else:
                 return True
-            age = (datetime.now(timezone.utc) - latest_dt).total_seconds() / 3600
-            return age > max_age_hours
+            
+            # Count trading days elapsed (exclude weekends)
+            now = datetime.now(timezone.utc)
+            days_elapsed = 0
+            check_date = latest_dt.date()
+            today = now.date()
+            from datetime import timedelta as td
+            while check_date < today:
+                check_date += td(days=1)
+                if check_date.weekday() < 5:  # Mon-Fri
+                    days_elapsed += 1
+            
+            # Allow up to 3 trading days (covers weekends + Monday holidays)
+            return days_elapsed > 3
+            
         except Exception:
             return True  # Error parsing = treat as stale
     
@@ -274,17 +306,20 @@ class RealTimeTechnicalService:
             # Get intraday bars (5-min) from MongoDB — same source as training
             intraday_bars = await asyncio.to_thread(self._get_intraday_bars_from_db, symbol, "5 mins", 78)
             
-            # Staleness check: skip symbol if intraday data is too old (>24h)
-            if self._check_staleness(intraday_bars, max_age_hours=24):
-                logger.debug(f"Stale or missing intraday data for {symbol}, skipping")
+            # Staleness check: skip symbol if intraday data is too old
+            # BUT: if IB Pusher has a live quote, bars are fine for indicator calc
+            ib_quote = self._get_ib_quote(symbol)
+            ib_pusher_live = ib_quote and ib_quote.get("price", 0) > 0
+            
+            if not ib_pusher_live and self._check_staleness(intraday_bars):
+                logger.debug(f"Stale or missing intraday data for {symbol}, no live IB quote — skipping")
                 intraday_bars = None  # Will use fallback estimates
             
             # Get daily bars for ATR, average volume, daily levels from MongoDB
             daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, symbol, 50)
             
-            # Get current quote - IB Pusher only (no Alpaca fallback)
-            ib_quote = self._get_ib_quote(symbol)
-            if ib_quote and ib_quote.get("price", 0) > 0:
+            # Get current quote - IB Pusher (already fetched above for staleness check)
+            if ib_pusher_live:
                 quote = ib_quote
             else:
                 # Fallback: use latest bar close from MongoDB as estimated price

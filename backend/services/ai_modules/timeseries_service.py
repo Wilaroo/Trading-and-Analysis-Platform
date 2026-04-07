@@ -1,7 +1,7 @@
 """
 Time-Series AI Service - Directional Forecasting Integration
 
-Integrates LightGBM directional forecasting into the AI modules system.
+Integrates XGBoost directional forecasting into the AI modules system.
 Provides predictions for the AI Trade Consultation.
 
 Key Features:
@@ -11,12 +11,12 @@ Key Features:
 - Performance tracking
 - Training Priority Mode - pauses non-essential tasks during training
 
-Note: Requires lightgbm to be installed. Will gracefully degrade if not available.
+Note: Requires xgboost to be installed. Will gracefully degrade if not available.
 """
 
 import logging
-import pickle
 import base64
+import io
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -85,17 +85,18 @@ class TimeSeriesAIService:
     }
     
     # Memory-safe settings per timeframe
-    # Intraday timeframes have more data and need smaller batches to prevent OOM
+    # Optimized for DGX Spark (128GB unified memory + XGBoost GPU)
+    # Larger batches = faster training with more data loaded at once
     # IMPORTANT: We keep max_bars high to use ALL available data - only batch_size is reduced
     # This ensures we don't lose training data, just process fewer symbols at a time
     TIMEFRAME_SETTINGS = {
-        "1 min": {"batch_size": 5, "max_bars": 10000, "is_intraday": True},     # Most data, smallest batch - process 5 symbols at a time
-        "5 mins": {"batch_size": 10, "max_bars": 10000, "is_intraday": True},   # High data volume - process 10 symbols at a time
-        "15 mins": {"batch_size": 15, "max_bars": 10000, "is_intraday": True},  # Medium-high data
-        "30 mins": {"batch_size": 20, "max_bars": 10000, "is_intraday": True},  # Medium data
-        "1 hour": {"batch_size": 50, "max_bars": 10000, "is_intraday": False},  # Moderate data
-        "1 day": {"batch_size": 100, "max_bars": 10000, "is_intraday": False},  # Lower data volume
-        "1 week": {"batch_size": 100, "max_bars": 10000, "is_intraday": False}, # Lowest data
+        "1 min": {"batch_size": 25, "max_bars": 10000, "is_intraday": True},     # 128GB handles 25 symbols of 1min easily
+        "5 mins": {"batch_size": 50, "max_bars": 10000, "is_intraday": True},    # 50 symbols × 10K bars = ~4GB features
+        "15 mins": {"batch_size": 75, "max_bars": 10000, "is_intraday": True},   # Medium-high data
+        "30 mins": {"batch_size": 100, "max_bars": 10000, "is_intraday": True},  # Medium data
+        "1 hour": {"batch_size": 200, "max_bars": 10000, "is_intraday": False},  # Moderate data
+        "1 day": {"batch_size": 500, "max_bars": 10000, "is_intraday": False},   # Lower data volume
+        "1 week": {"batch_size": 500, "max_bars": 10000, "is_intraday": False},  # Lowest data
     }
     
     # Training defaults — PRODUCTION settings
@@ -170,7 +171,7 @@ class TimeSeriesAIService:
                 
                 if doc and "model_data" in doc:
                     model_bytes = base64.b64decode(doc["model_data"])
-                    loaded_model = pickle.loads(model_bytes)
+                    model_format = doc.get("model_format", "pickle")
                     
                     # Create or update the cached model
                     from .timeseries_gbm import TimeSeriesGBM, ModelMetrics
@@ -178,7 +179,17 @@ class TimeSeriesAIService:
                         self._models[bar_size] = TimeSeriesGBM(model_name=model_name)
                         self._models[bar_size].set_db(self._db)
                     
-                    self._models[bar_size]._model = loaded_model
+                    if model_format == "xgboost_json":
+                        # New XGBoost JSON format
+                        import xgboost as xgb
+                        booster = xgb.Booster()
+                        booster.load_model(bytearray(model_bytes))
+                        self._models[bar_size]._model = booster
+                    else:
+                        # Legacy LightGBM pickle — skip (needs retraining)
+                        logger.warning(f"Legacy LightGBM model found for {model_name}, needs retraining with XGBoost")
+                        continue
+                    
                     self._models[bar_size]._version = doc.get("version", "v0.0.0")
                     if doc.get("metrics"):
                         self._models[bar_size]._metrics = ModelMetrics(**doc.get("metrics", {}))
@@ -237,7 +248,7 @@ class TimeSeriesAIService:
         """
         # Check if ML is available
         if not self._ml_available or self._model is None:
-            return self._empty_forecast(symbol, "ML not available - lightgbm not installed")
+            return self._empty_forecast(symbol, "ML not available - xgboost not installed")
             
         # If no bars provided, fetch from MongoDB
         if not bars:
@@ -1646,13 +1657,23 @@ class TimeSeriesAIService:
                 if not setup_type:
                     continue
                 model_bytes = base64.b64decode(doc["model_data"])
-                loaded_model = pickle.loads(model_bytes)
+                model_format = doc.get("model_format", "pickle")
                 
                 from services.ai_modules.setup_training_config import get_model_name
                 model_name = doc.get("model_name") or get_model_name(setup_type, bar_size)
                 gbm = TimeSeriesGBM(model_name=model_name)
                 gbm.set_db(self._db)
-                gbm._model = loaded_model
+                
+                if model_format == "xgboost_json":
+                    import xgboost as xgb
+                    booster = xgb.Booster()
+                    booster.load_model(bytearray(model_bytes))
+                    gbm._model = booster
+                else:
+                    # Legacy LightGBM pickle — skip (needs retraining)
+                    logger.warning(f"Legacy LightGBM model found for setup {setup_type}, needs retraining")
+                    continue
+                
                 gbm._version = doc.get("version", "v0.0.0")
                 if doc.get("metrics"):
                     gbm._metrics = ModelMetrics(**doc["metrics"])
@@ -2178,8 +2199,11 @@ class TimeSeriesAIService:
         from services.ai_modules.setup_training_config import get_model_name
         col = self._db["setup_type_models"]
         
-        # Serialize model
-        model_bytes = pickle.dumps(model._model)
+        # Serialize model using XGBoost native JSON format
+        import xgboost as xgb
+        buffer = io.BytesIO()
+        model._model.save_model(buffer)
+        model_bytes = buffer.getvalue()
         model_b64 = base64.b64encode(model_bytes).decode('utf-8')
         
         # Serialize feature names so predictions use the right features
@@ -2190,6 +2214,8 @@ class TimeSeriesAIService:
             "bar_size": bar_size,
             "model_name": get_model_name(setup_type, bar_size),
             "model_data": model_b64,
+            "model_format": "xgboost_json",
+            "engine": "xgboost",
             "version": model._version,
             "metrics": metrics.to_dict() if metrics else {},
             "symbols_used": symbols_used,

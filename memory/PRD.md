@@ -78,6 +78,31 @@ REMOVED:
 - Staleness check tested (fresh, stale, no data)
 - XGBoost params, training, serialization format, and prediction contract validated
 
+#### Phase 3: Training Optimizations (COMPLETE)
+- Feature caching: New `feature_cache` MongoDB collection stores precomputed features with 1-week TTL, auto-invalidates on feature set changes
+- Batch sizes: 5x-10x increase (1min: 5→25, 5min: 10→50, 1day: 100→500) for 128GB Spark
+- Float32 enforcement: All training arrays use `np.float32` to halve memory
+- Fixed `timeseries_service.py`: Replaced `pickle.loads/dumps` with XGBoost JSON serialization throughout
+
+#### Phase 4: Scanner Upgrade (COMPLETE)
+- Scan config: 100 symbols/batch (was 10), 0.1s delay (was 1s), 15s interval (was 60s)
+- **Tiered scanning**: Intraday ≥500K ADV (every ~15s), Swing ≥100K (every ~2min), Investment ≥50K (11:00 AM + 3:45 PM ET only)
+- Staleness check v2: IB Pusher-aware (live quote = never stale), market-hours-aware (counts trading days, not calendar days), handles IB date format `YYYYMMDD HH:MM:SS`
+- Investment tier ADV set to 50K per user's existing data
+
+#### Phase 4.5: Confidence Gate Refactor (COMPLETE)
+- **Additive scoring** (base 0, earn confirmation): Regime ±20/10, AI ±10/5, Consensus ±15/5, Live Model ±15/5 (accuracy-weighted), Cross-Model ±5, Quality ±10/5, Learning ±8/5, CNN ±12/5
+- **Floor protection**: Regime max -10, all others max -5 per gate
+- **Thresholds**: ≥55 GO, ≥30 REDUCE, <30 SKIP
+- `scoring_version: "additive_v1"` field in all gate log entries
+- CNN signal + cnn_signal field added to result dict
+
+#### Testing (32/32 pass across all phases)
+- Phase 1-2: 13 tests (Alpaca removal, staleness, XGBoost)
+- Phase 3: 5 tests (batch sizes, float32, feature cache, no-pickle)
+- Phase 4: 7 tests (scan config, investment tier, three tiers, staleness IB format, weekend handling)
+- Phase 4.5: 7 tests (additive base 0, scoring version, floor protection, thresholds, docstring, CNN signal, no base-50)
+
 ### Session: April 8, 2026 (Previous — Planning Session)
 - Complete architecture audit of data sources, scanning pipeline, and kill chain
 - Identified train/serve data skew (models train on IB, scanner uses Alpaca)
@@ -123,29 +148,26 @@ REMOVED:
 - 2d. Update model serialization (XGBoost JSON format) ✅
 - 2e. Update requirements.txt ✅
 
-### Phase 3: Training Optimizations [NOT STARTED]
-- 3a. Feature caching across pipeline phases
-- 3b. Increase STREAM_BATCH_SIZE 25 -> 100-200
-- 3c. Increase MAX_EXTRACT_WORKERS
-- 3d. XGBoost memory tuning (max_bin, float32)
+### Phase 3: Training Optimizations [COMPLETE ✅]
+- 3a. Feature caching — save/load precomputed features from MongoDB `feature_cache` ✅
+- 3b. Batch sizes increased for 128GB: 1min 5→25, 5min 10→50, 15min 15→75, 1hr 50→200, 1day 100→500 ✅
+- 3c. Float32 enforcement in numpy arrays ✅
+- 3d. XGBoost memory tuning (max_bin=256) ✅
+- Fixed pickle→XGBoost JSON in timeseries_service.py model reload/save ✅
 
-### Phase 4: Scanner Upgrade [NOT STARTED]
-- 4a. symbols_per_batch 10 -> 100
-- 4b. batch_delay 1.0s -> 0.1s
-- 4c. scan_interval 60s -> 30s
-- 4d. wave_size 200 -> 500
-- 4e. Bot scan interval 30s -> 15s
-- 4f. Event-driven scan hook (trigger on IB data push)
-- 4g. Batch model inference (predict all symbols at once)
+### Phase 4: Scanner Upgrade [COMPLETE ✅]
+- 4a. symbols_per_batch 10 → 100 ✅
+- 4b. batch_delay 1.0s → 0.1s ✅
+- 4c. scan_interval 60s → 15s ✅
+- 4d. Tiered scanning by ADV: Intraday ≥500K (every 15s), Swing ≥100K (every 2min), Investment ≥50K (11AM + 3:45PM ET only) ✅
+- 4e. Staleness check: IB Pusher-aware + market-hours-aware (3 trading days, IB date formats, weekends) ✅
 
-### Phase 4.5: Confidence Gate Refactor [NOT STARTED] **CRITICAL — MUST DO BEFORE PHASE 5**
-- Refactor from subtractive to additive scoring (start at 0, add for confirms)
-- Weighted ensemble voting (accuracy-proportional, not binary agree/disagree)
-- Model abstention (high uncertainty = no vote, not a veto)
-- Rolling window for Smart Filter (30-day decay instead of all-time cumulative)
-- Confidence floor protection (minimum 25, never auto-zero from stacking)
-- Sector-relative regime check (don't penalize if sector strong while SPY weak)
-- Fuzzy threshold margins (within 5% of threshold = partial credit, not binary)
+### Phase 4.5: Confidence Gate Refactor [COMPLETE ✅] **CRITICAL — Done before Phase 5**
+- Subtractive (base 50) → Additive (base 0) with graduated point scales ✅
+- Floor protection: regime max -10, all others max -5 ✅
+- Thresholds: ≥55 GO, ≥30 REDUCE, <30 SKIP ✅
+- scoring_version: "additive_v1" for migration tracking ✅
+- CNN signal + learning loop capped in result ✅
 
 ### Phase 5: Deep Learning Models [NOT STARTED]
 - 5a. Temporal Fusion Transformer (TFT) — Phase 11 (new)
