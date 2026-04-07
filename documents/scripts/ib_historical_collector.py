@@ -138,15 +138,28 @@ class IBPacingManager:
         if symbol and bar_size:
             self.recent_requests[(symbol, bar_size)] = now
     
-    def wait_time(self) -> float:
+    def wait_time(self, symbol: str = None, bar_size: str = None) -> float:
         """How long to wait before next request is allowed."""
+        now = time.time()
+        
+        # Check duplicate request wait (15s) first — much shorter
+        if symbol and bar_size:
+            key = (symbol, bar_size)
+            if key in self.recent_requests:
+                dup_wait = 15 - (now - self.recent_requests[key])
+                if dup_wait > 0:
+                    return dup_wait
+        
+        # Window-based wait
         if not self.request_times:
             return 0
         
-        now = time.time()
-        oldest = self.request_times[0]
-        wait = (oldest + self.window_seconds) - now
-        return max(0, wait)
+        if len(self.request_times) >= self.max_requests:
+            oldest = self.request_times[0]
+            wait = (oldest + self.window_seconds) - now
+            return max(0, wait)
+        
+        return 0
     
     def requests_remaining(self) -> int:
         """How many requests remaining in current window."""
@@ -330,7 +343,7 @@ class IBHistoricalCollector:
         
         try:
             if not self.pacing.can_make_request(symbol, bar_size):
-                wait = self.pacing.wait_time()
+                wait = self.pacing.wait_time(symbol, bar_size)
                 if wait > 0:
                     logger.info(f"Pacing: waiting {wait:.1f}s ({self.pacing.requests_remaining()} requests remaining)")
                     self.stats["pacing_waits"] += 1
