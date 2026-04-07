@@ -219,5 +219,66 @@ class TestPhase45AdditiveConfidenceGate:
                 pytest.fail(f"Found old subtractive base 50 at line {i+1}: {line.strip()}")
 
 
+class TestFullUniverseXGBoostFixes:
+    """Validates the 5-bug fix for full_universe training pipeline"""
+
+    def test_no_lightgbm_in_train_full_universe(self):
+        """train_full_universe must NOT import lightgbm — uses XGBoost"""
+        import inspect
+        from services.ai_modules.timeseries_service import TimeSeriesAIService
+        source = inspect.getsource(TimeSeriesAIService.train_full_universe)
+        assert "import lightgbm" not in source, "train_full_universe still imports lightgbm!"
+        assert "lgb.Dataset" not in source, "train_full_universe still uses lgb.Dataset!"
+        assert "lgb.train" not in source, "train_full_universe still uses lgb.train!"
+        assert "xgb.DMatrix" in source or "xgboost" in source, "train_full_universe should use XGBoost"
+
+    def test_memory_cap_appropriate_for_spark(self):
+        """Memory emergency stop should be >= 100GB for 128GB Spark"""
+        import inspect
+        from services.ai_modules.timeseries_service import TimeSeriesAIService
+        source = inspect.getsource(TimeSeriesAIService.train_full_universe)
+        # Should NOT have the old 3000 MB cap
+        assert "mem_mb > 3000" not in source, "Memory cap still at 3GB — way too low for 128GB Spark"
+        assert "100000" in source, "Memory cap should be ~100GB for 128GB Spark"
+
+    def test_full_universe_defaults_use_all_data(self):
+        """train_full_universe should default to large batch sizes and all bars"""
+        import inspect
+        from services.ai_modules.timeseries_service import TimeSeriesAIService
+        sig = inspect.signature(TimeSeriesAIService.train_full_universe)
+        params = sig.parameters
+        assert params["symbol_batch_size"].default == 500, f"symbol_batch_size default should be 500, got {params['symbol_batch_size'].default}"
+        assert params["max_bars_per_symbol"].default == 99999, f"max_bars_per_symbol default should be 99999, got {params['max_bars_per_symbol'].default}"
+
+    def test_full_universe_all_tf_defaults_use_all_data(self):
+        """train_full_universe_all_timeframes should default to large batch sizes"""
+        import inspect
+        from services.ai_modules.timeseries_service import TimeSeriesAIService
+        sig = inspect.signature(TimeSeriesAIService.train_full_universe_all_timeframes)
+        params = sig.parameters
+        assert params["symbol_batch_size"].default == 500, f"Expected 500, got {params['symbol_batch_size'].default}"
+        assert params["max_bars_per_symbol"].default == 99999, f"Expected 99999, got {params['max_bars_per_symbol'].default}"
+
+    def test_worker_passes_params_to_full_universe(self):
+        """Worker must forward max_bars_per_symbol and symbol_batch_size"""
+        import inspect
+        # Read worker source to check param forwarding
+        worker_path = os.path.join(os.path.dirname(__file__), "..", "worker.py")
+        with open(worker_path, "r") as f:
+            worker_source = f.read()
+        assert "max_bars_per_symbol" in worker_source, "Worker doesn't pass max_bars_per_symbol"
+        assert "symbol_batch_size" in worker_source, "Worker doesn't pass symbol_batch_size"
+
+    def test_router_defaults_not_limiting(self):
+        """Router endpoints should default to 99999 bars, not 1000 or 2000"""
+        router_path = os.path.join(os.path.dirname(__file__), "..", "routers", "ai_modules.py")
+        with open(router_path, "r") as f:
+            router_source = f.read()
+        # Should NOT have old limiting defaults
+        assert "else 1000" not in router_source, "Router still defaults max_bars to 1000"
+        assert "else 2000" not in router_source, "Router still defaults max_bars to 2000"
+
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

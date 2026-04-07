@@ -146,7 +146,11 @@ async def process_training_job(job: dict, db) -> dict:
                 
                 try:
                     if full_universe:
-                        tf_result = await timeseries_service.train_full_universe(bar_size=tf)
+                        tf_result = await timeseries_service.train_full_universe(
+                            bar_size=tf,
+                            max_bars_per_symbol=params.get('max_bars_per_symbol', 99999),
+                            symbol_batch_size=params.get('symbol_batch_size', 500)
+                        )
                     else:
                         tf_result = await timeseries_service.train_model(
                             bar_size=tf, max_symbols=max_symbols
@@ -196,7 +200,9 @@ async def process_training_job(job: dict, db) -> dict:
             
             if full_universe:
                 result = await timeseries_service.train_full_universe(
-                    bar_size=bar_size
+                    bar_size=bar_size,
+                    max_bars_per_symbol=params.get('max_bars_per_symbol', 99999),
+                    symbol_batch_size=params.get('symbol_batch_size', 500)
                 )
             else:
                 result = await timeseries_service.train_model(

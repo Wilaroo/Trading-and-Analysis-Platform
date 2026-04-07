@@ -667,8 +667,8 @@ class TimeSeriesAIService:
     async def train_full_universe(
         self,
         bar_size: str = "1 day",
-        symbol_batch_size: int = 50,
-        max_bars_per_symbol: int = 1000,
+        symbol_batch_size: int = 500,
+        max_bars_per_symbol: int = 99999,
         progress_callback = None
     ) -> Dict[str, Any]:
         """
@@ -886,8 +886,8 @@ class TimeSeriesAIService:
                     mem_mb = process.memory_info().rss / 1024 / 1024
                     logger.info(f"[FULL UNIVERSE] Memory usage: {mem_mb:.0f} MB")
                     
-                    # Emergency stop if memory usage is too high (>3GB)
-                    if mem_mb > 3000:
+                    # Emergency stop if memory usage is too high (>100GB on 128GB Spark)
+                    if mem_mb > 100000:
                         logger.warning(f"[FULL UNIVERSE] HIGH MEMORY WARNING: {mem_mb:.0f} MB - stopping early to prevent crash")
                         break
                 except ImportError:
@@ -928,15 +928,15 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Symbols with data: {symbols_with_data:,}")
             logger.info(f"[FULL UNIVERSE] Total bars processed: {total_bars_processed:,}")
             logger.info("")
-            logger.info("[FULL UNIVERSE] Starting LightGBM training...")
+            logger.info("[FULL UNIVERSE] Starting XGBoost GPU training...")
             sys.stdout.flush()
             
             self._training_status[bar_size]["phase"] = "training"
             self._training_status[bar_size]["message"] = f"Training on {len(all_features):,} samples..."
             
-            # Convert to numpy arrays
-            X = np.array(all_features)
-            y = np.array(all_targets)
+            # Convert to numpy arrays (float32 for GPU efficiency)
+            X = np.array(all_features, dtype=np.float32)
+            y = np.array(all_targets, dtype=np.float32)
             
             logger.info(f"[FULL UNIVERSE] Arrays created: X shape={X.shape}, y shape={y.shape}")
             sys.stdout.flush()
@@ -961,34 +961,45 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Training samples: {len(X_train):,}, Validation: {len(X_val):,}")
             sys.stdout.flush()
             
-            # Create LightGBM datasets
-            logger.info("[FULL UNIVERSE] Creating LightGBM datasets...")
+            # Create XGBoost DMatrix datasets
+            import xgboost as xgb
+            logger.info("[FULL UNIVERSE] Creating XGBoost DMatrix datasets...")
             sys.stdout.flush()
             
-            import lightgbm as lgb
-            train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
-            val_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+            dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+            dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
             
-            # Train with more rounds for full universe
-            logger.info("[FULL UNIVERSE] Starting LightGBM train()...")
+            # XGBoost GPU parameters (matching timeseries_gbm.py defaults)
+            xgb_params = {
+                'objective': 'binary:logistic',
+                'eval_metric': 'logloss',
+                'tree_method': 'hist',
+                'device': 'cuda',
+                'max_depth': 8,
+                'learning_rate': 0.05,
+                'colsample_bytree': 0.8,
+                'subsample': 0.8,
+                'max_bin': 256,
+                'verbosity': 1,
+            }
+            
+            logger.info("[FULL UNIVERSE] Starting XGBoost train()...")
             sys.stdout.flush()
             
-            callbacks = [lgb.early_stopping(20)]  # More patience for large dataset
-            
-            trained_model = lgb.train(
-                model.params,
-                train_data,
-                num_boost_round=200,  # Reduced for faster debugging
-                valid_sets=[train_data, val_data],
-                valid_names=["train", "val"],
-                callbacks=callbacks
+            trained_model = xgb.train(
+                xgb_params,
+                dtrain,
+                num_boost_round=300,
+                evals=[(dtrain, "train"), (dval, "val")],
+                early_stopping_rounds=20,
+                verbose_eval=50
             )
             
-            logger.info("[FULL UNIVERSE] LightGBM training complete!")
+            logger.info("[FULL UNIVERSE] XGBoost training complete!")
             sys.stdout.flush()
             
             # Evaluate
-            y_pred_proba = trained_model.predict(X_val)
+            y_pred_proba = trained_model.predict(dval)
             y_pred = (y_pred_proba >= 0.52).astype(int)
             
             accuracy = np.mean(y_pred == y_val)
@@ -1094,19 +1105,19 @@ class TimeSeriesAIService:
     
     async def train_full_universe_all_timeframes(
         self,
-        symbol_batch_size: int = 50,
-        max_bars_per_symbol: int = 1000,
+        symbol_batch_size: int = 500,
+        max_bars_per_symbol: int = 99999,
         timeframes: List[str] = None
     ) -> Dict[str, Any]:
         """
         Train FULL UNIVERSE on ALL timeframes sequentially.
         
-        This is the comprehensive training that uses all 39M+ bars.
-        Expected runtime: 1-3 hours depending on system performance.
+        This is the comprehensive training that uses all 178M+ bars.
+        Expected runtime: 8-12 hours on DGX Spark (first run), faster with cached features.
         
         Args:
-            symbol_batch_size: Symbols per batch (default: 50 - reduced for memory safety)
-            max_bars_per_symbol: Max bars per symbol (default: 1000 - reduced for memory safety)
+            symbol_batch_size: Symbols per batch (default: 500 — 128GB Spark handles this easily)
+            max_bars_per_symbol: Max bars per symbol (default: 99999 — use ALL available data)
             timeframes: Specific timeframes or all if None
         """
         import sys

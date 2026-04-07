@@ -1003,7 +1003,7 @@ async def train_timeseries_model(request: Optional[TrainRequest] = None):
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
@@ -1058,7 +1058,7 @@ async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
@@ -1126,7 +1126,7 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
@@ -1136,7 +1136,8 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
         from services.job_queue_manager import job_queue_manager
         
         bar_size = request.bar_size if request and request.bar_size else "1 day"
-        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 99999
+        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 500
         
         result = await job_queue_manager.create_job(
             job_type="training",
@@ -1144,6 +1145,7 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
                 "bar_size": bar_size,
                 "full_universe": True,
                 "max_bars_per_symbol": max_bars_per_symbol,
+                "symbol_batch_size": symbol_batch_size,
             },
             priority=6,
             metadata={"description": f"Full universe training ({bar_size})"}
@@ -1184,7 +1186,7 @@ async def train_full_universe_all_timeframes(
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
@@ -1193,7 +1195,8 @@ async def train_full_universe_all_timeframes(
     try:
         from services.job_queue_manager import job_queue_manager
         
-        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 1000
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 99999
+        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 500
         timeframes = request.timeframes if request and request.timeframes else None
         
         result = await job_queue_manager.create_job(
@@ -1202,6 +1205,7 @@ async def train_full_universe_all_timeframes(
                 "full_universe": True,
                 "all_timeframes": True,
                 "max_bars_per_symbol": max_bars_per_symbol,
+                "symbol_batch_size": symbol_batch_size,
                 "timeframes": timeframes,
             },
             priority=5,
@@ -1431,7 +1435,7 @@ async def get_training_status():
             "auto_training": {"enabled": False, "after_collection": False, "schedule": None},
             "history": [],
             "next_scheduled": None,
-            "ml_message": "ML libraries not installed. Run 'pip install lightgbm' locally to enable AI training."
+            "ml_message": "ML libraries not installed. Run 'pip install xgboost' locally to enable AI training."
         }
     
     try:
@@ -1648,7 +1652,7 @@ async def train_setup_model(request: SetupTrainRequest):
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
@@ -1707,7 +1711,7 @@ async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None)
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm"
+            "install_command": "pip install xgboost"
         }
     
     if not _timeseries_ai:
