@@ -36,13 +36,13 @@ set IB_COLLECTOR_ID_2=17
 set IB_COLLECTOR_ID_3=18
 set IB_COLLECTOR_ID_4=19
 
-:: Number of turbo collectors to launch (1-4)
+:: Number of turbo collectors (idle when queue empty, activate from NIA UI)
 set NUM_COLLECTORS=4
 
 :: =====================================================
 :: STEP 1: CHECK SPARK NETWORK CONNECTION
 :: =====================================================
-echo [1/9] Checking DGX Spark connectivity...
+echo [1/8] Checking DGX Spark connectivity...
 ping -n 1 -w 2000 %SPARK_IP% >nul 2>&1
 if %errorlevel%==0 (
     echo        Spark reachable at %SPARK_IP%
@@ -58,7 +58,7 @@ echo.
 :: =====================================================
 :: STEP 2: GIT PULL (Both Windows and Spark)
 :: =====================================================
-echo [2/9] Pulling latest code...
+echo [2/8] Pulling latest code...
 pushd "%REPO_DIR%"
 if exist ".git" (
     git pull origin main 2>nul
@@ -72,16 +72,17 @@ popd
 
 echo        Pulling latest code on Spark...
 ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git pull" 2>nul
-if %errorlevel% neq 0 (
-    echo        [WARN] SSH git pull failed - you may need to enter password
-    echo        TIP: Set up SSH keys to skip password: ssh-keygen then ssh-copy-id %SPARK_USER%@%SPARK_IP%
+if %errorlevel%==0 (
+    echo        Spark code updated!
+) else (
+    echo        [WARN] SSH git pull failed - enter password manually or set up SSH keys
 )
 echo.
 
 :: =====================================================
 :: STEP 3: START/VERIFY SPARK SERVICES
 :: =====================================================
-echo [3/9] Starting DGX Spark services...
+echo [3/8] Starting DGX Spark services...
 
 :: Check if backend already running
 echo        Checking Spark backend...
@@ -97,7 +98,6 @@ ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activa
 echo        Waiting for backend startup (30 sec)...
 timeout /t 30 /nobreak >nul
 
-:: Health check loop
 set HEALTH_ATTEMPTS=0
 :spark_health_loop
 set /a HEALTH_ATTEMPTS+=1
@@ -115,28 +115,25 @@ timeout /t 3 /nobreak >nul
 goto spark_health_loop
 
 :check_frontend
-:: Check if frontend already running
 curl -s -f -m 3 %SPARK_FRONTEND% >nul 2>&1
 if %errorlevel%==0 (
     echo        Spark frontend already running!
     goto check_worker
 )
-
 echo        Starting Spark frontend via SSH...
 ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/frontend && nohup yarn start > /tmp/frontend.log 2>&1 &"
-echo        Frontend starting (takes ~20 sec to compile)...
+echo        Frontend starting (compiles in ~20 sec)...
 
 :check_worker
-:: Start worker on Spark
-echo        Starting Spark worker via SSH...
+echo        Checking Spark worker...
 ssh %SPARK_USER%@%SPARK_IP% "pgrep -f 'python worker.py' > /dev/null 2>&1 && echo 'Worker already running' || (cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python worker.py > /tmp/worker.log 2>&1 &)"
-echo        Worker process checked/started
+echo        Worker checked/started
 echo.
 
 :: =====================================================
 :: STEP 4: IB GATEWAY LOGIN (Windows)
 :: =====================================================
-echo [4/9] IB Gateway Login (Windows)...
+echo [4/8] IB Gateway Login (Windows)...
 
 if not exist "%IB_GATEWAY_PATH%" (
     echo        [SKIP] IB Gateway not found at %IB_GATEWAY_PATH%
@@ -228,7 +225,7 @@ echo.
 :: =====================================================
 :: STEP 5: START IB DATA PUSHER (Windows -> Spark)
 :: =====================================================
-echo [5/9] Starting IB Data Pusher (Windows to Spark)...
+echo [5/8] Starting IB Data Pusher (live market data)...
 
 :: Kill existing pusher
 taskkill /F /FI "WINDOWTITLE eq [IB PUSHER]*" >nul 2>&1
@@ -243,39 +240,9 @@ if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
 echo.
 
 :: =====================================================
-:: STEP 6: CLEAR STUCK QUEUE + FILL GAPS (Spark)
+:: STEP 6: START TURBO COLLECTORS (idle until NIA triggers)
 :: =====================================================
-echo [6/9] Preparing collection queue on Spark...
-
-:: Clear any stuck/claimed requests
-curl -s -X POST "%SPARK_BACKEND%/api/ib-collector/clear-stuck" >nul 2>&1
-echo        Cleared stuck queue items
-
-:: Retry failed requests  
-curl -s -X POST "%SPARK_BACKEND%/api/ib-collector/retry-failed" >nul 2>&1
-echo        Reset failed requests for retry
-
-:: Check current queue
-curl -s -f -m 30 "%SPARK_BACKEND%/api/ib-collector/queue-progress" 2>nul > "%TEMP%\queue_init.tmp"
-if %errorlevel%==0 (
-    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_init.tmp"') do echo        Queue pending: %%a requests
-)
-del "%TEMP%\queue_init.tmp" 2>nul
-
-:: Trigger fill-gaps to queue any new missing data
-echo        Scanning for data gaps (may take a minute)...
-curl -s -X POST "%SPARK_BACKEND%/api/ib-collector/fill-gaps?use_max_lookback=true&enable_priority=true" -m 300 >nul 2>&1
-if %errorlevel%==0 (
-    echo        Gap fill requests queued!
-) else (
-    echo        [WARN] Gap scan timed out - collectors will process existing queue
-)
-echo.
-
-:: =====================================================
-:: STEP 7: START TURBO HISTORICAL COLLECTORS (Windows)
-:: =====================================================
-echo [7/9] Starting %NUM_COLLECTORS% Turbo Historical Collectors...
+echo [6/8] Starting %NUM_COLLECTORS% Turbo Collectors (idle until collection triggered)...
 
 :: Kill existing collectors
 taskkill /F /FI "WINDOWTITLE eq [COLLECTOR*" >nul 2>&1
@@ -286,43 +253,44 @@ if not exist "%SCRIPTS_DIR%\ib_historical_collector.py" (
     goto after_collectors
 )
 
-:: Launch collectors with staggered start (2 sec apart to avoid IB connection floods)
+:: Launch collectors with staggered start (2 sec apart)
 if %NUM_COLLECTORS% GEQ 1 (
-    start "[COLLECTOR 1] Turbo" cmd /k "title [COLLECTOR 1] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR 1] Historical Data - TURBO MODE && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_COLLECTOR_ID_1% ^| Color: RED && echo ===================================================== && echo. && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_1% --turbo"
+    start /MIN "[COLLECTOR 1] Turbo" cmd /k "title [COLLECTOR 1] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_1% --turbo"
     echo        Collector 1 started (client ID: %IB_COLLECTOR_ID_1%)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 2 (
-    start "[COLLECTOR 2] Turbo" cmd /k "title [COLLECTOR 2] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR 2] Historical Data - TURBO MODE && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_COLLECTOR_ID_2% ^| Color: RED && echo ===================================================== && echo. && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_2% --turbo"
+    start /MIN "[COLLECTOR 2] Turbo" cmd /k "title [COLLECTOR 2] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_2% --turbo"
     echo        Collector 2 started (client ID: %IB_COLLECTOR_ID_2%)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 3 (
-    start "[COLLECTOR 3] Turbo" cmd /k "title [COLLECTOR 3] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR 3] Historical Data - TURBO MODE && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_COLLECTOR_ID_3% ^| Color: RED && echo ===================================================== && echo. && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_3% --turbo"
+    start /MIN "[COLLECTOR 3] Turbo" cmd /k "title [COLLECTOR 3] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_3% --turbo"
     echo        Collector 3 started (client ID: %IB_COLLECTOR_ID_3%)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 4 (
-    start "[COLLECTOR 4] Turbo" cmd /k "title [COLLECTOR 4] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR 4] Historical Data - TURBO MODE && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_COLLECTOR_ID_4% ^| Color: RED && echo ===================================================== && echo. && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_4% --turbo"
+    start /MIN "[COLLECTOR 4] Turbo" cmd /k "title [COLLECTOR 4] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_4% --turbo"
     echo        Collector 4 started (client ID: %IB_COLLECTOR_ID_4%)
 )
 
+echo        Collectors idle until you trigger collection from NIA UI
 :after_collectors
 echo.
 
 :: =====================================================
-:: STEP 8: OPEN BROWSER TO SPARK FRONTEND
+:: STEP 7: OPEN BROWSER TO SPARK FRONTEND
 :: =====================================================
-echo [8/9] Opening TradeCommand on Spark...
+echo [7/8] Opening TradeCommand on Spark...
 timeout /t 5 /nobreak >nul
 start "" "%SPARK_FRONTEND%"
 echo.
 
 :: =====================================================
-:: STEP 9: READY
+:: STEP 8: READY
 :: =====================================================
 echo.
 echo ============================================
@@ -333,40 +301,39 @@ echo    Frontend: %SPARK_FRONTEND%  (DGX Spark)
 echo    Backend:  %SPARK_BACKEND%   (DGX Spark)
 echo.
 echo    +---------------------------------------------------+
-echo    ^|  ARCHITECTURE                                     ^|
-echo    +---------------------------------------------------+
 echo    ^|  DGX SPARK (192.168.50.2)                         ^|
 echo    ^|    Backend API    :8001                            ^|
 echo    ^|    Frontend React :3000                            ^|
-echo    ^|    MongoDB Docker :27017                           ^|
+echo    ^|    MongoDB Docker :27017  (177M+ bars)             ^|
 echo    ^|    Ollama AI      :11434                           ^|
 echo    ^|    Worker         Background jobs                  ^|
 echo    ^|    GPU: Blackwell GB10, 128GB unified memory       ^|
 echo    ^|                                                    ^|
 echo    ^|  WINDOWS PC (192.168.50.1)                         ^|
 echo    ^|    IB Gateway     :%IB_PORT%                            ^|
-echo    ^|    IB Data Pusher (client ID %IB_PUSHER_CLIENT_ID%)              ^|
-echo    ^|    Collectors x%NUM_COLLECTORS%  (IDs %IB_COLLECTOR_ID_1%-%IB_COLLECTOR_ID_4%, TURBO)       ^|
-echo    ^|    Browser UI                                      ^|
+echo    ^|    IB Pusher      (ID %IB_PUSHER_CLIENT_ID%, live quotes)           ^|
+echo    ^|    Collectors x%NUM_COLLECTORS%  (IDs %IB_COLLECTOR_ID_1%-%IB_COLLECTOR_ID_4%, TURBO, idle)  ^|
 echo    +---------------------------------------------------+
 echo.
 echo    +-------------------------------------------------+
 echo    ^|  TERMINAL COLOR GUIDE                           ^|
 echo    +-------------------------------------------------+
-echo    ^|  WHITE       [MAIN]        Startup Controller   ^|
-echo    ^|  YELLOW      [IB PUSHER]   Live Market Data     ^|
-echo    ^|  RED x4      [COLLECTOR]   Historical Turbo     ^|
+echo    ^|  WHITE       [MAIN]        This controller      ^|
+echo    ^|  YELLOW      [IB PUSHER]   Live market data     ^|
+echo    ^|  RED x4      [COLLECTOR]   Historical (idle)    ^|
 echo    +-------------------------------------------------+
 echo.
-echo    Focus Mode System (UI-controlled):
+echo    HOW TO USE:
 echo    +-------------------------------------------------+
-echo    ^|  Start Collection:  NIA page or Command Center  ^|
-echo    ^|    - IB Pusher + 4 Turbo Collectors active      ^|
-echo    ^|    - ~232 requests/10min (4x throughput)         ^|
+echo    ^|  TRADING: Just use the UI - everything is live  ^|
 echo    ^|                                                  ^|
-echo    ^|  Start Training:    NIA page "Train All"         ^|
-echo    ^|    - Blackwell GPU handles all ML training       ^|
-echo    ^|    - 128GB unified memory for full dataset       ^|
+echo    ^|  COLLECT DATA: Open NIA page, click "Fill Gaps" ^|
+echo    ^|    Collectors activate instantly (already running)^|
+echo    ^|    ~232 requests/10min with 4 turbo collectors   ^|
+echo    ^|    They idle again when queue empties             ^|
+echo    ^|                                                  ^|
+echo    ^|  TRAIN MODELS: NIA page, click "Train All"      ^|
+echo    ^|    Blackwell GPU + 128GB unified memory          ^|
 echo    +-------------------------------------------------+
 echo.
 echo ============================================
@@ -400,7 +367,7 @@ if %errorlevel%==0 (
 :: IB Gateway (Windows)
 netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
 if %errorlevel%==0 (
-    echo IB Gateway:      CONNECTED (Windows :%IB_PORT%)
+    echo IB Gateway:      CONNECTED (:%IB_PORT%)
 ) else (
     echo IB Gateway:      DISCONNECTED
 )
@@ -421,7 +388,7 @@ if %errorlevel%==0 (
     echo Spark Frontend:  STARTING...
 )
 
-:: IB Data Pusher (check window title)
+:: IB Data Pusher
 tasklist /FI "WINDOWTITLE eq [IB PUSHER]*" 2>NUL | find /I /N "cmd.exe">NUL
 if "%ERRORLEVEL%"=="0" (
     echo IB Pusher:       RUNNING
@@ -429,7 +396,7 @@ if "%ERRORLEVEL%"=="0" (
     echo IB Pusher:       NOT RUNNING
 )
 
-:: Collectors (count running)
+:: Collectors count
 set COLLECTOR_COUNT=0
 tasklist /FI "WINDOWTITLE eq [COLLECTOR 1]*" 2>NUL | find /I /N "cmd.exe">NUL
 if "%ERRORLEVEL%"=="0" set /a COLLECTOR_COUNT+=1
@@ -439,16 +406,16 @@ tasklist /FI "WINDOWTITLE eq [COLLECTOR 3]*" 2>NUL | find /I /N "cmd.exe">NUL
 if "%ERRORLEVEL%"=="0" set /a COLLECTOR_COUNT+=1
 tasklist /FI "WINDOWTITLE eq [COLLECTOR 4]*" 2>NUL | find /I /N "cmd.exe">NUL
 if "%ERRORLEVEL%"=="0" set /a COLLECTOR_COUNT+=1
-echo Collectors:      %COLLECTOR_COUNT%/%NUM_COLLECTORS% TURBO running
+echo Collectors:      %COLLECTOR_COUNT%/%NUM_COLLECTORS% TURBO (idle until NIA trigger)
 
 :: --------- FOCUS MODE ---------
 echo.
-echo ------- FOCUS MODE STATUS -------
+echo ------- FOCUS MODE -------
 curl -s -f -m 5 %SPARK_BACKEND%/api/focus-mode 2>nul > "%TEMP%\focus_check.tmp"
 if %errorlevel%==0 (
-    for /f "tokens=2 delims=:,}" %%a in ('findstr "mode" "%TEMP%\focus_check.tmp"') do echo Current Mode:  %%~a
+    for /f "tokens=2 delims=:,}" %%a in ('findstr "mode" "%TEMP%\focus_check.tmp"') do echo Mode:            %%~a
 ) else (
-    echo Focus Mode:  Unable to check
+    echo Mode:  Unable to check
 )
 del "%TEMP%\focus_check.tmp" 2>nul
 
@@ -457,39 +424,38 @@ echo.
 echo ------- DATA COLLECTION -------
 curl -s -f -m 5 %SPARK_BACKEND%/api/ib-collector/queue-progress 2>nul > "%TEMP%\queue_check.tmp"
 if %errorlevel%==0 (
-    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Queue Pending:   %%a
-    for /f "tokens=2 delims=:," %%a in ('findstr "claimed" "%TEMP%\queue_check.tmp"') do echo Queue Claimed:   %%a (actively fetching)
-    for /f "tokens=2 delims=:," %%a in ('findstr "completed" "%TEMP%\queue_check.tmp"') do echo Queue Completed: %%a
-    for /f "tokens=2 delims=:," %%a in ('findstr "failed" "%TEMP%\queue_check.tmp"') do echo Queue Failed:    %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Pending:         %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "claimed" "%TEMP%\queue_check.tmp"') do echo Active:          %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "completed" "%TEMP%\queue_check.tmp"') do echo Completed:       %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "failed" "%TEMP%\queue_check.tmp"') do echo Failed:          %%a
 ) else (
-    echo Collection:  Unable to check
+    echo Queue:  Unable to check
 )
 del "%TEMP%\queue_check.tmp" 2>nul
 
 :: --------- ML TRAINING ---------
 echo.
-echo ------- ML TRAINING STATUS -------
+echo ------- ML TRAINING -------
 curl -s -f -m 5 %SPARK_BACKEND%/api/ai-training/status 2>nul > "%TEMP%\train_check.tmp"
 if %errorlevel%==0 (
-    for /f "tokens=2 delims=:,}" %%a in ('findstr "phase" "%TEMP%\train_check.tmp"') do echo Training Phase:  %%~a
-    for /f "tokens=2 delims=:,}" %%a in ('findstr "status" "%TEMP%\train_check.tmp"') do echo Training Status: %%~a
+    for /f "tokens=2 delims=:,}" %%a in ('findstr "phase" "%TEMP%\train_check.tmp"') do echo Phase:           %%~a
+    for /f "tokens=2 delims=:,}" %%a in ('findstr "status" "%TEMP%\train_check.tmp"') do echo Status:          %%~a
 ) else (
     echo Training:  Unable to check
 )
 del "%TEMP%\train_check.tmp" 2>nul
 
-:: Trained models count
-curl -s -f -m 5 %SPARK_BACKEND%/api/ai-modules/timeseries/available-data 2>nul > "%TEMP%\models_check.tmp"
+curl -s -f -m 5 %SPARK_BACKEND%/api/ai-modules/timeseries/available-data 2>nul > "%TEMP%\data_check.tmp"
 if %errorlevel%==0 (
-    for /f "tokens=2 delims=:," %%a in ('findstr "total_bars" "%TEMP%\models_check.tmp"') do echo Training Bars:   %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "total_bars" "%TEMP%\data_check.tmp"') do echo Training Bars:   %%a
 ) else (
     echo Training Data: Checking...
 )
-del "%TEMP%\models_check.tmp" 2>nul
+del "%TEMP%\data_check.tmp" 2>nul
 
 echo.
 echo ===================================
-echo Press any key to check again...
+echo Press any key to refresh...
 echo Press Ctrl+C to exit
 pause >nul
 goto health_check_loop
