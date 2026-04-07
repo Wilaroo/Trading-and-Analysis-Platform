@@ -204,7 +204,7 @@ const BotTakeCard = ({ trade, symbol }) => {
         
         if (response.ok) {
           const data = await response.json();
-          if (data.success) {
+          if (data?.success) {
             setStopAnalysis(data);
           }
         }

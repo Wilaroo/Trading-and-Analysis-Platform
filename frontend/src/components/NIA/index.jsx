@@ -167,7 +167,7 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       const slowResults = await Promise.allSettled([
         withTimeout(api.get('/api/ib-collector/stats'), 10000),
         withTimeout(api.get('/api/ib-collector/queue-progress'), 10000),
-        withTimeout(api.get('/api/simulation/jobs?limit=10'), 10000)
+        withTimeout(api.get('/api/simulator/status'), 10000)
       ]);
 
       const [collectionStatsRes, collectionQueueRes, simulationJobsRes] = slowResults;

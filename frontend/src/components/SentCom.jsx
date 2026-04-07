@@ -599,7 +599,7 @@ const StopFixPanel = ({ thoughts = [], onRefresh }) => {
     try {
       const { data } = await api.post('/api/trading-bot/fix-all-risky-stops');
       
-      if (data.success) {
+      if (data?.success) {
         setFixResult({
           success: true,
           message: data.message || `Fixed ${data.fixes_applied} stops`,
@@ -1392,7 +1392,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                       setVerifying(true);
                       try {
                         const { data } = await api.post('/api/ai-modules/timeseries/verify-predictions');
-                        if (data.success) {
+                        if (data?.success) {
                           toast.success(`Verified ${data.result.verified} predictions`);
                           refresh();
                         }
@@ -1610,7 +1610,7 @@ const useMarketSession = (pollInterval = 120000) => {
   const fetchSession = useCallback(async () => {
     try {
       const data = await safeGet('/api/market-context/session/status');
-      if (data.success && data.session) {
+      if (data?.success && data.session) {
         setSession(data.session);
       }
     } catch (err) {
@@ -1644,7 +1644,7 @@ const useSentComStatus = (pollInterval = 120000) => {  // HTTP backup only, WS i
   const fetchStatus = useCallback(async () => {
     try {
       const data = await safeGet('/api/sentcom/status');
-      if (data.success) {
+      if (data?.success) {
         setStatus(data.status);
         setCached('sentcomStatus', data.status, 30000); // 30 second TTL
       }
@@ -1699,7 +1699,7 @@ const useSentComStream = (pollInterval = 120000) => {  // HTTP backup only, WS i
       const data = await safeGet('/api/sentcom/stream?limit=20');
       if (!data) return;
       
-      if (data.success && data.messages) {
+      if (data?.success && data.messages) {
         // Separate chat messages from status/system messages
         const chatMessages = data.messages.filter(m => 
           m.type === 'chat' || m.action_type === 'chat_response' || m.action_type === 'user_message'
@@ -1776,7 +1776,7 @@ const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup only, WS
   const fetchPositions = useCallback(async () => {
     try {
       const data = await safeGet('/api/sentcom/positions');
-      if (data.success) {
+      if (data?.success) {
         setPositions(data.positions || []);
         setTotalPnl(data.total_pnl || 0);
         setCached('sentcomPositions', { positions: data.positions || [], totalPnl: data.total_pnl || 0 }, 15000); // 15 second TTL (positions update more frequently)
@@ -1833,7 +1833,7 @@ const useSentComSetups = (pollInterval = 120000) => {
   const fetchSetups = useCallback(async () => {
     try {
       const data = await safeGet('/api/sentcom/setups');
-      if (data.success) {
+      if (data?.success) {
         setSetups(data.setups || []);
         setCached('sentcomSetups', data.setups || [], 30000); // 30 second TTL
       }
@@ -1876,7 +1876,7 @@ const useSentComContext = (pollInterval = 120000) => {
   const fetchContext = useCallback(async () => {
     try {
       const data = await safeGet('/api/sentcom/context');
-      if (data.success) {
+      if (data?.success) {
         setContext(data.context);
         setCached('sentcomContext', data.context, 60000); // 60 second TTL (context changes slowly)
       }
@@ -1926,7 +1926,7 @@ const useSentComAlerts = (pollInterval = 60000) => {
   const fetchAlerts = useCallback(async () => {
     try {
       const data = await safeGet('/api/sentcom/alerts?limit=5');
-      if (data.success) {
+      if (data?.success) {
         setAlerts(data.alerts || []);
         setCached('sentcomAlerts', data.alerts || [], 15000); // 15 second TTL (alerts update frequently)
       }
@@ -1974,7 +1974,7 @@ const useChatHistory = () => {
     
     try {
       const data = await safeGet('/api/sentcom/chat/history?limit=50');
-      if (data.success && data.messages) {
+      if (data?.success && data.messages) {
         // Convert to local message format and reverse for newest-first display
         const formattedMessages = data.messages.map((msg, idx) => ({
           id: `history_${idx}_${Date.now()}`,
@@ -2017,7 +2017,7 @@ const useTradingBotControl = (pollInterval = 60000) => {
   const fetchBotStatus = useCallback(async () => {
     try {
       const data = await safeGet('/api/trading-bot/status');
-      if (data.success) {
+      if (data?.success) {
         setBotStatus(data);
         setCached('botStatus', data, 30000); // 30 second TTL
       }
@@ -2059,7 +2059,7 @@ const useTradingBotControl = (pollInterval = 60000) => {
     setActionLoading('risk');
     try {
       const { data } = await api.post('/api/trading-bot/risk-params', params);
-      if (data.success) {
+      if (data?.success) {
         await fetchBotStatus();
         toast.success('Risk parameters updated');
         return true;
@@ -2170,7 +2170,7 @@ const useAIModules = (pollInterval = 60000) => {
     setActionLoading(moduleName);
     try {
       const { data } = await api.post(`/api/ai-modules/toggle/${moduleName}`, { enabled });
-      if (data.success) {
+      if (data?.success) {
         await fetchStatus();
         toast.success(`${moduleName.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`);
       }
@@ -2186,7 +2186,7 @@ const useAIModules = (pollInterval = 60000) => {
     setActionLoading('shadow');
     try {
       const { data } = await api.post('/api/ai-modules/shadow-mode', { shadow_mode: shadowMode });
-      if (data.success) {
+      if (data?.success) {
         await fetchStatus();
         toast.success(`Shadow mode ${shadowMode ? 'enabled' : 'disabled'}`);
       }

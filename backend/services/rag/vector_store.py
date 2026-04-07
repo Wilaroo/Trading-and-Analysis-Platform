@@ -33,7 +33,7 @@ except ImportError:
 
 # ChromaDB client (lazy loaded)
 _chroma_client = None
-_persist_directory = "/app/backend/data/chromadb"
+_persist_directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "chromadb")
 
 
 def get_chroma_client():

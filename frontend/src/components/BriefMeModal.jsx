@@ -39,7 +39,7 @@ const BriefMeModal = ({ isOpen, onClose }) => {
       
       clearTimeout(timeoutId);
       
-      if (data.success) {
+      if (data?.success) {
         setBriefData(data);
       } else {
         setError(data.error || 'Unknown error');

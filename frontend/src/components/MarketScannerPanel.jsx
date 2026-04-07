@@ -132,7 +132,7 @@ export default function MarketScannerPanel() {
           run_in_background: true
         });
       
-      if (data.success) {
+      if (data?.success) {
         setActiveScan({
           id: data.scan_id,
           status: 'pending',

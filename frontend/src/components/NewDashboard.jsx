@@ -51,7 +51,7 @@ const DashboardHeader = ({
     const fetchSession = async () => {
       try {
         const data = await safeGet('/api/market-context/session/status');
-        if (data.success && data.session) {
+        if (data?.success && data.session) {
           setMarketSession(data.session);
         }
       } catch (err) {

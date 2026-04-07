@@ -2159,7 +2159,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
   const fetchSimJobs = useCallback(async () => {
     try {
       const { data } = await api.get('/api/backtest/full-ai-simulation/jobs?limit=20');
-      if (data.success) {
+      if (data?.success) {
         setSimJobs(data.jobs || []);
       }
     } catch (err) {
@@ -2178,7 +2178,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
       if (selectedJob) {
         try {
           const { data } = await api.get(`/api/backtest/full-ai-simulation/status/${selectedJob}`);
-          if (data.success) {
+          if (data?.success) {
             setJobDetail(data.job);
             if (data.job.status === 'completed' || data.job.status === 'failed') {
               clearInterval(timer);
@@ -2226,7 +2226,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
       if (!payload.end_date) delete payload.end_date;
       
       const { data } = await api.post('/api/backtest/full-ai-simulation', payload);
-      if (data.success) {
+      if (data?.success) {
         toast.success(`Full AI simulation started! Job: ${data.job_id}`);
         setSelectedJob(data.job_id);
         setJobDetail({ status: 'running', ...data.config });
@@ -2250,7 +2250,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
     setDetailView('summary');
     try {
       const { data } = await api.get(`/api/backtest/full-ai-simulation/status/${jobId}`);
-      if (data.success) {
+      if (data?.success) {
         setJobDetail(data.job);
         if (data.job.status === 'running') {
           setPollInterval(3000);

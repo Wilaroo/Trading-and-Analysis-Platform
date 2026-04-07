@@ -25,7 +25,7 @@ import {
   Wifi,
   RefreshCw
 } from 'lucide-react';
-import { useWsData } from '../contexts/WebSocketDataContext';
+import { useConnection } from '../contexts/ConnectionManagerContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -82,7 +82,7 @@ const StartupModal = ({ onComplete }) => {
   const timerRef = useRef(null);
   
   // Frontend WS connection state — supplements backend's report
-  const { isConnected: frontendWsConnected } = useWsData();
+  const { wsConnected: frontendWsConnected } = useConnection();
 
   // Check if user has opted out
   useEffect(() => {

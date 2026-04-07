@@ -44,7 +44,7 @@ export const useSOCStream = () => {
     try {
       const data = await safeGet('/api/sentcom/stream?limit=30');
       
-      if (data.success && data.messages) {
+      if (data?.success && data.messages) {
         const socMessages = data.messages.filter(m => 
           m.type !== 'chat' && 
           m.action_type !== 'chat_response' && 

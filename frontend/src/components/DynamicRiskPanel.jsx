@@ -133,7 +133,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
     setActionLoading(true);
     try {
       const { data } = await api.post('/api/dynamic-risk/toggle');
-      if (data.success) {
+      if (data?.success) {
         toast.success(data.enabled ? 'Dynamic risk enabled' : 'Dynamic risk disabled');
         refresh();
       }
@@ -151,7 +151,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
           duration_minutes: overrideDuration,
           reason: overrideReason
         });
-      if (data.success) {
+      if (data?.success) {
         toast.success(`Override set: ${overrideValue}x for ${overrideDuration} mins`);
         setShowOverride(false);
         refresh();
@@ -166,7 +166,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
     setActionLoading(true);
     try {
       const data = await safeDelete('/api/dynamic-risk/override');
-      if (data.success) {
+      if (data?.success) {
         toast.success('Override cleared');
         refresh();
       }

@@ -732,7 +732,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading(tradeId);
     try {
       const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/confirm`);
-      if (data.success) {
+      if (data?.success) {
         await fetchTrades();
         await fetchStatus();
       }
@@ -747,7 +747,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading(tradeId);
     try {
       const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/reject`);
-      if (data.success) {
+      if (data?.success) {
         await fetchTrades();
       }
     } catch (err) {
@@ -763,7 +763,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading(tradeId);
     try {
       const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/close`);
-      if (data.success) {
+      if (data?.success) {
         await fetchTrades();
         await fetchStatus();
       }
@@ -778,7 +778,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading(`strategy-${strategy}`);
     try {
       const { data } = await api.post(`/api/trading-bot/strategy-configs/${strategy}`, strategyForm);
-      if (data.success) {
+      if (data?.success) {
         await fetchStatus();
         setEditingStrategy(null);
         setStrategyForm({});
