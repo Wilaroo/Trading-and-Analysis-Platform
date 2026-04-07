@@ -474,8 +474,8 @@ class TimeSeriesGBM:
         self,
         bars_by_symbol: Dict[str, List[Dict]],
         validation_split: float = 0.2,
-        num_boost_round: int = 100,
-        early_stopping_rounds: int = 10
+        num_boost_round: int = 300,
+        early_stopping_rounds: int = 20
     ) -> ModelMetrics:
         """
         Train the model on historical data.
@@ -784,8 +784,8 @@ class TimeSeriesGBM:
         y: np.ndarray,
         feature_names: List[str],
         validation_split: float = 0.2,
-        num_boost_round: int = 100,
-        early_stopping_rounds: int = 10,
+        num_boost_round: int = 300,
+        early_stopping_rounds: int = 20,
         skip_save: bool = False,
         num_classes: int = 2
     ) -> 'ModelMetrics':
