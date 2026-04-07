@@ -847,70 +847,52 @@ async def run_training_pipeline(
         # Clear symbol cache at start of pipeline run
         clear_symbol_cache()
 
-        # ── Phase 1: Generic Directional Models ──
+        # ── Phase 1: Generic Directional Models (Full Universe) ──
         if "generic" in phases:
             status.update(phase="generic_directional")
-            logger.info("=== Phase 1: Training Generic Directional Models ===")
-            for bs in bar_sizes:
-                config = BAR_SIZE_CONFIGS.get(bs)
-                if not config:
-                    continue
-                model_name = f"direction_predictor_{bs.replace(' ', '_')}"
-                status.update(current_model=model_name)
-                try:
-                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                    from services.ai_modules.timeseries_features import get_feature_engineer
+            logger.info("=== Phase 1: Training Generic Directional Models (Full Universe) ===")
+            try:
+                from services.ai_modules.timeseries_service import TimeSeriesAIService
 
-                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=config["forecast_horizon"])
-                    model.set_db(db)
+                ts_service = TimeSeriesAIService()
+                ts_service.set_db(db)
 
-                    max_sym = max_symbols_override or config["max_symbols"]
-                    symbols = await get_cached_symbols(db, bs, config["min_bars_per_symbol"])
-                    symbols = symbols[:max_sym]
-
-                    if not symbols:
-                        logger.warning(f"No symbols available for {bs}")
+                for bs in bar_sizes:
+                    config = BAR_SIZE_CONFIGS.get(bs)
+                    if not config:
                         continue
+                    model_name = f"direction_predictor_{bs.replace(' ', '_')}"
+                    status.update(current_model=model_name)
+                    logger.info(f"[Phase 1] Training {model_name} via Full Universe...")
 
-                    # Stream-load + extract: loads symbols in batches, extracts features,
-                    # discards raw bars immediately. No max_bars cap needed.
-                    X, y = await stream_load_and_extract(
-                        db, symbols, bs, config["min_bars_per_symbol"],
-                        config["forecast_horizon"],
+                    result = await ts_service.train_full_universe(
+                        bar_size=bs,
+                        symbol_batch_size=500,
+                        max_bars_per_symbol=99999,
                     )
 
-                    if X is None or len(X) < 100:
-                        logger.warning(f"Too few samples for {bs}: {len(X) if X is not None else 0}")
-                        continue
-
-                    feature_names = get_feature_engineer().get_feature_names()
-                    logger.info(f"Training {model_name}: {len(X):,} samples from {len(symbols)} symbols")
-                    metrics = await _run_in_thread(
-                        model.train_from_features,
-                        X, y, feature_names,
-                        num_boost_round=200,
-                        early_stopping_rounds=20,
-                    )
-
-                    # Free feature matrix after training
-                    del X, y
-                    gc.collect()
-
-                    if metrics and metrics.accuracy > 0:
+                    if result.get("success"):
+                        acc = result.get("metrics", {}).get("accuracy", 0)
+                        samples = result.get("training_samples", 0)
                         results["models_trained"].append({
                             "name": model_name,
-                            "accuracy": metrics.accuracy,
-                            "samples": metrics.training_samples,
+                            "accuracy": acc,
+                            "samples": samples,
                         })
-                        results["total_samples"] += metrics.training_samples
-                        status.add_completed(model_name, metrics.accuracy)
+                        results["total_samples"] += samples
+                        status.add_completed(model_name, acc)
+                        logger.info(f"[Phase 1] {model_name}: {acc*100:.1f}% accuracy, {samples:,} samples")
                     else:
-                        results["models_failed"].append({"name": model_name, "reason": "Low accuracy or no metrics"})
+                        error = result.get("error", "Training failed")
+                        results["models_failed"].append({"name": model_name, "reason": error})
+                        status.add_error(model_name, error)
+                        logger.warning(f"[Phase 1] {model_name} failed: {error}")
 
-                except Exception as e:
-                    logger.error(f"Failed to train {model_name}: {e}")
-                    results["models_failed"].append({"name": model_name, "reason": str(e)})
-                    status.add_error(model_name, str(e))
+                    gc.collect()
+
+            except Exception as e:
+                logger.error(f"Phase 1 Full Universe error: {e}", exc_info=True)
+                results["models_failed"].append({"name": "generic_directional", "reason": str(e)})
 
         # ── Phase 2: Setup-Specific Models (Long) ──
         if "setup" in phases:

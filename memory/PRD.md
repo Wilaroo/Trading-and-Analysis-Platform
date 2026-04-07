@@ -12,91 +12,60 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 
 ### Phase 1: 100% IB Data (DONE)
 - Removed Alpaca, Finnhub, TwelveData from all trading/scanning paths
-- All training and inference strictly through IB data in MongoDB
 
 ### Phase 2: XGBoost GPU Swap (DONE)
 - Replaced LightGBM with XGBoost (`tree_method='hist'`, `device='cuda'`)
-- Updated `timeseries_gbm.py` with XGBoost native training
 
 ### Phase 3: Training Optimizations (DONE)
-- Vectorized `extract_features_bulk()` for numpy sliding windows
-- Feature caching in MongoDB
-- Batch sizes increased to 500 symbols for 128GB Spark
+- Vectorized `extract_features_bulk()`, feature caching, batch sizes 500
 
 ### Phase 4: Scanner Upgrade (DONE)
-- ADV-tiered scanning (Intraday > 500K, Swing > 100K, Investment > 50K)
-- 100 symbols per batch, trading-day staleness check
+- ADV-tiered scanning, 100 symbols per batch
 
 ### Phase 4.5: Confidence Gate Refactor (DONE)
-- Additive 0-100 scoring system with floor protection
-- Thresholds: GO >= 55, REDUCE >= 30, SKIP < 30
+- Additive 0-100 scoring, 12 layers, GO >= 55 / REDUCE >= 30 / SKIP < 30
 
 ### Phase 5a: Training Pipeline Bug Fixes (DONE — April 7, 2026)
-1. Fixed `train_full_universe()` — was still calling LightGBM, now uses XGBoost GPU
-2. Fixed 3GB memory cap to 100GB for 128GB Spark
-3. Fixed method defaults: symbol_batch_size 50->500, max_bars_per_symbol 1000->99999
-4. Fixed router defaults: max_bars 1000/2000->99999
-5. Fixed worker param passthrough for max_bars and batch_size
-6. Fixed Pydantic model defaults 100/2000->500/99999
-7. Fixed model save: XGBoost Booster uses temp file instead of BytesIO
-8. Fixed misleading model save log (archived vs promoted)
-9. Fixed stale feature cache guidance (clear before re-training)
+- 9 critical XGBoost pipeline bugs fixed and verified on Spark hardware
 
 ### Phase 5b: Deep Learning Models (DONE — April 7, 2026)
-Three new DL models created and integrated into the Confidence Gate:
-
-1. **VAE Regime Detection** (`vae_regime.py`)
-   - Variational Autoencoder for unsupervised market regime labeling
-   - 5 regimes: Bull Trending, Bear Trending, High Volatility, Mean Reverting, Momentum Surge
-   - Trains on SPY + sector ETF microstructure features
-   - Confidence Gate Layer 10: max +8 / floor -5
-
-2. **Temporal Fusion Transformer** (`temporal_fusion_transformer.py`)
-   - Multi-timeframe attention model (1min, 5min, 15min, 1hour, 1day)
-   - Variable Selection Network learns feature importance per timeframe
-   - Cross-timeframe patterns (e.g., "daily trend up + 15min pullback = continuation")
-   - Confidence Gate Layer 9: max +12 / floor -5
-
-3. **CNN-LSTM** (`cnn_lstm_model.py`)
-   - Temporal chart pattern recognition
-   - 1D CNN backbone + LSTM sequence processing + attention
-   - Learns pattern evolution over 5 consecutive windows
-   - Confidence Gate Layer 11: max +10 / floor -5
-
-**API Endpoints:**
-- `POST /api/ai-modules/dl/train-vae-regime`
-- `POST /api/ai-modules/dl/train-tft`
-- `POST /api/ai-modules/dl/train-cnn-lstm`
-- `POST /api/ai-modules/dl/train-all` (all 3 sequentially)
-- `GET /api/ai-modules/dl/status`
-
-**Worker Integration:** `DL_TRAINING` job type added to job queue system.
-**Frontend:** "Train All DL Models" button added to AI Training panel.
+- VAE Regime Detection (Layer 10), TFT Multi-Timeframe (Layer 9), CNN-LSTM (Layer 11)
+- Full PyTorch implementations with train/predict/save/load
+- Wired into Confidence Gate and training pipeline (Phase 11)
 
 ### Phase 5c: FinBERT Sentiment (DONE — April 8, 2026)
-Complete FinBERT sentiment analysis pipeline, **decoupled from live training loop** per user request.
+- FinnhubNewsCollector + FinBERTSentiment with 6 API endpoints
+- Worker `FINBERT_ANALYSIS` job type for background pipeline
+- Wired into training pipeline (Phase 12)
+- Decoupled from live training loop — Gate Layer 12 ready when activated
 
-**Components:**
-- `FinnhubNewsCollector`: Fetches ticker-tagged news, caches in MongoDB `news_articles`, deduplicates by Finnhub article ID, respects 60 calls/min rate limit
-- `FinBERTSentiment`: Scores articles using ProsusAI/finbert (positive/negative/neutral), batch scoring, per-symbol and market-wide aggregation
-- Worker `FINBERT_ANALYSIS` job type: Background pipeline (collect -> score)
+### Phase 5d: Training Pipeline Optimization (DONE — April 8, 2026)
+- **9x memory reduction**: Replaced `.tolist()` Python list accumulation with numpy chunk pattern across `train_full_universe()`, `TimeSeriesGBM.train()`, and `_train_single_setup_profile()`
+- **10-50x setup training speedup**: Replaced per-match `extract_features()` with one `extract_features_bulk()` per symbol + numpy indexing
+- **Training mode bridge**: Connected `training_mode_manager` ↔ `focus_mode_manager` so scanner/bot/WS streams genuinely pause during training
+- **Pipeline Phase 1 upgraded**: Replaced old `stream_load_and_extract` with optimized `train_full_universe()` — eliminates redundancy with Full Universe button
+- **Phase 11 + 12 added**: DL models and FinBERT wired into master training pipeline
+- **Results**: Daily model 2 min (cached), 1-hour model 30M samples in 66 min, memory flat ~15-25GB
 
-**API Endpoints:**
-- `POST /api/ai-modules/finbert/collect-news` — collect news from Finnhub
-- `POST /api/ai-modules/finbert/score-articles` — score unscored articles with FinBERT
-- `POST /api/ai-modules/finbert/run-pipeline` — queue background job (collect + score)
-- `GET /api/ai-modules/finbert/stats` — collection/scoring statistics
-- `GET /api/ai-modules/finbert/sentiment/{symbol}` — per-symbol aggregated sentiment
-- `GET /api/ai-modules/finbert/market-sentiment` — broad market sentiment
+## Master Training Pipeline (13 Phases)
+| Phase | What | Models |
+|-------|------|--------|
+| 1 | Generic Directional (Full Universe) | 7 |
+| 2 | Setup-Specific (Long) | 17 |
+| 2.5 | Setup-Specific (Short) | 17 |
+| 3 | Volatility Prediction | 7 |
+| 4 | Exit Timing | 10 |
+| 5 | Sector-Relative | 3 |
+| 6 | Risk-of-Ruin | 6 |
+| 7 | Regime-Conditional | 28 |
+| 8 | Ensemble Meta-Learner | 10 |
+| 9 | CNN Chart Patterns | 13 |
+| 11 | Deep Learning (VAE/TFT/CNN-LSTM) | 3 |
+| 12 | FinBERT Sentiment | 1 |
+| 13 | Auto-Validation (5-phase) | 34 |
+| **Total** | | **156 work units** |
 
-**Collections:**
-- `news_articles`: Raw Finnhub articles with dedup index
-- `news_sentiment`: Scored articles for fast aggregation
-
-**Gate Integration:** Ready to wire as Confidence Gate Layer 12 when user enables it.
-
-## Confidence Gate Scoring (Updated)
-Max theoretical: ~115 pts (Layer 12 disabled, ready to add +7/-5 when enabled)
+## Confidence Gate Scoring (12 Layers)
 - Layer 1: Regime Check (max +20 / floor -10)
 - Layer 2: AI Regime (max +10 / floor -5)
 - Layer 3: Model Consensus (max +15 / floor -5)
@@ -110,29 +79,41 @@ Max theoretical: ~115 pts (Layer 12 disabled, ready to add +7/-5 when enabled)
 - Layer 11: CNN-LSTM Temporal (max +10 / floor -5)
 - Layer 12: FinBERT Sentiment (INACTIVE — max +7 / floor -5) [READY]
 
+## Key API Endpoints
+- `/api/ai-modules/timeseries/train-full-universe-all` — Train all 7 directional models
+- `/api/ai-modules/timeseries/setups/train-all` — Train all 35 setup profiles
+- `/api/ai-modules/dl/train-all` — Train 3 DL models
+- `/api/ai-modules/finbert/*` — 6 FinBERT endpoints
+- `/api/ai-modules/dl/status` — DL + FinBERT status
+- `/api/ai-training/start` — Master pipeline (all 13 phases)
+
 ## Upcoming Tasks
-- Phase 5e: RL Position Sizer (PPO/SAC agent for dynamic position sizing — needs logged trade outcomes first)
-- Phase 6: Distributed PC Worker (training coordinator for Windows PC over LAN — useful when GPU contention increases)
+- Phase 5e: RL Position Sizer (needs trade outcome data)
+- Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
 - Phase 7: Infrastructure Polish (systemd, notifications, symbol rotation)
-- Per-signal weight optimizer for auto-tuning gate point values
+- FinBERT UI panel in NIA
+- Activate FinBERT as Gate Layer 12
+- Per-signal weight optimizer
 
 ## Key Files
+- `/app/backend/services/ai_modules/training_pipeline.py` — Master 13-phase pipeline
+- `/app/backend/services/ai_modules/timeseries_service.py` — Full Universe training
 - `/app/backend/services/ai_modules/timeseries_gbm.py` — XGBoost model
-- `/app/backend/services/ai_modules/timeseries_service.py` — Training orchestration
-- `/app/backend/services/ai_modules/confidence_gate.py` — Additive scoring (11 layers)
+- `/app/backend/services/ai_modules/confidence_gate.py` — 12-layer scoring
 - `/app/backend/services/ai_modules/vae_regime.py` — VAE Regime Detection
 - `/app/backend/services/ai_modules/temporal_fusion_transformer.py` — TFT
 - `/app/backend/services/ai_modules/cnn_lstm_model.py` — CNN-LSTM
 - `/app/backend/services/ai_modules/finbert_sentiment.py` — FinBERT Sentiment
 - `/app/backend/routers/ai_modules.py` — All AI API endpoints
-- `/app/backend/worker.py` — Background job processor (DL + FinBERT)
-- `/app/backend/tests/test_phase3_4_45.py` — Test suite
+- `/app/backend/worker.py` — Background job processor
+- `/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx` — Pipeline UI
 
-## DB Schema
-- `tradecommand.ib_historical_data` — 178M+ bars (compound index: symbol, bar_size, date)
-- `tradecommand.timeseries_models` — XGBoost models (JSON format)
-- `tradecommand.feature_cache` — Cached training features
-- `tradecommand.dl_models` — PyTorch DL models (base64 state_dict)
-- `tradecommand.confidence_gate_log` — AI decisions (scoring_version: "additive_v1")
-- `tradecommand.news_articles` — Finnhub news articles (indexed: finnhub_id unique, symbol+datetime)
-- `tradecommand.news_sentiment` — FinBERT scored articles (indexed: symbol+datetime, symbol+date)
+## DB Collections
+- `ib_historical_data` — 178M+ bars
+- `timeseries_models` — XGBoost models
+- `feature_cache` — Cached training features
+- `dl_models` — PyTorch DL models
+- `news_articles` — Finnhub news articles
+- `news_sentiment` — FinBERT scored articles
+- `confidence_gate_log` — AI decisions
+- `job_queue` — Background jobs
