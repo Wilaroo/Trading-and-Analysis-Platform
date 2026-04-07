@@ -1003,8 +1003,7 @@ try:
         scoring_engine=scoring_engine
     )
     
-    # Initialize the simulation engine
-    asyncio.create_task(simulation_engine.initialize())
+    # Simulation engine initialization deferred to startup event (no running event loop at module load)
     
     # Initialize router (simulation engine unified into advanced backtest)
     
@@ -3476,6 +3475,14 @@ async def startup_event():
                 print(f"Trading bot: STARTED in {mode} mode (paper mode — no IB connection)")
         except Exception as e:
             print(f"Trading bot: FAILED ({e})")
+
+        # 4.5 Initialize simulation engine (deferred from module load)
+        try:
+            if simulation_engine is not None:
+                await simulation_engine.initialize()
+                print("Simulation engine: INITIALIZED")
+        except Exception as e:
+            print(f"Simulation engine: DEFERRED ({e})")
 
         # 5. Startup summary
         print("")
