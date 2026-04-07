@@ -515,46 +515,37 @@ class TimeSeriesGBM:
                 continue
             
             cache_misses += 1
-            symbol_features = []
-            symbol_targets = []
             
-            # Bars are in chronological order (oldest first)
-            # We need 50 bars for features + forecast_horizon bars for target
-            # Slide through leaving room for future target
-            for i in range(len(bars) - 50 - self.forecast_horizon):
-                # Window of 50 bars starting at position i
-                window_bars = bars[i:i+50]
-                
-                # Reverse window to recent-first for feature extraction
-                window_bars_recent_first = window_bars[::-1]
-                
-                feature_set = self._feature_engineer.extract_features(
-                    window_bars_recent_first,
-                    symbol=symbol,
-                    include_target=False  # We calculate target ourselves
-                )
-                
-                if feature_set is not None:
-                    # Convert features to vector in consistent order
-                    feature_vector = [
-                        feature_set.features.get(f, 0.0) 
-                        for f in self._feature_names
-                    ]
-                    
-                    # Calculate forward-looking target
-                    current_price = bars[i + 49]["close"]
-                    future_price = bars[i + 49 + self.forecast_horizon]["close"]
-                    target_return = (future_price - current_price) / current_price
-                    target = 1 if target_return > 0 else 0
-                    
-                    symbol_features.append(feature_vector)
-                    symbol_targets.append(target)
+            # Use VECTORIZED bulk extraction (processes entire symbol in one pass)
+            # instead of per-window Python loop — 10-50x faster
+            bulk_features = self._feature_engineer.extract_features_bulk(bars)
             
-            if symbol_features:
-                all_features.extend(symbol_features)
-                all_targets.extend(symbol_targets)
-                # Save to cache for next training cycle
-                self._save_features_to_cache(symbol, symbol_features, symbol_targets)
+            if bulk_features is not None and len(bulk_features) > self.forecast_horizon:
+                # bulk_features shape: (n_windows, 46) — one row per valid window
+                # Calculate targets for each window
+                closes = np.array([b.get("close", 0) for b in bars], dtype=np.float32)
+                lb = self._feature_engineer.lookback  # 50
+                
+                # Window i corresponds to bar index (lb-1+i) as the "current" bar
+                # Target: price at (current + forecast_horizon) vs current
+                n_usable = min(len(bulk_features), len(closes) - lb - self.forecast_horizon + 1)
+                
+                if n_usable > 0:
+                    symbol_features = bulk_features[:n_usable].tolist()
+                    symbol_targets = []
+                    for i in range(n_usable):
+                        current_idx = lb - 1 + i
+                        future_idx = current_idx + self.forecast_horizon
+                        if future_idx < len(closes) and closes[current_idx] > 0:
+                            target_return = (closes[future_idx] - closes[current_idx]) / closes[current_idx]
+                            symbol_targets.append(1 if target_return > 0 else 0)
+                        else:
+                            symbol_targets.append(0)
+                    
+                    all_features.extend(symbol_features)
+                    all_targets.extend(symbol_targets)
+                    # Save to cache for next training cycle
+                    self._save_features_to_cache(symbol, symbol_features, symbol_targets)
         
         logger.info(f"Feature cache stats: {cache_hits} hits, {cache_misses} computed fresh")
                     
