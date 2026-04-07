@@ -1225,7 +1225,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                       <div>
                         <p className="text-[10px] text-zinc-500 uppercase">Confidence</p>
                         <p className="text-sm font-medium text-cyan-400">
-                          {((decision.confidence_score || 0) * 100).toFixed(0)}%
+                          {(decision.confidence_score || 0).toFixed(0)}
                         </p>
                       </div>
                       <div>

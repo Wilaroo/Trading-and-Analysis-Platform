@@ -404,6 +404,9 @@ class LiveAlert:
     earnings_score: int = 0              # -10 to +10
     trading_approach: str = ""           # "max_conviction", "aggressive", "directional", "limited", "avoid"
     
+    # ADV Scan Tier (Phase 4)
+    scan_tier: str = "intraday"          # "intraday" (≥500K ADV), "swing" (≥100K), "investment" (≥50K)
+    
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: Optional[str] = None
     acknowledged: bool = False
@@ -3913,6 +3916,9 @@ class EnhancedBackgroundScanner:
                 )
         except Exception as e:
             logger.debug(f"Could not capture learning context: {e}")
+        
+        # Set scan tier from ADV classification
+        alert.scan_tier = self._tier_cache.get(alert.symbol, self._classify_symbol_tier(alert.symbol))
         
         self._live_alerts[alert.id] = alert
         self._alerts_generated += 1

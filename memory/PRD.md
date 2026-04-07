@@ -97,11 +97,15 @@ REMOVED:
 - `scoring_version: "additive_v1"` field in all gate log entries
 - CNN signal + cnn_signal field added to result dict
 
-#### Testing (32/32 pass across all phases)
-- Phase 1-2: 13 tests (Alpaca removal, staleness, XGBoost)
-- Phase 3: 5 tests (batch sizes, float32, feature cache, no-pickle)
-- Phase 4: 7 tests (scan config, investment tier, three tiers, staleness IB format, weekend handling)
-- Phase 4.5: 7 tests (additive base 0, scoring version, floor protection, thresholds, docstring, CNN signal, no base-50)
+#### Frontend UI Updates (COMPLETE)
+- Fixed confidence score display: removed erroneous `×100` multiplier (was showing "5500%" for score 55)
+- Updated color thresholds to match additive scoring: ≥55 green, ≥30 amber, <30 gray (was 65-75/40-50)
+- Replaced all "Alpaca" references with "IB Cache" / "IB Gateway" (QuickStatsBar, Tooltip, TickerDetailModal, CommandCenter, Dashboard)
+- Added scan tier badges (INTRADAY/SWING/INVESTMENT) to ScannerAlertsPanel and ScannerPage
+- Added additive scoring breakdown visualization to SentComIntelligencePanel (bar chart of point contributions)
+- Added "XGBoost" engine label badge to TrainingPipelinePanel
+- Confidence display shows "pts" (not %) since additive scoring is point-based
+- Fixed pre-existing StartupModal compile error (useConnection → useConnectionManager)
 
 ### Session: April 8, 2026 (Previous — Planning Session)
 - Complete architecture audit of data sources, scanning pipeline, and kill chain

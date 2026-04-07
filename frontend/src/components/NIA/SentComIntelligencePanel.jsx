@@ -40,6 +40,58 @@ const DECISION_ICONS = {
   SKIP: { icon: Ban, color: 'text-red-400', bg: 'bg-red-500/10' },
 };
 
+const ScoreBreakdown = memo(({ decision }) => {
+  // Parse additive scoring components from reasoning text
+  const parsePoints = (reasoning) => {
+    if (!reasoning || !reasoning.length) return [];
+    const components = [];
+    reasoning.forEach(r => {
+      const match = r.match(/\(([+-]\d+)\)/);
+      if (match) {
+        const pts = parseInt(match[1]);
+        let label = r.split('(')[0].trim();
+        // Shorten common labels
+        if (label.includes('Regime')) label = 'Regime';
+        else if (label.includes('AI confirms') || label.includes('AI detects') || label.includes('AI sees')) label = 'AI Regime';
+        else if (label.includes('Model consensus')) label = 'Consensus';
+        else if (label.includes('Live ')) label = 'Live Model';
+        else if (label.includes('Cross-model')) label = 'Cross-Model';
+        else if (label.includes('Quality')) label = 'Quality';
+        else if (label.includes('CNN')) label = 'CNN Visual';
+        else if (label.includes('Learning') || label.includes('Historical')) label = 'Learning';
+        components.push({ label, pts });
+      }
+    });
+    return components;
+  };
+
+  const components = parsePoints(decision.reasoning);
+  if (!components.length) return null;
+
+  const maxPts = Math.max(...components.map(c => Math.abs(c.pts)), 1);
+
+  return (
+    <div className="mt-1.5 space-y-0.5" data-testid="score-breakdown">
+      {components.map((c, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <span className="text-[9px] text-zinc-500 w-16 text-right truncate">{c.label}</span>
+          <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden relative">
+            <div
+              className={`h-full rounded-full ${c.pts >= 0 ? 'bg-emerald-500/60' : 'bg-red-500/60'}`}
+              style={{ width: `${Math.min(100, (Math.abs(c.pts) / maxPts) * 100)}%` }}
+            />
+          </div>
+          <span className={`text-[9px] font-mono w-6 text-right ${
+            c.pts > 0 ? 'text-emerald-400' : c.pts < 0 ? 'text-red-400' : 'text-zinc-500'
+          }`}>
+            {c.pts > 0 ? '+' : ''}{c.pts}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+});
+
 const DecisionRow = memo(({ decision }) => {
   const style = DECISION_ICONS[decision.decision] || DECISION_ICONS.SKIP;
   const Icon = style.icon;
@@ -59,7 +111,11 @@ const DecisionRow = memo(({ decision }) => {
             <span className={`text-[10px] font-medium ${style.color}`}>{decision.decision}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-zinc-400">{decision.confidence_score}%</span>
+            <span className={`text-[10px] font-mono ${
+              decision.confidence_score >= 55 ? 'text-emerald-400' :
+              decision.confidence_score >= 30 ? 'text-amber-400' :
+              'text-zinc-400'
+            }`}>{decision.confidence_score} pts</span>
             <span className="text-[10px] text-zinc-600">{timeStr}</span>
           </div>
         </div>
@@ -70,6 +126,7 @@ const DecisionRow = memo(({ decision }) => {
             ))}
           </div>
         )}
+        <ScoreBreakdown decision={decision} />
       </div>
     </div>
   );

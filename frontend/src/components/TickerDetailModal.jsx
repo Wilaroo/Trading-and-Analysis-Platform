@@ -73,7 +73,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
           api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch((err) => {
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
-              setChartError('IB Gateway is busy with a scan. Using cached/Alpaca data.');
+              setChartError('IB Gateway is busy with a scan. Using cached IB data.');
             } else {
               setChartError(errorMsg);
             }

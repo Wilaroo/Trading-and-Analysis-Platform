@@ -605,6 +605,9 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
             <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
               {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
             </span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-cyan-500/15 text-cyan-400" data-testid="engine-label">
+              XGBoost
+            </span>
           </div>
         )}
         {inventory && (

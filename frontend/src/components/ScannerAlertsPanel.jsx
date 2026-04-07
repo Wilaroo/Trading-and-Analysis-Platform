@@ -67,6 +67,15 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
                             {alert.setup_type}
                           </span>
                         )}
+                        {alert.scan_tier && (
+                          <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                            alert.scan_tier === 'intraday' ? 'bg-violet-500/15 text-violet-400' :
+                            alert.scan_tier === 'swing' ? 'bg-blue-500/15 text-blue-400' :
+                            'bg-zinc-500/15 text-zinc-400'
+                          }`} data-testid={`scan-tier-${alert.scan_tier}`}>
+                            {alert.scan_tier.toUpperCase()}
+                          </span>
+                        )}
                         {alert.direction && (
                           <span className={`text-[9px] ${
                             alert.direction === 'long' ? 'text-emerald-400' : 'text-rose-400'
@@ -129,8 +138,8 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
                       )}
                       {setup.confidence && (
                         <span className={`text-[9px] px-1 py-0.5 rounded ${
-                          setup.confidence >= 70 ? 'bg-emerald-500/15 text-emerald-400' :
-                          setup.confidence >= 50 ? 'bg-amber-500/15 text-amber-400' :
+                          setup.confidence >= 55 ? 'bg-emerald-500/15 text-emerald-400' :
+                          setup.confidence >= 30 ? 'bg-amber-500/15 text-amber-400' :
                           'bg-zinc-500/15 text-zinc-400'
                         }`}>
                           {setup.confidence}%

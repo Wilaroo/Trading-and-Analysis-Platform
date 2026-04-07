@@ -183,7 +183,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
       ) : (
         <div className="space-y-1.5">
           {positions.map((pos, i) => {
-            // Handle all possible field name variants from IB Pusher / Alpaca / Trading Bot
+            // Handle all possible field name variants from IB Pusher / Trading Bot
             const pnl = pos.unrealized_pnl || pos.pnl || 0;
             const pnlPct = pos.pnl_percent || pos.unrealized_pnl_percent || pos.unrealizedPnlPercent || (
               (pos.current_price || pos.market_price || pos.marketPrice) && (pos.entry_price || pos.avg_entry_price || pos.avgCost || pos.averageCost)

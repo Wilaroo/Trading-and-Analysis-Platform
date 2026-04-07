@@ -998,6 +998,15 @@ const ScannerPage = () => {
                               'bg-green-500/20 text-green-400 border-green-500/30'
                             }`}>{detail.id}</span>
                             <span className="font-medium">{detail.name}</span>
+                            {detail.scan_tier && (
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                detail.scan_tier === 'intraday' ? 'bg-violet-500/20 text-violet-300' :
+                                detail.scan_tier === 'swing' ? 'bg-blue-500/20 text-blue-300' :
+                                'bg-zinc-500/20 text-zinc-400'
+                              }`} data-testid={`scan-tier-badge-${detail.scan_tier}`}>
+                                {detail.scan_tier.toUpperCase()}
+                              </span>
+                            )}
                             {isContextMatch && (
                               <span className="text-xs bg-primary/30 text-primary px-2 py-0.5 rounded-full">
                                 ★ Context Match
@@ -1007,7 +1016,7 @@ const ScannerPage = () => {
                           <div className="flex items-center gap-2">
                             <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
                               <div 
-                                className={`h-full rounded-full ${detail.confidence >= 75 ? 'bg-green-400' : detail.confidence >= 50 ? 'bg-yellow-400' : 'bg-blue-400'}`}
+                                className={`h-full rounded-full ${detail.confidence >= 55 ? 'bg-green-400' : detail.confidence >= 30 ? 'bg-yellow-400' : 'bg-blue-400'}`}
                                 style={{ width: `${detail.confidence}%` }}
                               />
                             </div>

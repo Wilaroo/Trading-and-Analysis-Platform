@@ -526,8 +526,8 @@ export default function MarketScannerPanel() {
                             <AlertTriangle className="w-3 h-3 text-amber-400" />
                           )}
                           <span className={`text-xs font-mono ${
-                            signal.ai_confidence >= 70 ? 'text-green-400' :
-                            signal.ai_confidence >= 50 ? 'text-yellow-400' :
+                            signal.ai_confidence >= 55 ? 'text-green-400' :
+                            signal.ai_confidence >= 30 ? 'text-yellow-400' :
                             'text-gray-400'
                           }`}>
                             {signal.ai_confidence?.toFixed(0)}%

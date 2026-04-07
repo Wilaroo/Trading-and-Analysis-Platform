@@ -24,7 +24,7 @@ const QuickStatsBar = memo(({ data }) => {
 
     // Data source
     const ibConnected = data.connectorSummary?.healthy > 0;
-    const dataSource = data.dataSource || (ibConnected ? 'IB Gateway' : 'Alpaca');
+    const dataSource = data.dataSource || (ibConnected ? 'IB Gateway' : 'IB Cache');
 
     return [
       {

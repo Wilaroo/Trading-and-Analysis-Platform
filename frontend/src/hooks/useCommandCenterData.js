@@ -165,7 +165,7 @@ export function useCommandCenterData({
       // IB pushed data fetch failed - will try fallback
     }
     
-    // Fall back to Alpaca positions if IB not connected
+    // Fall back to bot positions if IB not connected
     if (!positionsFetched) {
       try {
         const botPositionsRes = await api.get('/api/trading-bot/positions');
@@ -543,7 +543,7 @@ export function useCommandCenterData({
     return safePolling(poll, interval, { immediate: false });
   }, [isTrainingActive, getPollingInterval]);
 
-  // Fetch positions immediately on mount - IB is primary, Alpaca is fallback
+  // Fetch positions immediately on mount - IB is primary source
   // Positions are essential - slower during training but still poll
   useEffect(() => {
     fetchAccountData();

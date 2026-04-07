@@ -25,7 +25,7 @@ import {
   Wifi,
   RefreshCw
 } from 'lucide-react';
-import { useConnection } from '../contexts/ConnectionManagerContext';
+import { useConnectionManager as useConnection } from '../contexts/ConnectionManagerContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 

@@ -800,8 +800,8 @@ export const tooltipDefinitions = {
     category: 'Status'
   },
   'alpaca-connected': { 
-    term: 'Alpaca Connected', 
-    def: 'Alpaca API connected for historical data and paper trading.',
+    term: 'IB Cache Active', 
+    def: 'Using cached IB historical data from MongoDB when live IB Gateway is unavailable.',
     category: 'Status'
   },
   'data-delayed': { 
