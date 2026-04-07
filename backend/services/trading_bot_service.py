@@ -658,9 +658,6 @@ class TradingBotService:
         self._trade_executor = trade_executor
         self._db = db
         logger.info("TradingBotService services configured")
-        
-        # Restore bot state from database on startup
-        asyncio.create_task(self._restore_state())
     
     def set_market_regime_engine(self, regime_engine):
         """Set market regime engine for regime-aware position sizing"""

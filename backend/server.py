@@ -3467,6 +3467,7 @@ async def startup_event():
 
         # 4. Auto-start trading bot (needs IB for order execution)
         try:
+            await trading_bot._restore_state()
             await trading_bot.start()
             mode = trading_bot.get_mode().value.upper()
             if ib_connected:
