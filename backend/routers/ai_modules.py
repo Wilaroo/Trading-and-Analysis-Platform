@@ -1102,14 +1102,14 @@ async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
 class FullUniverseTrainRequest(BaseModel):
     """Request for full universe training"""
     bar_size: Optional[str] = Field(default="1 day", description="Timeframe to train")
-    symbol_batch_size: Optional[int] = Field(default=100, description="Symbols to process per batch")
-    max_bars_per_symbol: Optional[int] = Field(default=2000, description="Max bars per symbol")
+    symbol_batch_size: Optional[int] = Field(default=500, description="Symbols to process per batch (128GB Spark)")
+    max_bars_per_symbol: Optional[int] = Field(default=99999, description="Max bars per symbol (99999 = use all)")
 
 
 class FullUniverseAllRequest(BaseModel):
     """Request for full universe training on all timeframes"""
-    symbol_batch_size: Optional[int] = Field(default=100, description="Symbols to process per batch")
-    max_bars_per_symbol: Optional[int] = Field(default=2000, description="Max bars per symbol")
+    symbol_batch_size: Optional[int] = Field(default=500, description="Symbols to process per batch (128GB Spark)")
+    max_bars_per_symbol: Optional[int] = Field(default=99999, description="Max bars per symbol (99999 = use all)")
     timeframes: Optional[List[str]] = Field(default=None, description="Specific timeframes or all")
 
 
