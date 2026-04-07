@@ -1034,11 +1034,13 @@ class TimeSeriesAIService:
             logger.info("[FULL UNIVERSE] Saving model...")
             sys.stdout.flush()
             
-            save_success = model._save_model()
-            if save_success:
-                logger.info("[FULL UNIVERSE] Model saved successfully!")
+            save_result = model._save_model()
+            if save_result == "promoted":
+                logger.info("[FULL UNIVERSE] Model saved and promoted as active!")
+            elif save_result == "archived":
+                logger.info("[FULL UNIVERSE] Model saved to archive (existing active model has better accuracy).")
             else:
-                logger.warning("[FULL UNIVERSE] Model save failed, but training completed. Model is in memory.")
+                logger.warning("[FULL UNIVERSE] Model save failed! Model is in memory only.")
             
             self._models[bar_size] = model
             

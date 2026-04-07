@@ -386,7 +386,7 @@ class TimeSeriesGBM:
                 # Reload the active model since we didn't promote
                 self._load_model()
                 
-            return should_promote
+            return "promoted" if should_promote else "archived"
         except Exception as e:
             logger.error(f"Could not save model: {e}")
             return False
