@@ -632,6 +632,12 @@ async def get_model_inventory():
                 "group": "support",
                 "models": [],
             },
+            "finbert": {
+                "label": "FinBERT Sentiment",
+                "description": "Pre-trained news sentiment scoring (bullish/bearish/neutral)",
+                "group": "support",
+                "models": [],
+            },
         }
 
         # Generic directional — use the ACTUAL model names from timeseries_service.py config
@@ -721,6 +727,30 @@ async def get_model_inventory():
                 "trained": dl_trained,
                 **dl_info,
             })
+
+        # FinBERT Sentiment (Phase 12) — check if sentiment data exists
+        finbert_trained = False
+        finbert_info = {}
+        if mongo_db is not None:
+            try:
+                sent_count = mongo_db["finbert_sentiment"].count_documents({})
+                if sent_count > 0:
+                    finbert_trained = True
+                    latest = mongo_db["finbert_sentiment"].find_one(
+                        {}, {"_id": 0, "analyzed_at": 1}, sort=[("analyzed_at", -1)]
+                    )
+                    finbert_info = {
+                        "articles_scored": sent_count,
+                        "promoted_at": str(latest.get("analyzed_at", "")) if latest else "",
+                    }
+            except Exception:
+                pass
+        categories["finbert"]["models"].append({
+            "name": "finbert_news_sentiment",
+            "description": "Scores news articles via ProsusAI/finbert for market sentiment",
+            "trained": finbert_trained,
+            **finbert_info,
+        })
 
         # Summary stats
         total_defined = sum(len(c["models"]) for c in categories.values())

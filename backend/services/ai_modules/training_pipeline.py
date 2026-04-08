@@ -1554,6 +1554,143 @@ async def run_training_pipeline(
                     results["models_failed"].append({"name": model_name, "reason": str(e)})
                     status.add_error(model_name, str(e))
 
+        # ── Phase 5.5: Gap Fill Probability Models ──
+        if "gap_fill" in phases:
+            status.update(phase="gap_fill")
+            logger.info("=== Phase 5.5: Training Gap Fill Probability Models ===")
+            from services.ai_modules.gap_fill_model import (
+                GAP_MODEL_CONFIGS, GAP_FEATURE_NAMES,
+                compute_gap_features, compute_gap_fill_target,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+            combined_names = base_names + [f"gap_{n}" for n in GAP_FEATURE_NAMES]
+
+            for bs, gap_config in GAP_MODEL_CONFIGS.items():
+                model_name = gap_config["model_name"]
+                max_bars = gap_config["max_bars"]
+                status.update(current_model=model_name)
+
+                try:
+                    bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                    symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
+                    symbols = symbols[:max_sym]
+
+                    min_required = 70 + max_bars
+                    all_X = []
+                    all_y = []
+
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                        )
+                        if not batch_bars:
+                            continue
+
+                        for sym, bars in batch_bars.items():
+                            if len(bars) < min_required:
+                                continue
+
+                            # Bulk-extract base features
+                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            if base_matrix is None:
+                                continue
+
+                            closes = np.array([b["close"] for b in bars], dtype=float)
+                            opens = np.array([b["open"] for b in bars], dtype=float)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            highs = np.array([b["high"] for b in bars], dtype=float)
+                            lows = np.array([b["low"] for b in bars], dtype=float)
+
+                            # Compute 20-day rolling average volume
+                            avg_vol_20 = np.convolve(volumes, np.ones(20) / 20, mode='full')[:len(volumes)]
+
+                            # ATR proxy (10-period)
+                            tr = np.maximum(highs - lows, np.abs(highs - np.roll(closes, 1)), np.abs(lows - np.roll(closes, 1)))
+                            atr_10 = np.convolve(tr, np.ones(10) / 10, mode='full')[:len(tr)]
+
+                            for i in range(50, len(bars) - max_bars):
+                                # Check for a gap (open != previous close)
+                                if i < 1:
+                                    continue
+                                prev_close = closes[i - 1]
+                                today_open = opens[i]
+                                gap_pct = abs(today_open - prev_close) / prev_close if prev_close > 0 else 0
+
+                                # Only train on meaningful gaps (> 0.2%)
+                                if gap_pct < 0.002:
+                                    continue
+
+                                # Compute gap-specific features
+                                gap_feats = compute_gap_features(
+                                    today_open=today_open,
+                                    today_close_bar1=closes[i],
+                                    today_volume_bar1=volumes[i],
+                                    prev_day_open=opens[i - 1],
+                                    prev_day_close=prev_close,
+                                    prev_day_high=highs[i - 1],
+                                    prev_day_low=lows[i - 1],
+                                    avg_volume_20=avg_vol_20[i] if avg_vol_20[i] > 0 else 1.0,
+                                    atr_10=atr_10[i] if atr_10[i] > 0 else 0.01,
+                                    recent_high_20=float(np.max(highs[max(0, i - 20):i])),
+                                    recent_low_20=float(np.min(lows[max(0, i - 20):i])),
+                                )
+                                gap_vec = np.array([gap_feats.get(f, 0.0) for f in GAP_FEATURE_NAMES], dtype=np.float32)
+
+                                # Compute target: did the gap fill?
+                                intraday_lows = lows[i:i + max_bars] if today_open > prev_close else None
+                                intraday_highs = highs[i:i + max_bars] if today_open < prev_close else None
+                                target = compute_gap_fill_target(
+                                    prev_close=prev_close,
+                                    gap_direction=1 if today_open > prev_close else -1,
+                                    intraday_highs=highs[i:i + max_bars],
+                                    intraday_lows=lows[i:i + max_bars],
+                                    max_bars=max_bars,
+                                )
+
+                                # Base features row
+                                row_idx = i - 49
+                                if row_idx < 0 or row_idx >= len(base_matrix):
+                                    continue
+
+                                all_X.append(np.concatenate([base_matrix[row_idx], gap_vec]))
+                                all_y.append(float(target))
+
+                        del batch_bars
+                        gc.collect()
+
+                    if len(all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient gap fill data for {bs}: {len(all_X)} samples")
+                        continue
+
+                    X = np.vstack(all_X).astype(np.float32)
+                    y = np.array(all_y, dtype=np.float32)
+                    fill_pct = float(np.mean(y)) * 100
+                    del all_X, all_y
+                    logger.info(f"Training {model_name}: {len(X):,} samples, gap_fill={fill_pct:.1f}%")
+
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars)
+                    model.set_db(db)
+                    metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+
+                    del X, y
+                    gc.collect()
+
+                    if metrics and metrics.accuracy > 0:
+                        results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
+                        results["total_samples"] += metrics.training_samples
+                        status.add_completed(model_name, metrics.accuracy)
+
+                except Exception as e:
+                    logger.error(f"Failed to train {model_name}: {e}")
+                    results["models_failed"].append({"name": model_name, "reason": str(e)})
+                    status.add_error(model_name, str(e))
+
         # ── Phase 6: Risk-of-Ruin Models ──
         if "risk" in phases:
             status.update(phase="risk_of_ruin")
