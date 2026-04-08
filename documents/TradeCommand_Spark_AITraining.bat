@@ -89,7 +89,7 @@ timeout /t 5 /nobreak >nul
 echo        Spark processes stopped.
 
 echo        Shrinking MongoDB cache to 16GB (frees RAM for training)...
-ssh -n %SPARK_USER%@%SPARK_IP% "mongosh --quiet --eval \"db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})\" 2>/dev/null; exit" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "sudo docker exec mongodb mongosh --quiet --eval \"db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})\" 2>/dev/null; exit" 2>nul
 echo        MongoDB cache configured.
 echo.
 
