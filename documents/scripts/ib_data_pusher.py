@@ -1141,7 +1141,9 @@ class IBDataPusher:
                                 elif consecutive_training_checks % 5 == 0:
                                     elapsed_min = consecutive_training_checks * training_backoff_interval / 60
                                     logger.info(f"[TRAINING GUARD] Still training ({elapsed_min:.0f} min) — backing off...")
-                            else:
+                            elif resp is not None:
+                                # Only resume if we got a REAL response saying not active
+                                # resp=None means timeout/error — assume still training
                                 if training_paused:
                                     logger.info("")
                                     logger.info("=" * 55)
@@ -1152,7 +1154,13 @@ class IBDataPusher:
                                     training_paused = False
                                     consecutive_training_checks = 0
                         except Exception:
-                            pass  # Ignore training check errors — don't block the pusher
+                            # Timeout/connection error — if we were paused, STAY paused
+                            # The backend is likely busy with training
+                            if training_paused:
+                                consecutive_training_checks += 1
+                                if consecutive_training_checks % 5 == 0:
+                                    elapsed_min = consecutive_training_checks * training_backoff_interval / 60
+                                    logger.info(f"[TRAINING GUARD] Backend unreachable ({elapsed_min:.0f} min) — assuming still training...")
                         last_training_check = current_time
                     
                     # If Spark is training, skip ALL IB operations AND cloud pushes.
