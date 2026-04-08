@@ -209,9 +209,10 @@ class MultiTimeframeFeatureProvider:
             cursor = self._db["ib_historical_data"].find(
                 {"symbol": symbol, "bar_size": "1 day"},
                 {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-            ).sort("date", 1)
+            ).sort("date", -1).limit(10000).max_time_ms(30000)
 
             bars = list(cursor)
+            bars.reverse()  # Back to chronological order
             if not bars:
                 return 0
 

@@ -50,13 +50,13 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 0},
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 0},
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 0},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 0},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 0},
-    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 0},
-    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 0},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 50000},   # 50K ≈ 125 trading days
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 50000},   # 50K ≈ 640 trading days
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 50000},
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 50000},
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 50000},
+    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 10000},   # 10K ≈ 40 years
+    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 5000},
 }
 
 # How many symbols to load at once before extracting and discarding raw bars.
@@ -609,24 +609,28 @@ async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) ->
     
     Args:
         max_bars: If > 0, only load the most recent N bars (saves memory).
+                  If 0, auto-resolve from BAR_SIZE_CONFIGS (never truly unlimited).
                   The query fetches newest-first then reverses to chronological order.
     """
     try:
         loop = asyncio.get_event_loop()
         
+        # Auto-resolve max_bars from config when 0 (prevents unbounded queries on 1-min data)
+        effective_max = max_bars
+        if effective_max <= 0:
+            effective_max = BAR_SIZE_CONFIGS.get(bar_size, {}).get("max_bars", 50000)
+            if effective_max <= 0:
+                effective_max = 50000  # Hard safety cap
+        
         def _run_query():
             query = {"symbol": symbol, "bar_size": bar_size}
             projection = {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
             
-            if max_bars > 0:
-                # Fetch most recent N bars (desc), then reverse to chronological
-                rows = list(db["ib_historical_data"].find(query, projection)
-                           .sort("date", -1).limit(max_bars).max_time_ms(60000))
-                rows.reverse()
-                return rows
-            else:
-                return list(db["ib_historical_data"].find(query, projection)
-                           .sort("date", 1).max_time_ms(60000))
+            # Always use reverse-sort (newest first) + reverse — much faster on large collections
+            rows = list(db["ib_historical_data"].find(query, projection)
+                       .sort("date", -1).limit(effective_max).max_time_ms(90000))
+            rows.reverse()
+            return rows
         
         bars = await asyncio.wait_for(
             loop.run_in_executor(TRAINING_POOL, _run_query),

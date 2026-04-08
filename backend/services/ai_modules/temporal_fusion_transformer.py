@@ -316,8 +316,9 @@ class TFTModel:
                 cursor = db["ib_historical_data"].find(
                     {"symbol": symbol, "bar_size": tf},
                     {"_id": 0, "close": 1, "high": 1, "low": 1, "volume": 1, "date": 1}
-                ).sort("date", 1).limit(5000)
+                ).sort("date", -1).limit(5000).max_time_ms(60000)
                 bars = list(cursor)
+                bars.reverse()  # Back to chronological order
                 if bars:
                     bars_by_tf[tf] = bars
 
