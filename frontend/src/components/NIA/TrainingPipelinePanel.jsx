@@ -563,7 +563,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     });
   }
 
-  const totalModels = (inventory?.total_defined || 0) + 20; // +20 CNN
+  const totalModels = (inventory?.total_defined || 0) + 20; // +20 CNN (loaded separately)
   const totalTrained = (inventory?.total_trained || 0) + cnnModels.length;
 
   return (

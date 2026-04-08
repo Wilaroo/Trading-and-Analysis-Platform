@@ -626,6 +626,12 @@ async def get_model_inventory():
                 "group": "support",
                 "models": [],
             },
+            "deep_learning": {
+                "label": "Deep Learning",
+                "description": "Neural network models (VAE regime, TFT cross-timeframe, CNN-LSTM patterns)",
+                "group": "support",
+                "models": [],
+            },
         }
 
         # Generic directional — use the ACTUAL model names from timeseries_service.py config
@@ -685,6 +691,36 @@ async def get_model_inventory():
                     "trained": name in trained_models,
                     **(trained_models.get(name, {})),
                 })
+
+        # Deep Learning models (Phase 11)
+        DL_MODELS = [
+            {"name": "vae_regime_detector", "description": "VAE market regime labeling (5 regimes)"},
+            {"name": "temporal_fusion_transformer", "description": "TFT cross-timeframe attention"},
+            {"name": "cnn_lstm_sequential", "description": "CNN-LSTM temporal pattern recognition"},
+        ]
+        for dl in DL_MODELS:
+            name = dl["name"]
+            # Check dl_models collection as well as timeseries_models
+            dl_trained = name in trained_models
+            dl_info = trained_models.get(name, {})
+            if not dl_trained and mongo_db is not None:
+                try:
+                    dl_doc = mongo_db["dl_models"].find_one({"name": name}, {"_id": 0, "model_data": 0})
+                    if dl_doc:
+                        dl_trained = True
+                        metrics = dl_doc.get("metrics", {})
+                        dl_info = {
+                            "accuracy": metrics.get("accuracy", dl_doc.get("accuracy", 0)),
+                            "training_samples": metrics.get("training_samples", 0),
+                            "promoted_at": dl_doc.get("saved_at", ""),
+                        }
+                except Exception:
+                    pass
+            categories["deep_learning"]["models"].append({
+                "name": name, "description": dl["description"],
+                "trained": dl_trained,
+                **dl_info,
+            })
 
         # Summary stats
         total_defined = sum(len(c["models"]) for c in categories.values())
