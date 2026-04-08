@@ -91,6 +91,28 @@ async def start_training(request: TrainingRequest):
     """
     global _training_task, _last_result
 
+    # OS-level guard: check if training_subprocess is already running as a system process
+    # This catches orphaned processes that survive server restarts
+    if os.name != 'nt':
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'services.ai_modules.training_subprocess'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                pids = [p for p in pids if p.strip()]
+                if pids:
+                    logger.warning(f"[TRAINING] Found {len(pids)} existing training subprocess(es): {pids}")
+                    return {
+                        "success": False,
+                        "error": f"Training already running as OS process (PIDs: {', '.join(pids)}). Kill them first: pkill -9 -f training_subprocess",
+                        "status": "running",
+                        "pids": pids,
+                    }
+        except Exception as e:
+            logger.warning(f"[TRAINING] OS-level process check failed (non-fatal): {e}")
+
     if _training_task and not _training_task.done():
         if hasattr(_training_task, '_start_time'):
             elapsed = datetime.now(timezone.utc) - _training_task._start_time
@@ -277,18 +299,15 @@ async def get_training_status():
 
 @router.post("/stop")
 async def stop_training():
-    """Cancel the running training pipeline."""
+    """Cancel the running training pipeline — kills both in-memory task and OS processes."""
     global _training_task
 
     terminated = False
     if _training_task and not _training_task.done():
         logger.info("[TRAINING] Stop requested — terminating subprocess")
         try:
-            # Try graceful terminate first
             _training_task.terminate()
-            # Give it 2 seconds to clean up
             await asyncio.sleep(2)
-            # If still running, force kill
             if not _training_task.done():
                 logger.warning("[TRAINING] Subprocess didn't terminate gracefully, force killing...")
                 _training_task._proc.kill()
@@ -296,6 +315,26 @@ async def stop_training():
             logger.warning(f"[TRAINING] Error during termination: {e}")
         _training_task = None
         terminated = True
+
+    # OS-level kill: catch orphaned training processes that survive server restarts
+    os_killed = []
+    if os.name != 'nt':
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'services.ai_modules.training_subprocess'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                pids = [p.strip() for p in result.stdout.strip().split('\n') if p.strip()]
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), 9)  # SIGKILL
+                        os_killed.append(pid)
+                        logger.info(f"[TRAINING] Force-killed orphaned training process PID {pid}")
+                    except (ProcessLookupError, ValueError):
+                        pass
+        except Exception as e:
+            logger.warning(f"[TRAINING] OS-level kill failed: {e}")
 
     # Also reset training status in DB to idle
     try:
@@ -317,8 +356,14 @@ async def stop_training():
     except Exception:
         pass
 
-    if terminated:
-        return {"success": True, "message": "Training process terminated, focus mode restored to LIVE"}
+    if terminated or os_killed:
+        msg = "Training stopped."
+        if terminated:
+            msg += " In-memory process terminated."
+        if os_killed:
+            msg += f" Killed {len(os_killed)} orphaned OS process(es): PIDs {', '.join(os_killed)}."
+        msg += " Focus mode restored to LIVE."
+        return {"success": True, "message": msg, "os_killed_pids": os_killed}
 
     # Even if no task found, reset focus mode (handles backend restart case)
     return {"success": True, "message": "Focus mode restored to LIVE (training process may have already ended)"}
