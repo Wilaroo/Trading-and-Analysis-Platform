@@ -2222,10 +2222,13 @@ async def run_training_pipeline(
                 async def cnn_progress(pct, msg):
                     status.update(current_model=msg)
 
-                cnn_result = await run_cnn_training(
-                    db=db,
-                    setup_type="ALL",
-                    progress_callback=cnn_progress,
+                cnn_result = await asyncio.wait_for(
+                    run_cnn_training(
+                        db=db,
+                        setup_type="ALL",
+                        progress_callback=cnn_progress,
+                    ),
+                    timeout=7200  # 2 hours max for CNN training
                 )
 
                 if cnn_result.get("success"):
@@ -2249,6 +2252,9 @@ async def run_training_pipeline(
                     logger.warning(f"CNN training failed: {cnn_result.get('error', 'Unknown')}")
                     results["cnn_training"] = {"error": cnn_result.get("error")}
 
+            except asyncio.TimeoutError:
+                logger.error("[CNN] Phase 9 TIMED OUT after 2 hours — skipping")
+                results["cnn_training"] = {"error": "Timed out (>2 hours)"}
             except Exception as e:
                 logger.error(f"CNN phase failed: {e}", exc_info=True)
                 results["cnn_training"] = {"error": str(e)}
@@ -2288,7 +2294,10 @@ async def run_training_pipeline(
                     ModelClass = getattr(mod, dl_cfg["class"])
                     dl_instance = ModelClass()
                     logger.info(f"[DL] Training {model_name}...")
-                    dl_result = await dl_instance.train(db=db, **dl_cfg["kwargs"])
+                    dl_result = await asyncio.wait_for(
+                        dl_instance.train(db=db, **dl_cfg["kwargs"]),
+                        timeout=7200  # 2 hours max per DL model
+                    )
 
                     if dl_result.get("success"):
                         acc = dl_result.get("accuracy", dl_result.get("reconstruction_error", 0))
@@ -2307,7 +2316,30 @@ async def run_training_pipeline(
 
                     del dl_instance
                     gc.collect()
+                    # Release CUDA memory between DL models to prevent OOM
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            logger.info(f"[DL] Released CUDA memory after {model_name}")
+                    except Exception:
+                        pass
 
+                except asyncio.TimeoutError:
+                    logger.error(f"[DL] {model_name} TIMED OUT after 2 hours — skipping")
+                    results["models_failed"].append({
+                        "name": model_name, "reason": "Timed out (>2 hours)", "type": "dl"
+                    })
+                    status.add_error(model_name, "Timed out (>2 hours)")
+                    # Still clean up GPU memory
+                    try:
+                        del dl_instance
+                        gc.collect()
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error(f"[DL] {model_name} error: {e}", exc_info=True)
                     results["models_failed"].append({
@@ -2326,15 +2358,9 @@ async def run_training_pipeline(
                 # Step 1: Collect news
                 collector = FinnhubNewsCollector(db=db)
                 logger.info("[FINBERT] Collecting news from Finnhub...")
-                # Get top symbols from training data
-                pipeline_agg = [
-                    {"$match": {"bar_size": "1 day"}},
-                    {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                    {"$match": {"count": {"$gte": 50}}},
-                    {"$sort": {"count": -1}},
-                    {"$limit": 100},
-                ]
-                symbols = [r["_id"] for r in db["ib_historical_data"].aggregate(pipeline_agg, allowDiskUse=True)]
+                
+                # Reuse cached symbol list from earlier phases (no slow 178M doc aggregation)
+                symbols = await get_cached_symbols(db, "1 day", min_bars=50, max_symbols=100)
                 
                 if symbols:
                     collect_result = await collector.collect_news(symbols=symbols, days_back=30)
