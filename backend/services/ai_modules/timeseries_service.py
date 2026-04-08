@@ -90,13 +90,13 @@ class TimeSeriesAIService:
     # IMPORTANT: We keep max_bars high to use ALL available data - only batch_size is reduced
     # This ensures we don't lose training data, just process fewer symbols at a time
     TIMEFRAME_SETTINGS = {
-        "1 min": {"batch_size": 25, "max_bars": 10000, "is_intraday": True},     # 128GB handles 25 symbols of 1min easily
-        "5 mins": {"batch_size": 50, "max_bars": 10000, "is_intraday": True},    # 50 symbols × 10K bars = ~4GB features
-        "15 mins": {"batch_size": 75, "max_bars": 10000, "is_intraday": True},   # Medium-high data
-        "30 mins": {"batch_size": 100, "max_bars": 10000, "is_intraday": True},  # Medium data
-        "1 hour": {"batch_size": 200, "max_bars": 10000, "is_intraday": False},  # Moderate data
-        "1 day": {"batch_size": 500, "max_bars": 10000, "is_intraday": False},   # Lower data volume
-        "1 week": {"batch_size": 500, "max_bars": 10000, "is_intraday": False},  # Lowest data
+        "1 min": {"batch_size": 25, "max_bars": 50000, "is_intraday": True},     # 50K bars ≈ 125 trading days
+        "5 mins": {"batch_size": 50, "max_bars": 50000, "is_intraday": True},    # 50K bars ≈ 640 trading days
+        "15 mins": {"batch_size": 75, "max_bars": 50000, "is_intraday": True},   # 50K bars ≈ 1920 trading days
+        "30 mins": {"batch_size": 100, "max_bars": 50000, "is_intraday": True},  # 50K bars
+        "1 hour": {"batch_size": 200, "max_bars": 50000, "is_intraday": False},  # 50K bars
+        "1 day": {"batch_size": 500, "max_bars": 10000, "is_intraday": False},   # 10K bars ≈ 40 years
+        "1 week": {"batch_size": 500, "max_bars": 5000, "is_intraday": False},   # 5K bars ≈ 96 years
     }
     
     # Training defaults — PRODUCTION settings
@@ -668,7 +668,7 @@ class TimeSeriesAIService:
         self,
         bar_size: str = "1 day",
         symbol_batch_size: int = 500,
-        max_bars_per_symbol: int = 99999,
+        max_bars_per_symbol: int = 0,
         progress_callback = None
     ) -> Dict[str, Any]:
         """
@@ -685,12 +685,12 @@ class TimeSeriesAIService:
         - Vectorized feature extraction (extract_features_bulk)
         - Feature caching (skip recomputation on subsequent runs)
         - Large batch sizes (500 symbols at once)
-        - Full bar history (no artificial cap)
+        - Per-timeframe max_bars from TIMEFRAME_SETTINGS
         
         Args:
             bar_size: Timeframe to train (e.g., "1 day")
             symbol_batch_size: How many symbols to load at once (default: 500 — 128GB handles this easily)
-            max_bars_per_symbol: Max bars per symbol (default: 99999 — use ALL available data)
+            max_bars_per_symbol: Max bars per symbol. 0 = use TIMEFRAME_SETTINGS default.
             progress_callback: Optional callback for progress updates
             
         Returns:
@@ -712,6 +712,15 @@ class TimeSeriesAIService:
             
         if bar_size not in self.SUPPORTED_TIMEFRAMES:
             return {"success": False, "error": f"Unsupported bar_size: {bar_size}"}
+        
+        # Resolve per-timeframe max_bars from TIMEFRAME_SETTINGS if not explicitly set
+        if max_bars_per_symbol <= 0:
+            tf_settings = self.TIMEFRAME_SETTINGS.get(bar_size, {})
+            max_bars_per_symbol = tf_settings.get("max_bars", 50000)
+            # For intraday timeframes, cap higher to get more training data
+            # while still avoiding the 100K+ hang: 50K bars ≈ 125 trading days of 1-min
+            if tf_settings.get("is_intraday", False) and max_bars_per_symbol < 50000:
+                max_bars_per_symbol = 50000
         
         model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
         model_name = model_config["model_name"]
@@ -1455,15 +1464,27 @@ class TimeSeriesAIService:
             max_bars = self.DEFAULT_MAX_BARS_PER_SYMBOL
         
         def _blocking_query():
-            """This runs in a thread pool"""
+            """This runs in a thread pool.
+            Uses reverse-sort (newest first) + reverse for large limits.
+            This is much faster than ascending sort on huge collections because
+            MongoDB can walk backward from the index tip."""
             try:
-                cursor = self._db["ib_historical_data"].find(
-                    {"symbol": symbol, "bar_size": bar_size},
-                    {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
+                query = {"symbol": symbol, "bar_size": bar_size}
+                projection = {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
                      "low": 1, "close": 1, "volume": 1}
-                ).sort("date", 1).limit(max_bars).batch_size(10000)  # Large batch for 128GB Spark
                 
-                bars = list(cursor)
+                if max_bars > 5000:
+                    # Reverse-sort trick: fetch newest N bars descending, then reverse
+                    cursor = self._db["ib_historical_data"].find(
+                        query, projection
+                    ).sort("date", -1).limit(max_bars).batch_size(10000).max_time_ms(90000)
+                    bars = list(cursor)
+                    bars.reverse()  # Back to chronological order
+                else:
+                    cursor = self._db["ib_historical_data"].find(
+                        query, projection
+                    ).sort("date", 1).limit(max_bars).batch_size(10000).max_time_ms(90000)
+                    bars = list(cursor)
                 
                 # Convert 'date' field to 'timestamp' for compatibility with model
                 for bar in bars:

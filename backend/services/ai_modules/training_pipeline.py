@@ -879,7 +879,7 @@ async def run_training_pipeline(
                     result = await ts_service.train_full_universe(
                         bar_size=bs,
                         symbol_batch_size=500,
-                        max_bars_per_symbol=99999,
+                        max_bars_per_symbol=0,  # Auto-resolve from TIMEFRAME_SETTINGS (50K for intraday, 10K for daily)
                     )
 
                     if result.get("success"):
@@ -2003,8 +2003,23 @@ async def run_training_pipeline(
                         all_X = []
                         all_y = []
 
+                        # Pre-compute column mappings from bulk features → each sub-model's expected order
+                        # This avoids per-bar dict lookups (the old bottleneck)
+                        sub_model_col_maps = {}
+                        for tf, sm in sub_models.items():
+                            if sm._feature_names and base_names:
+                                base_name_to_idx = {name: idx for idx, name in enumerate(base_names)}
+                                col_map = [base_name_to_idx.get(f, -1) for f in sm._feature_names]
+                                sub_model_col_maps[tf] = col_map
+
+                        setup_col_map = None
+                        if setup_model and setup_model._feature_names and base_names:
+                            base_name_to_idx = {name: idx for idx, name in enumerate(base_names)}
+                            setup_col_map = [base_name_to_idx.get(f, -1) for f in setup_model._feature_names]
+
                         # Stream-load symbols in batches to limit RAM
                         min_required = 70 + anchor_fh
+                        lb = feature_engineer.lookback  # 50
 
                         for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                             sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
@@ -2014,26 +2029,62 @@ async def run_training_pipeline(
                             )
 
                             for sym, bars in batch_bars.items():
-
                                 closes = np.array([b["close"] for b in bars], dtype=float)
-
-                                for i in range(50, len(bars) - anchor_fh):
-                                    window = bars[i - 49: i + 1][::-1]
-                                    fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
-                                    if fs is None:
+                                
+                                # VECTORIZED bulk feature extraction (replaces per-bar extract_features loop)
+                                bulk_features = feature_engineer.extract_features_bulk(bars)
+                                if bulk_features is None or len(bulk_features) == 0:
+                                    continue
+                                
+                                n_usable = min(len(bulk_features), len(bars) - lb - anchor_fh)
+                                if n_usable <= 0:
+                                    continue
+                                
+                                features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features)
+                                
+                                # BATCH predict through all sub-models at once (replaces per-bar predict loop)
+                                sub_raw_preds = {}
+                                for tf, sm in sub_models.items():
+                                    col_map = sub_model_col_maps.get(tf)
+                                    if col_map is None:
                                         continue
-
-                                    # Get raw predictions from each sub-model (no DB logging)
+                                    try:
+                                        # Build feature matrix in sub-model's expected column order
+                                        model_feats = np.zeros((n_usable, len(col_map)), dtype=np.float32)
+                                        for ci, src_idx in enumerate(col_map):
+                                            if 0 <= src_idx < features_matrix.shape[1]:
+                                                model_feats[:, ci] = features_matrix[:, src_idx]
+                                        
+                                        sub_raw_preds[tf] = sm._model.predict(model_feats)  # Batch predict!
+                                    except Exception:
+                                        pass
+                                
+                                # Batch predict setup model
+                                setup_raw_preds = None
+                                if setup_model and setup_col_map:
+                                    try:
+                                        model_feats = np.zeros((n_usable, len(setup_col_map)), dtype=np.float32)
+                                        for ci, src_idx in enumerate(setup_col_map):
+                                            if 0 <= src_idx < features_matrix.shape[1]:
+                                                model_feats[:, ci] = features_matrix[:, src_idx]
+                                        setup_raw_preds = setup_model._model.predict(model_feats)
+                                    except Exception:
+                                        pass
+                                
+                                # Now iterate per-sample for ensemble feature assembly (fast — just dict ops)
+                                for i in range(n_usable):
+                                    bar_idx = lb + i - 1  # Map back to bars index
+                                    if bar_idx + anchor_fh >= len(closes) or closes[bar_idx] <= 0:
+                                        continue
+                                    
+                                    # Parse sub-model predictions for this sample
                                     predictions = {}
-                                    for tf, sm in sub_models.items():
+                                    for tf, raw_pred_batch in sub_raw_preds.items():
                                         try:
-                                            feat_vec = np.array([[
-                                                fs.features.get(f, 0.0) for f in sm._feature_names
-                                            ]])
-                                            raw_pred = sm._model.predict(feat_vec)
-
-                                            if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
-                                                probs = raw_pred[0]
+                                            raw_pred = raw_pred_batch[i] if raw_pred_batch.ndim >= 1 else raw_pred_batch
+                                            
+                                            if hasattr(raw_pred_batch, 'ndim') and raw_pred_batch.ndim == 2:
+                                                probs = raw_pred
                                                 prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
                                                 prob_down = float(probs[0])
                                                 conf = float(max(probs) - 1.0 / len(probs))
@@ -2041,13 +2092,13 @@ async def run_training_pipeline(
                                                     "down" if np.argmax(probs) == 0 else "flat"
                                                 )
                                             else:
-                                                prob_up = float(raw_pred[0])
+                                                prob_up = float(raw_pred) if np.isscalar(raw_pred) else float(raw_pred)
                                                 prob_down = 1.0 - prob_up
                                                 conf = abs(prob_up - 0.5) * 2
                                                 direction = "up" if prob_up > 0.52 else (
                                                     "down" if prob_down > 0.55 else "flat"
                                                 )
-
+                                            
                                             predictions[tf] = {
                                                 "prob_up": prob_up,
                                                 "prob_down": prob_down,
@@ -2056,19 +2107,15 @@ async def run_training_pipeline(
                                             }
                                         except Exception:
                                             pass
-
-                                    # Get setup model prediction (raw, no DB logging)
+                                    
+                                    # Parse setup model prediction for this sample
                                     setup_preds = []
-                                    if setup_model:
+                                    if setup_raw_preds is not None:
                                         try:
-                                            feat_vec = np.array([[
-                                                fs.features.get(f, 0.0)
-                                                for f in setup_model._feature_names
-                                            ]])
-                                            raw_pred = setup_model._model.predict(feat_vec)
-
-                                            if hasattr(raw_pred, 'ndim') and raw_pred.ndim == 2:
-                                                probs = raw_pred[0]
+                                            raw_pred = setup_raw_preds[i] if setup_raw_preds.ndim >= 1 else setup_raw_preds
+                                            
+                                            if hasattr(setup_raw_preds, 'ndim') and setup_raw_preds.ndim == 2:
+                                                probs = raw_pred
                                                 prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
                                                 prob_down = float(probs[0])
                                                 conf = float(max(probs) - 1.0 / len(probs))
@@ -2076,13 +2123,13 @@ async def run_training_pipeline(
                                                     "down" if np.argmax(probs) == 0 else "flat"
                                                 )
                                             else:
-                                                prob_up = float(raw_pred[0])
+                                                prob_up = float(raw_pred) if np.isscalar(raw_pred) else float(raw_pred)
                                                 prob_down = 1.0 - prob_up
                                                 conf = abs(prob_up - 0.5) * 2
                                                 direction = "up" if prob_up > 0.52 else (
                                                     "down" if prob_down > 0.55 else "flat"
                                                 )
-
+                                            
                                             setup_preds.append({
                                                 "prob_up": prob_up,
                                                 "prob_down": prob_down,
@@ -2091,17 +2138,16 @@ async def run_training_pipeline(
                                             })
                                         except Exception:
                                             pass
-
+                                    
                                     # Extract ensemble features from stacked predictions
                                     ens_feats = extract_ensemble_features(
                                         predictions, setup_preds or None
                                     )
                                     feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
-
+                                    
                                     # Target: future return over daily forecast horizon
                                     future_return = (
-                                        (closes[i + anchor_fh] - closes[i]) / closes[i]
-                                        if closes[i] > 0 else 0
+                                        (closes[bar_idx + anchor_fh] - closes[bar_idx]) / closes[bar_idx]
                                     )
                                     if future_return > 0.003:
                                         target = 2  # UP
@@ -2109,9 +2155,11 @@ async def run_training_pipeline(
                                         target = 0  # DOWN
                                     else:
                                         target = 1  # FLAT
-
+                                    
                                     all_X.append(feat_vec)
                                     all_y.append(target)
+                                
+                                del bulk_features, features_matrix
 
                             del batch_bars
                             gc.collect()
