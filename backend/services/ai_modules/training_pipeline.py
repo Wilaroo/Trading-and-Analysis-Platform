@@ -850,6 +850,9 @@ async def run_training_pipeline(
     try:
         # Clear symbol cache at start of pipeline run
         clear_symbol_cache()
+        
+        import time as _time
+        _pipeline_start = _time.monotonic()
 
         # Canonical model name mapping — must match timeseries_service.py SUPPORTED_TIMEFRAMES
         DIRECTIONAL_MODEL_NAMES = {
@@ -865,7 +868,8 @@ async def run_training_pipeline(
         # ── Phase 1: Generic Directional Models (Full Universe) ──
         if "generic" in phases:
             status.update(phase="generic_directional")
-            logger.info("=== Phase 1: Training Generic Directional Models (Full Universe) ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 1: Training Generic Directional Models (Full Universe) === [{int(_p_elapsed//60)}m elapsed]")
             try:
                 from services.ai_modules.timeseries_service import TimeSeriesAIService
 
@@ -912,7 +916,8 @@ async def run_training_pipeline(
         # ── Phase 2: Setup-Specific Models (Long) ──
         if "setup" in phases:
             status.update(phase="setup_specific")
-            logger.info("=== Phase 2: Training Setup-Specific Models (Long) ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 2: Training Setup-Specific Models (Long) === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.setup_features import get_setup_feature_names
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
@@ -1057,7 +1062,8 @@ async def run_training_pipeline(
         # ── Phase 2.5: Short Setup-Specific Models ──
         if "short" in phases:
             status.update(phase="short_setup_specific")
-            logger.info("=== Phase 2.5: Training SHORT Setup-Specific Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 2.5: Training SHORT Setup-Specific Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.short_setup_features import get_short_setup_feature_names
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
@@ -1198,7 +1204,8 @@ async def run_training_pipeline(
         # ── Phase 3: Volatility Prediction Models ──
         if "volatility" in phases:
             status.update(phase="volatility_prediction")
-            logger.info("=== Phase 3: Training Volatility Prediction Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 3: Training Volatility Prediction Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.volatility_model import (
                 VOL_MODEL_CONFIGS, VOL_FEATURE_NAMES,
                 compute_vol_specific_features, compute_vol_target,
@@ -1326,7 +1333,8 @@ async def run_training_pipeline(
                     status.add_error(model_name, str(e))
         if "exit" in phases:
             status.update(phase="exit_timing")
-            logger.info("=== Phase 4: Training Exit Timing Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 4: Training Exit Timing Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS, EXIT_FEATURE_NAMES
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
@@ -1453,7 +1461,8 @@ async def run_training_pipeline(
         # ── Phase 5: Sector-Relative Models ──
         if "sector" in phases:
             status.update(phase="sector_relative")
-            logger.info("=== Phase 5: Training Sector-Relative Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 5: Training Sector-Relative Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.sector_relative_model import (
                 SECTOR_MODEL_CONFIGS, SECTOR_REL_FEATURE_NAMES,
                 compute_sector_relative_features, compute_sector_relative_target,
@@ -1572,7 +1581,8 @@ async def run_training_pipeline(
         # ── Phase 5.5: Gap Fill Probability Models ──
         if "gap_fill" in phases:
             status.update(phase="gap_fill")
-            logger.info("=== Phase 5.5: Training Gap Fill Probability Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 5.5: Training Gap Fill Probability Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.gap_fill_model import (
                 GAP_MODEL_CONFIGS, GAP_FEATURE_NAMES,
                 compute_gap_features, compute_gap_fill_target,
@@ -1709,7 +1719,8 @@ async def run_training_pipeline(
         # ── Phase 6: Risk-of-Ruin Models ──
         if "risk" in phases:
             status.update(phase="risk_of_ruin")
-            logger.info("=== Phase 6: Training Risk-of-Ruin Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 6: Training Risk-of-Ruin Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.risk_of_ruin_model import RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
@@ -1812,7 +1823,8 @@ async def run_training_pipeline(
         # ── Phase 7: Regime-Conditional (depends on Phase 1-6) ──
         if "regime" in phases:
             status.update(phase="regime_conditional")
-            logger.info("=== Phase 7: Training Regime-Conditional Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 7: Training Regime-Conditional Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.regime_conditional_model import (
                 ALL_REGIMES, classify_regime_for_date, get_regime_model_name,
                 MIN_REGIME_SAMPLES,
@@ -1947,7 +1959,8 @@ async def run_training_pipeline(
         # ── Phase 8: Ensemble Meta-Learner (depends on Phase 1-7) ──
         if "ensemble" in phases:
             status.update(phase="ensemble_meta")
-            logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 8: Training Ensemble Meta-Learner === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.ensemble_model import (
                 ENSEMBLE_MODEL_CONFIGS, ENSEMBLE_FEATURE_NAMES,
                 extract_ensemble_features, STACKED_TIMEFRAMES,
@@ -2215,7 +2228,8 @@ async def run_training_pipeline(
         # ── Phase 9: CNN Chart Pattern Training ──
         if "cnn" in phases:
             status.update(phase="cnn_patterns")
-            logger.info("=== Phase 9: Training CNN Chart Pattern Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 9: Training CNN Chart Pattern Models === [{int(_p_elapsed//60)}m elapsed]")
             try:
                 from services.ai_modules.cnn_training_pipeline import run_cnn_training
 
@@ -2262,7 +2276,8 @@ async def run_training_pipeline(
         # ── Phase 11: Deep Learning Models (VAE Regime + TFT + CNN-LSTM) ──
         if "dl" in phases:
             status.update(phase="deep_learning")
-            logger.info("=== Phase 11: Training Deep Learning Models ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 11: Training Deep Learning Models === [{int(_p_elapsed//60)}m elapsed]")
 
             dl_models_config = [
                 {
@@ -2350,7 +2365,8 @@ async def run_training_pipeline(
         # ── Phase 12: FinBERT Sentiment Analysis ──
         if "finbert" in phases:
             status.update(phase="finbert_sentiment")
-            logger.info("=== Phase 12: FinBERT Sentiment Analysis ===")
+            _p_elapsed = _time.monotonic() - _pipeline_start
+            logger.info(f"=== Phase 12: FinBERT Sentiment Analysis === [{int(_p_elapsed//60)}m elapsed]")
             status.update(current_model="finbert_news_collection")
             try:
                 from services.ai_modules.finbert_sentiment import FinnhubNewsCollector, FinBERTSentiment
@@ -2529,9 +2545,13 @@ async def run_training_pipeline(
             "total_samples": results["total_samples"],
         }
         status.update(phase="completed", current_model="")
+        _total_elapsed = _time.monotonic() - _pipeline_start
+        _total_hrs = int(_total_elapsed // 3600)
+        _total_min = int((_total_elapsed % 3600) // 60)
         logger.info(
             f"Training pipeline complete: {len(results['models_trained'])} trained, "
-            f"{len(results['models_failed'])} failed, {results['total_samples']:,} total samples"
+            f"{len(results['models_failed'])} failed, {results['total_samples']:,} total samples "
+            f"[Total time: {_total_hrs}h{_total_min:02d}m]"
         )
 
     except Exception as e:

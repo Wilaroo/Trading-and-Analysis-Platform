@@ -801,6 +801,9 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Step 3: Processing {num_batches} batches...")
             sys.stdout.flush()
             
+            import time as _time
+            _phase1_start = _time.monotonic()
+            
             for batch_idx in range(num_batches):
                 batch_start = batch_idx * symbol_batch_size
                 batch_end = min(batch_start + symbol_batch_size, total_symbols)
@@ -885,7 +888,17 @@ class TimeSeriesAIService:
                         
                         # Per-symbol progress logging (every 10 symbols)
                         if sym_count_in_batch % 10 == 0:
-                            logger.info(f"[FULL UNIVERSE]   {sym_count_in_batch}/{len(batch_symbols)} in batch ({symbols_with_data} with data, {total_bars_processed:,} bars)")
+                            _elapsed = _time.monotonic() - _phase1_start
+                            _total_done = batch_start + sym_count_in_batch
+                            _rate = _total_done / _elapsed if _elapsed > 0 else 0
+                            _remaining = (total_symbols - _total_done) / _rate if _rate > 0 else 0
+                            _eta_min = int(_remaining // 60)
+                            _eta_sec = int(_remaining % 60)
+                            logger.info(
+                                f"[FULL UNIVERSE]   {sym_count_in_batch}/{len(batch_symbols)} in batch "
+                                f"({symbols_with_data} with data, {total_bars_processed:,} bars) "
+                                f"[{_total_done}/{total_symbols} total, ETA {_eta_min}m{_eta_sec:02d}s]"
+                            )
                             sys.stdout.flush()
                         
                     except Exception as e:
@@ -915,7 +928,14 @@ class TimeSeriesAIService:
                     "bars_processed": total_bars_processed
                 })
                 
-                logger.info(f"[FULL UNIVERSE] Batch {batch_idx + 1} complete: {batch_samples:,} samples, Total: {total_samples:,} samples")
+                _batch_elapsed = _time.monotonic() - _phase1_start
+                _batch_elapsed_min = int(_batch_elapsed // 60)
+                _batch_elapsed_sec = int(_batch_elapsed % 60)
+                logger.info(
+                    f"[FULL UNIVERSE] Batch {batch_idx + 1}/{num_batches} complete: "
+                    f"{batch_samples:,} samples, Total: {total_samples:,} samples "
+                    f"[Elapsed: {_batch_elapsed_min}m{_batch_elapsed_sec:02d}s]"
+                )
                 sys.stdout.flush()
                 
                 # Force garbage collection after each batch
