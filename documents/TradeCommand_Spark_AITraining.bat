@@ -71,7 +71,7 @@ if exist ".git" (
 popd
 
 echo        Pulling latest code on Spark...
-ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git pull; exit" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git stash 2>/dev/null; git pull origin main; exit" 2>nul
 if %errorlevel%==0 (
     echo        Spark code updated!
 ) else (
