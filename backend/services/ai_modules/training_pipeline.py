@@ -847,6 +847,17 @@ async def run_training_pipeline(
         # Clear symbol cache at start of pipeline run
         clear_symbol_cache()
 
+        # Canonical model name mapping — must match timeseries_service.py SUPPORTED_TIMEFRAMES
+        DIRECTIONAL_MODEL_NAMES = {
+            "1 min": "direction_predictor_1min",
+            "5 mins": "direction_predictor_5min",
+            "15 mins": "direction_predictor_15min",
+            "30 mins": "direction_predictor_30min",
+            "1 hour": "direction_predictor_1hour",
+            "1 day": "direction_predictor_daily",
+            "1 week": "direction_predictor_weekly",
+        }
+
         # ── Phase 1: Generic Directional Models (Full Universe) ──
         if "generic" in phases:
             status.update(phase="generic_directional")
@@ -861,7 +872,7 @@ async def run_training_pipeline(
                     config = BAR_SIZE_CONFIGS.get(bs)
                     if not config:
                         continue
-                    model_name = f"direction_predictor_{bs.replace(' ', '_')}"
+                    model_name = DIRECTIONAL_MODEL_NAMES.get(bs, f"direction_predictor_{bs.replace(' ', '_')}")
                     status.update(current_model=model_name)
                     logger.info(f"[Phase 1] Training {model_name} via Full Universe...")
 
@@ -1824,7 +1835,7 @@ async def run_training_pipeline(
                     if not config:
                         continue
 
-                    base_model_name = f"direction_predictor_{bs.replace(' ', '_')}"
+                    base_model_name = DIRECTIONAL_MODEL_NAMES.get(bs, f"direction_predictor_{bs.replace(' ', '_')}")
                     fh = config["forecast_horizon"]
 
                     try:
@@ -1950,7 +1961,7 @@ async def run_training_pipeline(
             # Load generic sub-models for each stacked timeframe
             sub_models = {}
             for tf in STACKED_TIMEFRAMES:
-                tf_model_name = f"direction_predictor_{tf.replace(' ', '_')}"
+                tf_model_name = DIRECTIONAL_MODEL_NAMES.get(tf, f"direction_predictor_{tf.replace(' ', '_')}")
                 tf_fh = BAR_SIZE_CONFIGS.get(tf, {}).get("forecast_horizon", 5)
                 m = TimeSeriesGBM(model_name=tf_model_name, forecast_horizon=tf_fh)
                 m.set_db(db)
