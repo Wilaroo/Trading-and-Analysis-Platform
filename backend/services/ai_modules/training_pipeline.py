@@ -374,11 +374,14 @@ PHASE_CONFIGS = {
     "volatility_prediction": {"label": "Volatility Prediction", "order": 4, "expected_models": 7, "phase_num": "3"},
     "exit_timing": {"label": "Exit Timing", "order": 5, "expected_models": 10, "phase_num": "4"},
     "sector_relative": {"label": "Sector-Relative", "order": 6, "expected_models": 3, "phase_num": "5"},
-    "risk_of_ruin": {"label": "Risk-of-Ruin", "order": 7, "expected_models": 6, "phase_num": "6"},
-    "regime_conditional": {"label": "Regime-Conditional", "order": 8, "expected_models": 28, "phase_num": "7"},
-    "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 9, "expected_models": 10, "phase_num": "8"},
-    "cnn_patterns": {"label": "CNN Chart Patterns", "order": 10, "expected_models": 13, "phase_num": "9"},
-    "auto_validation": {"label": "Auto-Validation", "order": 11, "expected_models": 34, "phase_num": "10"},
+    "gap_fill": {"label": "Gap Fill Probability", "order": 7, "expected_models": 7, "phase_num": "5.5"},
+    "risk_of_ruin": {"label": "Risk-of-Ruin", "order": 8, "expected_models": 6, "phase_num": "6"},
+    "regime_conditional": {"label": "Regime-Conditional", "order": 9, "expected_models": 28, "phase_num": "7"},
+    "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 10, "expected_models": 10, "phase_num": "8"},
+    "cnn_patterns": {"label": "CNN Chart Patterns", "order": 11, "expected_models": 13, "phase_num": "9"},
+    "deep_learning": {"label": "Deep Learning (VAE/TFT/CNN-LSTM)", "order": 12, "expected_models": 3, "phase_num": "11"},
+    "finbert_sentiment": {"label": "FinBERT Sentiment", "order": 13, "expected_models": 1, "phase_num": "12"},
+    "auto_validation": {"label": "Auto-Validation", "order": 14, "expected_models": 34, "phase_num": "13"},
 }
 
 
@@ -790,15 +793,16 @@ def count_total_models() -> int:
     volatility = len(BAR_SIZE_CONFIGS)  # 7
     exit_timing = len(ALL_SETUP_TYPES)  # 10
     sector_relative = 3  # daily, hourly, 5min
-    gap_fill = 3  # 5min, 1min, 15min
+    gap_fill = 7  # one per timeframe
     risk_of_ruin = 6  # 1min through daily
     regime_conditional = generic * len(["bull_trend", "bear_trend", "range_bound", "high_vol"])  # 7 * 4 = 28
     ensemble = len(ALL_SETUP_TYPES)  # 10
+    cnn_models = 13  # CNN chart pattern models
     dl_models = 3  # VAE Regime, TFT, CNN-LSTM
     finbert = 1    # FinBERT Sentiment pipeline
     return (generic + setup_long + setup_short + volatility + exit_timing +
             sector_relative + gap_fill + risk_of_ruin + regime_conditional + ensemble +
-            dl_models + finbert)
+            cnn_models + dl_models + finbert)
 
 
 async def run_training_pipeline(
@@ -884,10 +888,18 @@ async def run_training_pipeline(
                     status.update(current_model=model_name)
                     logger.info(f"[Phase 1] Training {model_name} via Full Universe...")
 
+                    def _phase1_progress(pct, msg):
+                        """Callback: push batch progress to DB so WS broadcasts to UI."""
+                        status.update(
+                            current_phase_progress=pct,
+                            current_model=f"{model_name} — {msg}",
+                        )
+
                     result = await ts_service.train_full_universe(
                         bar_size=bs,
                         symbol_batch_size=500,
                         max_bars_per_symbol=0,  # Auto-resolve from TIMEFRAME_SETTINGS (50K for intraday, 10K for daily)
+                        progress_callback=_phase1_progress,
                     )
 
                     if result.get("success"):

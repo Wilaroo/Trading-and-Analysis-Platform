@@ -55,6 +55,7 @@ const ALL_PHASES = [
   { key: 'volatility_prediction', label: 'Volatility Prediction', num: '3', expected: 7 },
   { key: 'exit_timing', label: 'Exit Timing', num: '4', expected: 10 },
   { key: 'sector_relative', label: 'Sector-Relative', num: '5', expected: 3 },
+  { key: 'gap_fill', label: 'Gap Fill Probability', num: '5.5', expected: 7 },
   { key: 'risk_of_ruin', label: 'Risk-of-Ruin', num: '6', expected: 6 },
   { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
   { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
@@ -74,7 +75,7 @@ const formatDuration = (seconds) => {
   return `${s}s`;
 };
 
-const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
+const PhaseRow = memo(({ phase, phaseData, isActive, currentModel, phaseProgress }) => {
   const status = phaseData?.status || 'pending';
   const trained = phaseData?.models_trained || 0;
   const _failed = phaseData?.models_failed || 0; // eslint-disable-line no-unused-vars
@@ -110,6 +111,11 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel }) => {
         </div>
         {isActive && currentModel && (
           <div className="text-[10px] text-cyan-400/70 font-mono mt-0.5 truncate pl-6">{currentModel}</div>
+        )}
+        {isActive && phaseProgress > 0 && (
+          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1 ml-6">
+            <div className="h-full bg-cyan-500/60 rounded-full transition-all duration-700" style={{ width: `${Math.min(100, phaseProgress)}%` }} />
+          </div>
         )}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -237,7 +243,14 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
       </div>
       <div className="px-1 py-1 space-y-0.5 max-h-[340px] overflow-auto">
         {ALL_PHASES.map((phase) => (
-          <PhaseRow key={phase.key} phase={phase} phaseData={phaseHistory[phase.key]} isActive={isTraining && currentPhase === phase.key} currentModel={currentPhase === phase.key ? currentModel : null} />
+          <PhaseRow
+            key={phase.key}
+            phase={phase}
+            phaseData={phaseHistory[phase.key]}
+            isActive={isTraining && currentPhase === phase.key}
+            currentModel={currentPhase === phase.key ? currentModel : null}
+            phaseProgress={currentPhase === phase.key ? (pipelineStatus?.pipeline_status?.current_phase_progress || 0) : 0}
+          />
         ))}
       </div>
       {!isTraining && completedPhases.length > 0 && (

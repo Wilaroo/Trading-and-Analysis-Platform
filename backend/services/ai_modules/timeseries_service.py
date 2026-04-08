@@ -900,6 +900,17 @@ class TimeSeriesAIService:
                                 f"[{_total_done}/{total_symbols} total, ETA {_eta_min}m{_eta_sec:02d}s]"
                             )
                             sys.stdout.flush()
+                            
+                            # Push mid-batch progress to UI every 100 symbols
+                            if progress_callback and sym_count_in_batch % 100 == 0:
+                                try:
+                                    mid_pct = (batch_start + sym_count_in_batch) / total_symbols * 100
+                                    progress_callback(
+                                        mid_pct,
+                                        f"{batch_start + sym_count_in_batch}/{total_symbols} symbols ({total_bars_processed:,} bars, ETA {_eta_min}m{_eta_sec:02d}s)"
+                                    )
+                                except Exception:
+                                    pass
                         
                     except Exception as e:
                         logger.warning(f"[FULL UNIVERSE] Error processing {symbol}: {e}")
@@ -927,6 +938,16 @@ class TimeSeriesAIService:
                     "samples_collected": total_samples,
                     "bars_processed": total_bars_processed
                 })
+                
+                # Push progress to pipeline DB (drives WS → UI updates)
+                if progress_callback:
+                    try:
+                        progress_callback(
+                            progress_pct,
+                            f"Batch {batch_idx + 1}/{num_batches} ({symbols_processed:,}/{total_symbols:,} symbols, {total_bars_processed:,} bars)"
+                        )
+                    except Exception:
+                        pass
                 
                 _batch_elapsed = _time.monotonic() - _phase1_start
                 _batch_elapsed_min = int(_batch_elapsed // 60)

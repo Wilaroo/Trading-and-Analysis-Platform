@@ -2968,7 +2968,7 @@ async def stream_training_status():
                         str(status.get("phase", "")) + 
                         str(status.get("current_model", "")) + 
                         str(status.get("models_completed", 0)) +
-                        str(status.get("current_phase_progress", 0))
+                        str(int(status.get("current_phase_progress", 0)))
                     )
                 else:
                     status_hash = None
