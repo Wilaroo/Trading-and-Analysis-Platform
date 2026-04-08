@@ -296,7 +296,7 @@ timeout /t 5 /nobreak >nul
 start "" "%SPARK_FRONTEND%"
 
 echo [8/9] Opening AI Training Monitor on Spark...
-start "[SPARK MONITOR] Training Pipeline" cmd /k "title [SPARK MONITOR] AI Training Pipeline && color 0B && echo. && echo ===================================================== && echo   [SPARK MONITOR] AI Training Pipeline Dashboard && echo   Connects to DGX Spark via SSH && echo   Refreshes every 10 seconds once training starts && echo ===================================================== && echo. && ssh -t %SPARK_USER%@%SPARK_IP% ""cd %SPARK_REPO% && ./documents/scripts/monitor_training.sh"""
+start "[SPARK MONITOR] Training Pipeline" cmd /k "title [SPARK MONITOR] AI Training Pipeline && color 0B && echo. && echo ===================================================== && echo   [SPARK MONITOR] AI Training Pipeline Dashboard && echo   Connects to DGX Spark via SSH && echo   Refreshes every 10 seconds once training starts && echo ===================================================== && echo. && ssh -t %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && bash documents/scripts/monitor_training.sh""
 echo        Training monitor terminal opened (BLUE)
 echo.
 
