@@ -95,8 +95,12 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **Collectors Fixed:** Added same training guard to `ib_historical_collector.py`, `v3`, and `v4` — all back off 60s per cycle when training detected.
 - **Auto-Mode Fixed:** `_check_cloud_mode()` now checks the new `/api/ai-training/is-active` endpoint first (most reliable signal).
 
+### Phase 5f: Restart Script OOM Fix (DONE — Feb 2026)
+- **Bug Fixed:** `.bat` restart script (`TradeCommand_Spark_AITraining.bat`) Step 2.5 only killed `server.py`, `worker.py`, and frontend — but NOT `training_subprocess` GPU processes. On restart, 13 new training subprocesses stacked on top of existing ones, causing 100% RAM (128GB), 12GB swap, and 91.6°C thermal throttle.
+- **Fix:** Added `pkill -9 -f training_subprocess` and `pkill -9 -f training_pipeline` as the FIRST kill commands (before backend/worker), with 2s delay, then verification pass to catch stubborn processes. Increased shutdown wait from 5s to 8s.
+
 ## Upcoming Tasks
-- Phase 5f: RL Position Sizer (needs trade outcome data)
+- Phase 5g: RL Position Sizer (needs trade outcome data)
 - Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
 - Phase 7: Infrastructure Polish (systemd, notifications, symbol rotation)
 - FinBERT UI panel in NIA
