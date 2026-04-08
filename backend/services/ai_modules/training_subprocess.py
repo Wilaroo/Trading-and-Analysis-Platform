@@ -14,10 +14,75 @@ import asyncio
 import json
 import logging
 import os
+import subprocess as _subprocess
 import sys
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger("training_subprocess")
+
+
+def _system_preflight():
+    """Run system-level checks and optimizations before training starts."""
+    if os.name == 'nt':
+        return  # Windows — skip Linux-specific tuning
+
+    my_pid = os.getpid()
+
+    # 1. Kill orphaned training processes (from crashed previous runs)
+    try:
+        result = _subprocess.run(
+            ['pgrep', '-f', 'services.ai_modules.training_subprocess'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            pids = [p.strip() for p in result.stdout.strip().split('\n') if p.strip()]
+            orphans = [p for p in pids if int(p) != my_pid]
+            if orphans:
+                logger.warning(f"[PREFLIGHT] Found {len(orphans)} orphaned training process(es): {orphans}")
+                for pid in orphans:
+                    try:
+                        os.kill(int(pid), 9)
+                        logger.info(f"[PREFLIGHT] Killed orphan PID {pid}")
+                    except (ProcessLookupError, ValueError):
+                        pass
+    except Exception as e:
+        logger.warning(f"[PREFLIGHT] Orphan check failed (non-fatal): {e}")
+
+    # 2. Set swappiness low — prefer RAM over swap for training workloads
+    try:
+        current = open('/proc/sys/vm/swappiness').read().strip()
+        if int(current) > 10:
+            _subprocess.run(['sysctl', '-w', 'vm.swappiness=10'],
+                           capture_output=True, timeout=5)
+            logger.info(f"[PREFLIGHT] Set vm.swappiness=10 (was {current})")
+        else:
+            logger.info(f"[PREFLIGHT] vm.swappiness already {current}")
+    except Exception:
+        pass  # Not root or sysctl not available — fine
+
+    # 3. Log system memory state
+    try:
+        import shutil
+        mem = shutil.disk_usage('/')  # Just to confirm we can read system info
+        with open('/proc/meminfo') as f:
+            lines = f.readlines()
+        mem_total = mem_avail = swap_total = swap_free = 0
+        for line in lines:
+            if line.startswith('MemTotal:'):
+                mem_total = int(line.split()[1]) // 1024 // 1024  # GB
+            elif line.startswith('MemAvailable:'):
+                mem_avail = int(line.split()[1]) // 1024 // 1024
+            elif line.startswith('SwapTotal:'):
+                swap_total = int(line.split()[1]) // 1024 // 1024
+            elif line.startswith('SwapFree:'):
+                swap_free = int(line.split()[1]) // 1024 // 1024
+        logger.info(f"[PREFLIGHT] RAM: {mem_total - mem_avail}GB / {mem_total}GB used | "
+                    f"Swap: {swap_total - swap_free}GB / {swap_total}GB used | "
+                    f"Available: {mem_avail}GB")
+        if mem_avail < 20:
+            logger.warning(f"[PREFLIGHT] LOW MEMORY WARNING: Only {mem_avail}GB available!")
+    except Exception:
+        pass
 
 
 def main():
@@ -26,6 +91,9 @@ def main():
     parser.add_argument("--bar-sizes", default=None, help="Comma-separated bar sizes")
     parser.add_argument("--max-symbols", type=int, default=None)
     args = parser.parse_args()
+
+    # System-level safety checks before anything else
+    _system_preflight()
 
     # Read MongoDB connection from environment (avoids shell escaping issues with special chars)
     mongo_url = os.environ.get("TRAINING_MONGO_URL") or os.environ.get("MONGO_URL", "")

@@ -65,8 +65,9 @@ BAR_SIZE_CONFIGS = {
 STREAM_BATCH_SIZE = 25
 
 # Max parallel worker processes for feature extraction.
-# Using half the CPU cores leaves headroom for the OS, MongoDB, and the main process.
-MAX_EXTRACT_WORKERS = max(1, os.cpu_count() // 2)
+# Cap at 8 to limit memory overhead from forked processes (each worker copies parent memory).
+# On DGX Spark (20+ cores), uncapped cpu_count()//2 causes 10+ workers × ~4GB each = swap pressure.
+MAX_EXTRACT_WORKERS = min(8, max(1, os.cpu_count() // 2))
 
 
 # ── Symbol Cache ──────────────────────────────────────────────

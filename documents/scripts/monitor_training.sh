@@ -39,7 +39,7 @@ get_mongo_status() {
         print('PHASE: ' + (s.phase || 'idle'));
         print('MODEL: ' + (s.current_model || '-'));
         print('PROGRESS: ' + (s.models_completed || 0) + '/' + (s.models_total || 0));
-        print('PHASE_PCT: ' + ((s.current_phase_progress || 0) * 100).toFixed(1) + '%');
+        print('PHASE_PCT: ' + ((s.current_phase_progress || 0)).toFixed(1) + '%');
         print('STARTED: ' + (s.started_at || '-'));
         print('ERRORS: ' + (s.errors ? s.errors.length : 0));
         print('---PHASES---');
