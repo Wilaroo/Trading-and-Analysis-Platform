@@ -52,17 +52,41 @@ def main():
     # Ensure critical indexes exist before heavy queries
     try:
         from pymongo import ASCENDING
-        db["ib_historical_data"].create_index(
-            [("symbol", ASCENDING), ("bar_size", ASCENDING), ("date", ASCENDING)],
-            name="symbol_barsize_date", background=True
-        )
-        db["feature_cache"].create_index(
-            [("cache_key", ASCENDING)],
-            name="cache_key_idx", unique=True, background=True
-        )
-        logger.info("[SUBPROCESS] Ensured MongoDB indexes on ib_historical_data and feature_cache")
+        
+        # Check existing indexes first — skip creation if already present (saves minutes on 178M+ docs)
+        existing_indexes = {idx["name"] for idx in db["ib_historical_data"].list_indexes()}
+        
+        if "symbol_barsize_date" in existing_indexes or "symbol_1_bar_size_1_date_1" in existing_indexes:
+            logger.info("[SUBPROCESS] ib_historical_data compound index already exists — skipping")
+        else:
+            logger.info("[SUBPROCESS] Building index on ib_historical_data (178M+ docs — may take 5-15 minutes)...")
+            db["ib_historical_data"].create_index(
+                [("symbol", ASCENDING), ("bar_size", ASCENDING), ("date", ASCENDING)],
+                name="symbol_barsize_date"
+            )
+            logger.info("[SUBPROCESS] ib_historical_data index built")
+        
+        # Feature cache index (small collection, fast)
+        existing_cache_indexes = {idx["name"] for idx in db["feature_cache"].list_indexes()}
+        if "cache_key_idx" not in existing_cache_indexes and "cache_key_1" not in existing_cache_indexes:
+            logger.info("[SUBPROCESS] Building index on feature_cache...")
+            try:
+                db["feature_cache"].create_index(
+                    [("cache_key", ASCENDING)],
+                    name="cache_key_idx", unique=True
+                )
+            except Exception:
+                # Duplicates exist — create non-unique
+                db["feature_cache"].create_index(
+                    [("cache_key", ASCENDING)],
+                    name="cache_key_idx"
+                )
+            logger.info("[SUBPROCESS] feature_cache index ready")
+        else:
+            logger.info("[SUBPROCESS] feature_cache index already exists — skipping")
+            
     except Exception as idx_err:
-        logger.warning(f"[SUBPROCESS] Index creation (non-fatal): {idx_err}")
+        logger.warning(f"[SUBPROCESS] Index check/creation (non-fatal): {idx_err}")
 
     phases = args.phases.split(",") if args.phases else None
     bar_sizes = args.bar_sizes.split(",") if args.bar_sizes else None
