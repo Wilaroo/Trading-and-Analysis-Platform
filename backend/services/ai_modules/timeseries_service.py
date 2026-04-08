@@ -803,7 +803,10 @@ class TimeSeriesAIService:
                 logger.info(f"[FULL UNIVERSE] Processing batch {batch_idx + 1}/{num_batches} ({batch_start + 1}-{batch_end} of {total_symbols})")
                 sys.stdout.flush()
                 
+                sym_count_in_batch = 0
+                cache_hits_batch = 0
                 for symbol in batch_symbols:
+                    sym_count_in_batch += 1
                     try:
                         # Check feature cache first (skip expensive extraction if cached)
                         cached = model._load_features_from_cache(symbol, bar_size)
@@ -811,14 +814,25 @@ class TimeSeriesAIService:
                             batch_feat_parts.append(np.array(cached["features"], dtype=np.float32))
                             batch_tgt_parts.append(np.array(cached["targets"], dtype=np.float32))
                             symbols_with_data += 1
+                            cache_hits_batch += 1
+                            if sym_count_in_batch % 50 == 0:
+                                logger.info(f"[FULL UNIVERSE]   {sym_count_in_batch}/{len(batch_symbols)} in batch (cache hits: {cache_hits_batch})")
+                                sys.stdout.flush()
                             continue
                         
-                        # Load bars for this symbol
-                        bars = await self._get_historical_bars_from_db(
-                            symbol, 
-                            bar_size=bar_size,
-                            max_bars=max_bars_per_symbol
-                        )
+                        # Load bars for this symbol — with timeout to prevent infinite hangs
+                        try:
+                            bars = await asyncio.wait_for(
+                                self._get_historical_bars_from_db(
+                                    symbol, 
+                                    bar_size=bar_size,
+                                    max_bars=max_bars_per_symbol
+                                ),
+                                timeout=120  # 2 min max per symbol query
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(f"[FULL UNIVERSE] TIMEOUT loading {symbol} ({bar_size}) — skipping")
+                            continue
                         
                         if not bars or len(bars) < 50 + forecast_horizon:
                             continue
@@ -859,6 +873,11 @@ class TimeSeriesAIService:
                         
                         # Clear bars from memory after processing
                         del bars
+                        
+                        # Per-symbol progress logging (every 10 symbols)
+                        if sym_count_in_batch % 10 == 0:
+                            logger.info(f"[FULL UNIVERSE]   {sym_count_in_batch}/{len(batch_symbols)} in batch ({symbols_with_data} with data, {total_bars_processed:,} bars)")
+                            sys.stdout.flush()
                         
                     except Exception as e:
                         logger.warning(f"[FULL UNIVERSE] Error processing {symbol}: {e}")

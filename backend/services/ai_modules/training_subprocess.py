@@ -49,6 +49,21 @@ def main():
         _write_result(db, {"error": f"MongoDB connection failed: {e}"})
         sys.exit(1)
 
+    # Ensure critical indexes exist before heavy queries
+    try:
+        from pymongo import ASCENDING
+        db["ib_historical_data"].create_index(
+            [("symbol", ASCENDING), ("bar_size", ASCENDING), ("date", ASCENDING)],
+            name="symbol_barsize_date", background=True
+        )
+        db["feature_cache"].create_index(
+            [("cache_key", ASCENDING)],
+            name="cache_key_idx", unique=True, background=True
+        )
+        logger.info("[SUBPROCESS] Ensured MongoDB indexes on ib_historical_data and feature_cache")
+    except Exception as idx_err:
+        logger.warning(f"[SUBPROCESS] Index creation (non-fatal): {idx_err}")
+
     phases = args.phases.split(",") if args.phases else None
     bar_sizes = args.bar_sizes.split(",") if args.bar_sizes else None
 
