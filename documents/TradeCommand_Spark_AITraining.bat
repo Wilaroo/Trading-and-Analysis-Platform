@@ -83,10 +83,14 @@ echo.
 :: STEP 2.5: STOP EXISTING SPARK SERVICES (clean restart)
 :: =====================================================
 echo [2.5] Stopping existing Spark services for clean restart...
-ssh -n %SPARK_USER%@%SPARK_IP% "pkill -f 'python server.py' 2>/dev/null; pkill -f 'python worker.py' 2>/dev/null; pkill -f 'node.*react-scripts' 2>/dev/null; pkill -f 'yarn start' 2>/dev/null; exit" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "pkill -f 'python server.py' 2>/dev/null; pkill -f 'python worker.py' 2>/dev/null; pkill -f 'python3 worker.py' 2>/dev/null; pkill -f 'python3 -m uvicorn' 2>/dev/null; pkill -f 'node.*react-scripts' 2>/dev/null; pkill -f 'yarn start' 2>/dev/null; pkill firefox 2>/dev/null; exit" 2>nul
 echo        Kill signals sent. Waiting for clean shutdown (5 sec)...
 timeout /t 5 /nobreak >nul
 echo        Spark processes stopped.
+
+echo        Shrinking MongoDB cache to 16GB (frees RAM for training)...
+ssh -n %SPARK_USER%@%SPARK_IP% "mongosh --quiet --eval \"db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})\" 2>/dev/null; exit" 2>nul
+echo        MongoDB cache configured.
 echo.
 
 :: =====================================================
