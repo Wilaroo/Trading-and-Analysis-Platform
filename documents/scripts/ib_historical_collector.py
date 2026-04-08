@@ -441,6 +441,18 @@ class IBHistoricalCollector:
             while self.running:
                 cycle += 1
                 
+                # Training guard: check if Spark is running GPU training
+                # If so, back off to avoid hammering MongoDB with inserts
+                try:
+                    training_resp = self.api.get("/api/ai-training/is-active", timeout=5)
+                    if training_resp and training_resp.get("active"):
+                        if cycle == 1 or (cycle % 10 == 0):
+                            logger.info(f"[TRAINING GUARD] Spark GPU training in progress ({training_resp.get('reason', '?')}) — backing off 60s...")
+                        time.sleep(60)
+                        continue
+                except Exception:
+                    pass  # Don't block collection if training check fails
+                
                 requests = self.fetch_pending_requests(batch_size)
                 
                 if not requests:

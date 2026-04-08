@@ -324,6 +324,44 @@ async def stop_training():
     return {"success": True, "message": "Focus mode restored to LIVE (training process may have already ended)"}
 
 
+@router.get("/is-active")
+async def is_training_active():
+    """
+    Lightweight endpoint for external processes (IB Pusher, Collectors) to check
+    if training is currently running. Returns a simple boolean.
+    
+    Used by Windows-side scripts to back off during Spark GPU training.
+    """
+    active = False
+    reason = "idle"
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        mode = focus_mode_manager.get_mode()
+        if mode == "training":
+            active = True
+            reason = f"focus_mode={mode}"
+    except Exception:
+        pass
+
+    if not active:
+        try:
+            from services.training_mode import training_mode_manager
+            if training_mode_manager.is_training_active():
+                active = True
+                reason = "training_mode_manager"
+        except Exception:
+            pass
+
+    if not active and _training_task and not _training_task.done():
+        active = True
+        reason = "subprocess_running"
+
+    return {
+        "active": active,
+        "reason": reason,
+    }
+
+
 @router.get("/models")
 async def list_trained_models():
     """List all trained models with their metrics."""

@@ -86,14 +86,23 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - `/api/ai-modules/finbert/*` — 6 FinBERT endpoints
 - `/api/ai-modules/dl/status` — DL + FinBERT status
 - `/api/ai-training/start` — Master pipeline (all 13 phases)
+- `/api/ai-training/is-active` — Lightweight training status check (for IB Pusher/Collectors)
+
+### Phase 5e: IB Pusher Training Guard (DONE — April 8, 2026)
+- **Bug Fixed:** IB Pusher's `run()` mode was checking `http://127.0.0.1:8001` for training status — but pusher runs on Windows PC, not Spark. Focus mode check silently failed, pusher kept hammering MongoDB during training.
+- **New Endpoint:** `GET /api/ai-training/is-active` — lightweight boolean check consolidating `focus_mode_manager` + `training_mode_manager` + subprocess status. 14ms response time.
+- **Pusher Fix:** Changed `local_backend_url` to `spark_backend_url` (cloud_url = `http://192.168.50.2:8001`). Added proper exponential backoff: 30s checks normally, 60s checks during training, 5s sleep per tick when paused, clear console logging.
+- **Collectors Fixed:** Added same training guard to `ib_historical_collector.py`, `v3`, and `v4` — all back off 60s per cycle when training detected.
+- **Auto-Mode Fixed:** `_check_cloud_mode()` now checks the new `/api/ai-training/is-active` endpoint first (most reliable signal).
 
 ## Upcoming Tasks
-- Phase 5e: RL Position Sizer (needs trade outcome data)
+- Phase 5f: RL Position Sizer (needs trade outcome data)
 - Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
 - Phase 7: Infrastructure Polish (systemd, notifications, symbol rotation)
 - FinBERT UI panel in NIA
 - Activate FinBERT as Gate Layer 12
 - Per-signal weight optimizer
+- Deprecate/remove `ollama_proxy_manager.py` (native Ollama on Spark replaces it)
 
 ## Key Files
 - `/app/backend/services/ai_modules/training_pipeline.py` — Master 13-phase pipeline

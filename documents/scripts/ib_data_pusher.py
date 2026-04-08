@@ -227,7 +227,7 @@ class IBDataPusher:
     
     def __init__(self, cloud_url: str, ib_host: str = "127.0.0.1", ib_port: int = 4002, client_id: int = 10):
         self.cloud_url = cloud_url.rstrip('/')
-        self.local_backend_url = "http://127.0.0.1:8001"  # Local backend for focus mode checks
+        self.spark_backend_url = self.cloud_url  # Use Spark backend for training checks (NOT localhost — pusher runs on Windows)
         self.ib_host = ib_host
         self.ib_port = ib_port
         self.client_id = client_id
@@ -1109,39 +1109,57 @@ class IBDataPusher:
         self.push_data_to_cloud()
         self.last_push_time = current_time
         
-        # Track focus mode state
-        focus_mode_paused = False
-        last_focus_check = 0
-        focus_check_interval = 30  # Check every 30 seconds
+        # Training guard state — backs off when Spark is training
+        training_paused = False
+        last_training_check = 0
+        training_check_interval = 30  # Check every 30 seconds normally
+        training_backoff_interval = 60  # Check every 60 seconds when training is active
+        consecutive_training_checks = 0  # Track how long training has been active
         
         try:
             while self.running:
                 try:
-                    # Check focus mode periodically - pause IB requests during training
+                    # Check Spark backend for training status periodically
                     current_time = time.time()
-                    if current_time - last_focus_check >= focus_check_interval:
-                        try:
-                            # Check LOCAL backend for focus mode (training runs locally, not on cloud)
-                            import requests as _req
-                            resp = _req.get(f"{self.local_backend_url}/api/focus-mode/status", timeout=3)
-                            status = resp.json() if resp.status_code == 200 else None
-                            if status and status.get("mode") == "training":
-                                if not focus_mode_paused:
-                                    logger.info("[FOCUS MODE] Training mode detected - pausing IB requests and cloud pushes")
-                                    focus_mode_paused = True
-                            else:
-                                if focus_mode_paused:
-                                    logger.info("[FOCUS MODE] Training complete - resuming IB requests")
-                                    focus_mode_paused = False
-                        except Exception:
-                            pass  # Ignore focus mode check errors
-                        last_focus_check = current_time
+                    check_interval = training_backoff_interval if training_paused else training_check_interval
                     
-                    # If in training mode, skip IB operations AND cloud pushes
-                    # The backend CPU is saturated by ML training — pushing data
+                    if current_time - last_training_check >= check_interval:
+                        try:
+                            resp = self.api.get_safe("/api/ai-training/is-active", timeout=5)
+                            if resp and resp.get("active"):
+                                consecutive_training_checks += 1
+                                if not training_paused:
+                                    logger.info("")
+                                    logger.info("=" * 55)
+                                    logger.info("  [TRAINING GUARD] Spark GPU training detected!")
+                                    logger.info(f"  Reason: {resp.get('reason', 'unknown')}")
+                                    logger.info("  Pausing IB data pushes to free Spark I/O...")
+                                    logger.info("  Will resume automatically when training ends.")
+                                    logger.info("=" * 55)
+                                    logger.info("")
+                                    training_paused = True
+                                elif consecutive_training_checks % 5 == 0:
+                                    elapsed_min = consecutive_training_checks * training_backoff_interval / 60
+                                    logger.info(f"[TRAINING GUARD] Still training ({elapsed_min:.0f} min) — backing off...")
+                            else:
+                                if training_paused:
+                                    logger.info("")
+                                    logger.info("=" * 55)
+                                    logger.info("  [TRAINING GUARD] Training complete!")
+                                    logger.info("  Resuming IB data pushes to Spark.")
+                                    logger.info("=" * 55)
+                                    logger.info("")
+                                    training_paused = False
+                                    consecutive_training_checks = 0
+                        except Exception:
+                            pass  # Ignore training check errors — don't block the pusher
+                        last_training_check = current_time
+                    
+                    # If Spark is training, skip ALL IB operations AND cloud pushes.
+                    # The backend CPU/GPU is saturated by ML training — pushing data
                     # would just timeout and fill logs with connection errors.
-                    if focus_mode_paused:
-                        self.ib.sleep(2.0)  # Longer sleep when paused
+                    if training_paused:
+                        self.ib.sleep(5.0)  # Long sleep when paused, no need to process IB events
                         continue
                     
                     # Let ib_insync process events (sync - no event loop conflict)
@@ -1339,12 +1357,17 @@ class IBDataPusher:
             logger.info("Disconnected from IB Gateway")
     
     def _check_cloud_mode(self) -> Optional[str]:
-        """Check cloud for desired operating mode"""
+        """Check Spark backend for desired operating mode"""
         try:
-            # First check focus mode - training takes priority
+            # First check the dedicated training endpoint — most reliable signal
+            training_status = self.api.get_safe("/api/ai-training/is-active", timeout=5)
+            if training_status and training_status.get("active"):
+                return "training"  # Return special mode that pauses IB requests
+            
+            # Then check focus mode (covers backtesting, etc.)
             focus_status = self.api.get_safe("/api/focus-mode/status", timeout=10)
             if focus_status and focus_status.get("mode") == "training":
-                return "training"  # Return special mode that pauses IB requests
+                return "training"
             
             result = self.api.get_safe("/api/ib/mode", timeout=10)
             if result:

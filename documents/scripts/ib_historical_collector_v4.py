@@ -373,6 +373,17 @@ class IBHistoricalCollectorV4:
             while self.running:
                 cycle += 1
                 
+                # Training guard: check if Spark is running GPU training
+                try:
+                    training_resp = self.api.get("/api/ai-training/is-active", timeout=5)
+                    if training_resp and training_resp.get("active"):
+                        if cycle == 1 or (cycle % 10 == 0):
+                            logger.info(f"[TRAINING GUARD] Spark GPU training in progress — backing off 60s...")
+                        time.sleep(60)
+                        continue
+                except Exception:
+                    pass
+                
                 # Fetch more requests to fill parallel slots
                 requests_batch = self.fetch_pending_requests(batch_size)
                 
