@@ -628,9 +628,17 @@ async def get_model_inventory():
             },
         }
 
-        # Generic directional
-        for bs in ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]:
-            name = f"direction_predictor_{bs.replace(' ', '_')}"
+        # Generic directional — use the ACTUAL model names from timeseries_service.py config
+        DIRECTIONAL_MODEL_NAMES = {
+            "1 min": "direction_predictor_1min",
+            "5 mins": "direction_predictor_5min",
+            "15 mins": "direction_predictor_15min",
+            "30 mins": "direction_predictor_30min",
+            "1 hour": "direction_predictor_1hour",
+            "1 day": "direction_predictor_daily",
+            "1 week": "direction_predictor_weekly",
+        }
+        for bs, name in DIRECTIONAL_MODEL_NAMES.items():
             categories["generic_directional"]["models"].append({
                 "name": name, "bar_size": bs,
                 "trained": name in trained_models,
@@ -669,8 +677,7 @@ async def get_model_inventory():
 
         # Regime-conditional model variants (generic directional x 4 regimes)
         from services.ai_modules.regime_conditional_model import ALL_REGIMES, get_regime_model_name
-        for bs in ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]:
-            base_name = f"direction_predictor_{bs.replace(' ', '_')}"
+        for bs, base_name in DIRECTIONAL_MODEL_NAMES.items():
             for regime in ALL_REGIMES:
                 name = get_regime_model_name(base_name, regime)
                 categories["regime_conditional"]["models"].append({
