@@ -71,7 +71,7 @@ if exist ".git" (
 popd
 
 echo        Pulling latest code on Spark...
-ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git pull" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git pull; exit" 2>nul
 if %errorlevel%==0 (
     echo        Spark code updated!
 ) else (
@@ -83,7 +83,7 @@ echo.
 :: STEP 2.5: STOP EXISTING SPARK SERVICES (clean restart)
 :: =====================================================
 echo [2.5] Stopping existing Spark services for clean restart...
-ssh %SPARK_USER%@%SPARK_IP% "pkill -f 'python server.py' 2>/dev/null; pkill -f 'python worker.py' 2>/dev/null; pkill -f 'node.*react-scripts' 2>/dev/null; pkill -f 'yarn start' 2>/dev/null" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "pkill -f 'python server.py' 2>/dev/null; pkill -f 'python worker.py' 2>/dev/null; pkill -f 'node.*react-scripts' 2>/dev/null; pkill -f 'yarn start' 2>/dev/null; exit" 2>nul
 echo        Kill signals sent. Waiting for clean shutdown (5 sec)...
 timeout /t 5 /nobreak >nul
 echo        Spark processes stopped.
@@ -95,7 +95,7 @@ echo.
 echo [3/8] Starting DGX Spark services (fresh after git pull)...
 
 echo        Starting Spark backend via SSH...
-ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python server.py > /tmp/backend.log 2>&1 &"
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python server.py > /tmp/backend.log 2>&1 < /dev/null & disown; exit" 2>nul
 
 echo        Waiting for backend startup (30 sec)...
 timeout /t 30 /nobreak >nul
@@ -118,12 +118,12 @@ goto spark_health_loop
 
 :check_frontend
 echo        Starting Spark frontend via SSH...
-ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/frontend && nohup yarn start > /tmp/frontend.log 2>&1 &"
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/frontend && nohup yarn start > /tmp/frontend.log 2>&1 < /dev/null & disown; exit" 2>nul
 echo        Frontend starting (compiles in ~20 sec)...
 
 :check_worker
 echo        Starting Spark worker via SSH...
-ssh %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python worker.py > /tmp/worker.log 2>&1 &"
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python worker.py > /tmp/worker.log 2>&1 < /dev/null & disown; exit" 2>nul
 echo        Worker started
 echo.
 
