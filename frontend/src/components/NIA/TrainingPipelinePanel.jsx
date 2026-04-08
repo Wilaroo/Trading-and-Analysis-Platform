@@ -540,7 +540,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     return () => window.removeEventListener('ws-message', handleWsMessage);
   }, []);
 
-  const handleStartTraining = useCallback(() => {
+  const handleStartTraining = useCallback(async () => {
     setStarting(true);
     const sent = sendWsMessage({ action: 'start_pipeline' });
     if (!sent) {
@@ -548,11 +548,31 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       toast.error('WebSocket not connected — cannot start training');
       return;
     }
-    // Timeout fallback in case WS response never arrives
-    startCallbackRef.current = setTimeout(() => {
+    // Quick WS response timeout — if no WS ack in 5s, poll REST as fallback
+    startCallbackRef.current = setTimeout(async () => {
+      try {
+        const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+        const res = await fetch(`${backendUrl}/api/ai-training/status`);
+        const status = await res.json();
+        const phase = status?.pipeline_status?.phase || status?.phase;
+        if (phase && phase !== 'idle' && phase !== 'completed' && phase !== 'error') {
+          // Training IS running — WS just missed the ack
+          toast.success('Training pipeline started');
+          optimisticUntilRef.current = Date.now() + 15000;
+          setPipelineStatus(prev => ({
+            ...prev,
+            task_status: 'running',
+            pipeline_status: status?.pipeline_status || { phase: 'starting' },
+          }));
+        } else {
+          toast.error('Training start timed out — check backend terminal');
+        }
+      } catch {
+        toast.error('Training start timed out — check backend terminal');
+      }
       setStarting(false);
-      toast.error('Training start timed out — check backend terminal');
-    }, 60000);  // Increased to 60s for slow machine startup
+      startCallbackRef.current = null;
+    }, 5000);
   }, [sendWsMessage]);
 
   const handleStopTraining = useCallback(() => {
