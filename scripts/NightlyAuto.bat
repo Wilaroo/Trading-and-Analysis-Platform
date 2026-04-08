@@ -21,7 +21,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://dual-gpu-trading.preview.emergentagent.com
+set CLOUD_URL=https://trade-ai-optimize.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%nightly_auto.log
 
 :: Log start time
