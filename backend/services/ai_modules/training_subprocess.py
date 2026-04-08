@@ -62,8 +62,6 @@ def _system_preflight():
 
     # 3. Log system memory state
     try:
-        import shutil
-        mem = shutil.disk_usage('/')  # Just to confirm we can read system info
         with open('/proc/meminfo') as f:
             lines = f.readlines()
         mem_total = mem_avail = swap_total = swap_free = 0

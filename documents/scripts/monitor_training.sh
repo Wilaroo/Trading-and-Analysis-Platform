@@ -41,7 +41,17 @@ get_mongo_status() {
         print('PROGRESS: ' + (s.models_completed || 0) + '/' + (s.models_total || 0));
         print('PHASE_PCT: ' + ((s.current_phase_progress || 0)).toFixed(1) + '%');
         print('STARTED: ' + (s.started_at || '-'));
+        let now = new Date();
+        let started = s.started_at ? new Date(s.started_at) : now;
+        let elapsed_min = ((now - started) / 60000).toFixed(0);
+        print('ELAPSED: ' + elapsed_min + 'm');
         print('ERRORS: ' + (s.errors ? s.errors.length : 0));
+        print('---LAST_MODELS---');
+        let recent = (s.completed_models || []).slice(-3);
+        recent.forEach(m => {
+            let acc_str = m.accuracy ? (m.accuracy * 100).toFixed(1) + '%' : '-';
+            print('  OK ' + m.name + ' (acc: ' + acc_str + ')');
+        });
         print('---PHASES---');
         phases.forEach(([k, v]) => {
             let status_icon = v.status === 'done' ? 'DONE' : v.status === 'running' ? 'RUNNING' : v.status;
@@ -137,6 +147,9 @@ print_status() {
             STARTED:*)
                 echo -e "  Started:  ${DIM}${line#STARTED: }${NC}"
                 ;;
+            ELAPSED:*)
+                echo -e "  Elapsed:  ${DIM}${line#ELAPSED: }${NC}"
+                ;;
             ERRORS:*)
                 local err_count="${line#ERRORS: }"
                 if [ "$err_count" -gt 0 ]; then
@@ -144,6 +157,13 @@ print_status() {
                 else
                     echo -e "  Errors:   ${GREEN}0${NC}"
                 fi
+                ;;
+            "---LAST_MODELS---")
+                echo ""
+                echo -e "${DIM}--- RECENTLY COMPLETED ---${NC}"
+                ;;
+            "  OK "*)
+                echo -e "  ${GREEN}${line:2}${NC}"
                 ;;
             "---PHASES---")
                 echo ""

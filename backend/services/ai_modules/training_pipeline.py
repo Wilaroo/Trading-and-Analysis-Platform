@@ -977,8 +977,14 @@ async def run_training_pipeline(
                     status.update(current_model=model_name)
 
                 # Stream-load in batches, multiprocess extraction across all setup types at once
-                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                total_syms = len(symbols)
+                for sb_start in range(0, total_syms, STREAM_BATCH_SIZE):
                     sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    sb_end = min(sb_start + STREAM_BATCH_SIZE, total_syms)
+                    status.update(
+                        current_model=f"{bs} setups — loading symbols {sb_start+1}-{sb_end}/{total_syms}",
+                        current_phase_progress=(sb_end / total_syms) * 100,
+                    )
                     batch_bars = await load_symbols_parallel(
                         db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                     )
@@ -1122,6 +1128,11 @@ async def run_training_pipeline(
 
                 for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                     sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                    status.update(
+                        current_model=f"{bs} short setups — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                        current_phase_progress=(sb_end / len(symbols)) * 100,
+                    )
                     batch_bars = await load_symbols_parallel(
                         db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                     )
@@ -1263,6 +1274,11 @@ async def run_training_pipeline(
 
                     for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"vol_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20,
                             max_bars=0
@@ -1377,6 +1393,11 @@ async def run_training_pipeline(
 
                 for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                     sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                    sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                    status.update(
+                        current_model=f"exit_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                        current_phase_progress=(sb_end / len(symbols)) * 100,
+                    )
                     batch_bars = await load_symbols_parallel(
                         db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                     )
@@ -1518,6 +1539,11 @@ async def run_training_pipeline(
 
                     for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"sector_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20,
                             max_bars=0
@@ -1624,6 +1650,11 @@ async def run_training_pipeline(
 
                     for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"risk_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                         )
@@ -1766,6 +1797,11 @@ async def run_training_pipeline(
 
                     for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"regime_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
                         )
