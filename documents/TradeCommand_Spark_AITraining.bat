@@ -289,15 +289,19 @@ echo        Collectors idle until you trigger collection from NIA UI
 echo.
 
 :: =====================================================
-:: STEP 7: OPEN BROWSER TO SPARK FRONTEND
+:: STEP 7: OPEN BROWSER + TRAINING MONITOR
 :: =====================================================
-echo [7/8] Opening TradeCommand on Spark...
+echo [7/9] Opening TradeCommand on Spark...
 timeout /t 5 /nobreak >nul
 start "" "%SPARK_FRONTEND%"
+
+echo [8/9] Opening AI Training Monitor on Spark...
+start "[SPARK MONITOR] Training Pipeline" cmd /k "title [SPARK MONITOR] AI Training Pipeline && color 0B && echo. && echo ===================================================== && echo   [SPARK MONITOR] AI Training Pipeline Dashboard && echo   Connects to DGX Spark via SSH && echo   Refreshes every 10 seconds once training starts && echo ===================================================== && echo. && ssh -t %SPARK_USER%@%SPARK_IP% ""cd %SPARK_REPO% && ./documents/scripts/monitor_training.sh"""
+echo        Training monitor terminal opened (BLUE)
 echo.
 
 :: =====================================================
-:: STEP 8: READY
+:: STEP 9: READY
 :: =====================================================
 echo.
 echo ============================================
@@ -328,6 +332,7 @@ echo    +-------------------------------------------------+
 echo    ^|  WHITE       [MAIN]        This controller      ^|
 echo    ^|  YELLOW      [IB PUSHER]   Live market data     ^|
 echo    ^|  RED x4      [COLLECTOR]   Historical (idle)    ^|
+echo    ^|  BLUE        [MONITOR]     Training dashboard   ^|
 echo    +-------------------------------------------------+
 echo.
 echo    HOW TO USE:
