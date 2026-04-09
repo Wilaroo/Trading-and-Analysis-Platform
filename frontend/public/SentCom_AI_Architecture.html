@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentCom AI Trading Platform — Technical Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-2: #232736;
+    --border: #2e3347;
+    --text: #e4e8f1;
+    --text-dim: #8b92a8;
+    --accent: #6366f1;
+    --accent-2: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --cyan: #06b6d4;
+    --orange: #f97316;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  @page {
+    size: A4;
+    margin: 1.5cm;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 40px;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  @media print {
+    body { background: white; color: #1a1a2e; padding: 0; }
+    .page-break { page-break-before: always; }
+    h1, h2, h3 { color: #1a1a2e; }
+    .card { background: #f8f9fa; border: 1px solid #dee2e6; }
+    .model-card { background: #f0f1f5; }
+    .flow-step { background: #f0f1f5; border-color: #dee2e6; }
+    .gate-row { border-color: #dee2e6; }
+    .accent-text { color: #4338ca; }
+    .section-number { background: #4338ca; }
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    font-size: 1rem;
+    color: var(--text-dim);
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-top: 48px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .section-number {
+    background: var(--accent);
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-top: 28px;
+    margin-bottom: 12px;
+    color: var(--accent-2);
+  }
+
+  p { margin-bottom: 14px; }
+  .accent-text { color: var(--accent-2); font-weight: 500; }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .yellow { color: var(--yellow); }
+  .cyan { color: var(--cyan); }
+  .orange { color: var(--orange); }
+  .dim { color: var(--text-dim); }
+  strong { font-weight: 600; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+  }
+
+  .model-card {
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 18px;
+    margin: 12px 0;
+  }
+
+  .model-card h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .model-card .meta {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+
+  .tag-xgb { background: #1e3a5f; color: #60a5fa; }
+  .tag-pytorch { background: #3f1e1e; color: #f87171; }
+  .tag-transformer { background: #1e3a2e; color: #4ade80; }
+  .tag-cnn { background: #3a2e1e; color: #fbbf24; }
+  .tag-nlp { background: #2e1e3a; color: #c084fc; }
+
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    background: var(--surface-2);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .gate-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+
+  .gate-row:last-child { border-bottom: none; }
+
+  .gate-layer-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .gate-name { flex: 1; font-weight: 500; }
+  .gate-range { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; min-width: 100px; }
+
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+  }
+
+  .flow-step {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    position: relative;
+  }
+
+  .flow-arrow {
+    text-align: center;
+    padding: 4px 0;
+    color: var(--text-dim);
+    font-size: 1.2rem;
+  }
+
+  .flow-step-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+
+  .flow-step-desc {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  ul { padding-left: 24px; margin-bottom: 14px; }
+  li { margin-bottom: 6px; }
+
+  .toc { margin: 20px 0 40px; }
+  .toc a { color: var(--accent-2); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin-bottom: 8px; }
+
+  .hardware-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+
+  @media (max-width: 600px) {
+    .hardware-grid { grid-template-columns: 1fr; }
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 16px 0;
+  }
+
+  .stat-box {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent-2);
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>SentCom AI Trading Platform</h1>
+<p class="subtitle">Complete Technical Architecture: Learning Loop, Model Inventory & Trading Process<br>
+<span class="dim">Version 2.0 — April 2026 | DGX Spark + Windows PC Dual-GPU Architecture</span></p>
+
+<div class="stat-grid">
+  <div class="stat-box">
+    <div class="stat-value">132+</div>
+    <div class="stat-label">Trained Models</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-value">13</div>
+    <div class="stat-label">Training Phases</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-value">11</div>
+    <div class="stat-label">Confidence Gate Layers</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-value">178M+</div>
+    <div class="stat-label">Historical Bars</div>
+  </div>
+</div>
+
+<div class="card toc">
+  <strong>Table of Contents</strong>
+  <ol>
+    <li><a href="#s1">System Architecture Overview</a></li>
+    <li><a href="#s2">The Learning Loop (End-to-End)</a></li>
+    <li><a href="#s3">Training Pipeline — All 13 Phases</a></li>
+    <li><a href="#s4">Model Inventory — Every Model Explained</a></li>
+    <li><a href="#s5">The Confidence Gate — 11-Layer Additive Scoring</a></li>
+    <li><a href="#s6">Live Trading Process</a></li>
+    <li><a href="#s7">Data Flow & MongoDB Schema</a></li>
+    <li><a href="#s8">Hardware Architecture</a></li>
+  </ol>
+</div>
+
+<!-- ─── SECTION 1: ARCHITECTURE ─── -->
+<h2 id="s1"><span class="section-number">1</span> System Architecture Overview</h2>
+
+<p>SentCom is a fully autonomous AI trading system that ingests live market data from Interactive Brokers, trains 132+ machine learning models across 13 training phases, scores every potential trade through an 11-layer confidence gate, and executes orders autonomously — all while continuously learning from its own outcomes.</p>
+
+<div class="hardware-grid">
+  <div class="card">
+    <h3>DGX Spark (192.168.50.2)</h3>
+    <p class="dim">128GB RAM | NVIDIA Grace CPU | 120-core ARM</p>
+    <ul>
+      <li>FastAPI Backend (:8001)</li>
+      <li>React Frontend (:3000)</li>
+      <li>MongoDB (Docker, 16GB cache)</li>
+      <li>XGBoost GPU training (CUDA)</li>
+      <li>PyTorch deep learning models</li>
+      <li>Ollama local LLM (trade consultation)</li>
+      <li>WebSocket real-time updates</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Windows PC (192.168.50.1)</h3>
+    <p class="dim">RTX 5060 Ti | IB Gateway Connection</p>
+    <ul>
+      <li>Interactive Brokers Gateway</li>
+      <li>Live market data pusher</li>
+      <li>Historical data collectors (x4)</li>
+      <li>Orchestrator .bat scripts</li>
+      <li>Trade execution relay</li>
+      <li>Future: DL model offloading via LAN</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ─── SECTION 2: LEARNING LOOP ─── -->
+<div class="page-break"></div>
+<h2 id="s2"><span class="section-number">2</span> The Learning Loop (End-to-End)</h2>
+
+<p>The learning loop is the core feedback mechanism that makes SentCom self-improving. Every trade feeds back into the system, adjusting future confidence scores, model weights, and position sizing.</p>
+
+<div class="flow-container">
+  <div class="flow-step">
+    <div class="flow-step-title">1. Data Ingestion</div>
+    <div class="flow-step-desc">IB Gateway pushes live bars (1min → weekly) to MongoDB via <code>ib_historical_data</code>. 4 parallel collectors fetch historical data for ~2,800 symbols. 178M+ bars stored with <code>sort("date", -1).limit(N)</code> optimized queries.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">2. Feature Extraction</div>
+    <div class="flow-step-desc">Vectorized NumPy feature engineering extracts 50+ features per bar: SMA/EMA ratios, RSI, Bollinger Bands, VWAP deviation, volume profiles, volatility metrics, regime features, and setup-specific patterns. Cached in <code>feature_cache</code> collection (~97% cache hit rate on subsequent runs).</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">3. Model Training (13 Phases)</div>
+    <div class="flow-step-desc">132+ models trained across XGBoost (GPU CUDA), PyTorch deep learning (VAE, TFT, CNN-LSTM), CNN chart pattern recognition, FinBERT NLP sentiment, and ensemble meta-learners. Walk-forward validation ensures models only promote if they beat existing accuracy.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">4. Setup Detection (Enhanced Scanner)</div>
+    <div class="flow-step-desc">Real-time scanner monitors all active symbols for 20 setup types (10 long + 10 short): SCALP, ORB, GAP_AND_GO, VWAP, BREAKOUT, RANGE, MEAN_REVERSION, REVERSAL, TREND_CONTINUATION, MOMENTUM — plus their short equivalents. Each detected setup generates a <code>LiveAlert</code>.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">5. Confidence Gate (11 Layers)</div>
+    <div class="flow-step-desc">Every alert passes through the additive scoring gate. Starts at 0 points, earns confirmation from regime alignment, model consensus, live prediction, CNN patterns, TFT temporal signals, VAE regime detection, and learning loop feedback. Decision: <span class="green">GO (≥55pts)</span> | <span class="yellow">REDUCE (≥30pts, 60% size)</span> | <span class="red">SKIP (&lt;30pts)</span>.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">6. Trade Execution</div>
+    <div class="flow-step-desc">GO/REDUCE decisions route to the <code>TradeExecution</code> engine, which sizes positions based on confidence score, risk-of-ruin calculations, and dynamic risk parameters. Orders submitted to IB Gateway. Real-time P&L tracked.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">7. Outcome Recording & Learning</div>
+    <div class="flow-step-desc">The <code>LearningLoopService</code> captures every trade outcome (W/L, R-multiple, execution quality), updates per-setup win rates, detects tilt states, checks for edge decay, and generates calibration recommendations. This data feeds back into Layer 7 (Learning Loop Feedback) of the confidence gate, closing the loop.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">8. Re-Training</div>
+    <div class="flow-step-desc">Periodic re-training incorporates new market data and trade outcomes. Models that improve on validation accuracy replace existing ones. Models that regress are kept at their previous version (accuracy gating). The cycle continues.</div>
+  </div>
+</div>
+
+<!-- ─── SECTION 3: TRAINING PIPELINE ─── -->
+<div class="page-break"></div>
+<h2 id="s3"><span class="section-number">3</span> Training Pipeline — All 13 Phases</h2>
+
+<p>The training pipeline orchestrates 132+ model trainings in a specific order. Each phase builds on the outputs of previous phases. The entire run is managed by <code>training_subprocess.py</code> as an isolated OS process, with progress tracked in MongoDB and broadcast to the UI via WebSocket.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Phase</th>
+      <th>Name</th>
+      <th>Models</th>
+      <th>Type</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1</strong></td>
+      <td>Generic Directional</td>
+      <td>7</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>One model per timeframe (1min→1week). Predicts directional movement for any symbol. Foundation layer.</td>
+    </tr>
+    <tr>
+      <td><strong>2</strong></td>
+      <td>Setup-Specific (Long)</td>
+      <td>17</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Specialized models per long setup type × timeframe. Trained on setup-specific feature sets (e.g., SCALP features differ from BREAKOUT features).</td>
+    </tr>
+    <tr>
+      <td><strong>2.5</strong></td>
+      <td>Setup-Specific (Short)</td>
+      <td>17</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Mirror of Phase 2 for short setups. Uses inverse feature engineering (SHORT_SCALP, SHORT_BREAKDOWN, etc.).</td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td>Volatility Prediction</td>
+      <td>7</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Predicts future volatility per timeframe. Used for position sizing and stop-loss calibration.</td>
+    </tr>
+    <tr>
+      <td><strong>4</strong></td>
+      <td>Exit Timing</td>
+      <td>10</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>One model per setup type. Predicts optimal exit points based on historical trade patterns.</td>
+    </tr>
+    <tr>
+      <td><strong>5</strong></td>
+      <td>Sector-Relative</td>
+      <td>3</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Compares stock vs sector ETF performance. Models for daily, hourly, and 5-minute relative strength.</td>
+    </tr>
+    <tr>
+      <td><strong>5.5</strong></td>
+      <td>Gap Fill Probability</td>
+      <td>7</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Predicts probability of gap fill per timeframe. Critical for GAP_AND_GO and SHORT_GAP_FADE setups.</td>
+    </tr>
+    <tr>
+      <td><strong>6</strong></td>
+      <td>Risk-of-Ruin</td>
+      <td>6</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>Estimates probability of catastrophic drawdown per timeframe. Feeds position sizing and circuit breakers.</td>
+    </tr>
+    <tr>
+      <td><strong>7</strong></td>
+      <td>Regime-Conditional</td>
+      <td>28</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>7 timeframes × 4 regimes (bull_trend, bear_trend, range_bound, high_vol). Specialized predictions per market regime.</td>
+    </tr>
+    <tr>
+      <td><strong>8</strong></td>
+      <td>Ensemble Meta-Learner</td>
+      <td>10</td>
+      <td><span class="tag tag-xgb">XGBoost</span></td>
+      <td>One per setup type. Takes predictions from Phase 1-7 models as features and learns optimal weighting/combination.</td>
+    </tr>
+    <tr>
+      <td><strong>9</strong></td>
+      <td>CNN Chart Patterns</td>
+      <td>13</td>
+      <td><span class="tag tag-cnn">PyTorch CNN</span></td>
+      <td>Visual pattern recognition on OHLCV chart images. Classifies patterns (flag, wedge, channel, etc.) and estimates win probability.</td>
+    </tr>
+    <tr>
+      <td><strong>11</strong></td>
+      <td>Deep Learning</td>
+      <td>3</td>
+      <td><span class="tag tag-pytorch">PyTorch</span></td>
+      <td>VAE Regime Detection, Temporal Fusion Transformer (multi-timeframe), CNN-LSTM Temporal model. Advanced neural architectures.</td>
+    </tr>
+    <tr>
+      <td><strong>12</strong></td>
+      <td>FinBERT Sentiment</td>
+      <td>1</td>
+      <td><span class="tag tag-nlp">HuggingFace NLP</span></td>
+      <td>Scores financial news sentiment using ProsusAI/finbert. Feeds Finnhub news articles through the pipeline.</td>
+    </tr>
+    <tr>
+      <td><strong>13</strong></td>
+      <td>Auto-Validation</td>
+      <td>34</td>
+      <td><span class="dim">Validation</span></td>
+      <td>Validates all trained models against holdout data. Models that beat accuracy thresholds are promoted; others keep previous versions.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Total: 132+ models</strong> trained in a single pipeline run. Typical duration: 4-8 hours on DGX Spark depending on feature cache hit rate.</p>
+
+<!-- ─── SECTION 4: MODEL INVENTORY ─── -->
+<div class="page-break"></div>
+<h2 id="s4"><span class="section-number">4</span> Model Inventory — Every Model Explained</h2>
+
+<h3>4.1 XGBoost Models (GPU CUDA)</h3>
+<p>The backbone of the prediction system. XGBoost models are trained with CUDA GPU acceleration on the DGX Spark, using walk-forward validation (train on historical, validate on recent data).</p>
+
+<div class="model-card">
+  <h4>Generic Directional Predictor <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 1 | 7 models (1min, 5min, 15min, 30min, 1hr, daily, weekly) | File: <code>timeseries_gbm.py</code></div>
+  <p>Foundation model. Takes 50+ technical features for ANY symbol and predicts whether the next N bars will move up, down, or flat. Trained on the entire universe (~2,800 symbols × all available history). Each timeframe has a different forecast horizon (e.g., 30 bars for 1min, 5 bars for daily).</p>
+  <p><strong>Features:</strong> SMA/EMA ratios (5/10/20/50), RSI(14), Bollinger Band width, VWAP deviation, volume ratio, price momentum (5/10/20), ATR ratio, bar patterns, and regime indicators.</p>
+</div>
+
+<div class="model-card">
+  <h4>Setup-Specific Predictors (Long) <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 2 | 17 models | File: <code>setup_features.py</code>, <code>setup_training_config.py</code></div>
+  <p>Specialized models trained only on symbols/bars where a specific setup type was detected. Each setup has custom feature extractors:</p>
+  <ul>
+    <li><strong>SCALP</strong> — micro-structure features (tick volume, spread, momentum burst)</li>
+    <li><strong>ORB</strong> — opening range features (range width, time-of-day, gap context)</li>
+    <li><strong>GAP_AND_GO</strong> — gap size, volume confirmation, pre-market context</li>
+    <li><strong>VWAP</strong> — VWAP deviation, reclaim probability, anchored VWAP</li>
+    <li><strong>BREAKOUT</strong> — consolidation tightness, volume expansion, prior resistance</li>
+    <li><strong>RANGE</strong> — range boundaries, mean-reversion tendency, support/resistance</li>
+    <li><strong>MEAN_REVERSION</strong> — Z-score extremity, Bollinger squeeze, RSI divergence</li>
+    <li><strong>REVERSAL</strong> — exhaustion signals, volume climax, trend fatigue</li>
+    <li><strong>TREND_CONTINUATION</strong> — trend strength, pullback depth, moving average alignment</li>
+    <li><strong>MOMENTUM</strong> — rate-of-change, relative strength, sector momentum</li>
+  </ul>
+</div>
+
+<div class="model-card">
+  <h4>Setup-Specific Predictors (Short) <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 2.5 | 17 models | File: <code>short_setup_features.py</code></div>
+  <p>Mirror of the long setup models with inverted feature engineering. SHORT_SCALP, SHORT_ORB, SHORT_GAP_FADE, SHORT_VWAP, SHORT_BREAKDOWN, SHORT_RANGE, SHORT_MEAN_REVERSION, SHORT_REVERSAL, SHORT_MOMENTUM, SHORT_TREND.</p>
+</div>
+
+<div class="model-card">
+  <h4>Volatility Predictor <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 3 | 7 models | File: <code>volatility_model.py</code></div>
+  <p>Predicts future realized volatility for each timeframe. Uses historical volatility features (ATR, Parkinson volatility, Yang-Zhang estimator), VIX correlation, and intraday range patterns. Critical for dynamic position sizing — higher predicted volatility = smaller positions.</p>
+</div>
+
+<div class="model-card">
+  <h4>Exit Timing Model <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 4 | 10 models | File: <code>exit_timing_model.py</code></div>
+  <p>One per setup type. Predicts the optimal exit point (in bars) after entry. Trained on historical trades with labeled exit quality (early exit, optimal, late exit, stopped out). Features include time-in-trade, unrealized P&L trajectory, momentum decay, and volume patterns post-entry.</p>
+</div>
+
+<div class="model-card">
+  <h4>Sector-Relative Model <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 5 | 3 models (daily, hourly, 5min) | File: <code>sector_relative_model.py</code></div>
+  <p>Compares individual stock performance against its sector ETF. Features: relative strength ratio, correlation breakdown, sector rotation signals, and beta-adjusted momentum. Helps identify stocks outperforming/underperforming their sector — key for pair-style trades.</p>
+</div>
+
+<div class="model-card">
+  <h4>Gap Fill Probability Model <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 5.5 | 7 models | File: <code>gap_fill_model.py</code></div>
+  <p>Predicts the probability that a price gap will be filled within the session. Features: gap size relative to ATR, pre-market volume, overnight news sentiment, historical gap-fill rates per symbol. Critical input for GAP_AND_GO and SHORT_GAP_FADE setup decisions.</p>
+</div>
+
+<div class="model-card">
+  <h4>Risk-of-Ruin Model <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 6 | 6 models (1min → daily) | File: <code>risk_of_ruin_model.py</code></div>
+  <p>Estimates the probability of a catastrophic drawdown scenario per timeframe. Features: consecutive loss streaks, drawdown depth/duration, portfolio heat, correlation spikes, and volatility regime. Feeds the circuit breaker system and position sizing limits.</p>
+</div>
+
+<div class="model-card">
+  <h4>Regime-Conditional Models <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 7 | 28 models (7 timeframes × 4 regimes) | File: <code>regime_conditional_model.py</code></div>
+  <p>Rather than one model-fits-all, these are specialized models trained only on data from a specific market regime:</p>
+  <ul>
+    <li><strong>Bull Trend</strong> — trained on confirmed uptrend periods</li>
+    <li><strong>Bear Trend</strong> — trained on confirmed downtrend periods</li>
+    <li><strong>Range-Bound</strong> — trained on consolidation periods</li>
+    <li><strong>High Volatility</strong> — trained on volatile/chaotic periods</li>
+  </ul>
+  <p>At prediction time, the current regime is classified first, then the appropriate regime-specific model is selected. This dramatically improves accuracy vs. a single model that averages across all market conditions.</p>
+</div>
+
+<div class="model-card">
+  <h4>Ensemble Meta-Learner <span class="tag tag-xgb">XGBoost</span></h4>
+  <div class="meta">Phase 8 | 10 models (one per setup) | File: <code>ensemble_model.py</code></div>
+  <p>The "model of models." Takes predictions from all Phase 1-7 models as input features and learns which models to trust in which conditions. Features: individual model predictions, confidence scores, agreement rates, current regime, volatility level. This is the final XGBoost layer that synthesizes all signals.</p>
+</div>
+
+<h3>4.2 Deep Learning Models (PyTorch)</h3>
+
+<div class="model-card">
+  <h4>CNN Chart Pattern Recognition <span class="tag tag-cnn">PyTorch CNN</span></h4>
+  <div class="meta">Phase 9 | 13 models | Files: <code>chart_pattern_cnn.py</code>, <code>chart_image_generator.py</code>, <code>cnn_training_pipeline.py</code></div>
+  <p>Converts OHLCV data into chart images and classifies visual patterns using convolutional neural networks. Identifies: flags, wedges, channels, triangles, head-and-shoulders, double tops/bottoms, cup-and-handle, and more. Each pattern gets a win probability score based on historical outcomes. 13 model variants cover different chart contexts and timeframes.</p>
+  <p><strong>Architecture:</strong> Multi-layer CNN with batch normalization, dropout, and a final classification head that outputs both pattern type and win probability.</p>
+</div>
+
+<div class="model-card">
+  <h4>VAE Regime Detector <span class="tag tag-pytorch">PyTorch VAE</span></h4>
+  <div class="meta">Phase 11 | 1 model | File: <code>vae_regime.py</code></div>
+  <p>Variational Autoencoder that learns to compress market state into a low-dimensional latent space, then classifies the current market regime from that compressed representation.</p>
+  <p><strong>Architecture:</strong></p>
+  <ul>
+    <li>Encoder: Linear(input→128) → ReLU → Linear(128→64) → ReLU → μ/σ heads</li>
+    <li>Latent Space: 16-dimensional with reparameterization trick</li>
+    <li>Decoder: Linear(16→64) → ReLU → Linear(64→128) → ReLU → Linear(128→input)</li>
+    <li>Regime Head: Linear(16→32) → ReLU → Linear(32→N_regimes)</li>
+  </ul>
+  <p><strong>Detected Regimes:</strong> bull_trending, bear_trending, high_volatility, mean_reverting, momentum_surge</p>
+  <p><strong>Training:</strong> 100 epochs, batch size 256. Loss = reconstruction loss + KL divergence + regime classification cross-entropy.</p>
+</div>
+
+<div class="model-card">
+  <h4>Temporal Fusion Transformer (TFT) <span class="tag tag-transformer">PyTorch Transformer</span></h4>
+  <div class="meta">Phase 11 | 1 model | File: <code>temporal_fusion_transformer.py</code></div>
+  <p>Multi-timeframe attention model that simultaneously processes data from multiple timeframes and learns which timeframe matters most for the current prediction.</p>
+  <p><strong>Architecture:</strong></p>
+  <ul>
+    <li>Per-Timeframe Encoders: Linear(features→hidden) + ReLU + Dropout for each of 7 timeframes</li>
+    <li>Variable Selection Network: Learns importance weights per input variable</li>
+    <li>Temporal Self-Attention: MultiheadAttention (4 heads) with residual connections</li>
+    <li>Direction Head: Linear(hidden×7→hidden) → ReLU → Linear(hidden→3) [up/down/flat]</li>
+    <li>Confidence Head: Linear(hidden×7→hidden) → ReLU → Linear(hidden→1) → Sigmoid</li>
+  </ul>
+  <p><strong>Key Innovation:</strong> Outputs timeframe_weights showing which timeframe dominated the prediction (e.g., "15min: 0.4, daily: 0.35, 1hr: 0.25").</p>
+</div>
+
+<div class="model-card">
+  <h4>CNN-LSTM Temporal Model <span class="tag tag-pytorch">PyTorch CNN+LSTM</span></h4>
+  <div class="meta">Phase 11 | 1 model | File: <code>cnn_lstm_model.py</code></div>
+  <p>Hybrid architecture that uses CNN to extract spatial features from price windows and LSTM to capture temporal dependencies across those windows.</p>
+  <p><strong>Architecture:</strong></p>
+  <ul>
+    <li>CNN Block: Conv1d(1→64, k=5) → BatchNorm → ReLU → Conv1d(64→128, k=3) → BatchNorm → ReLU → MaxPool → Flatten → Linear(128×16→256)</li>
+    <li>LSTM: 2-layer bidirectional LSTM (input=256, hidden=128) with dropout=0.2</li>
+    <li>Direction Head: Linear(128→64) → ReLU → Dropout → Linear(64→3) [up/down/flat]</li>
+    <li>Win Probability Head: Linear(128→64) → ReLU → Dropout → Linear(64→1) → Sigmoid</li>
+    <li>Confidence Head: Linear(128→64) → ReLU → Linear(64→1) → Sigmoid</li>
+  </ul>
+  <p><strong>Input:</strong> Rolling windows of 64 price bars per symbol. Processes temporal evolution of patterns.</p>
+</div>
+
+<h3>4.3 NLP Model</h3>
+
+<div class="model-card">
+  <h4>FinBERT Sentiment Analyzer <span class="tag tag-nlp">HuggingFace</span></h4>
+  <div class="meta">Phase 12 | 1 model | File: <code>finbert_sentiment.py</code></div>
+  <p>Pre-trained ProsusAI/finbert model fine-tuned for financial text sentiment. Scores news articles fetched from Finnhub API as positive, negative, or neutral with confidence scores.</p>
+  <p><strong>Pipeline:</strong> Finnhub news → Article text extraction → FinBERT tokenization → Sentiment classification → Score aggregation per symbol → Storage in MongoDB.</p>
+  <p><strong>Note:</strong> Currently trained in the pipeline but the confidence gate layer (Layer 12) is inactive pending integration of real-time news feed.</p>
+</div>
+
+<!-- ─── SECTION 5: CONFIDENCE GATE ─── -->
+<div class="page-break"></div>
+<h2 id="s5"><span class="section-number">5</span> The Confidence Gate — 11-Layer Additive Scoring</h2>
+
+<p>The confidence gate is the pre-trade intelligence layer. Every detected setup must pass through all 11 layers before a trading decision is made. The system uses <strong>additive scoring</strong> — starting from 0 points, each layer adds or subtracts confirmation points with floor protection (no single layer can veto a trade with more than -10 points).</p>
+
+<div class="card">
+  <strong>Decision Thresholds</strong>
+  <table>
+    <thead>
+      <tr><th>Score</th><th>Decision</th><th>Position Size</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="green"><strong>≥ 55 pts</strong></span></td><td><span class="green">GO</span></td><td>Full size</td><td>Strong multi-signal confirmation. Execute with conviction.</td></tr>
+      <tr><td><span class="yellow"><strong>≥ 30 pts</strong></span></td><td><span class="yellow">REDUCE</span></td><td>60% size</td><td>Borderline — some confirmation but not unanimous. Smaller position.</td></tr>
+      <tr><td><span class="red"><strong>&lt; 30 pts</strong></span></td><td><span class="red">SKIP</span></td><td>0%</td><td>Insufficient confirmation. Do not trade.</td></tr>
+    </tbody>
+  </table>
+  <p class="dim" style="margin-top:12px">Maximum theoretical score: ~125 pts (all layers max). Maximum theoretical floor: ~-65 pts (all layers min).</p>
+</div>
+
+<div class="card">
+  <div class="gate-row" style="border-bottom: 2px solid var(--border);">
+    <div style="width:28px; font-weight:700; color: var(--text-dim);">#</div>
+    <div class="gate-name" style="color: var(--text-dim); font-weight:600;">Layer Name</div>
+    <div class="gate-range" style="color: var(--text-dim); font-weight:600;">Points</div>
+    <div style="flex:2; color: var(--text-dim); font-weight:600;">What It Checks</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e3a5f;color:#60a5fa;">1</div>
+    <div class="gate-name">Regime Check</div>
+    <div class="gate-range"><span class="red">-10</span> → <span class="green">+20</span></div>
+    <div style="flex:2">Market regime alignment. CONFIRMED_UP + long = +20. Against trend = -10 (floor). Largest single contributor.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#2e1e3a;color:#c084fc;">2</div>
+    <div class="gate-name">AI Regime</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+10</span></div>
+    <div style="flex:2">AI-classified regime refinement (bull_trend, bear_trend, high_vol, etc.). High volatility = -5 + 20% size reduction.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e3a2e;color:#4ade80;">3</div>
+    <div class="gate-name">Model Consensus</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+15</span></div>
+    <div style="flex:2">Agreement across all applicable models (generic + setup-specific + ensemble). ≥70% agreement = +15, ≥50% = +8, else -5.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#3a2e1e;color:#fbbf24;">4</div>
+    <div class="gate-name">Live Model Prediction</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+15</span></div>
+    <div style="flex:2">Real-time prediction on current bar data. Weighted by model accuracy (better models contribute more). Agreement + high confidence = +15.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e2e3a;color:#67e8f9;">5</div>
+    <div class="gate-name">Cross-Model Agreement</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+5</span></div>
+    <div style="flex:2">Checks if historical consensus (Layer 3) and live prediction (Layer 4) agree. Both aligned = +5. Both against = -5.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#3a1e2e;color:#f472b6;">6</div>
+    <div class="gate-name">Quality Score</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+10</span></div>
+    <div style="flex:2">Setup quality from the scanner (0-100). Score ≥80 = +10, ≥60 = +5, ≥40 = neutral, <40 = -5.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e3a3a;color:#5eead4;">7</div>
+    <div class="gate-name">Learning Loop Feedback</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+8</span></div>
+    <div style="flex:2">Historical win rate for this specific setup + regime + time context. High win rate = boost. Losing streak = penalty. THE SELF-IMPROVING SIGNAL.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#3a2e1e;color:#fb923c;">8</div>
+    <div class="gate-name">CNN Visual Pattern</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+12</span></div>
+    <div style="flex:2">CNN chart pattern recognition. Win probability ≥65% = +12, ≥50% = +5, <35% = -5. Reads the visual chart shape.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e3a5f;color:#60a5fa;">9</div>
+    <div class="gate-name">TFT Multi-Timeframe</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+12</span></div>
+    <div style="flex:2">Temporal Fusion Transformer signal. Synthesizes all 7 timeframes simultaneously. Reports which timeframe dominates the signal.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#2e1e3a;color:#c084fc;">10</div>
+    <div class="gate-name">VAE Regime Detection</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+8</span></div>
+    <div style="flex:2">VAE-detected regime alignment. Bull trending + long = up to +8. Momentum surge = +5. High volatility = -5 + size reduction.</div>
+  </div>
+
+  <div class="gate-row">
+    <div class="gate-layer-num" style="background:#1e3a2e;color:#4ade80;">11</div>
+    <div class="gate-name">CNN-LSTM Temporal</div>
+    <div class="gate-range"><span class="red">-5</span> → <span class="green">+10</span></div>
+    <div style="flex:2">Hybrid CNN-LSTM temporal pattern. Win probability + directional agreement. Pattern evolving favorably = +10, unfavorable = -5.</div>
+  </div>
+</div>
+
+<p><strong>Key Design Principle:</strong> Floor protection ensures no single layer can veto a trade. Even if a model strongly disagrees (-5), the other 10 layers can still confirm the trade. This prevents over-reliance on any single signal and rewards broad confirmation.</p>
+
+<!-- ─── SECTION 6: LIVE TRADING PROCESS ─── -->
+<div class="page-break"></div>
+<h2 id="s6"><span class="section-number">6</span> Live Trading Process</h2>
+
+<p>Here is exactly what happens when SentCom identifies and executes a trade:</p>
+
+<div class="flow-container">
+  <div class="flow-step">
+    <div class="flow-step-title">1. Market Data Stream</div>
+    <div class="flow-step-desc">IB Gateway streams live bars to the Spark backend via WebSocket. Data is normalized and stored in <code>ib_historical_data</code>. The enhanced scanner processes every incoming bar.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">2. Setup Detection</div>
+    <div class="flow-step-desc">The <code>EnhancedScanner</code> evaluates 20 setup patterns (10 long, 10 short) on every bar update. When a pattern matches (e.g., VWAP reclaim on AAPL 5min), it generates a <code>LiveAlert</code> with entry price, stop price, targets, and quality score (0-100).</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">3. SentCom AI Consultation (Optional)</div>
+    <div class="flow-step-desc">High-quality alerts (A/A+ grade) can trigger a quick LLM consultation via the local Ollama model. SentCom's "brain" reviews the alert context, recent similar trades, current regime, and provides a natural language assessment.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">4. Confidence Gate Evaluation</div>
+    <div class="flow-step-desc">The alert enters the 11-layer confidence gate. Each layer runs independently and contributes points. Total score determines: <span class="green">GO (≥55)</span>, <span class="yellow">REDUCE (≥30)</span>, or <span class="red">SKIP (&lt;30)</span>. Full reasoning chain is logged.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">5. Position Sizing</div>
+    <div class="flow-step-desc">For GO/REDUCE decisions, the <code>PositionSizer</code> calculates position size using:
+      <br>• Account equity × risk percentage (usually 1-2%)
+      <br>• Distance to stop loss
+      <br>• Confidence gate's position_multiplier (0.0-1.5)
+      <br>• Volatility prediction (Phase 3 model)
+      <br>• Risk-of-ruin constraint (Phase 6 model)
+      <br>• Circuit breaker limits (daily loss, consecutive losses, etc.)
+    </div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">6. Order Execution</div>
+    <div class="flow-step-desc"><code>TradeExecution</code> sends the order to IB Gateway via the Windows PC relay. Supports market, limit, and bracket orders. Stop-loss and take-profit orders are placed simultaneously. Execution quality (slippage, fill time) is tracked.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">7. Position Management</div>
+    <div class="flow-step-desc">Active positions are monitored by the <code>PositionManager</code>. The Exit Timing model (Phase 4) provides guidance on when to close. Dynamic stop adjustments (trailing stops) are applied based on the Volatility model. Scale-out targets are calculated using the Advanced Targets module.</div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">8. Outcome Recording</div>
+    <div class="flow-step-desc">When a position is closed (stop, target, or manual), the <code>LearningLoopService</code> records:
+      <br>• Win/Loss and R-multiple
+      <br>• Execution quality score
+      <br>• Setup context (regime, quality, confidence score at entry)
+      <br>• Actual vs predicted outcome
+      <br>This data feeds back into the confidence gate (Layer 7) and future model training.
+    </div>
+  </div>
+  <div class="flow-arrow">▼</div>
+
+  <div class="flow-step">
+    <div class="flow-step-title">9. Continuous Adaptation</div>
+    <div class="flow-step-desc">Daily analysis runs automatically:
+      <br>• Per-setup win rate tracking (edge decay detection)
+      <br>• Trader profile updates (tilt detection, confidence calibration)
+      <br>• Strategy promotion/demotion based on recent performance
+      <br>• Trading mode adjustment: Aggressive → Normal → Cautious → Defensive
+      <br>• Calibration recommendations generated for the next session
+    </div>
+  </div>
+</div>
+
+<h3>Trading Modes</h3>
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Mode</th><th>Trigger</th><th>Effect</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="green"><strong>Aggressive</strong></span></td><td>Strong regime, high win rate, low drawdown</td><td>Larger positions, lower confidence threshold</td></tr>
+      <tr><td><strong>Normal</strong></td><td>Default state</td><td>Standard sizing and thresholds</td></tr>
+      <tr><td><span class="yellow"><strong>Cautious</strong></span></td><td>Mixed signals, moderate drawdown, tilt detected</td><td>Smaller positions, higher threshold</td></tr>
+      <tr><td><span class="red"><strong>Defensive</strong></span></td><td>Large drawdown, losing streak, circuit breaker triggered</td><td>Minimal positions, very high threshold, may halt trading</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ─── SECTION 7: DATA FLOW ─── -->
+<div class="page-break"></div>
+<h2 id="s7"><span class="section-number">7</span> Data Flow & MongoDB Schema</h2>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Collection</th><th>Purpose</th><th>Size</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>ib_historical_data</code></td><td>All OHLCV bars (1min → weekly) for ~2,800 symbols. Indexed by symbol + barSize + date.</td><td>178M+ documents</td></tr>
+      <tr><td><code>feature_cache</code></td><td>Pre-computed features per symbol/timeframe. Unique index on <code>cache_key</code>. ~97% hit rate on re-training.</td><td>~500K documents</td></tr>
+      <tr><td><code>timeseries_models</code></td><td>Serialized XGBoost JSON models + metadata (accuracy, feature names, training date).</td><td>~120 documents</td></tr>
+      <tr><td><code>training_pipeline_status</code></td><td>Single document tracking current phase, progress, ETA, errors. Powers the UI dashboard.</td><td>1 document</td></tr>
+      <tr><td><code>learning_outcomes</code></td><td>Every trade outcome: W/L, R-multiple, setup, regime, confidence score at entry.</td><td>Growing</td></tr>
+      <tr><td><code>confidence_gate_decisions</code></td><td>Full decision log: 11-layer reasoning chain per evaluated setup. For debugging and analysis.</td><td>Growing</td></tr>
+      <tr><td><code>sentiment_scores</code></td><td>FinBERT-scored news articles per symbol with sentiment (positive/negative/neutral) and confidence.</td><td>Growing</td></tr>
+      <tr><td><code>dl_models</code></td><td>Serialized PyTorch state_dicts for VAE, TFT, and CNN-LSTM models.</td><td>3 documents</td></tr>
+      <tr><td><code>cnn_chart_models</code></td><td>Serialized CNN chart pattern recognition models + pattern labels.</td><td>13 documents</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ─── SECTION 8: HARDWARE ─── -->
+<h2 id="s8"><span class="section-number">8</span> Hardware Architecture</h2>
+
+<div class="card">
+  <h3>DGX Spark (Primary Compute)</h3>
+  <ul>
+    <li><strong>CPU:</strong> NVIDIA Grace (120 ARM cores)</li>
+    <li><strong>RAM:</strong> 128GB LPDDR5X</li>
+    <li><strong>GPU:</strong> Integrated CUDA (used for XGBoost GPU training)</li>
+    <li><strong>Storage:</strong> 3.6TB NVMe</li>
+    <li><strong>Network:</strong> 192.168.50.2 (LAN) + 10.0.0.17 (WiFi)</li>
+    <li><strong>OS:</strong> NVIDIA DGX Spark Version 7.5.0 (Ubuntu-based, aarch64)</li>
+    <li><strong>Optimizations:</strong> vm.swappiness=10, MongoDB 16GB cache cap, max 8 extraction workers</li>
+  </ul>
+
+  <h3 style="margin-top:24px">Windows PC (Data & Execution)</h3>
+  <ul>
+    <li><strong>GPU:</strong> NVIDIA RTX 5060 Ti (future DL offloading target)</li>
+    <li><strong>Role:</strong> IB Gateway connection, market data pushing, historical collection, trade execution relay</li>
+    <li><strong>Network:</strong> 192.168.50.1</li>
+    <li><strong>Orchestration:</strong> <code>TradeCommand_Spark_AITraining.bat</code> manages full startup/shutdown across both machines via SSH</li>
+  </ul>
+</div>
+
+<div class="card" style="margin-top: 32px; text-align: center;">
+  <p class="dim">SentCom AI Trading Platform — Technical Architecture Document</p>
+  <p class="dim">Generated April 2026 | Confidential</p>
+</div>
+
+</body>
+</html>
