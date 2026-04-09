@@ -1961,7 +1961,7 @@ async def run_training_pipeline(
                     fh = config["forecast_horizon"]
 
                     try:
-                        max_sym = max_symbols_override or config["max_symbols"]
+                        max_sym = max_symbols_override or min(1500, config["max_symbols"])
                         symbols = await get_cached_symbols(db, bs, config["min_bars_per_symbol"])
                         symbols = symbols[:max_sym]
 
@@ -2103,7 +2103,7 @@ async def run_training_pipeline(
                 anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
 
                 symbols = await get_cached_symbols(db, anchor_bs, 100)
-                max_sym = max_symbols_override or BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 2500)
+                max_sym = max_symbols_override or min(1500, BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 2500))
                 symbols = symbols[:max_sym]
 
                 for setup_type, ens_config in ENSEMBLE_MODEL_CONFIGS.items():
