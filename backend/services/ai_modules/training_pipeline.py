@@ -64,6 +64,12 @@ BAR_SIZE_CONFIGS = {
 # Kept conservative to leave headroom on 16GB systems.
 STREAM_BATCH_SIZE = 50
 
+# Max symbols for setup-specific phases (2, 2.5, 4).
+# These phases accumulate features for 10+ model types simultaneously,
+# so memory = symbols × models × features. 1000 symbols provides ample
+# training data while keeping total accumulation under 40GB.
+SETUP_PHASE_MAX_SYMBOLS = 1000
+
 # Max parallel worker processes for feature extraction.
 # Cap at 8 to limit memory overhead from forked processes (each worker copies parent memory).
 # On DGX Spark (20+ cores), uncapped cpu_count()//2 causes 10+ workers × ~4GB each = swap pressure.
@@ -970,7 +976,7 @@ async def run_training_pipeline(
 
             for bs, st_profiles in profiles_by_bs.items():
                 bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                max_sym = max_symbols_override or min(SETUP_PHASE_MAX_SYMBOLS, bs_config.get("max_symbols", 2500))
                 symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
                 symbols = symbols[:max_sym]
                 if not symbols:
@@ -1130,7 +1136,7 @@ async def run_training_pipeline(
 
             for bs, st_profiles in profiles_by_bs.items():
                 bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-                max_sym = max_symbols_override or bs_config.get("max_symbols", 2500)
+                max_sym = max_symbols_override or min(SETUP_PHASE_MAX_SYMBOLS, bs_config.get("max_symbols", 2500))
                 symbols = await get_cached_symbols(db, bs, 100)
                 symbols = symbols[:max_sym]
                 if not symbols:
