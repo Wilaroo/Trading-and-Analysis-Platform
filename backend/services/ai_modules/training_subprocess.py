@@ -16,6 +16,11 @@ import logging
 import os
 import subprocess as _subprocess
 import sys
+import warnings
+
+# Silence NumPy divide-by-zero warnings in correlation calculations
+# (constant-value features produce stddev=0, which is handled by XGBoost natively)
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered in divide.*")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger("training_subprocess")
