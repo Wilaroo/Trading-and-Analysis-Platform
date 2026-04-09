@@ -42,6 +42,8 @@ class TrainingRequest(BaseModel):
     phases: Optional[List[str]] = None  # e.g., ["generic", "volatility", "exit"]
     bar_sizes: Optional[List[str]] = None  # e.g., ["1 day", "5 mins"]
     max_symbols: Optional[int] = None
+    force_retrain: bool = False  # If True, retrain all models ignoring resume cache
+    resume_max_age_hours: float = 24.0  # Skip models trained within N hours
 
 
 async def _monitor_training_process(task: _TrainingProcess):
@@ -172,6 +174,10 @@ async def start_training(request: TrainingRequest):
             cmd.extend(["--bar-sizes", ",".join(request.bar_sizes)])
         if request.max_symbols:
             cmd.extend(["--max-symbols", str(request.max_symbols)])
+        if request.force_retrain:
+            cmd.append("--force-retrain")
+        if request.resume_max_age_hours != 24.0:
+            cmd.extend(["--resume-max-age", str(request.resume_max_age_hours)])
 
         log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log')
         popen_kwargs = dict(

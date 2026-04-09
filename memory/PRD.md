@@ -125,7 +125,19 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
   7. Refactored Phase 7 (Regime) from per-row `.copy()` to per-symbol chunk accumulation with regime splitting
   8. All 12 phase transitions now have cleanup calls (verified: 14 phases - first - last = 12 cleanups)
 - **Estimated memory savings:** 15-25GB cumulative across full pipeline run
-- **Status:** Code verified and linted. Awaiting user to `git pull` and test on DGX Spark.
+### Phase 5i: Pipeline Caching & Resume (CODE COMPLETE — Feb 2026, PENDING USER TEST)
+- **4 caching layers implemented to speed up future training runs:**
+  1. **NVMe Bar Cache** — Bars loaded from MongoDB once per symbol+bar_size, cached as pickle on NVMe disk. Later phases read from disk (NVMe ~5-7 GB/s) instead of re-querying MongoDB. Saves minutes of I/O per phase.
+  2. **NVMe Feature Cache** — `extract_features_bulk` results cached as `.npy` on disk. Phases 3, 5, 5.5, 7, 8 share pre-computed feature matrices. Saves hours of CPU recomputation.
+  3. **Pipeline Resume** — Before training each model, checks MongoDB for existing model trained within N hours (default 24h). Skips training if model is fresh. If pipeline crashes at Phase 7, restart only trains Phases 7-12 (Phases 1-6 are auto-skipped). API supports `force_retrain=true` to override.
+  4. **Shared Regime/SPY Data** — RegimeFeatureProvider created once at pipeline start, reused by Phase 3 (Volatility) and Phase 7 (Regime). Eliminates duplicate SPY data loading.
+- **Resume checks added to all 11 training phases** (Phase 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 8, 11)
+- **API Parameters:** `POST /api/ai-training/start` now accepts:
+  - `force_retrain: bool` (default: false) — retrain all models ignoring cache
+  - `resume_max_age_hours: float` (default: 24.0) — skip models trained within N hours
+- **Cache lifecycle:** NVMe disk cache (`/tmp/training_cache/`) cleared at pipeline start, preserved at end for debugging
+- **Zero accuracy impact:** All caching is pure I/O optimization — identical mathematical inputs to all models
+- **Status:** Code verified and linted. Awaiting user test on DGX Spark.
 
 ## Upcoming Tasks
 - Phase 5g: RL Position Sizer (needs trade outcome data)

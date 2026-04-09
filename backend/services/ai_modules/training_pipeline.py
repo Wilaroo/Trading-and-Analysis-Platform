@@ -95,6 +95,130 @@ def clear_symbol_cache():
     _symbol_cache.clear()
 
 
+# ── NVMe Disk Cache ──────────────────────────────────────────
+# Caches bar data and feature matrices on disk (NVMe) to avoid
+# redundant MongoDB queries and CPU-heavy feature extraction
+# across phases. Cleared at the start of each pipeline run.
+import pickle as _pickle
+import os as _os
+
+CACHE_BASE_DIR = "/tmp/training_cache"
+BAR_CACHE_DIR = f"{CACHE_BASE_DIR}/bars"
+FEATURE_CACHE_DIR = f"{CACHE_BASE_DIR}/features"
+
+
+def _sanitize_bar_size(bar_size: str) -> str:
+    """Convert bar_size to a safe directory name."""
+    return bar_size.replace(" ", "_")
+
+
+def _init_disk_cache():
+    """Create cache directories on NVMe."""
+    for d in (BAR_CACHE_DIR, FEATURE_CACHE_DIR):
+        _os.makedirs(d, exist_ok=True)
+
+
+def _clear_disk_cache():
+    """Wipe cache at start of a fresh pipeline run."""
+    import shutil
+    if _os.path.exists(CACHE_BASE_DIR):
+        shutil.rmtree(CACHE_BASE_DIR, ignore_errors=True)
+    _init_disk_cache()
+    logger.info("[CACHE] Cleared NVMe disk cache")
+
+
+def _bar_cache_path(symbol: str, bar_size: str) -> str:
+    bs_dir = f"{BAR_CACHE_DIR}/{_sanitize_bar_size(bar_size)}"
+    _os.makedirs(bs_dir, exist_ok=True)
+    return f"{bs_dir}/{symbol}.pkl"
+
+
+def _feature_cache_path(symbol: str, bar_size: str) -> str:
+    bs_dir = f"{FEATURE_CACHE_DIR}/{_sanitize_bar_size(bar_size)}"
+    _os.makedirs(bs_dir, exist_ok=True)
+    return f"{bs_dir}/{symbol}.npy"
+
+
+def _cache_bars_to_disk(symbol: str, bar_size: str, bars: List[Dict]):
+    """Write bars to NVMe as pickle."""
+    try:
+        path = _bar_cache_path(symbol, bar_size)
+        with open(path, "wb") as f:
+            _pickle.dump(bars, f, protocol=_pickle.HIGHEST_PROTOCOL)
+    except Exception:
+        pass
+
+
+def _load_bars_from_disk(symbol: str, bar_size: str) -> Optional[List[Dict]]:
+    """Load bars from NVMe cache. Returns None on miss."""
+    path = _bar_cache_path(symbol, bar_size)
+    if not _os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return _pickle.load(f)
+    except Exception:
+        return None
+
+
+def _cache_features_to_disk(symbol: str, bar_size: str, features: np.ndarray):
+    """Write feature matrix to NVMe as .npy."""
+    try:
+        path = _feature_cache_path(symbol, bar_size)
+        np.save(path, features)
+    except Exception:
+        pass
+
+
+def _load_features_from_disk(symbol: str, bar_size: str) -> Optional[np.ndarray]:
+    """Load feature matrix from NVMe cache. Returns None on miss."""
+    path = _feature_cache_path(symbol, bar_size)
+    if not _os.path.exists(path):
+        return None
+    try:
+        return np.load(path)
+    except Exception:
+        return None
+
+
+def cached_extract_features_bulk(feature_engineer, bars, symbol: str, bar_size: str):
+    """Extract features with NVMe disk caching."""
+    cached = _load_features_from_disk(symbol, bar_size)
+    if cached is not None:
+        return cached
+    result = feature_engineer.extract_features_bulk(bars)
+    if result is not None:
+        _cache_features_to_disk(symbol, bar_size, result)
+    return result
+
+
+def _check_resume_model(db, model_name: str, max_age_hours: float = 24.0) -> Optional[Dict]:
+    """Check if model was recently trained and can be skipped.
+    
+    Returns dict with accuracy/samples if resumable, None otherwise.
+    """
+    try:
+        doc = db["timeseries_models"].find_one(
+            {"name": model_name},
+            {"saved_at": 1, "metrics": 1, "_id": 0}
+        )
+        if doc and "saved_at" in doc:
+            saved_at = datetime.fromisoformat(doc["saved_at"])
+            age_hours = (datetime.now(timezone.utc) - saved_at).total_seconds() / 3600
+            if age_hours < max_age_hours:
+                metrics = doc.get("metrics", {})
+                accuracy = metrics.get("accuracy", 0)
+                samples = metrics.get("training_samples", 0)
+                logger.info(
+                    f"[RESUME] Skipping {model_name} — trained {age_hours:.1f}h ago "
+                    f"(accuracy={accuracy:.4f}, samples={samples:,})"
+                )
+                return {"accuracy": accuracy, "samples": samples, "age_hours": age_hours}
+    except Exception as e:
+        logger.warning(f"[RESUME] Error checking model {model_name}: {e}")
+    return None
+
+
 # ── Multiprocessing Workers (must be at module scope for pickle) ────────
 
 def _extract_setup_long_worker(args):
@@ -617,12 +741,20 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
 async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) -> List[Dict]:
     """Load bars for a symbol+bar_size, sorted chronologically (oldest first).
     
+    Uses NVMe disk cache: first call queries MongoDB + writes to disk,
+    subsequent calls (from later phases) load from disk.
+    
     Args:
         max_bars: If > 0, only load the most recent N bars (saves memory).
                   If 0, auto-resolve from BAR_SIZE_CONFIGS (never truly unlimited).
                   The query fetches newest-first then reverses to chronological order.
     """
     try:
+        # Check NVMe disk cache first
+        cached_bars = _load_bars_from_disk(symbol, bar_size)
+        if cached_bars is not None:
+            return cached_bars
+
         loop = asyncio.get_event_loop()
         
         # Auto-resolve max_bars from config when 0 (prevents unbounded queries on 1-min data)
@@ -646,6 +778,9 @@ async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) ->
             loop.run_in_executor(TRAINING_POOL, _run_query),
             timeout=90
         )
+        # Write to NVMe disk cache for reuse by later phases
+        if bars:
+            _cache_bars_to_disk(symbol, bar_size, bars)
         return bars
     except asyncio.TimeoutError:
         logger.warning(f"Timeout loading bars for {symbol}/{bar_size}")
@@ -821,6 +956,8 @@ async def run_training_pipeline(
     phases: List[str] = None,
     bar_sizes: List[str] = None,
     max_symbols_override: int = None,
+    force_retrain: bool = False,
+    resume_max_age_hours: float = 24.0,
 ) -> Dict[str, Any]:
     """
     Run the full training pipeline.
@@ -831,6 +968,8 @@ async def run_training_pipeline(
             Options: "generic", "setup", "volatility", "regime", "exit", "ensemble"
         bar_sizes: Which bar sizes to train. Default: all.
         max_symbols_override: Override max symbols per bar_size.
+        force_retrain: If True, retrain all models even if recently trained.
+        resume_max_age_hours: Skip models trained within this many hours (default 24h).
 
     Returns:
         Dict with training results summary.
@@ -865,9 +1004,15 @@ async def run_training_pipeline(
     try:
         # Clear symbol cache at start of pipeline run
         clear_symbol_cache()
+        _clear_disk_cache()
         
         import time as _time
         _pipeline_start = _time.monotonic()
+
+        if force_retrain:
+            logger.info("[PIPELINE] force_retrain=True — all models will be retrained")
+        else:
+            logger.info(f"[PIPELINE] Resume enabled — skipping models trained within {resume_max_age_hours}h")
 
         # Canonical model name mapping — must match timeseries_service.py SUPPORTED_TIMEFRAMES
         DIRECTIONAL_MODEL_NAMES = {
@@ -927,6 +1072,22 @@ async def run_training_pipeline(
             except Exception:
                 pass
 
+        # ── Shared Data: Pre-load once, reuse across phases ──
+        _shared_regime_provider = None
+        _shared_spy_data = None
+
+        async def _get_shared_regime_data():
+            """Load RegimeFeatureProvider once, reuse in Phase 3 and Phase 7."""
+            nonlocal _shared_regime_provider, _shared_spy_data
+            if _shared_regime_provider is None:
+                from services.ai_modules.regime_features import RegimeFeatureProvider
+                _shared_regime_provider = RegimeFeatureProvider(db)
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(TRAINING_POOL, _shared_regime_provider.preload_index_daily)
+                _shared_spy_data = _shared_regime_provider._data.get("spy", {})
+                logger.info("[SHARED] RegimeFeatureProvider loaded (shared across Phase 3 + Phase 7)")
+            return _shared_regime_provider, _shared_spy_data
+
         # ── Phase 1: Generic Directional Models (Full Universe) ──
         if "generic" in phases:
             status.update(phase="generic_directional")
@@ -944,6 +1105,19 @@ async def run_training_pipeline(
                         continue
                     model_name = DIRECTIONAL_MODEL_NAMES.get(bs, f"direction_predictor_{bs.replace(' ', '_')}")
                     status.update(current_model=model_name)
+
+                    # Pipeline resume: skip if recently trained
+                    if not force_retrain:
+                        resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                        if resumed:
+                            results["models_trained"].append({
+                                "name": model_name, "accuracy": resumed["accuracy"],
+                                "samples": resumed["samples"], "resumed": True,
+                            })
+                            results["total_samples"] += resumed["samples"]
+                            status.add_completed(model_name, resumed["accuracy"])
+                            continue
+
                     logger.info(f"[Phase 1] Training {model_name} via Full Universe...")
 
                     def _phase1_progress(pct, msg):
@@ -1094,6 +1268,18 @@ async def run_training_pipeline(
                     model_name = data["model_name"]
                     status.update(current_model=model_name)
                     try:
+                        # Pipeline resume
+                        if not force_retrain:
+                            resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                            if resumed:
+                                results["models_trained"].append({
+                                    "name": model_name, "accuracy": resumed["accuracy"],
+                                    "samples": resumed["samples"], "resumed": True,
+                                })
+                                results["total_samples"] += resumed["samples"]
+                                status.add_completed(model_name, resumed["accuracy"])
+                                continue
+
                         if not data["X"]:
                             results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
                             continue
@@ -1249,6 +1435,18 @@ async def run_training_pipeline(
                     model_name = data["model_name"]
                     status.update(current_model=model_name)
                     try:
+                        # Pipeline resume
+                        if not force_retrain:
+                            resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                            if resumed:
+                                results["models_trained"].append({
+                                    "name": model_name, "accuracy": resumed["accuracy"],
+                                    "samples": resumed["samples"], "resumed": True,
+                                })
+                                results["total_samples"] += resumed["samples"]
+                                status.add_completed(model_name, resumed["accuracy"])
+                                continue
+
                         if not data["X"]:
                             results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
                             continue
@@ -1310,13 +1508,9 @@ async def run_training_pipeline(
             )
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
-            from services.ai_modules.regime_features import (
-                RegimeFeatureProvider, REGIME_FEATURE_NAMES,
-            )
+            from services.ai_modules.regime_features import REGIME_FEATURE_NAMES
 
-            regime_provider = RegimeFeatureProvider(db)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(TRAINING_POOL, regime_provider.preload_index_daily)
+            regime_provider, _ = await _get_shared_regime_data()
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
@@ -1329,6 +1523,18 @@ async def run_training_pipeline(
                 model_name = vol_config["model_name"]
                 fh = vol_config["forecast_horizon"]
                 status.update(current_model=model_name)
+
+                # Pipeline resume
+                if not force_retrain:
+                    resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                    if resumed:
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": resumed["accuracy"],
+                            "samples": resumed["samples"], "resumed": True,
+                        })
+                        results["total_samples"] += resumed["samples"]
+                        status.add_completed(model_name, resumed["accuracy"])
+                        continue
 
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
@@ -1369,8 +1575,8 @@ async def run_training_pipeline(
                             volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
                             opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            # Bulk-extract base features ONCE for this symbol (NVMe cached)
+                            base_matrix = cached_extract_features_bulk(feature_engineer, bars, sym, bs)
                             if base_matrix is None:
                                 continue
 
@@ -1542,6 +1748,18 @@ async def run_training_pipeline(
                     max_h = data["max_horizon"]
                     status.update(current_model=model_name)
                     try:
+                        # Pipeline resume
+                        if not force_retrain:
+                            resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                            if resumed:
+                                results["models_trained"].append({
+                                    "name": model_name, "accuracy": resumed["accuracy"],
+                                    "samples": resumed["samples"], "resumed": True,
+                                })
+                                results["total_samples"] += resumed["samples"]
+                                status.add_completed(model_name, resumed["accuracy"])
+                                continue
+
                         if not data["X"]:
                             results["models_failed"].append({"name": model_name, "reason": "Insufficient data"})
                             continue
@@ -1615,6 +1833,18 @@ async def run_training_pipeline(
                 fh = sec_config["forecast_horizon"]
                 status.update(current_model=model_name)
 
+                # Pipeline resume
+                if not force_retrain:
+                    resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                    if resumed:
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": resumed["accuracy"],
+                            "samples": resumed["samples"], "resumed": True,
+                        })
+                        results["total_samples"] += resumed["samples"]
+                        status.add_completed(model_name, resumed["accuracy"])
+                        continue
+
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
@@ -1666,8 +1896,8 @@ async def run_training_pipeline(
                             if min_len < 70 + fh:
                                 continue
 
-                            # Bulk-extract base features ONCE for this symbol
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            # Bulk-extract base features ONCE for this symbol (NVMe cached)
+                            base_matrix = cached_extract_features_bulk(feature_engineer, bars, sym, bs)
                             if base_matrix is None:
                                 continue
 
@@ -1757,6 +1987,18 @@ async def run_training_pipeline(
                 max_bars = gap_config["max_bars"]
                 status.update(current_model=model_name)
 
+                # Pipeline resume
+                if not force_retrain:
+                    resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                    if resumed:
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": resumed["accuracy"],
+                            "samples": resumed["samples"], "resumed": True,
+                        })
+                        results["total_samples"] += resumed["samples"]
+                        status.add_completed(model_name, resumed["accuracy"])
+                        continue
+
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
@@ -1785,8 +2027,8 @@ async def run_training_pipeline(
                             if len(bars) < min_required:
                                 continue
 
-                            # Bulk-extract base features
-                            base_matrix = feature_engineer.extract_features_bulk(bars)
+                            # Bulk-extract base features (NVMe cached)
+                            base_matrix = cached_extract_features_bulk(feature_engineer, bars, sym, bs)
                             if base_matrix is None:
                                 continue
 
@@ -1918,6 +2160,18 @@ async def run_training_pipeline(
                 max_bars_horizon = risk_config["max_bars"]
                 status.update(current_model=model_name)
 
+                # Pipeline resume
+                if not force_retrain:
+                    resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                    if resumed:
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": resumed["accuracy"],
+                            "samples": resumed["samples"], "resumed": True,
+                        })
+                        results["total_samples"] += resumed["samples"]
+                        status.add_completed(model_name, resumed["accuracy"])
+                        continue
+
                 try:
                     bs_config = BAR_SIZE_CONFIGS.get(bs, {})
                     symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
@@ -2017,18 +2271,14 @@ async def run_training_pipeline(
                 ALL_REGIMES, classify_regime_for_date, get_regime_model_name,
                 MIN_REGIME_SAMPLES,
             )
-            from services.ai_modules.regime_features import RegimeFeatureProvider
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
 
             feature_engineer = get_feature_engineer()
             base_names = feature_engineer.get_feature_names()
 
-            # Preload SPY daily data for regime classification
-            regime_provider = RegimeFeatureProvider(db)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(TRAINING_POOL, regime_provider.preload_index_daily)
-            spy_data = regime_provider._data.get("spy", {})
+            # Reuse shared SPY/regime data from Phase 3
+            _, spy_data = await _get_shared_regime_data()
 
             if not spy_data or spy_data.get("closes") is None or len(spy_data.get("closes", [])) < 30:
                 logger.warning("Insufficient SPY data for regime classification — skipping Phase 7")
@@ -2067,8 +2317,8 @@ async def run_training_pipeline(
 
                                 closes = np.array([b["close"] for b in bars], dtype=np.float32)
 
-                                # Bulk-extract base features ONCE for this symbol
-                                base_matrix = feature_engineer.extract_features_bulk(bars)
+                                # Bulk-extract base features ONCE for this symbol (NVMe cached)
+                                base_matrix = cached_extract_features_bulk(feature_engineer, bars, sym, bs)
                                 if base_matrix is None:
                                     continue
 
@@ -2128,6 +2378,20 @@ async def run_training_pipeline(
                             y = np.concatenate(y_list).astype(np.float32)
                             regime_model_name = get_regime_model_name(base_model_name, regime)
                             status.update(current_model=regime_model_name)
+
+                            # Pipeline resume
+                            if not force_retrain:
+                                resumed = _check_resume_model(db, regime_model_name, resume_max_age_hours)
+                                if resumed:
+                                    results["models_trained"].append({
+                                        "name": regime_model_name, "accuracy": resumed["accuracy"],
+                                        "samples": resumed["samples"], "resumed": True,
+                                    })
+                                    results["total_samples"] += resumed["samples"]
+                                    status.add_completed(regime_model_name, resumed["accuracy"])
+                                    del X, y
+                                    gc.collect()
+                                    continue
 
                             logger.info(
                                 f"Training {regime_model_name}: {len(X)} samples, "
@@ -2215,6 +2479,18 @@ async def run_training_pipeline(
                     model_name = ens_config["model_name"]
                     status.update(current_model=model_name)
 
+                    # Pipeline resume
+                    if not force_retrain:
+                        resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                        if resumed:
+                            results["models_trained"].append({
+                                "name": model_name, "accuracy": resumed["accuracy"],
+                                "samples": resumed["samples"], "resumed": True,
+                            })
+                            results["total_samples"] += resumed["samples"]
+                            status.add_completed(model_name, resumed["accuracy"])
+                            continue
+
                     try:
                         # Load setup-specific model if daily variant exists
                         setup_model = None
@@ -2260,8 +2536,8 @@ async def run_training_pipeline(
                             for sym, bars in batch_bars.items():
                                 closes = np.array([b["close"] for b in bars], dtype=np.float32)
                                 
-                                # VECTORIZED bulk feature extraction (replaces per-bar extract_features loop)
-                                bulk_features = feature_engineer.extract_features_bulk(bars)
+                                # VECTORIZED bulk feature extraction (NVMe cached)
+                                bulk_features = cached_extract_features_bulk(feature_engineer, bars, sym, anchor_bs)
                                 if bulk_features is None or len(bulk_features) == 0:
                                     continue
                                 
@@ -2520,6 +2796,19 @@ async def run_training_pipeline(
             for dl_cfg in dl_models_config:
                 model_name = dl_cfg["name"]
                 status.update(current_model=model_name)
+
+                # Pipeline resume
+                if not force_retrain:
+                    resumed = _check_resume_model(db, model_name, resume_max_age_hours)
+                    if resumed:
+                        results["models_trained"].append({
+                            "name": model_name, "accuracy": resumed["accuracy"],
+                            "samples": resumed["samples"], "resumed": True, "type": "dl",
+                        })
+                        results["total_samples"] += resumed["samples"]
+                        status.add_completed(model_name, resumed["accuracy"])
+                        continue
+
                 try:
                     import importlib
                     mod = importlib.import_module(dl_cfg["module"])
@@ -2778,5 +3067,6 @@ async def run_training_pipeline(
         status.update(phase="error", current_model=str(e))
     finally:
         clear_symbol_cache()
+        # Keep NVMe cache on disk (useful for debugging) — it gets cleared on next run start
 
     return results

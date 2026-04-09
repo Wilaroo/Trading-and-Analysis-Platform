@@ -95,6 +95,10 @@ def main():
     parser.add_argument("--phases", default=None, help="Comma-separated phase list")
     parser.add_argument("--bar-sizes", default=None, help="Comma-separated bar sizes")
     parser.add_argument("--max-symbols", type=int, default=None)
+    parser.add_argument("--force-retrain", action="store_true", default=False,
+                        help="Force retrain all models, ignoring resume cache")
+    parser.add_argument("--resume-max-age", type=float, default=24.0,
+                        help="Skip models trained within this many hours (default: 24)")
     args = parser.parse_args()
 
     # System-level safety checks before anything else
@@ -189,6 +193,8 @@ def main():
                 phases=phases,
                 bar_sizes=bar_sizes,
                 max_symbols_override=args.max_symbols,
+                force_retrain=args.force_retrain,
+                resume_max_age_hours=args.resume_max_age,
             )
         )
         logger.info("[SUBPROCESS] Pipeline completed successfully")
