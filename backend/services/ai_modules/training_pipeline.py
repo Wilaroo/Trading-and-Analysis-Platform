@@ -776,7 +776,7 @@ async def stream_load_and_extract(
                 f"{total_samples:,} samples accumulated"
             )
     finally:
-        pool.shutdown(wait=False)
+        pool.shutdown(wait=True)
 
     if not all_features:
         return None, None
@@ -1087,7 +1087,7 @@ async def run_training_pipeline(
                         del batch_bars, worker_args, chunk_results
                     gc.collect()
                 finally:
-                    pool.shutdown(wait=False)
+                    pool.shutdown(wait=True)
 
                 # Train each model from accumulated numpy arrays
                 for key, data in model_accum.items():
@@ -1243,7 +1243,7 @@ async def run_training_pipeline(
                         del batch_bars, worker_args, chunk_results
                     gc.collect()
                 finally:
-                    pool.shutdown(wait=False)
+                    pool.shutdown(wait=True)
 
                 for key, data in model_accum.items():
                     model_name = data["model_name"]
@@ -1358,25 +1358,35 @@ async def run_training_pipeline(
                             max_bars=bs_config.get("max_bars", 50000)
                         )
 
+                        n_vol = len(VOL_FEATURE_NAMES)
+                        n_regime = len(REGIME_FEATURE_NAMES)
+
                         for sym, bars in batch_bars.items():
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                            opens = np.array([b.get("open", 0) for b in bars], dtype=float)
+                            closes = np.array([b["close"] for b in bars], dtype=np.float32)
+                            highs = np.array([b["high"] for b in bars], dtype=np.float32)
+                            lows = np.array([b["low"] for b in bars], dtype=np.float32)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+                            opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
 
                             # Bulk-extract base features ONCE for this symbol
                             base_matrix = feature_engineer.extract_features_bulk(bars)
                             if base_matrix is None:
                                 continue
 
+                            n_base = base_matrix.shape[1]
+                            max_rows = len(bars) - 50 - fh
+                            if max_rows <= 0:
+                                continue
+
+                            X_buf = np.empty((max_rows, n_base + n_vol + n_regime), dtype=np.float32)
+                            y_buf = np.empty(max_rows, dtype=np.float32)
+                            valid = 0
+
                             for i in range(50, len(bars) - fh):
-                                # Base features (from pre-computed bulk matrix)
                                 row_idx = i - 49
                                 if row_idx >= len(base_matrix):
                                     break
-                                base_vec = base_matrix[row_idx].tolist()
 
                                 # Vol-specific features
                                 c_window = closes[i - 49: i + 1][::-1]
@@ -1385,20 +1395,25 @@ async def run_training_pipeline(
                                 v_window = volumes[i - 49: i + 1][::-1]
                                 o_window = opens[i - 49: i + 1][::-1]
                                 vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
-                                vol_vec = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
 
                                 # Regime features
                                 bar_date = str(bars[i].get("date", ""))
                                 regime_feats = regime_provider.get_regime_features_for_date(bar_date)
-                                regime_vec = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
 
                                 # Target
                                 target = compute_vol_target(closes, fh, i)
                                 if target is None:
                                     continue
 
-                                all_X.append(np.concatenate([base_matrix[row_idx], np.array(vol_vec + regime_vec, dtype=np.float32)]))
-                                all_y.append(target)
+                                X_buf[valid, :n_base] = base_matrix[row_idx]
+                                X_buf[valid, n_base:n_base + n_vol] = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
+                                X_buf[valid, n_base + n_vol:] = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
+                                y_buf[valid] = target
+                                valid += 1
+
+                            if valid > 0:
+                                all_X.append(X_buf[:valid].copy())
+                                all_y.append(y_buf[:valid].copy())
 
                         del batch_bars
                         gc.collect()
@@ -1408,7 +1423,7 @@ async def run_training_pipeline(
                         continue
 
                     X = np.vstack(all_X).astype(np.float32)
-                    y = np.array(all_y, dtype=np.float32)
+                    y = np.concatenate(all_y).astype(np.float32)
                     del all_X, all_y
                     logger.info(f"Training {model_name}: {len(X)} samples, {len(combined_names)} features")
 
@@ -1420,6 +1435,9 @@ async def run_training_pipeline(
                         num_boost_round=150,
                         early_stopping_rounds=15,
                     )
+
+                    del X, y
+                    gc.collect()
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({
@@ -1435,6 +1453,7 @@ async def run_training_pipeline(
                     results["models_failed"].append({"name": model_name, "reason": str(e)})
                     status.add_error(model_name, str(e))
         if "exit" in phases:
+            _phase_memory_cleanup("Phase 3")
             status.update(phase="exit_timing")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 4: Training Exit Timing Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1516,7 +1535,7 @@ async def run_training_pipeline(
                         del batch_bars, worker_args, chunk_results
                     gc.collect()
                 finally:
-                    pool.shutdown(wait=False)
+                    pool.shutdown(wait=True)
 
                 for st_key, data in model_accum.items():
                     model_name = data["model_name"]
@@ -1608,11 +1627,12 @@ async def run_training_pipeline(
                         etf_bars = await load_symbol_bars(db, etf, bs)
                         if len(etf_bars) >= 50:
                             sector_etf_bars[etf] = {
-                                "closes": np.array([b["close"] for b in etf_bars], dtype=float),
-                                "volumes": np.array([b.get("volume", 0) for b in etf_bars], dtype=float),
+                                "closes": np.array([b["close"] for b in etf_bars], dtype=np.float32),
+                                "volumes": np.array([b.get("volume", 0) for b in etf_bars], dtype=np.float32),
                             }
 
                     combined_names = base_names + [f"secrel_{n}" for n in SECTOR_REL_FEATURE_NAMES]
+                    n_sec = len(SECTOR_REL_FEATURE_NAMES)
                     
                     # Stream-load symbols in batches to limit RAM
                     min_required = 70 + fh
@@ -1636,8 +1656,8 @@ async def run_training_pipeline(
                             if sector_etf is None or sector_etf not in sector_etf_bars:
                                 continue
 
-                            stock_closes = np.array([b["close"] for b in bars], dtype=float)
-                            stock_volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                            stock_closes = np.array([b["close"] for b in bars], dtype=np.float32)
+                            stock_volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
                             sec_data = sector_etf_bars[sector_etf]
                             sec_closes = sec_data["closes"]
                             sec_volumes = sec_data["volumes"]
@@ -1651,8 +1671,16 @@ async def run_training_pipeline(
                             if base_matrix is None:
                                 continue
 
+                            n_base = base_matrix.shape[1]
+                            max_rows = min_len - 50 - fh
+                            if max_rows <= 0:
+                                continue
+
+                            X_buf = np.empty((max_rows, n_base + n_sec), dtype=np.float32)
+                            y_buf = np.empty(max_rows, dtype=np.float32)
+                            valid = 0
+
                             for i in range(50, min_len - fh):
-                                # Base features (from pre-computed bulk matrix)
                                 row_idx = i - 49
                                 if row_idx >= len(base_matrix):
                                     break
@@ -1664,30 +1692,38 @@ async def run_training_pipeline(
                                 ev = sec_volumes[max(0, i - 24): i + 1][::-1]
 
                                 sec_feats = compute_sector_relative_features(sc, sv, ec, ev)
-                                sec_vec = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
 
                                 target = compute_sector_relative_target(stock_closes, sec_closes, i, fh)
                                 if target is None:
                                     continue
 
-                                all_X.append(np.concatenate([base_matrix[row_idx], np.array(sec_vec, dtype=np.float32)]))
-                                all_y.append(target)
+                                X_buf[valid, :n_base] = base_matrix[row_idx]
+                                X_buf[valid, n_base:] = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
+                                y_buf[valid] = target
+                                valid += 1
+
+                            if valid > 0:
+                                all_X.append(X_buf[:valid].copy())
+                                all_y.append(y_buf[:valid].copy())
 
                         del batch_bars
                         gc.collect()
 
-                    if len(all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient sector-relative data for {bs}: {len(all_X)}")
+                    if len(all_X) < 1 or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient sector-relative data for {bs}: {sum(len(x) for x in all_X) if all_X else 0}")
                         continue
 
                     X = np.vstack(all_X).astype(np.float32)
-                    y = np.array(all_y, dtype=np.float32)
+                    y = np.concatenate(all_y).astype(np.float32)
                     del all_X, all_y
                     logger.info(f"Training {model_name}: {len(X)} samples")
 
                     model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
                     model.set_db(db)
                     metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+
+                    del X, y
+                    gc.collect()
 
                     if metrics and metrics.accuracy > 0:
                         results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
@@ -1701,6 +1737,7 @@ async def run_training_pipeline(
 
         # ── Phase 5.5: Gap Fill Probability Models ──
         if "gap_fill" in phases:
+            _phase_memory_cleanup("Phase 5")
             status.update(phase="gap_fill")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 5.5: Training Gap Fill Probability Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1753,11 +1790,13 @@ async def run_training_pipeline(
                             if base_matrix is None:
                                 continue
 
-                            closes = np.array([b["close"] for b in bars], dtype=float)
-                            opens = np.array([b["open"] for b in bars], dtype=float)
-                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
-                            highs = np.array([b["high"] for b in bars], dtype=float)
-                            lows = np.array([b["low"] for b in bars], dtype=float)
+                            n_base = base_matrix.shape[1]
+                            n_gap = len(GAP_FEATURE_NAMES)
+                            closes = np.array([b["close"] for b in bars], dtype=np.float32)
+                            opens = np.array([b["open"] for b in bars], dtype=np.float32)
+                            volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
+                            highs = np.array([b["high"] for b in bars], dtype=np.float32)
+                            lows = np.array([b["low"] for b in bars], dtype=np.float32)
 
                             # Compute 20-day rolling average volume
                             avg_vol_20 = np.convolve(volumes, np.ones(20) / 20, mode='full')[:len(volumes)]
@@ -1765,6 +1804,14 @@ async def run_training_pipeline(
                             # ATR proxy (10-period)
                             tr = np.maximum(highs - lows, np.abs(highs - np.roll(closes, 1)), np.abs(lows - np.roll(closes, 1)))
                             atr_10 = np.convolve(tr, np.ones(10) / 10, mode='full')[:len(tr)]
+
+                            gap_max_rows = len(bars) - 50 - max_bars
+                            if gap_max_rows <= 0:
+                                continue
+
+                            X_buf = np.empty((gap_max_rows, n_base + n_gap), dtype=np.float32)
+                            y_buf = np.empty(gap_max_rows, dtype=np.float32)
+                            valid = 0
 
                             for i in range(50, len(bars) - max_bars):
                                 # Check for a gap (open != previous close)
@@ -1792,11 +1839,8 @@ async def run_training_pipeline(
                                     recent_high_20=float(np.max(highs[max(0, i - 20):i])),
                                     recent_low_20=float(np.min(lows[max(0, i - 20):i])),
                                 )
-                                gap_vec = np.array([gap_feats.get(f, 0.0) for f in GAP_FEATURE_NAMES], dtype=np.float32)
 
                                 # Compute target: did the gap fill?
-                                intraday_lows = lows[i:i + max_bars] if today_open > prev_close else None
-                                intraday_highs = highs[i:i + max_bars] if today_open < prev_close else None
                                 target = compute_gap_fill_target(
                                     prev_close=prev_close,
                                     gap_direction=1 if today_open > prev_close else -1,
@@ -1810,18 +1854,24 @@ async def run_training_pipeline(
                                 if row_idx < 0 or row_idx >= len(base_matrix):
                                     continue
 
-                                all_X.append(np.concatenate([base_matrix[row_idx], gap_vec]))
-                                all_y.append(float(target))
+                                X_buf[valid, :n_base] = base_matrix[row_idx]
+                                X_buf[valid, n_base:] = [gap_feats.get(f, 0.0) for f in GAP_FEATURE_NAMES]
+                                y_buf[valid] = float(target)
+                                valid += 1
+
+                            if valid > 0:
+                                all_X.append(X_buf[:valid].copy())
+                                all_y.append(y_buf[:valid].copy())
 
                         del batch_bars
                         gc.collect()
 
-                    if len(all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient gap fill data for {bs}: {len(all_X)} samples")
+                    if len(all_X) < 1 or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient gap fill data for {bs}: {sum(len(x) for x in all_X) if all_X else 0} samples")
                         continue
 
                     X = np.vstack(all_X).astype(np.float32)
-                    y = np.array(all_y, dtype=np.float32)
+                    y = np.concatenate(all_y).astype(np.float32)
                     fill_pct = float(np.mean(y)) * 100
                     del all_X, all_y
                     logger.info(f"Training {model_name}: {len(X):,} samples, gap_fill={fill_pct:.1f}%")
@@ -1929,7 +1979,7 @@ async def run_training_pipeline(
                             del batch_bars, worker_args, chunk_results
                             gc.collect()
                     finally:
-                        pool.shutdown(wait=False)
+                        pool.shutdown(wait=True)
 
                     if not all_X or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient risk data for {bs}")
@@ -2015,18 +2065,27 @@ async def run_training_pipeline(
 
                             for sym, bars in batch_bars.items():
 
-                                closes = np.array([b["close"] for b in bars], dtype=float)
+                                closes = np.array([b["close"] for b in bars], dtype=np.float32)
 
                                 # Bulk-extract base features ONCE for this symbol
                                 base_matrix = feature_engineer.extract_features_bulk(bars)
                                 if base_matrix is None:
                                     continue
 
+                                n_base = base_matrix.shape[1]
+                                max_rows = len(bars) - 50 - fh
+                                if max_rows <= 0:
+                                    continue
+
+                                X_buf = np.empty((max_rows, n_base), dtype=np.float32)
+                                y_buf = np.empty(max_rows, dtype=np.float32)
+                                r_buf = []
+                                valid = 0
+
                                 for i in range(50, len(bars) - fh):
                                     row_idx = i - 49
                                     if row_idx >= len(base_matrix):
                                         break
-                                    base_vec = base_matrix[row_idx]
 
                                     # Classify regime at this date
                                     bar_date = str(bars[i].get("date", ""))
@@ -2036,8 +2095,19 @@ async def run_training_pipeline(
                                     future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
                                     target = 1 if future_return > 0 else 0
 
-                                    regime_samples[regime]["X"].append(base_vec.copy())
-                                    regime_samples[regime]["y"].append(target)
+                                    X_buf[valid] = base_matrix[row_idx]
+                                    y_buf[valid] = target
+                                    r_buf.append(regime)
+                                    valid += 1
+
+                                if valid > 0:
+                                    X_sym = X_buf[:valid]
+                                    y_sym = y_buf[:valid]
+                                    for regime in ALL_REGIMES:
+                                        mask = np.array([r == regime for r in r_buf], dtype=bool)
+                                        if mask.any():
+                                            regime_samples[regime]["X"].append(X_sym[mask].copy())
+                                            regime_samples[regime]["y"].append(y_sym[mask].copy())
 
                             del batch_bars
                             gc.collect()
@@ -2055,7 +2125,7 @@ async def run_training_pipeline(
                                 continue
 
                             X = np.vstack(X_list).astype(np.float32)
-                            y = np.array(y_list, dtype=np.float32)
+                            y = np.concatenate(y_list).astype(np.float32)
                             regime_model_name = get_regime_model_name(base_model_name, regime)
                             status.update(current_model=regime_model_name)
 
@@ -2073,6 +2143,9 @@ async def run_training_pipeline(
                                 early_stopping_rounds=15,
                                 num_classes=2,
                             )
+
+                            del X, y
+                            gc.collect()
 
                             if metrics and metrics.accuracy > 0:
                                 results["models_trained"].append({
@@ -2185,7 +2258,7 @@ async def run_training_pipeline(
                             )
 
                             for sym, bars in batch_bars.items():
-                                closes = np.array([b["close"] for b in bars], dtype=float)
+                                closes = np.array([b["close"] for b in bars], dtype=np.float32)
                                 
                                 # VECTORIZED bulk feature extraction (replaces per-bar extract_features loop)
                                 bulk_features = feature_engineer.extract_features_bulk(bars)
