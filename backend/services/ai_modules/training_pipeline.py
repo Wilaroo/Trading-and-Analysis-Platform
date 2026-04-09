@@ -66,9 +66,9 @@ STREAM_BATCH_SIZE = 50
 
 # Max symbols for setup-specific phases (2, 2.5, 4).
 # These phases accumulate features for 10+ model types simultaneously,
-# so memory = symbols × models × features. 1000 symbols provides ample
-# training data while keeping total accumulation under 40GB.
-SETUP_PHASE_MAX_SYMBOLS = 1000
+# so memory = symbols × models × features. 750 symbols provides ample
+# training data (~21M samples per model) while keeping peak RAM under 90GB.
+SETUP_PHASE_MAX_SYMBOLS = 750
 
 # Max parallel worker processes for feature extraction.
 # Cap at 8 to limit memory overhead from forked processes (each worker copies parent memory).
