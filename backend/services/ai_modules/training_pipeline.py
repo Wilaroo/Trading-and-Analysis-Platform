@@ -871,6 +871,21 @@ async def run_training_pipeline(
             "1 week": "direction_predictor_weekly",
         }
 
+        def _phase_memory_cleanup(phase_name: str):
+            """Force garbage collection between phases to prevent memory accumulation."""
+            gc.collect()
+            try:
+                with open('/proc/meminfo') as f:
+                    for line in f:
+                        if line.startswith('MemAvailable:'):
+                            avail_gb = int(line.split()[1]) // 1024 // 1024
+                            logger.info(f"[MEMORY] After {phase_name}: {avail_gb}GB available")
+                            if avail_gb < 15:
+                                logger.warning(f"[MEMORY] LOW MEMORY WARNING: {avail_gb}GB available after {phase_name}!")
+                            break
+            except Exception:
+                pass
+
         # ── Phase 1: Generic Directional Models (Full Universe) ──
         if "generic" in phases:
             status.update(phase="generic_directional")
@@ -929,6 +944,7 @@ async def run_training_pipeline(
 
         # ── Phase 2: Setup-Specific Models (Long) ──
         if "setup" in phases:
+            _phase_memory_cleanup("Phase 1")
             status.update(phase="setup_specific")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 2: Training Setup-Specific Models (Long) === [{int(_p_elapsed//60)}m elapsed]")
@@ -1080,8 +1096,12 @@ async def run_training_pipeline(
                         results["models_failed"].append({"name": model_name, "reason": str(e)})
                         status.add_error(model_name, str(e))
 
+                del model_accum
+                gc.collect()
+
         # ── Phase 2.5: Short Setup-Specific Models ──
         if "short" in phases:
+            _phase_memory_cleanup("Phase 2")
             status.update(phase="short_setup_specific")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 2.5: Training SHORT Setup-Specific Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1228,8 +1248,12 @@ async def run_training_pipeline(
                         results["models_failed"].append({"name": model_name, "reason": str(e)})
                         status.add_error(model_name, str(e))
 
+                del model_accum
+                gc.collect()
+
         # ── Phase 3: Volatility Prediction Models ──
         if "volatility" in phases:
+            _phase_memory_cleanup("Phase 2.5")
             status.update(phase="volatility_prediction")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 3: Training Volatility Prediction Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1496,8 +1520,12 @@ async def run_training_pipeline(
                         results["models_failed"].append({"name": model_name, "reason": str(e)})
                         status.add_error(model_name, str(e))
 
+                del model_accum
+                gc.collect()
+
         # ── Phase 5: Sector-Relative Models ──
         if "sector" in phases:
+            _phase_memory_cleanup("Phase 4")
             status.update(phase="sector_relative")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 5: Training Sector-Relative Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1767,6 +1795,7 @@ async def run_training_pipeline(
 
         # ── Phase 6: Risk-of-Ruin Models ──
         if "risk" in phases:
+            _phase_memory_cleanup("Phase 5.5")
             status.update(phase="risk_of_ruin")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 6: Training Risk-of-Ruin Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -1877,6 +1906,7 @@ async def run_training_pipeline(
 
         # ── Phase 7: Regime-Conditional (depends on Phase 1-6) ──
         if "regime" in phases:
+            _phase_memory_cleanup("Phase 6")
             status.update(phase="regime_conditional")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 7: Training Regime-Conditional Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -2013,6 +2043,7 @@ async def run_training_pipeline(
 
         # ── Phase 8: Ensemble Meta-Learner (depends on Phase 1-7) ──
         if "ensemble" in phases:
+            _phase_memory_cleanup("Phase 7")
             status.update(phase="ensemble_meta")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 8: Training Ensemble Meta-Learner === [{int(_p_elapsed//60)}m elapsed]")
@@ -2260,6 +2291,9 @@ async def run_training_pipeline(
                             num_classes=3,
                         )
 
+                        del all_X, all_y, X, y
+                        gc.collect()
+
                         if metrics and metrics.accuracy > 0:
                             results["models_trained"].append({
                                 "name": model_name,
@@ -2282,6 +2316,7 @@ async def run_training_pipeline(
 
         # ── Phase 9: CNN Chart Pattern Training ──
         if "cnn" in phases:
+            _phase_memory_cleanup("Phase 8")
             status.update(phase="cnn_patterns")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 9: Training CNN Chart Pattern Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -2330,6 +2365,7 @@ async def run_training_pipeline(
 
         # ── Phase 11: Deep Learning Models (VAE Regime + TFT + CNN-LSTM) ──
         if "dl" in phases:
+            _phase_memory_cleanup("Phase 9")
             status.update(phase="deep_learning")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 11: Training Deep Learning Models === [{int(_p_elapsed//60)}m elapsed]")
@@ -2419,6 +2455,7 @@ async def run_training_pipeline(
 
         # ── Phase 12: FinBERT Sentiment Analysis ──
         if "finbert" in phases:
+            _phase_memory_cleanup("Phase 11")
             status.update(phase="finbert_sentiment")
             _p_elapsed = _time.monotonic() - _pipeline_start
             logger.info(f"=== Phase 12: FinBERT Sentiment Analysis === [{int(_p_elapsed//60)}m elapsed]")
