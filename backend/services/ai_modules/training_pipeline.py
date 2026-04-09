@@ -881,16 +881,48 @@ async def run_training_pipeline(
         }
 
         def _phase_memory_cleanup(phase_name: str):
-            """Force garbage collection between phases to prevent memory accumulation."""
+            """Force garbage collection between phases to prevent memory accumulation.
+            
+            Python's gc.collect() frees Python objects, but glibc's malloc keeps
+            freed pages in its internal free-list. malloc_trim(0) forces glibc
+            to return unused memory pages to the OS, preventing swap buildup
+            across phase transitions.
+            """
             gc.collect()
+            
+            # Force glibc to release freed memory back to OS
+            try:
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6")
+                libc.malloc_trim(0)
+            except Exception:
+                pass  # Not Linux or libc not available
+            
+            gc.collect()  # Second pass after malloc_trim
+            
             try:
                 with open('/proc/meminfo') as f:
                     for line in f:
                         if line.startswith('MemAvailable:'):
                             avail_gb = int(line.split()[1]) // 1024 // 1024
                             logger.info(f"[MEMORY] After {phase_name}: {avail_gb}GB available")
-                            if avail_gb < 15:
-                                logger.warning(f"[MEMORY] LOW MEMORY WARNING: {avail_gb}GB available after {phase_name}!")
+                            if avail_gb < 30:
+                                logger.warning(f"[MEMORY] LOW MEMORY after {phase_name}: {avail_gb}GB available! "
+                                              f"Sleeping 10s for OS to reclaim pages...")
+                                import time
+                                time.sleep(10)
+                                gc.collect()
+                                try:
+                                    libc.malloc_trim(0)
+                                except Exception:
+                                    pass
+                                # Re-check
+                                with open('/proc/meminfo') as f2:
+                                    for line2 in f2:
+                                        if line2.startswith('MemAvailable:'):
+                                            avail_gb2 = int(line2.split()[1]) // 1024 // 1024
+                                            logger.info(f"[MEMORY] After recovery sleep: {avail_gb2}GB available")
+                                            break
                             break
             except Exception:
                 pass

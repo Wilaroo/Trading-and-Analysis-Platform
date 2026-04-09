@@ -18,7 +18,7 @@ import re
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
     # Fallback for local testing
-    BASE_URL = "https://trade-ai-optimize.preview.emergentagent.com"
+    BASE_URL = "https://xgboost-gpu-trade.preview.emergentagent.com"
 
 
 class TestFocusModeEndpoint:

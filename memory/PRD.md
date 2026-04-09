@@ -99,6 +99,22 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **Bug Fixed:** `.bat` restart script (`TradeCommand_Spark_AITraining.bat`) Step 2.5 only killed `server.py`, `worker.py`, and frontend — but NOT `training_subprocess` GPU processes. On restart, 13 new training subprocesses stacked on top of existing ones, causing 100% RAM (128GB), 12GB swap, and 91.6°C thermal throttle.
 - **Fix:** Added `pkill -9 -f training_subprocess` and `pkill -9 -f training_pipeline` as the FIRST kill commands (before backend/worker), with 2s delay, then verification pass to catch stubborn processes. Increased shutdown wait from 5s to 8s.
 
+### Phase 5g: Memory Management & BSON Fix (CODE COMPLETE — Feb 2026, PENDING USER TEST)
+- **P0 OOM/Swap Thrashing Fix:**
+  - Added `_phase_memory_cleanup()` using `gc.collect()` + `ctypes.CDLL("libc.so.6").malloc_trim(0)` to force glibc to release freed Python memory back to OS between all 10+ phase transitions
+  - Low-memory detection: if <30GB available after cleanup, sleeps 10s and retries
+  - Capped `MAX_EXTRACT_WORKERS` to 8, `SETUP_PHASE_MAX_SYMBOLS` to 750
+  - Auto-resolve `max_bars` from `BAR_SIZE_CONFIGS` (never truly unlimited)
+  - `_system_preflight()` kills orphan processes, sets `vm.swappiness=10`, logs memory state
+  - 6 Python memory leaks fixed (missing `del` + `gc.collect()`)
+  - Start/Stop routes have OS-level `pgrep`/`pkill` guards
+- **P1 XGBoost BSON Size Limit Fix:**
+  - `_save_model()` now uses `zlib.compress(model_bytes, level=6)` + Base64 encoding
+  - Models stored as `xgboost_json_zlib` format (35MB raw → ~3MB compressed)
+  - `_load_model()` detects format and `zlib.decompress()` before loading
+  - Backward-compatible with legacy `xgboost_json` and LightGBM pickle formats
+- **Status:** Code verified in codebase. Awaiting user to `git pull`, clear swap, and test on DGX Spark hardware.
+
 ## Upcoming Tasks
 - Phase 5g: RL Position Sizer (needs trade outcome data)
 - Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
