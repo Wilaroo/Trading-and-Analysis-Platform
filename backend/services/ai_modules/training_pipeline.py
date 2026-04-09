@@ -714,9 +714,10 @@ async def stream_load_and_extract(
         batch_symbols = symbols[batch_start:batch_start + STREAM_BATCH_SIZE]
 
         # Load only this batch of bars
+        _max_bars = BAR_SIZE_CONFIGS.get(bar_size, {}).get("max_bars", 50000)
         batch_bars = await load_symbols_parallel(
             db, batch_symbols, bar_size, min_bars=min_bars,
-            batch_size=20, max_bars=0
+            batch_size=20, max_bars=_max_bars
         )
 
         if not batch_bars:
@@ -986,7 +987,8 @@ async def run_training_pipeline(
                         current_phase_progress=(sb_end / total_syms) * 100,
                     )
                     batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                        max_bars=bs_config.get("max_bars", 50000)
                     )
                     if not batch_bars:
                         continue
@@ -1134,7 +1136,8 @@ async def run_training_pipeline(
                         current_phase_progress=(sb_end / len(symbols)) * 100,
                     )
                     batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                        max_bars=bs_config.get("max_bars", 50000)
                     )
                     if not batch_bars:
                         continue
@@ -1281,7 +1284,7 @@ async def run_training_pipeline(
                         )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                            max_bars=0
+                            max_bars=bs_config.get("max_bars", 50000)
                         )
 
                         for sym, bars in batch_bars.items():
@@ -1399,7 +1402,8 @@ async def run_training_pipeline(
                         current_phase_progress=(sb_end / len(symbols)) * 100,
                     )
                     batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                        max_bars=bs_config.get("max_bars", 50000)
                     )
                     if not batch_bars:
                         continue
@@ -1546,7 +1550,7 @@ async def run_training_pipeline(
                         )
                         batch_bars = await load_symbols_parallel(
                             db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                            max_bars=0
+                            max_bars=bs_config.get("max_bars", 50000)
                         )
 
                         for sym, bars in batch_bars.items():
@@ -1656,7 +1660,8 @@ async def run_training_pipeline(
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=bs_config.get("max_bars", 50000)
                         )
                         if not batch_bars:
                             continue
@@ -1803,7 +1808,8 @@ async def run_training_pipeline(
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20, max_bars=0
+                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            max_bars=bs_config.get("max_bars", 50000)
                         )
                         if not batch_bars:
                             continue
@@ -1921,7 +1927,7 @@ async def run_training_pipeline(
                             sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                             batch_bars = await load_symbols_parallel(
                                 db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                                max_bars=0
+                                max_bars=BAR_SIZE_CONFIGS.get(bs, {}).get("max_bars", 50000)
                             )
 
                             for sym, bars in batch_bars.items():
@@ -2091,7 +2097,7 @@ async def run_training_pipeline(
                             sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                             batch_bars = await load_symbols_parallel(
                                 db, sb_syms, anchor_bs, min_bars=min_required, batch_size=20,
-                                max_bars=0
+                                max_bars=BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_bars", 50000)
                             )
 
                             for sym, bars in batch_bars.items():
