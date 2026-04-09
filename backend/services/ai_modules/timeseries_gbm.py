@@ -265,8 +265,12 @@ class TimeSeriesGBM:
                 model_bytes = base64.b64decode(doc["model_data"])
                 model_format = doc.get("model_format", "pickle")  # Default to pickle for legacy
                 
-                if model_format == "xgboost_json":
-                    # New XGBoost JSON format
+                if model_format in ("xgboost_json", "xgboost_json_zlib"):
+                    # Decompress if zlib-compressed
+                    if model_format == "xgboost_json_zlib":
+                        import zlib
+                        model_bytes = zlib.decompress(model_bytes)
+                    # Load XGBoost JSON format
                     self._model = xgb.Booster()
                     self._model.load_model(bytearray(model_bytes))
                 else:
@@ -317,19 +321,26 @@ class TimeSeriesGBM:
             # Serialize XGBoost model to JSON via temp file (save_model requires file path)
             import tempfile
             import os as _os
+            import zlib
             tmp_path = tempfile.mktemp(suffix='.json')
             self._model.save_model(tmp_path)
             with open(tmp_path, 'rb') as f:
                 model_bytes = f.read()
             _os.unlink(tmp_path)
-            model_data = base64.b64encode(model_bytes).decode("utf-8")
+            
+            # Compress model data to stay under MongoDB's 16MB BSON limit
+            # XGBoost JSON models can be 20-40MB uncompressed; zlib reduces to ~2-5MB
+            compressed = zlib.compress(model_bytes, level=6)
+            model_data = base64.b64encode(compressed).decode("utf-8")
+            model_format = "xgboost_json_zlib"  # Track compression for load path
+            logger.info(f"Model {self.model_name}: {len(model_bytes)/1024/1024:.1f}MB raw → {len(compressed)/1024/1024:.1f}MB compressed")
             new_accuracy = self._metrics.accuracy if self._metrics else 0
             
             model_doc = {
                 "name": self.model_name,
                 "model_id": self.model_name,
                 "model_data": model_data,
-                "model_format": "xgboost_json",  # Marks this as XGBoost format
+                "model_format": model_format,  # xgboost_json_zlib (compressed)
                 "engine": "xgboost",
                 "version": self._version,
                 "metrics": self._metrics.to_dict(),
