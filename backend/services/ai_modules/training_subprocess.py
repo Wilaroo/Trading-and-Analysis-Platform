@@ -18,6 +18,8 @@ import subprocess as _subprocess
 import sys
 import warnings
 
+import numpy as np
+
 # Silence NumPy divide-by-zero warnings in correlation calculations
 # (constant-value features produce stddev=0, which is handled by XGBoost natively)
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered in divide.*")
@@ -97,6 +99,19 @@ def main():
 
     # System-level safety checks before anything else
     _system_preflight()
+
+    # Verify GPU/CUDA availability for XGBoost
+    try:
+        import xgboost as xgb
+        _test_X = np.random.rand(100, 5).astype(np.float32)
+        _test_y = np.random.randint(0, 2, 100).astype(np.float32)
+        _test_dm = xgb.DMatrix(_test_X, label=_test_y)
+        _test_params = {'tree_method': 'hist', 'device': 'cuda', 'objective': 'binary:logistic', 'max_depth': 3, 'verbosity': 0}
+        _test_model = xgb.train(_test_params, _test_dm, num_boost_round=2)
+        del _test_model, _test_dm, _test_X, _test_y
+        logger.info("[PREFLIGHT] XGBoost CUDA GPU: AVAILABLE and WORKING in subprocess")
+    except Exception as e:
+        logger.warning(f"[PREFLIGHT] XGBoost CUDA GPU: NOT AVAILABLE in subprocess ({e}) — training will use CPU")
 
     # Read MongoDB connection from environment (avoids shell escaping issues with special chars)
     mongo_url = os.environ.get("TRAINING_MONGO_URL") or os.environ.get("MONGO_URL", "")

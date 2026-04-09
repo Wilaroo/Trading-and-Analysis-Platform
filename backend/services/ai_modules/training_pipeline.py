@@ -62,7 +62,7 @@ BAR_SIZE_CONFIGS = {
 # How many symbols to load at once before extracting and discarding raw bars.
 # Controls peak RAM: 25 symbols × ~15MB each = ~375MB of raw bar dicts at a time.
 # Kept conservative to leave headroom on 16GB systems.
-STREAM_BATCH_SIZE = 25
+STREAM_BATCH_SIZE = 50
 
 # Max parallel worker processes for feature extraction.
 # Cap at 8 to limit memory overhead from forked processes (each worker copies parent memory).
@@ -710,30 +710,31 @@ async def stream_load_and_extract(
     total_samples = 0
     symbols_processed = 0
 
-    for batch_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-        batch_symbols = symbols[batch_start:batch_start + STREAM_BATCH_SIZE]
+    pool = ProcessPoolExecutor(max_workers=n_workers)
+    try:
+        for batch_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+            batch_symbols = symbols[batch_start:batch_start + STREAM_BATCH_SIZE]
 
-        # Load only this batch of bars
-        _max_bars = BAR_SIZE_CONFIGS.get(bar_size, {}).get("max_bars", 50000)
-        batch_bars = await load_symbols_parallel(
-            db, batch_symbols, bar_size, min_bars=min_bars,
-            batch_size=20, max_bars=_max_bars
-        )
+            # Load only this batch of bars
+            _max_bars = BAR_SIZE_CONFIGS.get(bar_size, {}).get("max_bars", 50000)
+            batch_bars = await load_symbols_parallel(
+                db, batch_symbols, bar_size, min_bars=min_bars,
+                batch_size=50, max_bars=_max_bars
+            )
 
-        if not batch_bars:
-            symbols_processed += len(batch_symbols)
-            continue
+            if not batch_bars:
+                symbols_processed += len(batch_symbols)
+                continue
 
-        # Prepare worker args
-        worker_args = []
-        for symbol, bars in batch_bars.items():
-            if len(bars) >= lookback + forecast_horizon:
-                worker_args.append((symbol, bars, lookback, forecast_horizon))
+            # Prepare worker args
+            worker_args = []
+            for symbol, bars in batch_bars.items():
+                if len(bars) >= lookback + forecast_horizon:
+                    worker_args.append((symbol, bars, lookback, forecast_horizon))
 
-        # Parallel feature extraction across CPU cores
-        chunk_results = []
-        try:
-            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            # Parallel feature extraction across CPU cores
+            chunk_results = []
+            try:
                 futures = {pool.submit(_extract_symbol_worker, args): args[0] for args in worker_args}
                 for future in as_completed(futures):
                     try:
@@ -742,32 +743,34 @@ async def stream_load_and_extract(
                             chunk_results.append(result)
                     except Exception as e:
                         logger.warning(f"Worker failed for {futures[future]}: {e}")
-        except Exception as e:
-            logger.warning(f"Multiprocess failed ({e}), falling back to single-process")
-            for args in worker_args:
-                try:
-                    result = _extract_symbol_worker(args)
-                    if result is not None:
-                        chunk_results.append(result)
-                except Exception:
-                    pass
+            except Exception as e:
+                logger.warning(f"Multiprocess failed ({e}), falling back to single-process")
+                for args in worker_args:
+                    try:
+                        result = _extract_symbol_worker(args)
+                        if result is not None:
+                            chunk_results.append(result)
+                    except Exception:
+                        pass
 
-        # Accumulate compact numpy arrays
-        for feat_matrix, targets in chunk_results:
-            all_features.append(feat_matrix)
-            all_targets.append(targets)
-            total_samples += len(feat_matrix)
+            # Accumulate compact numpy arrays
+            for feat_matrix, targets in chunk_results:
+                all_features.append(feat_matrix)
+                all_targets.append(targets)
+                total_samples += len(feat_matrix)
 
-        symbols_processed += len(batch_symbols)
+            symbols_processed += len(batch_symbols)
 
-        # Free raw bars for this batch — the big memory savings
-        del batch_bars, worker_args, chunk_results
-        gc.collect()
+            # Free raw bars for this batch — the big memory savings
+            del batch_bars, worker_args, chunk_results
+            gc.collect()
 
-        logger.info(
-            f"[Stream extract] {symbols_processed}/{len(symbols)} symbols, "
-            f"{total_samples:,} samples accumulated"
-        )
+            logger.info(
+                f"[Stream extract] {symbols_processed}/{len(symbols)} symbols, "
+                f"{total_samples:,} samples accumulated"
+            )
+    finally:
+        pool.shutdown(wait=False)
 
     if not all_features:
         return None, None
@@ -995,29 +998,30 @@ async def run_training_pipeline(
 
                 # Stream-load in batches, multiprocess extraction across all setup types at once
                 total_syms = len(symbols)
-                for sb_start in range(0, total_syms, STREAM_BATCH_SIZE):
-                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                    sb_end = min(sb_start + STREAM_BATCH_SIZE, total_syms)
-                    status.update(
-                        current_model=f"{bs} setups — loading symbols {sb_start+1}-{sb_end}/{total_syms}",
-                        current_phase_progress=(sb_end / total_syms) * 100,
-                    )
-                    batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                        max_bars=bs_config.get("max_bars", 50000)
-                    )
-                    if not batch_bars:
-                        continue
+                pool = ProcessPoolExecutor(max_workers=n_workers)
+                try:
+                    for sb_start in range(0, total_syms, STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, total_syms)
+                        status.update(
+                            current_model=f"{bs} setups — loading symbols {sb_start+1}-{sb_end}/{total_syms}",
+                            current_phase_progress=(sb_end / total_syms) * 100,
+                        )
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
+                            max_bars=bs_config.get("max_bars", 50000)
+                        )
+                        if not batch_bars:
+                            continue
 
-                    worker_args = [
-                        (sym, bars, setup_configs)
-                        for sym, bars in batch_bars.items()
-                        if len(bars) >= min_required
-                    ]
+                        worker_args = [
+                            (sym, bars, setup_configs)
+                            for sym, bars in batch_bars.items()
+                            if len(bars) >= min_required
+                        ]
 
-                    chunk_results = []
-                    try:
-                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                        chunk_results = []
+                        try:
                             futures = {pool.submit(_extract_setup_long_worker, a): a[0] for a in worker_args}
                             for future in as_completed(futures):
                                 try:
@@ -1026,24 +1030,26 @@ async def run_training_pipeline(
                                         chunk_results.append(res)
                                 except Exception as e:
                                     logger.warning(f"Setup worker failed for {futures[future]}: {e}")
-                    except Exception as e:
-                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
-                        for a in worker_args:
-                            try:
-                                res = _extract_setup_long_worker(a)
-                                if res:
-                                    chunk_results.append(res)
-                            except Exception:
-                                pass
+                        except Exception as e:
+                            logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                            for a in worker_args:
+                                try:
+                                    res = _extract_setup_long_worker(a)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception:
+                                    pass
 
-                    for res_dict in chunk_results:
-                        for key, (X_chunk, y_chunk) in res_dict.items():
-                            if key in model_accum:
-                                model_accum[key]["X"].append(X_chunk)
-                                model_accum[key]["y"].append(y_chunk)
+                        for res_dict in chunk_results:
+                            for key, (X_chunk, y_chunk) in res_dict.items():
+                                if key in model_accum:
+                                    model_accum[key]["X"].append(X_chunk)
+                                    model_accum[key]["y"].append(y_chunk)
 
-                    del batch_bars, worker_args, chunk_results
+                        del batch_bars, worker_args, chunk_results
                     gc.collect()
+                finally:
+                    pool.shutdown(wait=False)
 
                 # Train each model from accumulated numpy arrays
                 for key, data in model_accum.items():
@@ -1148,29 +1154,30 @@ async def run_training_pipeline(
                     }
                     status.update(current_model=model_name)
 
-                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                    sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
-                    status.update(
-                        current_model=f"{bs} short setups — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
-                        current_phase_progress=(sb_end / len(symbols)) * 100,
-                    )
-                    batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                        max_bars=bs_config.get("max_bars", 50000)
-                    )
-                    if not batch_bars:
-                        continue
+                pool = ProcessPoolExecutor(max_workers=n_workers)
+                try:
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"{bs} short setups — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
+                            max_bars=bs_config.get("max_bars", 50000)
+                        )
+                        if not batch_bars:
+                            continue
 
-                    worker_args = [
-                        (sym, bars, setup_configs)
-                        for sym, bars in batch_bars.items()
-                        if len(bars) >= min_required
-                    ]
+                        worker_args = [
+                            (sym, bars, setup_configs)
+                            for sym, bars in batch_bars.items()
+                            if len(bars) >= min_required
+                        ]
 
-                    chunk_results = []
-                    try:
-                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                        chunk_results = []
+                        try:
                             futures = {pool.submit(_extract_setup_short_worker, a): a[0] for a in worker_args}
                             for future in as_completed(futures):
                                 try:
@@ -1179,24 +1186,26 @@ async def run_training_pipeline(
                                         chunk_results.append(res)
                                 except Exception as e:
                                     logger.warning(f"Short worker failed for {futures[future]}: {e}")
-                    except Exception as e:
-                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
-                        for a in worker_args:
-                            try:
-                                res = _extract_setup_short_worker(a)
-                                if res:
-                                    chunk_results.append(res)
-                            except Exception:
-                                pass
+                        except Exception as e:
+                            logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                            for a in worker_args:
+                                try:
+                                    res = _extract_setup_short_worker(a)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception:
+                                    pass
 
-                    for res_dict in chunk_results:
-                        for key, (X_chunk, y_chunk) in res_dict.items():
-                            if key in model_accum:
-                                model_accum[key]["X"].append(X_chunk)
-                                model_accum[key]["y"].append(y_chunk)
+                        for res_dict in chunk_results:
+                            for key, (X_chunk, y_chunk) in res_dict.items():
+                                if key in model_accum:
+                                    model_accum[key]["X"].append(X_chunk)
+                                    model_accum[key]["y"].append(y_chunk)
 
-                    del batch_bars, worker_args, chunk_results
+                        del batch_bars, worker_args, chunk_results
                     gc.collect()
+                finally:
+                    pool.shutdown(wait=False)
 
                 for key, data in model_accum.items():
                     model_name = data["model_name"]
@@ -1307,7 +1316,7 @@ async def run_training_pipeline(
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
                             max_bars=bs_config.get("max_bars", 50000)
                         )
 
@@ -1418,29 +1427,30 @@ async def run_training_pipeline(
                     model_accum[st] = {"X": [], "y": [], "model_name": cfg["model_name"], "max_horizon": cfg["max_horizon"]}
                     status.update(current_model=cfg["model_name"])
 
-                for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                    sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                    sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
-                    status.update(
-                        current_model=f"exit_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
-                        current_phase_progress=(sb_end / len(symbols)) * 100,
-                    )
-                    batch_bars = await load_symbols_parallel(
-                        db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                        max_bars=bs_config.get("max_bars", 50000)
-                    )
-                    if not batch_bars:
-                        continue
+                pool = ProcessPoolExecutor(max_workers=n_workers)
+                try:
+                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                        status.update(
+                            current_model=f"exit_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_phase_progress=(sb_end / len(symbols)) * 100,
+                        )
+                        batch_bars = await load_symbols_parallel(
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
+                            max_bars=bs_config.get("max_bars", 50000)
+                        )
+                        if not batch_bars:
+                            continue
 
-                    worker_args = [
-                        (sym, bars, exit_configs)
-                        for sym, bars in batch_bars.items()
-                        if len(bars) >= min_required
-                    ]
+                        worker_args = [
+                            (sym, bars, exit_configs)
+                            for sym, bars in batch_bars.items()
+                            if len(bars) >= min_required
+                        ]
 
-                    chunk_results = []
-                    try:
-                        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                        chunk_results = []
+                        try:
                             futures = {pool.submit(_extract_exit_worker, a): a[0] for a in worker_args}
                             for future in as_completed(futures):
                                 try:
@@ -1449,24 +1459,26 @@ async def run_training_pipeline(
                                         chunk_results.append(res)
                                 except Exception as e:
                                     logger.warning(f"Exit worker failed for {futures[future]}: {e}")
-                    except Exception as e:
-                        logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
-                        for a in worker_args:
-                            try:
-                                res = _extract_exit_worker(a)
-                                if res:
-                                    chunk_results.append(res)
-                            except Exception:
-                                pass
+                        except Exception as e:
+                            logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                            for a in worker_args:
+                                try:
+                                    res = _extract_exit_worker(a)
+                                    if res:
+                                        chunk_results.append(res)
+                                except Exception:
+                                    pass
 
-                    for res_dict in chunk_results:
-                        for st_key, (X_chunk, y_chunk) in res_dict.items():
-                            if st_key in model_accum:
-                                model_accum[st_key]["X"].append(X_chunk)
-                                model_accum[st_key]["y"].append(y_chunk)
+                        for res_dict in chunk_results:
+                            for st_key, (X_chunk, y_chunk) in res_dict.items():
+                                if st_key in model_accum:
+                                    model_accum[st_key]["X"].append(X_chunk)
+                                    model_accum[st_key]["y"].append(y_chunk)
 
-                    del batch_bars, worker_args, chunk_results
+                        del batch_bars, worker_args, chunk_results
                     gc.collect()
+                finally:
+                    pool.shutdown(wait=False)
 
                 for st_key, data in model_accum.items():
                     model_name = data["model_name"]
@@ -1577,7 +1589,7 @@ async def run_training_pipeline(
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
                             max_bars=bs_config.get("max_bars", 50000)
                         )
 
@@ -1688,7 +1700,7 @@ async def run_training_pipeline(
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                            db, sb_syms, bs, min_bars=min_required, batch_size=50,
                             max_bars=bs_config.get("max_bars", 50000)
                         )
                         if not batch_bars:
@@ -1829,29 +1841,30 @@ async def run_training_pipeline(
                     all_X = []
                     all_y = []
 
-                    for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
-                        sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
-                        sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
-                        status.update(
-                            current_model=f"regime_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
-                            current_phase_progress=(sb_end / len(symbols)) * 100,
-                        )
-                        batch_bars = await load_symbols_parallel(
-                            db, sb_syms, bs, min_bars=min_required, batch_size=20,
-                            max_bars=bs_config.get("max_bars", 50000)
-                        )
-                        if not batch_bars:
-                            continue
+                    pool = ProcessPoolExecutor(max_workers=n_workers)
+                    try:
+                        for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
+                            sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
+                            sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
+                            status.update(
+                                current_model=f"regime_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                                current_phase_progress=(sb_end / len(symbols)) * 100,
+                            )
+                            batch_bars = await load_symbols_parallel(
+                                db, sb_syms, bs, min_bars=min_required, batch_size=50,
+                                max_bars=bs_config.get("max_bars", 50000)
+                            )
+                            if not batch_bars:
+                                continue
 
-                        worker_args = [
-                            (sym, bars, risk_configs_list)
-                            for sym, bars in batch_bars.items()
-                            if len(bars) >= min_required
-                        ]
+                            worker_args = [
+                                (sym, bars, risk_configs_list)
+                                for sym, bars in batch_bars.items()
+                                if len(bars) >= min_required
+                            ]
 
-                        chunk_results = []
-                        try:
-                            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                            chunk_results = []
+                            try:
                                 futures = {pool.submit(_extract_risk_worker, a): a[0] for a in worker_args}
                                 for future in as_completed(futures):
                                     try:
@@ -1860,23 +1873,25 @@ async def run_training_pipeline(
                                             chunk_results.append(res)
                                     except Exception as e:
                                         logger.warning(f"Risk worker failed for {futures[future]}: {e}")
-                        except Exception as e:
-                            logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
-                            for a in worker_args:
-                                try:
-                                    res = _extract_risk_worker(a)
-                                    if res:
-                                        chunk_results.append(res)
-                                except Exception:
-                                    pass
+                            except Exception as e:
+                                logger.warning(f"ProcessPool failed ({e}), falling back to sequential")
+                                for a in worker_args:
+                                    try:
+                                        res = _extract_risk_worker(a)
+                                        if res:
+                                            chunk_results.append(res)
+                                    except Exception:
+                                        pass
 
-                        for res_dict in chunk_results:
-                            for key, (X_chunk, y_chunk) in res_dict.items():
-                                all_X.append(X_chunk)
-                                all_y.append(y_chunk)
+                            for res_dict in chunk_results:
+                                for key, (X_chunk, y_chunk) in res_dict.items():
+                                    all_X.append(X_chunk)
+                                    all_y.append(y_chunk)
 
-                        del batch_bars, worker_args, chunk_results
-                        gc.collect()
+                            del batch_bars, worker_args, chunk_results
+                            gc.collect()
+                    finally:
+                        pool.shutdown(wait=False)
 
                     if not all_X or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
                         logger.warning(f"Insufficient risk data for {bs}")
@@ -1956,7 +1971,7 @@ async def run_training_pipeline(
                         for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                             sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                             batch_bars = await load_symbols_parallel(
-                                db, sb_syms, bs, min_bars=min_required, batch_size=20,
+                                db, sb_syms, bs, min_bars=min_required, batch_size=50,
                                 max_bars=BAR_SIZE_CONFIGS.get(bs, {}).get("max_bars", 50000)
                             )
 
@@ -2127,7 +2142,7 @@ async def run_training_pipeline(
                         for sb_start in range(0, len(symbols), STREAM_BATCH_SIZE):
                             sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                             batch_bars = await load_symbols_parallel(
-                                db, sb_syms, anchor_bs, min_bars=min_required, batch_size=20,
+                                db, sb_syms, anchor_bs, min_bars=min_required, batch_size=50,
                                 max_bars=BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_bars", 50000)
                             )
 

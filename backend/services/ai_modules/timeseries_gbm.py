@@ -595,6 +595,12 @@ class TimeSeriesGBM:
             early_stopping_rounds=early_stopping_rounds,
             verbose_eval=False
         )
+
+        # Log GPU/device status after training
+        best_iter = getattr(self._model, 'best_iteration', None)
+        device_used = self.params.get("device", "cpu")
+        logger.info(f"[XGB] {self.model_name} trained on device={device_used}, "
+                    f"best_iteration={best_iter}, trees={self._model.num_boosted_rounds()}")
         
         # Evaluate with dynamic threshold
         y_pred_proba = self._model.predict(dval)
@@ -860,6 +866,12 @@ class TimeSeriesGBM:
             early_stopping_rounds=early_stopping_rounds,
             verbose_eval=False
         )
+
+        # Log GPU/device status after training
+        best_iter = getattr(self._model, 'best_iteration', None)
+        device_used = train_params.get("device", "cpu")
+        logger.info(f"[XGB] {self.model_name} trained on device={device_used}, "
+                    f"best_iteration={best_iter}, trees={self._model.num_boosted_rounds()}")
 
         # Evaluate
         y_pred_raw = self._model.predict(dval)
