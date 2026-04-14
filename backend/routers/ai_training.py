@@ -44,6 +44,7 @@ class TrainingRequest(BaseModel):
     max_symbols: Optional[int] = None
     force_retrain: bool = False  # If True, retrain all models ignoring resume cache
     resume_max_age_hours: float = 24.0  # Skip models trained within N hours
+    test_mode: bool = False  # Quick test: cap symbols to 50, bars to 5000
 
 
 async def _monitor_training_process(task: _TrainingProcess):
@@ -178,6 +179,8 @@ async def start_training(request: TrainingRequest):
             cmd.append("--force-retrain")
         if request.resume_max_age_hours != 24.0:
             cmd.extend(["--resume-max-age", str(request.resume_max_age_hours)])
+        if request.test_mode:
+            cmd.append("--test-mode")
 
         log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'training_subprocess.log')
         popen_kwargs = dict(

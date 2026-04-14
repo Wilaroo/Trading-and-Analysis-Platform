@@ -136,8 +136,20 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
   - `force_retrain: bool` (default: false) — retrain all models ignoring cache
   - `resume_max_age_hours: float` (default: 24.0) — skip models trained within N hours
 - **Cache lifecycle:** NVMe disk cache (`/tmp/training_cache/`) cleared at pipeline start, preserved at end for debugging
-- **Zero accuracy impact:** All caching is pure I/O optimization — identical mathematical inputs to all models
-- **Status:** Code verified and linted. Awaiting user test on DGX Spark.
+### Phase 5j: OOM Fix — Per-Bar-Size Symbol Caps & Memory Guard (CODE COMPLETE — Feb 2026)
+- **Root Cause:** OS OOM killer terminated pipeline (173GB virtual, 90GB RSS on 128GB system). 2500 symbols × 50K 5-min bars = 125M rows accumulated in `all_X`. `np.vstack` doubled peak to ~100GB → OOM.
+- **Fix 1 — Frequency-scaled symbol caps in BAR_SIZE_CONFIGS:**
+  - 1 min: 200 symbols (×50K bars = 10M rows)
+  - 5 mins: 500 symbols (×50K bars = 25M rows)
+  - 15 mins: 750 symbols (×20K bars = 15M rows)
+  - 30 mins: 1000 symbols (×13K bars = 13M rows)
+  - 1 hour: 1500 symbols (×6K bars = 9M rows)
+  - 1 day: 2500 symbols (×500 bars = 1.25M rows) — unchanged
+  - 1 week: 2500 symbols (×200 bars = 500K rows) — unchanged
+- **Fix 2 — Pre-vstack memory guard:** `_check_vstack_memory()` reads `/proc/meminfo`, estimates peak from `sum(x.nbytes)×2`, and auto-truncates oldest symbol chunks if >80% of available RAM. Applied to all 4 inline vstack points (Phases 3, 5, 5.5, 7).
+- **Fix 3 — Test mode:** `--test-mode` flag caps symbols to 50, bars to 5000. Runs entire pipeline in minutes for systematic per-phase testing.
+- **API:** `POST /api/ai-training/start` now supports `test_mode: true`
+- **CLI:** `python -m services.ai_modules.training_subprocess --phases volatility --test-mode`
 
 ## Upcoming Tasks
 - Phase 5g: RL Position Sizer (needs trade outcome data)

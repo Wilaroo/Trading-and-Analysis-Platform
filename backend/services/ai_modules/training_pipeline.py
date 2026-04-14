@@ -50,13 +50,13 @@ async def _run_in_thread(func, *args, **kwargs):
 
 # Bar sizes and their training configs
 BAR_SIZE_CONFIGS = {
-    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 50000},   # 50K ≈ 125 trading days
-    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 2500, "max_bars": 50000},   # 50K ≈ 640 trading days
-    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 50000},
-    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 2500, "max_bars": 50000},
-    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 50000},
-    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 10000},   # 10K ≈ 40 years
-    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 5000},
+    "1 min":   {"forecast_horizon": 30, "min_bars_per_symbol": 200, "max_symbols": 200,  "max_bars": 50000},   # 200 syms × 50K bars = 10M rows (plenty)
+    "5 mins":  {"forecast_horizon": 12, "min_bars_per_symbol": 200, "max_symbols": 500,  "max_bars": 50000},   # 500 syms × 50K bars = 25M rows
+    "15 mins": {"forecast_horizon": 8,  "min_bars_per_symbol": 150, "max_symbols": 750,  "max_bars": 50000},   # 750 syms × ~20K bars = 15M rows
+    "30 mins": {"forecast_horizon": 6,  "min_bars_per_symbol": 150, "max_symbols": 1000, "max_bars": 50000},   # 1K syms × ~13K bars = 13M rows
+    "1 hour":  {"forecast_horizon": 6,  "min_bars_per_symbol": 100, "max_symbols": 1500, "max_bars": 50000},   # 1.5K syms × ~6K bars = 9M rows
+    "1 day":   {"forecast_horizon": 5,  "min_bars_per_symbol": 100, "max_symbols": 2500, "max_bars": 10000},   # 2.5K syms × 500 bars = 1.25M rows
+    "1 week":  {"forecast_horizon": 4,  "min_bars_per_symbol": 50,  "max_symbols": 2500, "max_bars": 5000},    # 2.5K syms × 200 bars = 500K rows
 }
 
 # How many symbols to load at once before extracting and discarding raw bars.
@@ -190,6 +190,35 @@ def cached_extract_features_bulk(feature_engineer, bars, symbol: str, bar_size: 
     if result is not None:
         _cache_features_to_disk(symbol, bar_size, result)
     return result
+
+
+
+def _check_vstack_memory(all_X: list, label: str) -> bool:
+    """Check if np.vstack(all_X) will fit in available RAM. Returns True if safe."""
+    if not all_X:
+        return True
+    try:
+        estimated_bytes = sum(x.nbytes for x in all_X) * 2  # vstack creates a copy
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    avail_kb = int(line.split()[1])
+                    avail_bytes = avail_kb * 1024
+                    if estimated_bytes > avail_bytes * 0.8:  # 80% safety margin
+                        logger.error(
+                            f"[MEMORY GUARD] {label}: vstack needs ~{estimated_bytes // (1024**3)}GB "
+                            f"but only {avail_bytes // (1024**3)}GB available. "
+                            f"Truncating to fit."
+                        )
+                        return False
+                    logger.info(
+                        f"[MEMORY] {label}: vstack ~{estimated_bytes // (1024**3)}GB, "
+                        f"available {avail_bytes // (1024**3)}GB — OK"
+                    )
+                    return True
+    except Exception:
+        pass
+    return True
 
 
 def _check_resume_model(db, model_name: str, max_age_hours: float = 24.0) -> Optional[Dict]:
@@ -958,6 +987,7 @@ async def run_training_pipeline(
     max_symbols_override: int = None,
     force_retrain: bool = False,
     resume_max_age_hours: float = 24.0,
+    test_mode: bool = False,
 ) -> Dict[str, Any]:
     """
     Run the full training pipeline.
@@ -970,6 +1000,7 @@ async def run_training_pipeline(
         max_symbols_override: Override max symbols per bar_size.
         force_retrain: If True, retrain all models even if recently trained.
         resume_max_age_hours: Skip models trained within this many hours (default 24h).
+        test_mode: If True, cap symbols to 50 and bars to 5000 for quick testing.
 
     Returns:
         Dict with training results summary.
@@ -1013,6 +1044,13 @@ async def run_training_pipeline(
             logger.info("[PIPELINE] force_retrain=True — all models will be retrained")
         else:
             logger.info(f"[PIPELINE] Resume enabled — skipping models trained within {resume_max_age_hours}h")
+
+        # Test mode: cap symbols and bars for quick validation
+        if test_mode:
+            max_symbols_override = 50
+            for bs_key in BAR_SIZE_CONFIGS:
+                BAR_SIZE_CONFIGS[bs_key]["max_bars"] = 5000
+            logger.info("[PIPELINE] TEST MODE — max 50 symbols, 5000 bars per symbol")
 
         # Canonical model name mapping — must match timeseries_service.py SUPPORTED_TIMEFRAMES
         DIRECTIONAL_MODEL_NAMES = {
@@ -1628,6 +1666,12 @@ async def run_training_pipeline(
                         logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
                         continue
 
+                    # Memory safety check before vstack
+                    if not _check_vstack_memory(all_X, model_name):
+                        # Truncate to fit: keep most recent symbols (they have freshest data)
+                        while all_X and not _check_vstack_memory(all_X, model_name):
+                            all_X.pop(0)
+                            all_y.pop(0)
                     X = np.vstack(all_X).astype(np.float32)
                     y = np.concatenate(all_y).astype(np.float32)
                     del all_X, all_y
@@ -1943,6 +1987,11 @@ async def run_training_pipeline(
                         logger.warning(f"Insufficient sector-relative data for {bs}: {sum(len(x) for x in all_X) if all_X else 0}")
                         continue
 
+                    # Memory safety check before vstack
+                    if not _check_vstack_memory(all_X, model_name):
+                        while all_X and not _check_vstack_memory(all_X, model_name):
+                            all_X.pop(0)
+                            all_y.pop(0)
                     X = np.vstack(all_X).astype(np.float32)
                     y = np.concatenate(all_y).astype(np.float32)
                     del all_X, all_y
@@ -2112,6 +2161,11 @@ async def run_training_pipeline(
                         logger.warning(f"Insufficient gap fill data for {bs}: {sum(len(x) for x in all_X) if all_X else 0} samples")
                         continue
 
+                    # Memory safety check before vstack
+                    if not _check_vstack_memory(all_X, model_name):
+                        while all_X and not _check_vstack_memory(all_X, model_name):
+                            all_X.pop(0)
+                            all_y.pop(0)
                     X = np.vstack(all_X).astype(np.float32)
                     y = np.concatenate(all_y).astype(np.float32)
                     fill_pct = float(np.mean(y)) * 100
@@ -2374,6 +2428,11 @@ async def run_training_pipeline(
                                 )
                                 continue
 
+                            # Memory safety check before vstack
+                            if not _check_vstack_memory(X_list, f"{base_model_name}_{regime}"):
+                                while X_list and not _check_vstack_memory(X_list, f"{base_model_name}_{regime}"):
+                                    X_list.pop(0)
+                                    y_list.pop(0)
                             X = np.vstack(X_list).astype(np.float32)
                             y = np.concatenate(y_list).astype(np.float32)
                             regime_model_name = get_regime_model_name(base_model_name, regime)

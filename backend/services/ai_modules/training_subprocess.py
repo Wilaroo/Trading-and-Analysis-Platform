@@ -99,6 +99,8 @@ def main():
                         help="Force retrain all models, ignoring resume cache")
     parser.add_argument("--resume-max-age", type=float, default=24.0,
                         help="Skip models trained within this many hours (default: 24)")
+    parser.add_argument("--test-mode", action="store_true", default=False,
+                        help="Quick test: cap symbols to 50, bars to 5000")
     args = parser.parse_args()
 
     # System-level safety checks before anything else
@@ -195,6 +197,7 @@ def main():
                 max_symbols_override=args.max_symbols,
                 force_retrain=args.force_retrain,
                 resume_max_age_hours=args.resume_max_age,
+                test_mode=args.test_mode,
             )
         )
         logger.info("[SUBPROCESS] Pipeline completed successfully")
