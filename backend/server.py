@@ -3886,29 +3886,22 @@ async def websocket_quotes(websocket: WebSocket):
 
 @app.post("/api/llm-test")
 @app.get("/api/llm-test")
-async def llm_test_direct():
-    """Bare-metal LLM test — no router, no middleware chain"""
-    import asyncio
+def llm_test_direct():
+    """Bare-metal LLM test — sync endpoint, bypasses event loop completely"""
+    import requests
     from starlette.responses import JSONResponse
     
     ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
     
-    def _call():
-        import requests
+    try:
         r = requests.post(f"{ollama_url}/api/chat", json={
             "model": model,
             "messages": [{"role": "user", "content": "Say hello in 5 words"}],
             "stream": False,
             "options": {"num_predict": 50}
         }, timeout=30)
-        return r.json()
-    
-    try:
-        loop = asyncio.get_event_loop()
-        import concurrent.futures
-        _test_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="llm-test")
-        data = await loop.run_in_executor(_test_pool, _call)
+        data = r.json()
         content = data.get("message", {}).get("content", "no content")
         return JSONResponse(content={"ok": True, "response": content, "model": model})
     except Exception as e:
