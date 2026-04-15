@@ -190,6 +190,11 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **New stats:** `total_decisions`, `executed_decisions`, `shadow_only` (not executed), `outcomes_tracked`, `wins`, `win_rate`, `avg_confidence`
 - **Frontend:** Updated SentCom shadow stats display with clearer labels and conditional second row showing win rate + avg confidence when outcome data exists.
 
+### Zombie Process Prevention (CODE COMPLETE — Apr 2026)
+- **Startup cleanup:** `_kill_orphan_processes()` in `server.py` kills leftover `training_subprocess`, `training_pipeline`, `worker.py` on every server start
+- **Shutdown cleanup:** Enhanced `shutdown_event()` kills child processes on SIGTERM/SIGINT
+- **Shell scripts:** `scripts/spark_start.sh` (clean start with health check) and `scripts/spark_stop.sh` (ordered kill: training → workers → backend → frontend)
+
 ## Upcoming Tasks
 - User verify DL model status, shadow stats, and Phase 13 validation fixes on DGX Spark
 - Live confidence gate display in NIA dashboard

@@ -3510,13 +3510,61 @@ async def startup_event():
     print("Heavy initialization deferred to background task")
 
 
+def _kill_orphan_processes():
+    """Kill orphaned processes from previous sessions.
+    Called on startup AND shutdown to prevent zombie accumulation."""
+    if os.name == 'nt':
+        return  # Windows cleanup handled by .bat script
+
+    import subprocess as _sp
+    targets = [
+        ('training_subprocess', 'training_subprocess'),
+        ('training_pipeline', 'training_pipeline'),
+        ('worker.py', 'worker.py'),
+    ]
+    for label, pattern in targets:
+        try:
+            result = _sp.run(
+                ['pgrep', '-f', pattern],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0:
+                pids = [p.strip() for p in result.stdout.strip().split('\n') if p.strip()]
+                # Exclude our own PID
+                my_pid = str(os.getpid())
+                pids = [p for p in pids if p != my_pid]
+                if pids:
+                    print(f"[CLEANUP] Found {len(pids)} orphaned {label} process(es): {pids}")
+                    _sp.run(['kill', '-9'] + pids, timeout=3)
+                    print(f"[CLEANUP] Killed {label} PIDs: {', '.join(pids)}")
+        except Exception as e:
+            print(f"[CLEANUP] Error checking {label}: {e}")
+
+
+# Run orphan cleanup on import (before server starts accepting requests)
+_kill_orphan_processes()
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean shutdown of background services"""
-    await background_scanner.stop()
-    perf_service.stop_scheduler()
-    market_intel_service.stop_scheduler()
-    print("Background services stopped")
+    """Clean shutdown of background services and child processes"""
+    print("[SHUTDOWN] Stopping background services...")
+    try:
+        await background_scanner.stop()
+    except Exception:
+        pass
+    try:
+        perf_service.stop_scheduler()
+    except Exception:
+        pass
+    try:
+        market_intel_service.stop_scheduler()
+    except Exception:
+        pass
+
+    # Kill any training subprocesses we spawned
+    _kill_orphan_processes()
+    print("[SHUTDOWN] All background services and child processes stopped")
 
 
 @app.websocket("/api/ws/quotes")
