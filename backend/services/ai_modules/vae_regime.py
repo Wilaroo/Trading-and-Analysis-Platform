@@ -255,6 +255,8 @@ class VAERegimeModel:
             return {"success": False, "error": "PyTorch not installed"}
 
         db = db if db is not None else self._db
+        if db is not None:
+            self._db = db
         if db is None:
             return {"success": False, "error": "No database connection"}
 
