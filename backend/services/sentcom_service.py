@@ -1071,11 +1071,15 @@ class SentComService:
                     "timestamp": chat_msg.get("timestamp")
                 })
             
-            # Process through orchestrator with conversation history
-            result = await orchestrator.process(
-                message=message, 
-                session_id=session_id,
-                chat_history=recent_history
+            # Process through orchestrator with timeout to prevent hanging
+            import asyncio
+            result = await asyncio.wait_for(
+                orchestrator.process(
+                    message=message, 
+                    session_id=session_id,
+                    chat_history=recent_history
+                ),
+                timeout=45.0  # 45s max for entire chat pipeline
             )
             
             # Ensure response uses "we" voice
@@ -1124,8 +1128,15 @@ class SentComService:
                 "source": "sentcom"
             }
             
+        except asyncio.TimeoutError:
+            logger.error("SentCom chat timed out after 45s")
+            return {
+                "success": False,
+                "response": "Our AI took too long to respond. This usually means the language model is loading. Please try again in a few seconds.",
+                "source": "sentcom_timeout"
+            }
         except Exception as e:
-            logger.error(f"SentCom chat error: {e}")
+            logger.error(f"SentCom chat error: {type(e).__name__}: {e}")
             # Provide a friendly error message
             error_response = "We're having trouble with that query right now."
             if "connection" in str(e).lower() or "offline" in str(e).lower():

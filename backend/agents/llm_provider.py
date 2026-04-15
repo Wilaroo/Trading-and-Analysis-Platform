@@ -168,7 +168,7 @@ class OllamaProvider(BaseLLMProvider):
                     )
                     
         except Exception as e:
-            logger.error(f"Ollama direct call error: {e}")
+            logger.error(f"Ollama direct call error ({model}): {type(e).__name__}: {e}")
             return LLMResponse(
                 content="",
                 model=model,
