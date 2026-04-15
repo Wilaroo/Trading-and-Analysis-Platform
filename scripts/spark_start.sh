@@ -68,26 +68,41 @@ for i in $(seq 1 45); do
 done
 echo ""
 
-# Step 4: Start worker
-echo "[4/5] Starting worker..."
+# Step 4: Start chat server (dedicated LLM process)
+echo "[4/6] Starting chat server..."
+cd "$BACKEND_DIR"
+nohup python chat_server.py > /tmp/chat_server.log 2>&1 &
+CHAT_PID=$!
+echo "  Chat server PID: $CHAT_PID (port 8002)"
+sleep 2
+if curl -sf http://localhost:8002/health > /dev/null 2>&1; then
+    echo "  Chat server healthy"
+else
+    echo "  Chat server starting..."
+fi
+echo ""
+
+# Step 5: Start worker
+echo "[5/6] Starting worker..."
 cd "$BACKEND_DIR"
 nohup python worker.py > /tmp/worker.log 2>&1 &
 echo "  Worker PID: $!"
 echo ""
 
-# Step 5: Start frontend
+# Step 6: Start frontend
 if [ "$SKIP_FRONTEND" = false ]; then
-    echo "[5/5] Starting frontend..."
+    echo "[6/6] Starting frontend..."
     cd "$FRONTEND_DIR"
     nohup yarn start > /tmp/frontend.log 2>&1 &
     echo "  Frontend PID: $! (compiles in ~20s)"
 else
-    echo "[5/5] Skipping frontend (--skip-frontend)"
+    echo "[6/6] Skipping frontend (--skip-frontend)"
 fi
 echo ""
 
 echo "========================================="
 echo "  SentCom — Startup Complete"
 echo "  Backend:  http://localhost:8001"
+echo "  Chat:     http://localhost:8002"
 echo "  Frontend: http://localhost:3000"
 echo "========================================="

@@ -20,12 +20,14 @@ pkill -f 'python.*worker.py' 2>/dev/null && echo "  Killed worker.py" || echo " 
 pkill -f 'python3.*worker.py' 2>/dev/null || true
 sleep 1
 
-# 3. Kill backend server (graceful first, then force)
-echo "[3/4] Killing backend server..."
+# 3. Kill backend + chat server (graceful first, then force)
+echo "[3/4] Killing backend + chat server..."
 pkill -TERM -f 'python.*server.py' 2>/dev/null && echo "  Sent SIGTERM to server.py" || echo "  No server.py found"
+pkill -TERM -f 'python.*chat_server.py' 2>/dev/null && echo "  Sent SIGTERM to chat_server.py" || echo "  No chat_server.py found"
 pkill -TERM -f 'uvicorn' 2>/dev/null || true
 sleep 3
 pkill -9 -f 'python.*server.py' 2>/dev/null || true
+pkill -9 -f 'python.*chat_server.py' 2>/dev/null || true
 pkill -9 -f 'uvicorn' 2>/dev/null || true
 
 # 4. Kill frontend

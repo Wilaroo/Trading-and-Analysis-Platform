@@ -1,0 +1,269 @@
+"""
+SentCom Chat Server — Dedicated LLM Process
+Runs on port 8002, completely isolated from the main backend's event loop.
+
+Usage:
+    python chat_server.py
+
+The main backend (port 8001) handles everything else.
+This server ONLY handles chat — clean event loop, fast responses.
+"""
+import os
+import sys
+import json
+import logging
+import time
+from datetime import datetime, timezone
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+import requests
+from pymongo import MongoClient
+
+# Logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("chat_server")
+
+# MongoDB connection (same DB as main backend)
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "tradecommand")
+mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+db = mongo_client[DB_NAME]
+
+# Ollama config
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+OLLAMA_FALLBACK = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
+
+# FastAPI app
+app = FastAPI(title="SentCom Chat Server", version="1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
+
+
+class ChatHistory(BaseModel):
+    limit: int = 50
+
+
+def _get_portfolio_context() -> str:
+    """Build portfolio context from MongoDB (sync, fast)"""
+    parts = []
+    try:
+        # Positions from IB pushed data
+        pushed = db["ib_pushed_data"].find_one(
+            {"data_type": "positions"}, {"_id": 0},
+            sort=[("pushed_at", -1)]
+        )
+        if pushed and pushed.get("data"):
+            pos_lines = []
+            for p in pushed["data"][:10]:
+                symbol = p.get("symbol", "?")
+                qty = p.get("quantity", p.get("position", 0))
+                direction = "LONG" if qty > 0 else "SHORT"
+                avg = p.get("avgCost", p.get("avg_cost", 0))
+                mkt = p.get("marketPrice", p.get("market_price", avg))
+                pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
+                pos_lines.append(
+                    f"  {symbol} ({direction}): {abs(qty):.0f} shares @ ${avg:.2f}, "
+                    f"current ${mkt:.2f}, P&L ${pnl:+,.2f}"
+                )
+            if pos_lines:
+                total_pnl = sum(
+                    p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
+                    for p in pushed["data"][:10]
+                )
+                parts.append(
+                    f"Current Positions ({len(pos_lines)}):\n"
+                    + "\n".join(pos_lines)
+                    + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
+                )
+
+        # Recent confidence gate decisions
+        try:
+            recent = list(
+                db["shadow_decisions"]
+                .find({}, {"_id": 0, "symbol": 1, "combined_recommendation": 1, "confidence_score": 1})
+                .sort("created_at", -1)
+                .limit(5)
+            )
+            if recent:
+                gate_lines = [
+                    f"  {r.get('symbol','?')}: {r.get('combined_recommendation','?').upper()} "
+                    f"(score: {r.get('confidence_score', 0)})"
+                    for r in recent
+                ]
+                parts.append("Recent AI Gate Decisions:\n" + "\n".join(gate_lines))
+        except Exception:
+            pass
+
+        # Market regime
+        try:
+            regime = db["market_regime_snapshots"].find_one(
+                {}, {"_id": 0, "state": 1, "composite_score": 1},
+                sort=[("timestamp", -1)]
+            )
+            if regime:
+                parts.append(
+                    f"Market Regime: {regime.get('state', 'UNKNOWN')} "
+                    f"(score: {regime.get('composite_score', 0):.1f})"
+                )
+        except Exception:
+            pass
+
+    except Exception as e:
+        parts.append(f"(Portfolio data unavailable: {e})")
+
+    return "\n\n".join(parts) if parts else "No portfolio data available."
+
+
+def _get_chat_history(session_id: str = "default", limit: int = 10) -> list:
+    """Get recent chat history for context"""
+    try:
+        docs = list(
+            db["sentcom_chat_history"]
+            .find({"session_id": session_id}, {"_id": 0, "role": 1, "content": 1})
+            .sort("timestamp", -1)
+            .limit(limit)
+        )
+        docs.reverse()
+        return docs
+    except Exception:
+        return []
+
+
+def _store_message(role: str, content: str, session_id: str = "default"):
+    """Store a chat message"""
+    try:
+        db["sentcom_chat_history"].insert_one({
+            "role": role,
+            "content": content,
+            "session_id": session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception:
+        pass
+
+
+def _call_ollama(messages: list, model: str, timeout: int = 60) -> Optional[str]:
+    """Call Ollama and return content, or None on failure"""
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 1500}
+            },
+            timeout=timeout
+        )
+        data = r.json()
+        if "error" in data:
+            logger.warning(f"Ollama {model}: {data['error']}")
+            return None
+        return data.get("message", {}).get("content", "")
+    except Exception as e:
+        logger.warning(f"Ollama {model} failed: {e}")
+        return None
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy", "service": "chat_server", "port": 8002}
+
+
+@app.post("/chat")
+def chat(request: ChatRequest):
+    """Process a chat message — fully sync, dedicated process"""
+    start = time.time()
+    
+    # Build context
+    context = _get_portfolio_context()
+    history = _get_chat_history(request.session_id, limit=6)
+    
+    system_prompt = f"""You are SentCom, an AI trading co-pilot for a live trading operation.
+Speak in first person plural ("we", "our", "us") — you and the trader are a team.
+Be concise, direct, and actionable. Use specific numbers from the data.
+When reviewing positions, mention entry price, current price, P&L, and whether stops/targets are hit.
+When asked about risk, consider position sizing, portfolio concentration, and market regime.
+
+{context}"""
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    # Add conversation history
+    for msg in history:
+        messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+    
+    # Add current message
+    messages.append({"role": "user", "content": request.message})
+    
+    # Store user message
+    _store_message("user", request.message, request.session_id)
+    
+    # Call Ollama (try primary, then fallback)
+    response_content = _call_ollama(messages, OLLAMA_MODEL)
+    used_model = OLLAMA_MODEL
+    
+    if not response_content and OLLAMA_FALLBACK != OLLAMA_MODEL:
+        logger.info(f"Falling back to {OLLAMA_FALLBACK}")
+        response_content = _call_ollama(messages, OLLAMA_FALLBACK, timeout=120)
+        used_model = OLLAMA_FALLBACK
+    
+    if not response_content:
+        response_content = "I'm having trouble connecting to our AI right now. Please try again in a moment."
+    
+    # Store response
+    _store_message("assistant", response_content, request.session_id)
+    
+    latency = (time.time() - start) * 1000
+    logger.info(f"Chat response in {latency:.0f}ms via {used_model}")
+    
+    return {
+        "success": True,
+        "response": response_content,
+        "source": f"sentcom ({used_model})",
+        "latency_ms": latency,
+        "agent": "sentcom",
+        "model": used_model,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.get("/chat/history")
+def get_history(limit: int = 50, session_id: str = "default"):
+    """Get chat history"""
+    try:
+        docs = list(
+            db["sentcom_chat_history"]
+            .find({"session_id": session_id}, {"_id": 0})
+            .sort("timestamp", -1)
+            .limit(limit)
+        )
+        docs.reverse()
+        return {"success": True, "history": docs}
+    except Exception as e:
+        return {"success": False, "error": str(e), "history": []}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("CHAT_PORT", 8002))
+    logger.info(f"Starting SentCom Chat Server on port {port}")
+    logger.info(f"  Primary model: {OLLAMA_MODEL}")
+    logger.info(f"  Fallback model: {OLLAMA_FALLBACK}")
+    logger.info(f"  Ollama URL: {OLLAMA_URL}")
+    logger.info(f"  MongoDB: {MONGO_URL}/{DB_NAME}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
