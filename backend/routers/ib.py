@@ -448,6 +448,25 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
         fund_count = len(request.fundamentals) if request.fundamentals else 0
         news_count = sum(len(items) for items in request.news.values()) if request.news else 0
         
+        # Persist snapshot to MongoDB so chat_server (port 8002) can read it
+        # without HTTP calls to the main backend (avoids thread pool exhaustion)
+        try:
+            from database import get_db
+            _db = get_db()
+            _db["ib_live_snapshot"].update_one(
+                {"_id": "current"},
+                {"$set": {
+                    "last_update": _pushed_ib_data["last_update"],
+                    "connected": True,
+                    "quotes": _pushed_ib_data.get("quotes", {}),
+                    "account": _pushed_ib_data.get("account", {}),
+                    "positions": _pushed_ib_data.get("positions", []),
+                }},
+                upsert=True
+            )
+        except Exception as snap_err:
+            logger.debug(f"IB snapshot write skipped: {snap_err}")
+
         return {
             "success": True,
             "received": {

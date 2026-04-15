@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import requests
+import requests  # Still needed for Ollama calls
 from pymongo import MongoClient
 
 # Logging
@@ -58,22 +58,33 @@ class ChatHistory(BaseModel):
 
 
 def _get_portfolio_context() -> dict:
-    """Build rich portfolio context by fetching from main backend + MongoDB.
+    """Build rich portfolio context from MongoDB only.
+    No HTTP calls to main backend — avoids thread pool exhaustion hangs.
     Returns dict with 'text' (for LLM) and 'debug' (for diagnostics)."""
     parts = []
     debug = {}
-    backend = "http://127.0.0.1:8001"
     
-    # 1. Live positions from main backend (in-memory, fast)
+    # 1. Live positions from MongoDB snapshot (written by IB push endpoint)
     try:
-        r = requests.get(f"{backend}/api/ib/pushed-data", timeout=5)
-        debug["ib_pushed_status"] = r.status_code
-        if r.status_code == 200:
-            data = r.json()
-            connected = data.get("connected", False)
-            positions = data.get("positions", [])
-            quotes = data.get("quotes", {})
-            account = data.get("account", {})
+        snapshot = db["ib_live_snapshot"].find_one({"_id": "current"})
+        if snapshot:
+            connected = snapshot.get("connected", False)
+            positions = snapshot.get("positions", [])
+            quotes = snapshot.get("quotes", {})
+            account = snapshot.get("account", {})
+            last_update = snapshot.get("last_update", "")
+            
+            # Check staleness (>90s = stale)
+            if last_update:
+                try:
+                    last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                    age = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    debug["ib_data_age_seconds"] = round(age, 1)
+                    if age > 90:
+                        connected = False
+                except Exception:
+                    pass
+            
             debug["ib_connected"] = connected
             debug["ib_positions_count"] = len(positions)
             debug["ib_quotes_count"] = len(quotes)
@@ -84,16 +95,16 @@ def _get_portfolio_context() -> dict:
                 total_pnl = 0
                 for p in positions[:10]:
                     symbol = p.get("symbol", "?")
-                    qty = p.get("quantity", p.get("position", 0))
+                    qty = p.get("quantity", p.get("position", 0)) or 0
                     direction = "LONG" if qty > 0 else "SHORT"
-                    avg = p.get("avgCost", p.get("avg_cost", 0))
-                    mkt = p.get("marketPrice", p.get("market_price", avg))
-                    pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
+                    avg = p.get("avgCost", p.get("avg_cost", 0)) or 0
+                    mkt = p.get("marketPrice", p.get("market_price", avg)) or avg
+                    pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0)) or 0
                     total_pnl += pnl
                     
                     quote = quotes.get(symbol, {})
                     if quote:
-                        mkt = quote.get("last", quote.get("close", mkt))
+                        mkt = quote.get("last", quote.get("close", mkt)) or mkt
                     
                     pos_lines.append(
                         f"  {symbol} ({direction}): {abs(qty):.0f} shares @ ${avg:.2f}, "
@@ -111,54 +122,18 @@ def _get_portfolio_context() -> dict:
                 netliq = account.get("NetLiquidation", account.get("net_liquidation", ""))
                 buying = account.get("BuyingPower", account.get("buying_power", ""))
                 if netliq:
-                    parts.append(f"Account: Net Liq ${float(netliq):,.2f}" + (f", Buying Power ${float(buying):,.2f}" if buying else ""))
+                    try:
+                        parts.append(f"Account: Net Liq ${float(netliq):,.2f}" + (f", Buying Power ${float(buying):,.2f}" if buying else ""))
+                    except (ValueError, TypeError):
+                        pass
         else:
-            debug["ib_pushed_error"] = f"HTTP {r.status_code}"
-            logger.warning(f"IB pushed-data returned {r.status_code}")
+            debug["ib_snapshot"] = "not_found"
+            parts.append("IB data not available (pusher may not have sent data yet).")
     except Exception as e:
-        debug["ib_pushed_error"] = str(e)
-        logger.warning(f"Failed to get positions from backend: {e}")
+        debug["ib_error"] = str(e)
+        logger.warning(f"Failed to read IB snapshot from MongoDB: {e}")
 
-    # 2. Scanner alerts (what the AI scanner is seeing right now)
-    try:
-        r = requests.get(f"{backend}/api/live-scanner/alerts?limit=10", timeout=5)
-        debug["scanner_status"] = r.status_code
-        if r.status_code == 200:
-            data = r.json()
-            alerts = data.get("alerts", data) if isinstance(data, dict) else data
-            debug["scanner_alerts_count"] = len(alerts) if isinstance(alerts, list) else 0
-            if isinstance(alerts, list) and alerts:
-                alert_lines = []
-                for a in alerts[:8]:
-                    sym = a.get("symbol", "?")
-                    setup = a.get("setup_type", a.get("pattern", ""))
-                    score = a.get("score", a.get("confidence", ""))
-                    alert_lines.append(f"  {sym}: {setup}" + (f" (score: {score})" if score else ""))
-                parts.append("Scanner Alerts (live):\n" + "\n".join(alert_lines))
-    except Exception as e:
-        debug["scanner_error"] = str(e)
-
-    # 3. Bot status (trading mode, today's stats)
-    try:
-        r = requests.get(f"{backend}/api/ai-training/confidence-gate/summary", timeout=5)
-        debug["gate_status"] = r.status_code
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("success"):
-                mode = data.get("trading_mode", "unknown")
-                reason = data.get("mode_reason", "")
-                today = data.get("today", {})
-                evaluated = today.get("evaluated", 0)
-                taken = today.get("taken", 0)
-                skipped = today.get("skipped", 0)
-                parts.append(
-                    f"Trading Mode: {mode.upper()}" + (f" ({reason})" if reason else "")
-                    + f"\nToday's Gate: {evaluated} evaluated, {taken} taken, {skipped} skipped"
-                )
-    except Exception as e:
-        debug["gate_error"] = str(e)
-
-    # 4. AI gate decisions (from MongoDB)
+    # 2. AI gate decisions (from MongoDB)
     try:
         recent = list(
             db["shadow_decisions"]
@@ -177,7 +152,7 @@ def _get_portfolio_context() -> dict:
     except Exception as e:
         debug["shadow_error"] = str(e)
 
-    # 5. Market regime (from MongoDB)
+    # 3. Market regime (from MongoDB)
     try:
         regime = db["market_regime_snapshots"].find_one(
             {}, {"_id": 0, "state": 1, "composite_score": 1},
@@ -192,7 +167,7 @@ def _get_portfolio_context() -> dict:
     except Exception as e:
         debug["regime_error"] = str(e)
 
-    # 6. Recent trade history (from MongoDB)
+    # 4. Recent trade history (from MongoDB)
     try:
         recent_trades = list(
             db["trades"]
@@ -209,22 +184,23 @@ def _get_portfolio_context() -> dict:
             total = len(recent_trades)
             for t in recent_trades[:5]:
                 sym = t.get("symbol", "?")
-                direction = t.get("direction", "?")
-                pnl = t.get("pnl", 0)
-                status = t.get("status", "?")
-                setup = t.get("setup_type", "")
+                direction = t.get("direction", "?") or "?"
+                pnl = t.get("pnl") or 0
+                status = t.get("status", "?") or "?"
+                setup = t.get("setup_type", "") or ""
                 trade_lines.append(
                     f"  {sym} ({direction}): ${pnl:+,.2f} [{status}]"
                     + (f" — {setup}" if setup else "")
                 )
+            wr = (wins / total * 100) if total > 0 else 0
             parts.append(
                 f"Recent Trades (last {total}): {wins}W / {total-wins}L "
-                f"({wins/total*100:.0f}% win rate)\n" + "\n".join(trade_lines)
+                f"({wr:.0f}% win rate)\n" + "\n".join(trade_lines)
             )
     except Exception as e:
         debug["trades_error"] = str(e)
 
-    # 7. Performance stats (from MongoDB)
+    # 5. Performance stats (from MongoDB)
     try:
         perf = db["performance_daily"].find_one(
             {}, {"_id": 0},
@@ -232,15 +208,36 @@ def _get_portfolio_context() -> dict:
         )
         debug["perf_found"] = perf is not None
         if perf:
-            daily_pnl = perf.get("realized_pnl", perf.get("pnl", 0))
-            total_trades = perf.get("total_trades", 0)
-            win_rate = perf.get("win_rate", 0)
+            daily_pnl = perf.get("realized_pnl", perf.get("pnl", 0)) or 0
+            total_trades = perf.get("total_trades", 0) or 0
+            win_rate = perf.get("win_rate", 0) or 0
             parts.append(
                 f"Today's Performance: P&L ${daily_pnl:+,.2f}, "
                 f"{total_trades} trades, {win_rate:.0f}% win rate"
             )
     except Exception as e:
         debug["perf_error"] = str(e)
+
+    # 6. Scanner alerts (from MongoDB — live_scanner_alerts collection)
+    try:
+        alerts = list(
+            db["live_scanner_alerts"]
+            .find({}, {"_id": 0, "symbol": 1, "setup_type": 1, "pattern": 1,
+                       "score": 1, "confidence": 1})
+            .sort("created_at", -1)
+            .limit(8)
+        )
+        debug["scanner_alerts_count"] = len(alerts)
+        if alerts:
+            alert_lines = []
+            for a in alerts:
+                sym = a.get("symbol", "?")
+                setup = a.get("setup_type", a.get("pattern", ""))
+                score = a.get("score", a.get("confidence", ""))
+                alert_lines.append(f"  {sym}: {setup}" + (f" (score: {score})" if score else ""))
+            parts.append("Scanner Alerts:\n" + "\n".join(alert_lines))
+    except Exception as e:
+        debug["scanner_error"] = str(e)
 
     text = "\n\n".join(parts) if parts else "No portfolio data available at this moment. IB Pusher may not be connected or market is closed."
     debug["context_sections"] = len(parts)
