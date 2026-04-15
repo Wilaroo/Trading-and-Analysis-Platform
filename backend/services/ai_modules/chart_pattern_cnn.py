@@ -160,28 +160,35 @@ def build_cnn_model(num_classes: int = None):
 
 # ── Model Persistence (MongoDB) ─────────────────────────────────
 def save_model_to_db(db, model, setup_type: str, bar_size: str, metrics: Dict):
-    """Save trained CNN model weights and metadata to MongoDB."""
+    """Save trained CNN model weights and metadata to MongoDB using GridFS for large models."""
     import torch
     import io
-    import zlib
+    import gridfs
 
     model_name = f"cnn_{setup_type.lower()}_{bar_size.replace(' ', '')}"
 
-    # Serialize model state dict to bytes, then compress with zlib
+    # Serialize model state dict to bytes
     buffer = io.BytesIO()
     torch.save(model.state_dict(), buffer)
-    model_bytes_raw = buffer.getvalue()
-    model_bytes = zlib.compress(model_bytes_raw, level=6)
-    raw_mb = len(model_bytes_raw) / (1024 * 1024)
-    comp_mb = len(model_bytes) / (1024 * 1024)
-    logger.info(f"CNN model {model_name}: {raw_mb:.1f}MB raw → {comp_mb:.1f}MB compressed")
+    model_bytes = buffer.getvalue()
+    size_mb = len(model_bytes) / (1024 * 1024)
+    logger.info(f"CNN model {model_name}: {size_mb:.1f}MB")
 
+    # Store weights in GridFS (no 16MB limit)
+    fs = gridfs.GridFS(db, collection="cnn_model_files")
+    # Remove old file if exists
+    for old_file in fs.find({"filename": model_name}):
+        fs.delete(old_file._id)
+    file_id = fs.put(model_bytes, filename=model_name)
+
+    # Store metadata (small doc) with reference to GridFS file
     doc = {
         "model_name": model_name,
         "setup_type": setup_type,
         "bar_size": bar_size,
         "model_type": "cnn_resnet18",
-        "model_weights_zlib": model_bytes,
+        "gridfs_file_id": file_id,
+        "size_mb": round(size_mb, 1),
         "metrics": metrics,
         "num_classes": len(SETUP_CLASSES),
         "image_size": CNN_IMAGE_SIZE,
@@ -213,8 +220,13 @@ def load_model_from_db(db, setup_type: str, bar_size: str):
         return None, None
 
     model = build_cnn_model(num_classes=doc.get("num_classes", len(SETUP_CLASSES)))
-    # Support both compressed (zlib) and uncompressed model weights
-    if "model_weights_zlib" in doc:
+    # Load weights from GridFS or inline
+    if "gridfs_file_id" in doc:
+        import gridfs
+        fs = gridfs.GridFS(db, collection="cnn_model_files")
+        grid_file = fs.get(doc["gridfs_file_id"])
+        raw_bytes = grid_file.read()
+    elif "model_weights_zlib" in doc:
         import zlib
         raw_bytes = zlib.decompress(doc["model_weights_zlib"])
     else:
