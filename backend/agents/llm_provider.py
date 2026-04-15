@@ -61,31 +61,22 @@ class OllamaProvider(BaseLLMProvider):
         self.default_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
         # Local fallback: Qwen3 30B (strong reasoning + tool calling, runs on GB10)
         self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
-        # Track if we should use the proxy
-        self._use_proxy = True
     
     async def generate(self, prompt: str, model: str = None,
                       system_prompt: str = None, temperature: float = 0.7,
                       max_tokens: int = 1000) -> LLMResponse:
-        """Generate using Ollama - tries proxy first, then direct URL, then fallback model"""
+        """Generate using Ollama — direct local connection (proxy no longer needed)"""
         import time
         start = time.time()
         
         model = model or self.default_model
         
-        # Try 1: Use the WebSocket proxy (if local client is connected)
-        if self._use_proxy:
-            response = await self._call_via_proxy(prompt, model, system_prompt, temperature, max_tokens)
-            if response.success:
-                return response
-            logger.warning(f"Proxy method failed: {response.error}")
-        
-        # Try 2: Direct Ollama API call with primary model
+        # Direct Ollama API call (Ollama runs on Spark localhost)
         response = await self._call_ollama_direct(prompt, model, system_prompt, temperature, max_tokens)
         if response.success:
             return response
         
-        # Try 3: Fallback model (if not already using it)
+        # Fallback model (if not already using it)
         if model != self.fallback_model:
             logger.warning(f"Primary model {model} failed, trying fallback {self.fallback_model}")
             response = await self._call_ollama_direct(prompt, self.fallback_model, system_prompt, temperature, max_tokens)
@@ -105,148 +96,9 @@ class OllamaProvider(BaseLLMProvider):
             model=model,
             provider="ollama",
             success=False,
-            error="Ollama not available. Local IB pusher may be offline.",
+            error="Ollama not available. Check: ollama serve",
             latency_ms=(time.time() - start) * 1000
         )
-    
-    async def _call_via_proxy(self, prompt: str, model: str, system_prompt: str = None,
-                             temperature: float = 0.7, max_tokens: int = 1000) -> LLMResponse:
-        """Call Ollama through the proxy (HTTP or WebSocket)"""
-        import time
-        start = time.time()
-        
-        # Try HTTP proxy first (more reliable)
-        try:
-            from server import is_http_ollama_proxy_connected, call_ollama_via_http_proxy
-            
-            if is_http_ollama_proxy_connected():
-                logger.info(f"🔌 Agent using HTTP Ollama proxy for model: {model}")
-                
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
-                
-                result = await call_ollama_via_http_proxy(
-                    model=model,
-                    messages=messages,
-                    options={"temperature": temperature, "num_predict": max_tokens},
-                    timeout=120.0
-                )
-                
-                if result.get("success"):
-                    # Handle nested response structure from proxy
-                    response_data = result.get("response", {})
-                    if isinstance(response_data, dict) and "response" in response_data:
-                        # Nested structure: {response: {response: {message: {content: ...}}}}
-                        inner_response = response_data.get("response", {})
-                        content = inner_response.get("message", {}).get("content", "")
-                    else:
-                        # Flat structure: {response: {message: {content: ...}}}
-                        content = response_data.get("message", {}).get("content", "")
-                    
-                    if content:
-                        return LLMResponse(
-                            content=content,
-                            model=model,
-                            provider="ollama",
-                            latency_ms=(time.time() - start) * 1000,
-                            success=True
-                        )
-                    else:
-                        # Check for error in response (403 from cloud model)
-                        error = response_data.get("error") or response_data.get("response", {}).get("error", "")
-                        if error:
-                            logger.warning(f"Model returned error: {error}")
-                
-                # Get error message
-                error = result.get("error", "HTTP proxy call failed")
-                if not error and result.get("response", {}).get("error"):
-                    error = result.get("response", {}).get("error")
-                logger.warning(f"HTTP proxy failed: {error}")
-                
-                # Try fallback model if primary failed (cloud models or any failure)
-                if model != self.fallback_model:
-                    logger.info(f"🔄 Trying fallback model: {self.fallback_model}")
-                    fallback_result = await call_ollama_via_http_proxy(
-                        model=self.fallback_model,
-                        messages=messages,
-                        options={"temperature": temperature, "num_predict": max_tokens},
-                        timeout=60.0
-                    )
-                    if fallback_result.get("success"):
-                        # Handle nested response for fallback too
-                        fb_response = fallback_result.get("response", {})
-                        if isinstance(fb_response, dict) and "response" in fb_response:
-                            inner = fb_response.get("response", {})
-                            content = inner.get("message", {}).get("content", "")
-                        else:
-                            content = fb_response.get("message", {}).get("content", "")
-                        
-                        if content:
-                            return LLMResponse(
-                                content=content,
-                                model=f"{self.fallback_model} (fallback)",
-                                provider="ollama",
-                                latency_ms=(time.time() - start) * 1000,
-                                success=True
-                            )
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.warning(f"HTTP proxy error: {e}")
-        
-        # Fallback to WebSocket proxy
-        try:
-            from services.ollama_proxy_manager import ollama_proxy_manager
-            
-            if not ollama_proxy_manager.is_connected:
-                return LLMResponse(
-                    content="",
-                    model=model,
-                    provider="ollama",
-                    success=False,
-                    error="No proxy connected"
-                )
-            
-            # Format messages
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            
-            result = await ollama_proxy_manager.chat(
-                model=model,
-                messages=messages,
-                options={"temperature": temperature, "num_predict": max_tokens}
-            )
-            
-            if result.get("success"):
-                return LLMResponse(
-                    content=result.get("content", ""),
-                    model=model,
-                    provider="ollama",
-                    latency_ms=(time.time() - start) * 1000,
-                    success=True
-                )
-            else:
-                return LLMResponse(
-                    content="",
-                    model=model,
-                    provider="ollama",
-                    success=False,
-                    error=result.get("error", "Proxy call failed")
-                )
-                
-        except Exception as e:
-            logger.error(f"WebSocket proxy call error: {e}")
-            return LLMResponse(
-                content="",
-                model=model,
-                provider="ollama",
-                success=False,
-                error=str(e)
-            )
     
     async def _call_ollama_direct(self, prompt: str, model: str, system_prompt: str = None,
                                   temperature: float = 0.7, max_tokens: int = 1000) -> LLMResponse:
