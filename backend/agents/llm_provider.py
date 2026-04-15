@@ -52,7 +52,12 @@ class BaseLLMProvider(ABC):
 
 
 class OllamaProvider(BaseLLMProvider):
-    """Ollama provider - uses WebSocket proxy or direct connection"""
+    """Ollama provider - direct local connection"""
+    
+    # Dedicated thread pool for LLM calls — immune to main pool exhaustion
+    _llm_pool = __import__('concurrent.futures').ThreadPoolExecutor(
+        max_workers=4, thread_name_prefix="llm"
+    )
     
     def __init__(self):
         # Direct Ollama URL — use 127.0.0.1 (not localhost) to avoid IPv6 hang
@@ -132,7 +137,9 @@ class OllamaProvider(BaseLLMProvider):
                 )
                 return r.status_code, r.json()
             
-            status_code, data = await asyncio.to_thread(_sync_call)
+            # Use dedicated LLM thread pool — immune to main pool exhaustion
+            loop = asyncio.get_event_loop()
+            status_code, data = await loop.run_in_executor(self._llm_pool, _sync_call)
             
             if status_code == 200:
                 if "error" in data:
