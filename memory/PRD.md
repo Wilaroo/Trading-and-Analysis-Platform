@@ -175,15 +175,28 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **Fix 3:** Added error logging instead of silent `except: pass` — errors now visible in backend logs as `[MODEL-INVENTORY]`
 - **Fix 4:** Fixed `_check_resume_model()` — now checks `dl_models` collection for DL model names instead of only `timeseries_models`, preventing unnecessary retraining on pipeline restart
 
-### Phase 13 Validation 0 Trades (P1 — NOT STARTED)
-- Backtest ran across 200 symbols × 10 setup types → 0 trades. Entry signal logic in `advanced_backtest_engine.py` only has hard-coded rules for ORB, VWAP_BOUNCE, GAP_AND_GO, BREAKOUT. All other setup types fall through to `_check_momentum_entry()` which requires 3% momentum in 3 days — too restrictive.
-- **Next steps:** Either add specific entry rules for each setup type, or wire the AI model predictions into the validation backtest (making it use the confidence gate like the live system).
+### Phase 13 Validation Entry Rules (CODE COMPLETE — Apr 2026, PENDING USER TEST)
+- **P1 Fix:** Backtest ran across 200 symbols × 10 setup types → 0 trades.
+- **Root Cause 1:** Entry signal logic only had rules for 4 of 18 setup types (ORB, VWAP_BOUNCE, GAP_AND_GO, BREAKOUT). Rest fell through to `_check_momentum_entry()` requiring 3% in 3 days — too restrictive.
+- **Root Cause 2:** VWAP setup type mismatch — code checked `"vwap_bounce"` but actual type is `"vwap"`.
+- **Fix 1:** Added proper entry signal rules for ALL setup types: SCALP (narrow range breakout + volume surge), RANGE (buy support / sell resistance), MEAN_REVERSION (price stretched from MA), REVERSAL (trend change via higher low/lower high), TREND_CONTINUATION (pullback to MA in trend).
+- **Fix 2:** Fixed VWAP name matching: now accepts both `"vwap"` and `"vwap_bounce"`.
+- **Fix 3:** Added full SHORT trade support: SHORT_ prefixed setups invert stop/target, P&L, MFE/MAE.
+- **Fix 4:** Reduced momentum threshold from 3% to 2% for better signal density.
+- **Fix 5:** VWAP entry now uses 10-bar MA proxy when VWAP field unavailable (common on daily bars).
+
+### Shadow Tracking Stats Fix (CODE COMPLETE — Apr 2026, PENDING USER TEST)
+- **Fix:** "Pending" stat was showing `outcome_tracked: False` count (6485 = ALL decisions), misleading users to think trades were pending execution.
+- **New stats:** `total_decisions`, `executed_decisions`, `shadow_only` (not executed), `outcomes_tracked`, `wins`, `win_rate`, `avg_confidence`
+- **Frontend:** Updated SentCom shadow stats display with clearer labels and conditional second row showing win rate + avg confidence when outcome data exists.
 
 ## Upcoming Tasks
+- User verify DL model status, shadow stats, and Phase 13 validation fixes on DGX Spark
 - Live confidence gate display in NIA dashboard
 - SentCom real-time signal display + trade execution monitoring
 - Phase 5e: RL Position Sizer (needs trade outcome data)
 - Per-signal weight optimizer
+- Wire confidence gate into Phase 13 validation backtest (use AI predictions instead of hardcoded rules)
 - Deprecate/remove `ollama_proxy_manager.py` (native Ollama on Spark replaces it)
 
 ## Key Files

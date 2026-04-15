@@ -421,18 +421,42 @@ class ShadowTracker:
     def get_stats(self) -> Dict[str, Any]:
         """Get quick stats for dashboard"""
         total = 0
-        pending = 0
         executed = 0
-        
+        outcomes_tracked = 0
+        wins = 0
+        avg_confidence = 0.0
+
         if self._decisions_col is not None:
             total = self._decisions_col.count_documents({})
-            pending = self._decisions_col.count_documents({"outcome_tracked": False})
             executed = self._decisions_col.count_documents({"was_executed": True})
-            
+            outcomes_tracked = self._decisions_col.count_documents({"outcome_tracked": True})
+            wins = self._decisions_col.count_documents({"outcome_tracked": True, "would_have_pnl": {"$gt": 0}})
+
+            # Average confidence from recent decisions (last 100)
+            try:
+                pipeline = [
+                    {"$sort": {"created_at": -1}},
+                    {"$limit": 100},
+                    {"$group": {"_id": None, "avg_conf": {"$avg": "$confidence_score"}}}
+                ]
+                agg = list(self._decisions_col.aggregate(pipeline))
+                if agg:
+                    avg_confidence = agg[0].get("avg_conf", 0) or 0
+            except Exception:
+                pass
+
+        shadow_only = total - executed
+        win_rate = (wins / outcomes_tracked * 100) if outcomes_tracked > 0 else 0
+
         return {
             "total_decisions": total,
-            "pending_outcomes": pending,
             "executed_decisions": executed,
+            "shadow_only": shadow_only,
+            "outcomes_tracked": outcomes_tracked,
+            "outcomes_pending": total - outcomes_tracked,
+            "wins": wins,
+            "win_rate": round(win_rate, 1),
+            "avg_confidence": round(avg_confidence, 2),
             "db_connected": self._db is not None
         }
 

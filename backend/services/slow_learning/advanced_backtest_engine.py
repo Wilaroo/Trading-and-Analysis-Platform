@@ -1980,8 +1980,10 @@ class AdvancedBacktestEngine:
             # Track equity
             equity = capital
             if in_position and current_trade:
-                position_value = current_trade.shares * current_price
-                unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
+                if current_trade.direction == "short":
+                    unrealized_pnl = (current_trade.entry_price - current_price) * current_trade.shares
+                else:
+                    unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
                 equity = capital + unrealized_pnl
                 
                 # Track MFE/MAE
@@ -1998,28 +2000,36 @@ class AdvancedBacktestEngine:
             
             if in_position and current_trade:
                 current_trade.bars_held += 1
+                is_short_trade = current_trade.direction == "short"
                 
                 # Check exit conditions
                 exit_price = None
                 exit_reason = ""
                 
-                # Stop loss (check low first)
-                if low <= current_trade.stop_price:
-                    exit_price = current_trade.stop_price
-                    exit_reason = "stop"
-                
-                # Target (check high)
-                elif high >= current_trade.target_price:
-                    exit_price = current_trade.target_price
-                    exit_reason = "target"
+                if is_short_trade:
+                    # Short trade: stop hit when price goes UP, target hit when DOWN
+                    if high >= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif low <= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
+                else:
+                    # Long trade: stop hit when price goes DOWN, target hit when UP
+                    if low <= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif high >= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
                 
                 # Time-based exit
-                elif current_trade.bars_held >= strategy.max_bars_to_hold:
+                if not exit_price and current_trade.bars_held >= strategy.max_bars_to_hold:
                     exit_price = current_price
                     exit_reason = "time"
                 
                 # End of data
-                elif i == len(bars) - 1:
+                if not exit_price and i == len(bars) - 1:
                     exit_price = current_price
                     exit_reason = "end_of_data"
                 
@@ -2029,10 +2039,15 @@ class AdvancedBacktestEngine:
                     current_trade.exit_date = timestamp[:10]
                     current_trade.exit_time = timestamp[11:19] if len(timestamp) > 10 else ""
                     current_trade.exit_reason = exit_reason
-                    current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
-                    current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
                     
-                    risk = current_trade.entry_price - current_trade.stop_price
+                    if is_short_trade:
+                        current_trade.pnl = (current_trade.entry_price - exit_price) * current_trade.shares
+                        current_trade.pnl_percent = (current_trade.entry_price / exit_price - 1) * 100 if exit_price > 0 else 0
+                    else:
+                        current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
+                        current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100 if current_trade.entry_price > 0 else 0
+                    
+                    risk = abs(current_trade.entry_price - current_trade.stop_price)
                     if risk > 0:
                         current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
                     
@@ -2055,20 +2070,28 @@ class AdvancedBacktestEngine:
                         entry_allowed = True   # Allow but with caution
                 
                 if entry_allowed and self._check_entry_signal(bar, strategy, bars[:i+1]):
+                    # Determine trade direction from setup type
+                    is_short = strategy.setup_type.lower().startswith("short_")
+                    direction = "short" if is_short else "long"
+                    
                     # Calculate position size
                     position_value = capital * (strategy.position_size_pct / 100)
                     shares = int(position_value / current_price)
                     
                     if shares > 0:
-                        stop_price = current_price * (1 - strategy.stop_pct / 100)
-                        target_price = current_price * (1 + strategy.target_pct / 100)
+                        if is_short:
+                            stop_price = current_price * (1 + strategy.stop_pct / 100)
+                            target_price = current_price * (1 - strategy.target_pct / 100)
+                        else:
+                            stop_price = current_price * (1 - strategy.stop_pct / 100)
+                            target_price = current_price * (1 + strategy.target_pct / 100)
                         
                         current_trade = BacktestTrade(
                             id=f"t_{uuid.uuid4().hex[:8]}",
                             symbol=symbol,
                             strategy_name=strategy.name,
                             setup_type=strategy.setup_type,
-                            direction="long",
+                            direction=direction,
                             entry_date=timestamp[:10],
                             entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
                             entry_price=current_price,
@@ -2102,42 +2125,72 @@ class AdvancedBacktestEngine:
         # Strategy-specific entry logic
         setup_type = strategy.setup_type.lower()
         
-        if setup_type == "orb":
-            return self._check_orb_entry(bar, recent_bars)
-        elif setup_type == "vwap_bounce":
-            return self._check_vwap_entry(bar, recent_bars)
-        elif setup_type == "gap_and_go":
-            return self._check_gap_entry(bar, recent_bars)
-        elif setup_type == "breakout":
-            return self._check_breakout_entry(bar, recent_bars)
+        # Short setups: strip prefix and invert direction
+        is_short = setup_type.startswith("short_")
+        clean_type = setup_type.replace("short_", "") if is_short else setup_type
+        
+        if clean_type == "orb":
+            return self._check_orb_entry(bar, recent_bars, short=is_short)
+        elif clean_type in ("vwap", "vwap_bounce"):
+            return self._check_vwap_entry(bar, recent_bars, short=is_short)
+        elif clean_type in ("gap_and_go", "gap_fade"):
+            return self._check_gap_entry(bar, recent_bars, short=is_short)
+        elif clean_type in ("breakout", "breakdown"):
+            return self._check_breakout_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "scalp":
+            return self._check_scalp_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "range":
+            return self._check_range_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "mean_reversion":
+            return self._check_mean_reversion_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "reversal":
+            return self._check_reversal_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "trend_continuation":
+            return self._check_trend_continuation_entry(bar, recent_bars, short=is_short)
+        elif clean_type == "momentum":
+            return self._check_momentum_entry(bar, recent_bars, short=is_short)
         else:
-            # Default: simple momentum
-            return self._check_momentum_entry(bar, recent_bars)
+            # Unknown setup type — use momentum as fallback
+            return self._check_momentum_entry(bar, recent_bars, short=is_short)
     
-    def _check_orb_entry(self, bar: Dict, recent_bars: List[Dict]) -> bool:
+    def _check_orb_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
         """Opening Range Breakout entry"""
         if len(recent_bars) < 3:
             return False
         
-        # Check if price broke above recent high
         current_high = bar.get("high", bar.get("h", 0))
+        current_low = bar.get("low", bar.get("l", 0))
         prev_high = max(b.get("high", b.get("h", 0)) for b in recent_bars[-3:-1])
+        prev_low = min(b.get("low", b.get("l", 0)) for b in recent_bars[-3:-1])
         
+        if short:
+            return current_low < prev_low * 0.998  # 0.2% breakdown
         return current_high > prev_high * 1.002  # 0.2% breakout
     
-    def _check_vwap_entry(self, bar: Dict, recent_bars: List[Dict]) -> bool:
-        """VWAP bounce entry"""
-        if len(recent_bars) < 5:
+    def _check_vwap_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """VWAP bounce entry — uses MA proxy when VWAP unavailable"""
+        if len(recent_bars) < 10:
             return False
         
         close = bar.get("close", bar.get("c", 0))
-        vwap = bar.get("vwap", close)  # Use close as proxy if no VWAP
+        # Use actual VWAP if available, otherwise approximate with 10-bar avg
+        vwap = bar.get("vwap", 0)
+        if not vwap or vwap == 0:
+            vwap = sum(b.get("close", b.get("c", 0)) for b in recent_bars[-10:]) / 10
         
-        # Price bouncing off VWAP (within 0.5%)
-        return abs(close - vwap) / vwap < 0.005 and close > vwap
+        if vwap == 0:
+            return False
+            
+        dist = (close - vwap) / vwap
+        
+        if short:
+            # Price rejecting from above VWAP
+            return -0.002 < dist < 0.008 and close < vwap
+        # Price bouncing from below VWAP
+        return -0.008 < dist < 0.002 and close > vwap
     
-    def _check_gap_entry(self, bar: Dict, recent_bars: List[Dict]) -> bool:
-        """Gap and Go entry"""
+    def _check_gap_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Gap and Go / Gap Fade entry"""
         if len(recent_bars) < 2:
             return False
         
@@ -2149,20 +2202,151 @@ class AdvancedBacktestEngine:
         
         gap_pct = (current_open - prev_close) / prev_close * 100
         
-        return gap_pct >= 2.0  # 2% gap up
+        if short:
+            return gap_pct <= -1.5  # 1.5% gap down
+        return gap_pct >= 1.5  # 1.5% gap up
     
-    def _check_breakout_entry(self, bar: Dict, recent_bars: List[Dict]) -> bool:
-        """Resistance breakout entry"""
+    def _check_breakout_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Resistance breakout / Support breakdown entry"""
         if len(recent_bars) < 20:
             return False
         
+        if short:
+            current_low = bar.get("low", bar.get("l", 0))
+            recent_low = min(b.get("low", b.get("l", 0)) for b in recent_bars[-20:-1])
+            return current_low < recent_low
+        
         current_high = bar.get("high", bar.get("h", 0))
         recent_high = max(b.get("high", b.get("h", 0)) for b in recent_bars[-20:-1])
-        
         return current_high > recent_high
     
-    def _check_momentum_entry(self, bar: Dict, recent_bars: List[Dict]) -> bool:
-        """Simple momentum entry"""
+    def _check_scalp_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Scalp entry — narrow range breakout with volume surge"""
+        if len(recent_bars) < 5:
+            return False
+        
+        close = bar.get("close", bar.get("c", 0))
+        volume = bar.get("volume", bar.get("v", 0))
+        
+        # Recent range narrowing (low ATR)
+        ranges = [b.get("high", b.get("h", 0)) - b.get("low", b.get("l", 0)) for b in recent_bars[-5:-1]]
+        avg_range = sum(ranges) / len(ranges) if ranges else 0
+        current_range = bar.get("high", bar.get("h", 0)) - bar.get("low", bar.get("l", 0))
+        
+        # Volume surge
+        recent_vols = [b.get("volume", b.get("v", 0)) for b in recent_bars[-5:-1]]
+        avg_vol = sum(recent_vols) / len(recent_vols) if recent_vols else 1
+        
+        if avg_range == 0 or avg_vol == 0:
+            return False
+        
+        # Breakout from narrow range with volume confirmation
+        range_expanding = current_range > avg_range * 1.3
+        volume_surge = volume > avg_vol * 1.2
+        
+        if not (range_expanding and volume_surge):
+            return False
+        
+        prev_close = recent_bars[-2].get("close", recent_bars[-2].get("c", 0))
+        if prev_close == 0:
+            return False
+            
+        if short:
+            return close < prev_close  # Downward break
+        return close > prev_close  # Upward break
+    
+    def _check_range_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Range-bound play — buy near support, sell near resistance"""
+        if len(recent_bars) < 20:
+            return False
+        
+        close = bar.get("close", bar.get("c", 0))
+        highs = [b.get("high", b.get("h", 0)) for b in recent_bars[-20:]]
+        lows = [b.get("low", b.get("l", 0)) for b in recent_bars[-20:]]
+        
+        range_high = max(highs)
+        range_low = min(lows)
+        range_size = range_high - range_low
+        
+        if range_size == 0:
+            return False
+        
+        position_in_range = (close - range_low) / range_size  # 0 = bottom, 1 = top
+        
+        if short:
+            # Near top of range — short
+            return position_in_range > 0.85
+        # Near bottom of range — long
+        return position_in_range < 0.15
+    
+    def _check_mean_reversion_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Mean reversion — price stretched away from moving average"""
+        if len(recent_bars) < 20:
+            return False
+        
+        close = bar.get("close", bar.get("c", 0))
+        closes = [b.get("close", b.get("c", 0)) for b in recent_bars[-20:]]
+        ma20 = sum(closes) / len(closes)
+        
+        if ma20 == 0:
+            return False
+        
+        deviation = (close - ma20) / ma20
+        
+        if short:
+            # Overbought: price well above MA — short for reversion
+            return deviation > 0.04  # 4% above MA
+        # Oversold: price well below MA — long for reversion
+        return deviation < -0.04  # 4% below MA
+    
+    def _check_reversal_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Reversal — trend change with higher low (long) or lower high (short)"""
+        if len(recent_bars) < 15:
+            return False
+        
+        closes = [b.get("close", b.get("c", 0)) for b in recent_bars[-15:]]
+        lows = [b.get("low", b.get("l", 0)) for b in recent_bars[-15:]]
+        highs = [b.get("high", b.get("h", 0)) for b in recent_bars[-15:]]
+        
+        if short:
+            # Bearish reversal: prior uptrend, then lower high
+            uptrend = closes[-8] > closes[-15]  # Was trending up
+            lower_high = highs[-1] < max(highs[-8:-1])  # Current high is lower
+            close_below_ma = closes[-1] < sum(closes[-10:]) / 10
+            return uptrend and lower_high and close_below_ma
+        
+        # Bullish reversal: prior downtrend, then higher low
+        downtrend = closes[-8] < closes[-15]  # Was trending down
+        higher_low = lows[-1] > min(lows[-8:-1])  # Current low is higher
+        close_above_ma = closes[-1] > sum(closes[-10:]) / 10
+        return downtrend and higher_low and close_above_ma
+    
+    def _check_trend_continuation_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Trend continuation — pullback to MA in established trend"""
+        if len(recent_bars) < 20:
+            return False
+        
+        closes = [b.get("close", b.get("c", 0)) for b in recent_bars[-20:]]
+        close = closes[-1]
+        ma10 = sum(closes[-10:]) / 10
+        ma20 = sum(closes) / 20
+        
+        if ma20 == 0 or ma10 == 0:
+            return False
+        
+        if short:
+            # Downtrend: MA10 < MA20 and price pulled back up to MA10
+            in_downtrend = ma10 < ma20
+            pullback_to_ma = abs(close - ma10) / ma10 < 0.01  # Within 1% of MA10
+            return in_downtrend and pullback_to_ma and close < ma10
+        
+        # Uptrend: MA10 > MA20 and price pulled back to MA10
+        in_uptrend = ma10 > ma20
+        pullback_to_ma = abs(close - ma10) / ma10 < 0.01  # Within 1% of MA10
+        return in_uptrend and pullback_to_ma and close > ma10
+    
+    def _check_momentum_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
+        """Momentum entry — sustained directional move"""
         if len(recent_bars) < 5:
             return False
         
@@ -2173,7 +2357,9 @@ class AdvancedBacktestEngine:
         
         momentum = (closes[-1] - closes[0]) / closes[0] * 100
         
-        return momentum >= 3.0  # 3% momentum over 3 days
+        if short:
+            return momentum <= -2.0  # 2% drop over 3 days
+        return momentum >= 2.0  # 2% rise over 3 days
 
     # ========================================================================
     # Metrics Calculation

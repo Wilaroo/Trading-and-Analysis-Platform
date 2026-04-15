@@ -1013,18 +1013,36 @@ const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, actionLoadi
           <h5 className="text-[10px] font-bold text-zinc-400 uppercase mb-2">Shadow Tracking Stats</h5>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div>
-              <p className="text-lg font-bold text-white">{aiStatus.shadow_stats.total_decisions}</p>
+              <p className="text-lg font-bold text-white">{aiStatus.shadow_stats.total_decisions?.toLocaleString()}</p>
               <p className="text-[9px] text-zinc-500">Decisions</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-cyan-400">{aiStatus.shadow_stats.executed_decisions}</p>
+              <p className="text-lg font-bold text-emerald-400">{aiStatus.shadow_stats.executed_decisions?.toLocaleString()}</p>
               <p className="text-[9px] text-zinc-500">Executed</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-amber-400">{aiStatus.shadow_stats.pending_outcomes}</p>
-              <p className="text-[9px] text-zinc-500">Pending</p>
+              <p className="text-lg font-bold text-violet-400">{aiStatus.shadow_stats.shadow_only?.toLocaleString()}</p>
+              <p className="text-[9px] text-zinc-500">Shadow Only</p>
             </div>
           </div>
+          {(aiStatus.shadow_stats.outcomes_tracked > 0 || aiStatus.shadow_stats.avg_confidence > 0) && (
+            <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-sm font-bold text-cyan-400">{aiStatus.shadow_stats.outcomes_tracked?.toLocaleString()}</p>
+                <p className="text-[9px] text-zinc-500">Tracked</p>
+              </div>
+              <div>
+                <p className={`text-sm font-bold ${(aiStatus.shadow_stats.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {aiStatus.shadow_stats.win_rate || 0}%
+                </p>
+                <p className="text-[9px] text-zinc-500">Win Rate</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-amber-400">{((aiStatus.shadow_stats.avg_confidence || 0) * 100).toFixed(0)}%</p>
+                <p className="text-[9px] text-zinc-500">Avg Confidence</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
