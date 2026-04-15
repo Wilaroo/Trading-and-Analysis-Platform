@@ -105,7 +105,9 @@ async def run_cnn_training(
             samples = generate_training_images_from_bars(
                 db, st, bs,
                 window_size=window_size,
-                max_symbols=max_symbols,
+                max_symbols=max_symbols or 200,
+                max_bars_per_symbol=5000,
+                max_samples=10000,
             )
         except Exception as e:
             logger.error(f"Image generation failed for {st}/{bs}: {e}")

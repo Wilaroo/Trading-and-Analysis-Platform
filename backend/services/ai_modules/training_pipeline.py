@@ -2968,6 +2968,7 @@ async def run_training_pipeline(
                     run_cnn_training(
                         db=db,
                         setup_type="ALL",
+                        max_symbols=200,
                         progress_callback=cnn_progress,
                     ),
                     timeout=7200  # 2 hours max for CNN training
