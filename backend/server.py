@@ -3903,40 +3903,25 @@ def test_sync():
 
 @app.post("/api/llm-test")
 @app.get("/api/llm-test")
-async def llm_test_direct():
-    """Bare-metal LLM test — raw thread, bypasses ALL pools"""
-    import threading
+def llm_test_direct():
+    """Sync LLM test — runs in thread, no event loop dependency"""
     import requests
-    import asyncio
-    from starlette.responses import JSONResponse
     
     ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
     
-    loop = asyncio.get_event_loop()
-    future = loop.create_future()
-    
-    def _worker():
-        try:
-            r = requests.post(f"{ollama_url}/api/chat", json={
-                "model": model,
-                "messages": [{"role": "user", "content": "Say hello in 5 words"}],
-                "stream": False,
-                "options": {"num_predict": 50}
-            }, timeout=30)
-            loop.call_soon_threadsafe(future.set_result, r.json())
-        except Exception as e:
-            loop.call_soon_threadsafe(future.set_exception, e)
-    
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    
     try:
-        data = await asyncio.wait_for(future, timeout=30)
+        r = requests.post(f"{ollama_url}/api/chat", json={
+            "model": model,
+            "messages": [{"role": "user", "content": "Say hello in 5 words"}],
+            "stream": False,
+            "options": {"num_predict": 50}
+        }, timeout=30)
+        data = r.json()
         content = data.get("message", {}).get("content", "no content")
-        return JSONResponse(content={"ok": True, "response": content, "model": model})
+        return {"ok": True, "response": content, "model": model}
     except Exception as e:
-        return JSONResponse(content={"ok": False, "error": str(e)})
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/stream/status")
