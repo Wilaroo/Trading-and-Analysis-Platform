@@ -55,8 +55,8 @@ class OllamaProvider(BaseLLMProvider):
     """Ollama provider - uses WebSocket proxy or direct connection"""
     
     def __init__(self):
-        # Direct Ollama URL from environment
-        self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        # Direct Ollama URL — use 127.0.0.1 (not localhost) to avoid IPv6 hang
+        self.ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
         # Primary model: GPT-OSS 120B cloud (best reasoning, 1s response, zero GPU cost)
         self.default_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
         # Local fallback: Qwen3 30B (works offline, runs on GB10)
