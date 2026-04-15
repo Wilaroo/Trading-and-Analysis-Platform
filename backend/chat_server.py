@@ -57,18 +57,27 @@ class ChatHistory(BaseModel):
     limit: int = 50
 
 
-def _get_portfolio_context() -> str:
-    """Build rich portfolio context by fetching from main backend + MongoDB"""
+def _get_portfolio_context() -> dict:
+    """Build rich portfolio context by fetching from main backend + MongoDB.
+    Returns dict with 'text' (for LLM) and 'debug' (for diagnostics)."""
     parts = []
+    debug = {}
     backend = "http://127.0.0.1:8001"
     
     # 1. Live positions from main backend (in-memory, fast)
     try:
         r = requests.get(f"{backend}/api/ib/pushed-data", timeout=5)
+        debug["ib_pushed_status"] = r.status_code
         if r.status_code == 200:
             data = r.json()
+            connected = data.get("connected", False)
             positions = data.get("positions", [])
             quotes = data.get("quotes", {})
+            account = data.get("account", {})
+            debug["ib_connected"] = connected
+            debug["ib_positions_count"] = len(positions)
+            debug["ib_quotes_count"] = len(quotes)
+            debug["ib_account_keys"] = list(account.keys())[:10]
             
             if positions:
                 pos_lines = []
@@ -95,22 +104,29 @@ def _get_portfolio_context() -> str:
                     + "\n".join(pos_lines)
                     + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
                 )
+            else:
+                parts.append(f"IB Connected: {connected}. No open positions currently.")
             
-            account = data.get("account", {})
             if account:
                 netliq = account.get("NetLiquidation", account.get("net_liquidation", ""))
                 buying = account.get("BuyingPower", account.get("buying_power", ""))
                 if netliq:
                     parts.append(f"Account: Net Liq ${float(netliq):,.2f}" + (f", Buying Power ${float(buying):,.2f}" if buying else ""))
+        else:
+            debug["ib_pushed_error"] = f"HTTP {r.status_code}"
+            logger.warning(f"IB pushed-data returned {r.status_code}")
     except Exception as e:
+        debug["ib_pushed_error"] = str(e)
         logger.warning(f"Failed to get positions from backend: {e}")
 
     # 2. Scanner alerts (what the AI scanner is seeing right now)
     try:
-        r = requests.get(f"{backend}/api/scanner/alerts?limit=10", timeout=5)
+        r = requests.get(f"{backend}/api/live-scanner/alerts?limit=10", timeout=5)
+        debug["scanner_status"] = r.status_code
         if r.status_code == 200:
             data = r.json()
             alerts = data.get("alerts", data) if isinstance(data, dict) else data
+            debug["scanner_alerts_count"] = len(alerts) if isinstance(alerts, list) else 0
             if isinstance(alerts, list) and alerts:
                 alert_lines = []
                 for a in alerts[:8]:
@@ -119,12 +135,13 @@ def _get_portfolio_context() -> str:
                     score = a.get("score", a.get("confidence", ""))
                     alert_lines.append(f"  {sym}: {setup}" + (f" (score: {score})" if score else ""))
                 parts.append("Scanner Alerts (live):\n" + "\n".join(alert_lines))
-    except Exception:
-        pass
+    except Exception as e:
+        debug["scanner_error"] = str(e)
 
     # 3. Bot status (trading mode, today's stats)
     try:
         r = requests.get(f"{backend}/api/ai-training/confidence-gate/summary", timeout=5)
+        debug["gate_status"] = r.status_code
         if r.status_code == 200:
             data = r.json()
             if data.get("success"):
@@ -138,8 +155,8 @@ def _get_portfolio_context() -> str:
                     f"Trading Mode: {mode.upper()}" + (f" ({reason})" if reason else "")
                     + f"\nToday's Gate: {evaluated} evaluated, {taken} taken, {skipped} skipped"
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        debug["gate_error"] = str(e)
 
     # 4. AI gate decisions (from MongoDB)
     try:
@@ -149,6 +166,7 @@ def _get_portfolio_context() -> str:
             .sort("created_at", -1)
             .limit(5)
         )
+        debug["shadow_decisions_count"] = len(recent)
         if recent:
             gate_lines = [
                 f"  {r.get('symbol','?')}: {r.get('combined_recommendation','?').upper()} "
@@ -156,8 +174,8 @@ def _get_portfolio_context() -> str:
                 for r in recent
             ]
             parts.append("Recent AI Gate Decisions:\n" + "\n".join(gate_lines))
-    except Exception:
-        pass
+    except Exception as e:
+        debug["shadow_error"] = str(e)
 
     # 5. Market regime (from MongoDB)
     try:
@@ -165,13 +183,14 @@ def _get_portfolio_context() -> str:
             {}, {"_id": 0, "state": 1, "composite_score": 1},
             sort=[("timestamp", -1)]
         )
+        debug["regime_found"] = regime is not None
         if regime:
             parts.append(
                 f"Market Regime: {regime.get('state', 'UNKNOWN')} "
                 f"(score: {regime.get('composite_score', 0):.1f})"
             )
-    except Exception:
-        pass
+    except Exception as e:
+        debug["regime_error"] = str(e)
 
     # 6. Recent trade history (from MongoDB)
     try:
@@ -183,6 +202,7 @@ def _get_portfolio_context() -> str:
             .sort("entry_time", -1)
             .limit(10)
         )
+        debug["trades_count"] = len(recent_trades)
         if recent_trades:
             trade_lines = []
             wins = sum(1 for t in recent_trades if (t.get("pnl") or 0) > 0)
@@ -201,8 +221,8 @@ def _get_portfolio_context() -> str:
                 f"Recent Trades (last {total}): {wins}W / {total-wins}L "
                 f"({wins/total*100:.0f}% win rate)\n" + "\n".join(trade_lines)
             )
-    except Exception:
-        pass
+    except Exception as e:
+        debug["trades_error"] = str(e)
 
     # 7. Performance stats (from MongoDB)
     try:
@@ -210,6 +230,7 @@ def _get_portfolio_context() -> str:
             {}, {"_id": 0},
             sort=[("date", -1)]
         )
+        debug["perf_found"] = perf is not None
         if perf:
             daily_pnl = perf.get("realized_pnl", perf.get("pnl", 0))
             total_trades = perf.get("total_trades", 0)
@@ -218,10 +239,13 @@ def _get_portfolio_context() -> str:
                 f"Today's Performance: P&L ${daily_pnl:+,.2f}, "
                 f"{total_trades} trades, {win_rate:.0f}% win rate"
             )
-    except Exception:
-        pass
+    except Exception as e:
+        debug["perf_error"] = str(e)
 
-    return "\n\n".join(parts) if parts else "No portfolio data available."
+    text = "\n\n".join(parts) if parts else "No portfolio data available at this moment. IB Pusher may not be connected or market is closed."
+    debug["context_sections"] = len(parts)
+    logger.info(f"Portfolio context: {len(parts)} sections, debug={json.dumps(debug)}")
+    return {"text": text, "debug": debug}
 
 
 def _get_chat_history(session_id: str = "default", limit: int = 10) -> list:
@@ -280,22 +304,47 @@ def health():
     return {"status": "healthy", "service": "chat_server", "port": 8002}
 
 
+@app.get("/context-debug")
+def context_debug():
+    """Diagnostic: shows exactly what context the chat server can see"""
+    result = _get_portfolio_context()
+    return {
+        "context_text": result["text"],
+        "debug": result["debug"],
+        "mongo_connected": _check_mongo(),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+def _check_mongo() -> bool:
+    try:
+        db.command("ping")
+        return True
+    except Exception:
+        return False
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     """Process a chat message — fully sync, dedicated process"""
     start = time.time()
     
     # Build context
-    context = _get_portfolio_context()
+    ctx = _get_portfolio_context()
+    context = ctx["text"]
     history = _get_chat_history(request.session_id, limit=6)
     
     system_prompt = f"""You are SentCom, an AI trading co-pilot for a live trading operation.
 Speak in first person plural ("we", "our", "us") — you and the trader are a team.
-Be concise, direct, and actionable. Use specific numbers from the data.
+Be concise, direct, and actionable. Use specific numbers from the data below.
 When reviewing positions, mention entry price, current price, P&L, and whether stops/targets are hit.
 When asked about risk, consider position sizing, portfolio concentration, and market regime.
+If the data below shows no positions, tell the user we have no open positions right now (don't ask them to paste data).
+If IB is disconnected or no data is available, say so directly.
 
-{context}"""
+=== LIVE DATA ===
+{context}
+=== END DATA ==="""
     
     messages = [{"role": "system", "content": system_prompt}]
     
