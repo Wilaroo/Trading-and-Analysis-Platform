@@ -12,6 +12,7 @@ Endpoints:
 - GET /api/sentcom/alerts - Recent alerts
 """
 import logging
+import os
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
@@ -119,27 +120,42 @@ async def get_stream(limit: int = Query(20, ge=1, le=100)):
 async def chat_test(request: ChatRequest):
     """Quick diagnostic: tests LLM directly, bypasses orchestrator"""
     import time
+    import asyncio
+    import requests as sync_requests
     start = time.time()
+    print(f"[CHAT-TEST] Endpoint reached: {request.message}", flush=True)
     try:
-        from agents.llm_provider import get_llm_provider
-        llm = get_llm_provider()
-        logger.info(f"[CHAT-TEST] Calling LLM with model: {llm.get_provider('ollama').default_model}")
-        response = await llm.generate(
-            prompt=request.message,
-            system_prompt="You are a helpful trading assistant. Be brief.",
-            max_tokens=200
-        )
+        ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+        model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+        
+        def _sync_call():
+            r = sync_requests.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful trading assistant. Be brief."},
+                        {"role": "user", "content": request.message}
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.7, "num_predict": 200}
+                },
+                timeout=30
+            )
+            return r.json()
+        
+        data = await asyncio.to_thread(_sync_call)
+        content = data.get("message", {}).get("content", "")
         latency = (time.time() - start) * 1000
-        logger.info(f"[CHAT-TEST] LLM responded: success={response.success}, model={response.model}, latency={latency:.0f}ms")
+        print(f"[CHAT-TEST] Success in {latency:.0f}ms: {content[:80]}", flush=True)
         return {
-            "success": response.success,
-            "response": response.content,
-            "model": response.model,
-            "error": response.error,
+            "success": True,
+            "response": content,
+            "model": model,
             "latency_ms": latency
         }
     except Exception as e:
-        logger.error(f"[CHAT-TEST] Error: {type(e).__name__}: {e}")
+        print(f"[CHAT-TEST] Error: {type(e).__name__}: {e}", flush=True)
         return {"success": False, "error": f"{type(e).__name__}: {e}", "latency_ms": (time.time() - start) * 1000}
 
 
