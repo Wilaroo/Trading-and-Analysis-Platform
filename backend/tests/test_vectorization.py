@@ -205,6 +205,69 @@ def test_vol_batch_is_faster():
     print(f"  Features: original(500bars)={feat_orig_time:.3f}s, batch(5000bars)={feat_batch_time:.3f}s, speedup≈{feat_speedup:.1f}x")
 
 
+def test_setup_worker_produces_results():
+    """Verify the optimized setup worker produces valid feature matrices."""
+    from services.ai_modules.training_pipeline import _extract_setup_long_worker
+    closes, highs, lows, opens, volumes = _make_synthetic_bars(500)
+    bars = [{"close": float(closes[i]), "high": float(highs[i]), "low": float(lows[i]),
+             "open": float(opens[i]), "volume": float(volumes[i]),
+             "date": f"2025-01-{i%28+1:02d}T10:00:00"} for i in range(500)]
+    
+    # Test with SCALP setup type
+    setup_configs = [("SCALP", 12, 0.003)]
+    result = _extract_setup_long_worker(("TEST", bars, setup_configs))
+    
+    assert result is not None, "Worker returned None"
+    assert len(result) > 0, "Worker returned empty results"
+    for key, (X, y) in result.items():
+        assert X.shape[0] == y.shape[0], f"X/y shape mismatch: {X.shape[0]} vs {y.shape[0]}"
+        assert X.shape[0] > 100, f"Too few samples: {X.shape[0]}"
+        assert X.dtype == np.float32, f"Expected float32, got {X.dtype}"
+        assert np.all(np.isfinite(X)), "Found NaN/Inf in features"
+        assert set(np.unique(y)).issubset({0, 1, 2}), f"Unexpected target values: {np.unique(y)}"
+        print(f"  setup_long_worker: {X.shape[0]} samples, shape={X.shape}, targets={dict(zip(*np.unique(y, return_counts=True)))} ✓")
+
+
+def test_exit_worker_produces_results():
+    """Verify the optimized exit worker produces valid results."""
+    from services.ai_modules.training_pipeline import _extract_exit_worker
+    closes, highs, lows, opens, volumes = _make_synthetic_bars(500)
+    bars = [{"close": float(closes[i]), "high": float(highs[i]), "low": float(lows[i]),
+             "open": float(opens[i]), "volume": float(volumes[i]),
+             "date": f"2025-01-{i%28+1:02d}T10:00:00"} for i in range(500)]
+    
+    exit_configs = [("SCALP", 12)]
+    result = _extract_exit_worker(("TEST", bars, exit_configs))
+    
+    assert result is not None, "Exit worker returned None"
+    for key, (X, y) in result.items():
+        assert X.shape[0] == y.shape[0], f"X/y shape mismatch"
+        assert X.shape[0] > 50, f"Too few samples: {X.shape[0]}"
+        assert np.all(np.isfinite(X)), "Found NaN/Inf in features"
+        assert np.all(y >= 1) and np.all(y <= 30), f"Exit targets out of range: min={y.min()}, max={y.max()}"
+        print(f"  exit_worker: {X.shape[0]} samples, target range=[{y.min():.0f}, {y.max():.0f}] ✓")
+
+
+def test_risk_worker_produces_results():
+    """Verify the optimized risk worker produces valid results."""
+    from services.ai_modules.training_pipeline import _extract_risk_worker
+    closes, highs, lows, opens, volumes = _make_synthetic_bars(500)
+    bars = [{"close": float(closes[i]), "high": float(highs[i]), "low": float(lows[i]),
+             "open": float(opens[i]), "volume": float(volumes[i]),
+             "date": f"2025-01-{i%28+1:02d}T10:00:00"} for i in range(500)]
+    
+    risk_configs = [("5 mins", 24)]
+    result = _extract_risk_worker(("TEST", bars, risk_configs))
+    
+    assert result is not None, "Risk worker returned None"
+    for key, (X, y) in result.items():
+        assert X.shape[0] == y.shape[0], f"X/y shape mismatch"
+        assert X.shape[0] > 50, f"Too few samples: {X.shape[0]}"
+        assert np.all(np.isfinite(X)), "Found NaN/Inf in features"
+        assert set(np.unique(y)).issubset({0, 1}), f"Unexpected risk targets: {np.unique(y)}"
+        print(f"  risk_worker: {X.shape[0]} samples, STOP_HIT={np.sum(y==1)}, SURVIVED={np.sum(y==0)} ✓")
+
+
 if __name__ == "__main__":
     print("=== Vectorization Correctness Tests ===")
     test_vol_targets_batch_matches_original()
@@ -212,6 +275,10 @@ if __name__ == "__main__":
     test_vol_features_batch_approx_matches_original()
     test_sector_targets_batch_matches_original()
     test_sector_features_batch_shape()
+    print("\n=== Worker Tests ===")
+    test_setup_worker_produces_results()
+    test_exit_worker_produces_results()
+    test_risk_worker_produces_results()
     print("\n=== Performance Tests ===")
     test_vol_batch_is_faster()
     print("\n=== ALL TESTS PASSED ===")

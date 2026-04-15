@@ -256,6 +256,7 @@ def _extract_setup_long_worker(args):
     # setup_configs: list of (setup_type, forecast_horizon, noise_threshold)
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
     from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+    from numpy.lib.stride_tricks import sliding_window_view
 
     try:
         fe = TimeSeriesFeatureEngineer(50)
@@ -269,48 +270,52 @@ def _extract_setup_long_worker(args):
         volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
         opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
 
+        n = len(bars)
+        # Pre-compute ALL reversed sliding windows once (views, no copy)
+        if n < 50:
+            return None
+        o_wins = sliding_window_view(opens, 50)[:, ::-1]    # (n-49, 50) MRF
+        h_wins = sliding_window_view(highs, 50)[:, ::-1]
+        l_wins = sliding_window_view(lows, 50)[:, ::-1]
+        c_wins = sliding_window_view(closes, 50)[:, ::-1]
+        v_wins = sliding_window_view(volumes, 50)[:, ::-1]
+
         results = {}
         for setup_type, fh, noise_thr in setup_configs:
             feat_names = get_setup_feature_names(setup_type)
             n_setup = len(feat_names)
             n_base = base_matrix.shape[1]
 
-            max_rows = len(bars) - 50 - fh
+            max_rows = n - 50 - fh
             if max_rows <= 0:
                 continue
 
+            # VECTORIZED targets: future return for all bars at once
+            idx = np.arange(50, 50 + max_rows)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                fr = np.where(closes[idx] > 0, (closes[idx + fh] - closes[idx]) / closes[idx], 0.0)
+            y_all = np.where(np.abs(fr) < noise_thr, 1.0, np.where(fr > 0, 2.0, 0.0)).astype(np.float32)
+
             X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
-            y_buf = np.empty(max_rows, dtype=np.float32)
             valid = 0
 
-            for i in range(50, len(bars) - fh):
-                row_idx = i - 49
+            for j in range(max_rows):
+                row_idx = j + 1  # base_matrix row for bar 50+j
                 if row_idx >= len(base_matrix):
                     break
 
-                o_win = opens[max(0, i - 49): i + 1][::-1]
-                h_win = highs[max(0, i - 49): i + 1][::-1]
-                l_win = lows[max(0, i - 49): i + 1][::-1]
-                c_win = closes[max(0, i - 49): i + 1][::-1]
-                v_win = volumes[max(0, i - 49): i + 1][::-1]
-
-                sf = get_setup_features(setup_type, o_win, h_win, l_win, c_win, v_win)
+                # Pre-computed windows: c_wins[k] = closes[k:k+50][::-1]
+                # For bar i=50+j, window starts at i-49=j+1
+                win_idx = j + 1
+                sf = get_setup_features(setup_type, o_wins[win_idx], h_wins[win_idx], l_wins[win_idx], c_wins[win_idx], v_wins[win_idx])
                 setup_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
 
                 X_buf[valid, :n_base] = base_matrix[row_idx]
                 X_buf[valid, n_base:] = setup_vec
-
-                fr = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                if abs(fr) < noise_thr:
-                    y_buf[valid] = 1
-                elif fr > 0:
-                    y_buf[valid] = 2
-                else:
-                    y_buf[valid] = 0
                 valid += 1
 
             if valid > 0:
-                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_all[:valid].copy())
         return results
     except Exception as e:
         logger.warning(f"Setup worker error for {symbol}: {e}")
@@ -322,6 +327,7 @@ def _extract_setup_short_worker(args):
     symbol, bars, setup_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
     from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+    from numpy.lib.stride_tricks import sliding_window_view
 
     try:
         fe = TimeSeriesFeatureEngineer(50)
@@ -335,49 +341,51 @@ def _extract_setup_short_worker(args):
         volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
         opens = np.array([b.get("open", 0) for b in bars], dtype=np.float32)
 
+        n = len(bars)
+        if n < 50:
+            return None
+        # Pre-compute ALL reversed sliding windows once (views, no copy)
+        o_wins = sliding_window_view(opens, 50)[:, ::-1]
+        h_wins = sliding_window_view(highs, 50)[:, ::-1]
+        l_wins = sliding_window_view(lows, 50)[:, ::-1]
+        c_wins = sliding_window_view(closes, 50)[:, ::-1]
+        v_wins = sliding_window_view(volumes, 50)[:, ::-1]
+
         results = {}
         for setup_type, fh, noise_thr in setup_configs:
             feat_names = get_short_setup_feature_names(setup_type)
             n_setup = len(feat_names)
             n_base = base_matrix.shape[1]
 
-            max_rows = len(bars) - 50 - fh
+            max_rows = n - 50 - fh
             if max_rows <= 0:
                 continue
 
+            # VECTORIZED targets: inverted future return for shorts
+            idx = np.arange(50, 50 + max_rows)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                fr = np.where(closes[idx] > 0, (closes[idx + fh] - closes[idx]) / closes[idx], 0.0)
+            inv_fr = -fr
+            y_all = np.where(np.abs(inv_fr) < noise_thr, 1.0, np.where(inv_fr > 0, 2.0, 0.0)).astype(np.float32)
+
             X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
-            y_buf = np.empty(max_rows, dtype=np.float32)
             valid = 0
 
-            for i in range(50, len(bars) - fh):
-                row_idx = i - 49
+            for j in range(max_rows):
+                row_idx = j + 1
                 if row_idx >= len(base_matrix):
                     break
 
-                c_win = closes[max(0, i - 49): i + 1][::-1]
-                h_win = highs[max(0, i - 49): i + 1][::-1]
-                l_win = lows[max(0, i - 49): i + 1][::-1]
-                v_win = volumes[max(0, i - 49): i + 1][::-1]
-                o_win = opens[max(0, i - 49): i + 1][::-1]
-
-                sf = get_short_setup_features(setup_type, o_win, h_win, l_win, c_win, v_win)
+                win_idx = j + 1
+                sf = get_short_setup_features(setup_type, o_wins[win_idx], h_wins[win_idx], l_wins[win_idx], c_wins[win_idx], v_wins[win_idx])
                 short_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
 
                 X_buf[valid, :n_base] = base_matrix[row_idx]
                 X_buf[valid, n_base:] = short_vec
-
-                fr = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                inv_fr = -fr
-                if abs(inv_fr) < noise_thr:
-                    y_buf[valid] = 1
-                elif inv_fr > 0:
-                    y_buf[valid] = 2
-                else:
-                    y_buf[valid] = 0
                 valid += 1
 
             if valid > 0:
-                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+                results[(setup_type, fh)] = (X_buf[:valid].copy(), y_all[:valid].copy())
         return results
     except Exception as e:
         logger.warning(f"Short setup worker error for {symbol}: {e}")
@@ -388,7 +396,8 @@ def _extract_exit_worker(args):
     """Phase 4 worker: extract base + exit features for one symbol."""
     symbol, bars, exit_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
-    from services.ai_modules.exit_features import compute_exit_features, compute_exit_target, EXIT_FEATURE_NAMES
+    from services.ai_modules.exit_timing_model import compute_exit_features, compute_exit_target, EXIT_FEATURE_NAMES
+    from numpy.lib.stride_tricks import sliding_window_view
 
     try:
         fe = TimeSeriesFeatureEngineer(50)
@@ -402,42 +411,72 @@ def _extract_exit_worker(args):
         volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
         n_base = base_matrix.shape[1]
         n_exit = len(EXIT_FEATURE_NAMES)
+        n = len(bars)
+
+        if n < 50:
+            return None
+
+        # Pre-compute reversed sliding windows (views, no copy)
+        c_wins = sliding_window_view(closes, 50)[:, ::-1]
+        h_wins = sliding_window_view(highs, 50)[:, ::-1]
+        l_wins = sliding_window_view(lows, 50)[:, ::-1]
+        v_wins = sliding_window_view(volumes, 50)[:, ::-1]
+
+        # Pre-compute direction for all bars: "up" if closes[i] > closes[i-3]
+        dir_prev = np.roll(closes, 3)
+        dir_prev[:3] = closes[:3]
+        directions_up = closes > dir_prev  # True = "up", False = "down"
 
         results = {}
         for setup_type, max_horizon in exit_configs:
-            max_rows = len(bars) - 50 - max_horizon
+            max_rows = n - 50 - max_horizon
             if max_rows <= 0:
                 continue
 
+            # VECTORIZED exit targets using sliding windows on forward highs/lows
+            idx = np.arange(50, 50 + max_rows)
+            if n > max_horizon:
+                fwd_h = sliding_window_view(highs, max_horizon)  # (n-mh+1, mh)
+                fwd_l = sliding_window_view(lows, max_horizon)
+                # fwd_h[i+1] = highs[i+1:i+1+mh] for bar i
+                fwd_h_valid = idx + 1 < len(fwd_h)
+                up_targets = np.zeros(max_rows, dtype=np.float32)
+                dn_targets = np.zeros(max_rows, dtype=np.float32)
+                valid_fwd = idx[fwd_h_valid] + 1
+                if len(valid_fwd) > 0:
+                    up_targets[fwd_h_valid] = np.argmax(fwd_h[valid_fwd], axis=1).astype(np.float32) + 1
+                    dn_targets[fwd_h_valid] = np.argmin(fwd_l[valid_fwd], axis=1).astype(np.float32) + 1
+                y_all = np.where(directions_up[idx], up_targets, dn_targets)
+                # Mark invalid entries (closes[i] <= 0 or not enough forward data)
+                invalid = (closes[idx] <= 0) | ~fwd_h_valid
+            else:
+                y_all = np.zeros(max_rows, dtype=np.float32)
+                invalid = np.ones(max_rows, dtype=bool)
+
             X_buf = np.empty((max_rows, n_base + n_exit), dtype=np.float32)
-            y_buf = np.empty(max_rows, dtype=np.float32)
             valid = 0
 
-            for i in range(50, len(bars) - max_horizon):
-                row_idx = i - 49
+            for j in range(max_rows):
+                row_idx = j + 1
                 if row_idx >= len(base_matrix):
                     break
-
-                c_win = closes[i - 49: i + 1][::-1]
-                h_win = highs[i - 49: i + 1][::-1]
-                l_win = lows[i - 49: i + 1][::-1]
-                v_win = volumes[i - 49: i + 1][::-1]
-                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-
-                ef = compute_exit_features(c_win, h_win, l_win, v_win, direction)
-                exit_vec = np.array([ef.get(f, 0.0) for f in EXIT_FEATURE_NAMES], dtype=np.float32)
-
-                target = compute_exit_target(closes, highs, lows, i, max_horizon, direction)
-                if target is None:
+                if invalid[j]:
                     continue
+
+                win_idx = j + 1
+                direction = "up" if directions_up[50 + j] else "down"
+                ef = compute_exit_features(c_wins[win_idx], h_wins[win_idx], l_wins[win_idx], v_wins[win_idx], direction)
+                exit_vec = np.array([ef.get(f, 0.0) for f in EXIT_FEATURE_NAMES], dtype=np.float32)
 
                 X_buf[valid, :n_base] = base_matrix[row_idx]
                 X_buf[valid, n_base:] = exit_vec
-                y_buf[valid] = target
                 valid += 1
 
             if valid > 0:
-                results[setup_type] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+                # Gather only valid targets
+                valid_mask = ~invalid[:min(max_rows, len(base_matrix) - 1)]
+                y_valid = y_all[:len(valid_mask)][valid_mask][:valid]
+                results[setup_type] = (X_buf[:valid].copy(), y_valid.copy())
         return results
     except Exception as e:
         logger.warning(f"Exit worker error for {symbol}: {e}")
@@ -448,7 +487,8 @@ def _extract_risk_worker(args):
     """Phase 6 worker: extract base + risk features for one symbol."""
     symbol, bars, risk_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
-    from services.ai_modules.risk_features import compute_risk_features, compute_risk_target, RISK_FEATURE_NAMES
+    from services.ai_modules.risk_of_ruin_model import compute_risk_features, compute_risk_target, RISK_FEATURE_NAMES
+    from numpy.lib.stride_tricks import sliding_window_view
 
     try:
         fe = TimeSeriesFeatureEngineer(50)
@@ -462,50 +502,109 @@ def _extract_risk_worker(args):
         volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
         n_base = base_matrix.shape[1]
         n_risk = len(RISK_FEATURE_NAMES)
+        n = len(bars)
+
+        if n < 50:
+            return None
+
+        # Pre-compute reversed sliding windows for risk features (25-bar window)
+        if n >= 25:
+            c_wins25 = sliding_window_view(closes, 25)[:, ::-1]
+            h_wins25 = sliding_window_view(highs, 25)[:, ::-1]
+            l_wins25 = sliding_window_view(lows, 25)[:, ::-1]
+            v_wins25 = sliding_window_view(volumes, 25)[:, ::-1]
+        else:
+            return None
+
+        # Pre-compute direction and rolling ATR vectorially
+        dir_prev = np.roll(closes, 3)
+        dir_prev[:3] = closes[:3]
+        directions_up = closes > dir_prev
+
+        # Vectorized True Range and rolling 10-bar ATR
+        tr = np.maximum(highs[1:] - lows[1:],
+                        np.maximum(np.abs(highs[1:] - closes[:-1]),
+                                   np.abs(lows[1:] - closes[:-1])))
+        tr_full = np.concatenate([[highs[0] - lows[0]], tr])
+        if len(tr_full) >= 10:
+            atr_10_rolling = np.convolve(tr_full, np.ones(10, dtype=np.float32) / 10, mode='valid')
+        else:
+            atr_10_rolling = np.array([np.mean(tr_full)], dtype=np.float32)
 
         results = {}
         for bs_label, max_bars_horizon in risk_configs:
-            max_rows = len(bars) - 50 - max_bars_horizon
+            max_rows = n - 50 - max_bars_horizon
             if max_rows <= 0:
                 continue
 
+            # VECTORIZED risk targets using cumulative min/max on forward windows
+            idx = np.arange(50, 50 + max_rows)
+            # ATR for each bar: atr_10_rolling covers indices 0..n-10
+            # atr_10_rolling[k] = mean ATR for bars k..k+9
+            # For bar i, we want ATR ending at bar i: atr_10_rolling[max(0, i-9)]
+            atr_idx = np.clip(idx - 9, 0, len(atr_10_rolling) - 1)
+            atr_per_bar = atr_10_rolling[atr_idx]
+            atr_per_bar = np.where(atr_per_bar > 0, atr_per_bar, 0.01)
+            stop_dist = 1.5 * atr_per_bar
+            entries = closes[idx]
+
+            # Forward windows for stop-hit detection
+            if n > max_bars_horizon + 1:
+                fwd_h = sliding_window_view(highs, max_bars_horizon)
+                fwd_l = sliding_window_view(lows, max_bars_horizon)
+                y_all = np.zeros(max_rows, dtype=np.float32)
+                invalid = np.zeros(max_rows, dtype=bool)
+
+                for j_batch_start in range(0, max_rows, 5000):
+                    j_batch_end = min(j_batch_start + 5000, max_rows)
+                    batch_idx = idx[j_batch_start:j_batch_end]
+                    fwd_start = batch_idx + 1
+                    fwd_ok = fwd_start < len(fwd_l)
+                    for jj in range(j_batch_end - j_batch_start):
+                        ji = j_batch_start + jj
+                        fi = fwd_start[jj]
+                        if not fwd_ok[jj] or entries[ji] <= 0:
+                            invalid[ji] = True
+                            continue
+                        if directions_up[idx[ji]]:
+                            # Stop hit if any low <= entry - stop_dist
+                            if np.any(fwd_l[fi] <= entries[ji] - stop_dist[ji]):
+                                y_all[ji] = 1.0
+                        else:
+                            if np.any(fwd_h[fi] >= entries[ji] + stop_dist[ji]):
+                                y_all[ji] = 1.0
+            else:
+                y_all = np.zeros(max_rows, dtype=np.float32)
+                invalid = np.ones(max_rows, dtype=bool)
+
             X_buf = np.empty((max_rows, n_base + n_risk), dtype=np.float32)
-            y_buf = np.empty(max_rows, dtype=np.float32)
             valid = 0
 
-            for i in range(50, len(bars) - max_bars_horizon):
-                row_idx = i - 49
+            for j in range(max_rows):
+                row_idx = j + 1
                 if row_idx >= len(base_matrix):
                     break
-
-                c_win = closes[i - 24: i + 1][::-1]
-                h_win = highs[i - 24: i + 1][::-1]
-                l_win = lows[i - 24: i + 1][::-1]
-                v_win = volumes[i - 24: i + 1][::-1]
-
-                direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
-                rf = compute_risk_features(c_win, h_win, l_win, v_win, direction)
-                risk_vec = np.array([rf.get(f, 0.0) for f in RISK_FEATURE_NAMES], dtype=np.float32)
-
-                atr_vals = []
-                for j in range(max(0, i - 10), i):
-                    tr = max(highs[j] - lows[j],
-                             abs(highs[j] - closes[j - 1]) if j > 0 else 0,
-                             abs(lows[j] - closes[j - 1]) if j > 0 else 0)
-                    atr_vals.append(tr)
-                atr = np.mean(atr_vals) if atr_vals else 0.01
-
-                target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars_horizon)
-                if target is None:
+                if invalid[j]:
                     continue
+
+                # 25-bar MRF window for risk features
+                # For bar i=50+j, 25-bar window starts at i-24 in chrono
+                win25_idx = 50 + j - 24
+                if win25_idx < 0 or win25_idx >= len(c_wins25):
+                    continue
+
+                direction = "up" if directions_up[50 + j] else "down"
+                rf = compute_risk_features(c_wins25[win25_idx], h_wins25[win25_idx], l_wins25[win25_idx], v_wins25[win25_idx], direction)
+                risk_vec = np.array([rf.get(f, 0.0) for f in RISK_FEATURE_NAMES], dtype=np.float32)
 
                 X_buf[valid, :n_base] = base_matrix[row_idx]
                 X_buf[valid, n_base:] = risk_vec
-                y_buf[valid] = target
                 valid += 1
 
             if valid > 0:
-                results[bs_label] = (X_buf[:valid].copy(), y_buf[:valid].copy())
+                valid_mask = ~invalid[:min(max_rows, len(base_matrix) - 1)]
+                y_valid = y_all[:len(valid_mask)][valid_mask][:valid]
+                results[bs_label] = (X_buf[:valid].copy(), y_valid.copy())
         return results
     except Exception as e:
         logger.warning(f"Risk worker error for {symbol}: {e}")
@@ -822,6 +921,9 @@ async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) ->
 async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars: int = 100, batch_size: int = 20, max_bars: int = 0) -> Dict[str, List[Dict]]:
     """Load bars for multiple symbols in parallel batches.
     
+    Optimization: checks NVMe disk cache synchronously first (O(1) per file).
+    Only farms cache misses to MongoDB via the thread pool, reducing async overhead.
+    
     Args:
         db: MongoDB database
         symbols: List of symbols to load
@@ -834,10 +936,31 @@ async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars:
         Dict of symbol -> bars for symbols with enough data
     """
     bars_by_symbol = {}
-    total_batches = (len(symbols) + batch_size - 1) // batch_size
     
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i+batch_size]
+    # Phase 1: Fast NVMe cache check (synchronous, no executor needed)
+    cache_misses = []
+    for sym in symbols:
+        cached = _load_bars_from_disk(sym, bar_size)
+        if cached is not None:
+            if len(cached) >= min_bars:
+                bars_by_symbol[sym] = cached
+        else:
+            cache_misses.append(sym)
+    
+    if bars_by_symbol:
+        logger.info(
+            f"[load_symbols_parallel] {len(bars_by_symbol)}/{len(symbols)} from NVMe cache, "
+            f"{len(cache_misses)} need MongoDB"
+        )
+    
+    if not cache_misses:
+        return bars_by_symbol
+    
+    # Phase 2: Load cache misses from MongoDB in parallel batches
+    total_batches = (len(cache_misses) + batch_size - 1) // batch_size
+    
+    for i in range(0, len(cache_misses), batch_size):
+        batch = cache_misses[i:i+batch_size]
         batch_num = i // batch_size + 1
         
         # Load batch in parallel
@@ -850,7 +973,7 @@ async def load_symbols_parallel(db, symbols: List[str], bar_size: str, min_bars:
             if len(bars) >= min_bars:
                 bars_by_symbol[sym] = bars
         
-        logger.info(f"[load_symbols_parallel] Batch {batch_num}/{total_batches} complete ({len(bars_by_symbol)} symbols loaded)")
+        logger.info(f"[load_symbols_parallel] MongoDB batch {batch_num}/{total_batches} ({len(bars_by_symbol)} symbols loaded)")
     
     return bars_by_symbol
 

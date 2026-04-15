@@ -152,15 +152,20 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **CLI:** `python -m services.ai_modules.training_subprocess --phases volatility --test-mode`
 
 ### Phase 5k: Vectorized Feature Extraction (CODE COMPLETE — Feb 2026, PENDING USER TEST)
-- **Root Cause:** Per-bar Python `for i in range(50, len(bars) - fh)` loops in Phases 3, 5, and 7 created ~125M iterations across all symbols (500 symbols × 50K bars × 5 freq). Each iteration called Python functions, created numpy slices, and did dict operations. This was the #1 CPU bottleneck, accounting for 65% of pipeline runtime (~17 min per 50-symbol batch).
+- **Root Cause:** Per-bar Python `for i in range(50, len(bars) - fh)` loops in Phases 2, 2.5, 3, 4, 5, 6, and 7 created ~125M iterations across all symbols (500 symbols × 50K bars × 5 freq). Each iteration called Python functions, created numpy slices, and did dict operations. This was the #1 CPU bottleneck, accounting for 65% of pipeline runtime (~17 min per 50-symbol batch).
 - **Fix 1 — Vectorized vol targets:** `compute_vol_targets_batch()` in `volatility_model.py` — uses `numpy.lib.stride_tricks.sliding_window_view` to compute trailing/forward realized vols for ALL bars simultaneously. 91x speedup verified.
 - **Fix 2 — Vectorized vol features:** `compute_vol_features_batch()` — computes all 6 vol-specific features (vol_rank_20, vol_rank_50, vol_acceleration, range_expansion, gap_frequency, volume_vol_corr) for all bars at once using rolling windows and vectorized correlation. 159x speedup verified.
 - **Fix 3 — Vectorized sector-relative targets & features:** `compute_sector_relative_targets_batch()` and `compute_sector_relative_features_batch()` in `sector_relative_model.py` — computes all 10 sector features vectorized.
 - **Fix 4 — Date-based regime cache:** Phase 3 now extracts unique dates from bars and calls `get_regime_features_for_date()` once per unique date (~250 calls per year vs ~50K calls per symbol).
 - **Fix 5 — Phase 7 (Regime-Conditional) vectorized:** Targets computed as vectorized numpy operations, regime classification cached by unique date.
 - **Fix 6 — `extract_features_bulk()` returns float32:** Halves memory for feature matrices (XGBoost uses float32 internally).
-- **Test suite:** `/app/backend/tests/test_vectorization.py` — Verifies correctness (bit-for-bit target match, feature spot-check within tolerance) and performance (91-162x speedup on 5K bars, ~25000x on 50K bars).
-- **Expected pipeline impact:** Phase 3/5/7 inner loops that took ~17 min per 50-symbol batch should now complete in seconds. Total pipeline runtime should drop from hours to well under an hour.
+- **Fix 7 — Workers pre-compute sliding windows:** `_extract_setup_long_worker`, `_extract_setup_short_worker`, `_extract_exit_worker`, `_extract_risk_worker` now pre-compute ALL reversed OHLCV windows via `sliding_window_view` once (zero-copy views). Eliminates ~250K per-bar array allocations per symbol.
+- **Fix 8 — Workers vectorize targets:** All 4 workers compute targets (UP/DOWN/FLAT, MFE bars, stop-hit) as vectorized numpy operations instead of per-bar function calls. Exit targets use vectorized argmax/argmin on forward windows. Risk targets use pre-computed rolling ATR and forward window scans.
+- **Fix 9 — Workers fix broken imports:** `_extract_exit_worker` imported from non-existent `exit_features` (fixed to `exit_timing_model`). `_extract_risk_worker` imported from non-existent `risk_features` (fixed to `risk_of_ruin_model`).
+- **Fix 10 — MongoDB `load_symbols_parallel` optimization:** Checks NVMe disk cache synchronously for ALL symbols upfront (O(1) per file), only sends cache misses to MongoDB. After first pipeline phase, subsequent phases get 100% cache hits with zero MongoDB queries.
+- **Known issue:** Phase 5.5 (Gap Fill) has a pre-existing `compute_gap_features` signature mismatch — pipeline passes `avg_volume_20`/`atr_10` kwargs but function expects `daily_closes`/`daily_highs`. Phase 5.5 has never successfully run. Needs separate fix.
+- **Test suite:** `/app/backend/tests/test_vectorization.py` — 9 tests verify correctness (bit-for-bit target match, feature tolerance, worker output validation) and performance (91-162x speedup on 5K bars, ~25000x on 50K bars).
+- **Expected pipeline impact:** All inner per-bar loops across Phases 2-7 now use pre-computed windows and vectorized targets. Total pipeline runtime should drop from hours to well under an hour.
 
 ## Upcoming Tasks
 - Phase 5g: RL Position Sizer (needs trade outcome data)
