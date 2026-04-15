@@ -3901,6 +3901,13 @@ def test_sync():
     """Test 3: Sync handler — needs thread from default pool"""
     return {"ok": True, "test": "sync handler"}
 
+@app.get("/api/test-4")
+def test_sync_slow():
+    """Test 4: Sync handler with 2s delay"""
+    import time
+    time.sleep(2)
+    return {"ok": True, "test": "sync slow 2s"}
+
 @app.post("/api/llm-test")
 @app.get("/api/llm-test")
 def llm_test_direct():
