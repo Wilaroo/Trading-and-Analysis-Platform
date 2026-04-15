@@ -3885,6 +3885,7 @@ async def websocket_quotes(websocket: WebSocket):
 
 
 @app.post("/api/llm-test")
+@app.get("/api/llm-test")
 async def llm_test_direct():
     """Bare-metal LLM test — no router, no middleware chain"""
     import requests as sync_requests
