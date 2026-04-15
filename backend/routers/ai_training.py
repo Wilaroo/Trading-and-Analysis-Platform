@@ -803,6 +803,7 @@ async def get_model_inventory():
             if not dl_trained and mongo_db is not None:
                 try:
                     dl_doc = mongo_db["dl_models"].find_one({"name": name}, {"_id": 0, "model_data": 0})
+                    logger.info(f"[MODEL-INVENTORY] DL check '{name}': doc_found={dl_doc is not None}")
                     if dl_doc:
                         dl_trained = True
                         metrics = dl_doc.get("metrics", {})
@@ -818,8 +819,9 @@ async def get_model_inventory():
                             "model_type": dl_doc.get("model_type", "deep_learning"),
                             "version": dl_doc.get("version", ""),
                         }
-                except Exception:
-                    pass
+                        logger.info(f"[MODEL-INVENTORY] DL '{name}' → trained=True, acc={dl_info.get('accuracy')}, samples={dl_info.get('training_samples')}")
+                except Exception as e:
+                    logger.error(f"[MODEL-INVENTORY] Error checking DL model '{name}': {e}")
             categories["deep_learning"]["models"].append({
                 "name": name, "description": dl["description"],
                 "trained": dl_trained,

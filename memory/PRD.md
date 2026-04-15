@@ -167,8 +167,19 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **Test suite:** `/app/backend/tests/test_vectorization.py` — 9 tests verify correctness (bit-for-bit target match, feature tolerance, worker output validation) and performance (91-162x speedup on 5K bars, ~25000x on 50K bars).
 - **Expected pipeline impact:** All inner per-bar loops across Phases 2-7 now use pre-computed windows and vectorized targets. Total pipeline runtime should drop from hours to well under an hour.
 
+### DL Model Status Fix (CODE COMPLETE — Feb 2026, PENDING USER TEST)
+- **P0 Fix:** DL models (VAE, TFT, CNN-LSTM) showed "0/3" in NIA dashboard despite being trained
+- **Root Cause:** Previous version had wrong model names (`temporal_fusion_transformer` → `tft_multi_timeframe`, `cnn_lstm_sequential` → `cnn_lstm_chart`). Also, silent `except: pass` was swallowing DB errors.
+- **Fix 1:** Model names corrected to match actual `MODEL_NAME` constants in DL model classes
+- **Fix 2:** Added robust field fallback chain: `metrics.accuracy → doc.accuracy → doc.val_accuracy → 0`
+- **Fix 3:** Added error logging instead of silent `except: pass` — errors now visible in backend logs as `[MODEL-INVENTORY]`
+- **Fix 4:** Fixed `_check_resume_model()` — now checks `dl_models` collection for DL model names instead of only `timeseries_models`, preventing unnecessary retraining on pipeline restart
+
+### Phase 13 Validation 0 Trades (P1 — NOT STARTED)
+- Backtest ran across 200 symbols × 10 setup types → 0 trades. Entry signal logic in `advanced_backtest_engine.py` only has hard-coded rules for ORB, VWAP_BOUNCE, GAP_AND_GO, BREAKOUT. All other setup types fall through to `_check_momentum_entry()` which requires 3% momentum in 3 days — too restrictive.
+- **Next steps:** Either add specific entry rules for each setup type, or wire the AI model predictions into the validation backtest (making it use the confidence gate like the live system).
+
 ## Upcoming Tasks
-- Fix the remaining startup UI (TrainingPipelinePanel should show all 150+ models including CNN/DL)
 - Live confidence gate display in NIA dashboard
 - SentCom real-time signal display + trade execution monitoring
 - Phase 5e: RL Position Sizer (needs trade outcome data)

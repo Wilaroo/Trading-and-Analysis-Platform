@@ -224,25 +224,47 @@ def _check_vstack_memory(all_X: list, label: str) -> bool:
 def _check_resume_model(db, model_name: str, max_age_hours: float = 24.0) -> Optional[Dict]:
     """Check if model was recently trained and can be skipped.
     
+    Checks both timeseries_models and dl_models collections.
     Returns dict with accuracy/samples if resumable, None otherwise.
     """
+    # DL model names that live in the dl_models collection
+    DL_MODEL_NAMES = {"vae_regime_detector", "tft_multi_timeframe", "cnn_lstm_chart"}
+
     try:
-        doc = db["timeseries_models"].find_one(
-            {"name": model_name},
-            {"saved_at": 1, "metrics": 1, "_id": 0}
-        )
-        if doc and "saved_at" in doc:
-            saved_at = datetime.fromisoformat(doc["saved_at"])
-            age_hours = (datetime.now(timezone.utc) - saved_at).total_seconds() / 3600
-            if age_hours < max_age_hours:
-                metrics = doc.get("metrics", {})
-                accuracy = metrics.get("accuracy", 0)
-                samples = metrics.get("training_samples", 0)
-                logger.info(
-                    f"[RESUME] Skipping {model_name} — trained {age_hours:.1f}h ago "
-                    f"(accuracy={accuracy:.4f}, samples={samples:,})"
-                )
-                return {"accuracy": accuracy, "samples": samples, "age_hours": age_hours}
+        # Check the appropriate collection based on model name
+        if model_name in DL_MODEL_NAMES:
+            doc = db["dl_models"].find_one(
+                {"name": model_name},
+                {"updated_at": 1, "accuracy": 1, "training_samples": 1, "_id": 0}
+            )
+            if doc and "updated_at" in doc:
+                saved_at = datetime.fromisoformat(doc["updated_at"])
+                age_hours = (datetime.now(timezone.utc) - saved_at).total_seconds() / 3600
+                if age_hours < max_age_hours:
+                    accuracy = doc.get("accuracy", 0) or 0
+                    samples = doc.get("training_samples", 0) or 0
+                    logger.info(
+                        f"[RESUME] Skipping DL {model_name} — trained {age_hours:.1f}h ago "
+                        f"(accuracy={accuracy:.4f}, samples={samples:,})"
+                    )
+                    return {"accuracy": accuracy, "samples": samples, "age_hours": age_hours}
+        else:
+            doc = db["timeseries_models"].find_one(
+                {"name": model_name},
+                {"saved_at": 1, "metrics": 1, "_id": 0}
+            )
+            if doc and "saved_at" in doc:
+                saved_at = datetime.fromisoformat(doc["saved_at"])
+                age_hours = (datetime.now(timezone.utc) - saved_at).total_seconds() / 3600
+                if age_hours < max_age_hours:
+                    metrics = doc.get("metrics", {})
+                    accuracy = metrics.get("accuracy", 0)
+                    samples = metrics.get("training_samples", 0)
+                    logger.info(
+                        f"[RESUME] Skipping {model_name} — trained {age_hours:.1f}h ago "
+                        f"(accuracy={accuracy:.4f}, samples={samples:,})"
+                    )
+                    return {"accuracy": accuracy, "samples": samples, "age_hours": age_hours}
     except Exception as e:
         logger.warning(f"[RESUME] Error checking model {model_name}: {e}")
     return None
