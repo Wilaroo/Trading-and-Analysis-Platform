@@ -57,10 +57,10 @@ class OllamaProvider(BaseLLMProvider):
     def __init__(self):
         # Direct Ollama URL from environment
         self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        # Primary model: GPT-OSS 120B cloud (best reasoning, zero GPU cost)
-        self.default_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
-        # Local fallback: Qwen3 30B (strong reasoning + tool calling, runs on GB10)
-        self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
+        # Primary model: Qwen3 30B local (strong reasoning + tool calling, runs on GB10)
+        self.default_model = os.environ.get("OLLAMA_MODEL", "qwen3:30b")
+        # Cloud fallback: GPT-OSS 120B (requires Ollama cloud auth)
+        self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "gpt-oss:120b-cloud")
     
     async def generate(self, prompt: str, model: str = None,
                       system_prompt: str = None, temperature: float = 0.7,
@@ -132,7 +132,24 @@ class OllamaProvider(BaseLLMProvider):
                 
                 if response.status_code == 200:
                     data = response.json()
+                    # Check for error in response body (e.g. cloud auth failure)
+                    if "error" in data:
+                        return LLMResponse(
+                            content="",
+                            model=model,
+                            provider="ollama",
+                            success=False,
+                            error=data["error"]
+                        )
                     content = data.get("message", {}).get("content", "")
+                    if not content:
+                        return LLMResponse(
+                            content="",
+                            model=model,
+                            provider="ollama",
+                            success=False,
+                            error="Empty response from Ollama"
+                        )
                     
                     return LLMResponse(
                         content=content,
