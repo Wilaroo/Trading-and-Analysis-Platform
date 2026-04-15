@@ -57,10 +57,10 @@ class OllamaProvider(BaseLLMProvider):
     def __init__(self):
         # Direct Ollama URL from environment
         self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        # Primary model: Qwen3 30B local (strong reasoning + tool calling, runs on GB10)
-        self.default_model = os.environ.get("OLLAMA_MODEL", "qwen3:30b")
-        # Cloud fallback: GPT-OSS 120B (requires Ollama cloud auth)
-        self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "gpt-oss:120b-cloud")
+        # Primary model: GPT-OSS 120B cloud (best reasoning, 1s response, zero GPU cost)
+        self.default_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+        # Local fallback: Qwen3 30B (works offline, runs on GB10)
+        self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
     
     async def generate(self, prompt: str, model: str = None,
                       system_prompt: str = None, temperature: float = 0.7,
