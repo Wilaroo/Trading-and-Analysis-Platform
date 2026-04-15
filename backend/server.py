@@ -3884,6 +3884,23 @@ async def websocket_quotes(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+@app.get("/api/test-1")
+async def test_pure_async():
+    """Test 1: Pure async — no threads, no I/O"""
+    return {"ok": True, "test": "pure async"}
+
+@app.get("/api/test-2")
+async def test_async_sleep():
+    """Test 2: Async with await — tests event loop health"""
+    import asyncio
+    await asyncio.sleep(0.1)
+    return {"ok": True, "test": "async sleep"}
+
+@app.get("/api/test-3")
+def test_sync():
+    """Test 3: Sync handler — needs thread from default pool"""
+    return {"ok": True, "test": "sync handler"}
+
 @app.post("/api/llm-test")
 @app.get("/api/llm-test")
 async def llm_test_direct():
