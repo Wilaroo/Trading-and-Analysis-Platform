@@ -62,9 +62,6 @@ def _build_strategy_config(setup_type: str, bar_size: str = None):
     return StrategyConfig(
         name=f"{setup_type}_validation",
         setup_type=setup_type.lower(),
-        entry_rules={"setup_confirmation": True},
-        exit_rules={"target_r": 2.0, "stop_r": 1.0},
-        risk_per_trade=0.01,
     )
 
 
@@ -635,9 +632,6 @@ async def run_batch_validation(
             strategies.append(StrategyConfig(
                 name=f"{st}_comparison",
                 setup_type=st.lower(),
-                entry_rules={"setup_confirmation": True},
-                exit_rules={"target_r": 2.0, "stop_r": 1.0},
-                risk_per_trade=0.01,
             ))
 
         if len(strategies) >= 2:

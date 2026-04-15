@@ -30,7 +30,7 @@ def get_device():
     if torch.cuda.is_available():
         _DEVICE = torch.device("cuda")
         gpu_name = torch.cuda.get_device_name(0)
-        vram_mb = torch.cuda.get_device_properties(0).total_mem // (1024 * 1024)
+        vram_mb = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)
         _GPU_INFO = {"gpu": gpu_name, "vram_mb": vram_mb, "cuda": True}
         logger.info(f"CNN using GPU: {gpu_name} ({vram_mb} MB VRAM)")
     else:
