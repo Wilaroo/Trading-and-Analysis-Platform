@@ -105,7 +105,7 @@ echo.
 echo [3/8] Starting DGX Spark services (fresh after git pull)...
 
 echo        Starting Spark backend via SSH...
-start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && export $(grep -v '^#' .env | xargs) && nohup python server.py > /tmp/backend.log 2>&1 < /dev/null &"
+start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python server.py > /tmp/backend.log 2>&1 < /dev/null &"
 
 echo        Waiting for backend startup (30 sec)...
 timeout /t 30 /nobreak >nul
@@ -133,7 +133,7 @@ echo        Frontend starting (compiles in ~20 sec)...
 
 :check_worker
 echo        Starting Spark worker via SSH...
-start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && export $(grep -v '^#' .env | xargs) && nohup python worker.py > /tmp/worker.log 2>&1 < /dev/null &"
+start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python worker.py > /tmp/worker.log 2>&1 < /dev/null &"
 echo        Worker started
 echo.
 
