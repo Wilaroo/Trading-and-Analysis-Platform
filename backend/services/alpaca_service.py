@@ -64,17 +64,27 @@ ALPACA_CALL_TIMEOUT = 10
 
 
 class AlpacaService:
-    """Service for fetching market data from Alpaca"""
+    """Service for fetching market data from Alpaca.
+    
+    DISABLED: IB Gateway is the primary data source. All methods return empty
+    to prevent failed retries from saturating the event loop.
+    Set ALPACA_ENABLED=true in .env to re-enable.
+    """
+    
+    DISABLED = os.environ.get("ALPACA_ENABLED", "false").lower() != "true"
     
     def __init__(self):
         self._initialized = False
         self._quote_cache: Dict[str, Dict] = {}
         self._bars_cache: Dict[str, Dict] = {}
-        self._cache_ttl = 10  # seconds for quotes (reduced from 15)
-        self._bars_cache_ttl = 60  # seconds for bars (reduced from 120)
+        self._cache_ttl = 10
+        self._bars_cache_ttl = 60
+        if self.DISABLED:
+            logger.info("[ALPACA] Disabled — IB Gateway is primary data source")
         
     async def _ensure_initialized_async(self) -> bool:
-        """Ensure clients are initialized (non-blocking)"""
+        if self.DISABLED:
+            return False
         if not self._initialized:
             try:
                 self._initialized = await asyncio.wait_for(
@@ -87,7 +97,8 @@ class AlpacaService:
         return self._initialized
     
     def _ensure_initialized(self) -> bool:
-        """Sync fallback for non-async contexts"""
+        if self.DISABLED:
+            return False
         if not self._initialized:
             self._initialized = _init_clients()
         return self._initialized

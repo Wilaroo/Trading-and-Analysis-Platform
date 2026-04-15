@@ -102,23 +102,23 @@ class OllamaProvider(BaseLLMProvider):
     
     async def _call_ollama_direct(self, prompt: str, model: str, system_prompt: str = None,
                                   temperature: float = 0.7, max_tokens: int = 1000) -> LLMResponse:
-        """Direct Ollama API call (fallback when proxy not available)"""
+        """Direct Ollama API call — uses sync requests in thread to avoid event loop blocking"""
         import time
         start = time.time()
         
         try:
-            # Direct Ollama API call — longer timeout for local models (30B can take 30-60s)
-            timeout = 90.0 if "cloud" not in model else 30.0
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                # Format messages
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": prompt})
-                
-                response = await client.post(
+            import requests as sync_requests
+            
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            timeout = 90 if "cloud" not in model else 30
+            
+            def _sync_call():
+                r = sync_requests.post(
                     f"{self.ollama_url}/api/chat",
-                    headers={"ngrok-skip-browser-warning": "true"},
                     json={
                         "model": model,
                         "messages": messages,
@@ -127,45 +127,47 @@ class OllamaProvider(BaseLLMProvider):
                             "temperature": temperature,
                             "num_predict": max_tokens
                         }
-                    }
+                    },
+                    timeout=timeout
                 )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Check for error in response body (e.g. cloud auth failure)
-                    if "error" in data:
-                        return LLMResponse(
-                            content="",
-                            model=model,
-                            provider="ollama",
-                            success=False,
-                            error=data["error"]
-                        )
-                    content = data.get("message", {}).get("content", "")
-                    if not content:
-                        return LLMResponse(
-                            content="",
-                            model=model,
-                            provider="ollama",
-                            success=False,
-                            error="Empty response from Ollama"
-                        )
-                    
-                    return LLMResponse(
-                        content=content,
-                        model=model,
-                        provider="ollama",
-                        latency_ms=(time.time() - start) * 1000,
-                        success=True
-                    )
-                else:
+                return r.status_code, r.json()
+            
+            status_code, data = await asyncio.to_thread(_sync_call)
+            
+            if status_code == 200:
+                if "error" in data:
                     return LLMResponse(
                         content="",
                         model=model,
                         provider="ollama",
                         success=False,
-                        error=f"Ollama returned {response.status_code}"
+                        error=data["error"]
                     )
+                content = data.get("message", {}).get("content", "")
+                if not content:
+                    return LLMResponse(
+                        content="",
+                        model=model,
+                        provider="ollama",
+                        success=False,
+                        error="Empty response from Ollama"
+                    )
+                
+                return LLMResponse(
+                    content=content,
+                    model=model,
+                    provider="ollama",
+                    latency_ms=(time.time() - start) * 1000,
+                    success=True
+                )
+            else:
+                return LLMResponse(
+                    content="",
+                    model=model,
+                    provider="ollama",
+                    success=False,
+                    error=f"Ollama returned {status_code}"
+                )
                     
         except Exception as e:
             logger.error(f"Ollama direct call error ({model}): {type(e).__name__}: {e}")
