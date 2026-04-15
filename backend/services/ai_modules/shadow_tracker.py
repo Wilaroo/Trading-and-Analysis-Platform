@@ -419,46 +419,70 @@ class ShadowTracker:
         }
         
     def get_stats(self) -> Dict[str, Any]:
-        """Get quick stats for dashboard"""
-        total = 0
-        executed = 0
-        outcomes_tracked = 0
-        wins = 0
-        avg_confidence = 0.0
+        """Get quick stats for dashboard — cached for 30s to avoid hammering MongoDB"""
+        now = __import__('time').monotonic()
 
-        if self._decisions_col is not None:
-            total = self._decisions_col.count_documents({})
-            executed = self._decisions_col.count_documents({"was_executed": True})
-            outcomes_tracked = self._decisions_col.count_documents({"outcome_tracked": True})
-            wins = self._decisions_col.count_documents({"outcome_tracked": True, "would_have_pnl": {"$gt": 0}})
+        # Return cached stats if fresh (< 30 seconds old)
+        if hasattr(self, '_stats_cache') and hasattr(self, '_stats_cache_time'):
+            if now - self._stats_cache_time < 30:
+                return self._stats_cache
 
-            # Average confidence from recent decisions (last 100)
-            try:
-                pipeline = [
-                    {"$sort": {"created_at": -1}},
-                    {"$limit": 100},
-                    {"$group": {"_id": None, "avg_conf": {"$avg": "$confidence_score"}}}
-                ]
-                agg = list(self._decisions_col.aggregate(pipeline))
-                if agg:
-                    avg_confidence = agg[0].get("avg_conf", 0) or 0
-            except Exception:
-                pass
-
-        shadow_only = total - executed
-        win_rate = (wins / outcomes_tracked * 100) if outcomes_tracked > 0 else 0
-
-        return {
-            "total_decisions": total,
-            "executed_decisions": executed,
-            "shadow_only": shadow_only,
-            "outcomes_tracked": outcomes_tracked,
-            "outcomes_pending": total - outcomes_tracked,
-            "wins": wins,
-            "win_rate": round(win_rate, 1),
-            "avg_confidence": round(avg_confidence, 2),
+        stats = {
+            "total_decisions": 0,
+            "executed_decisions": 0,
+            "shadow_only": 0,
+            "outcomes_tracked": 0,
+            "outcomes_pending": 0,
+            "wins": 0,
+            "win_rate": 0,
+            "avg_confidence": 0.0,
             "db_connected": self._db is not None
         }
+
+        if self._decisions_col is None:
+            return stats
+
+        try:
+            # Single aggregation pipeline instead of 4+ count_documents calls
+            pipeline = [
+                {"$group": {
+                    "_id": None,
+                    "total": {"$sum": 1},
+                    "executed": {"$sum": {"$cond": ["$was_executed", 1, 0]}},
+                    "tracked": {"$sum": {"$cond": ["$outcome_tracked", 1, 0]}},
+                    "wins": {"$sum": {"$cond": [
+                        {"$and": ["$outcome_tracked", {"$gt": ["$would_have_pnl", 0]}]},
+                        1, 0
+                    ]}},
+                    "avg_conf": {"$avg": "$confidence_score"},
+                }}
+            ]
+            result = list(self._decisions_col.aggregate(pipeline))
+            if result:
+                r = result[0]
+                total = r.get("total", 0)
+                executed = r.get("executed", 0)
+                tracked = r.get("tracked", 0)
+                wins = r.get("wins", 0)
+                avg_conf = r.get("avg_conf", 0) or 0
+
+                stats.update({
+                    "total_decisions": total,
+                    "executed_decisions": executed,
+                    "shadow_only": total - executed,
+                    "outcomes_tracked": tracked,
+                    "outcomes_pending": total - tracked,
+                    "wins": wins,
+                    "win_rate": round((wins / tracked * 100) if tracked > 0 else 0, 1),
+                    "avg_confidence": round(avg_conf, 2),
+                })
+        except Exception as e:
+            logger.warning(f"Shadow stats aggregation error: {e}")
+
+        # Cache it
+        self._stats_cache = stats
+        self._stats_cache_time = now
+        return stats
 
 
 # Singleton instance

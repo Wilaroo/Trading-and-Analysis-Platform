@@ -130,9 +130,10 @@ async def get_module_status():
     
     status = _module_config.get_status_summary()
     
-    # Add shadow tracker stats if available
+    # Add shadow tracker stats if available — run in thread to avoid blocking event loop
     if _shadow_tracker:
-        status["shadow_stats"] = _shadow_tracker.get_stats()
+        import asyncio
+        status["shadow_stats"] = await asyncio.to_thread(_shadow_tracker.get_stats)
     
     return {
         "success": True,
