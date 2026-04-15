@@ -82,59 +82,36 @@ echo.
 :: =====================================================
 :: STEP 2.5: STOP EXISTING SPARK SERVICES (clean restart)
 :: =====================================================
-echo [2.5] Stopping existing Spark services for clean restart...
-echo        Killing AI training subprocesses first (prevents OOM on restart)...
-ssh -n %SPARK_USER%@%SPARK_IP% "pkill -9 -f training_subprocess 2>/dev/null; pkill -9 -f 'training_pipeline' 2>/dev/null; exit" 2>nul
-timeout /t 2 /nobreak >nul
-echo        Killing backend, worker, frontend processes...
-ssh -n %SPARK_USER%@%SPARK_IP% "pkill -f 'python server.py' 2>/dev/null; pkill -f 'python worker.py' 2>/dev/null; pkill -f 'python3 worker.py' 2>/dev/null; pkill -f 'python3 -m uvicorn' 2>/dev/null; pkill -f 'node.*react-scripts' 2>/dev/null; pkill -f 'yarn start' 2>/dev/null; pkill firefox 2>/dev/null; exit" 2>nul
-echo        Kill signals sent. Waiting for clean shutdown (8 sec)...
-timeout /t 8 /nobreak >nul
-echo        Verifying no orphaned training processes...
-ssh -n %SPARK_USER%@%SPARK_IP% "if pgrep -f training_subprocess >/dev/null 2>&1; then echo '        [WARN] Stubborn training process found - force killing...' && pkill -9 -f training_subprocess 2>/dev/null && sleep 2; else echo '        All training processes terminated.'; fi; exit" 2>nul
-echo        Spark processes stopped.
-
-echo        Shrinking MongoDB cache to 16GB (frees RAM for training)...
-ssh -n %SPARK_USER%@%SPARK_IP% "sudo docker exec mongodb mongosh --quiet --eval \"db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})\" 2>/dev/null; exit" 2>nul
-echo        MongoDB cache configured.
+echo [2.5] Stopping existing Spark services (via spark_stop.sh)...
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && bash scripts/spark_stop.sh" 2>nul
+echo        Spark cleanup complete.
 echo.
 
 :: =====================================================
 :: STEP 3: START SPARK SERVICES (fresh)
 :: =====================================================
-echo [3/8] Starting DGX Spark services (fresh after git pull)...
+echo [3/8] Starting DGX Spark services (via spark_start.sh)...
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && bash scripts/spark_start.sh" 2>nul
+echo        Spark services started.
 
-echo        Starting Spark backend via SSH...
-start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python server.py > /tmp/backend.log 2>&1 < /dev/null &"
-
-echo        Waiting for backend startup (30 sec)...
-timeout /t 30 /nobreak >nul
-
+:: Quick Windows-side health verification
+echo        Verifying from Windows...
 set HEALTH_ATTEMPTS=0
 :spark_health_loop
 set /a HEALTH_ATTEMPTS+=1
-if %HEALTH_ATTEMPTS% GTR 15 (
-    echo        [WARN] Backend slow - continuing anyway
-    goto check_frontend
+if %HEALTH_ATTEMPTS% GTR 10 (
+    echo        [WARN] Backend not reachable from Windows - continuing anyway
+    goto after_spark_start
 )
 curl -s -f -m 3 %SPARK_BACKEND%/api/health >nul 2>&1
 if %errorlevel%==0 (
-    echo        Spark backend healthy!
-    goto check_frontend
+    echo        Spark backend reachable from Windows!
+    goto after_spark_start
 )
-echo        Waiting... (%HEALTH_ATTEMPTS%/15)
-timeout /t 3 /nobreak >nul
+timeout /t 2 /nobreak >nul
 goto spark_health_loop
 
-:check_frontend
-echo        Starting Spark frontend via SSH...
-start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/frontend && nohup yarn start > /tmp/frontend.log 2>&1 < /dev/null &"
-echo        Frontend starting (compiles in ~20 sec)...
-
-:check_worker
-echo        Starting Spark worker via SSH...
-start "" /b ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO%/backend && source ~/venv/bin/activate && nohup python worker.py > /tmp/worker.log 2>&1 < /dev/null &"
-echo        Worker started
+:after_spark_start
 echo.
 
 :: =====================================================

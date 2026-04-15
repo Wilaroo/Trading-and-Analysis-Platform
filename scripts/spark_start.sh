@@ -1,9 +1,9 @@
 #!/bin/bash
 # SentCom DGX Spark — Clean Start
-# Kills orphans, then starts backend + frontend
-# Usage: bash spark_start.sh [--skip-frontend]
+# Kills orphans first, then starts backend + worker + frontend
+# Called by: .bat file (via SSH), or directly on Spark
+# Usage: bash scripts/spark_start.sh [--skip-frontend]
 
-set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 BACKEND_DIR="$REPO_DIR/backend"
@@ -19,29 +19,30 @@ echo "  SentCom — Starting DGX Spark Services"
 echo "========================================="
 
 # Step 1: Clean kill any orphans from previous session
-echo "[1/5] Cleaning up orphaned processes..."
+echo "[1/6] Cleaning up orphaned processes..."
 bash "$SCRIPT_DIR/spark_stop.sh" 2>/dev/null || true
 sleep 2
 echo ""
 
 # Step 2: Verify MongoDB is running
-echo "[2/5] Checking MongoDB..."
-if docker ps | grep -q mongodb; then
+echo "[2/6] Checking MongoDB..."
+if docker ps 2>/dev/null | grep -q mongodb; then
     echo "  MongoDB container is running"
-    # Shrink WiredTiger cache to 16GB (frees RAM for training)
-    sudo docker exec mongodb mongosh --quiet --eval \
-        "db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})" 2>/dev/null \
-        && echo "  MongoDB cache set to 16GB" \
-        || echo "  [WARN] Could not configure MongoDB cache"
 else
-    echo "  [ERROR] MongoDB container not running! Start it with:"
-    echo "  sudo docker start mongodb"
-    exit 1
+    echo "  [ERROR] MongoDB container not running! Starting..."
+    sudo docker start mongodb 2>/dev/null
+    sleep 3
+    if docker ps 2>/dev/null | grep -q mongodb; then
+        echo "  MongoDB started successfully"
+    else
+        echo "  [FATAL] Cannot start MongoDB. Run: sudo docker start mongodb"
+        exit 1
+    fi
 fi
 echo ""
 
 # Step 3: Activate venv
-echo "[3/5] Activating Python environment..."
+echo "[3/6] Activating Python environment..."
 if [ -f ~/venv/bin/activate ]; then
     source ~/venv/bin/activate
     echo "  Activated ~/venv"
@@ -54,7 +55,7 @@ fi
 echo ""
 
 # Step 4: Start backend
-echo "[4/5] Starting backend server..."
+echo "[4/6] Starting backend server..."
 cd "$BACKEND_DIR"
 nohup python server.py > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
@@ -62,33 +63,49 @@ echo "  Backend PID: $BACKEND_PID (log: /tmp/backend.log)"
 
 # Wait for health check
 echo "  Waiting for backend to be healthy..."
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
     if curl -sf http://localhost:8001/api/health > /dev/null 2>&1; then
-        echo "  Backend healthy after ${i}s!"
+        echo "  Backend healthy after ${i}s"
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        echo "  [WARN] Backend not healthy after 30s — check /tmp/backend.log"
+    if [ "$i" -eq 45 ]; then
+        echo "  [WARN] Backend not healthy after 45s — check: tail -f /tmp/backend.log"
     fi
     sleep 1
 done
 echo ""
 
-# Step 5: Start frontend (optional)
+# Step 5: Start worker
+echo "[5/6] Starting worker..."
+cd "$BACKEND_DIR"
+nohup python worker.py > /tmp/worker.log 2>&1 &
+WORKER_PID=$!
+echo "  Worker PID: $WORKER_PID (log: /tmp/worker.log)"
+echo ""
+
+# Step 6: Start frontend (optional)
 if [ "$SKIP_FRONTEND" = false ]; then
-    echo "[5/5] Starting frontend..."
+    echo "[6/6] Starting frontend..."
     cd "$FRONTEND_DIR"
     nohup yarn start > /tmp/frontend.log 2>&1 &
     FRONTEND_PID=$!
     echo "  Frontend PID: $FRONTEND_PID (log: /tmp/frontend.log)"
 else
-    echo "[5/5] Skipping frontend (--skip-frontend)"
+    echo "[6/6] Skipping frontend (--skip-frontend)"
 fi
 echo ""
 
 echo "========================================="
 echo "  SentCom — Startup Complete"
-echo "  Backend:  http://localhost:8001"
-echo "  Frontend: http://localhost:3000"
-echo "  Logs:     tail -f /tmp/backend.log"
+echo "========================================="
+echo "  Backend:  http://localhost:8001  (PID $BACKEND_PID)"
+echo "  Worker:   Background jobs        (PID $WORKER_PID)"
+if [ "$SKIP_FRONTEND" = false ]; then
+echo "  Frontend: http://localhost:3000  (PID ${FRONTEND_PID:-N/A})"
+fi
+echo ""
+echo "  Logs:"
+echo "    tail -f /tmp/backend.log"
+echo "    tail -f /tmp/worker.log"
+echo "    tail -f /tmp/frontend.log"
 echo "========================================="
