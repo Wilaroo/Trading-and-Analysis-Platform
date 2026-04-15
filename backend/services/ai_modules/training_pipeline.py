@@ -2237,46 +2237,57 @@ async def run_training_pipeline(
                             highs = np.array([b["high"] for b in bars], dtype=np.float32)
                             lows = np.array([b["low"] for b in bars], dtype=np.float32)
 
-                            # Compute 20-day rolling average volume
-                            avg_vol_20 = np.convolve(volumes, np.ones(20) / 20, mode='full')[:len(volumes)]
-
-                            # ATR proxy (10-period)
-                            tr = np.maximum(highs - lows, np.abs(highs - np.roll(closes, 1)), np.abs(lows - np.roll(closes, 1)))
-                            atr_10 = np.convolve(tr, np.ones(10) / 10, mode='full')[:len(tr)]
-
                             gap_max_rows = len(bars) - 50 - max_bars
                             if gap_max_rows <= 0:
                                 continue
+
+                            # Pre-compute reversed sliding windows for MRF arrays
+                            from numpy.lib.stride_tricks import sliding_window_view as _swv
+                            if len(closes) >= 50:
+                                c_wins_mrf = _swv(closes, 50)[:, ::-1]
+                                h_wins_mrf = _swv(highs, 50)[:, ::-1]
+                                l_wins_mrf = _swv(lows, 50)[:, ::-1]
+                                v_wins_mrf = _swv(volumes, 50)[:, ::-1]
+                            else:
+                                continue
+
+                            # Vectorize gap detection: find bars with meaningful gaps
+                            gap_pcts = np.zeros(len(bars), dtype=np.float32)
+                            with np.errstate(divide='ignore', invalid='ignore'):
+                                gap_pcts[1:] = np.where(
+                                    closes[:-1] > 0,
+                                    np.abs(opens[1:] - closes[:-1]) / closes[:-1],
+                                    0.0,
+                                )
 
                             X_buf = np.empty((gap_max_rows, n_base + n_gap), dtype=np.float32)
                             y_buf = np.empty(gap_max_rows, dtype=np.float32)
                             valid = 0
 
                             for i in range(50, len(bars) - max_bars):
-                                # Check for a gap (open != previous close)
-                                if i < 1:
+                                if gap_pcts[i] < 0.002:
                                     continue
+
                                 prev_close = closes[i - 1]
                                 today_open = opens[i]
-                                gap_pct = abs(today_open - prev_close) / prev_close if prev_close > 0 else 0
 
-                                # Only train on meaningful gaps (> 0.2%)
-                                if gap_pct < 0.002:
+                                # Pass correct MRF window arrays as the function expects
+                                win_idx = i - 49  # c_wins_mrf[win_idx] = closes[i-49:i+1][::-1]
+                                if win_idx < 0 or win_idx >= len(c_wins_mrf):
                                     continue
 
-                                # Compute gap-specific features
                                 gap_feats = compute_gap_features(
                                     today_open=today_open,
                                     today_close_bar1=closes[i],
                                     today_volume_bar1=volumes[i],
                                     prev_day_open=opens[i - 1],
-                                    prev_day_close=prev_close,
                                     prev_day_high=highs[i - 1],
                                     prev_day_low=lows[i - 1],
-                                    avg_volume_20=avg_vol_20[i] if avg_vol_20[i] > 0 else 1.0,
-                                    atr_10=atr_10[i] if atr_10[i] > 0 else 0.01,
-                                    recent_high_20=float(np.max(highs[max(0, i - 20):i])),
-                                    recent_low_20=float(np.min(lows[max(0, i - 20):i])),
+                                    prev_day_close=prev_close,
+                                    daily_closes=c_wins_mrf[win_idx],
+                                    daily_highs=h_wins_mrf[win_idx],
+                                    daily_lows=l_wins_mrf[win_idx],
+                                    daily_volumes=v_wins_mrf[win_idx],
                                 )
 
                                 # Compute target: did the gap fill?
