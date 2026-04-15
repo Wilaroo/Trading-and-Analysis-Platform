@@ -55,9 +55,8 @@ class OllamaProvider(BaseLLMProvider):
     """Ollama provider - direct local connection"""
     
     # Dedicated thread pool for LLM calls — immune to main pool exhaustion
-    _llm_pool = __import__('concurrent.futures').ThreadPoolExecutor(
-        max_workers=4, thread_name_prefix="llm"
-    )
+    import concurrent.futures as _cf
+    _llm_pool = _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm")
     
     def __init__(self):
         # Direct Ollama URL — use 127.0.0.1 (not localhost) to avoid IPv6 hang

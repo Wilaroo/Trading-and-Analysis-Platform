@@ -3906,7 +3906,8 @@ async def llm_test_direct():
     
     try:
         loop = asyncio.get_event_loop()
-        _test_pool = __import__('concurrent.futures').ThreadPoolExecutor(max_workers=2, thread_name_prefix="llm-test")
+        import concurrent.futures
+        _test_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="llm-test")
         data = await loop.run_in_executor(_test_pool, _call)
         content = data.get("message", {}).get("content", "no content")
         return JSONResponse(content={"ok": True, "response": content, "model": model})
