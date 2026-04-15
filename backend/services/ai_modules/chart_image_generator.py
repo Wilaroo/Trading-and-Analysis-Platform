@@ -197,7 +197,7 @@ def generate_training_images_from_bars(
             noise_threshold = p.get("noise_threshold", 0.003)
             break
 
-    bars_col = db["historical_bars"]
+    bars_col = db["ib_historical_data"]
 
     # Get distinct symbols with enough bars
     pipeline = [
@@ -330,7 +330,7 @@ def generate_live_chart_tensor(db, symbol: str, bar_size: str, window_size: int 
     Returns:
         (tensor, metadata) or (None, None) if insufficient data
     """
-    bars_col = db["historical_bars"]
+    bars_col = db["ib_historical_data"]
 
     cursor = bars_col.find(
         {"symbol": symbol, "bar_size": bar_size},
