@@ -57,9 +57,10 @@ class OllamaProvider(BaseLLMProvider):
     def __init__(self):
         # Direct Ollama URL from environment
         self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        # Primary model: GPT-OSS cloud, Fallback: llama3.5 8b local
+        # Primary model: GPT-OSS 120B cloud (best reasoning, zero GPU cost)
         self.default_model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
-        self.fallback_model = "llama3:8b"  # Local fallback
+        # Local fallback: Qwen3 30B (strong reasoning + tool calling, runs on GB10)
+        self.fallback_model = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
         # Track if we should use the proxy
         self._use_proxy = True
     
@@ -254,8 +255,9 @@ class OllamaProvider(BaseLLMProvider):
         start = time.time()
         
         try:
-            # Direct Ollama API call with shorter timeout for quick failure
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            # Direct Ollama API call — longer timeout for local models (30B can take 30-60s)
+            timeout = 90.0 if "cloud" not in model else 30.0
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 # Format messages
                 messages = []
                 if system_prompt:
@@ -307,7 +309,7 @@ class OllamaProvider(BaseLLMProvider):
             )
     
     def get_available_models(self) -> List[str]:
-        return ["gpt-oss:120b-cloud", "llama3:8b", "mistral:7b"]
+        return ["gpt-oss:120b-cloud", "qwen3:30b", "llama3.3:70b"]
 
 
 class OpenAIProvider(BaseLLMProvider):
