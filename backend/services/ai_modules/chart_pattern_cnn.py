@@ -252,7 +252,7 @@ def list_cnn_models(db) -> List[Dict]:
     """List all saved CNN models with their metrics."""
     col = db["cnn_models"]
     models = []
-    for doc in col.find({}, {"model_weights": 0, "_id": 0}):
+    for doc in col.find({}, {"model_weights": 0, "model_weights_zlib": 0, "gridfs_file_id": 0, "_id": 0}):
         models.append(doc)
     return models
 

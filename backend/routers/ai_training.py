@@ -717,10 +717,16 @@ async def get_model_inventory():
                 "group": "support",
                 "models": [],
             },
-            "finbert": {
+            "finbert_sentiment": {
                 "label": "FinBERT Sentiment",
                 "description": "Pre-trained news sentiment scoring (bullish/bearish/neutral)",
                 "group": "support",
+                "models": [],
+            },
+            "cnn_patterns": {
+                "label": "CNN Visual Patterns",
+                "description": "ResNet18 chart pattern recognition (WIN/LOSS/SCRATCH from candlestick images)",
+                "group": "signal",
                 "models": [],
             },
         }
@@ -786,8 +792,8 @@ async def get_model_inventory():
         # Deep Learning models (Phase 11)
         DL_MODELS = [
             {"name": "vae_regime_detector", "description": "VAE market regime labeling (5 regimes)"},
-            {"name": "temporal_fusion_transformer", "description": "TFT cross-timeframe attention"},
-            {"name": "cnn_lstm_sequential", "description": "CNN-LSTM temporal pattern recognition"},
+            {"name": "tft_multi_timeframe", "description": "TFT cross-timeframe attention"},
+            {"name": "cnn_lstm_chart", "description": "CNN-LSTM temporal pattern recognition"},
         ]
         for dl in DL_MODELS:
             name = dl["name"]
@@ -801,9 +807,16 @@ async def get_model_inventory():
                         dl_trained = True
                         metrics = dl_doc.get("metrics", {})
                         dl_info = {
-                            "accuracy": metrics.get("accuracy", dl_doc.get("accuracy", 0)),
-                            "training_samples": metrics.get("training_samples", 0),
-                            "promoted_at": dl_doc.get("saved_at", ""),
+                            "accuracy": metrics.get("accuracy",
+                                        dl_doc.get("accuracy",
+                                        dl_doc.get("val_accuracy", 0))),
+                            "training_samples": (metrics.get("training_samples", 0)
+                                                or dl_doc.get("training_samples", 0)),
+                            "promoted_at": dl_doc.get("saved_at",
+                                          dl_doc.get("updated_at",
+                                          dl_doc.get("trained_at", ""))),
+                            "model_type": dl_doc.get("model_type", "deep_learning"),
+                            "version": dl_doc.get("version", ""),
                         }
                 except Exception:
                     pass
@@ -818,24 +831,52 @@ async def get_model_inventory():
         finbert_info = {}
         if mongo_db is not None:
             try:
-                sent_count = mongo_db["finbert_sentiment"].count_documents({})
+                # FinBERT saves scored articles to news_sentiment collection
+                sent_count = mongo_db["news_sentiment"].count_documents({})
+                if sent_count == 0:
+                    # Also check news_articles for raw collection
+                    sent_count = mongo_db["news_articles"].count_documents({"sentiment_score": {"$exists": True}})
                 if sent_count > 0:
                     finbert_trained = True
-                    latest = mongo_db["finbert_sentiment"].find_one(
-                        {}, {"_id": 0, "analyzed_at": 1}, sort=[("analyzed_at", -1)]
+                    latest = mongo_db["news_sentiment"].find_one(
+                        {}, {"_id": 0, "datetime": 1, "date": 1}, sort=[("datetime", -1)]
                     )
                     finbert_info = {
                         "articles_scored": sent_count,
-                        "promoted_at": str(latest.get("analyzed_at", "")) if latest else "",
+                        "promoted_at": str(latest.get("datetime", latest.get("date", ""))) if latest else "",
                     }
             except Exception:
                 pass
-        categories["finbert"]["models"].append({
+        categories["finbert_sentiment"]["models"].append({
             "name": "finbert_news_sentiment",
             "description": "Scores news articles via ProsusAI/finbert for market sentiment",
             "trained": finbert_trained,
             **finbert_info,
         })
+
+        # CNN Visual Patterns — from cnn_models collection
+        try:
+            if mongo_db is not None:
+                cnn_docs = list(mongo_db["cnn_models"].find(
+                    {},
+                    {"_id": 0, "gridfs_file_id": 0}
+                ).sort("trained_at", -1))
+                for doc in cnn_docs:
+                    metrics = doc.get("metrics", {})
+                    categories["cnn_patterns"]["models"].append({
+                        "name": doc.get("model_name", ""),
+                        "setup_type": doc.get("setup_type", ""),
+                        "bar_size": doc.get("bar_size", ""),
+                        "trained": True,
+                        "accuracy": metrics.get("accuracy", 0),
+                        "win_auc": metrics.get("win_auc", 0),
+                        "test_samples": metrics.get("test_samples", 0),
+                        "promoted_at": doc.get("trained_at", ""),
+                        "model_type": "cnn_resnet18",
+                        "size_mb": doc.get("size_mb", 0),
+                    })
+        except Exception:
+            pass
 
         # Summary stats
         total_defined = sum(len(c["models"]) for c in categories.values())

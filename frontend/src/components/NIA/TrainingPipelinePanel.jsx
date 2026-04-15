@@ -55,11 +55,11 @@ const ALL_PHASES = [
   { key: 'volatility_prediction', label: 'Volatility Prediction', num: '3', expected: 7 },
   { key: 'exit_timing', label: 'Exit Timing', num: '4', expected: 10 },
   { key: 'sector_relative', label: 'Sector-Relative', num: '5', expected: 3 },
-  { key: 'gap_fill', label: 'Gap Fill Probability', num: '5.5', expected: 7 },
+  { key: 'gap_fill', label: 'Gap Fill Probability', num: '5.5', expected: 3 },
   { key: 'risk_of_ruin', label: 'Risk-of-Ruin', num: '6', expected: 6 },
   { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
   { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
-  { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 13 },
+  { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 34 },
   { key: 'deep_learning', label: 'Deep Learning (VAE/TFT/CNN-LSTM)', num: '11', expected: 3 },
   { key: 'finbert_sentiment', label: 'FinBERT Sentiment', num: '12', expected: 1 },
   { key: 'auto_validation', label: 'Auto-Validation', num: '13', expected: 34 },
@@ -736,12 +736,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all ${cnnModels.length > 0 ? 'bg-fuchsia-500' : 'bg-zinc-700'}`} style={{ width: `${(cnnModels.length / 20) * 100}%` }} />
+                      <div className={`h-full rounded-full transition-all ${cnnModels.length > 0 ? 'bg-fuchsia-500' : 'bg-zinc-700'}`} style={{ width: `${Math.min((cnnModels.length / 34) * 100, 100)}%` }} />
                     </div>
-                    <span className={`text-[10px] font-mono w-10 text-right ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-600'}`}>{cnnModels.length}/20</span>
+                    <span className={`text-[10px] font-mono w-10 text-right ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-600'}`}>{cnnModels.length}/34</span>
                     {cnnModels.length > 0 && (
                       <span className="text-[10px] font-mono text-zinc-500 w-12 text-right">
-                        {(cnnModels.reduce((s, m) => s + (m.metrics?.accuracy || 0), 0) / cnnModels.length * 100).toFixed(1)}%
+                        {(cnnModels.reduce((s, m) => s + (m.metrics?.win_auc || m.win_auc || 0), 0) / cnnModels.length * 100).toFixed(1)}%
                       </span>
                     )}
                   </div>
