@@ -114,6 +114,35 @@ async def get_stream(limit: int = Query(20, ge=1, le=100)):
         }
 
 
+
+@router.post("/chat-test")
+async def chat_test(request: ChatRequest):
+    """Quick diagnostic: tests LLM directly, bypasses orchestrator"""
+    import time
+    start = time.time()
+    try:
+        from agents.llm_provider import get_llm_provider
+        llm = get_llm_provider()
+        logger.info(f"[CHAT-TEST] Calling LLM with model: {llm.get_provider('ollama').default_model}")
+        response = await llm.generate(
+            prompt=request.message,
+            system_prompt="You are a helpful trading assistant. Be brief.",
+            max_tokens=200
+        )
+        latency = (time.time() - start) * 1000
+        logger.info(f"[CHAT-TEST] LLM responded: success={response.success}, model={response.model}, latency={latency:.0f}ms")
+        return {
+            "success": response.success,
+            "response": response.content,
+            "model": response.model,
+            "error": response.error,
+            "latency_ms": latency
+        }
+    except Exception as e:
+        logger.error(f"[CHAT-TEST] Error: {type(e).__name__}: {e}")
+        return {"success": False, "error": f"{type(e).__name__}: {e}", "latency_ms": (time.time() - start) * 1000}
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
