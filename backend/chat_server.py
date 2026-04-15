@@ -58,72 +58,85 @@ class ChatHistory(BaseModel):
 
 
 def _get_portfolio_context() -> str:
-    """Build portfolio context from MongoDB (sync, fast)"""
+    """Build portfolio context by fetching from main backend + MongoDB"""
     parts = []
+    
+    # Get live positions from main backend (in-memory, fast)
     try:
-        # Positions from IB pushed data
-        pushed = db["ib_pushed_data"].find_one(
-            {"data_type": "positions"}, {"_id": 0},
-            sort=[("pushed_at", -1)]
-        )
-        if pushed and pushed.get("data"):
-            pos_lines = []
-            for p in pushed["data"][:10]:
-                symbol = p.get("symbol", "?")
-                qty = p.get("quantity", p.get("position", 0))
-                direction = "LONG" if qty > 0 else "SHORT"
-                avg = p.get("avgCost", p.get("avg_cost", 0))
-                mkt = p.get("marketPrice", p.get("market_price", avg))
-                pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
-                pos_lines.append(
-                    f"  {symbol} ({direction}): {abs(qty):.0f} shares @ ${avg:.2f}, "
-                    f"current ${mkt:.2f}, P&L ${pnl:+,.2f}"
-                )
-            if pos_lines:
-                total_pnl = sum(
-                    p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
-                    for p in pushed["data"][:10]
-                )
+        r = requests.get("http://127.0.0.1:8001/api/ib/pushed-data", timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            positions = data.get("positions", [])
+            quotes = data.get("quotes", {})
+            
+            if positions:
+                pos_lines = []
+                total_pnl = 0
+                for p in positions[:10]:
+                    symbol = p.get("symbol", "?")
+                    qty = p.get("quantity", p.get("position", 0))
+                    direction = "LONG" if qty > 0 else "SHORT"
+                    avg = p.get("avgCost", p.get("avg_cost", 0))
+                    mkt = p.get("marketPrice", p.get("market_price", avg))
+                    pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
+                    total_pnl += pnl
+                    
+                    # Try to get latest quote
+                    quote = quotes.get(symbol, {})
+                    if quote:
+                        mkt = quote.get("last", quote.get("close", mkt))
+                    
+                    pos_lines.append(
+                        f"  {symbol} ({direction}): {abs(qty):.0f} shares @ ${avg:.2f}, "
+                        f"current ${mkt:.2f}, P&L ${pnl:+,.2f}"
+                    )
                 parts.append(
                     f"Current Positions ({len(pos_lines)}):\n"
                     + "\n".join(pos_lines)
                     + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
                 )
-
-        # Recent confidence gate decisions
-        try:
-            recent = list(
-                db["shadow_decisions"]
-                .find({}, {"_id": 0, "symbol": 1, "combined_recommendation": 1, "confidence_score": 1})
-                .sort("created_at", -1)
-                .limit(5)
-            )
-            if recent:
-                gate_lines = [
-                    f"  {r.get('symbol','?')}: {r.get('combined_recommendation','?').upper()} "
-                    f"(score: {r.get('confidence_score', 0)})"
-                    for r in recent
-                ]
-                parts.append("Recent AI Gate Decisions:\n" + "\n".join(gate_lines))
-        except Exception:
-            pass
-
-        # Market regime
-        try:
-            regime = db["market_regime_snapshots"].find_one(
-                {}, {"_id": 0, "state": 1, "composite_score": 1},
-                sort=[("timestamp", -1)]
-            )
-            if regime:
-                parts.append(
-                    f"Market Regime: {regime.get('state', 'UNKNOWN')} "
-                    f"(score: {regime.get('composite_score', 0):.1f})"
-                )
-        except Exception:
-            pass
-
+            
+            # Account data
+            account = data.get("account", {})
+            if account:
+                netliq = account.get("NetLiquidation", account.get("net_liquidation", ""))
+                buying = account.get("BuyingPower", account.get("buying_power", ""))
+                if netliq:
+                    parts.append(f"Account: Net Liq ${float(netliq):,.2f}" + (f", Buying Power ${float(buying):,.2f}" if buying else ""))
     except Exception as e:
-        parts.append(f"(Portfolio data unavailable: {e})")
+        logger.warning(f"Failed to get positions from backend: {e}")
+
+    # Get AI decisions from MongoDB
+    try:
+        recent = list(
+            db["shadow_decisions"]
+            .find({}, {"_id": 0, "symbol": 1, "combined_recommendation": 1, "confidence_score": 1})
+            .sort("created_at", -1)
+            .limit(5)
+        )
+        if recent:
+            gate_lines = [
+                f"  {r.get('symbol','?')}: {r.get('combined_recommendation','?').upper()} "
+                f"(score: {r.get('confidence_score', 0)})"
+                for r in recent
+            ]
+            parts.append("Recent AI Gate Decisions:\n" + "\n".join(gate_lines))
+    except Exception:
+        pass
+
+    # Market regime from MongoDB
+    try:
+        regime = db["market_regime_snapshots"].find_one(
+            {}, {"_id": 0, "state": 1, "composite_score": 1},
+            sort=[("timestamp", -1)]
+        )
+        if regime:
+            parts.append(
+                f"Market Regime: {regime.get('state', 'UNKNOWN')} "
+                f"(score: {regime.get('composite_score', 0):.1f})"
+            )
+    except Exception:
+        pass
 
     return "\n\n".join(parts) if parts else "No portfolio data available."
 
