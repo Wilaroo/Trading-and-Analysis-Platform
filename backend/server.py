@@ -2665,7 +2665,7 @@ async def stream_system_status():
             try:
                 # IB Connection Status
                 try:
-                    ib_status = ib_service.get_connection_status()
+                    ib_status = await asyncio.to_thread(ib_service.get_connection_status)
                     ib_data = {
                         "connected": ib_status.get("connected", False),
                         "busy": ib_status.get("busy", False),
@@ -2684,7 +2684,7 @@ async def stream_system_status():
                 
                 # Trading Bot Status
                 try:
-                    bot_status = trading_bot.get_status()
+                    bot_status = await asyncio.to_thread(trading_bot.get_status)
                     bot_data = {
                         "state": bot_status.get("state", "unknown"),
                         "mode": bot_status.get("mode", "manual"),
@@ -2708,7 +2708,7 @@ async def stream_system_status():
                 
                 # Scanner Status
                 try:
-                    scanner_status = background_scanner.get_stats()
+                    scanner_status = await asyncio.to_thread(background_scanner.get_stats)
                     scanner_data = {
                         "running": scanner_status.get("running", False),
                         "scan_count": scanner_status.get("scan_count", 0),
@@ -3124,8 +3124,8 @@ async def stream_sentcom_data():
                     from services.sentcom_engine import get_sentcom_engine
                     engine = get_sentcom_engine()
                     if engine:
-                        sentcom_data["status"] = engine.get_status()
-                        sentcom_data["stream"] = engine.get_stream(limit=50)
+                        sentcom_data["status"] = await asyncio.to_thread(engine.get_status)
+                        sentcom_data["stream"] = await asyncio.to_thread(engine.get_stream, 50)
                 except Exception:
                     pass
                 # Positions from IB pushed data
@@ -3145,7 +3145,7 @@ async def stream_sentcom_data():
                     from services.market_context_service import get_market_context_service
                     mcs = get_market_context_service()
                     if mcs:
-                        sentcom_data["market_context"] = mcs.get_snapshot()
+                        sentcom_data["market_context"] = await asyncio.to_thread(mcs.get_snapshot)
                 except Exception:
                     pass
 
@@ -3349,7 +3349,7 @@ async def startup_event():
     
     # Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()
-    loop.set_default_executor(ThreadPoolExecutor(max_workers=64))
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=8))
     loop.slow_callback_duration = 0.5  # Log warning if a callback takes >500ms
     
     # Start WebSocket streaming tasks (lightweight, non-blocking)
