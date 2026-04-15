@@ -181,7 +181,7 @@ def _train_single_model(
     from torch.utils.data import Dataset, DataLoader, random_split
     from services.ai_modules.chart_pattern_cnn import (
         build_cnn_model, save_model_to_db, load_model_from_db,
-        CLASS_TO_IDX, MIN_ACCURACY_THRESHOLD,
+        CLASS_TO_IDX,
         CNN_IMAGE_SIZE
     )
     from services.ai_modules.chart_image_generator import image_bytes_to_tensor
