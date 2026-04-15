@@ -168,11 +168,10 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **Expected pipeline impact:** All inner per-bar loops across Phases 2-7 now use pre-computed windows and vectorized targets. Total pipeline runtime should drop from hours to well under an hour.
 
 ## Upcoming Tasks
-- Phase 5g: RL Position Sizer (needs trade outcome data)
-- Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
-- Phase 7: Infrastructure Polish (systemd, notifications, symbol rotation)
-- FinBERT UI panel in NIA
-- Activate FinBERT as Gate Layer 12
+- Fix the remaining startup UI (TrainingPipelinePanel should show all 150+ models including CNN/DL)
+- Live confidence gate display in NIA dashboard
+- SentCom real-time signal display + trade execution monitoring
+- Phase 5e: RL Position Sizer (needs trade outcome data)
 - Per-signal weight optimizer
 - Deprecate/remove `ollama_proxy_manager.py` (native Ollama on Spark replaces it)
 

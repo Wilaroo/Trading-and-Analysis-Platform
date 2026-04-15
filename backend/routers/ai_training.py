@@ -418,21 +418,52 @@ async def is_training_active():
 
 @router.get("/models")
 async def list_trained_models():
-    """List all trained models with their metrics."""
+    """List ALL trained models across all collections (XGBoost, CNN, DL)."""
     try:
         from server import db as mongo_db
         if mongo_db is None:
             raise HTTPException(status_code=503, detail="Database not connected")
 
-        models = list(mongo_db["timeseries_models"].find(
+        all_models = []
+
+        # XGBoost models (timeseries_models)
+        xgb_models = list(mongo_db["timeseries_models"].find(
             {},
-            {"_id": 0, "model_data": 0}  # Exclude heavy binary data
+            {"_id": 0, "model_data": 0, "xgboost_json_zlib": 0}
         ).sort("promoted_at", -1))
+        for m in xgb_models:
+            m["model_type"] = m.get("model_type", "xgboost")
+            m["source"] = "timeseries_models"
+        all_models.extend(xgb_models)
+
+        # CNN models
+        cnn_models = list(mongo_db["cnn_models"].find(
+            {},
+            {"_id": 0, "gridfs_file_id": 0}
+        ).sort("trained_at", -1))
+        for m in cnn_models:
+            m["model_type"] = "cnn_resnet18"
+            m["source"] = "cnn_models"
+        all_models.extend(cnn_models)
+
+        # Deep Learning models (VAE, TFT, CNN-LSTM)
+        dl_models = list(mongo_db["dl_models"].find(
+            {},
+            {"_id": 0, "model_data": 0}
+        ).sort("trained_at", -1))
+        for m in dl_models:
+            m["source"] = "dl_models"
+        all_models.extend(dl_models)
 
         return {
             "success": True,
-            "count": len(models),
-            "models": models,
+            "count": len(all_models),
+            "breakdown": {
+                "xgboost": len(xgb_models),
+                "cnn": len(cnn_models),
+                "deep_learning": len(dl_models),
+            },
+            "models": all_models,
         }
 
     except Exception as e:
