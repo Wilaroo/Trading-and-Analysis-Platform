@@ -58,12 +58,13 @@ class ChatHistory(BaseModel):
 
 
 def _get_portfolio_context() -> str:
-    """Build portfolio context by fetching from main backend + MongoDB"""
+    """Build rich portfolio context by fetching from main backend + MongoDB"""
     parts = []
+    backend = "http://127.0.0.1:8001"
     
-    # Get live positions from main backend (in-memory, fast)
+    # 1. Live positions from main backend (in-memory, fast)
     try:
-        r = requests.get("http://127.0.0.1:8001/api/ib/pushed-data", timeout=5)
+        r = requests.get(f"{backend}/api/ib/pushed-data", timeout=5)
         if r.status_code == 200:
             data = r.json()
             positions = data.get("positions", [])
@@ -81,7 +82,6 @@ def _get_portfolio_context() -> str:
                     pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
                     total_pnl += pnl
                     
-                    # Try to get latest quote
                     quote = quotes.get(symbol, {})
                     if quote:
                         mkt = quote.get("last", quote.get("close", mkt))
@@ -96,7 +96,6 @@ def _get_portfolio_context() -> str:
                     + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
                 )
             
-            # Account data
             account = data.get("account", {})
             if account:
                 netliq = account.get("NetLiquidation", account.get("net_liquidation", ""))
@@ -106,7 +105,43 @@ def _get_portfolio_context() -> str:
     except Exception as e:
         logger.warning(f"Failed to get positions from backend: {e}")
 
-    # Get AI decisions from MongoDB
+    # 2. Scanner alerts (what the AI scanner is seeing right now)
+    try:
+        r = requests.get(f"{backend}/api/scanner/alerts?limit=10", timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            alerts = data.get("alerts", data) if isinstance(data, dict) else data
+            if isinstance(alerts, list) and alerts:
+                alert_lines = []
+                for a in alerts[:8]:
+                    sym = a.get("symbol", "?")
+                    setup = a.get("setup_type", a.get("pattern", ""))
+                    score = a.get("score", a.get("confidence", ""))
+                    alert_lines.append(f"  {sym}: {setup}" + (f" (score: {score})" if score else ""))
+                parts.append("Scanner Alerts (live):\n" + "\n".join(alert_lines))
+    except Exception:
+        pass
+
+    # 3. Bot status (trading mode, today's stats)
+    try:
+        r = requests.get(f"{backend}/api/ai-training/confidence-gate/summary", timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("success"):
+                mode = data.get("trading_mode", "unknown")
+                reason = data.get("mode_reason", "")
+                today = data.get("today", {})
+                evaluated = today.get("evaluated", 0)
+                taken = today.get("taken", 0)
+                skipped = today.get("skipped", 0)
+                parts.append(
+                    f"Trading Mode: {mode.upper()}" + (f" ({reason})" if reason else "")
+                    + f"\nToday's Gate: {evaluated} evaluated, {taken} taken, {skipped} skipped"
+                )
+    except Exception:
+        pass
+
+    # 4. AI gate decisions (from MongoDB)
     try:
         recent = list(
             db["shadow_decisions"]
@@ -124,7 +159,7 @@ def _get_portfolio_context() -> str:
     except Exception:
         pass
 
-    # Market regime from MongoDB
+    # 5. Market regime (from MongoDB)
     try:
         regime = db["market_regime_snapshots"].find_one(
             {}, {"_id": 0, "state": 1, "composite_score": 1},
@@ -134,6 +169,54 @@ def _get_portfolio_context() -> str:
             parts.append(
                 f"Market Regime: {regime.get('state', 'UNKNOWN')} "
                 f"(score: {regime.get('composite_score', 0):.1f})"
+            )
+    except Exception:
+        pass
+
+    # 6. Recent trade history (from MongoDB)
+    try:
+        recent_trades = list(
+            db["trades"]
+            .find({}, {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
+                       "exit_price": 1, "pnl": 1, "status": 1, "setup_type": 1,
+                       "entry_time": 1, "exit_time": 1})
+            .sort("entry_time", -1)
+            .limit(10)
+        )
+        if recent_trades:
+            trade_lines = []
+            wins = sum(1 for t in recent_trades if (t.get("pnl") or 0) > 0)
+            total = len(recent_trades)
+            for t in recent_trades[:5]:
+                sym = t.get("symbol", "?")
+                direction = t.get("direction", "?")
+                pnl = t.get("pnl", 0)
+                status = t.get("status", "?")
+                setup = t.get("setup_type", "")
+                trade_lines.append(
+                    f"  {sym} ({direction}): ${pnl:+,.2f} [{status}]"
+                    + (f" — {setup}" if setup else "")
+                )
+            parts.append(
+                f"Recent Trades (last {total}): {wins}W / {total-wins}L "
+                f"({wins/total*100:.0f}% win rate)\n" + "\n".join(trade_lines)
+            )
+    except Exception:
+        pass
+
+    # 7. Performance stats (from MongoDB)
+    try:
+        perf = db["performance_daily"].find_one(
+            {}, {"_id": 0},
+            sort=[("date", -1)]
+        )
+        if perf:
+            daily_pnl = perf.get("realized_pnl", perf.get("pnl", 0))
+            total_trades = perf.get("total_trades", 0)
+            win_rate = perf.get("win_rate", 0)
+            parts.append(
+                f"Today's Performance: P&L ${daily_pnl:+,.2f}, "
+                f"{total_trades} trades, {win_rate:.0f}% win rate"
             )
     except Exception:
         pass
