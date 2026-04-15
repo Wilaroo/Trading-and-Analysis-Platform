@@ -220,8 +220,8 @@ def generate_training_images_from_bars(
 
     training_samples = []
     for sym_idx, symbol in enumerate(symbols):
-        if sym_idx % 50 == 0:
-            logger.info(f"  Processing symbol {sym_idx + 1}/{len(symbols)}: {symbol}")
+        if sym_idx % 10 == 0:
+            logger.info(f"  Processing symbol {sym_idx + 1}/{len(symbols)}: {symbol} ({len(training_samples)} samples so far)")
 
         # Check if we've hit the total sample cap
         if max_samples > 0 and len(training_samples) >= max_samples:
