@@ -133,17 +133,19 @@ def generate_chart_image(
 
         # Generate chart
         buf = io.BytesIO()
-        fig, axes = mpf.plot(
-            df,
+        plot_kwargs = dict(
             type='candle',
             style=CHART_STYLE,
             volume=include_volume,
-            addplot=addplots if addplots else None,
             figsize=(fig_inches, fig_inches),
             tight_layout=True,
             returnfig=True,
             axisoff=True,  # Clean image for CNN — no axis labels
         )
+        if addplots:
+            plot_kwargs["addplot"] = addplots
+
+        fig, axes = mpf.plot(df, **plot_kwargs)
 
         fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight',
                     facecolor='#0a0a0a', pad_inches=0.02)
