@@ -163,20 +163,25 @@ def save_model_to_db(db, model, setup_type: str, bar_size: str, metrics: Dict):
     """Save trained CNN model weights and metadata to MongoDB."""
     import torch
     import io
+    import zlib
 
     model_name = f"cnn_{setup_type.lower()}_{bar_size.replace(' ', '')}"
 
-    # Serialize model state dict to bytes
+    # Serialize model state dict to bytes, then compress with zlib
     buffer = io.BytesIO()
     torch.save(model.state_dict(), buffer)
-    model_bytes = buffer.getvalue()
+    model_bytes_raw = buffer.getvalue()
+    model_bytes = zlib.compress(model_bytes_raw, level=6)
+    raw_mb = len(model_bytes_raw) / (1024 * 1024)
+    comp_mb = len(model_bytes) / (1024 * 1024)
+    logger.info(f"CNN model {model_name}: {raw_mb:.1f}MB raw → {comp_mb:.1f}MB compressed")
 
     doc = {
         "model_name": model_name,
         "setup_type": setup_type,
         "bar_size": bar_size,
         "model_type": "cnn_resnet18",
-        "model_weights": model_bytes,
+        "model_weights_zlib": model_bytes,
         "metrics": metrics,
         "num_classes": len(SETUP_CLASSES),
         "image_size": CNN_IMAGE_SIZE,
@@ -208,7 +213,13 @@ def load_model_from_db(db, setup_type: str, bar_size: str):
         return None, None
 
     model = build_cnn_model(num_classes=doc.get("num_classes", len(SETUP_CLASSES)))
-    buffer = io.BytesIO(doc["model_weights"])
+    # Support both compressed (zlib) and uncompressed model weights
+    if "model_weights_zlib" in doc:
+        import zlib
+        raw_bytes = zlib.decompress(doc["model_weights_zlib"])
+    else:
+        raw_bytes = doc["model_weights"]
+    buffer = io.BytesIO(raw_bytes)
     state_dict = torch.load(buffer, map_location=get_device(), weights_only=True)
     model.load_state_dict(state_dict)
     model.to(get_device())
