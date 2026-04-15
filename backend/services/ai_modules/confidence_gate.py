@@ -1020,23 +1020,28 @@ class ConfidenceGate:
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):
         """
-        Update SentCom's overall trading mode based on recent regime data.
+        Update SentCom's overall trading mode based on Market Regime Engine.
+        AI regime (classify_regime) removed — it duplicated the market regime with stale data.
+        VAE regime still contributes via Layer 10 confidence gate scoring.
         """
-        if regime_state == "CONFIRMED_DOWN" or ai_regime == "bear_trend":
+        if regime_state == "CONFIRMED_DOWN":
             self._trading_mode = TradingMode.DEFENSIVE
-            self._mode_reason = f"Bear regime detected (score: {regime_score})"
-        elif ai_regime == "high_vol":
-            self._trading_mode = TradingMode.CAUTIOUS
-            self._mode_reason = "High volatility regime — reducing activity"
+            self._mode_reason = f"Bear regime confirmed (score: {regime_score})"
         elif regime_state == "CONFIRMED_UP" and regime_score >= 70:
             self._trading_mode = TradingMode.AGGRESSIVE
             self._mode_reason = f"Strong bull regime (score: {regime_score})"
         elif regime_state == "CONFIRMED_UP":
             self._trading_mode = TradingMode.NORMAL
             self._mode_reason = f"Moderate bull regime (score: {regime_score})"
+        elif regime_score >= 55:
+            self._trading_mode = TradingMode.NORMAL
+            self._mode_reason = f"Leaning bullish (score: {regime_score})"
+        elif regime_score <= 45:
+            self._trading_mode = TradingMode.CAUTIOUS
+            self._mode_reason = f"Leaning bearish (score: {regime_score})"
         else:
             self._trading_mode = TradingMode.CAUTIOUS
-            self._mode_reason = f"Mixed signals — regime neutral (score: {regime_score})"
+            self._mode_reason = f"Neutral regime (score: {regime_score})"
 
     def get_trading_mode(self) -> Dict[str, Any]:
         """Get current trading mode for UI display."""
