@@ -3883,6 +3883,34 @@ async def websocket_quotes(websocket: WebSocket):
         keepalive_task.cancel()
         manager.disconnect(websocket)
 
+
+@app.post("/api/llm-test")
+async def llm_test_direct():
+    """Bare-metal LLM test — no router, no middleware chain"""
+    import requests as sync_requests
+    import asyncio as _aio
+    from starlette.responses import JSONResponse
+    
+    ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+    
+    def _call():
+        r = sync_requests.post(f"{ollama_url}/api/chat", json={
+            "model": model,
+            "messages": [{"role": "user", "content": "Say hello in 5 words"}],
+            "stream": False,
+            "options": {"num_predict": 50}
+        }, timeout=30)
+        return r.json()
+    
+    try:
+        data = await _aio.to_thread(_call)
+        content = data.get("message", {}).get("content", "no content")
+        return JSONResponse(content={"ok": True, "response": content, "model": model})
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)})
+
+
 @app.get("/api/stream/status")
 async def get_stream_status():
     """Get WebSocket streaming status"""
