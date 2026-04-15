@@ -26,13 +26,13 @@ echo ""
 
 # Step 2: Verify MongoDB is running
 echo "[2/6] Checking MongoDB..."
-if docker ps 2>/dev/null | grep -q mongodb; then
+if sudo docker ps 2>/dev/null | grep -q mongodb; then
     echo "  MongoDB container is running"
 else
-    echo "  [ERROR] MongoDB container not running! Starting..."
+    echo "  MongoDB container not running — starting..."
     sudo docker start mongodb 2>/dev/null
     sleep 3
-    if docker ps 2>/dev/null | grep -q mongodb; then
+    if sudo docker ps 2>/dev/null | grep -q mongodb; then
         echo "  MongoDB started successfully"
     else
         echo "  [FATAL] Cannot start MongoDB. Run: sudo docker start mongodb"

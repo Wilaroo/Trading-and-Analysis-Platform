@@ -56,7 +56,7 @@ fi
 # 6. Configure MongoDB (shrink cache to free RAM for training/runtime)
 echo ""
 echo "Configuring MongoDB..."
-if docker ps 2>/dev/null | grep -q mongodb; then
+if sudo docker ps 2>/dev/null | grep -q mongodb; then
     sudo docker exec mongodb mongosh --quiet --eval \
         "db.adminCommand({setParameter: 1, wiredTigerEngineRuntimeConfig: 'cache_size=16G'})" 2>/dev/null \
         && echo "  MongoDB WiredTiger cache set to 16GB" \
