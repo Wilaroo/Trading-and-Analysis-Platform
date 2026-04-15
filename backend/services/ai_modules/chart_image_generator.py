@@ -69,6 +69,10 @@ def bars_to_dataframe(bars: List[Dict], bar_size: str = "1 day") -> Optional[pd.
         else:
             continue
 
+        # Strip timezone for mplfinance compatibility
+        if ts.tz is not None:
+            ts = ts.tz_localize(None)
+
         records.append({
             "Date": ts,
             "Open": float(b.get("open", b.get("o", 0))),
@@ -84,6 +88,8 @@ def bars_to_dataframe(bars: List[Dict], bar_size: str = "1 day") -> Optional[pd.
     df = pd.DataFrame(records)
     df = df.sort_values("Date").drop_duplicates(subset=["Date"])
     df = df.set_index("Date")
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
     df.index = pd.DatetimeIndex(df.index)
 
     # Drop rows with zero/nan prices
