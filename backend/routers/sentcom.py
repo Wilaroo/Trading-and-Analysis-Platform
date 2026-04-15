@@ -159,32 +159,124 @@ async def chat_test(request: ChatRequest):
         return {"success": False, "error": f"{type(e).__name__}: {e}", "latency_ms": (time.time() - start) * 1000}
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+@router.post("/chat")
+def chat(request: ChatRequest):
     """
-    Send a message to SentCom.
-    
-    Routes the message to the appropriate AI agent and returns
-    a unified response in "we" voice.
-    
-    Supports:
-    - Trade queries ("How's our NVDA position?")
-    - Analysis requests ("What do we think about AAPL?")
-    - Coaching ("Should we take profits here?")
-    - Trade execution ("Buy 100 shares of TSLA")
+    Send a message to SentCom — sync handler to bypass blocked event loop.
+    Calls Ollama directly with portfolio context.
     """
+    import requests as sync_requests
+    import time
+    start = time.time()
+    
+    ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+    fallback = os.environ.get("OLLAMA_FALLBACK_MODEL", "qwen3:30b")
+    
+    # Build context from MongoDB (sync)
+    context_parts = []
     try:
-        service = _get_service()
-        result = await service.chat(request.message, request.session_id)
-        return ChatResponse(**result)
+        from server import db as mongo_db
+        if mongo_db is not None:
+            # Get positions from IB pusher data
+            pushed = mongo_db["ib_pushed_data"].find_one(
+                {"data_type": "positions"},
+                {"_id": 0},
+                sort=[("pushed_at", -1)]
+            )
+            if pushed and pushed.get("data"):
+                positions = pushed["data"]
+                pos_lines = []
+                for p in positions[:10]:
+                    symbol = p.get("symbol", "?")
+                    qty = p.get("quantity", p.get("position", 0))
+                    avg = p.get("avgCost", p.get("avg_cost", 0))
+                    mkt = p.get("marketPrice", p.get("market_price", avg))
+                    pnl = p.get("unrealizedPNL", p.get("unrealized_pnl", 0))
+                    pos_lines.append(f"  {symbol}: {qty} shares @ ${avg:.2f}, current ${mkt:.2f}, P&L ${pnl:.2f}")
+                context_parts.append("Current Positions:\n" + "\n".join(pos_lines))
+            
+            # Get recent confidence gate summary
+            gate = mongo_db.get_collection("confidence_gate_log")
+            if gate:
+                recent = list(gate.find({}, {"_id": 0, "symbol": 1, "decision": 1, "confidence_score": 1})
+                             .sort("timestamp", -1).limit(5))
+                if recent:
+                    gate_lines = [f"  {r.get('symbol','?')}: {r.get('decision','?')} (score: {r.get('confidence_score',0)})" for r in recent]
+                    context_parts.append("Recent AI Decisions:\n" + "\n".join(gate_lines))
     except Exception as e:
-        logger.error(f"SentCom chat error: {e}")
-        return ChatResponse(
-            success=False,
-            response=f"We encountered an issue processing that request: {str(e)}",
-            source="sentcom_error"
-        )
+        context_parts.append(f"(Context unavailable: {e})")
+    
+    context = "\n\n".join(context_parts) if context_parts else "No portfolio data available."
+    
+    system_prompt = f"""You are SentCom, an AI trading co-pilot. Speak in first person plural ("we", "our", "us").
+You help analyze positions, review risk, and discuss trading strategy.
+Be concise, direct, and actionable. Use specific numbers from the data.
 
+{context}"""
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": request.message}
+    ]
+    
+    # Store user message in chat history
+    service = _get_service()
+    if service:
+        try:
+            service._store_chat_message("user", request.message)
+        except Exception:
+            pass
+    
+    # Call Ollama (try primary, then fallback)
+    response_content = ""
+    used_model = model
+    for m in [model, fallback]:
+        try:
+            r = sync_requests.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": m,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": 0.7, "num_predict": 1000}
+                },
+                timeout=60
+            )
+            data = r.json()
+            if "error" in data:
+                logger.warning(f"Ollama model {m} error: {data['error']}")
+                continue
+            response_content = data.get("message", {}).get("content", "")
+            used_model = m
+            if response_content:
+                break
+        except Exception as e:
+            logger.warning(f"Ollama {m} failed: {e}")
+            continue
+    
+    if not response_content:
+        response_content = "I'm having trouble connecting to our AI systems right now. Please try again in a moment."
+    
+    # Store assistant response
+    if service:
+        try:
+            service._store_chat_message("assistant", response_content)
+        except Exception:
+            pass
+    
+    latency = (time.time() - start) * 1000
+    
+    return {
+        "success": True,
+        "response": response_content,
+        "source": f"sentcom_direct ({used_model})",
+        "latency_ms": latency,
+        "agent": "sentcom",
+        "model": used_model,
+        "timestamp": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+    }
+    
 
 @router.get("/chat/history")
 async def get_chat_history(limit: int = Query(50, ge=1, le=100)):
