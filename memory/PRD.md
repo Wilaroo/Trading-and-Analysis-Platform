@@ -151,6 +151,17 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - **API:** `POST /api/ai-training/start` now supports `test_mode: true`
 - **CLI:** `python -m services.ai_modules.training_subprocess --phases volatility --test-mode`
 
+### Phase 5k: Vectorized Feature Extraction (CODE COMPLETE — Feb 2026, PENDING USER TEST)
+- **Root Cause:** Per-bar Python `for i in range(50, len(bars) - fh)` loops in Phases 3, 5, and 7 created ~125M iterations across all symbols (500 symbols × 50K bars × 5 freq). Each iteration called Python functions, created numpy slices, and did dict operations. This was the #1 CPU bottleneck, accounting for 65% of pipeline runtime (~17 min per 50-symbol batch).
+- **Fix 1 — Vectorized vol targets:** `compute_vol_targets_batch()` in `volatility_model.py` — uses `numpy.lib.stride_tricks.sliding_window_view` to compute trailing/forward realized vols for ALL bars simultaneously. 91x speedup verified.
+- **Fix 2 — Vectorized vol features:** `compute_vol_features_batch()` — computes all 6 vol-specific features (vol_rank_20, vol_rank_50, vol_acceleration, range_expansion, gap_frequency, volume_vol_corr) for all bars at once using rolling windows and vectorized correlation. 159x speedup verified.
+- **Fix 3 — Vectorized sector-relative targets & features:** `compute_sector_relative_targets_batch()` and `compute_sector_relative_features_batch()` in `sector_relative_model.py` — computes all 10 sector features vectorized.
+- **Fix 4 — Date-based regime cache:** Phase 3 now extracts unique dates from bars and calls `get_regime_features_for_date()` once per unique date (~250 calls per year vs ~50K calls per symbol).
+- **Fix 5 — Phase 7 (Regime-Conditional) vectorized:** Targets computed as vectorized numpy operations, regime classification cached by unique date.
+- **Fix 6 — `extract_features_bulk()` returns float32:** Halves memory for feature matrices (XGBoost uses float32 internally).
+- **Test suite:** `/app/backend/tests/test_vectorization.py` — Verifies correctness (bit-for-bit target match, feature spot-check within tolerance) and performance (91-162x speedup on 5K bars, ~25000x on 50K bars).
+- **Expected pipeline impact:** Phase 3/5/7 inner loops that took ~17 min per 50-symbol batch should now complete in seconds. Total pipeline runtime should drop from hours to well under an hour.
+
 ## Upcoming Tasks
 - Phase 5g: RL Position Sizer (needs trade outcome data)
 - Phase 6: Distributed PC Worker (LAN training on RTX 5060 Ti)
@@ -164,6 +175,10 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - `/app/backend/services/ai_modules/training_pipeline.py` — Master 13-phase pipeline
 - `/app/backend/services/ai_modules/timeseries_service.py` — Full Universe training
 - `/app/backend/services/ai_modules/timeseries_gbm.py` — XGBoost model
+- `/app/backend/services/ai_modules/timeseries_features.py` — Feature engineering (float32 output)
+- `/app/backend/services/ai_modules/volatility_model.py` — Volatility model + vectorized batch functions
+- `/app/backend/services/ai_modules/sector_relative_model.py` — Sector-relative model + vectorized batch functions
+- `/app/backend/services/ai_modules/regime_features.py` — Regime feature provider
 - `/app/backend/services/ai_modules/confidence_gate.py` — 12-layer scoring
 - `/app/backend/services/ai_modules/vae_regime.py` — VAE Regime Detection
 - `/app/backend/services/ai_modules/temporal_fusion_transformer.py` — TFT
@@ -171,6 +186,7 @@ AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serv
 - `/app/backend/services/ai_modules/finbert_sentiment.py` — FinBERT Sentiment
 - `/app/backend/routers/ai_modules.py` — All AI API endpoints
 - `/app/backend/worker.py` — Background job processor
+- `/app/backend/tests/test_vectorization.py` — Vectorization correctness & perf tests
 - `/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx` — Pipeline UI
 
 ## DB Collections

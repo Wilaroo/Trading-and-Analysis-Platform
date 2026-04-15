@@ -1542,7 +1542,7 @@ async def run_training_pipeline(
             logger.info(f"=== Phase 3: Training Volatility Prediction Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.volatility_model import (
                 VOL_MODEL_CONFIGS, VOL_FEATURE_NAMES,
-                compute_vol_specific_features, compute_vol_target,
+                compute_vol_targets_batch, compute_vol_features_batch,
             )
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
@@ -1623,41 +1623,59 @@ async def run_training_pipeline(
                             if max_rows <= 0:
                                 continue
 
-                            X_buf = np.empty((max_rows, n_base + n_vol + n_regime), dtype=np.float32)
-                            y_buf = np.empty(max_rows, dtype=np.float32)
-                            valid = 0
+                            # === VECTORIZED: Vol targets for all bars at once ===
+                            targets = compute_vol_targets_batch(closes, fh, start_idx=50)
+                            if len(targets) == 0:
+                                continue
 
-                            for i in range(50, len(bars) - fh):
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
+                            # === VECTORIZED: Vol features for all bars at once ===
+                            vol_feat_matrix = compute_vol_features_batch(closes, highs, lows, opens, volumes, lookback=50)
+                            # vol_feat_matrix[j] = features for bar index 50+j
 
-                                # Vol-specific features
-                                c_window = closes[i - 49: i + 1][::-1]
-                                h_window = highs[i - 49: i + 1][::-1]
-                                l_window = lows[i - 49: i + 1][::-1]
-                                v_window = volumes[i - 49: i + 1][::-1]
-                                o_window = opens[i - 49: i + 1][::-1]
-                                vol_feats = compute_vol_specific_features(c_window, h_window, l_window, o_window, v_window)
+                            # === CACHED: Regime features by unique date ===
+                            # Extract unique dates and compute regime features once per date
+                            _regime_date_cache = {}
+                            bar_dates = [str(bars[i].get("date", ""))[:10] for i in range(50, min(50 + len(targets), len(bars)))]
+                            unique_dates = set(bar_dates)
+                            for ud in unique_dates:
+                                if ud not in _regime_date_cache:
+                                    _regime_date_cache[ud] = regime_provider.get_regime_features_for_date(ud)
 
-                                # Regime features
-                                bar_date = str(bars[i].get("date", ""))
-                                regime_feats = regime_provider.get_regime_features_for_date(bar_date)
+                            # Build regime feature matrix using the cache
+                            regime_matrix = np.zeros((len(bar_dates), n_regime), dtype=np.float32)
+                            for j_date, bd in enumerate(bar_dates):
+                                rf = _regime_date_cache.get(bd[:10])
+                                if rf:
+                                    regime_matrix[j_date] = [rf.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
 
-                                # Target
-                                target = compute_vol_target(closes, fh, i)
-                                if target is None:
-                                    continue
+                            # Align all arrays to the same length
+                            n_usable = min(max_rows, len(targets), len(vol_feat_matrix), len(regime_matrix), len(base_matrix))
+                            if n_usable <= 0:
+                                continue
 
-                                X_buf[valid, :n_base] = base_matrix[row_idx]
-                                X_buf[valid, n_base:n_base + n_vol] = [vol_feats.get(f, 0.0) for f in VOL_FEATURE_NAMES]
-                                X_buf[valid, n_base + n_vol:] = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
-                                y_buf[valid] = target
-                                valid += 1
+                            # base_matrix rows: row_idx = i - 49 for i starting at 50 → row 1, 2, ...
+                            # targets[j] and vol_feat_matrix[j] correspond to bar index 50+j → base row j+1
+                            base_rows = base_matrix[1:n_usable + 1]  # rows 1..n_usable
+                            if len(base_rows) < n_usable:
+                                n_usable = len(base_rows)
 
-                            if valid > 0:
-                                all_X.append(X_buf[:valid].copy())
-                                all_y.append(y_buf[:valid].copy())
+                            vol_rows = vol_feat_matrix[:n_usable]
+                            regime_rows = regime_matrix[:n_usable]
+                            y_chunk = targets[:n_usable]
+
+                            # Filter out any targets that would have been None in original
+                            # (original returned None when current_idx < 20 or out of bounds,
+                            #  but start_idx=50 ensures current_idx >= 50 > 20, so all valid)
+
+                            # Assemble feature matrix: [base | vol | regime]
+                            X_chunk = np.empty((n_usable, n_base + n_vol + n_regime), dtype=np.float32)
+                            X_chunk[:, :n_base] = base_rows
+                            X_chunk[:, n_base:n_base + n_vol] = vol_rows
+                            X_chunk[:, n_base + n_vol:] = regime_rows
+
+                            if n_usable > 0:
+                                all_X.append(X_chunk)
+                                all_y.append(y_chunk)
 
                         del batch_bars
                         gc.collect()
@@ -1862,7 +1880,7 @@ async def run_training_pipeline(
             logger.info(f"=== Phase 5: Training Sector-Relative Models === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.sector_relative_model import (
                 SECTOR_MODEL_CONFIGS, SECTOR_REL_FEATURE_NAMES,
-                compute_sector_relative_features, compute_sector_relative_target,
+                compute_sector_relative_features_batch, compute_sector_relative_targets_batch,
                 SectorMapper,
             )
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
@@ -1950,35 +1968,42 @@ async def run_training_pipeline(
                             if max_rows <= 0:
                                 continue
 
-                            X_buf = np.empty((max_rows, n_base + n_sec), dtype=np.float32)
-                            y_buf = np.empty(max_rows, dtype=np.float32)
-                            valid = 0
+                            # === VECTORIZED: Sector-relative targets for all bars at once ===
+                            targets = compute_sector_relative_targets_batch(
+                                stock_closes[:min_len], sec_closes[:min_len], fh, start_idx=50
+                            )
+                            if len(targets) == 0:
+                                continue
 
-                            for i in range(50, min_len - fh):
-                                row_idx = i - 49
-                                if row_idx >= len(base_matrix):
-                                    break
+                            # === VECTORIZED: Sector-relative features for all bars at once ===
+                            sec_feat_matrix = compute_sector_relative_features_batch(
+                                stock_closes[:min_len], stock_volumes[:min_len],
+                                sec_closes[:min_len], sec_volumes[:min_len],
+                                lookback=50,
+                            )
 
-                                # Sector-relative features
-                                sc = stock_closes[max(0, i - 24): i + 1][::-1]
-                                sv = stock_volumes[max(0, i - 24): i + 1][::-1]
-                                ec = sec_closes[max(0, i - 24): i + 1][::-1]
-                                ev = sec_volumes[max(0, i - 24): i + 1][::-1]
+                            # Align all arrays
+                            n_usable = min(max_rows, len(targets), len(sec_feat_matrix), len(base_matrix) - 1)
+                            if n_usable <= 0:
+                                continue
 
-                                sec_feats = compute_sector_relative_features(sc, sv, ec, ev)
+                            # Filter out invalid targets (-1.0)
+                            valid_mask = targets[:n_usable] >= 0
+                            base_rows = base_matrix[1:n_usable + 1]
+                            if len(base_rows) < n_usable:
+                                n_usable = len(base_rows)
+                                valid_mask = valid_mask[:n_usable]
 
-                                target = compute_sector_relative_target(stock_closes, sec_closes, i, fh)
-                                if target is None:
-                                    continue
+                            sec_rows = sec_feat_matrix[:n_usable]
+                            y_chunk = targets[:n_usable]
 
-                                X_buf[valid, :n_base] = base_matrix[row_idx]
-                                X_buf[valid, n_base:] = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
-                                y_buf[valid] = target
-                                valid += 1
-
-                            if valid > 0:
-                                all_X.append(X_buf[:valid].copy())
-                                all_y.append(y_buf[:valid].copy())
+                            # Apply valid mask
+                            if valid_mask.any():
+                                X_chunk = np.empty((int(valid_mask.sum()), n_base + n_sec), dtype=np.float32)
+                                X_chunk[:, :n_base] = base_rows[valid_mask]
+                                X_chunk[:, n_base:] = sec_rows[valid_mask]
+                                all_X.append(X_chunk)
+                                all_y.append(y_chunk[valid_mask])
 
                         del batch_bars
                         gc.collect()
@@ -2381,37 +2406,55 @@ async def run_training_pipeline(
                                 if max_rows <= 0:
                                     continue
 
-                                X_buf = np.empty((max_rows, n_base), dtype=np.float32)
-                                y_buf = np.empty(max_rows, dtype=np.float32)
-                                r_buf = []
-                                valid = 0
+                                # === VECTORIZED: Targets for all bars at once ===
+                                idx_arr = np.arange(50, 50 + max_rows)
+                                fwd_idx = idx_arr + fh
+                                # Clip to valid range
+                                valid_mask = (fwd_idx < len(closes)) & (closes[idx_arr] > 0)
+                                n_usable = min(max_rows, len(base_matrix) - 1)
+                                valid_mask[:n_usable] &= True  # keep as-is
+                                if n_usable < max_rows:
+                                    valid_mask[n_usable:] = False
 
-                                for i in range(50, len(bars) - fh):
-                                    row_idx = i - 49
-                                    if row_idx >= len(base_matrix):
-                                        break
+                                if not valid_mask.any():
+                                    continue
 
-                                    # Classify regime at this date
-                                    bar_date = str(bars[i].get("date", ""))
-                                    regime = classify_regime_for_date(spy_data, bar_date)
+                                with np.errstate(divide='ignore', invalid='ignore'):
+                                    future_ret = np.where(
+                                        closes[idx_arr] > 0,
+                                        (closes[fwd_idx] - closes[idx_arr]) / closes[idx_arr],
+                                        0.0,
+                                    )
+                                y_all = np.where(future_ret > 0, 1.0, 0.0).astype(np.float32)
 
-                                    # Target: future return (binary UP/DOWN)
-                                    future_return = (closes[i + fh] - closes[i]) / closes[i] if closes[i] > 0 else 0
-                                    target = 1 if future_return > 0 else 0
+                                # base_matrix row indices: i - 49 for i in idx_arr → row = i - 49
+                                base_rows = base_matrix[idx_arr - 49]
+                                if len(base_rows) > n_usable:
+                                    base_rows = base_rows[:n_usable]
+                                    y_all = y_all[:n_usable]
+                                    valid_mask = valid_mask[:n_usable]
 
-                                    X_buf[valid] = base_matrix[row_idx]
-                                    y_buf[valid] = target
-                                    r_buf.append(regime)
-                                    valid += 1
+                                # === CACHED: Regime classification by unique date ===
+                                bar_dates = [str(bars[i].get("date", "")) for i in idx_arr[:len(y_all)]]
+                                _regime_cache_local = {}
+                                r_arr = np.empty(len(bar_dates), dtype=object)
+                                for jd, bd in enumerate(bar_dates):
+                                    bd10 = bd[:10]
+                                    if bd10 not in _regime_cache_local:
+                                        _regime_cache_local[bd10] = classify_regime_for_date(spy_data, bd)
+                                    r_arr[jd] = _regime_cache_local[bd10]
 
-                                if valid > 0:
-                                    X_sym = X_buf[:valid]
-                                    y_sym = y_buf[:valid]
+                                # Split by regime using vectorized masks
+                                X_valid = base_rows[valid_mask]
+                                y_valid = y_all[valid_mask]
+                                r_valid = r_arr[valid_mask]
+
+                                if len(X_valid) > 0:
                                     for regime in ALL_REGIMES:
-                                        mask = np.array([r == regime for r in r_buf], dtype=bool)
-                                        if mask.any():
-                                            regime_samples[regime]["X"].append(X_sym[mask].copy())
-                                            regime_samples[regime]["y"].append(y_sym[mask].copy())
+                                        rmask = (r_valid == regime)
+                                        if rmask.any():
+                                            regime_samples[regime]["X"].append(X_valid[rmask].copy())
+                                            regime_samples[regime]["y"].append(y_valid[rmask].copy())
 
                             del batch_bars
                             gc.collect()

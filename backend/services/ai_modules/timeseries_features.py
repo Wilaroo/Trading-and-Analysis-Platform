@@ -974,7 +974,7 @@ class TimeSeriesFeatureEngineer:
         # Final NaN/Inf cleanup
         np.nan_to_num(F, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
-        return F
+        return F.astype(np.float32)
 
 
 # Singleton

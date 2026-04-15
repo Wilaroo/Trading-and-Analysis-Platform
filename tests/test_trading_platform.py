@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://xgboost-gpu-trade.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://trading-gpu-boost.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""

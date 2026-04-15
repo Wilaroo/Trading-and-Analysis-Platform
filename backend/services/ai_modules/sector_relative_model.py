@@ -200,6 +200,179 @@ SECTOR_MODEL_CONFIGS = {
 }
 
 
+def compute_sector_relative_targets_batch(
+    stock_closes: np.ndarray,
+    sector_closes: np.ndarray,
+    forecast_horizon: int,
+    start_idx: int = 50,
+) -> np.ndarray:
+    """
+    Vectorized batch computation of sector-relative targets for all valid bars.
+
+    Same math as compute_sector_relative_target for all bars at once.
+    Returns float32 array: 1.0 (OUTPERFORM), 0.0 (UNDERPERFORM), -1.0 (invalid).
+    Arrays: chronological (oldest first).
+    """
+    n = min(len(stock_closes), len(sector_closes))
+    n_valid = n - start_idx - forecast_horizon
+    if n_valid <= 0:
+        return np.array([], dtype=np.float32)
+
+    idx = np.arange(start_idx, start_idx + n_valid)
+    fwd_idx = idx + forecast_horizon
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        stock_ret = (stock_closes[fwd_idx] - stock_closes[idx]) / stock_closes[idx]
+        sector_ret = (sector_closes[fwd_idx] - sector_closes[idx]) / sector_closes[idx]
+
+    invalid = (stock_closes[idx] <= 0) | (sector_closes[idx] <= 0) | ~np.isfinite(stock_ret) | ~np.isfinite(sector_ret)
+    targets = np.where(invalid, -1.0, np.where(stock_ret > sector_ret, 1.0, 0.0)).astype(np.float32)
+    return targets
+
+
+def compute_sector_relative_features_batch(
+    stock_closes: np.ndarray,
+    stock_volumes: np.ndarray,
+    sector_closes: np.ndarray,
+    sector_volumes: np.ndarray,
+    lookback: int = 50,
+) -> np.ndarray:
+    """
+    Vectorized batch computation of 10 sector-relative features for all valid bars.
+
+    Same math as compute_sector_relative_features but for all bars at once.
+    Arrays: chronological (oldest first). Minimum 25 bars each.
+    Returns: (M, 10) float32 array where M = min(len_stock, len_sector) - lookback.
+
+    Feature order matches SECTOR_REL_FEATURE_NAMES.
+    """
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    n = min(len(stock_closes), len(sector_closes), len(stock_volumes), len(sector_volumes))
+    n_out = n - lookback
+    if n_out <= 0 or n < 25:
+        return np.empty((0, 10), dtype=np.float32)
+
+    features = np.zeros((n_out, 10), dtype=np.float32)
+    j_idx = np.arange(n_out)
+    bar_i = lookback + j_idx  # chronological bar index for each output
+
+    # Helper: N-bar return at each output bar (most-recent-first style)
+    # For bar i: ret_N = (closes[i] - closes[i-N]) / closes[i-N]
+    def _rolling_ret(closes, period):
+        ret = np.zeros(n_out, dtype=np.float32)
+        src = bar_i
+        prev = bar_i - period
+        ok = (prev >= 0) & (src < len(closes))
+        # Recompute mask properly
+        mask = np.zeros(n_out, dtype=bool)
+        mask[ok] = closes[prev[ok]] > 0
+        if mask.any():
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ret[mask] = (closes[src[mask]] - closes[prev[mask]]) / closes[prev[mask]]
+            ret = np.where(np.isfinite(ret), ret, 0.0)
+        return ret
+
+    stock_ret_5 = _rolling_ret(stock_closes, 5)
+    sector_ret_5 = _rolling_ret(sector_closes, 5)
+    stock_ret_10 = _rolling_ret(stock_closes, 10)
+    sector_ret_10 = _rolling_ret(sector_closes, 10)
+
+    # 1. Relative return 5-bar
+    features[:, 0] = stock_ret_5 - sector_ret_5
+    # 2. Relative return 10-bar
+    features[:, 1] = stock_ret_10 - sector_ret_10
+    # 5. Momentum difference (same as rel_return_5 in original)
+    features[:, 4] = stock_ret_5 - sector_ret_5
+
+    # 3. Relative RSI — use rolling RSI via sliding windows
+    def _batch_rsi(closes_arr, period=14):
+        rsi_out = np.full(n_out, 50.0, dtype=np.float32)
+        if len(closes_arr) < period + 2:
+            return rsi_out
+        # For each output bar, we need closes[i-period:i+1] reversed → use sliding window of period+1
+        wins = sliding_window_view(closes_arr, period + 1)  # (len-period, period+1)
+        # wins[k] = closes[k:k+period+1] in chronological
+        # For RSI: need most-recent-first → reverse each row
+        # deltas = diff of reversed = diff of [closes[k+period], ..., closes[k]]
+        reversed_wins = wins[:, ::-1]
+        deltas = np.diff(reversed_wins, axis=1)  # (len-period, period)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains, axis=1)
+        avg_loss = np.mean(losses, axis=1)
+        avg_loss = np.where(avg_loss == 0, 0.0001, avg_loss)
+        rs = avg_gain / avg_loss
+        rsi_all = 100 - (100 / (1 + rs))
+        # Map: for output j, bar_i = lookback+j, wins index k = bar_i - period
+        k_idx = bar_i - period
+        ok = (k_idx >= 0) & (k_idx < len(rsi_all))
+        if ok.any():
+            rsi_out[ok] = rsi_all[k_idx[ok]].astype(np.float32)
+        return rsi_out
+
+    stock_rsi = _batch_rsi(stock_closes)
+    sector_rsi = _batch_rsi(sector_closes)
+    features[:, 2] = (stock_rsi - sector_rsi) / 50.0
+
+    # 4. Relative volume (current bar volume / 20-bar avg volume)
+    if n >= 20:
+        sv_mean20 = np.convolve(stock_volumes, np.ones(20, dtype=np.float32) / 20, mode='valid')
+        ev_mean20 = np.convolve(sector_volumes, np.ones(20, dtype=np.float32) / 20, mode='valid')
+        # sv_mean20[k] = mean(stock_volumes[k:k+20]), for bar i → k = i-19
+        sv_idx = bar_i - 19
+        ok = (sv_idx >= 0) & (sv_idx < len(sv_mean20)) & (sv_idx < len(ev_mean20))
+        if ok.any():
+            sm = sv_mean20[sv_idx[ok]]
+            em = ev_mean20[sv_idx[ok]]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                stock_rvol = np.where(sm > 0, stock_volumes[bar_i[ok]] / sm, 1.0)
+                sect_rvol = np.where(em > 0, sector_volumes[bar_i[ok]] / em, 1.0)
+            features[ok, 3] = np.where(np.isfinite(stock_rvol - sect_rvol), stock_rvol - sect_rvol, 0.0)
+
+    # 6. Beta to sector (10-bar rolling) and 7. Correlation
+    if n >= 12:
+        # Stock and sector returns over 11-element windows
+        s_wins = sliding_window_view(stock_closes, 11)  # (n-10, 11)
+        e_wins = sliding_window_view(sector_closes, 11)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            s_rets = np.diff(s_wins, axis=1) / np.where(s_wins[:, :-1] > 0, s_wins[:, :-1], 1.0)
+            e_rets = np.diff(e_wins, axis=1) / np.where(e_wins[:, :-1] > 0, e_wins[:, :-1], 1.0)
+        s_rets = np.where(np.isfinite(s_rets), s_rets, 0.0)
+        e_rets = np.where(np.isfinite(e_rets), e_rets, 0.0)
+
+        # For bar i, the 10-bar returns end at bar i → wins index k = i-10
+        # s_wins[k] = closes[k:k+11], so returns are at bars k to k+9
+        # For "most recent 10 returns ending at bar i", we need k such that k+10 = i → k = i-10
+        k_idx = bar_i - 10
+        ok = (k_idx >= 0) & (k_idx < len(s_rets))
+        if ok.any():
+            sr = s_rets[k_idx[ok]]  # (m, 10)
+            er = e_rets[k_idx[ok]]
+            e_var = np.var(er, axis=1)
+            s_std = np.std(sr, axis=1)
+            e_std = np.std(er, axis=1)
+            # Beta = cov(s,e) / var(e)
+            cov_se = np.mean(sr * er, axis=1) - np.mean(sr, axis=1) * np.mean(er, axis=1)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                beta = np.where(e_var > 0, cov_se / e_var, 1.0)
+                corr = np.where((s_std > 0) & (e_std > 0), cov_se / (s_std * e_std), 0.0)
+            features[ok, 5] = np.where(np.isfinite(beta), beta, 1.0)
+            features[ok, 6] = np.where(np.isfinite(corr), corr, 0.0)
+            # 8. Sector dispersion (std of sector returns)
+            features[ok, 7] = e_std.astype(np.float32)
+
+    # 9. Sector rotation score = sector 5-bar return
+    features[:, 8] = sector_ret_5
+
+    # 10. Relative strength rank = (stock_ret_10 - sector_ret_10), already computed
+    features[:, 9] = features[:, 1]  # Same as sector_rel_return_10 when no SPY
+
+    # Sanitize
+    features = np.where(np.isfinite(features), features, 0.0).astype(np.float32)
+    return features
+
+
 class SectorMapper:
     """
     Maps individual stocks to their sector ETF.

@@ -15,7 +15,7 @@ import os
 import time
 import concurrent.futures
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://xgboost-gpu-trade.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://trading-gpu-boost.preview.emergentagent.com').rstrip('/')
 
 
 class TestAIComparisonStatus:

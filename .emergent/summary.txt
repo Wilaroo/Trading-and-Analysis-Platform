@@ -1,34 +1,47 @@
-<analysis>**original_problem_statement**: AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serve data skew, eliminate scanning bottlenecks, refactor confidence gate to an additive system, and integrate Deep Learning models (Phase 5) across the dual-GPU architecture (DGX Spark + Windows PC). Include FinBERT sentiment analysis.
+<analysis>**original_problem_statement**: AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serve data skew, eliminate scanning bottlenecks, refactor confidence gate to an additive system, and integrate Deep Learning models (Phase 5) across the dual-GPU architecture (DGX Spark + Windows PC). Include FinBERT sentiment analysis. PRODUCT REQUIREMENTS: Stable 13-phase massive XGBoost/PyTorch training pipeline that doesn't crash the server.
 
 **User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English only)
 
-**what currently exists?** 
-A full-stack React + FastAPI + MongoDB distributed trading platform. The architecture uses a Windows PC (IB Gateway, Data Pusher, Collectors via  scripts) and a local DGX Spark (Backend, Frontend, Worker, Docker MongoDB, massive XGBoost + PyTorch training pipeline). The platform features a highly optimized, automated 13-phase AI training pipeline (132 models) including directional XGBoost models, setup-specific models, deep learning models (VAE, TFT, CNN-LSTM), and FinBERT sentiment scoring.
+**what currently exists?**: A full-stack React + FastAPI + MongoDB distributed AI trading platform running across a Windows PC (IB Gateway, data pushers,  orchestrators) and a physical DGX Spark (Linux, 128GB RAM). The backend has a massive 13-phase XGBoost/PyTorch AI training pipeline that extracts features via . Extensive NVMe disk caching () and strict memory safety mechanisms (, chunk accumulation) are in place.
 
 **Last working item**: 
-    - Last item agent was working: Fixing the training guard logic in . The pusher was correctly pausing when the Spark was training, but under heavy Spark GPU load, the backend timed out on the  check. The pusher incorrectly interpreted timeouts as training complete and resumed pushing, hammering the backend. Agent updated the script to fail-safe (treat timeouts as training still active).
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? manual testing by curl / bash
-    - User Testing Done: N (User needs to restart the IB Pusher on Windows to pick up the fix. Meanwhile, massive Phase 1 pipeline training is actively running on the DGX Spark).
+    - Last item agent was working: Vectorizing the pure-Python per-bar feature extraction loops (specifically in  and ). The pipeline memory issues are fixed, but the CPU compute time is bottlenecked by iterating row-by-row over 50,000 bars per symbol, taking ~17 minutes per 50 symbols. The agent was actively replacing these with  to process all bars simultaneously.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? manual testing by bash (monitoring system RAM, logs on the physical DGX Spark, and timing the batches)
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Internal Architecture of Phase 5 DL Models
-     - Attempted fixes: The models are wired into the pipeline and inventory, but the internal PyTorch/Neural Net architectures inside , , and  are currently placeholders.
-     - Next debug checklist: Implement the actual neural network layers in the respective PyTorch classes.
-     - Why fix this issue and what will be achieved with the fix? Fully functional Deep Learning models that learn temporal patterns and market regimes to complement the XGBoost models.
+  Issue 1: Phase 3/5/7 CPU Compute Bottleneck (Per-Bar Python Loops) (P0)
+     - Attempted fixes: Agent analyzed the pipeline and identified that  creates 125 million iterations for 5-min data, accounting for 65% of the pipeline's runtime.
+     - Next debug checklist: 
+       1. Pre-cache  by unique date.
+       2. Vectorize  and  using numpy sliding windows.
+       3. Update  to use a single MongoDB  batch query instead of a loop of 50 individual queries.
+       4. Vectorize .
+       5. Enforce  in .
+     - Why fix this issue and what will be achieved with the fix? Will cut batch processing time from ~17 minutes to 1-3 minutes, reducing total pipeline runtime from many hours to under an hour.
      - Status: IN PROGRESS
+     - Is recurring issue? Y (Performance bottleneck)
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 2:  deprecation (P3)
+     - Attempted fixes: None
+     - Next debug checklist: Remove/refactor legacy proxy manager since native Ollama on Spark is being used.
+     - Why fix this issue and what will be achieved with the fix? Cleans up legacy cloud infrastructure.
+     - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  Task 1: Monitor / Let the Master AI Pipeline complete
-     - Where to resume: The DGX Spark is currently crunching Phase 1 ( timeframe, 2,841 symbols) of the 13-phase pipeline. 
-     - What will be achieved with this? 132 trained models (XGBoost + DL) ready for live autonomous trading by Thursday.
+  Task 1: Vectorize  and 
+     - Where to resume: Modify  to calculate volatility targets and features across the whole array at once instead of inside a loop. Cache regime lookups by unique date in .
+     - What will be achieved with this? Eliminates the 99% GPU idle time by removing the CPU bottleneck.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? NA
-     - Blocked on something: Hardware time (Takes 8-14 hours to run on DGX Blackwell GPU). Do NOT interrupt the worker process on the Spark unless absolutely necessary.
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
@@ -40,86 +53,73 @@ A full-stack React + FastAPI + MongoDB distributed trading platform. The archite
     - ⚪ (P3) Enhancement: Build a per-signal weight optimizer to auto-tune the additive gate point values based on logged trade outcomes.
 
 **Completed work in this session**
-- Added  endpoint to protect the Spark backend from being hammered by Windows IB Pusher/Collectors during heavy AI training. (DONE)
-- Applied non-blocking execution () and auto Saved working directory and index state WIP on main: 0dd947f3 auto-commit for a60dfed3-737e-43a2-a888-fed3caed752c to the Windows  startup script to prevent terminal hangs. (DONE)
-- Added a permanent  cap to the MongoDB Docker container via the  script, freeing ~80GB of DGX Spark RAM for XGBoost/PyTorch training. (DONE)
-- Found and fixed a critical bug in  (Phase 8 Ensemble) where it was trying to load sub-models with incorrect naming conventions ( vs ). Fixed across UI and Backend. (DONE)
-- Identified that Phase 5.5 (Gap Fill models) was defined but missing from the pipeline execution path. Wired it correctly. (DONE)
-- Updated UI Inventory count to accurately reflect 132 models (Added DL, FinBERT, Gap Fill). (DONE)
-- Upgraded PyTorch to CUDA 12.8 () on the DGX Spark so Deep Learning models and FinBERT utilize the Blackwell GPU (10-20x speedup). (DONE)
-- Fixed IB Pusher's training guard to treat HTTP timeouts as training active to fail-safe and stay paused under heavy backend load. (DONE)
+- Verified and documented P0 OOM () and P1 BSON () fixes (DONE)
+- Fixed 8 systemic pipeline memory leaks: added missing  calls, forced  to prevent overlapping workers, converted accumulation to chunk-based instead of per-row, forced , and added missing  across all phases (DONE)
+- Built massive NVMe Caching System ( and ) to bypass MongoDB bottlenecks (DONE)
+- Implemented Pipeline Resume logic to auto-skip already trained models within the last 24h (DONE)
+- Added  sharing to load SPY/QQQ/IWM once per pipeline run (DONE)
+- Fixed severe OOM OS-Kill crash in Phase 3 by capping  based on frequency (e.g., 5-min capped to 500 symbols instead of 2500) (DONE)
+- Added  and  options to the subprocess CLI and API (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1:  deprecation
-   - Debug checklist: User asked earlier if the legacy proxy is still needed. Agent confirmed native Ollama on Spark is better but hasn't removed/refactored the legacy proxy manager yet.
-   - Why to solve this issue and what will be achieved with this? Cleans up legacy cloud infrastructure now that the user is running fully local on DGX Spark.
-   - Should Test frontend/backend/both after fix: backend
-   - Is recurring issue? N
+   - None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: None
-  - Recurrence count: 0
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: OOM (Out Of Memory) issues during accumulation ().
+  - Recurrence count: 5+ (Happened again in Phase 3 because 2500 symbols * 50k bars = 100GB peak RAM).
+  - Status: RESOLVED (Mitigated by introducing frequency-scaled symbol caps and pre-vstack memory safety guards. Pipeline is now stable with 79GB free).
 
 **Code Architecture**
-Distributed Dual-Node Setup:
-- **DGX Spark (192.168.50.2)**: Runs Backend (FastAPI :8001), Frontend (React :3000), Worker Process, Docker MongoDB (, capped at 16GB Cache). Runs massive memory-intensive XGBoost + PyTorch training pipelines using Blackwell GPU.
-- **Windows PC (192.168.50.1)**: Runs IB Gateway, local Data Pusher, and historical Data Collectors. Uses master  scripts to SSH into Spark, orchestrate processes, and pull code.
+- **DGX Spark (192.168.50.2)**: Runs Backend (FastAPI :8001), Frontend (React :3000), internal workers, Docker MongoDB. Has 4TB NVMe used for temp file caching.
+- **Windows PC (192.168.50.1)**: Runs IB Gateway, data pushers, orchestrator  scripts.
 
 **Key Technical Concepts**
-XGBoost CUDA Native, Vectorized Numpy Feature Extraction, Multi-Phase Orchestrated Training (13 phases, 132 models), PyTorch GPU (), Non-blocking SSH  automation, Docker MongoDB memory management.
+XGBoost CUDA Native, Memory Management (, GC, chunk accumulation, ), NVMe Disk Caching (Pickle/Numpy), Vectorized Feature Extraction (pandas/numpy ), Subprocess Orchestration.
 
 **key DB schema**
-  - : Highly active during training.
-  - : Stores the trained XGBoost models.
-  - : Tracks the 13-phase master pipeline.
+  - : Stores XGBoost JSON representations ( format). Checked for pipeline resume.
+  -  & : Tracks progress metrics & ETAs for UI.
+  - : Raw bar data (queried heavily).
 
 **changes in tech stack**
-  - PyTorch upgraded to  to support the Spark's Blackwell GPU.
+  - Introduction of a local NVMe disk caching system at  using Python  and  formats to drastically reduce MongoDB network overhead during multi-phase runs.
 
 **All files of reference**
-  -  (Added  and fixed )
-  -  (Fixed name mismatch bug, wired Gap Fill phase)
-  -  (Added training guard, fixed timeout fail-safe bug)
-  -  &  &  (Added training guard)
-  -  (Fixed SSH hangs, added MongoDB memory cap, added git stash)
-  -  (Fixed model counts to 132)
+  -  (Core pipeline logic, highly modified for caching, resume, and strict memory limits)
+  -  (Target for vectorization)
+  -  (Target for unique date caching)
+  -  (API endpoints, now accepts )
+  -  (CLI runner)
 
 **Areas that need refactoring**: 
-  -  could be deprecated.
+  - **Feature Extraction Loops:** Every  loop across the pipeline modules must be refactored into vectorized numpy array operations. 50K iterations per symbol in pure Python is currently crippling the pipeline.
 
 **key api endpoints**
-  - 
-  - 
+  -  (Now accepts  boolean and  boolean).
   - 
 
 **Critical Info for New Agent**
-  - **LIVE HARDWARE WARNING:** The user runs code updates on their local physical hardware via . 
-  - **Do NOT stop the Spark training subprocess!** A massive 13-phase training pipeline was successfully started at the end of the session. Let it run.
-  - The  script running on the user's Windows machine was modified in the final step to correctly handle network timeouts during heavy backend training loads. The user needs to restart the pusher for this to take effect.
-  - The DGX Spark's MongoDB cache is permanently capped at 16GB via Docker arguments to prevent OOM kills during XGBoost training.
+  - **HARDWARE WARNING:** The user is running code on a physical DGX Spark (128GB RAM). Memory is the absolute limit. DO NOT remove any memory protections (, , chunk accumulations, or symbol caps).
+  - **PERFORMANCE PARADIGM:** The pipeline currently runs perfectly without crashing, but is extremely slow. The user is actively monitoring the Spark terminal. **Your immediate goal is to vectorize , , and  (inner loops and MongoDB queries) to eliminate the Python compute bottleneck.**
+  - **Testing:** The user must trigger the script via SSH locally (e.g., ). You cannot mock this. Work with the user.
 
 **documents and test reports created in this job**
-  -  (Updated to reflect Phase 5e and IB Pusher guard implementation)
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - *Agent*: Added permanent  cap to MongoDB Docker and updated .
- - *User*: Ran . Spark memory dropped from 79GB to 24GB.
- - *Agent*: Confirmed 90GB+ available for training. Restarted backend/worker to reconnect to MongoDB.
- - *User*: Ran the  again, hit Start Training in UI. Saw pusher start dropping timeouts.
- - *User*: Pointed out the pusher logged  after a timeout, causing it to resume hammering the backend with live data while the backend was busy training.
- - *Agent*: Fixed  to treat  timeouts as training still active instead of training complete. Instructed user to restart the pusher window to pick up the fix.
+ - *User*: Requested vectorization of the pipeline after discovering that a batch of 50 symbols for 5-min data takes 17 minutes to load. Approved the agent's plan to implement date-based regime caching, vectorized targets, and MongoDB  query batching.
+ - *Pending*: The agent was just viewing  to apply the vectorized sliding window logic. Pick up right there.
 
 **Project Health Check:**
-Healthy. Heavy training pipeline (Phase 1, 1min timeframe) is actively running on the user's DGX Spark hardware using GPU acceleration.
+Broken (Technically functional without OOMs, but completely bottlenecked by pure Python loops taking hours).
 
 **3rd Party Integrations**
-  - Interactive Brokers (Primary Data & Execution - Local Gateway)
+  - Interactive Brokers (Primary Data & Execution)
   - Finnhub (News Data for FinBERT)
-  - HuggingFace Transformers (FinBERT Sentiment via PyTorch cu128)
+  - HuggingFace Transformers (FinBERT Sentiment)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Relied on direct python -c verification, bash tests, and live logs from user's hardware).
+  - Testing agent used after significant changes: NO (Requires the user's physical DGX Spark and proprietary MongoDB data to test pipeline runs).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
@@ -127,11 +127,4 @@ Healthy. Heavy training pipeline (Phase 1, 1min timeframe) is actively running o
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-No critical misses, but the DL model internal architectures (VAE, TFT, CNN-LSTM) still need their PyTorch layers implemented (Currently placeholders, though wired into the pipeline).
-
-**Debugging checklist for current issue**
-    Issue: Deep Learning Models Internal Architecture (Phase 11)
-    Backend files to check:
-    - 
-    - 
-    - </analysis>
+The agent drafted an excellent 6-step plan to vectorize the pipeline and eliminate the 17-minute batch times, but hit the context limit before it could write the code for  and .</analysis>
