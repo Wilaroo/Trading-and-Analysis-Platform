@@ -3886,22 +3886,36 @@ async def websocket_quotes(websocket: WebSocket):
 
 @app.post("/api/llm-test")
 @app.get("/api/llm-test")
-def llm_test_direct():
-    """Bare-metal LLM test — sync endpoint, bypasses event loop completely"""
+async def llm_test_direct():
+    """Bare-metal LLM test — raw thread, bypasses ALL pools"""
+    import threading
     import requests
+    import asyncio
     from starlette.responses import JSONResponse
     
     ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
     
+    loop = asyncio.get_event_loop()
+    future = loop.create_future()
+    
+    def _worker():
+        try:
+            r = requests.post(f"{ollama_url}/api/chat", json={
+                "model": model,
+                "messages": [{"role": "user", "content": "Say hello in 5 words"}],
+                "stream": False,
+                "options": {"num_predict": 50}
+            }, timeout=30)
+            loop.call_soon_threadsafe(future.set_result, r.json())
+        except Exception as e:
+            loop.call_soon_threadsafe(future.set_exception, e)
+    
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    
     try:
-        r = requests.post(f"{ollama_url}/api/chat", json={
-            "model": model,
-            "messages": [{"role": "user", "content": "Say hello in 5 words"}],
-            "stream": False,
-            "options": {"num_predict": 50}
-        }, timeout=30)
-        data = r.json()
+        data = await asyncio.wait_for(future, timeout=30)
         content = data.get("message", {}).get("content", "no content")
         return JSONResponse(content={"ok": True, "response": content, "model": model})
     except Exception as e:

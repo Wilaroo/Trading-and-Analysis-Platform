@@ -136,9 +136,21 @@ class OllamaProvider(BaseLLMProvider):
                 )
                 return r.status_code, r.json()
             
-            # Use dedicated LLM thread pool — immune to main pool exhaustion
+            # Use raw thread — immune to ThreadPoolExecutor exhaustion
+            import threading
             loop = asyncio.get_event_loop()
-            status_code, data = await loop.run_in_executor(self._llm_pool, _sync_call)
+            future = loop.create_future()
+            
+            def _threaded_call():
+                try:
+                    result = _sync_call()
+                    loop.call_soon_threadsafe(future.set_result, result)
+                except Exception as ex:
+                    loop.call_soon_threadsafe(future.set_exception, ex)
+            
+            t = threading.Thread(target=_threaded_call, daemon=True)
+            t.start()
+            status_code, data = await asyncio.wait_for(future, timeout=float(timeout))
             
             if status_code == 200:
                 if "error" in data:
