@@ -2640,7 +2640,7 @@ _streaming_cache = {
     "risk_status": {},
     "order_queue": {"pending": [], "active": [], "completed": [], "queue_size": 0},
     # SentCom
-    "sentcom_data": {},
+    "sentcom_data": {"positions": [], "status": {}, "stream": []},
     # Intel & collection
     "market_intel": {},
     "data_collection": {},
@@ -3046,7 +3046,7 @@ async def stream_system_status():
 async def stream_bot_trades():
     """Background task to push bot trades — reads from cache."""
     await asyncio.sleep(8)
-    last_trades_hash = None
+    last_trades_hash = "initial"  # Ensure first broadcast fires
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
@@ -3070,7 +3070,7 @@ async def stream_bot_trades():
 async def stream_scanner_alerts():
     """Background task to push scanner alerts — reads from cache."""
     await asyncio.sleep(10)
-    last_alerts_count = 0
+    last_alerts_count = -1  # Start at -1 so first broadcast always fires
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
@@ -3296,7 +3296,7 @@ async def stream_risk_status():
 
 async def stream_sentcom_data():
     """Push SentCom intelligence data — reads from cache."""
-    await asyncio.sleep(15)
+    await asyncio.sleep(5)  # Reduced from 15s — positions need to load fast
     last_hash = None
     while True:
         if _is_training_active():

@@ -12,7 +12,7 @@
  */
 
 class RequestThrottler {
-  constructor(maxConcurrent = 2) {
+  constructor(maxConcurrent = 4) {
     this.maxConcurrent = maxConcurrent;
     this.activeRequests = 0;
     this.queue = [];
