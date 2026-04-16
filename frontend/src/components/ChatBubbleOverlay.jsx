@@ -68,6 +68,8 @@ const RenderContent = ({ text, isUser }) => {
 // Chat message bubble — user right, bot left, distinct colors
 const ChatMessage = ({ msg }) => {
   const isUser = msg.type === 'chat' || msg.action_type === 'user_message';
+  const isBot = msg.action_type === 'chat_response' || msg.type === 'chat_response';
+  const showAsUser = isUser && !isBot;
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -81,38 +83,38 @@ const ChatMessage = ({ msg }) => {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}
-      data-testid={`chat-msg-${isUser ? 'user' : 'bot'}`}
+      className={`flex items-start gap-2.5 ${showAsUser ? 'flex-row-reverse' : ''}`}
+      data-testid={`chat-msg-${showAsUser ? 'user' : 'bot'}`}
     >
       {/* Avatar */}
       <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
-        isUser 
+        showAsUser 
           ? 'bg-gradient-to-br from-cyan-500 to-blue-600' 
           : 'bg-gradient-to-br from-emerald-500 to-teal-600'
       }`}>
-        {isUser 
+        {showAsUser 
           ? <MessageSquare className="w-3.5 h-3.5 text-white" /> 
           : <Brain className="w-3.5 h-3.5 text-white" />}
       </div>
 
       {/* Message */}
-      <div className={`flex-1 min-w-0 ${isUser ? 'max-w-[75%]' : 'max-w-[85%]'}`}>
+      <div className={`flex-1 min-w-0 ${showAsUser ? 'max-w-[75%]' : 'max-w-[85%]'}`}>
         <div className={`rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed relative group ${
-          isUser
+          showAsUser
             ? 'bg-cyan-500/15 border border-cyan-500/25 text-cyan-50 rounded-tr-sm ml-auto'
             : 'bg-zinc-800/80 border border-zinc-700/50 text-zinc-200 rounded-tl-sm'
         }`}>
           {/* Label */}
           <span className={`text-[9px] font-bold uppercase tracking-wider block mb-1 ${
-            isUser ? 'text-cyan-400/70' : 'text-emerald-400/70'
+            showAsUser ? 'text-cyan-400/70' : 'text-emerald-400/70'
           }`}>
-            {isUser ? 'YOU' : 'SENTCOM'}
+            {showAsUser ? 'YOU' : 'SENTCOM'}
           </span>
           
-          <RenderContent text={msg.content} isUser={isUser} />
+          <RenderContent text={msg.content} isUser={showAsUser} />
           
           {/* Copy button for bot messages */}
-          {!isUser && msg.content && (
+          {!showAsUser && msg.content && (
             <button
               onClick={handleCopy}
               className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all"
@@ -124,7 +126,7 @@ const ChatMessage = ({ msg }) => {
             </button>
           )}
         </div>
-        <span className={`text-[9px] text-zinc-600 mt-0.5 block ${isUser ? 'text-right' : ''}`}>
+        <span className={`text-[9px] text-zinc-600 mt-0.5 block ${showAsUser ? 'text-right' : ''}`}>
           {formatRelativeTime(msg.timestamp)}
         </span>
       </div>
@@ -254,7 +256,7 @@ const ChatBubbleOverlay = ({
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             onClick={() => setIsOpen(true)}
-            className="absolute bottom-4 right-4 z-30 w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center hover:shadow-emerald-500/50 hover:scale-105 transition-all cursor-pointer"
+            className="fixed bottom-6 right-6 z-30 w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center hover:shadow-emerald-500/50 hover:scale-105 transition-all cursor-pointer"
             data-testid="chat-bubble-btn"
           >
             <MessageSquare className="w-5 h-5 text-white" />
@@ -280,8 +282,8 @@ const ChatBubbleOverlay = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className={`absolute bottom-4 right-4 z-30 ${sizeClasses} rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/60`}
-            style={{ height: heightStyle, maxHeight: 'calc(100vh - 40px)' }}
+            className={`fixed bottom-6 right-6 z-50 ${sizeClasses} rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/60`}
+            style={{ height: heightStyle, maxHeight: 'calc(100vh - 80px)' }}
             data-testid="chat-overlay-window"
           >
             {/* Glass background */}
