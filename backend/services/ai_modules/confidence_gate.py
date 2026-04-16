@@ -554,25 +554,57 @@ class ConfidenceGate:
             base_setup = setup_type.upper().replace("_LONG", "").replace("_SHORT", "")
             is_short = direction.lower() == "short" or "SHORT" in setup_type.upper()
             
+            # Map scanner setup types → training model base names
+            # Scanner uses descriptive names; training uses canonical categories
+            SETUP_TO_MODEL = {
+                "VWAP_BOUNCE": ["VWAP"], "FIRST_VWAP_PULLBACK": ["VWAP"],
+                "VWAP_FADE": ["VWAP", "SHORT_VWAP"],
+                "SQUEEZE": ["BREAKOUT", "RANGE"], "BREAKOUT_CONFIRMED": ["BREAKOUT"],
+                "HOD_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
+                "APPROACHING_BREAKOUT": ["BREAKOUT"], "APPROACHING_HOD": ["BREAKOUT"],
+                "APPROACHING_RANGE_BREAK": ["RANGE", "BREAKOUT"],
+                "RANGE_BREAK_CONFIRMED": ["RANGE", "BREAKOUT"],
+                "RUBBER_BAND": ["MEAN_REVERSION"],
+                "MEAN_REVERSION": ["MEAN_REVERSION"],
+                "SECOND_CHANCE": ["TREND_CONTINUATION", "BREAKOUT"],
+                "FASHIONABLY_LATE": ["TREND_CONTINUATION"],
+                "OPENING_DRIVE": ["ORB", "MOMENTUM"], "ORB_LONG_CONFIRMED": ["ORB"],
+                "APPROACHING_ORB": ["ORB"],
+                "GAP_GIVE_GO": ["GAP_AND_GO"], "GAP_FADE": ["SHORT_GAP_FADE"],
+                "9_EMA_SCALP": ["SCALP"], "ABC_SCALP": ["SCALP"],
+                "SPENCER_SCALP": ["SCALP"], "PUPPY_DOG": ["SCALP"],
+                "BIG_DOG": ["MOMENTUM", "TREND_CONTINUATION"],
+                "TIDAL_WAVE": ["MOMENTUM", "BREAKOUT"],
+                "HITCHHIKER": ["TREND_CONTINUATION"],
+                "VOLUME_CAPITULATION": ["REVERSAL", "MEAN_REVERSION"],
+                "BACKSIDE": ["REVERSAL", "SHORT_REVERSAL"],
+                "OFF_SIDES_SHORT": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
+                "CHART_PATTERN": ["BREAKOUT", "RANGE"],
+            }
+            
+            # Get mapped model base names, fallback to the raw setup name
+            model_bases = SETUP_TO_MODEL.get(base_setup, [base_setup])
+            
             # Build TARGETED model search — only models that should vote
             relevant_patterns = []
             
-            # 1. Exact setup-type models (e.g., scalp_1min_predictor, scalp_5min_predictor)
-            relevant_patterns.append(
-                {"model_name": {"$regex": f"^{base_setup.lower()}_.*_predictor$", "$options": "i"}}
-            )
-            # 2. Short-specific variant if this is a short trade
-            if is_short:
+            for mb in model_bases:
+                # Setup-specific models (e.g., vwap_5min_predictor, breakout_1min_predictor)
                 relevant_patterns.append(
-                    {"model_name": {"$regex": f"^short_{base_setup.lower()}_.*_predictor$", "$options": "i"}}
+                    {"model_name": {"$regex": f"^{mb.lower()}_.*_predictor$", "$options": "i"}}
                 )
+                # Short-specific variant if this is a short trade
+                if is_short and not mb.startswith("SHORT_"):
+                    relevant_patterns.append(
+                        {"model_name": {"$regex": f"^short_{mb.lower()}_.*_predictor$", "$options": "i"}}
+                    )
             
-            # 3. General direction model (always relevant — it's direction-agnostic)
+            # General direction model (always relevant — it's direction-agnostic)
             relevant_patterns.append(
                 {"model_name": {"$regex": "^direction_.*_predictor$", "$options": "i"}}
             )
             
-            # 4. Ensemble model (cross-timeframe consensus — always relevant)
+            # Ensemble model (cross-timeframe consensus — always relevant)
             relevant_patterns.append(
                 {"model_name": {"$regex": "^ensemble_", "$options": "i"}}
             )
