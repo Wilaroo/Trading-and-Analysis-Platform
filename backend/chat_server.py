@@ -443,6 +443,84 @@ def _get_portfolio_context() -> dict:
     except Exception:
         pass
 
+    # 11. Technical indicators for held positions (RSI, VWAP, EMAs, squeeze, etc.)
+    try:
+        import requests
+        # Get symbols from positions
+        snapshot = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0, "positions": 1})
+        held_symbols = [p.get("symbol") for p in (snapshot or {}).get("positions", []) if p.get("symbol")]
+        # Add key indices
+        for idx in ["SPY", "QQQ"]:
+            if idx not in held_symbols:
+                held_symbols.append(idx)
+        
+        tech_lines = []
+        # Batch fetch technicals for held positions (limit to top 12 by position size)
+        for sym in held_symbols[:12]:
+            try:
+                resp = requests.get(f"http://127.0.0.1:8001/api/technicals/{sym}", timeout=2)
+                if resp.status_code == 200:
+                    t = resp.json()
+                    if t.get("success") and t.get("snapshot"):
+                        s = t["snapshot"]
+                        rsi = s.get("rsi_14", 0)
+                        vwap = s.get("vwap", 0)
+                        dist_vwap = s.get("dist_from_vwap", 0)
+                        ema9 = s.get("ema_9", 0)
+                        ema20 = s.get("ema_20", 0)
+                        atr_pct = s.get("atr_percent", 0)
+                        rvol = s.get("rvol", 0)
+                        trend = s.get("trend", "?")
+                        squeeze = s.get("squeeze_on", False)
+                        above_vwap = s.get("above_vwap", False)
+                        support = s.get("support", 0)
+                        resistance = s.get("resistance", 0)
+                        rs_spy = s.get("rs_vs_spy", 0)
+                        price = s.get("current_price", 0)
+                        
+                        line = f"  {sym} ${price:.2f}: RSI {rsi:.0f}"
+                        line += f", {'above' if above_vwap else 'below'} VWAP (${vwap:.2f}, {dist_vwap:+.1f}%)"
+                        line += f", EMA9 ${ema9:.2f}, EMA20 ${ema20:.2f}"
+                        line += f", trend={trend}, RVOL {rvol:.1f}x"
+                        line += f", ATR {atr_pct:.1f}%"
+                        if support: line += f", support ${support:.2f}"
+                        if resistance: line += f", resistance ${resistance:.2f}"
+                        if squeeze: line += " ** SQUEEZE ACTIVE **"
+                        if abs(rs_spy) > 1: line += f", RS vs SPY {rs_spy:+.1f}%"
+                        tech_lines.append(line)
+            except Exception:
+                pass
+        
+        if tech_lines:
+            parts.append(
+                f"Technical Indicators (LIVE — use these when discussing technicals):\n"
+                + "\n".join(tech_lines)
+            )
+    except Exception:
+        pass
+
+    # 12. Strategy performance by setup type
+    try:
+        strat_stats = list(db["strategy_stats"].find(
+            {"alerts_triggered": {"$gt": 5}},
+            {"_id": 0, "setup_type": 1, "win_rate": 1, "profit_factor": 1,
+             "expected_value_r": 1, "total_pnl": 1, "alerts_triggered": 1}
+        ).sort("expected_value_r", -1).limit(10))
+        if strat_stats:
+            strat_lines = []
+            for s in strat_stats:
+                ev = s.get("expected_value_r", 0)
+                wr = s.get("win_rate", 0) * 100
+                pf = s.get("profit_factor", 0)
+                n = s.get("alerts_triggered", 0)
+                label = "STRONG" if ev > 0.3 else "OK" if ev > 0 else "WEAK"
+                strat_lines.append(
+                    f"  {s['setup_type']:25s} WR {wr:.0f}% | PF {pf:.1f} | EV {ev:+.2f}R | {n} trades | {label}"
+                )
+            parts.append("Strategy Performance (by EV):\n" + "\n".join(strat_lines))
+    except Exception:
+        pass
+
     text = "\n\n".join(parts) if parts else "No portfolio data available at this moment. IB Pusher may not be connected or market is closed."
     debug["context_sections"] = len(parts)
     logger.info(f"Portfolio context: {len(parts)} sections, debug={json.dumps(debug)}")
@@ -622,6 +700,54 @@ CRITICAL RULES — DO NOT BREAK THESE:
 - NEVER reference specific news events, earnings dates, Fed meetings, or macro releases. You do NOT have a news feed. If asked about news, say "I don't have a live news feed right now — check your usual sources."
 - NEVER guess prices for symbols not in the LIVE DATA. Say "I don't have a quote on [symbol] right now."
 - When the market is closed, say so. Do not pretend prices are moving in real-time.
+- If technical indicators ARE provided for a symbol in the data below, USE them confidently and specifically.
+
+TRADING KNOWLEDGE — Use this to guide your advice:
+
+Setup Evaluation Framework:
+- A good long entry has: price above VWAP, RSI between 40-65 (not overbought), RVOL > 1.2x, trend = uptrend, support nearby
+- A good short entry has: price below VWAP, RSI between 35-60 (not oversold), declining into resistance
+- Squeeze setups (BB inside KC): wait for the "fire" — momentum direction tells you which way it breaks. Don't enter DURING the squeeze, enter on the breakout with volume confirmation
+- Second chance entries: must retest VWAP and hold. If it slices through VWAP, it's not a second chance — it's a breakdown
+- Breakout entries: need volume confirmation (RVOL > 1.3x minimum). No volume = false breakout
+
+Risk Management Rules:
+- Never risk more than $2,500 on a single trade
+- Minimum R:R is 1.5:1 — never take a trade where the reward doesn't justify the risk
+- If our daily P&L hits -1% of account, recommend stopping for the day
+- If we have 3+ losers in a row, suggest reducing size by 50% or taking a 15 min break
+- Max 10 open positions at once — if we're at the limit, something must close before we add
+- Concentration risk: no single position should be more than 15% of the portfolio. Flag it if so.
+- Stops must be respected. Never suggest moving a stop further away from entry.
+
+Position Sizing Logic (when asked "how many shares"):
+- shares = max_risk / (entry - stop)
+- Then cap at 50% of account / entry_price
+- Scale with volatility: low ATR = more shares, high ATR = fewer
+- REDUCE decisions from the gate = 60% of calculated size
+
+How to Read the Technical Data:
+- RSI < 30 = oversold (potential bounce), RSI > 70 = overbought (potential fade)
+- RSI 40-60 = neutral zone, good for trend continuation entries
+- RVOL > 1.5 = strong interest, RVOL > 2.0 = unusual activity worth investigating
+- Above VWAP + above EMA9 = strong intraday trend, ride it
+- Below VWAP + below EMA9 = weak, look for shorts or wait for reclaim
+- ATR% tells you how volatile the stock is: < 2% = low vol, 2-4% = normal, > 4% = high vol
+- Squeeze active = volatility compression, prepare for explosive move. Direction determined by momentum
+- RS vs SPY positive = outperforming market (bullish), negative = underperforming (bearish)
+
+When to Suggest Exits:
+- If a position hits its target R:R (e.g., 2:1), suggest taking at least partial profits
+- If RSI > 80 on a long position, suggest tightening stop to lock in gains
+- If price breaks below VWAP on a long after being above all day, suggest exiting
+- If a stock gaps down through support, suggest immediate exit — don't wait for it to "come back"
+- If volume dries up on a breakout, the move is losing momentum — tighten stop
+
+When Asked About Tomorrow / Next Session:
+- Look at today's trend, key levels (support/resistance), and whether we closed strong or weak
+- Suggest watching the opening 5-15 minutes for direction
+- Identify which positions need attention based on their levels
+- Do NOT make predictions — instead say "If X happens, we should do Y. If Z happens, we should do W."
 
 TRADE EXECUTION:
 - When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
