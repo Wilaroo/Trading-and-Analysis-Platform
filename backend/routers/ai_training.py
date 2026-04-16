@@ -1076,6 +1076,45 @@ def get_confidence_gate_accuracy(limit: int = 100):
 
 
 
+@router.post("/confidence-gate/calibrate")
+def calibrate_confidence_gate():
+    """
+    Run auto-calibration on the confidence gate thresholds.
+    Analyzes trade outcomes to find optimal GO/REDUCE/SKIP thresholds per trading mode.
+    Requires 50+ tracked outcomes to produce meaningful calibration.
+    """
+    try:
+        from server import db as mongo_db
+        from services.ai_modules.gate_calibrator import init_gate_calibrator
+        calibrator = init_gate_calibrator(db=mongo_db)
+        result = calibrator.calibrate()
+
+        # If calibration succeeded, reload thresholds in the live gate
+        if result.get("success"):
+            from services.ai_modules.confidence_gate import get_confidence_gate
+            gate = get_confidence_gate()
+            gate._load_calibrated_thresholds()
+
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Confidence gate calibration error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/confidence-gate/calibration")
+def get_confidence_gate_calibration():
+    """Get the current calibration state (thresholds, analysis, last calibrated)."""
+    try:
+        from server import db as mongo_db
+        doc = mongo_db["gate_calibration"].find_one({"_id": "current"}, {"_id": 0})
+        if doc:
+            return {"success": True, "calibrated": True, **doc}
+        return {"success": True, "calibrated": False, "reason": "No calibration data yet"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+
 # ═══════════════════════════════════════════════════════════════
 # CNN Chart Pattern Training Endpoints
 # ═══════════════════════════════════════════════════════════════

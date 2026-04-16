@@ -62,6 +62,7 @@ class ConfidenceGate:
         self._last_regime_check = None
         self._regime_cache = None
         self._ai_regime_cache = None
+        self._calibrated_thresholds = None  # Loaded from gate_calibration collection
         self._stats = {
             "total_evaluated": 0,
             "go_count": 0,
@@ -72,6 +73,22 @@ class ConfidenceGate:
             "today_skip": 0,
             "today_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         }
+        # Load calibrated thresholds if available
+        self._load_calibrated_thresholds()
+
+    def _load_calibrated_thresholds(self):
+        """Load auto-calibrated thresholds from DB (if available)."""
+        if self._db is None:
+            return
+        try:
+            from services.ai_modules.gate_calibrator import GateCalibrator
+            cal = GateCalibrator(db=self._db)
+            thresholds = cal.load_calibrated_thresholds()
+            if thresholds:
+                self._calibrated_thresholds = thresholds
+                logger.info(f"Loaded calibrated gate thresholds: {thresholds}")
+        except Exception as e:
+            logger.debug(f"No calibrated thresholds available: {e}")
 
     def set_db(self, db):
         self._db = db
@@ -424,9 +441,15 @@ class ConfidenceGate:
         # Additive scoring: base 0, earn points from confirmation
         confidence_score = max(0, min(100, confidence_points))
 
-        # Thresholds scale with trading mode — AGGRESSIVE takes more trades
+        # Use calibrated thresholds if available, else defaults
         mode = self._trading_mode
-        if mode == TradingMode.AGGRESSIVE:
+        mode_key = mode.lower() if isinstance(mode, str) else "normal"
+        
+        if self._calibrated_thresholds and mode_key in self._calibrated_thresholds:
+            cal = self._calibrated_thresholds[mode_key]
+            go_threshold = cal["go"]
+            reduce_threshold = cal["reduce"]
+        elif mode == TradingMode.AGGRESSIVE:
             go_threshold = 20
             reduce_threshold = 10
         elif mode == TradingMode.NORMAL:

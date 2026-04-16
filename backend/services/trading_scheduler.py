@@ -203,6 +203,20 @@ class TradingScheduler:
                 replace_existing=True
             )
             
+            # 7. Gate Calibration - Daily at 4:30 PM ET (after daily analysis, uses fresh outcomes)
+            self._scheduler.add_job(
+                self._run_gate_calibration,
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=16,
+                    minute=30,
+                    timezone='US/Eastern'
+                ),
+                id='gate_calibration',
+                name='Confidence Gate Calibration',
+                replace_existing=True
+            )
+            
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -212,6 +226,7 @@ class TradingScheduler:
             logger.info("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
             logger.info("  - Learning Sync: 5:00 PM ET (Mon-Fri)")
             logger.info("  - IB Collection Resume: 2:15 AM ET (Daily)")
+            logger.info("  - Gate Calibration: 4:30 PM ET (Mon-Fri)")
             
         except ImportError:
             logger.warning("APScheduler not installed. Scheduler disabled.")
@@ -584,6 +599,49 @@ class TradingScheduler:
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
             logger.info(f"IB collection resume check completed in {result.duration_seconds:.1f}s: {result.result_summary}")
+
+    async def _run_gate_calibration(self):
+        """Run confidence gate auto-calibration using trade outcomes."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="gate_calibration",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled gate calibration...")
+            from services.ai_modules.gate_calibrator import init_gate_calibrator
+            calibrator = init_gate_calibrator(db=self._db)
+            cal_result = calibrator.calibrate()
+
+            if cal_result.get("success"):
+                # Reload thresholds in the live gate
+                from services.ai_modules.confidence_gate import get_confidence_gate
+                gate = get_confidence_gate()
+                gate._load_calibrated_thresholds()
+                result.success = True
+                result.result_summary = (
+                    f"Calibrated from {cal_result['total_outcomes']} outcomes: "
+                    f"GO>={cal_result['base_go_threshold']}, REDUCE>={cal_result['base_reduce_threshold']}"
+                )
+            else:
+                result.success = True  # Not a failure, just insufficient data
+                result.result_summary = cal_result.get("reason", "No calibration needed")
+
+            logger.info(f"Gate calibration: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Calibration failed: {e}"
+            logger.error(f"Gate calibration failed: {e}")
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
             
     def _log_task_result(self, result: ScheduledTaskResult):
         """Log task result to database"""

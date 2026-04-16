@@ -62,6 +62,19 @@
 - **Confidence derived from TQS**: Setup confidence now maps 1:1 from TQS score (0-100) instead of hardcoded 70%.
 - **New data chips**: TQS grade (A/B/C), direction (LONG/SHORT), R:R ratio, win rate %, tape score, R-multiple on closed trades.
 
+### Gate Auto-Calibration (Feb 2026 — DONE)
+- Created `gate_calibrator.py`: Analyzes `confidence_gate_log` outcomes by 5-point score buckets, computes cumulative win rates, finds optimal GO/REDUCE thresholds where win rate meets targets (50% for GO, 38% for REDUCE).
+- Per-mode offsets: AGGRESSIVE gets -15 from base, CAUTIOUS +15, DEFENSIVE +25.
+- Confidence gate loads calibrated thresholds on startup from `gate_calibration` DB collection, falls back to defaults if no calibration data.
+- Scheduled nightly at 4:30 PM ET (Mon-Fri) via trading scheduler. Also available via `POST /api/ai-training/confidence-gate/calibrate`.
+- Requires 50+ tracked outcomes before adjusting thresholds (safety minimum).
+
+### LLM-Enriched Setup Descriptions (Feb 2026 — DONE)
+- Setup reasoning in S.O.C. stream now enriched via local Ollama LLM (qwen model). Raw pipe-delimited indicator data transformed into 1-2 sentence trader-friendly narratives.
+- Async, non-blocking: 8s timeout, graceful fallback to raw data if Ollama unavailable.
+- Cached per symbol+setup with 5-min TTL (avoids redundant LLM calls).
+- Prompt tuned for concise, actionable language with key numbers preserved.
+
 ## Upcoming Tasks
 - Phase 5e: RL Position Sizer
 - Phase 6: Distributed PC Worker

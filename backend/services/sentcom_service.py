@@ -111,6 +111,8 @@ class SentComService:
         self._max_history = 50
         self._message_counter = 0
         self._session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        self._llm_cache: Dict[str, str] = {}  # Cache LLM-enriched descriptions per symbol+setup
+        self._llm_cache_ttl: Dict[str, float] = {}  # Expiry timestamps
         
         # Load recent chat messages (current day only, for continuity)
         self._load_recent_chat_history()
@@ -145,6 +147,63 @@ class SentComService:
         except Exception as e:
             logger.error(f"Error loading chat history: {e}")
             self._chat_history = []
+
+    async def _enrich_setup_with_llm(self, symbol: str, setup_type: str, raw_reasoning: str, direction: str = "") -> str:
+        """
+        Call LLM to transform raw indicator data into a human-readable trading narrative.
+        Uses Ollama proxy (free, local) with cache to avoid redundant calls.
+        Falls back to raw reasoning if LLM unavailable.
+        """
+        import time as _t
+        cache_key = f"{symbol}_{setup_type}"
+        
+        # Check cache (5 min TTL)
+        if cache_key in self._llm_cache:
+            if _t.time() < self._llm_cache_ttl.get(cache_key, 0):
+                return self._llm_cache[cache_key]
+        
+        try:
+            import httpx
+            import os
+            
+            ollama_url = os.environ.get("OLLAMA_URL", "").rstrip("/")
+            if not ollama_url:
+                return raw_reasoning
+            
+            model = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+            
+            prompt = (
+                f"You are a senior day trader's AI assistant. Rewrite this trading setup data "
+                f"into a concise 1-2 sentence narrative a trader would find actionable. "
+                f"Keep the key numbers (price, %, R:R). Use confident, direct language.\n\n"
+                f"Symbol: {symbol}\nSetup: {setup_type}\nDirection: {direction}\n"
+                f"Raw data: {raw_reasoning}\n\n"
+                f"Narrative (1-2 sentences, no bullet points):"
+            )
+            
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post(
+                    f"{ollama_url}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False,
+                           "options": {"num_predict": 120, "temperature": 0.3}},
+                )
+                if resp.status_code == 200:
+                    text = resp.json().get("response", "").strip()
+                    if text and len(text) > 20:
+                        # Cache it
+                        self._llm_cache[cache_key] = text
+                        self._llm_cache_ttl[cache_key] = _t.time() + 300  # 5 min TTL
+                        # Prune cache if too large
+                        if len(self._llm_cache) > 100:
+                            oldest = min(self._llm_cache_ttl, key=self._llm_cache_ttl.get)
+                            self._llm_cache.pop(oldest, None)
+                            self._llm_cache_ttl.pop(oldest, None)
+                        return text
+        except Exception as e:
+            logger.debug(f"LLM enrichment failed for {symbol} (using raw): {e}")
+        
+        return raw_reasoning
+
     
     async def _save_chat_message(self, role: str, content: str, timestamp: str):
         """Save a chat message to MongoDB"""
@@ -415,6 +474,11 @@ class SentComService:
                         if profit_factor > 0:
                             reasoning_text += f", PF: {profit_factor:.1f}"
                     
+                    # LLM enrichment: transform raw data into trader-friendly narrative
+                    enriched_reasoning = await self._enrich_setup_with_llm(
+                        symbol, setup_name, reasoning_text, direction
+                    )
+                    
                     # Confidence from TQS (0-100 → clamp to 10-95)
                     if score > 0:
                         confidence = max(10, min(95, int(score)))
@@ -446,7 +510,7 @@ class SentComService:
                             "atr_percent": round(atr_pct, 2) if atr_pct else None,
                             "volatility": volatility,
                             "tape_score": round(tape_score_val, 1) if tape_score_val else None,
-                            "reasoning": reasoning_text
+                            "reasoning": enriched_reasoning
                         }
                     ))
                 
