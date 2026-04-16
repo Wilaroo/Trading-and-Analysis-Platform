@@ -169,20 +169,23 @@ def _get_portfolio_context() -> dict:
 
     # 1b. Key market index quotes (always include for context)
     try:
-        if 'quotes' in dir() and quotes:
+        snapshot = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0, "quotes": 1})
+        idx_quotes = (snapshot or {}).get("quotes", {})
+        if idx_quotes:
             idx_lines = []
-            for idx_sym in ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX']:
-                q = quotes.get(idx_sym, {})
+            for idx_sym in ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX', 'NVDA', 'XOM']:
+                q = idx_quotes.get(idx_sym, {})
                 if q:
                     last = q.get("last") or q.get("close") or 0
-                    chg = q.get("change") or 0
-                    chg_pct = q.get("changePercent") or q.get("change_pct") or 0
+                    prev_close = q.get("close") or last
+                    chg = last - prev_close if last and prev_close else 0
+                    chg_pct = (chg / prev_close * 100) if prev_close else 0
                     if last > 0:
-                        idx_lines.append(f"  {idx_sym}: ${last:.2f} ({chg_pct:+.2f}%)")
+                        idx_lines.append(f"  {idx_sym}: ${last:.2f} ({chg_pct:+.2f}% today)")
             if idx_lines:
-                parts.append("Market Indices (LIVE):\n" + "\n".join(idx_lines))
-    except Exception:
-        pass
+                parts.append("LIVE Market Prices (use THESE numbers, not from memory):\n" + "\n".join(idx_lines))
+    except Exception as e:
+        logger.debug(f"Index quotes error: {e}")
     try:
         recent = list(
             db["shadow_decisions"]
