@@ -328,7 +328,7 @@ class RiskParameters:
     starting_capital: float = 100000.0       # Account capital for position sizing (updated from IB)
     max_position_pct: float = 50.0           # Maximum % of capital per position (user requested 50%)
     max_open_positions: int = 10             # Maximum concurrent positions (unlimited = high number)
-    min_risk_reward: float = 0.8             # Minimum risk/reward ratio (lowered to allow more trades)
+    min_risk_reward: float = 1.5             # Minimum risk/reward ratio (1.5:1 = risk $1 to make $1.50)
     max_slippage_pct: float = 0.5           # Maximum acceptable slippage %
     
     # Trading hours (Eastern Time)
