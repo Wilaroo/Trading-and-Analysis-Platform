@@ -68,9 +68,11 @@ export const useSOCStream = () => {
     }
   }, []);
 
-  // Initial fetch only (no polling)
+  // Initial fetch + periodic refresh (30s fallback since WS doesn't carry stream data)
   useEffect(() => {
     fetchThoughts();
+    const interval = setInterval(fetchThoughts, 30000);
+    return () => clearInterval(interval);
   }, [fetchThoughts]);
 
   // Subscribe to WS updates

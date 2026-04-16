@@ -242,7 +242,7 @@ const ChatBubbleOverlay = ({
   const sizeClasses = isExpanded
     ? 'w-[800px] max-w-[90vw]'
     : 'w-[600px] max-w-[85vw]';
-  const heightStyle = isExpanded ? '85vh' : '560px';
+  const heightStyle = isExpanded ? 'calc(100vh - 120px)' : '560px';
 
   return (
     <>
@@ -281,7 +281,7 @@ const ChatBubbleOverlay = ({
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className={`absolute bottom-4 right-4 z-30 ${sizeClasses} rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/60`}
-            style={{ height: heightStyle }}
+            style={{ height: heightStyle, maxHeight: 'calc(100vh - 40px)' }}
             data-testid="chat-overlay-window"
           >
             {/* Glass background */}
