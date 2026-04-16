@@ -19,16 +19,11 @@ import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
 
-# uvloop: handled by uvicorn's loop parameter, not global policy
-# (APScheduler calls asyncio.get_event_loop() at module load time which
-#  fails with uvloop's strict policy before the event loop exists)
+# uvloop: DISABLED — conflicts with APScheduler's event loop handling at module load time
+# APScheduler calls asyncio.get_event_loop() during import, before uvicorn creates its loop.
+# When uvicorn uses uvloop, it creates a NEW loop, orphaning APScheduler's reference.
+# TODO: Fix by moving scheduler init to startup event handler, then re-enable uvloop.
 _has_uvloop = False
-try:
-    import uvloop
-    _has_uvloop = True
-    print("[UVLOOP] Available — will be used by uvicorn")
-except ImportError:
-    print("[UVLOOP] Not installed — using default asyncio loop")
 
 # Load environment variables
 load_dotenv()
