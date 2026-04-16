@@ -1130,6 +1130,33 @@ def _init_all_services():
         # This enables the SIM → PAPER → LIVE trade gating
         trading_bot.set_strategy_promotion_service(strategy_promotion_service)
 
+        # Auto-seed all known scanner setup types to LIVE phase
+        # IB paper account provides the safety layer during testing.
+        # When switching to live money, demote strategies to PAPER and let them re-earn LIVE.
+        ALL_SETUP_TYPES = [
+            "9_ema_scalp", "abc_scalp", "approaching_breakout", "approaching_hod",
+            "approaching_orb", "approaching_range_break", "backside", "big_dog",
+            "breakout_confirmed", "chart_pattern", "fashionably_late",
+            "first_vwap_pullback", "gap_fade", "gap_give_go", "hitchhiker",
+            "hod_breakout", "mean_reversion_long", "mean_reversion_short",
+            "off_sides_short", "opening_drive", "orb_long_confirmed", "puppy_dog",
+            "range_break_confirmed", "rubber_band_long", "rubber_band_short",
+            "second_chance", "spencer_scalp", "squeeze", "tidal_wave",
+            "volume_capitulation", "vwap_bounce", "vwap_fade_long", "vwap_fade_short",
+        ]
+        from services.strategy_promotion_service import StrategyPhase
+        seeded = 0
+        for setup in ALL_SETUP_TYPES:
+            current = strategy_promotion_service.get_strategy_phase(setup)
+            if current == StrategyPhase.SIMULATION:
+                strategy_promotion_service.set_strategy_phase(
+                    setup, StrategyPhase.LIVE,
+                    reason="Auto-seeded to LIVE (IB paper account testing)"
+                )
+                seeded += 1
+        if seeded > 0:
+            print(f"  - Auto-promoted {seeded} strategies to LIVE (paper account testing)")
+
         print("Strategy Promotion Service initialized")
         print("  - Manages strategy lifecycle: SIMULATION → PAPER → LIVE")
         print("  - Auto-promotes strategies that prove profitable")

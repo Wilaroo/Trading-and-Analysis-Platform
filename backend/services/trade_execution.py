@@ -39,13 +39,56 @@ class TradeExecution:
         print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
 
         # === STRATEGY PHASE CHECK ===
-        # BYPASSED: IB paper account provides the safety layer.
-        # Re-enable this block when switching to live money account.
-        # if bot._strategy_promotion_service:
-        #     should_execute, phase_reason, should_paper = bot._strategy_promotion_service.should_execute_trade(trade.setup_type)
-        #     if not should_execute:
-        #         ... (paper/simulation phase handling)
-        logger.info(f"🚀 [EXECUTING] {trade.symbol} {trade.setup_type} ({trade.direction.value}) — promotion gate bypassed")
+        # This is the gate that controls which strategies execute real trades
+        if bot._strategy_promotion_service:
+            should_execute, phase_reason, should_paper = bot._strategy_promotion_service.should_execute_trade(trade.setup_type)
+
+            if not should_execute:
+                if should_paper:
+                    # PAPER PHASE: Record the trade without executing
+                    logger.info(f"📝 [PAPER TRADE] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
+                    trade.notes = (trade.notes or "") + f" [PAPER: {phase_reason}]"
+
+                    # Record paper trade for tracking
+                    try:
+                        paper_trade_id = await bot._strategy_promotion_service.record_paper_trade(
+                            strategy_name=trade.setup_type,
+                            symbol=trade.symbol,
+                            direction=trade.direction.value,
+                            entry_price=trade.entry_price,
+                            stop_price=trade.stop_price,
+                            target_price=trade.target_prices[0] if trade.target_prices else trade.entry_price * 1.02,
+                            notes=f"Would have traded: {trade.shares} shares | R:R={trade.risk_reward_ratio:.1f}"
+                        )
+                        logger.info(f"📝 Paper trade recorded: {paper_trade_id}")
+
+                        # Add to filter thoughts for visibility
+                        bot._add_filter_thought({
+                            "text": f"📝 PAPER: {trade.symbol} {trade.setup_type} ({trade.direction.value}) - Strategy not yet LIVE",
+                            "symbol": trade.symbol,
+                            "setup_type": trade.setup_type,
+                            "action": "PAPER_TRACKED",
+                            "phase": "paper"
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to record paper trade: {e}")
+
+                    # Mark trade as not executed (for UI feedback)
+                    trade.status = TradeStatus.CANCELLED
+                    trade.close_reason = "paper_phase"
+                    await bot._save_trade(trade)
+                    return
+                else:
+                    # SIMULATION PHASE: Skip entirely
+                    logger.info(f"⏭️ [SKIPPED] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
+                    trade.notes = (trade.notes or "") + f" [SKIPPED: {phase_reason}]"
+                    trade.status = TradeStatus.CANCELLED
+                    trade.close_reason = "simulation_phase"
+                    await bot._save_trade(trade)
+                    return
+            else:
+                # LIVE PHASE: Proceed with execution
+                logger.info(f"🚀 [LIVE STRATEGY] {trade.symbol} {trade.setup_type} - Executing real trade")
 
         if not bot._trade_executor:
             print("   ❌ Trade executor not configured")
