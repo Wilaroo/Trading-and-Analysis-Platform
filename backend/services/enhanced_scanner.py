@@ -3850,29 +3850,72 @@ class EnhancedBackgroundScanner:
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB
     
     async def _scan_daily_setups(self):
-        """Scan for swing and position setups using daily bar data from ib_historical_data."""
+        """Scan for swing and position setups.
+        
+        Uses a hybrid approach:
+        - RECENT daily bars from ib_historical_data (for 20-60 day patterns)
+        - TODAY's live data from pushed quotes/snapshots (for current bar)
+        This way even if historical data is a few days stale, we still get
+        reasonable results by appending today's live bar.
+        """
         try:
             if not self.db:
                 return
             
-            # Get symbols with daily data (use ADV cache for filtering)
-            symbols = list(self._symbol_adv_cache.keys())[:200]  # Top 200 by liquidity
-            if not symbols:
+            # Get today's live data from pushed quotes
+            live_quotes = {}
+            try:
+                from routers.ib import get_pushed_quotes, get_pushed_positions, is_pusher_connected
+                if is_pusher_connected():
+                    live_quotes = get_pushed_quotes() or {}
+            except Exception:
+                pass
+            
+            if not live_quotes:
+                logger.debug("Daily scan: no live quotes available, skipping")
                 return
             
+            # Get symbols with daily data (use ADV cache for filtering)
+            symbols = list(self._symbol_adv_cache.keys())[:200]
+            if not symbols:
+                symbols = list(live_quotes.keys())[:200]
+            
             scanned = 0
+            alerts_found = 0
             for symbol in symbols:
                 try:
-                    # Get last 60 daily bars
+                    # Get historical daily bars from MongoDB
                     bars = list(self.db["ib_historical_data"].find(
                         {"symbol": symbol, "bar_size": "1 day"},
                         {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
                     ).sort("date", -1).limit(60))
                     
-                    if len(bars) < 20:
+                    if len(bars) < 15:
                         continue
                     
                     bars.reverse()  # Oldest first
+                    
+                    # Append today's live bar from pushed quotes
+                    quote = live_quotes.get(symbol, {})
+                    if quote:
+                        last_price = quote.get("last") or quote.get("close") or 0
+                        if last_price > 0:
+                            today_bar = {
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "open": quote.get("open", last_price) or last_price,
+                                "high": quote.get("high", last_price) or last_price,
+                                "low": quote.get("low", last_price) or last_price,
+                                "close": last_price,
+                                "volume": quote.get("volume", 0) or 0,
+                            }
+                            # Only append if it's a different date than the last bar
+                            last_bar_date = bars[-1].get("date", "")[:10] if bars else ""
+                            today_date = today_bar["date"]
+                            if today_date != last_bar_date:
+                                bars.append(today_bar)
+                            else:
+                                # Update today's bar with live data
+                                bars[-1] = today_bar
                     
                     # Run daily setup checks
                     for check in [
@@ -3887,6 +3930,7 @@ class EnhancedBackgroundScanner:
                             alert = await check(symbol, bars)
                             if alert:
                                 await self._process_new_alert(alert)
+                                alerts_found += 1
                         except Exception:
                             pass
                     
@@ -3894,7 +3938,7 @@ class EnhancedBackgroundScanner:
                 except Exception:
                     pass
             
-            logger.info(f"📊 Daily scan complete: {scanned} symbols checked for swing/position setups")
+            logger.info(f"📊 Daily scan: {scanned} symbols, {alerts_found} swing/position alerts found")
         except Exception as e:
             logger.error(f"Daily scan error: {e}")
 
