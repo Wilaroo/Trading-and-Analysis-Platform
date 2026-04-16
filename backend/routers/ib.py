@@ -466,6 +466,21 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
         except Exception as snap_err:
             logger.debug(f"IB snapshot write skipped: {snap_err}")
 
+        # Immediately update the streaming cache so WebSocket clients get fresh data
+        # without waiting for the next 10s cache refresh cycle
+        try:
+            import server as _srv
+            cache = getattr(_srv, '_streaming_cache', None)
+            if cache is not None:
+                cache["sentcom_data"] = {
+                    "positions": _pushed_ib_data.get("positions", []),
+                    "status": cache.get("sentcom_data", {}).get("status", {}),
+                    "stream": cache.get("sentcom_data", {}).get("stream", []),
+                    "market_context": cache.get("sentcom_data", {}).get("market_context", {}),
+                }
+        except Exception:
+            pass
+
         return {
             "success": True,
             "received": {

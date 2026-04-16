@@ -3018,7 +3018,7 @@ async def stream_quotes():
 
 async def stream_system_status():
     """Background task to push system status — reads from cache (zero threads)."""
-    await asyncio.sleep(5)
+    await asyncio.sleep(4)
     last_ib_status = None
     last_bot_status = None
     last_scanner_status = None
@@ -3059,7 +3059,7 @@ async def stream_system_status():
 
 async def stream_bot_trades():
     """Background task to push bot trades — reads from cache."""
-    await asyncio.sleep(8)
+    await asyncio.sleep(5)
     last_trades_hash = "initial"  # Ensure first broadcast fires
     while True:
         if _is_training_active():
@@ -3083,7 +3083,7 @@ async def stream_bot_trades():
 
 async def stream_scanner_alerts():
     """Background task to push scanner alerts — reads from cache."""
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
     last_alerts_count = -1  # Start at -1 so first broadcast always fires
     while True:
         if _is_training_active():
@@ -3108,7 +3108,7 @@ async def stream_scanner_alerts():
 
 async def stream_smart_watchlist():
     """Background task to push smart watchlist — reads from cache."""
-    await asyncio.sleep(12)
+    await asyncio.sleep(6)
     last_watchlist_hash = None
     while True:
         if _is_training_active():
@@ -3133,7 +3133,7 @@ async def stream_smart_watchlist():
 
 async def stream_coaching_notifications():
     """Background task to push AI coaching notifications — reads from cache."""
-    await asyncio.sleep(15)
+    await asyncio.sleep(7)
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
@@ -3155,7 +3155,7 @@ async def stream_coaching_notifications():
 
 async def stream_confidence_gate():
     """Push confidence gate summary — reads from cache."""
-    await asyncio.sleep(20)
+    await asyncio.sleep(6)
     last_summary_hash = None
     while True:
         if _is_training_active():
@@ -3213,7 +3213,7 @@ async def stream_training_status():
 
 async def stream_market_regime():
     """Push market regime data — reads from cache."""
-    await asyncio.sleep(18)
+    await asyncio.sleep(7)
     last_regime_hash = None
     while True:
         if _is_training_active():
@@ -3238,7 +3238,7 @@ async def stream_market_regime():
 
 async def stream_filter_thoughts():
     """Push smart filter thoughts — reads from cache."""
-    await asyncio.sleep(22)
+    await asyncio.sleep(6)
     last_thoughts_hash = None
     while True:
         if _is_training_active():
