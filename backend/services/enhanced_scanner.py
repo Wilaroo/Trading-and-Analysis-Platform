@@ -4601,6 +4601,22 @@ class EnhancedBackgroundScanner:
         """Get all live alerts for a specific symbol"""
         symbol = symbol.upper()
         return [a for a in self._live_alerts.values() if a.symbol == symbol]
+
+    def get_daily_swing_alerts(self) -> list:
+        """Get only daily/swing/position setup alerts (not intraday)."""
+        DAILY_SETUPS = {
+            'daily_squeeze', 'trend_continuation', 'daily_breakout',
+            'base_breakout', 'accumulation_entry', 'breakdown_confirmed',
+            'relative_strength_position', 'earnings_momentum', 'sector_rotation',
+            'gap_fade_daily', 'squeeze',
+        }
+        alerts = [
+            a for a in self._live_alerts.values()
+            if a.setup_type in DAILY_SETUPS and a.status == "active"
+        ]
+        alerts.sort(key=lambda x: x.created_at, reverse=True)
+        return alerts
+
     
     def set_watchlist(self, symbols: List[str]):
         self._watchlist = [s.upper() for s in symbols]

@@ -130,8 +130,32 @@ const getEntryStyle = (entry) => {
     };
   }
   
-  // Setup found
+  // Setup found — color-code by timeframe (swing/position vs intraday)
   if (actionType === 'setup_found' || type === 'setup' || type === 'alert') {
+    const tradeType = (entry.metadata?.trade_type || '').toLowerCase();
+    const isSwing = tradeType === 'swing';
+    const isPosition = tradeType === 'position';
+    
+    if (isPosition) {
+      return {
+        icon: <TrendingUp className="w-4 h-4" />,
+        label: 'POSITION',
+        gradient: 'from-amber-500 to-orange-500',
+        glowColor: 'rgba(245,158,11,0.4)',
+        textColor: 'text-amber-400',
+        bgColor: 'bg-amber-500/20',
+      };
+    }
+    if (isSwing) {
+      return {
+        icon: <Target className="w-4 h-4" />,
+        label: 'SWING',
+        gradient: 'from-purple-500 to-violet-500',
+        glowColor: 'rgba(168,85,247,0.4)',
+        textColor: 'text-purple-400',
+        bgColor: 'bg-purple-500/20',
+      };
+    }
     return {
       icon: <Target className="w-4 h-4" />,
       label: 'SETUP',

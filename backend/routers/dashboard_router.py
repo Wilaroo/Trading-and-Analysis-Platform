@@ -254,6 +254,44 @@ def get_scanner_presets():
     return {"presets": presets}
 
 
+@router.get("/api/scanner/daily-alerts")
+def get_daily_swing_alerts():
+    """Get active swing/position alerts from the daily scanner."""
+    if not _background_scanner:
+        return {"success": False, "alerts": [], "error": "Scanner not initialized"}
+    
+    try:
+        alerts = _background_scanner.get_daily_swing_alerts()
+        formatted = []
+        for a in alerts:
+            formatted.append({
+                "id": a.id,
+                "symbol": a.symbol,
+                "setup_type": a.setup_type,
+                "direction": a.direction,
+                "priority": a.priority.value if hasattr(a.priority, 'value') else str(a.priority),
+                "headline": getattr(a, 'headline', ''),
+                "entry_price": getattr(a, 'trigger_price', None),
+                "stop_price": getattr(a, 'stop_loss', None),
+                "target_price": getattr(a, 'target', None),
+                "risk_reward": getattr(a, 'risk_reward', 0),
+                "reasoning": getattr(a, 'reasoning', []),
+                "tqs_score": getattr(a, 'tqs_score', 0),
+                "created_at": a.created_at if hasattr(a, 'created_at') else None,
+                "status": a.status,
+            })
+        
+        return {
+            "success": True,
+            "count": len(formatted),
+            "alerts": formatted,
+            "scan_count": getattr(_background_scanner, '_scan_count', 0),
+        }
+    except Exception as e:
+        return {"success": False, "alerts": [], "error": str(e)}
+
+
+
 # ===================== WAVE SCANNER =====================
 
 @router.get("/api/wave-scanner/batch")

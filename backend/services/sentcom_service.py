@@ -422,15 +422,33 @@ class SentComService:
                     volatility = getattr(alert, 'volatility_regime', '') or ''
                     tape_score_val = getattr(alert, 'tape_score', 0) or 0
                     
-                    # Infer trade_type and timeframe from setup_name if not provided
+                    # Infer trade_type and timeframe from strategy config, then setup name
                     setup_lower = setup_name.lower()
+                    
+                    # Check STRATEGY_CONFIG for authoritative timeframe
+                    SWING_SETUPS = {
+                        'squeeze', 'trend_continuation', 'daily_squeeze', 'daily_breakout',
+                        'earnings_momentum', 'sector_rotation', 'gap_fade_daily',
+                    }
+                    POSITION_SETUPS = {
+                        'base_breakout', 'accumulation_entry', 'relative_strength_position',
+                        'position_trade',
+                    }
+                    SCALP_SETUPS = {
+                        '9_ema_scalp', 'abc_scalp', 'spencer_scalp', 'puppy_dog',
+                        'gap_give_go', 'gap_fade', 'short_squeeze_fade',
+                    }
+                    
                     if not timeframe:
-                        if 'scalp' in setup_lower or '9_ema' in setup_lower:
-                            timeframe = '5min'
-                            trade_type = 'Scalp'
-                        elif 'swing' in setup_lower or 'daily' in setup_lower:
+                        if setup_name in POSITION_SETUPS:
+                            timeframe = 'Weekly'
+                            trade_type = 'Position'
+                        elif setup_name in SWING_SETUPS:
                             timeframe = 'Daily'
                             trade_type = 'Swing'
+                        elif setup_name in SCALP_SETUPS or 'scalp' in setup_lower:
+                            timeframe = '5min'
+                            trade_type = 'Scalp'
                         elif 'gap' in setup_lower or 'open' in setup_lower:
                             timeframe = '1min'
                             trade_type = 'Scalp'
