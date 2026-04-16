@@ -66,17 +66,35 @@ def init_system_router(
 
 
 @router.get("/api/health")
-def health_check():
-    """Sync handler runs in thread pool — immune to event loop blocking."""
+async def health_check():
+    """Async handler — runs on event loop, immune to thread pool saturation."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@router.get("/api/cache-status")
+async def cache_status():
+    """Check streaming cache health — async, no threads."""
+    try:
+        # Import from server module where cache lives
+        import server as _srv
+        cache = getattr(_srv, '_streaming_cache', {})
+        return {
+            "status": "healthy",
+            "last_refresh": cache.get("last_refresh"),
+            "keys_populated": [k for k, v in cache.items() if v is not None and k != "last_refresh"],
+            "keys_empty": [k for k, v in cache.items() if v is None and k != "last_refresh"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 @router.get("/api/startup-check")
-def startup_check():
+async def startup_check():
     """
     Ultra-lightweight startup check endpoint for the StartupModal.
     Returns ALL service statuses in a SINGLE call using ONLY in-memory state.
-    Runs as sync (def) — immune to event loop blocking.
+    Async — runs on event loop, immune to thread pool saturation.
     """
     backend_ok = True
 

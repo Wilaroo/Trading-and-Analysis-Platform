@@ -2600,62 +2600,381 @@ def _is_training_active():
     except Exception:
         return False
 
-async def stream_quotes():
-    """Background task to stream quotes using batch API"""
-    await asyncio.sleep(3)
+
+# ===================== STREAMING CACHE LAYER (Phase 2) =====================
+# One background task computes ALL dashboard data → stores in memory.
+# All 17 stream functions read from this dict instead of hitting services/DB.
+# Thread usage: 1 per cycle instead of 26+.
+
+_streaming_cache = {
+    "last_refresh": None,
+    # System status
+    "ib_status": None,
+    "bot_status": None,
+    "scanner_status": None,
+    # Trades & positions
+    "bot_trades": None,
+    "scanner_alerts": None,
+    "smart_watchlist": None,
+    # AI & analysis
+    "coaching_notifications": None,
+    "confidence_gate": None,
+    "training_status": None,
+    "filter_thoughts": None,
+    # Market
+    "market_regime": None,
+    "risk_status": None,
+    "order_queue": None,
+    # SentCom
+    "sentcom_data": None,
+    # Intel & collection
+    "market_intel": None,
+    "data_collection": None,
+    # Mode
+    "focus_mode": None,
+    "simulator": None,
+}
+
+
+def _compute_all_sync_data(last_notification_time_iso: str = None):
+    """Runs in ONE thread — computes ALL dashboard data from services + MongoDB.
+    Returns a dict to merge into _streaming_cache."""
+    result = {}
     
+    # --- System Status ---
+    try:
+        ib_raw = ib_service.get_connection_status()
+        result["ib_status"] = {
+            "connected": ib_raw.get("connected", False),
+            "busy": ib_raw.get("busy", False),
+            "error": ib_raw.get("error"),
+        }
+    except Exception:
+        result["ib_status"] = {"connected": False, "busy": False, "error": "service unavailable"}
+    
+    try:
+        bot_raw = trading_bot.get_status()
+        result["bot_status"] = {
+            "state": bot_raw.get("state", "unknown"),
+            "mode": bot_raw.get("mode", "manual"),
+            "open_positions": bot_raw.get("open_positions", 0),
+            "pending_orders": bot_raw.get("pending_orders", 0),
+            "daily_pnl": bot_raw.get("daily_pnl", 0),
+            "daily_trades": bot_raw.get("daily_trades", 0),
+            "last_scan": bot_raw.get("last_scan"),
+            "next_scan": bot_raw.get("next_scan"),
+            "error": bot_raw.get("error"),
+        }
+    except Exception:
+        result["bot_status"] = {"state": "unknown", "mode": "manual"}
+    
+    try:
+        scanner_raw = background_scanner.get_stats()
+        result["scanner_status"] = {
+            "running": scanner_raw.get("running", False),
+            "scan_count": scanner_raw.get("scan_count", 0),
+            "alerts_count": scanner_raw.get("active_alerts", 0),
+            "symbols_scanned": scanner_raw.get("symbols_scanned_last", 0),
+        }
+    except Exception:
+        result["scanner_status"] = {"running": False}
+    
+    # --- Bot Trades ---
+    try:
+        trades_data = trading_bot.get_all_trades_summary()
+        all_trades = []
+        all_trades.extend(trades_data.get("pending", []))
+        all_trades.extend(trades_data.get("open", []))
+        all_trades.extend(trades_data.get("closed", [])[:30])
+        result["bot_trades"] = all_trades
+    except Exception:
+        result["bot_trades"] = []
+    
+    # --- Scanner Alerts ---
+    try:
+        alerts = background_scanner.get_live_alerts()
+        alerts_data = []
+        for alert in (alerts or [])[:20]:
+            if hasattr(alert, 'to_dict'):
+                alerts_data.append(alert.to_dict())
+            elif hasattr(alert, '__dict__'):
+                alerts_data.append(dict(alert.__dict__))
+            else:
+                alerts_data.append(alert)
+        result["scanner_alerts"] = alerts_data
+    except Exception:
+        result["scanner_alerts"] = []
+    
+    # --- Smart Watchlist ---
+    try:
+        watchlist_service = get_smart_watchlist()
+        if watchlist_service:
+            watchlist_items = watchlist_service.get_watchlist()
+            watchlist = []
+            for item in watchlist_items:
+                if hasattr(item, 'to_dict'):
+                    watchlist.append(item.to_dict())
+                elif hasattr(item, '__dict__'):
+                    item_dict = {}
+                    for key, val in item.__dict__.items():
+                        if not key.startswith('_'):
+                            if hasattr(val, 'isoformat'):
+                                item_dict[key] = val.isoformat()
+                            else:
+                                item_dict[key] = val
+                    watchlist.append(item_dict)
+                else:
+                    watchlist.append(item)
+            result["smart_watchlist"] = watchlist
+        else:
+            result["smart_watchlist"] = []
+    except Exception:
+        result["smart_watchlist"] = []
+    
+    # --- Coaching Notifications ---
+    try:
+        notifications = assistant_service.get_coaching_notifications(
+            since=last_notification_time_iso
+        ) if last_notification_time_iso else []
+        result["coaching_notifications"] = notifications or []
+    except Exception:
+        result["coaching_notifications"] = []
+    
+    # --- Confidence Gate ---
+    try:
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        summary = gate.get_summary()
+        decisions = gate.get_decision_log(limit=20)
+        clean_decisions = [{
+            "decision": d.get("decision"),
+            "confidence_score": d.get("confidence_score"),
+            "symbol": d.get("symbol"),
+            "setup_type": d.get("setup_type"),
+            "direction": d.get("direction"),
+            "regime_state": d.get("regime_state"),
+            "ai_regime": d.get("ai_regime"),
+            "trading_mode": d.get("trading_mode"),
+            "position_multiplier": d.get("position_multiplier"),
+            "reasoning": d.get("reasoning", [])[:3],
+            "timestamp": d.get("timestamp"),
+        } for d in decisions]
+        result["confidence_gate"] = {"summary": summary, "decisions": clean_decisions}
+    except Exception:
+        result["confidence_gate"] = {"summary": {}, "decisions": []}
+    
+    # --- Training Status (MongoDB) ---
+    try:
+        status = db["training_pipeline_status"].find_one({"_id": "pipeline"}, {"_id": 0})
+        result["training_status"] = status or {"phase": "idle"}
+    except Exception:
+        result["training_status"] = {"phase": "idle"}
+    
+    # --- Filter Thoughts ---
+    try:
+        result["filter_thoughts"] = trading_bot.get_filter_thoughts(limit=20)
+    except Exception:
+        result["filter_thoughts"] = []
+    
+    # --- Order Queue ---
+    try:
+        from services.ib_execution_service import get_ib_execution_service
+        exec_svc = get_ib_execution_service()
+        if exec_svc:
+            result["order_queue"] = exec_svc.get_queue_status()
+        else:
+            result["order_queue"] = {"pending": [], "active": [], "completed": [], "queue_size": 0}
+    except Exception:
+        result["order_queue"] = {"pending": [], "active": [], "completed": [], "queue_size": 0}
+    
+    # --- Risk Status ---
+    try:
+        from services.dynamic_risk_engine import get_dynamic_risk_engine
+        risk_svc = get_dynamic_risk_engine()
+        result["risk_status"] = risk_svc.get_status() if risk_svc else {}
+    except Exception:
+        result["risk_status"] = {}
+    
+    # --- SentCom Data ---
+    try:
+        sentcom_data = {}
+        try:
+            from services.sentcom_engine import get_sentcom_engine
+            engine = get_sentcom_engine()
+            if engine:
+                sentcom_data["status"] = engine.get_status()
+                sentcom_data["stream"] = engine.get_stream(50)
+        except Exception:
+            pass
+        try:
+            from routers.ib import get_pushed_positions
+            positions = get_pushed_positions()
+            sentcom_data["positions"] = positions or []
+        except Exception:
+            sentcom_data["positions"] = []
+        try:
+            mcs = get_market_context_service()
+            if mcs:
+                sentcom_data["market_context"] = mcs.get_snapshot()
+        except Exception:
+            pass
+        result["sentcom_data"] = sentcom_data
+    except Exception:
+        result["sentcom_data"] = {}
+    
+    # --- Market Intel ---
+    try:
+        intel_data = {}
+        try:
+            intel_data["schedule"] = market_intel_service.get_schedule_status()
+        except Exception:
+            pass
+        try:
+            reports = market_intel_service.get_todays_reports()
+            intel_data["reports"] = reports[-5:] if reports else []
+        except Exception:
+            pass
+        try:
+            intel_data["current"] = market_intel_service.get_current_report()
+        except Exception:
+            pass
+        result["market_intel"] = intel_data
+    except Exception:
+        result["market_intel"] = {}
+    
+    # --- Data Collection Coverage (MongoDB aggregation) ---
+    try:
+        coverage_result = list(db["ib_historical_data"].aggregate([
+            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+            {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
+        ]))
+        coverage = {}
+        for doc in coverage_result:
+            coverage = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
+        result["data_collection_coverage"] = coverage
+    except Exception:
+        result["data_collection_coverage"] = {}
+    
+    # --- Focus Mode (in-memory, instant) ---
+    try:
+        result["focus_mode"] = focus_mode_manager.get_status()
+    except Exception:
+        result["focus_mode"] = {}
+    
+    # --- Simulator ---
+    try:
+        from services.simulator_service import get_simulator_service
+        sim_svc = get_simulator_service()
+        if sim_svc:
+            result["simulator"] = {
+                "status": sim_svc.get_status(),
+                "alerts": sim_svc.get_alerts(limit=20),
+            }
+        else:
+            result["simulator"] = {}
+    except Exception:
+        result["simulator"] = {}
+    
+    result["last_refresh"] = datetime.now(timezone.utc).isoformat()
+    return result
+
+
+async def _streaming_cache_loop():
+    """Master cache refresh — ONE thread per cycle replaces 26+ thread submissions.
+    Only runs when WebSocket clients are connected."""
+    await asyncio.sleep(3)  # Let server start
+    _coaching_last_check = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    while True:
+        try:
+            has_clients = bool(manager.active_connections)
+            is_training = _is_training_active()
+            
+            if has_clients and not is_training:
+                # ONE thread does ALL sync work
+                sync_data = await asyncio.to_thread(
+                    _compute_all_sync_data,
+                    _coaching_last_check.isoformat()
+                )
+                _streaming_cache.update(sync_data)
+                
+                # Update coaching timestamp if we got new notifications
+                if sync_data.get("coaching_notifications"):
+                    _coaching_last_check = datetime.now(timezone.utc)
+                
+                # Async calls that can't run in thread
+                try:
+                    regime_data = await market_regime_engine.get_current_regime()
+                    _streaming_cache["market_regime"] = regime_data
+                except Exception:
+                    pass
+                
+                # Data collection progress (async)
+                try:
+                    from services.ib_historical_collector import get_ib_collector
+                    collector = get_ib_collector()
+                    if collector:
+                        progress = await collector.get_queue_progress_detailed()
+                        _streaming_cache["data_collection"] = {
+                            "progress": progress,
+                            "coverage": sync_data.get("data_collection_coverage", {}),
+                        }
+                except Exception:
+                    pass
+                
+                await asyncio.sleep(10)  # Refresh every 10s
+            elif has_clients and is_training:
+                # Minimal refresh during training (training status only)
+                try:
+                    status = await asyncio.to_thread(
+                        lambda: db["training_pipeline_status"].find_one({"_id": "pipeline"}, {"_id": 0})
+                    )
+                    _streaming_cache["training_status"] = status or {"phase": "idle"}
+                    _streaming_cache["focus_mode"] = focus_mode_manager.get_status()
+                    _streaming_cache["last_refresh"] = datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    pass
+                await asyncio.sleep(5)
+            else:
+                # No clients — idle
+                await asyncio.sleep(5)
+        except Exception as e:
+            print(f"[CACHE] Refresh error: {e}")
+            await asyncio.sleep(10)
+
+async def stream_quotes():
+    """Background task to stream quotes — reads from IB pushed data (no Alpaca)."""
+    await asyncio.sleep(3)
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                all_symbols = set(DEFAULT_STREAM_SYMBOLS)
-                for symbols in manager.subscriptions.values():
-                    all_symbols.update(symbols)
-                
-                # Use batch quote API - single request for all symbols
-                symbol_list = [s for s in list(all_symbols)[:12] if s not in ("VIX", "^VIX", "$VIX")]
-                
-                quotes = []
-                try:
-                    batch_results = await alpaca_service.get_quotes_batch(symbol_list)
-                    for symbol, data in batch_results.items():
-                        # Clean internal cache fields before broadcasting
+                from routers.ib import get_pushed_quotes
+                quotes_dict = get_pushed_quotes()
+                if quotes_dict:
+                    quotes = []
+                    for symbol, data in list(quotes_dict.items())[:12]:
                         clean_data = {k: v for k, v in data.items() if not k.startswith('_')}
+                        clean_data["symbol"] = symbol
                         quotes.append(clean_data)
-                except Exception as batch_err:
-                    print(f"Batch quote error: {batch_err}")
-                    # Fallback to individual fetches (limited)
-                    for symbol in symbol_list[:5]:
-                        quote = await fetch_quote(symbol)
-                        if quote:
-                            clean_quote = {k: v for k, v in quote.items() if not k.startswith('_')}
-                            quotes.append(clean_quote)
-                        await asyncio.sleep(0.3)
-                
-                if quotes:
-                    message = {
-                        "type": "quotes",
-                        "data": quotes,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
-                    await manager.broadcast(message)
+                    if quotes:
+                        await manager.broadcast({
+                            "type": "quotes",
+                            "data": quotes,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
             except Exception as e:
-                print(f"Stream error: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        await asyncio.sleep(15)  # 15s interval
+                print(f"Stream quotes error: {e}")
+        await asyncio.sleep(15)
 
 
 # ===================== SYSTEM STATUS STREAMING =====================
 
 async def stream_system_status():
-    """Background task to push system status updates via WebSocket"""
-    await asyncio.sleep(5)  # Wait for services to initialize
-    
-    # Cache for change detection
+    """Background task to push system status — reads from cache (zero threads)."""
+    await asyncio.sleep(5)
     last_ib_status = None
     last_bot_status = None
     last_scanner_status = None
@@ -2663,99 +2982,49 @@ async def stream_system_status():
     while True:
         if manager.active_connections:
             try:
-                # IB Connection Status
-                try:
-                    ib_status = await asyncio.to_thread(ib_service.get_connection_status)
-                    ib_data = {
-                        "connected": ib_status.get("connected", False),
-                        "busy": ib_status.get("busy", False),
-                        "error": ib_status.get("error")
-                    }
-                    # Only broadcast if changed
-                    if ib_data != last_ib_status:
-                        await manager.broadcast({
-                            "type": "ib_status",
-                            "data": ib_data,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
-                        last_ib_status = ib_data
-                except Exception as e:
-                    print(f"IB status stream error: {e}")
+                ib_data = _streaming_cache.get("ib_status")
+                if ib_data and ib_data != last_ib_status:
+                    await manager.broadcast({
+                        "type": "ib_status",
+                        "data": ib_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_ib_status = ib_data
                 
-                # Trading Bot Status
-                try:
-                    bot_status = await asyncio.to_thread(trading_bot.get_status)
-                    bot_data = {
-                        "state": bot_status.get("state", "unknown"),
-                        "mode": bot_status.get("mode", "manual"),
-                        "open_positions": bot_status.get("open_positions", 0),
-                        "pending_orders": bot_status.get("pending_orders", 0),
-                        "daily_pnl": bot_status.get("daily_pnl", 0),
-                        "daily_trades": bot_status.get("daily_trades", 0),
-                        "last_scan": bot_status.get("last_scan"),
-                        "next_scan": bot_status.get("next_scan"),
-                        "error": bot_status.get("error")
-                    }
-                    if bot_data != last_bot_status:
-                        await manager.broadcast({
-                            "type": "bot_status",
-                            "data": bot_data,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
-                        last_bot_status = bot_data
-                except Exception as e:
-                    print(f"Bot status stream error: {e}")
+                bot_data = _streaming_cache.get("bot_status")
+                if bot_data and bot_data != last_bot_status:
+                    await manager.broadcast({
+                        "type": "bot_status",
+                        "data": bot_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_bot_status = bot_data
                 
-                # Scanner Status
-                try:
-                    scanner_status = await asyncio.to_thread(background_scanner.get_stats)
-                    scanner_data = {
-                        "running": scanner_status.get("running", False),
-                        "scan_count": scanner_status.get("scan_count", 0),
-                        "alerts_count": scanner_status.get("active_alerts", 0),
-                        "symbols_scanned": scanner_status.get("symbols_scanned_last", 0)
-                    }
-                    if scanner_data != last_scanner_status:
-                        await manager.broadcast({
-                            "type": "scanner_status",
-                            "data": scanner_data,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
-                        last_scanner_status = scanner_data
-                except Exception as e:
-                    print(f"Scanner status stream error: {e}")
-                
-                # Yield control to event loop
-                await asyncio.sleep(0)
-                
+                scanner_data = _streaming_cache.get("scanner_status")
+                if scanner_data and scanner_data != last_scanner_status:
+                    await manager.broadcast({
+                        "type": "scanner_status",
+                        "data": scanner_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_scanner_status = scanner_data
             except Exception as e:
                 print(f"System status stream error: {e}")
-        
-        await asyncio.sleep(10)  # Check every 10 seconds
+        await asyncio.sleep(10)
 
 
 async def stream_bot_trades():
-    """Background task to push bot trades updates via WebSocket"""
+    """Background task to push bot trades — reads from cache."""
     await asyncio.sleep(8)
-    
     last_trades_hash = None
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                # Get all trades using the summary method
-                trades_data = trading_bot.get_all_trades_summary()
-                all_trades = []
-                all_trades.extend(trades_data.get("pending", []))
-                all_trades.extend(trades_data.get("open", []))
-                all_trades.extend(trades_data.get("closed", [])[:30])  # Limit closed trades
-                
-                # Create hash of trade IDs to detect changes
-                trades_hash = hash(tuple(t.get("id", "") for t in all_trades[-20:]))
-                
+                all_trades = _streaming_cache.get("bot_trades", [])
+                trades_hash = hash(tuple(t.get("id", "") for t in all_trades[-20:])) if all_trades else None
                 if trades_hash != last_trades_hash:
                     await manager.broadcast({
                         "type": "bot_trades",
@@ -2765,36 +3034,21 @@ async def stream_bot_trades():
                     last_trades_hash = trades_hash
             except Exception as e:
                 print(f"Bot trades stream error: {e}")
-        
-        await asyncio.sleep(20)  # Check every 20 seconds
+        await asyncio.sleep(20)
 
 
 async def stream_scanner_alerts():
-    """Background task to push scanner alerts via WebSocket"""
+    """Background task to push scanner alerts — reads from cache."""
     await asyncio.sleep(10)
-    
     last_alerts_count = 0
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                alerts = background_scanner.get_live_alerts()
-                current_count = len(alerts)
-                
-                # Convert LiveAlert objects to dicts
-                alerts_data = []
-                for alert in alerts[:20]:  # Top 20 alerts
-                    if hasattr(alert, 'to_dict'):
-                        alerts_data.append(alert.to_dict())
-                    elif hasattr(alert, '__dict__'):
-                        alerts_data.append(dict(alert.__dict__))
-                    else:
-                        alerts_data.append(alert)
-                
-                # Broadcast if alerts changed
+                alerts_data = _streaming_cache.get("scanner_alerts", [])
+                current_count = len(alerts_data)
                 if current_count != last_alerts_count or current_count > 0:
                     await manager.broadcast({
                         "type": "scanner_alerts",
@@ -2805,77 +3059,44 @@ async def stream_scanner_alerts():
                     last_alerts_count = current_count
             except Exception as e:
                 print(f"Scanner alerts stream error: {e}")
-        
-        await asyncio.sleep(15)  # Check every 15 seconds
+        await asyncio.sleep(15)
 
 
 async def stream_smart_watchlist():
-    """Background task to push smart watchlist updates via WebSocket"""
+    """Background task to push smart watchlist — reads from cache."""
     await asyncio.sleep(12)
-    
     last_watchlist_hash = None
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                watchlist_service = get_smart_watchlist()
-                if watchlist_service:
-                    watchlist_items = watchlist_service.get_watchlist()
-                    
-                    # Convert WatchlistItem objects to dicts
-                    watchlist = []
-                    for item in watchlist_items:
-                        if hasattr(item, 'to_dict'):
-                            watchlist.append(item.to_dict())
-                        elif hasattr(item, '__dict__'):
-                            # Convert dataclass/object to dict
-                            item_dict = {}
-                            for key, val in item.__dict__.items():
-                                if not key.startswith('_'):
-                                    # Handle datetime objects
-                                    if hasattr(val, 'isoformat'):
-                                        item_dict[key] = val.isoformat()
-                                    else:
-                                        item_dict[key] = val
-                            watchlist.append(item_dict)
-                        else:
-                            watchlist.append(item)
-                    
-                    # Hash based on symbols
-                    watchlist_hash = hash(tuple(w.get("symbol", "") for w in watchlist if isinstance(w, dict)))
-                    
-                    if watchlist_hash != last_watchlist_hash:
-                        await manager.broadcast({
-                            "type": "smart_watchlist",
-                            "data": watchlist,
-                            "count": len(watchlist),
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
-                        last_watchlist_hash = watchlist_hash
+                watchlist = _streaming_cache.get("smart_watchlist", [])
+                watchlist_hash = hash(tuple(w.get("symbol", "") for w in watchlist if isinstance(w, dict)))
+                if watchlist_hash != last_watchlist_hash:
+                    await manager.broadcast({
+                        "type": "smart_watchlist",
+                        "data": watchlist,
+                        "count": len(watchlist),
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_watchlist_hash = watchlist_hash
             except Exception as e:
                 print(f"Smart watchlist stream error: {e}")
-        
-        await asyncio.sleep(25)  # Check every 25 seconds
+        await asyncio.sleep(25)
 
 
 async def stream_coaching_notifications():
-    """Background task to push AI coaching notifications via WebSocket"""
+    """Background task to push AI coaching notifications — reads from cache."""
     await asyncio.sleep(15)
-    
-    last_notification_time = datetime.now(timezone.utc) - timedelta(hours=1)
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                # Use the correct method name
-                notifications = assistant_service.get_coaching_notifications(since=last_notification_time.isoformat())
-                
+                notifications = _streaming_cache.get("coaching_notifications", [])
                 if notifications:
                     await manager.broadcast({
                         "type": "coaching_notifications",
@@ -2883,86 +3104,49 @@ async def stream_coaching_notifications():
                         "count": len(notifications),
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
-                    # Update last check time
-                    last_notification_time = datetime.now(timezone.utc)
             except Exception as e:
                 print(f"Coaching notifications stream error: {e}")
-        
-        await asyncio.sleep(12)  # Check every 12 seconds
+        await asyncio.sleep(12)
 
 
 async def stream_confidence_gate():
-    """Push confidence gate summary + recent decisions via WebSocket."""
+    """Push confidence gate summary — reads from cache."""
     await asyncio.sleep(20)
-    
     last_summary_hash = None
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                from services.ai_modules.confidence_gate import get_confidence_gate
-                gate = get_confidence_gate()
-                summary = gate.get_summary()
-                decisions = gate.get_decision_log(limit=20)
-                
-                # Only broadcast on change
+                gate_data = _streaming_cache.get("confidence_gate", {})
+                summary = gate_data.get("summary", {})
+                decisions = gate_data.get("decisions", [])
                 summary_hash = hash((
                     summary.get("trading_mode"),
                     summary.get("today", {}).get("evaluated", 0),
                     len(decisions),
                 ))
-                
                 if summary_hash != last_summary_hash:
-                    # Strip heavy fields from decisions
-                    clean_decisions = [{
-                        "decision": d.get("decision"),
-                        "confidence_score": d.get("confidence_score"),
-                        "symbol": d.get("symbol"),
-                        "setup_type": d.get("setup_type"),
-                        "direction": d.get("direction"),
-                        "regime_state": d.get("regime_state"),
-                        "ai_regime": d.get("ai_regime"),
-                        "trading_mode": d.get("trading_mode"),
-                        "position_multiplier": d.get("position_multiplier"),
-                        "reasoning": d.get("reasoning", [])[:3],
-                        "timestamp": d.get("timestamp"),
-                    } for d in decisions]
-                    
                     await manager.broadcast({
                         "type": "confidence_gate",
-                        "data": {
-                            "summary": summary,
-                            "decisions": clean_decisions,
-                        },
+                        "data": gate_data,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     last_summary_hash = summary_hash
             except Exception as e:
                 print(f"Confidence gate stream error: {e}")
-        
-        await asyncio.sleep(15)  # Every 15 seconds
+        await asyncio.sleep(15)
 
 
 async def stream_training_status():
-    """Push AI training pipeline status via WebSocket."""
+    """Push AI training pipeline status — reads from cache."""
     await asyncio.sleep(5)
-    
     last_status_hash = None
-    status = None
-    
     while True:
         if manager.active_connections:
             try:
-                def _get_training_status():
-                    return db["training_pipeline_status"].find_one(
-                        {"_id": "pipeline"}, {"_id": 0}
-                    )
-                status = await asyncio.to_thread(_get_training_status)
-                
-                # Build hash from actual training fields so we detect real changes
+                status = _streaming_cache.get("training_status")
                 if status:
                     status_hash = hash(
                         str(status.get("phase", "")) + 
@@ -2970,68 +3154,56 @@ async def stream_training_status():
                         str(status.get("models_completed", 0)) +
                         str(int(status.get("current_phase_progress", 0)))
                     )
-                else:
-                    status_hash = None
-                
-                if status_hash != last_status_hash:
-                    print(f"[WS Training Status] Broadcasting: phase={status.get('phase')}, model={status.get('current_model')}")
-                    await manager.broadcast({
-                        "type": "training_status",
-                        "data": status or {"phase": "idle"},
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    last_status_hash = status_hash
+                    if status_hash != last_status_hash:
+                        await manager.broadcast({
+                            "type": "training_status",
+                            "data": status,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_status_hash = status_hash
             except Exception as e:
                 print(f"Training status stream error: {e}")
-        
-        # Poll faster during training (every 3s), slower when idle (every 30s)
-        is_training = (status.get("phase", "idle") not in ("idle", "completed", "cancelled", "error")) if status else False
+        is_training = ((_streaming_cache.get("training_status") or {}).get("phase", "idle") not in ("idle", "completed", "cancelled", "error"))
         await asyncio.sleep(3 if is_training else 30)
 
 
 async def stream_market_regime():
-    """Push market regime data via WebSocket."""
+    """Push market regime data — reads from cache."""
     await asyncio.sleep(18)
-    
     last_regime_hash = None
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(60)
             continue
         if manager.active_connections:
             try:
-                regime_data = await market_regime_engine.get_current_regime()
-                regime_hash = hash(str(regime_data.get("state")) + str(regime_data.get("composite_score")))
-                
-                if regime_hash != last_regime_hash:
-                    await manager.broadcast({
-                        "type": "market_regime",
-                        "data": regime_data,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    last_regime_hash = regime_hash
+                regime_data = _streaming_cache.get("market_regime")
+                if regime_data:
+                    regime_hash = hash(str(regime_data.get("state")) + str(regime_data.get("composite_score")))
+                    if regime_hash != last_regime_hash:
+                        await manager.broadcast({
+                            "type": "market_regime",
+                            "data": regime_data,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_regime_hash = regime_hash
             except Exception as e:
                 print(f"Market regime stream error: {e}")
-        
-        await asyncio.sleep(60)  # Every 60 seconds (regime changes slowly)
+        await asyncio.sleep(60)
 
 
 async def stream_filter_thoughts():
-    """Push smart filter & confidence gate thoughts via WebSocket."""
+    """Push smart filter thoughts — reads from cache."""
     await asyncio.sleep(22)
-    
     last_thoughts_hash = None
-    
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                thoughts = trading_bot.get_filter_thoughts(limit=20)
+                thoughts = _streaming_cache.get("filter_thoughts", [])
                 thoughts_hash = hash(str(len(thoughts)) + str(thoughts[0].get('timestamp', '')) if thoughts else '')
-                
                 if thoughts_hash != last_thoughts_hash:
                     await manager.broadcast({
                         "type": "filter_thoughts",
@@ -3041,27 +3213,20 @@ async def stream_filter_thoughts():
                     last_thoughts_hash = thoughts_hash
             except Exception as e:
                 print(f"Filter thoughts stream error: {e}")
-        
-        await asyncio.sleep(10)  # Every 10 seconds
+        await asyncio.sleep(10)
 
 
 async def stream_order_queue():
-    """Push order queue status via WebSocket (replaces 3s polling)."""
+    """Push order queue status — reads from cache."""
     await asyncio.sleep(8)
     last_hash = None
-    _module_warned = False
     while True:
         if _is_training_active():
             await asyncio.sleep(30)
             continue
         if manager.active_connections:
             try:
-                from services.ib_execution_service import get_ib_execution_service
-                exec_svc = get_ib_execution_service()
-                if exec_svc:
-                    queue_data = exec_svc.get_queue_status()
-                else:
-                    queue_data = {"pending": [], "active": [], "completed": [], "queue_size": 0}
+                queue_data = _streaming_cache.get("order_queue", {})
                 data_hash = hash(str(queue_data.get("queue_size", 0)) + str(len(queue_data.get("active", []))))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3070,17 +3235,13 @@ async def stream_order_queue():
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     last_hash = data_hash
-            except ImportError:
-                if not _module_warned:
-                    print("Order queue stream: ib_execution_service not available (non-critical)")
-                    _module_warned = True
             except Exception as e:
                 print(f"Order queue stream error: {e}")
-        await asyncio.sleep(10)  # Reduced from 3s — order queue changes slowly
+        await asyncio.sleep(10)
 
 
 async def stream_risk_status():
-    """Push dynamic risk status via WebSocket (replaces 5-10s polling)."""
+    """Push dynamic risk status — reads from cache."""
     await asyncio.sleep(12)
     last_hash = None
     while True:
@@ -3089,12 +3250,7 @@ async def stream_risk_status():
             continue
         if manager.active_connections:
             try:
-                from services.dynamic_risk_engine import get_dynamic_risk_engine
-                risk_svc = get_dynamic_risk_engine()
-                if risk_svc:
-                    status = risk_svc.get_status()
-                else:
-                    status = {}
+                status = _streaming_cache.get("risk_status", {})
                 status_hash = hash(str(status.get("current_mode")) + str(status.get("daily_pnl", 0)))
                 if status_hash != last_hash:
                     await manager.broadcast({
@@ -3109,7 +3265,7 @@ async def stream_risk_status():
 
 
 async def stream_sentcom_data():
-    """Push SentCom intelligence data via WebSocket (replaces 8 separate polling hooks)."""
+    """Push SentCom intelligence data — reads from cache."""
     await asyncio.sleep(15)
     last_hash = None
     while True:
@@ -3118,37 +3274,7 @@ async def stream_sentcom_data():
             continue
         if manager.active_connections:
             try:
-                sentcom_data = {}
-                # SentCom status
-                try:
-                    from services.sentcom_engine import get_sentcom_engine
-                    engine = get_sentcom_engine()
-                    if engine:
-                        sentcom_data["status"] = await asyncio.to_thread(engine.get_status)
-                        sentcom_data["stream"] = await asyncio.to_thread(engine.get_stream, 50)
-                except Exception:
-                    pass
-                # Positions from IB pushed data
-                try:
-                    pushed = db.get("ib_pushed_data", {})
-                    if hasattr(pushed, 'find_one'):
-                        def _get_pushed_positions():
-                            return pushed.find_one(sort=[("timestamp", -1)], projection={"_id": 0})
-                        latest = await asyncio.to_thread(_get_pushed_positions)
-                        sentcom_data["positions"] = latest if latest else {}
-                    else:
-                        sentcom_data["positions"] = {}
-                except Exception:
-                    sentcom_data["positions"] = {}
-                # Market context snapshot
-                try:
-                    from services.market_context_service import get_market_context_service
-                    mcs = get_market_context_service()
-                    if mcs:
-                        sentcom_data["market_context"] = await asyncio.to_thread(mcs.get_snapshot)
-                except Exception:
-                    pass
-
+                sentcom_data = _streaming_cache.get("sentcom_data", {})
                 data_hash = hash(str(sentcom_data.get("status", {}).get("last_updated", "")) + str(len(sentcom_data.get("stream", []))))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3163,7 +3289,7 @@ async def stream_sentcom_data():
 
 
 async def stream_market_intel():
-    """Push market intel data via WebSocket (replaces 60s polling)."""
+    """Push market intel data — reads from cache."""
     await asyncio.sleep(20)
     last_hash = None
     while True:
@@ -3172,22 +3298,7 @@ async def stream_market_intel():
             continue
         if manager.active_connections:
             try:
-                intel_data = {}
-                try:
-                    schedule = await asyncio.to_thread(market_intel_service.get_schedule_status)
-                    intel_data["schedule"] = schedule
-                except Exception:
-                    pass
-                try:
-                    reports = await asyncio.to_thread(market_intel_service.get_todays_reports)
-                    intel_data["reports"] = reports[-5:] if reports else []
-                except Exception:
-                    pass
-                try:
-                    current = await asyncio.to_thread(market_intel_service.get_current_report)
-                    intel_data["current"] = current
-                except Exception:
-                    pass
+                intel_data = _streaming_cache.get("market_intel", {})
                 data_hash = hash(str((intel_data.get("current") or {}).get("timestamp", "")) + str(len(intel_data.get("reports") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3202,7 +3313,7 @@ async def stream_market_intel():
 
 
 async def stream_data_collection():
-    """Push data collection status via WebSocket (replaces 15s polling)."""
+    """Push data collection status — reads from cache."""
     await asyncio.sleep(10)
     last_hash = None
     while True:
@@ -3211,28 +3322,8 @@ async def stream_data_collection():
             continue
         if manager.active_connections:
             try:
-                collection_data = {}
-                try:
-                    from services.ib_historical_collector import get_ib_collector
-                    collector = get_ib_collector()
-                    if collector:
-                        progress = await collector.get_queue_progress_detailed()
-                        collection_data["progress"] = progress
-                except Exception:
-                    pass
-                try:
-                    def _get_coverage():
-                        return list(db["ib_historical_data"].aggregate([
-                            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                            {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
-                        ]))
-                    coverage = await asyncio.to_thread(_get_coverage)
-                    for doc in coverage:
-                        collection_data["coverage"] = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
-                except Exception:
-                    pass
-
-                data_hash = hash(str(collection_data.get("progress", {}).get("active_collections", [])))
+                collection_data = _streaming_cache.get("data_collection", {})
+                data_hash = hash(str((collection_data.get("progress") or {}).get("active_collections", [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "data_collection",
@@ -3246,16 +3337,13 @@ async def stream_data_collection():
 
 
 async def stream_focus_mode():
-    """Push focus mode state via WebSocket — reads from in-memory FocusModeManager (source of truth)."""
+    """Push focus mode state — reads from cache."""
     await asyncio.sleep(5)
     last_hash = None
     while True:
         if manager.active_connections:
             try:
-                # Read from in-memory manager — this is the authoritative source
-                # (focus_mode_manager.set_mode/reset_to_live updates this immediately)
-                mode_data = focus_mode_manager.get_status()
-                
+                mode_data = _streaming_cache.get("focus_mode", {})
                 data_hash = hash(str(mode_data.get("mode", "")) + str(mode_data.get("start_time", "")))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3270,7 +3358,7 @@ async def stream_focus_mode():
 
 
 async def stream_simulator():
-    """Push simulator status + alerts via WebSocket (replaces dual polling)."""
+    """Push simulator status — reads from cache."""
     await asyncio.sleep(8)
     last_hash = None
     while True:
@@ -3279,15 +3367,7 @@ async def stream_simulator():
             continue
         if manager.active_connections:
             try:
-                sim_data = {}
-                try:
-                    from services.simulator_service import get_simulator_service
-                    sim_svc = get_simulator_service()
-                    if sim_svc:
-                        sim_data["status"] = sim_svc.get_status()
-                        sim_data["alerts"] = sim_svc.get_alerts(limit=20)
-                except Exception:
-                    pass
+                sim_data = _streaming_cache.get("simulator", {})
                 data_hash = hash(str(sim_data.get("status", {}).get("is_running", False)) + str(len(sim_data.get("alerts", []))))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3366,6 +3446,10 @@ async def startup_event():
                 print(f"⚠️ EVENT LOOP BLOCKED for {lag:.1f}s! Check for synchronous calls.")
             await asyncio.sleep(2)
     asyncio.create_task(_event_loop_monitor())
+    
+    # Master cache refresh — ONE thread replaces 26+ per cycle
+    asyncio.create_task(_streaming_cache_loop())
+    print("[CACHE] Streaming cache layer active — 1 thread/cycle instead of 26+")
     
     asyncio.create_task(stream_quotes())
     asyncio.create_task(stream_system_status())
