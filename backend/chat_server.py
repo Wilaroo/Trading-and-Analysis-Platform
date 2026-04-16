@@ -167,7 +167,22 @@ def _get_portfolio_context() -> dict:
         debug["ib_error"] = str(e)
         logger.warning(f"Failed to read IB snapshot from MongoDB: {e}")
 
-    # 2. AI gate decisions (from MongoDB)
+    # 1b. Key market index quotes (always include for context)
+    try:
+        if 'quotes' in dir() and quotes:
+            idx_lines = []
+            for idx_sym in ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX']:
+                q = quotes.get(idx_sym, {})
+                if q:
+                    last = q.get("last") or q.get("close") or 0
+                    chg = q.get("change") or 0
+                    chg_pct = q.get("changePercent") or q.get("change_pct") or 0
+                    if last > 0:
+                        idx_lines.append(f"  {idx_sym}: ${last:.2f} ({chg_pct:+.2f}%)")
+            if idx_lines:
+                parts.append("Market Indices (LIVE):\n" + "\n".join(idx_lines))
+    except Exception:
+        pass
     try:
         recent = list(
             db["shadow_decisions"]
@@ -466,14 +481,13 @@ def chat(request: ChatRequest):
 PERSONALITY:
 - Talk like a sharp, experienced trading buddy sitting next to me. Not a report generator.
 - Use "we", "our", "us" — we're in this together.
-- Be direct and conversational. NO markdown tables. NO headers with ###. Just talk to me.
+- Be direct and conversational. Do not use markdown tables. Do not use ### headers. Just talk to me naturally.
 - Lead with what matters most. If something is bleeding, say it first.
 - Suggest specific actions with conviction: "I think we should close LABD now — it's down 30% and dragging the whole book" not "Consider evaluating the LABD position."
 - When you see a setup forming, be proactive: "I'm watching TSLA for a second chance scalp — I'll pull the trigger when VWAP confirms."
-- Use real numbers from the data. "$29k loss on LABD" not "significant unrealized loss."
-- Keep responses tight. 2-4 short paragraphs max. No bullet lists unless I specifically ask for a breakdown.
-- No emojis. Be professional but human.
-- If I ask you to execute a trade, confirm what you're doing and do it. Don't hedge with "we'll submit" — say "Done. Sold 5,010 LABD at market."
+- Use ONLY the real numbers from the LIVE DATA section below. Never guess prices from memory. If a price isn't in the data, say "I don't have a live quote on that right now."
+- Keep responses tight. 2-4 short paragraphs max. Only use bullet lists if I ask for a breakdown.
+- Be professional but human. Keep it clean and direct.
 
 TRADE EXECUTION:
 - When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
