@@ -177,18 +177,30 @@ class PositionManager:
         if now_et.hour >= 16:
             return
 
-        # Time to close all positions!
+        # Time to close intraday positions!
         open_count = len(bot._open_trades)
         if open_count == 0:
             bot._eod_close_executed_today = True
             return
 
-        logger.info(f"🔔 EOD AUTO-CLOSE: Closing all {open_count} open positions at {now_et.strftime('%H:%M:%S')} ET")
+        # Only close trades marked for EOD close (intraday/scalp/day trades)
+        # Swing and position trades are held overnight
+        eod_trades = {
+            tid: t for tid, t in bot._open_trades.items()
+            if getattr(t, 'close_at_eod', True)  # Default True for safety
+        }
+        
+        if not eod_trades:
+            logger.info(f"🔔 EOD CHECK: {open_count} open trades, all are swing/position — no EOD close needed")
+            bot._eod_close_executed_today = True
+            return
+
+        logger.info(f"🔔 EOD AUTO-CLOSE: Closing {len(eod_trades)} intraday trades at {now_et.strftime('%H:%M:%S')} ET (keeping {open_count - len(eod_trades)} swing/position trades)")
 
         closed_count = 0
         total_pnl = 0.0
 
-        for trade_id, trade in list(bot._open_trades.items()):
+        for trade_id, trade in list(eod_trades.items()):
             try:
                 logger.info(f"  📤 EOD CLOSE: {trade.symbol} - {trade.direction.value} {trade.remaining_shares} shares")
                 result = await self.close_trade(trade_id, bot, reason="eod_auto_close")
