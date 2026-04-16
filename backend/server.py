@@ -19,11 +19,14 @@ import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
 
-# Install uvloop for 2-4x faster event loop (if available)
+# uvloop: handled by uvicorn's loop parameter, not global policy
+# (APScheduler calls asyncio.get_event_loop() at module load time which
+#  fails with uvloop's strict policy before the event loop exists)
+_has_uvloop = False
 try:
     import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-    print("[UVLOOP] Fast event loop enabled")
+    _has_uvloop = True
+    print("[UVLOOP] Available — will be used by uvicorn")
 except ImportError:
     print("[UVLOOP] Not installed — using default asyncio loop")
 
@@ -4118,5 +4121,5 @@ async def get_script(script_name: str):
 
 if __name__ == "__main__":
     import uvicorn
-    loop_impl = "uvloop" if 'uvloop' in dir() else "auto"
-    uvicorn.run(app, host="0.0.0.0", port=8001, loop=loop_impl)
+    loop_type = "uvloop" if _has_uvloop else "auto"
+    uvicorn.run(app, host="0.0.0.0", port=8001, loop=loop_type)
