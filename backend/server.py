@@ -2757,7 +2757,7 @@ _streaming_cache = {
     "risk_status": {},
     "order_queue": {"pending": [], "active": [], "completed": [], "queue_size": 0},
     # SentCom
-    "sentcom_data": {"positions": [], "status": {}, "stream": []},
+    "sentcom_data": {"positions": [], "status": {}},
     # Intel & collection
     "market_intel": {},
     "data_collection": {},
