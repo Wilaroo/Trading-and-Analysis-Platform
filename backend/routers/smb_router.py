@@ -131,7 +131,7 @@ class EarningsScoreResponse(BaseModel):
 # ==================== Setup Endpoints ====================
 
 @router.get("/setups", response_model=Dict[str, Any])
-async def get_all_setups():
+def get_all_setups():
     """Get all available setups with their configurations"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -154,7 +154,7 @@ async def get_all_setups():
 
 
 @router.get("/setup/{setup_name}", response_model=SetupConfigResponse)
-async def get_setup(setup_name: str):
+def get_setup(setup_name: str):
     """Get configuration for a specific setup by name or alias"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -181,7 +181,7 @@ async def get_setup(setup_name: str):
 
 
 @router.get("/setups/by-category/{category}")
-async def get_setups_by_category_endpoint(category: str):
+def get_setups_by_category_endpoint(category: str):
     """Get all setups in a specific category"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -197,7 +197,7 @@ async def get_setups_by_category_endpoint(category: str):
 
 
 @router.get("/setups/by-direction/{direction}")
-async def get_setups_by_direction_endpoint(direction: str):
+def get_setups_by_direction_endpoint(direction: str):
     """Get all setups by direction bias (long/short/both)"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -215,7 +215,7 @@ async def get_setups_by_direction_endpoint(direction: str):
 
 
 @router.get("/setups/summary")
-async def get_setups_summary():
+def get_setups_summary():
     """Get summary statistics of all setups"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -246,7 +246,7 @@ async def get_setups_summary():
 # ==================== SMB Scoring Endpoints ====================
 
 @router.post("/score", response_model=SMBScoreResponse)
-async def calculate_smb_variable_score(request: SMBScoreRequest):
+def calculate_smb_variable_score(request: SMBScoreRequest):
     """Calculate SMB 5-Variable score from inputs"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -272,7 +272,7 @@ async def calculate_smb_variable_score(request: SMBScoreRequest):
 
 
 @router.get("/trade-styles")
-async def get_trade_styles():
+def get_trade_styles():
     """Get all trade styles with their targets and rules"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -297,7 +297,7 @@ async def get_trade_styles():
 # ==================== Earnings Scoring Endpoints ====================
 
 @router.post("/earnings/score", response_model=EarningsScoreResponse)
-async def score_earnings_catalyst(request: EarningsScoreRequest):
+def score_earnings_catalyst(request: EarningsScoreRequest):
     """Score an earnings catalyst using SMB methodology"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -350,7 +350,7 @@ async def score_earnings_catalyst(request: EarningsScoreRequest):
 
 
 @router.get("/earnings/descriptions")
-async def get_all_score_descriptions():
+def get_all_score_descriptions():
     """Get descriptions for all earnings score levels"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -360,7 +360,7 @@ async def get_all_score_descriptions():
 
 
 @router.get("/resolve-alias/{alias}")
-async def resolve_setup_alias(alias: str):
+def resolve_setup_alias(alias: str):
     """Resolve an SMB setup alias to canonical name"""
     if not SMB_AVAILABLE:
         raise HTTPException(500, "SMB Integration not available")
@@ -394,7 +394,7 @@ class Reason2SellRequest(BaseModel):
 
 
 @router.post("/reasons-to-sell/check")
-async def check_reasons_to_sell(request: Reason2SellRequest):
+def check_reasons_to_sell(request: Reason2SellRequest):
     """Check all Reasons2Sell for a position"""
     try:
         from services.smb_unified_scoring import check_reasons_to_sell, Reason2Sell
@@ -441,7 +441,7 @@ async def check_reasons_to_sell(request: Reason2SellRequest):
 
 
 @router.get("/reasons-to-sell/list")
-async def list_reasons_to_sell():
+def list_reasons_to_sell():
     """Get all Reasons2Sell with descriptions"""
     return {
         "reasons": [
@@ -479,7 +479,7 @@ class TieredEntryRequest(BaseModel):
 
 
 @router.post("/tiered-entry/calculate")
-async def calculate_tiered_entry(request: TieredEntryRequest):
+def calculate_tiered_entry(request: TieredEntryRequest):
     """Calculate tiered entry sizes based on SMB methodology"""
     try:
         from services.smb_unified_scoring import calculate_tier_sizes
@@ -545,7 +545,7 @@ class TapeAnalysisRequest(BaseModel):
 
 
 @router.post("/tape/analyze")
-async def analyze_tape(request: TapeAnalysisRequest):
+def analyze_tape(request: TapeAnalysisRequest):
     """Analyze tape/order flow and return Level 2 Box metrics"""
     try:
         from services.smb_unified_scoring import analyze_tape_from_quote_data

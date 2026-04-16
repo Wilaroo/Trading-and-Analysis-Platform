@@ -328,7 +328,7 @@ async def get_shadow_report(days: int = Query(30)):
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")
-async def get_slow_learning_status():
+def get_slow_learning_status():
     """Get status of all Slow Learning services"""
     return {
         "success": True,

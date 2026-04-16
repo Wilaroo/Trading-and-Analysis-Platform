@@ -14,14 +14,14 @@ router = APIRouter(prefix="/api/scheduler", tags=["Scheduler"])
 
 
 @router.get("/status")
-async def get_scheduler_status():
+def get_scheduler_status():
     """Get scheduler status and configured services"""
     scheduler = get_trading_scheduler()
     return {"success": True, **scheduler.get_status()}
 
 
 @router.get("/jobs")
-async def get_scheduled_jobs():
+def get_scheduled_jobs():
     """Get list of scheduled jobs with next run times"""
     scheduler = get_trading_scheduler()
     jobs = scheduler.get_scheduled_jobs()
@@ -37,7 +37,7 @@ async def run_task_now(task_type: str):
 
 
 @router.get("/history")
-async def get_task_history(
+def get_task_history(
     task_type: Optional[str] = Query(None),
     limit: int = Query(20)
 ):
@@ -48,7 +48,7 @@ async def get_task_history(
 
 
 @router.post("/start")
-async def start_scheduler():
+def start_scheduler():
     """Start the scheduler"""
     scheduler = get_trading_scheduler()
     scheduler.start()
@@ -56,7 +56,7 @@ async def start_scheduler():
 
 
 @router.post("/stop")
-async def stop_scheduler():
+def stop_scheduler():
     """Stop the scheduler"""
     scheduler = get_trading_scheduler()
     scheduler.stop()

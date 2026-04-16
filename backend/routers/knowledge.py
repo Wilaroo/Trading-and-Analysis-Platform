@@ -36,7 +36,7 @@ class KnowledgeUpdate(BaseModel):
 
 
 @router.post("")
-async def add_knowledge(entry: KnowledgeEntry):
+def add_knowledge(entry: KnowledgeEntry):
     """
     Add a new knowledge entry.
     
@@ -59,7 +59,7 @@ async def add_knowledge(entry: KnowledgeEntry):
 
 
 @router.get("")
-async def search_knowledge(
+def search_knowledge(
     q: Optional[str] = Query(None, description="Text search query"),
     type: Optional[str] = Query(None, description="Filter by type"),
     category: Optional[str] = Query(None, description="Filter by category"),
@@ -96,14 +96,14 @@ async def search_knowledge(
 
 
 @router.get("/stats")
-async def get_stats():
+def get_stats():
     """Get knowledge base statistics"""
     service = get_knowledge_service()
     return service.get_stats()
 
 
 @router.get("/types")
-async def get_types():
+def get_types():
     """Get available types and categories"""
     service = get_knowledge_service()
     return {
@@ -113,7 +113,7 @@ async def get_types():
 
 
 @router.get("/{entry_id}")
-async def get_knowledge(entry_id: str):
+def get_knowledge(entry_id: str):
     """Get a specific knowledge entry by ID"""
     service = get_knowledge_service()
     entry = service.get(entry_id)
@@ -123,7 +123,7 @@ async def get_knowledge(entry_id: str):
 
 
 @router.put("/{entry_id}")
-async def update_knowledge(entry_id: str, updates: KnowledgeUpdate):
+def update_knowledge(entry_id: str, updates: KnowledgeUpdate):
     """Update a knowledge entry"""
     service = get_knowledge_service()
     
@@ -141,7 +141,7 @@ async def update_knowledge(entry_id: str, updates: KnowledgeUpdate):
 
 
 @router.delete("/{entry_id}")
-async def delete_knowledge(entry_id: str, hard: bool = Query(False, description="Permanently delete")):
+def delete_knowledge(entry_id: str, hard: bool = Query(False, description="Permanently delete")):
     """
     Delete a knowledge entry.
     By default, soft-deletes (marks as inactive). Use hard=true for permanent deletion.
@@ -160,7 +160,7 @@ async def delete_knowledge(entry_id: str, hard: bool = Query(False, description=
 
 
 @router.get("/export/all")
-async def export_knowledge():
+def export_knowledge():
     """Export all knowledge entries for backup"""
     service = get_knowledge_service()
     entries = service.export_all()
@@ -171,7 +171,7 @@ async def export_knowledge():
 
 
 @router.post("/import")
-async def import_knowledge(data: Dict[str, Any]):
+def import_knowledge(data: Dict[str, Any]):
     """
     Import knowledge entries from backup.
     Expects: {"entries": [...]}

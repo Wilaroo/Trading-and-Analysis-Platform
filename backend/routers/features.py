@@ -79,7 +79,7 @@ class QuickFeatureRequest(BaseModel):
 
 
 @router.post("/calculate")
-async def calculate_features(request: FeatureRequest):
+def calculate_features(request: FeatureRequest):
     """
     Calculate all technical features for a stock.
     
@@ -117,7 +117,7 @@ async def calculate_features(request: FeatureRequest):
 
 
 @router.post("/quick-analysis")
-async def quick_analysis(request: QuickFeatureRequest):
+def quick_analysis(request: QuickFeatureRequest):
     """
     Quick feature analysis with minimal data.
     Good for real-time scanning where you just have current bar info.
@@ -188,7 +188,7 @@ async def quick_analysis(request: QuickFeatureRequest):
 
 
 @router.get("/indicators")
-async def list_available_indicators():
+def list_available_indicators():
     """
     List all available technical indicators and features
     """
@@ -242,7 +242,7 @@ async def list_available_indicators():
 
 
 @router.get("/high-conviction-criteria")
-async def get_high_conviction_criteria():
+def get_high_conviction_criteria():
     """
     Get the criteria for high-conviction intraday setups
     """

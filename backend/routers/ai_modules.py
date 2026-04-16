@@ -203,7 +203,7 @@ class RiskAssessmentRequest(BaseModel):
 # =====================
 
 @router.get("/config")
-async def get_module_config():
+def get_module_config():
     """Get complete AI module configuration"""
     if not _module_config:
         raise HTTPException(status_code=503, detail="Module config not initialized")
@@ -234,7 +234,7 @@ async def get_module_status():
 
 
 @router.post("/toggle/{module_name}")
-async def toggle_module(module_name: str, request: ModuleToggleRequest):
+def toggle_module(module_name: str, request: ModuleToggleRequest):
     """Enable or disable a specific AI module"""
     if not _module_config:
         raise HTTPException(status_code=503, detail="Module config not initialized")
@@ -252,7 +252,7 @@ async def toggle_module(module_name: str, request: ModuleToggleRequest):
 
 
 @router.post("/shadow-mode")
-async def set_global_shadow_mode(request: ShadowModeRequest):
+def set_global_shadow_mode(request: ShadowModeRequest):
     """Set global shadow mode (affects all modules)"""
     if not _module_config:
         raise HTTPException(status_code=503, detail="Module config not initialized")
@@ -269,7 +269,7 @@ async def set_global_shadow_mode(request: ShadowModeRequest):
 
 
 @router.post("/shadow-mode/{module_name}")
-async def set_module_shadow_mode(module_name: str, request: ShadowModeRequest):
+def set_module_shadow_mode(module_name: str, request: ShadowModeRequest):
     """Set shadow mode for a specific module"""
     if not _module_config:
         raise HTTPException(status_code=503, detail="Module config not initialized")
@@ -287,7 +287,7 @@ async def set_module_shadow_mode(module_name: str, request: ShadowModeRequest):
 
 
 @router.put("/settings/{module_name}")
-async def update_module_settings(module_name: str, request: ModuleSettingsRequest):
+def update_module_settings(module_name: str, request: ModuleSettingsRequest):
     """Update settings for a specific module"""
     if not _module_config:
         raise HTTPException(status_code=503, detail="Module config not initialized")
@@ -360,7 +360,7 @@ async def run_debate(request: DebateRequest):
 
 
 @router.post("/debate/ai-advisor-weight")
-async def set_ai_advisor_weight(request: AIAdvisorConfigRequest):
+def set_ai_advisor_weight(request: AIAdvisorConfigRequest):
     """
     Set the AI advisor weight in the debate process.
     
@@ -390,7 +390,7 @@ async def set_ai_advisor_weight(request: AIAdvisorConfigRequest):
 
 
 @router.get("/debate/ai-advisor-status")
-async def get_ai_advisor_status():
+def get_ai_advisor_status():
     """
     Get the current AI advisor configuration and status.
     """
@@ -459,7 +459,7 @@ async def get_agent_context(
 
 
 @router.get("/agent-context/status")
-async def get_agent_data_service_status():
+def get_agent_data_service_status():
     """Get status of the AgentDataService"""
     return {
         "success": True,
@@ -811,7 +811,7 @@ class VolumeAnalysisRequest(BaseModel):
 
 
 @router.post("/volume/analyze")
-async def analyze_volume(request: VolumeAnalysisRequest):
+def analyze_volume(request: VolumeAnalysisRequest):
     """Analyze volume profile and detect anomalies"""
     if not _volume_anomaly:
         raise HTTPException(status_code=503, detail="Volume anomaly service not initialized")
@@ -832,7 +832,7 @@ async def analyze_volume(request: VolumeAnalysisRequest):
 
 
 @router.get("/volume/anomalies")
-async def get_recent_anomalies(
+def get_recent_anomalies(
     symbol: str = Query(None, description="Filter by symbol"),
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200)
@@ -868,7 +868,7 @@ class VolumeDetectionRequest(BaseModel):
 
 
 @router.post("/volume/detect")
-async def detect_anomaly(request: VolumeDetectionRequest):
+def detect_anomaly(request: VolumeDetectionRequest):
     """Detect volume anomaly for current bar"""
     if not _volume_anomaly:
         raise HTTPException(status_code=503, detail="Volume anomaly service not initialized")
@@ -909,7 +909,7 @@ async def detect_anomaly(request: VolumeDetectionRequest):
 # =====================
 
 @router.get("/consultation/status")
-async def get_consultation_status():
+def get_consultation_status():
     """Get AI Trade Consultation status"""
     if not _ai_consultation:
         return {
@@ -1332,7 +1332,7 @@ async def train_full_universe_all_timeframes(
 
 
 @router.get("/timeseries/training-status")
-async def get_timeseries_training_status():
+def get_timeseries_training_status():
     """Get current training status for all timeframe models"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1353,7 +1353,7 @@ async def get_timeseries_training_status():
 
 
 @router.post("/timeseries/reload-models")
-async def reload_models():
+def reload_models():
     """Reload all trained models from MongoDB.
     
     Call this after the worker process finishes training to pick up 
@@ -1370,7 +1370,7 @@ async def reload_models():
 
 
 @router.get("/training-mode/status")
-async def get_training_mode_status():
+def get_training_mode_status():
     """Get current training mode status (paused tasks, elapsed time, etc.)"""
     try:
         from services.training_mode import training_mode_manager
@@ -1387,7 +1387,7 @@ async def get_training_mode_status():
 
 
 @router.get("/timeseries/available-data")
-async def get_available_timeframe_data():
+def get_available_timeframe_data():
     """Get info about available data for each timeframe in the database"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1396,7 +1396,7 @@ async def get_available_timeframe_data():
 
 
 @router.get("/timeseries/training-history")
-async def get_training_history(bar_size: str = None, limit: int = 20):
+def get_training_history(bar_size: str = None, limit: int = 20):
     """
     Get training history for tracking model improvement over time.
     
@@ -1417,7 +1417,7 @@ async def get_training_history(bar_size: str = None, limit: int = 20):
 
 
 @router.get("/timeseries/metrics")
-async def get_model_metrics():
+def get_model_metrics():
     """Get model performance metrics"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1431,7 +1431,7 @@ async def get_model_metrics():
 
 
 @router.post("/timeseries/verify-predictions")
-async def verify_predictions():
+def verify_predictions():
     """Verify pending predictions against actual outcomes"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1452,7 +1452,7 @@ async def verify_predictions():
 
 
 @router.get("/timeseries/prediction-accuracy")
-async def get_prediction_accuracy(days: int = 30):
+def get_prediction_accuracy(days: int = 30):
     """Get prediction accuracy statistics over a time period"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1608,7 +1608,7 @@ def get_training_status():
 
 
 @router.post("/training-settings")
-async def update_training_settings(
+def update_training_settings(
     auto_train_enabled: bool = False,
     train_after_collection: bool = False,
     schedule_time: Optional[str] = None
@@ -1655,7 +1655,7 @@ from datetime import datetime, timezone
 
 
 @router.post("/timeseries/stop-training")
-async def stop_training():
+def stop_training():
     """
     Stop any running training job.
     Note: Progress is NOT saved - training must complete to save the model.
@@ -1717,7 +1717,7 @@ class SetupPredictRequest(BaseModel):
 
 
 @router.get("/timeseries/setups/status")
-async def get_setup_models_status():
+def get_setup_models_status():
     """
     Get the status of all setup-specific AI models.
     
@@ -2245,7 +2245,7 @@ def finbert_stats():
 
 
 @router.get("/finbert/sentiment/{symbol}")
-async def finbert_symbol_sentiment(symbol: str, lookback_days: int = 5):
+def finbert_symbol_sentiment(symbol: str, lookback_days: int = 5):
     """Get aggregated FinBERT sentiment for a specific symbol."""
     try:
         from services.ai_modules.finbert_sentiment import FinBERTSentiment
@@ -2266,7 +2266,7 @@ async def finbert_symbol_sentiment(symbol: str, lookback_days: int = 5):
 
 
 @router.get("/finbert/market-sentiment")
-async def finbert_market_sentiment(lookback_days: int = 3):
+def finbert_market_sentiment(lookback_days: int = 3):
     """Get broad market sentiment across all scored articles."""
     try:
         from services.ai_modules.finbert_sentiment import FinBERTSentiment

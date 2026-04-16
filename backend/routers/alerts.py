@@ -96,7 +96,7 @@ async def scan_all_alerts(request: ScanRequest):
 
 
 @router.get("/scalp")
-async def get_scalp_alerts():
+def get_scalp_alerts():
     """
     Get scalp trading alerts.
     
@@ -121,7 +121,7 @@ async def get_scalp_alerts():
 
 
 @router.get("/swing")
-async def get_swing_alerts():
+def get_swing_alerts():
     """
     Get swing trading alerts.
     
@@ -146,7 +146,7 @@ async def get_swing_alerts():
 
 
 @router.get("/summary")
-async def get_alerts_summary():
+def get_alerts_summary():
     """
     Get a quick summary of all active alerts for dashboard display.
     """
@@ -187,7 +187,7 @@ async def get_alerts_summary():
 
 
 @router.get("/ai-context")
-async def get_ai_context():
+def get_ai_context():
     """
     Get formatted alert context for AI assistant integration.
     """
@@ -248,7 +248,7 @@ async def check_in_play_status(symbol: str):
 
 
 @router.get("/scoring-weights")
-async def get_scoring_weights():
+def get_scoring_weights():
     """
     Get the scoring weights used for each timeframe.
     Shows how fundamentals vs technicals are weighted differently.

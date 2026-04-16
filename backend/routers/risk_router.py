@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/risk", tags=["risk-management"])
 # ==================== CIRCUIT BREAKERS ====================
 
 @router.get("/circuit-breakers/status")
-async def get_circuit_breaker_status():
+def get_circuit_breaker_status():
     """Get current status of all circuit breakers"""
     service = get_circuit_breaker_service()
     return {
@@ -33,7 +33,7 @@ async def get_circuit_breaker_status():
 
 
 @router.get("/circuit-breakers/configs")
-async def get_circuit_breaker_configs():
+def get_circuit_breaker_configs():
     """Get configuration for all circuit breakers"""
     service = get_circuit_breaker_service()
     return {
@@ -51,7 +51,7 @@ class CircuitBreakerConfigUpdate(BaseModel):
 
 
 @router.post("/circuit-breakers/{breaker_type}/configure")
-async def configure_circuit_breaker(breaker_type: str, config: CircuitBreakerConfigUpdate):
+def configure_circuit_breaker(breaker_type: str, config: CircuitBreakerConfigUpdate):
     """Update configuration for a specific circuit breaker"""
     try:
         cb_type = CircuitBreakerType(breaker_type)
@@ -69,7 +69,7 @@ async def configure_circuit_breaker(breaker_type: str, config: CircuitBreakerCon
 
 
 @router.post("/circuit-breakers/{breaker_type}/override")
-async def override_circuit_breaker(breaker_type: str, override_by: str = "manual"):
+def override_circuit_breaker(breaker_type: str, override_by: str = "manual"):
     """Override a triggered circuit breaker"""
     try:
         cb_type = CircuitBreakerType(breaker_type)
@@ -86,7 +86,7 @@ async def override_circuit_breaker(breaker_type: str, override_by: str = "manual
 
 
 @router.post("/circuit-breakers/{breaker_type}/reset")
-async def reset_circuit_breaker(breaker_type: str):
+def reset_circuit_breaker(breaker_type: str):
     """Reset a circuit breaker"""
     try:
         cb_type = CircuitBreakerType(breaker_type)
@@ -103,7 +103,7 @@ async def reset_circuit_breaker(breaker_type: str):
 
 
 @router.post("/circuit-breakers/reset-daily")
-async def reset_daily_circuit_breakers():
+def reset_daily_circuit_breakers():
     """Reset all daily circuit breaker counters"""
     service = get_circuit_breaker_service()
     service.reset_daily()
@@ -133,7 +133,7 @@ async def check_trading_permission(
 # ==================== POSITION SIZING ====================
 
 @router.get("/position-sizing/config")
-async def get_position_sizing_config():
+def get_position_sizing_config():
     """Get current position sizing configuration"""
     service = get_position_sizer_service()
     return {
@@ -157,7 +157,7 @@ class PositionSizingConfigUpdate(BaseModel):
 
 
 @router.post("/position-sizing/configure")
-async def configure_position_sizing(config: PositionSizingConfigUpdate):
+def configure_position_sizing(config: PositionSizingConfigUpdate):
     """Update position sizing configuration"""
     service = get_position_sizer_service()
     service.configure(config.dict(exclude_none=True))
@@ -207,7 +207,7 @@ async def calculate_position_size(request: PositionSizeRequest):
 
 
 @router.get("/position-sizing/table")
-async def get_sizing_table(
+def get_sizing_table(
     entry_price: float = Query(gt=0),
     stop_price: float = Query(gt=0),
     account_value: float = Query(gt=0, default=100000)
@@ -237,7 +237,7 @@ async def get_health_report():
 
 
 @router.get("/health/quick-status")
-async def get_quick_health_status():
+def get_quick_health_status():
     """Get quick health status summary"""
     service = get_health_monitor_service()
     return {
@@ -261,7 +261,7 @@ async def check_component_health(component: str):
 # ==================== DYNAMIC THRESHOLDS ====================
 
 @router.get("/thresholds/summary")
-async def get_threshold_summary():
+def get_threshold_summary():
     """Get summary of all threshold configurations"""
     service = get_dynamic_threshold_service()
     return {
@@ -348,7 +348,7 @@ async def check_trade_against_thresholds(request: TradeCheckRequest):
 
 
 @router.post("/thresholds/{threshold_type}/set-custom")
-async def set_custom_threshold(threshold_type: str, value: float = Query()):
+def set_custom_threshold(threshold_type: str, value: float = Query()):
     """Set a custom override for a base threshold"""
     try:
         t_type = ThresholdType(threshold_type)

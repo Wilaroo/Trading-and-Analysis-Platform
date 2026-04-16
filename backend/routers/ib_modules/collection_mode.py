@@ -36,7 +36,7 @@ _priority_collection = {
 }
 
 
-async def get_historical_data_queue_stats():
+def get_historical_data_queue_stats():
     """Get historical data queue statistics"""
     try:
         from server import db
@@ -59,7 +59,7 @@ async def get_historical_data_queue_stats():
 
 
 @router.post("/collection-mode/start")
-async def start_collection_mode(data: dict):
+def start_collection_mode(data: dict):
     """Called when collection mode starts"""
     global _collection_mode_status
     _collection_mode_status = {
@@ -76,7 +76,7 @@ async def start_collection_mode(data: dict):
 
 
 @router.post("/collection-mode/progress")
-async def update_collection_progress(data: dict):
+def update_collection_progress(data: dict):
     """Called periodically with collection progress"""
     global _collection_mode_status
     _collection_mode_status.update({
@@ -91,7 +91,7 @@ async def update_collection_progress(data: dict):
 
 
 @router.post("/collection-mode/stop")
-async def stop_collection_mode(data: dict):
+def stop_collection_mode(data: dict):
     """Called when collection mode stops"""
     global _collection_mode_status
     _collection_mode_status.update({
@@ -163,7 +163,7 @@ async def get_current_mode():
 
 
 @router.post("/mode/set")
-async def set_operating_mode(data: dict):
+def set_operating_mode(data: dict):
     """
     LEGACY ENDPOINT - Now redirects to priority collection.
     Kept for backwards compatibility with existing scripts.
@@ -229,7 +229,7 @@ async def enable_priority_collection():
 
 
 @router.post("/priority-collection/disable")
-async def disable_priority_collection():
+def disable_priority_collection():
     """
     Disable priority collection, return to normal trading mode.
     """

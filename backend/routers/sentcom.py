@@ -196,7 +196,7 @@ async def chat(request: ChatRequest):
 
 
 @router.get("/chat/history")
-async def get_chat_history(limit: int = Query(50, ge=1, le=100)):
+def get_chat_history(limit: int = Query(50, ge=1, le=100)):
     """
     Get persisted chat history.
     

@@ -60,7 +60,7 @@ class StartScanRequest(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("/status")
-async def get_scanner_status():
+def get_scanner_status():
     """Get market scanner service status"""
     if not _market_scanner_service:
         raise HTTPException(status_code=500, detail="Market scanner service not initialized")
@@ -238,7 +238,7 @@ async def cancel_scan(scan_id: str):
 
 
 @router.get("/filters/presets")
-async def get_filter_presets():
+def get_filter_presets():
     """Get pre-configured filter presets for different trading styles"""
     return {
         "success": True,
@@ -303,7 +303,7 @@ async def get_filter_presets():
 
 
 @router.get("/sectors")
-async def get_available_sectors():
+def get_available_sectors():
     """Get list of available sectors for filtering"""
     return {
         "success": True,

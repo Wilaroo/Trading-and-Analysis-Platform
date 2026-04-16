@@ -27,7 +27,7 @@ def _ensure_initialized():
 
 
 @router.get("/status")
-async def get_status():
+def get_status():
     """Get simulator status"""
     simulator = _ensure_initialized()
     return {
@@ -68,7 +68,7 @@ async def start_simulator(scenario: Optional[str] = None, interval: Optional[int
 
 
 @router.post("/stop")
-async def stop_simulator():
+def stop_simulator():
     """Stop the market simulator"""
     simulator = _ensure_initialized()
     simulator.stop()
@@ -80,7 +80,7 @@ async def stop_simulator():
 
 
 @router.get("/alerts")
-async def get_simulated_alerts():
+def get_simulated_alerts():
     """Get all generated simulated alerts"""
     simulator = _ensure_initialized()
     alerts = simulator.get_alerts()
@@ -111,7 +111,7 @@ async def generate_single_alert():
 
 
 @router.post("/scenario/{scenario_name}")
-async def set_scenario(scenario_name: str):
+def set_scenario(scenario_name: str):
     """Change the simulation scenario"""
     simulator = _ensure_initialized()
     
@@ -131,7 +131,7 @@ async def set_scenario(scenario_name: str):
 
 
 @router.get("/scenarios")
-async def list_scenarios():
+def list_scenarios():
     """List all available scenarios"""
     return {
         "success": True,

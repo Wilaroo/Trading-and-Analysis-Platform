@@ -384,7 +384,7 @@ async def stop_training():
 
 
 @router.get("/is-active")
-async def is_training_active():
+def is_training_active():
     """
     Lightweight endpoint for external processes (IB Pusher, Collectors) to check
     if training is currently running. Returns a simple boolean.
@@ -963,7 +963,7 @@ def get_model_inventory():
 # ============ CONFIDENCE GATE ENDPOINTS ============
 
 @router.get("/confidence-gate/summary")
-async def get_confidence_gate_summary():
+def get_confidence_gate_summary():
     """
     Get SentCom's current trading mode, today's decision stats, and recent streak.
     Used by the NIA SentCom Intelligence panel header.
@@ -978,7 +978,7 @@ async def get_confidence_gate_summary():
 
 
 @router.get("/confidence-gate/decisions")
-async def get_confidence_gate_decisions(limit: int = 30):
+def get_confidence_gate_decisions(limit: int = 30):
     """
     Get recent confidence gate decisions for the NIA decision log.
     Shows what SentCom evaluated, what it decided, and why.
@@ -1010,7 +1010,7 @@ async def get_confidence_gate_decisions(limit: int = 30):
 
 
 @router.get("/confidence-gate/stats")
-async def get_confidence_gate_stats():
+def get_confidence_gate_stats():
     """
     Get lifetime and daily statistics for the confidence gate.
     """
@@ -1059,7 +1059,7 @@ async def evaluate_trade_confidence(symbol: str, setup_type: str, direction: str
 
 
 @router.get("/confidence-gate/accuracy")
-async def get_confidence_gate_accuracy(limit: int = 100):
+def get_confidence_gate_accuracy(limit: int = 100):
     """
     GAP 5: Get decision accuracy — how often did GO/REDUCE/SKIP lead to wins?
     Returns per-decision win rate, total P&L, and avg confidence.

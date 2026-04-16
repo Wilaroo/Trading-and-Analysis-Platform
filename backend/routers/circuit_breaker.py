@@ -35,7 +35,7 @@ def init_circuit_breaker_router(trading_bot=None):
 
 
 @router.get("/status")
-async def get_circuit_breaker_status():
+def get_circuit_breaker_status():
     """
     Get the current status of trading circuit breakers.
     
@@ -93,7 +93,7 @@ async def get_circuit_breaker_status():
 
 
 @router.post("/reset")
-async def reset_circuit_breaker():
+def reset_circuit_breaker():
     """Reset the circuit breaker after it has been triggered"""
     _circuit_breaker_state.update({
         "triggered": False,
@@ -115,7 +115,7 @@ async def reset_circuit_breaker():
 
 
 @router.post("/configure")
-async def configure_circuit_breaker(
+def configure_circuit_breaker(
     daily_loss_limit: float = None,
     max_drawdown_limit: float = None,
     max_consecutive_losses: int = None

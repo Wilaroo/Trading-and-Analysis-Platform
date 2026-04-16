@@ -34,7 +34,7 @@ class QueryInput(BaseModel):
 
 
 @router.get("/status")
-async def get_learning_status():
+def get_learning_status():
     """
     Get the status of the AI learning system.
     Shows which LLM provider is active and knowledge base stats.
@@ -50,7 +50,7 @@ async def get_learning_status():
 
 
 @router.post("/text")
-async def learn_from_text(input: TextInput):
+def learn_from_text(input: TextInput):
     """
     Learn from text content.
     
@@ -119,7 +119,7 @@ async def learn_from_pdf(
 
 
 @router.post("/insight")
-async def learn_insight(input: InsightInput):
+def learn_insight(input: InsightInput):
     """
     Quick learning from a single insight or observation.
     
@@ -151,7 +151,7 @@ async def learn_insight(input: InsightInput):
 
 
 @router.post("/query")
-async def query_knowledge(input: QueryInput):
+def query_knowledge(input: QueryInput):
     """
     Query the knowledge base with AI-enhanced search.
     
@@ -201,7 +201,7 @@ Provide a concise, actionable answer based on the knowledge above. If the knowle
 
 
 @router.get("/relevant/{symbol}")
-async def get_relevant_knowledge(symbol: str, limit: int = 5):
+def get_relevant_knowledge(symbol: str, limit: int = 5):
     """
     Get knowledge relevant to a specific stock or situation.
     
@@ -226,7 +226,7 @@ async def get_relevant_knowledge(symbol: str, limit: int = 5):
 
 
 @router.post("/bulk")
-async def bulk_learn(entries: List[Dict[str, Any]]):
+def bulk_learn(entries: List[Dict[str, Any]]):
     """
     Bulk import knowledge entries.
     
@@ -262,7 +262,7 @@ async def bulk_learn(entries: List[Dict[str, Any]]):
 
 
 @router.post("/analyze/{symbol}")
-async def analyze_with_knowledge(symbol: str, stock_data: Dict[str, Any] = None):
+def analyze_with_knowledge(symbol: str, stock_data: Dict[str, Any] = None):
     """
     Analyze a stock using the knowledge base.
     
@@ -317,7 +317,7 @@ async def enhance_opportunities(data: Dict[str, Any]):
 
 
 @router.get("/ai-recommendation/{symbol}")
-async def get_ai_recommendation(symbol: str, rvol: float = 1.0, gap_percent: float = 0, 
+def get_ai_recommendation(symbol: str, rvol: float = 1.0, gap_percent: float = 0, 
                                  vwap_position: str = "UNKNOWN", rsi: float = 50):
     """
     Get an AI-powered trade recommendation for a symbol.

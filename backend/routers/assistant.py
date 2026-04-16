@@ -85,7 +85,7 @@ class IntentDetectRequest(BaseModel):
 
 
 @router.post("/detect-intent")
-async def detect_intent(request: IntentDetectRequest):
+def detect_intent(request: IntentDetectRequest):
     """
     PROOF OF CONCEPT: Detect intent from user message.
     Shows what context sources would be fetched for a given query.
@@ -248,7 +248,7 @@ async def validate_response(request: ValidateResponseRequest):
 
 
 @router.get("/accuracy-stats")
-async def get_accuracy_stats(
+def get_accuracy_stats(
     days: int = 7,
     intent: Optional[str] = None,
     symbol: Optional[str] = None
@@ -273,7 +273,7 @@ async def get_accuracy_stats(
 
 
 @router.get("/accuracy-issues")
-async def get_recent_issues(limit: int = 10):
+def get_recent_issues(limit: int = 10):
     """
     Get recent validation issues for debugging.
     
@@ -293,7 +293,7 @@ async def get_recent_issues(limit: int = 10):
 
 
 @router.get("/accuracy-symbol/{symbol}")
-async def get_symbol_accuracy(symbol: str, days: int = 30):
+def get_symbol_accuracy(symbol: str, days: int = 30):
     """
     Get accuracy statistics for a specific stock symbol.
     
@@ -374,7 +374,7 @@ async def review_trading_patterns(session_id: Optional[str] = None):
 
 
 @router.get("/suggestions")
-async def get_suggestions():
+def get_suggestions():
     """
     Get suggested requests based on your usage patterns.
     
@@ -431,7 +431,7 @@ async def get_sessions(user_id: str = "default"):
 
 
 @router.get("/providers")
-async def get_available_providers():
+def get_available_providers():
     """Get available LLM providers"""
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
@@ -446,7 +446,7 @@ async def get_available_providers():
 
 
 @router.post("/providers")
-async def set_provider(request: ProviderRequest):
+def set_provider(request: ProviderRequest):
     """Switch LLM provider"""
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
@@ -463,7 +463,7 @@ async def set_provider(request: ProviderRequest):
 
 
 @router.get("/status")
-async def get_assistant_status():
+def get_assistant_status():
     """Get assistant service status"""
     if not _assistant_service:
         return {
@@ -923,7 +923,7 @@ async def find_strategy_setups(strategy: str, limit: int = 5):
 # ==================== SCANNER COACHING NOTIFICATIONS ====================
 
 @router.get("/coach/scanner-notifications")
-async def get_scanner_coaching_notifications(since: Optional[str] = None):
+def get_scanner_coaching_notifications(since: Optional[str] = None):
     """
     Get proactive AI coaching notifications from scanner alerts.
     These are generated automatically when high-priority opportunities are detected.
@@ -1024,7 +1024,7 @@ class ValidateTradeRequest(BaseModel):
 
 
 @router.post("/intelligence/score-setup")
-async def score_trade_setup(request: SetupScoreRequest):
+def score_trade_setup(request: SetupScoreRequest):
     """
     Comprehensive trade setup scoring using the Trading Intelligence System.
     
@@ -1103,7 +1103,7 @@ async def score_trade_setup(request: SetupScoreRequest):
 
 
 @router.post("/intelligence/validate-trade")
-async def validate_trade_idea(request: ValidateTradeRequest):
+def validate_trade_idea(request: ValidateTradeRequest):
     """
     Validate a trade idea with go/no-go decision.
     
@@ -1181,7 +1181,7 @@ async def validate_trade_idea(request: ValidateTradeRequest):
 
 
 @router.get("/intelligence/pattern-strategy-match")
-async def match_patterns_to_strategies(
+def match_patterns_to_strategies(
     patterns: str,
     direction: str = "long"
 ):
@@ -1219,7 +1219,7 @@ async def match_patterns_to_strategies(
 
 
 @router.get("/intelligence/market-analysis")
-async def analyze_market_conditions(
+def analyze_market_conditions(
     spy_trend: str = "neutral",
     vix_level: float = 15.0,
     breadth: str = "neutral",
@@ -1272,7 +1272,7 @@ async def analyze_market_conditions(
 
 
 @router.post("/intelligence/predict-outcome")
-async def predict_trade_outcome(
+def predict_trade_outcome(
     setup_score: int,
     pattern_reliability: float = 0.65,
     regime_alignment: float = 75.0,
@@ -1465,7 +1465,7 @@ async def get_fundamental_metric_info(metric_name: str):
 
 
 @router.get("/fundamentals/all-metrics")
-async def get_all_fundamental_metrics():
+def get_all_fundamental_metrics():
     """
     Get list of all available fundamental analysis metrics.
     """
@@ -1509,7 +1509,7 @@ async def get_all_fundamental_metrics():
 
 
 @router.get("/fundamentals/knowledge")
-async def get_fundamental_analysis_knowledge():
+def get_fundamental_analysis_knowledge():
     """
     Get comprehensive fundamental analysis knowledge for education/reference.
     Includes all valuation metrics, profitability measures, solvency ratios,

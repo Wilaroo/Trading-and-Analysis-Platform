@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/trade-history", tags=["trade-history"])
 
 
 @router.get("/status")
-async def get_trade_history_status():
+def get_trade_history_status():
     """Check if trade history sync is configured."""
     return {
         "configured": ib_flex_service.is_configured,

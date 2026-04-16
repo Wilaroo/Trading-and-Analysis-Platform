@@ -137,7 +137,7 @@ class EVResponse(BaseModel):
 # ==================== ENDPOINTS ====================
 
 @router.get("/report")
-async def get_ev_report(setup_type: str = None):
+def get_ev_report(setup_type: str = None):
     """
     Get Expected Value report for one or all setups.
     
@@ -156,7 +156,7 @@ async def get_ev_report(setup_type: str = None):
 
 
 @router.get("/playbook")
-async def get_playbook_summary():
+def get_playbook_summary():
     """
     Get PlayBook summary with all setups categorized by EV.
     
@@ -173,7 +173,7 @@ async def get_playbook_summary():
 
 
 @router.post("/record-outcome")
-async def record_trade_outcome(request: RecordOutcomeRequest):
+def record_trade_outcome(request: RecordOutcomeRequest):
     """
     Record a trade outcome for EV calculation.
     
@@ -202,7 +202,7 @@ async def record_trade_outcome(request: RecordOutcomeRequest):
 
 
 @router.post("/calculate")
-async def calculate_ev(setup_type: str):
+def calculate_ev(setup_type: str):
     """
     Manually trigger EV calculation for a setup.
     
@@ -222,7 +222,7 @@ async def calculate_ev(setup_type: str):
 # ==================== SMB WORKFLOW ENDPOINTS ====================
 
 @router.post("/workflow/idea")
-async def create_trade_idea(request: CreateIdeaRequest):
+def create_trade_idea(request: CreateIdeaRequest):
     """
     Step 1: Create a new trade idea (Idea Generation)
     
@@ -252,7 +252,7 @@ async def create_trade_idea(request: CreateIdeaRequest):
 
 
 @router.post("/workflow/grade")
-async def grade_trade_idea(request: GradeIdeaRequest):
+def grade_trade_idea(request: GradeIdeaRequest):
     """
     Step 2: Filter and grade the idea (A/B/C)
     
@@ -291,7 +291,7 @@ async def grade_trade_idea(request: GradeIdeaRequest):
 
 
 @router.post("/workflow/plan")
-async def create_trade_plan(request: CreatePlanRequest):
+def create_trade_plan(request: CreatePlanRequest):
     """
     Step 3: Create the trade plan with entries, stops, targets
     
@@ -332,7 +332,7 @@ async def create_trade_plan(request: CreatePlanRequest):
 
 
 @router.post("/workflow/execute")
-async def execute_trade(idea_id: str):
+def execute_trade(idea_id: str):
     """
     Step 4: Mark the trade as executed
     """
@@ -356,7 +356,7 @@ async def execute_trade(idea_id: str):
 
 
 @router.post("/workflow/review")
-async def review_trade(request: ReviewTradeRequest):
+def review_trade(request: ReviewTradeRequest):
     """
     Step 5: Review the completed trade and update EV
     
@@ -394,7 +394,7 @@ async def review_trade(request: ReviewTradeRequest):
 
 
 @router.get("/active-ideas")
-async def get_active_ideas():
+def get_active_ideas():
     """Get all active trade ideas in the workflow"""
     service = get_service()
     
@@ -419,7 +419,7 @@ async def get_active_ideas():
 
 
 @router.get("/setup-gates")
-async def get_setup_gates():
+def get_setup_gates():
     """
     Get current EV gates for all setups.
     
@@ -452,7 +452,7 @@ async def get_setup_gates():
 # ==================== TECHNICAL LEVELS & PROJECTED EV ====================
 
 @router.post("/calculate-levels")
-async def calculate_trade_levels(request: CalculateLevelsRequest):
+def calculate_trade_levels(request: CalculateLevelsRequest):
     """
     Calculate entry, stop, and target levels from technical data.
     
@@ -501,7 +501,7 @@ async def calculate_trade_levels(request: CalculateLevelsRequest):
 
 
 @router.post("/projected-ev")
-async def calculate_projected_ev_endpoint(request: ProjectedEVRequest):
+def calculate_projected_ev_endpoint(request: ProjectedEVRequest):
     """
     Calculate projected EV for a trade based on levels and historical performance.
     

@@ -23,7 +23,7 @@ class RecommendationAction(BaseModel):
 
 
 @router.get("/strategy-stats")
-async def get_strategy_stats():
+def get_strategy_stats():
     """Get per-strategy performance statistics"""
     if not _perf_service:
         raise HTTPException(status_code=503, detail="Performance service not initialized")
@@ -32,7 +32,7 @@ async def get_strategy_stats():
 
 
 @router.get("/recent-trades")
-async def get_recent_trades(strategy: Optional[str] = None, limit: int = 20):
+def get_recent_trades(strategy: Optional[str] = None, limit: int = 20):
     """Get recent trade records for performance analysis"""
     if not _perf_service:
         raise HTTPException(status_code=503, detail="Performance service not initialized")
@@ -50,7 +50,7 @@ async def analyze_performance():
 
 
 @router.get("/recommendations")
-async def get_recommendations():
+def get_recommendations():
     """Get pending tuning recommendations"""
     if not _perf_service:
         raise HTTPException(status_code=503, detail="Performance service not initialized")
@@ -59,7 +59,7 @@ async def get_recommendations():
 
 
 @router.post("/recommendations/{rec_id}")
-async def handle_recommendation(rec_id: str, body: RecommendationAction):
+def handle_recommendation(rec_id: str, body: RecommendationAction):
     """Apply or dismiss a recommendation"""
     if not _perf_service:
         raise HTTPException(status_code=503, detail="Performance service not initialized")
@@ -73,7 +73,7 @@ async def handle_recommendation(rec_id: str, body: RecommendationAction):
 
 
 @router.get("/tuning-history")
-async def get_tuning_history(limit: int = 20):
+def get_tuning_history(limit: int = 20):
     """Get audit trail of tuning actions"""
     if not _perf_service:
         raise HTTPException(status_code=503, detail="Performance service not initialized")
@@ -171,7 +171,7 @@ async def get_trader_profile():
 
 
 @router.get("/loop/tilt-status")
-async def get_tilt_status():
+def get_tilt_status():
     """Check if trader is currently tilted (based on recent performance)"""
     learning_loop = get_learning_loop_service()
     
@@ -205,7 +205,7 @@ async def run_daily_analysis():
 
 
 @router.get("/loop/health")
-async def get_learning_system_health():
+def get_learning_system_health():
     """Get health status of the learning system and its services"""
     from services.graceful_degradation import get_degradation_service
     

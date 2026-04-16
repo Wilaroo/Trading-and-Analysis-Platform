@@ -55,7 +55,7 @@ class CacheClearRequest(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("/status")
-async def get_data_service_status():
+def get_data_service_status():
     """
     Get hybrid data service status including connection status and rate limits.
     """
@@ -219,7 +219,7 @@ async def clear_cache(request: CacheClearRequest):
 
 
 @router.get("/timeframes")
-async def get_supported_timeframes():
+def get_supported_timeframes():
     """Get list of supported timeframes."""
     if not _hybrid_data_service:
         raise HTTPException(status_code=500, detail="Hybrid data service not initialized")

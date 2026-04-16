@@ -41,7 +41,7 @@ class CreateJobRequest(BaseModel):
 # === Focus Mode Endpoints ===
 
 @router.get("/focus-mode")
-async def get_focus_mode():
+def get_focus_mode():
     """Get current focus mode status."""
     return {
         "success": True,
@@ -50,7 +50,7 @@ async def get_focus_mode():
 
 
 @router.get("/focus-mode/status")
-async def get_focus_mode_status():
+def get_focus_mode_status():
     """Lightweight focus mode status endpoint (used by IB Data Pusher).
     
     Returns minimal payload for fast responses even under heavy CPU load.
@@ -64,7 +64,7 @@ async def get_focus_mode_status():
 
 
 @router.post("/focus-mode")
-async def set_focus_mode(request: SetFocusModeRequest):
+def set_focus_mode(request: SetFocusModeRequest):
     """Set the system focus mode."""
     result = focus_mode_manager.set_mode(
         mode=request.mode,
@@ -75,13 +75,13 @@ async def set_focus_mode(request: SetFocusModeRequest):
 
 
 @router.post("/focus-mode/reset")
-async def reset_focus_mode():
+def reset_focus_mode():
     """Reset to live mode."""
     return focus_mode_manager.reset_to_live()
 
 
 @router.get("/focus-mode/task-priority/{task_name}")
-async def get_task_priority(task_name: str):
+def get_task_priority(task_name: str):
     """Get priority for a specific task in current mode."""
     priority = focus_mode_manager.get_task_priority(task_name)
     should_run = focus_mode_manager.should_run_task(task_name)

@@ -36,7 +36,7 @@ def _restore_live_mode():
 
 
 @router.get("/data-status")
-async def get_data_status(
+def get_data_status(
     bar_size: str = "1 day",
     days_threshold: int = 7
 ):
@@ -77,7 +77,7 @@ async def get_data_status(
 
 
 @router.get("/data-coverage")
-async def get_data_coverage():
+def get_data_coverage():
     """
     Get comprehensive data coverage summary (cached for performance).
     
@@ -545,7 +545,7 @@ async def incremental_update(
 
 
 @router.get("/incremental-analysis")
-async def get_incremental_analysis():
+def get_incremental_analysis():
     """
     Preview what incremental data would be fetched.
     
@@ -561,7 +561,7 @@ async def get_incremental_analysis():
 
 
 @router.get("/gap-analysis")
-async def get_gap_analysis(tier_filter: Optional[str] = None):
+def get_gap_analysis(tier_filter: Optional[str] = None):
     """
     Preview what gaps exist without starting a collection.
     
@@ -663,7 +663,7 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
 
 
 @router.get("/adv-distribution")
-async def get_adv_distribution():
+def get_adv_distribution():
     """
     Get the distribution of symbols by ADV (Average Daily Volume).
     
@@ -740,7 +740,7 @@ async def rebuild_adv_from_ib():
 
 
 @router.get("/failure-analysis")
-async def get_failure_analysis():
+def get_failure_analysis():
     """
     Analyze failures in the historical data queue.
     
@@ -1097,7 +1097,7 @@ async def liquid_collection(
 
 
 @router.post("/cancel")
-async def cancel_collection():
+def cancel_collection():
     """Cancel the currently running collection job."""
     try:
         collector = get_ib_collector()
@@ -1143,7 +1143,7 @@ async def resume_collection():
 
 
 @router.get("/status")
-async def get_status(job_id: Optional[str] = None):
+def get_status(job_id: Optional[str] = None):
     """
     Get status of a collection job.
     If no job_id provided, returns current running job status.
@@ -1158,7 +1158,7 @@ async def get_status(job_id: Optional[str] = None):
 
 
 @router.get("/stats")
-async def get_stats():
+def get_stats():
     """Get statistics about all collected historical data."""
     try:
         collector = get_ib_collector()
@@ -1170,7 +1170,7 @@ async def get_stats():
 
 
 @router.get("/queue-progress")
-async def get_queue_progress(job_id: Optional[str] = None):
+def get_queue_progress(job_id: Optional[str] = None):
     """
     Get real-time progress from the data request queue.
     
@@ -1211,7 +1211,7 @@ async def get_queue_progress(job_id: Optional[str] = None):
 _queue_progress_cache = {"data": None, "expires": 0}
 
 @router.get("/queue-progress-detailed")
-async def get_queue_progress_detailed():
+def get_queue_progress_detailed():
     """
     Get detailed queue progress broken down by bar_size.
     Cached for 30 seconds to avoid 3+ collectors hammering Atlas with aggregations.
@@ -1249,7 +1249,7 @@ async def get_queue_progress_detailed():
 
 
 @router.post("/cancel-by-barsize")
-async def cancel_collection_by_barsize(bar_size: str):
+def cancel_collection_by_barsize(bar_size: str):
     """
     Cancel all pending requests for a specific bar_size.
     
@@ -1271,7 +1271,7 @@ async def cancel_collection_by_barsize(bar_size: str):
 
 
 @router.post("/cancel-all-pending")
-async def cancel_all_pending_collections():
+def cancel_all_pending_collections():
     """
     Cancel ALL pending collections across all bar_sizes.
     
@@ -1295,7 +1295,7 @@ async def cancel_all_pending_collections():
 
 
 @router.get("/resumable-collections")
-async def get_resumable_collections():
+def get_resumable_collections():
     """
     Get collections that can be resumed.
     
@@ -1320,7 +1320,7 @@ async def get_resumable_collections():
 
 
 @router.post("/clear-stuck")
-async def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
+def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
     """
     Clear items that have been stuck in 'claimed' status for too long.
     
@@ -1343,7 +1343,7 @@ async def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
 
 
 @router.get("/failed-items")
-async def get_failed_items(
+def get_failed_items(
     bar_size: str = None,
     limit: int = 500
 ):
@@ -1506,7 +1506,7 @@ async def resume_barsize_collection(
 
 
 @router.post("/queue-cancel")
-async def cancel_queue_job(job_id: str):
+def cancel_queue_job(job_id: str):
     """
     Cancel pending requests for a specific job.
     
@@ -1535,7 +1535,7 @@ async def cancel_queue_job(job_id: str):
 
 
 @router.post("/clear-pending")
-async def clear_pending_queue():
+def clear_pending_queue():
     """
     Clear ALL pending requests from the queue.
     
@@ -1566,7 +1566,7 @@ async def clear_pending_queue():
 
 
 @router.post("/queue/deduplicate")
-async def deduplicate_queue():
+def deduplicate_queue():
     """
     Find and remove duplicate pending requests from the collection queue.
     
@@ -1586,7 +1586,7 @@ async def deduplicate_queue():
 
 
 @router.get("/history")
-async def get_job_history(limit: int = 10):
+def get_job_history(limit: int = 10):
     """Get history of collection jobs."""
     try:
         collector = get_ib_collector()
@@ -1598,7 +1598,7 @@ async def get_job_history(limit: int = 10):
 
 
 @router.get("/data/{symbol}")
-async def get_symbol_data(
+def get_symbol_data(
     symbol: str,
     bar_size: str = "5 mins",
     limit: int = 1000
@@ -1620,7 +1620,7 @@ async def get_symbol_data(
 
 
 @router.get("/default-symbols")
-async def get_default_symbols():
+def get_default_symbols():
     """Get the list of default symbols for collection."""
     try:
         collector = get_ib_collector()
@@ -1686,7 +1686,7 @@ async def get_liquid_symbols(min_adv: int = 100_000):
 
 
 @router.get("/filter-preview")
-async def preview_ib_filter():
+def preview_ib_filter():
     """
     Preview what symbols would be filtered out as IB-incompatible.
     
@@ -1936,7 +1936,7 @@ async def _run_max_lookback_background(collector, symbols_list, bar_sizes_list, 
 
 
 @router.post("/max-lookback-collection")
-async def max_lookback_collection(
+def max_lookback_collection(
     background_tasks: BackgroundTasks,
     max_symbols: int = None,
     specific_symbols: str = None,
@@ -2007,7 +2007,7 @@ async def max_lookback_collection(
 
 
 @router.get("/max-lookback-status")
-async def max_lookback_status():
+def max_lookback_status():
     """Check the status of the background max lookback chaining job."""
     return {
         "success": True,
@@ -2019,7 +2019,7 @@ async def max_lookback_status():
 
 
 @router.get("/chain-preview")
-async def chain_preview(
+def chain_preview(
     symbol: str = "AAPL",
     bar_size: str = "1 min",
 ):
@@ -2116,7 +2116,7 @@ async def multi_timeframe_collection(
 
 
 @router.get("/timeframe-stats")
-async def get_timeframe_stats():
+def get_timeframe_stats():
     """
     Get statistics about collected data broken down by timeframe/bar_size.
     
@@ -2183,7 +2183,7 @@ async def get_timeframe_stats():
 
 
 @router.get("/collection-presets")
-async def get_collection_presets():
+def get_collection_presets():
     """
     Get recommended collection presets for different trading styles.
     
@@ -2280,7 +2280,7 @@ async def get_collection_presets():
 
 
 @router.get("/error-investigation")
-async def investigate_errors(
+def investigate_errors(
     limit: int = 50,
     status_filter: Optional[str] = None,
     symbol_filter: Optional[str] = None,
@@ -2459,7 +2459,7 @@ async def investigate_errors(
 
 
 @router.get("/system-health")
-async def get_system_health():
+def get_system_health():
     """
     Overall system health check for data collection infrastructure.
     
@@ -2572,7 +2572,7 @@ async def get_system_health():
 # ==================== UNIFIED DATA INVENTORY ====================
 
 @router.post("/build-inventory")
-async def build_inventory(background_tasks: BackgroundTasks):
+def build_inventory(background_tasks: BackgroundTasks):
     """
     Build/rebuild the unified data inventory by scanning both
     ib_historical_data and historical_bars collections.
@@ -2601,7 +2601,7 @@ async def build_inventory(background_tasks: BackgroundTasks):
 
 
 @router.get("/inventory/summary")
-async def get_inventory_summary_endpoint():
+def get_inventory_summary_endpoint():
     """
     Get high-level summary of the unified data inventory.
     
@@ -2626,7 +2626,7 @@ async def get_inventory_summary_endpoint():
 
 
 @router.get("/inventory/symbol/{symbol}")
-async def get_symbol_inventory(symbol: str):
+def get_symbol_inventory(symbol: str):
     """
     Get complete data inventory for a single symbol across all timeframes.
     """
@@ -2646,7 +2646,7 @@ async def get_symbol_inventory(symbol: str):
 
 
 @router.get("/deep-gap-analysis")
-async def deep_gap_analysis(tier: str = None):
+def deep_gap_analysis(tier: str = None):
     """
     Depth-aware gap analysis using the unified inventory.
     
@@ -2675,7 +2675,7 @@ async def deep_gap_analysis(tier: str = None):
 
 
 @router.get("/backfill-plan")
-async def get_backfill_plan(tier: str = None, max_requests: int = None):
+def get_backfill_plan(tier: str = None, max_requests: int = None):
     """
     Generate a prioritized backfill plan from deep gap analysis.
     
@@ -2705,7 +2705,7 @@ async def get_backfill_plan(tier: str = None, max_requests: int = None):
 
 
 @router.post("/execute-backfill")
-async def execute_backfill(tier: str = None, max_requests: int = None):
+def execute_backfill(tier: str = None, max_requests: int = None):
     """
     Generate a backfill plan and queue all requests for the collector to process.
     
@@ -2744,7 +2744,7 @@ async def execute_backfill(tier: str = None, max_requests: int = None):
 
 
 @router.post("/clear-stale-jobs")
-async def clear_stale_jobs():
+def clear_stale_jobs():
     """
     Mark all stale 'running' collection jobs as 'stalled'.
     

@@ -118,7 +118,7 @@ async def score_earnings(request: EarningsScoreRequest):
 
 
 @router.post("/score/quick")
-async def score_quick(request: QuickScoreRequest):
+def score_quick(request: QuickScoreRequest):
     """
     Quick earnings score with simplified inputs
     Ideal for rapid scoring when full data isn't available
@@ -265,7 +265,7 @@ async def score_sentiment(request: SentimentScoreRequest):
 
 
 @router.post("/score/combined")
-async def score_combined(catalysts: List[Dict]):
+def score_combined(catalysts: List[Dict]):
     """
     Combine multiple catalyst scores into aggregate score
     Weighted by catalyst type importance
@@ -325,7 +325,7 @@ async def get_recent_catalysts(
 
 
 @router.get("/score-guide")
-async def get_score_guide():
+def get_score_guide():
     """Get the scoring guide and rubric explanation"""
     return {
         "scale": {

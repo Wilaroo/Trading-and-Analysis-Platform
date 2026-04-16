@@ -40,7 +40,7 @@ class AssessRequest(BaseModel):
 # ==================== ENDPOINTS ====================
 
 @router.get("/status")
-async def get_status():
+def get_status():
     """
     Get current dynamic risk engine status.
     
@@ -57,7 +57,7 @@ async def get_status():
 
 
 @router.get("/config")
-async def get_config():
+def get_config():
     """
     Get current dynamic risk configuration.
     
@@ -74,7 +74,7 @@ async def get_config():
 
 
 @router.post("/config")
-async def update_config(request: ConfigUpdateRequest):
+def update_config(request: ConfigUpdateRequest):
     """
     Update dynamic risk configuration.
     
@@ -103,7 +103,7 @@ async def update_config(request: ConfigUpdateRequest):
 
 
 @router.post("/toggle")
-async def toggle_engine():
+def toggle_engine():
     """
     Toggle the dynamic risk engine on/off.
     """
@@ -149,7 +149,7 @@ async def assess_risk(request: AssessRequest):
 
 
 @router.post("/override")
-async def set_override(request: OverrideRequest):
+def set_override(request: OverrideRequest):
     """
     Set a temporary override multiplier.
     
@@ -175,7 +175,7 @@ async def set_override(request: OverrideRequest):
 
 
 @router.delete("/override")
-async def clear_override():
+def clear_override():
     """
     Clear any active override and return to calculated risk assessment.
     """
@@ -189,7 +189,7 @@ async def clear_override():
 
 
 @router.get("/history")
-async def get_history(limit: int = 20):
+def get_history(limit: int = 20):
     """
     Get recent assessment history.
     
@@ -209,7 +209,7 @@ async def get_history(limit: int = 20):
 
 
 @router.get("/factors")
-async def get_factor_summary():
+def get_factor_summary():
     """
     Get summary statistics for each risk factor.
     
@@ -226,7 +226,7 @@ async def get_factor_summary():
 
 
 @router.get("/explain")
-async def explain_current():
+def explain_current():
     """
     Get a human-readable explanation of the current risk state.
     

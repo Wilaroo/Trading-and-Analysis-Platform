@@ -769,7 +769,7 @@ async def _run_ai_comparison_job(
 
 
 @router.get("/ai-comparison/status")
-async def get_ai_model_status():
+def get_ai_model_status():
     """Check if the AI model is available for comparison backtesting"""
     if not _advanced_engine:
         raise HTTPException(503, "Advanced backtest engine not initialized")
@@ -885,7 +885,7 @@ async def get_job_status(job_id: str):
 
 
 @router.get("/jobs")
-async def list_recent_jobs(
+def list_recent_jobs(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="Filter by status")
 ):
@@ -949,7 +949,7 @@ async def get_backtest_result(result_id: str):
 # ============================================================================
 
 @router.get("/strategy-templates")
-async def get_strategy_templates():
+def get_strategy_templates():
     """
     Get pre-configured strategy templates for common setups.
     Use these as starting points for your backtests.
@@ -1045,7 +1045,7 @@ async def get_strategy_templates():
 
 
 @router.get("/strategies")
-async def get_all_strategies():
+def get_all_strategies():
     """
     Get all trading strategies from the database.
     These are the full 77+ strategies available for backtesting.

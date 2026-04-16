@@ -84,7 +84,7 @@ class SmartStopResponse(BaseModel):
 
 
 @router.post("/calculate", response_model=SmartStopResponse)
-async def calculate_smart_stop(request: SmartStopRequest):
+def calculate_smart_stop(request: SmartStopRequest):
     """
     Calculate a smart stop loss for a trade.
     
@@ -137,7 +137,7 @@ async def calculate_smart_stop(request: SmartStopRequest):
 
 
 @router.get("/modes")
-async def get_stop_modes():
+def get_stop_modes():
     """
     Get all available smart stop modes with descriptions.
     """
@@ -191,7 +191,7 @@ async def get_stop_modes():
 
 
 @router.get("/recommend/{symbol}")
-async def recommend_stop_mode(
+def recommend_stop_mode(
     symbol: str,
     float_shares: Optional[float] = Query(None, description="Float shares (if known)"),
     avg_volume: Optional[float] = Query(None, description="Average daily volume"),
@@ -254,7 +254,7 @@ async def recommend_stop_mode(
 
 
 @router.get("/compare")
-async def compare_stop_modes(
+def compare_stop_modes(
     entry_price: float = Query(..., description="Entry price"),
     direction: str = Query(..., description="Trade direction: long or short"),
     atr: float = Query(..., description="ATR value"),
@@ -460,7 +460,7 @@ async def calculate_intelligent_stop(request: IntelligentStopRequest):
 
 
 @router.get("/setup-rules")
-async def get_setup_rules():
+def get_setup_rules():
     """
     Get all available setup-based stop rules.
     
@@ -495,7 +495,7 @@ async def get_setup_rules():
 
 
 @router.get("/trailing-modes")
-async def get_trailing_modes():
+def get_trailing_modes():
     """
     Get all available trailing stop modes with descriptions.
     """
@@ -520,7 +520,7 @@ async def get_trailing_modes():
 
 
 @router.get("/urgency-levels")
-async def get_urgency_levels():
+def get_urgency_levels():
     """
     Get all urgency levels and their meanings.
     """
@@ -709,7 +709,7 @@ async def get_volume_profile(
 
 
 @router.post("/calculate-trailing-stop")
-async def calculate_trailing_stop(
+def calculate_trailing_stop(
     symbol: str = Query(..., description="Ticker symbol"),
     entry_price: float = Query(..., description="Original entry price"),
     current_price: float = Query(..., description="Current market price"),
@@ -851,7 +851,7 @@ async def calculate_trailing_stop(
 
 
 @router.post("/auto-trail-positions")
-async def auto_trail_all_positions():
+def auto_trail_all_positions():
     """
     Analyze all open positions and suggest trailing stop adjustments.
     

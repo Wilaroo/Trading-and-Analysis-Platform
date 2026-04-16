@@ -176,7 +176,7 @@ async def call_ollama_via_http_proxy(model: str, messages: list, options: dict =
 # ===================== ENDPOINTS =====================
 
 @router.get("/api/ollama-proxy/status")
-async def get_ollama_proxy_status():
+def get_ollama_proxy_status():
     """Get Ollama proxy connection status (both WebSocket and HTTP)"""
     ws_status = _ollama_proxy_manager.get_status()
     
@@ -207,7 +207,7 @@ async def get_ollama_proxy_status():
 
 
 @router.get("/api/ollama-usage")
-async def get_ollama_usage():
+def get_ollama_usage():
     """Get Ollama usage statistics"""
     _reset_ollama_usage_if_needed()
     
@@ -253,7 +253,7 @@ async def get_ollama_usage():
 
 
 @router.post("/api/ollama-proxy/register")
-async def register_http_proxy(data: dict):
+def register_http_proxy(data: dict):
     """Register an HTTP-based Ollama proxy"""
     session_id = data.get("session_id")
     ollama_status = data.get("ollama_status", {})
@@ -269,7 +269,7 @@ async def register_http_proxy(data: dict):
 
 
 @router.post("/api/ollama-proxy/heartbeat")
-async def http_proxy_heartbeat(data: dict):
+def http_proxy_heartbeat(data: dict):
     """Heartbeat from HTTP proxy"""
     session_id = data.get("session_id")
     ollama_status = data.get("ollama_status", {})
@@ -289,7 +289,7 @@ async def http_proxy_heartbeat(data: dict):
 
 
 @router.get("/api/ollama-proxy/poll")
-async def poll_http_proxy(session_id: str):
+def poll_http_proxy(session_id: str):
     """Poll for pending requests (long-poll style)"""
     if session_id not in _http_proxy_sessions:
         return {"requests": [], "error": "Not registered"}
@@ -304,7 +304,7 @@ async def poll_http_proxy(session_id: str):
 
 
 @router.post("/api/ollama-proxy/response")
-async def submit_http_proxy_response(data: dict):
+def submit_http_proxy_response(data: dict):
     """Submit response from HTTP proxy"""
     request_id = data.get("request_id")
     result = data.get("result", {})

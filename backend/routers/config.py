@@ -22,7 +22,7 @@ class ConfigResponse(BaseModel):
 
 
 @router.get("", response_model=ConfigResponse)
-async def get_config():
+def get_config():
     """Get current configuration values - fast response, no connection test."""
     ollama_url = os.environ.get("OLLAMA_URL", "")
     ollama_model = os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b")
@@ -152,7 +152,7 @@ class OllamaModelConfig(BaseModel):
 
 
 @router.post("/ollama-model")
-async def update_ollama_model(config: OllamaModelConfig):
+def update_ollama_model(config: OllamaModelConfig):
     """Update the Ollama model at runtime."""
     new_model = config.model.strip()
     

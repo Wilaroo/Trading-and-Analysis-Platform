@@ -86,7 +86,7 @@ async def get_all_phases():
 
 
 @router.get("/phase/{strategy_name}")
-async def get_strategy_phase(strategy_name: str):
+def get_strategy_phase(strategy_name: str):
     """Get current phase for a specific strategy"""
     try:
         service = get_strategy_promotion_service()
@@ -266,7 +266,7 @@ async def close_paper_trade(request: ClosePaperTradeRequest):
 
 
 @router.get("/should-execute/{strategy_name}")
-async def should_execute_trade(strategy_name: str):
+def should_execute_trade(strategy_name: str):
     """
     Check if a trade should be executed for real.
     
@@ -290,7 +290,7 @@ async def should_execute_trade(strategy_name: str):
 
 
 @router.post("/set-phase/{strategy_name}")
-async def set_strategy_phase_manual(
+def set_strategy_phase_manual(
     strategy_name: str,
     phase: str = Query(..., description="Target phase: simulation, paper, live, demoted, disabled"),
     reason: str = Query("Manual override", description="Reason for change")

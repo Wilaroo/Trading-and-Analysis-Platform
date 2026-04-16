@@ -37,7 +37,7 @@ class SimilarTradesRequest(BaseModel):
 
 
 @router.get("/stats")
-async def get_rag_stats():
+def get_rag_stats():
     """Get RAG service statistics"""
     service = get_rag_service()
     return {
@@ -47,7 +47,7 @@ async def get_rag_stats():
 
 
 @router.get("/needs-sync")
-async def check_needs_sync():
+def check_needs_sync():
     """Check if RAG data needs to be synced from MongoDB"""
     service = get_rag_service()
     return {
@@ -160,7 +160,7 @@ async def find_similar_trades(request: SimilarTradesRequest):
 
 
 @router.get("/collections")
-async def get_collections():
+def get_collections():
     """Get information about RAG collections"""
     from services.rag.vector_store import VectorStoreService
     
@@ -171,7 +171,7 @@ async def get_collections():
 
 
 @router.get("/embedding-stats")
-async def get_embedding_stats():
+def get_embedding_stats():
     """Get embedding service statistics (cache hits, model info)"""
     from services.rag.embedding_service import get_embedding_service
     
@@ -183,7 +183,7 @@ async def get_embedding_stats():
 
 
 @router.post("/clear-cache")
-async def clear_embedding_cache():
+def clear_embedding_cache():
     """Clear the embedding cache (useful for memory management)"""
     from services.rag.embedding_service import get_embedding_service
     
@@ -197,7 +197,7 @@ async def clear_embedding_cache():
 
 
 @router.delete("/reset")
-async def reset_vector_store():
+def reset_vector_store():
     """
     Reset all RAG data (clear ChromaDB collections).
     

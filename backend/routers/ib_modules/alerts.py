@@ -39,7 +39,7 @@ class PriceAlertRequest(BaseModel):
 # ===================== PRICE ALERTS =====================
 
 @router.post("/alerts/price")
-async def create_price_alert(request: PriceAlertRequest):
+def create_price_alert(request: PriceAlertRequest):
     """Create a new price alert"""
     alert_id = f"{request.symbol}_{request.direction}_{request.target_price}_{datetime.now().timestamp()}"
     
@@ -58,7 +58,7 @@ async def create_price_alert(request: PriceAlertRequest):
 
 
 @router.get("/alerts/price")
-async def get_price_alerts():
+def get_price_alerts():
     """Get all active price alerts"""
     return {
         "alerts": list(_price_alerts.values()),
@@ -132,7 +132,7 @@ async def check_price_alerts():
 
 
 @router.delete("/alerts/price/{alert_id}")
-async def delete_price_alert(alert_id: str):
+def delete_price_alert(alert_id: str):
     """Delete a price alert"""
     if alert_id in _price_alerts:
         del _price_alerts[alert_id]
@@ -141,7 +141,7 @@ async def delete_price_alert(alert_id: str):
 
 
 @router.get("/alerts/price/history")
-async def get_triggered_alerts_history():
+def get_triggered_alerts_history():
     """Get history of triggered alerts"""
     return {
         "triggered": _triggered_alerts[-50:],  # Last 50 triggered alerts
@@ -152,7 +152,7 @@ async def get_triggered_alerts_history():
 # ===================== ENHANCED ALERTS =====================
 
 @router.get("/alerts/enhanced")
-async def get_enhanced_alerts(limit: int = 50):
+def get_enhanced_alerts(limit: int = 50):
     """
     Get enhanced alerts with full context including:
     - Exact timestamp when triggered
@@ -174,7 +174,7 @@ async def get_enhanced_alerts(limit: int = 50):
 
 
 @router.get("/alerts/enhanced/history")
-async def get_enhanced_alert_history(limit: int = 100):
+def get_enhanced_alert_history(limit: int = 100):
     """Get history of all enhanced alerts"""
     from services.enhanced_alerts import get_alert_manager
     
@@ -188,7 +188,7 @@ async def get_enhanced_alert_history(limit: int = 100):
 
 
 @router.post("/alerts/enhanced/{alert_id}/viewed")
-async def mark_alert_viewed(alert_id: str):
+def mark_alert_viewed(alert_id: str):
     """Mark an alert as viewed"""
     from services.enhanced_alerts import get_alert_manager
     
@@ -199,7 +199,7 @@ async def mark_alert_viewed(alert_id: str):
 
 
 @router.delete("/alerts/enhanced/{alert_id}")
-async def archive_enhanced_alert(alert_id: str):
+def archive_enhanced_alert(alert_id: str):
     """Archive/dismiss an alert"""
     from services.enhanced_alerts import get_alert_manager
     

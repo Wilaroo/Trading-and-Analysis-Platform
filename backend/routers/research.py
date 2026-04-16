@@ -232,7 +232,7 @@ async def get_market_context_skill():
 
 
 @router.get("/stats")
-async def get_research_stats():
+def get_research_stats():
     """
     Get research service statistics including cache hit rate and credit usage
     
@@ -249,7 +249,7 @@ async def get_research_stats():
 # ===================== CREDIT BUDGET ENDPOINTS =====================
 
 @router.get("/budget")
-async def get_credit_budget():
+def get_credit_budget():
     """
     Get full Tavily credit budget status
     
@@ -273,7 +273,7 @@ async def get_credit_budget():
 
 
 @router.post("/budget/limit")
-async def set_credit_limit(new_limit: int = Query(..., ge=100, le=100000, description="New monthly credit limit")):
+def set_credit_limit(new_limit: int = Query(..., ge=100, le=100000, description="New monthly credit limit")):
     """
     Update the monthly credit limit
     

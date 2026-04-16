@@ -35,7 +35,7 @@ class SetupValidationRequest(BaseModel):
 # ===================== ENDPOINTS =====================
 
 @router.get("/market-context")
-async def get_market_context_rules():
+def get_market_context_rules():
     """Get all market context regime rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -44,7 +44,7 @@ async def get_market_context_rules():
 
 
 @router.get("/market-context/{regime}")
-async def get_regime_rules(regime: str):
+def get_regime_rules(regime: str):
     """Get rules for a specific market regime"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -61,7 +61,7 @@ async def get_regime_rules(regime: str):
 
 
 @router.get("/volume")
-async def get_volume_rules():
+def get_volume_rules():
     """Get all volume-related rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -70,7 +70,7 @@ async def get_volume_rules():
 
 
 @router.get("/time-of-day")
-async def get_time_rules():
+def get_time_rules():
     """Get time of day trading rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -79,7 +79,7 @@ async def get_time_rules():
 
 
 @router.get("/setups")
-async def get_setup_rules():
+def get_setup_rules():
     """Get all setup pattern rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -88,7 +88,7 @@ async def get_setup_rules():
 
 
 @router.get("/exits")
-async def get_exit_rules():
+def get_exit_rules():
     """Get all exit and target rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -97,7 +97,7 @@ async def get_exit_rules():
 
 
 @router.get("/stops")
-async def get_stop_loss_rules():
+def get_stop_loss_rules():
     """Get all stop loss placement rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -106,7 +106,7 @@ async def get_stop_loss_rules():
 
 
 @router.get("/avoidance")
-async def get_avoidance_rules():
+def get_avoidance_rules():
     """Get all avoidance conditions"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -115,7 +115,7 @@ async def get_avoidance_rules():
 
 
 @router.get("/catalyst-scoring")
-async def get_catalyst_scoring():
+def get_catalyst_scoring():
     """Get catalyst scoring rubric"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -124,7 +124,7 @@ async def get_catalyst_scoring():
 
 
 @router.get("/game-plan")
-async def get_game_plan_framework():
+def get_game_plan_framework():
     """Get daily game plan framework"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -133,7 +133,7 @@ async def get_game_plan_framework():
 
 
 @router.post("/recommend")
-async def get_strategy_recommendations(request: StrategyRecommendationRequest):
+def get_strategy_recommendations(request: StrategyRecommendationRequest):
     """Get recommended strategies based on current conditions"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -157,7 +157,7 @@ async def get_strategy_recommendations(request: StrategyRecommendationRequest):
 
 
 @router.post("/validate")
-async def validate_setup(request: SetupValidationRequest):
+def validate_setup(request: SetupValidationRequest):
     """Validate if a setup meets strategy requirements"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -182,7 +182,7 @@ async def validate_setup(request: SetupValidationRequest):
 
 
 @router.get("/summary")
-async def get_rules_summary():
+def get_rules_summary():
     """Get a summary of all trading rules"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")
@@ -200,7 +200,7 @@ async def get_rules_summary():
 
 
 @router.get("/quick-reference/{topic}")
-async def get_quick_reference(topic: str):
+def get_quick_reference(topic: str):
     """Get quick reference for a specific topic"""
     if not trading_rules_engine:
         raise HTTPException(500, "Trading rules engine not initialized")

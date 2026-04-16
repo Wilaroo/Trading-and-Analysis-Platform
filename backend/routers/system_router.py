@@ -67,13 +67,13 @@ def init_system_router(
 
 
 @router.get("/api/health")
-async def health_check():
+def health_check():
     """Async handler — runs on event loop, immune to thread pool saturation."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/api/cache-status")
-async def cache_status():
+def cache_status():
     """Check streaming cache health — async, no threads."""
     import resource
     try:
@@ -124,7 +124,7 @@ async def cache_status():
 
 
 @router.get("/api/startup-check")
-async def startup_check():
+def startup_check():
     """
     Ultra-lightweight startup check endpoint for the StartupModal.
     Returns ALL service statuses in a SINGLE call using ONLY in-memory state.

@@ -164,7 +164,7 @@ async def batch_score(request: BatchScoreRequest):
 
 
 @router.get("/guidance")
-async def get_score_guidance(score: float = Query(ge=0, le=100)):
+def get_score_guidance(score: float = Query(ge=0, le=100)):
     """
     Get trading guidance for a particular TQS score.
     
@@ -185,7 +185,7 @@ async def get_score_guidance(score: float = Query(ge=0, le=100)):
 
 
 @router.get("/thresholds")
-async def get_tqs_thresholds():
+def get_tqs_thresholds():
     """
     Get the current TQS threshold configuration.
     
@@ -210,7 +210,7 @@ async def get_tqs_thresholds():
 
 
 @router.get("/pillars")
-async def get_pillar_info():
+def get_pillar_info():
     """
     Get information about the 5 TQS pillars.
     

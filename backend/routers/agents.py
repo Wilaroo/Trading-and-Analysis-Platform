@@ -108,7 +108,7 @@ async def agent_chat(request: ChatRequest):
 
 
 @router.get("/metrics")
-async def get_agent_metrics():
+def get_agent_metrics():
     """Get performance metrics from all agents"""
     orchestrator = get_orchestrator()
     
@@ -122,7 +122,7 @@ async def get_agent_metrics():
 
 
 @router.delete("/session/{session_id}")
-async def clear_session(session_id: str):
+def clear_session(session_id: str):
     """Clear a session's context (useful for testing)"""
     orchestrator = get_orchestrator()
     
@@ -133,7 +133,7 @@ async def clear_session(session_id: str):
 
 
 @router.get("/status")
-async def get_agent_status():
+def get_agent_status():
     """Get status of the agent system"""
     orchestrator = get_orchestrator()
     llm = get_llm_provider()
@@ -149,7 +149,7 @@ async def get_agent_status():
 
 
 @router.post("/switch-provider/{provider}")
-async def switch_llm_provider(provider: str):
+def switch_llm_provider(provider: str):
     """Switch the LLM provider (ollama, openai, anthropic)"""
     llm = get_llm_provider()
     

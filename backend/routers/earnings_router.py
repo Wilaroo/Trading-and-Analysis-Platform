@@ -161,7 +161,7 @@ def generate_earnings_play_strategy(avg_reaction: float, iv_rank: float, expecte
     }
 
 
-async def generate_earnings_data(symbol: str, earnings_date: str) -> Dict:
+def generate_earnings_data(symbol: str, earnings_date: str) -> Dict:
     """Generate simulated earnings data for a symbol"""
     random.seed(hash(symbol + earnings_date))
     
@@ -526,7 +526,7 @@ async def get_earnings_detail(symbol: str):
 
 
 @router.get("/earnings/iv/{symbol}")
-async def get_earnings_iv(symbol: str):
+def get_earnings_iv(symbol: str):
     """Get implied volatility analysis for earnings"""
     random.seed(hash(symbol + "iv"))
     

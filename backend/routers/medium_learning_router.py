@@ -522,7 +522,7 @@ async def run_daily_analysis():
 
 
 @router.get("/status")
-async def get_medium_learning_status():
+def get_medium_learning_status():
     """
     Get status of all Medium Learning services.
     """

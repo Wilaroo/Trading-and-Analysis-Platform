@@ -48,7 +48,7 @@ class StrategyUpdate(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("")
-async def get_all_strategies(
+def get_all_strategies(
     category: Optional[str] = Query(None, description="Filter by category: intraday, swing, investment")
 ):
     """Get all trading strategies or filter by category"""
@@ -60,7 +60,7 @@ async def get_all_strategies(
 
 
 @router.get("/categories")
-async def get_categories():
+def get_categories():
     """Get all strategy categories"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -70,7 +70,7 @@ async def get_categories():
 
 
 @router.get("/search")
-async def search_strategies(
+def search_strategies(
     q: str = Query(..., description="Search query")
 ):
     """Search strategies by name, criteria, or indicators"""
@@ -82,7 +82,7 @@ async def search_strategies(
 
 
 @router.get("/count")
-async def get_strategy_count():
+def get_strategy_count():
     """Get total number of strategies"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -92,7 +92,7 @@ async def get_strategy_count():
 
 
 @router.get("/{strategy_id}")
-async def get_strategy(strategy_id: str):
+def get_strategy(strategy_id: str):
     """Get specific strategy details by ID"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -104,7 +104,7 @@ async def get_strategy(strategy_id: str):
 
 
 @router.post("")
-async def create_strategy(strategy: StrategyCreate):
+def create_strategy(strategy: StrategyCreate):
     """Create a new strategy"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -122,7 +122,7 @@ async def create_strategy(strategy: StrategyCreate):
 
 
 @router.put("/{strategy_id}")
-async def update_strategy(strategy_id: str, updates: StrategyUpdate):
+def update_strategy(strategy_id: str, updates: StrategyUpdate):
     """Update an existing strategy"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -146,7 +146,7 @@ async def update_strategy(strategy_id: str, updates: StrategyUpdate):
 
 
 @router.delete("/{strategy_id}")
-async def delete_strategy(strategy_id: str):
+def delete_strategy(strategy_id: str):
     """Delete a strategy"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")
@@ -164,7 +164,7 @@ async def delete_strategy(strategy_id: str):
 
 
 @router.post("/batch")
-async def get_strategies_batch(strategy_ids: List[str]):
+def get_strategies_batch(strategy_ids: List[str]):
     """Get multiple strategies by their IDs"""
     if not _strategy_service:
         raise HTTPException(status_code=500, detail="Strategy service not initialized")

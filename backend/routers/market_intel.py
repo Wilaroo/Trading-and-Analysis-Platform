@@ -15,7 +15,7 @@ def init_market_intel_router(service: MarketIntelService):
 
 
 @router.get("/current")
-async def get_current_report():
+def get_current_report():
     """Get the most relevant report for the current time of day"""
     report = _service.get_current_report()
     return {
@@ -25,7 +25,7 @@ async def get_current_report():
 
 
 @router.get("/reports")
-async def get_todays_reports():
+def get_todays_reports():
     """Get all reports generated today"""
     reports = _service.get_todays_reports()
     return {
@@ -35,7 +35,7 @@ async def get_todays_reports():
 
 
 @router.get("/schedule")
-async def get_schedule():
+def get_schedule():
     """Get the report schedule with status for today"""
     status = _service.get_schedule_status()
     return {
@@ -45,7 +45,7 @@ async def get_schedule():
 
 
 @router.get("/auto-trigger")
-async def auto_trigger():
+def auto_trigger():
     """Check if a report should be auto-generated on app open.
     Returns the report type to generate, or null if current report exists."""
     from services.market_intel_service import applicable_report_type

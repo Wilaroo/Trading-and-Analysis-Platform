@@ -37,7 +37,7 @@ SCRIPT_PATHS = {
 
 
 @router.get("/{script_name}")
-async def get_script(script_name: str):
+def get_script(script_name: str):
     """
     Download a script by name.
     Used by StartTrading.bat for auto-updates.
@@ -67,7 +67,7 @@ async def get_script(script_name: str):
 
 
 @router.get("/")
-async def list_scripts():
+def list_scripts():
     """List available scripts for download."""
     available = {}
     for name, paths in SCRIPT_PATHS.items():

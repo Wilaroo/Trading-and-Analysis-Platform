@@ -130,7 +130,7 @@ async def stop_scanner():
 
 
 @router.get("/status")
-async def get_scanner_status():
+def get_scanner_status():
     """Get current scanner status and statistics"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -144,7 +144,7 @@ async def get_scanner_status():
 # ===================== Alert Management =====================
 
 @router.get("/alerts")
-async def get_live_alerts(
+def get_live_alerts(
     priority: Optional[str] = None,
     ai_agrees_only: bool = False,
     min_ai_confidence: Optional[float] = None,
@@ -201,7 +201,7 @@ async def get_live_alerts(
 
 
 @router.get("/alerts/{alert_id}")
-async def get_alert(alert_id: str):
+def get_alert(alert_id: str):
     """Get a specific alert by ID"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -217,7 +217,7 @@ async def get_alert(alert_id: str):
 
 
 @router.post("/alerts/{alert_id}/dismiss")
-async def dismiss_alert(alert_id: str):
+def dismiss_alert(alert_id: str):
     """Dismiss/acknowledge an alert"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -233,7 +233,7 @@ async def dismiss_alert(alert_id: str):
 # ===================== Configuration =====================
 
 @router.post("/watchlist")
-async def set_watchlist(request: WatchlistRequest):
+def set_watchlist(request: WatchlistRequest):
     """Set the symbols to scan"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -248,7 +248,7 @@ async def set_watchlist(request: WatchlistRequest):
 
 
 @router.get("/watchlist")
-async def get_watchlist():
+def get_watchlist():
     """Get current watchlist"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -261,7 +261,7 @@ async def get_watchlist():
 
 
 @router.post("/config")
-async def update_config(request: ConfigRequest):
+def update_config(request: ConfigRequest):
     """Update scanner configuration"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -282,7 +282,7 @@ async def update_config(request: ConfigRequest):
 
 
 @router.get("/config")
-async def get_config():
+def get_config():
     """Get current scanner configuration"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -301,7 +301,7 @@ async def get_config():
 # ===================== Strategy Stats (Win-Rate Tracking) =====================
 
 @router.get("/stats/strategies")
-async def get_strategy_stats(setup_type: Optional[str] = None):
+def get_strategy_stats(setup_type: Optional[str] = None):
     """Get win-rate statistics for strategies"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -315,7 +315,7 @@ async def get_strategy_stats(setup_type: Optional[str] = None):
 
 
 @router.post("/stats/record-outcome")
-async def record_alert_outcome(
+def record_alert_outcome(
     alert_id: str = Query(..., description="Alert ID"),
     outcome: str = Query(..., description="Outcome: won, lost, expired, cancelled"),
     pnl: float = Query(default=0.0, description="Realized P&L")
@@ -338,7 +338,7 @@ async def record_alert_outcome(
 # ===================== Auto-Execution Control =====================
 
 @router.post("/auto-execute/enable")
-async def enable_auto_execute(
+def enable_auto_execute(
     enabled: bool = Query(default=True),
     min_win_rate: float = Query(default=0.55, ge=0.0, le=1.0),
     min_priority: str = Query(default="high", regex="^(critical|high)$")
@@ -358,7 +358,7 @@ async def enable_auto_execute(
 
 
 @router.get("/auto-execute/status")
-async def get_auto_execute_status():
+def get_auto_execute_status():
     """Get auto-execution status"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -375,7 +375,7 @@ async def get_auto_execute_status():
 # ===================== RVOL Pre-filter =====================
 
 @router.post("/config/rvol-filter")
-async def set_rvol_filter(
+def set_rvol_filter(
     min_rvol: float = Query(default=0.8, ge=0.0, le=5.0, description="Minimum RVOL to scan symbol")
 ):
     """Set minimum RVOL filter for pre-filtering symbols"""
@@ -394,7 +394,7 @@ async def set_rvol_filter(
 # ===================== ADV Volume Filter =====================
 
 @router.get("/config/volume-filter")
-async def get_volume_filter():
+def get_volume_filter():
     """Get current average daily volume (ADV) filter configuration"""
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
@@ -406,7 +406,7 @@ async def get_volume_filter():
 
 
 @router.post("/config/volume-filter")
-async def set_volume_filter(
+def set_volume_filter(
     min_adv_general: int = Query(default=100_000, ge=0, description="Min ADV for general/swing setups"),
     min_adv_intraday: int = Query(default=500_000, ge=0, description="Min ADV for intraday/scalp setups")
 ):
@@ -439,7 +439,7 @@ class BlacklistRequest(BaseModel):
 
 
 @router.get("/config/blacklist")
-async def get_blacklist():
+def get_blacklist():
     """
     Get the current list of blacklisted symbols.
     
@@ -457,7 +457,7 @@ async def get_blacklist():
 
 
 @router.post("/config/blacklist/add")
-async def add_to_blacklist(request: BlacklistRequest):
+def add_to_blacklist(request: BlacklistRequest):
     """
     Add symbols to the scanner blacklist.
     
@@ -478,7 +478,7 @@ async def add_to_blacklist(request: BlacklistRequest):
 
 
 @router.post("/config/blacklist/remove")
-async def remove_from_blacklist(request: BlacklistRequest):
+def remove_from_blacklist(request: BlacklistRequest):
     """
     Remove symbols from the scanner blacklist.
     
@@ -499,7 +499,7 @@ async def remove_from_blacklist(request: BlacklistRequest):
 
 
 @router.get("/config/blacklist/check/{symbol}")
-async def check_blacklist(symbol: str):
+def check_blacklist(symbol: str):
     """
     Check if a specific symbol is blacklisted.
     """

@@ -127,7 +127,7 @@ async def stop_bot():
 
 
 @router.get("/executor/status")
-async def get_executor_status():
+def get_executor_status():
     """Get trade executor status and current broker"""
     if not _trade_executor:
         raise HTTPException(status_code=503, detail="Trade executor not initialized")
@@ -145,7 +145,7 @@ async def get_executor_status():
 
 
 @router.post("/executor/mode/{mode}")
-async def set_executor_mode(mode: str):
+def set_executor_mode(mode: str):
     """
     Set trade execution mode/broker.
     
@@ -178,7 +178,7 @@ async def set_executor_mode(mode: str):
 
 
 @router.post("/mode/{mode}")
-async def set_bot_mode(mode: str):
+def set_bot_mode(mode: str):
     """Set bot operating mode (autonomous, confirmation, paused)"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -206,7 +206,7 @@ async def set_bot_mode(mode: str):
 
 
 @router.post("/config")
-async def update_bot_config(config: BotConfigUpdate):
+def update_bot_config(config: BotConfigUpdate):
     """Update bot configuration"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -242,7 +242,7 @@ async def update_bot_config(config: BotConfigUpdate):
 
 
 @router.post("/risk-params")
-async def update_risk_params(params: RiskParamsUpdate):
+def update_risk_params(params: RiskParamsUpdate):
     """Update risk management parameters"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -262,7 +262,7 @@ class EODConfigUpdate(BaseModel):
 
 
 @router.get("/eod-config")
-async def get_eod_config():
+def get_eod_config():
     """Get EOD auto-close configuration"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -281,7 +281,7 @@ async def get_eod_config():
 
 
 @router.post("/eod-config")
-async def update_eod_config(config: EODConfigUpdate):
+def update_eod_config(config: EODConfigUpdate):
     """Update EOD auto-close configuration"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -379,7 +379,7 @@ async def trigger_eod_close_now():
 # ==================== TRADE MANAGEMENT ====================
 
 @router.get("/trades/pending")
-async def get_pending_trades():
+def get_pending_trades():
     """Get all trades awaiting confirmation"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -389,7 +389,7 @@ async def get_pending_trades():
 
 
 @router.get("/trades/open")
-async def get_open_trades():
+def get_open_trades():
     """Get all open positions"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -399,7 +399,7 @@ async def get_open_trades():
 
 
 @router.get("/trades/closed")
-async def get_closed_trades(limit: int = Query(50, ge=1, le=500)):
+def get_closed_trades(limit: int = Query(50, ge=1, le=500)):
     """Get closed trades history"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -409,7 +409,7 @@ async def get_closed_trades(limit: int = Query(50, ge=1, le=500)):
 
 
 @router.get("/trades/all")
-async def get_all_trades():
+def get_all_trades():
     """Get all bot trades (pending, open, closed) for the AI Command Panel"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -493,7 +493,7 @@ async def close_phantom_trade(trade_id: str, reason: str = "manual_close"):
 
 
 @router.get("/trades")
-async def get_trades_list():
+def get_trades_list():
     """
     Get a unified list of all trades (pending, open, closed).
     This is an alias endpoint for /trades/all for API consistency.
@@ -662,7 +662,7 @@ async def submit_trade(request: TradeSubmitRequest):
 
 
 @router.get("/trades/{trade_id}")
-async def get_trade(trade_id: str):
+def get_trade(trade_id: str):
     """Get details of a specific trade including explanation"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -721,7 +721,7 @@ async def close_trade(trade_id: str, reason: Optional[str] = "manual"):
 # ==================== STATISTICS ====================
 
 @router.get("/stats/daily")
-async def get_daily_stats():
+def get_daily_stats():
     """Get daily trading statistics"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -731,7 +731,7 @@ async def get_daily_stats():
 
 
 @router.get("/stats/performance")
-async def get_performance_stats():
+def get_performance_stats():
     """Get overall performance statistics"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -761,7 +761,7 @@ async def get_performance_stats():
 
 
 @router.get("/performance/equity-curve")
-async def get_equity_curve(period: str = Query("today", enum=["today", "week", "month", "ytd", "all"])):
+def get_equity_curve(period: str = Query("today", enum=["today", "week", "month", "ytd", "all"])):
     """
     Get equity curve data for the bot performance chart.
     Returns cumulative P&L over time with trade markers.
@@ -1650,7 +1650,7 @@ async def trigger_manual_scan():
 
 
 @router.get("/strategy-configs")
-async def get_strategy_configs():
+def get_strategy_configs():
     """Get all strategy configurations"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -1660,7 +1660,7 @@ async def get_strategy_configs():
 
 
 @router.put("/strategy-configs/{strategy}")
-async def update_strategy_config(strategy: str, config: StrategyConfigUpdate):
+def update_strategy_config(strategy: str, config: StrategyConfigUpdate):
     """Update a specific strategy configuration"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -2004,7 +2004,7 @@ async def import_position(request: ImportPositionRequest):
 
 
 @router.get("/sync-positions")
-async def sync_with_ib_positions():
+def sync_with_ib_positions():
     """
     Sync bot's tracked trades with actual IB positions.
     
@@ -2082,7 +2082,7 @@ async def sync_with_ib_positions():
 
 
 @router.post("/clear-orphaned")
-async def clear_orphaned_trades():
+def clear_orphaned_trades():
     """
     Remove trades from bot tracking that no longer exist in IB.
     
@@ -2132,7 +2132,7 @@ async def clear_orphaned_trades():
 # ==================== SMART STRATEGY FILTERING ENDPOINTS ====================
 
 @router.get("/smart-filter/config")
-async def get_smart_filter_config():
+def get_smart_filter_config():
     """Get the current Smart Strategy Filter configuration"""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
@@ -2144,7 +2144,7 @@ async def get_smart_filter_config():
 
 
 @router.post("/smart-filter/config")
-async def update_smart_filter_config(updates: Dict[str, Any]):
+def update_smart_filter_config(updates: Dict[str, Any]):
     """
     Update Smart Strategy Filter configuration.
     
@@ -2171,7 +2171,7 @@ async def update_smart_filter_config(updates: Dict[str, Any]):
 
 
 @router.get("/smart-filter/thoughts")
-async def get_filter_thoughts(limit: int = Query(10, ge=1, le=50)):
+def get_filter_thoughts(limit: int = Query(10, ge=1, le=50)):
     """
     Get recent strategy filter thoughts/reasoning.
     
@@ -2191,7 +2191,7 @@ async def get_filter_thoughts(limit: int = Query(10, ge=1, le=50)):
 
 
 @router.get("/smart-filter/strategy-stats/{setup_type}")
-async def get_strategy_stats(setup_type: str):
+def get_strategy_stats(setup_type: str):
     """
     Get user's historical performance stats for a specific setup type.
     
@@ -2209,7 +2209,7 @@ async def get_strategy_stats(setup_type: str):
 
 
 @router.get("/smart-filter/all-strategy-stats")
-async def get_all_strategy_stats():
+def get_all_strategy_stats():
     """
     Get user's historical performance stats for ALL setup types.
     Useful for the Learning Dashboard to show strategy performance breakdown.

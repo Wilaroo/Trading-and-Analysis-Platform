@@ -118,13 +118,13 @@ async def remove_from_watchlist(symbol: str):
 # ===================== SMART WATCHLIST =====================
 
 @router.get("/smart-watchlist")
-async def get_smart_watchlist_api():
+def get_smart_watchlist_api():
     """Get the smart watchlist (hybrid auto + manual)"""
     return _smart_watchlist.to_api_response()
 
 
 @router.post("/smart-watchlist/add")
-async def add_to_smart_watchlist(data: dict):
+def add_to_smart_watchlist(data: dict):
     """Manually add a symbol to smart watchlist"""
     symbol = data.get("symbol", "").upper()
     notes = data.get("notes", "")
@@ -137,7 +137,7 @@ async def add_to_smart_watchlist(data: dict):
 
 
 @router.delete("/smart-watchlist/{symbol}")
-async def remove_from_smart_watchlist(symbol: str):
+def remove_from_smart_watchlist(symbol: str):
     """Manually remove a symbol from smart watchlist"""
     result = _smart_watchlist.remove_manual(symbol.upper())
     if not result.get("success"):
@@ -146,6 +146,6 @@ async def remove_from_smart_watchlist(symbol: str):
 
 
 @router.get("/smart-watchlist/stats")
-async def get_smart_watchlist_stats():
+def get_smart_watchlist_stats():
     """Get smart watchlist statistics"""
     return _smart_watchlist.get_stats()

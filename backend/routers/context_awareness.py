@@ -75,7 +75,7 @@ class FullContextResponse(BaseModel):
 
 
 @router.get("/session", response_model=SessionContextResponse)
-async def get_session_context():
+def get_session_context():
     """
     Get the current trading session context.
     

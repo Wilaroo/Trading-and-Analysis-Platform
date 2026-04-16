@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/data-storage", tags=["data-storage"])
 
 
 @router.get("/stats")
-async def get_storage_stats():
+def get_storage_stats():
     """Get statistics about all stored data collections"""
     try:
         manager = get_storage_manager()
@@ -25,7 +25,7 @@ async def get_storage_stats():
 
 
 @router.get("/learning-summary")
-async def get_learning_summary():
+def get_learning_summary():
     """Get summary of all data available for learning/training"""
     try:
         manager = get_storage_manager()
@@ -37,7 +37,7 @@ async def get_learning_summary():
 
 
 @router.post("/cleanup")
-async def cleanup_old_data(dry_run: bool = True):
+def cleanup_old_data(dry_run: bool = True):
     """
     Clean up data past retention period.
     
@@ -53,7 +53,7 @@ async def cleanup_old_data(dry_run: bool = True):
 
 
 @router.get("/export/{source}")
-async def export_training_data(
+def export_training_data(
     source: str,
     symbol: Optional[str] = None,
     limit: int = 10000
@@ -79,7 +79,7 @@ async def export_training_data(
 
 
 @router.get("/collections")
-async def list_collections():
+def list_collections():
     """List all managed collections with their descriptions"""
     try:
         from services.data_storage_manager import DataStorageManager

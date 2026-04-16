@@ -678,7 +678,7 @@ def get_eod_service_instance():
 
 
 @router.get("/eod/status")
-async def get_eod_status():
+def get_eod_status():
     """Get the status of the end-of-day auto-generation scheduler"""
     eod_svc = get_eod_service_instance()
     
@@ -833,7 +833,7 @@ async def get_current_weekly_report():
 
 
 @router.get("/weekly-report/stats")
-async def get_weekly_report_stats():
+def get_weekly_report_stats():
     """Get weekly report service statistics"""
     service = get_weekly_report_service_instance()
     return {"success": True, **service.get_stats()}

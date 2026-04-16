@@ -45,7 +45,7 @@ class AlertConfigRequest(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("/status")
-async def get_scanner_status():
+def get_scanner_status():
     """
     Get the current status of the predictive scanner.
     Returns running state, scan count, and active alerts.
@@ -164,7 +164,7 @@ async def scan_for_setups(request: ScanRequest):
 
 
 @router.get("/setups")
-async def get_forming_setups(
+def get_forming_setups(
     min_probability: float = 0.30,
     setup_type: Optional[str] = None,
     symbol: Optional[str] = None
@@ -217,7 +217,7 @@ async def get_forming_setups(
 
 
 @router.get("/alerts")
-async def get_active_alerts():
+def get_active_alerts():
     """
     Get active (pending) trade alerts.
     These are setups that are about to trigger.
@@ -260,7 +260,7 @@ async def get_active_alerts():
 
 
 @router.get("/alerts/history")
-async def get_alert_history(limit: int = 50):
+def get_alert_history(limit: int = 50):
     """Get historical alerts with outcomes"""
     if not _scanner_service:
         raise HTTPException(status_code=500, detail="Scanner service not initialized")
@@ -283,7 +283,7 @@ async def get_alert_history(limit: int = 50):
 
 
 @router.post("/watchlist")
-async def set_watchlist(request: WatchlistRequest):
+def set_watchlist(request: WatchlistRequest):
     """Set the symbols to scan"""
     if not _scanner_service:
         raise HTTPException(status_code=500, detail="Scanner service not initialized")
@@ -298,7 +298,7 @@ async def set_watchlist(request: WatchlistRequest):
 
 
 @router.get("/watchlist")
-async def get_watchlist():
+def get_watchlist():
     """Get current watchlist"""
     if not _scanner_service:
         raise HTTPException(status_code=500, detail="Scanner service not initialized")
@@ -313,7 +313,7 @@ async def get_watchlist():
 
 
 @router.get("/setup-types")
-async def get_available_setup_types():
+def get_available_setup_types():
     """Get list of available setup types for filtering"""
     from services.predictive_scanner import SetupType, PredictiveScannerService
     
@@ -334,7 +334,7 @@ async def get_available_setup_types():
 
 
 @router.get("/summary")
-async def get_scanner_summary():
+def get_scanner_summary():
     """
     Get a quick summary of current scanner state.
     Good for dashboard widgets and AI assistant.
@@ -376,7 +376,7 @@ async def get_scanner_summary():
 
 
 @router.get("/ai-context")
-async def get_ai_context():
+def get_ai_context():
     """
     Get formatted context for AI assistant integration.
     Returns human-readable summary of current setups.
@@ -395,7 +395,7 @@ async def get_ai_context():
 
 
 @router.get("/universe-stats")
-async def get_universe_stats():
+def get_universe_stats():
     """
     Get statistics about the scanner symbol universe.
     Shows total symbols being scanned across all tiers.

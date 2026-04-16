@@ -74,7 +74,7 @@ class BatchScoreRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze_single_stock(stock: StockDataInput, market_data: Optional[MarketDataInput] = None):
+def analyze_single_stock(stock: StockDataInput, market_data: Optional[MarketDataInput] = None):
     """
     Analyze a single stock and return comprehensive score
     """
@@ -144,7 +144,7 @@ async def get_top_picks(
 
 
 @router.get("/criteria")
-async def get_scoring_criteria():
+def get_scoring_criteria():
     """
     Get the scoring criteria and weights used by the engine
     """
@@ -197,7 +197,7 @@ async def get_scoring_criteria():
 
 
 @router.get("/timeframes")
-async def get_timeframe_criteria():
+def get_timeframe_criteria():
     """
     Get criteria for each trading timeframe
     """

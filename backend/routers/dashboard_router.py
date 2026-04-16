@@ -243,7 +243,7 @@ async def run_scanner(
 
 
 @router.get("/api/scanner/presets")
-async def get_scanner_presets():
+def get_scanner_presets():
     """Get predefined scanner presets"""
     presets = [
         {"name": "Momentum Movers", "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AMD", "NFLX", "CRM"], "min_score": 40},
@@ -267,13 +267,13 @@ async def get_wave_scanner_batch():
 
 
 @router.get("/api/wave-scanner/stats")
-async def get_wave_scanner_stats():
+def get_wave_scanner_stats():
     """Get wave scanner statistics"""
     return _wave_scanner.get_stats()
 
 
 @router.get("/api/wave-scanner/config")
-async def get_wave_scanner_config():
+def get_wave_scanner_config():
     """Get wave scanner configuration"""
     return _wave_scanner.get_scan_config()
 
@@ -281,13 +281,13 @@ async def get_wave_scanner_config():
 # ===================== INDEX UNIVERSE =====================
 
 @router.get("/api/universe/stats")
-async def get_universe_stats():
+def get_universe_stats():
     """Get index universe statistics"""
     return _index_universe.get_stats()
 
 
 @router.get("/api/universe/symbols/{index_type}")
-async def get_index_symbols(index_type: str):
+def get_index_symbols(index_type: str):
     """
     Get symbols for a specific index
     Valid types: sp500, nasdaq100, russell2000, etf

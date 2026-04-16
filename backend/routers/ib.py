@@ -329,7 +329,7 @@ def get_connection_status():
 
 
 @router.get("/pusher-setup")
-async def get_pusher_setup_info():
+def get_pusher_setup_info():
     """Get setup info for the IB Data Pusher script"""
     import os
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
@@ -399,12 +399,11 @@ async def disconnect_from_ib():
 # ===================== IB Data Pusher Endpoints =====================
 
 @router.post("/push-data")
-async def receive_pushed_ib_data(request: IBPushDataRequest):
+def receive_pushed_ib_data(request: IBPushDataRequest):
     """
     Receive data pushed from local IB Data Pusher.
-    This endpoint runs as async because it only does in-memory dict updates
-    (microseconds). Running on the event loop keeps it immune to thread pool
-    starvation during training.
+    Sync handler — runs in thread pool so it doesn't compete with the event loop.
+    Critical for live trading: this MUST respond fast to the Windows PC pusher.
     """
     global _pushed_ib_data
     
@@ -486,7 +485,7 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
 
 
 @router.get("/pushed-data")
-async def get_pushed_ib_data():
+def get_pushed_ib_data():
     """
     Get the latest data pushed from local IB Data Pusher.
     Async because it only reads in-memory dicts — immune to thread pool starvation.
@@ -519,7 +518,7 @@ async def get_pushed_ib_data():
 
 
 @router.get("/debug/context-ib-check")
-async def debug_context_ib_check():
+def debug_context_ib_check():
     """
     Debug endpoint to verify smart context engine can access IB data.
     Tests the same code path used by the AI assistant.
@@ -555,7 +554,7 @@ async def debug_context_ib_check():
 
 
 @router.get("/level2/{symbol}")
-async def get_level2_data(symbol: str):
+def get_level2_data(symbol: str):
     """
     Get Level 2 / DOM data for a specific symbol.
     Returns order book depth with bid/ask sizes and imbalance.
@@ -586,7 +585,7 @@ async def get_level2_data(symbol: str):
 
 
 @router.get("/fundamentals/{symbol}")
-async def get_fundamentals(symbol: str):
+def get_fundamentals(symbol: str):
     """
     Get fundamental data for a specific symbol from IB Gateway.
     Returns P/E, short interest, float, institutional ownership, etc.
@@ -622,7 +621,7 @@ async def get_fundamentals(symbol: str):
 
 
 @router.get("/fundamentals")
-async def get_all_fundamentals():
+def get_all_fundamentals():
     """Get all available fundamental data"""
     global _pushed_ib_data
     
@@ -675,7 +674,7 @@ def _extract_account_value(account: dict, key: str, default=0):
 
 
 @router.get("/account/summary")
-async def get_account_summary():
+def get_account_summary():
     """
     Get account summary with Net Liquidation, Buying Power, Today P&L.
     This data comes from IB Gateway pushed account values.
@@ -745,7 +744,7 @@ def get_fundamentals_for_symbol(symbol: str) -> dict:
 
 
 @router.get("/inplay-stocks")
-async def get_inplay_stocks():
+def get_inplay_stocks():
     """
     Get current in-play stocks for Level 2 subscription.
     These are stocks with active alerts or on the smart watchlist.
@@ -902,7 +901,7 @@ def is_pusher_connected() -> bool:
 
 
 @router.get("/pushed-quote/{symbol}")
-async def get_pushed_quote(symbol: str):
+def get_pushed_quote(symbol: str):
     """Get a specific quote from pushed IB data"""
     global _pushed_ib_data
     
@@ -1166,7 +1165,7 @@ async def get_historical_data(
 # ==================== Order Queue Endpoints (for remote execution) ====================
 
 @router.post("/orders/queue")
-async def queue_order_for_execution(request: QueuedOrderRequest):
+def queue_order_for_execution(request: QueuedOrderRequest):
     """
     Queue an order for execution by the local IB pusher.
     The trading bot calls this to submit orders.
@@ -1217,7 +1216,7 @@ async def get_pending_orders_endpoint():
 
 
 @router.post("/orders/claim/{order_id}")
-async def claim_order_for_execution(order_id: str):
+def claim_order_for_execution(order_id: str):
     """
     Mark an order as being executed (prevents duplicate execution).
     The pusher calls this before executing an order.
@@ -1234,7 +1233,7 @@ async def claim_order_for_execution(order_id: str):
 
 
 @router.post("/orders/result")
-async def report_order_result(result: OrderExecutionResult):
+def report_order_result(result: OrderExecutionResult):
     """
     Report the result of an order execution.
     The pusher calls this after executing an order via IB Gateway.
@@ -1293,7 +1292,7 @@ def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float 
 
 
 @router.get("/orders/queue/status")
-async def get_order_queue_status():
+def get_order_queue_status():
     """Get the current status of the order queue"""
     try:
         service = get_order_queue_service()
@@ -1331,7 +1330,7 @@ def _get_historical_data_service():
 
 
 @router.get("/historical-data/pending")
-async def get_pending_historical_data_requests(
+def get_pending_historical_data_requests(
     limit: int = 12,
     bar_sizes: str = None,
     partition: int = None,
@@ -1388,7 +1387,7 @@ async def get_pending_historical_data_requests(
 
 
 @router.post("/historical-data/claim/{request_id}")
-async def claim_historical_data_request(request_id: str):
+def claim_historical_data_request(request_id: str):
     """
     Claim a historical data request (prevents duplicate processing).
     Called by IB Data Pusher before fetching data.
@@ -1872,7 +1871,7 @@ async def skip_symbol_requests(request: Request):
 
 
 @router.post("/historical-data/optimize-indexes")
-async def optimize_historical_data_indexes():
+def optimize_historical_data_indexes():
     """
     Create/verify optimal indexes for historical data collections.
     
@@ -2019,7 +2018,7 @@ async def optimize_historical_data_indexes():
 
 
 @router.get("/mongodb/diagnostics")
-async def get_mongodb_diagnostics():
+def get_mongodb_diagnostics():
     """
     Get comprehensive MongoDB Atlas diagnostics and recommendations.
     
@@ -2201,7 +2200,7 @@ async def get_mongodb_diagnostics():
 
 
 @router.get("/historical-data/status/{request_id}")
-async def get_historical_data_request_status(request_id: str):
+def get_historical_data_request_status(request_id: str):
     """Get the status of a historical data request"""
     service = _get_historical_data_service()
     if not service:
@@ -2221,7 +2220,7 @@ async def get_historical_data_request_status(request_id: str):
 
 
 @router.delete("/orders/queue/{order_id}")
-async def cancel_queued_order(order_id: str):
+def cancel_queued_order(order_id: str):
     """Cancel a pending order (only works if not yet executing)"""
     try:
         service = get_order_queue_service()
@@ -3440,7 +3439,7 @@ class OrderTrackRequest(BaseModel):
 
 
 @router.post("/orders/track")
-async def track_order(request: OrderTrackRequest):
+def track_order(request: OrderTrackRequest):
     """Start tracking an order for fill notifications"""
     _tracked_orders[request.order_id] = {
         "order_id": request.order_id,
@@ -3454,7 +3453,7 @@ async def track_order(request: OrderTrackRequest):
 
 
 @router.get("/orders/tracked")
-async def get_tracked_orders():
+def get_tracked_orders():
     """Get all currently tracked orders"""
     return {"tracked": list(_tracked_orders.values()), "count": len(_tracked_orders)}
 
@@ -3494,7 +3493,7 @@ async def check_order_fills():
 
 
 @router.delete("/orders/track/{order_id}")
-async def stop_tracking_order(order_id: int):
+def stop_tracking_order(order_id: int):
     """Stop tracking an order"""
     if order_id in _tracked_orders:
         del _tracked_orders[order_id]
@@ -3517,7 +3516,7 @@ class PriceAlertRequest(BaseModel):
 
 
 @router.post("/alerts/price")
-async def create_price_alert(request: PriceAlertRequest):
+def create_price_alert(request: PriceAlertRequest):
     """Create a new price alert"""
     from datetime import datetime, timezone
     
@@ -3538,7 +3537,7 @@ async def create_price_alert(request: PriceAlertRequest):
 
 
 @router.get("/alerts/price")
-async def get_price_alerts():
+def get_price_alerts():
     """Get all active price alerts"""
     return {
         "alerts": list(_price_alerts.values()),
@@ -3614,7 +3613,7 @@ async def check_price_alerts():
 
 
 @router.delete("/alerts/price/{alert_id}")
-async def delete_price_alert(alert_id: str):
+def delete_price_alert(alert_id: str):
     """Delete a price alert"""
     if alert_id in _price_alerts:
         del _price_alerts[alert_id]
@@ -3623,7 +3622,7 @@ async def delete_price_alert(alert_id: str):
 
 
 @router.get("/alerts/price/history")
-async def get_triggered_alerts_history():
+def get_triggered_alerts_history():
     """Get history of triggered alerts"""
     return {
         "triggered": _triggered_alerts[-50:],  # Last 50 triggered alerts
@@ -4147,7 +4146,7 @@ async def get_breakout_alerts():
 
 
 @router.get("/scanner/breakouts/history")
-async def get_breakout_history():
+def get_breakout_history():
     """Get recent breakout alert history"""
     return {
         "history": _breakout_alert_history[-50:],  # Last 50 breakouts
@@ -4988,7 +4987,7 @@ def generate_alert_headline(symbol: str, alert_type: str, timeframe: str, direct
 # ===================== Enhanced Alerts with Context =====================
 
 @router.get("/alerts/enhanced")
-async def get_enhanced_alerts(limit: int = 50):
+def get_enhanced_alerts(limit: int = 50):
     """
     Get enhanced alerts with full context including:
     - Exact timestamp when triggered
@@ -5010,7 +5009,7 @@ async def get_enhanced_alerts(limit: int = 50):
 
 
 @router.get("/alerts/enhanced/history")
-async def get_enhanced_alert_history(limit: int = 100):
+def get_enhanced_alert_history(limit: int = 100):
     """Get history of all enhanced alerts"""
     from services.enhanced_alerts import get_alert_manager
     
@@ -5024,7 +5023,7 @@ async def get_enhanced_alert_history(limit: int = 100):
 
 
 @router.post("/alerts/enhanced/{alert_id}/viewed")
-async def mark_alert_viewed(alert_id: str):
+def mark_alert_viewed(alert_id: str):
     """Mark an alert as viewed"""
     from services.enhanced_alerts import get_alert_manager
     
@@ -5035,7 +5034,7 @@ async def mark_alert_viewed(alert_id: str):
 
 
 @router.delete("/alerts/enhanced/{alert_id}")
-async def archive_enhanced_alert(alert_id: str):
+def archive_enhanced_alert(alert_id: str):
     """Archive/dismiss an alert"""
     from services.enhanced_alerts import get_alert_manager
     
@@ -5193,7 +5192,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
 # ===================== SCRIPTS DOWNLOAD =====================
 
 @router.get("/scripts/{script_name}")
-async def get_script(script_name: str):
+def get_script(script_name: str):
     """
     Serve local scripts for auto-update functionality.
     This allows StartTrading.bat to download the latest scripts from the cloud.
@@ -5247,7 +5246,7 @@ _collection_mode_status = {
 
 
 @router.post("/collection-mode/start")
-async def start_collection_mode(data: dict):
+def start_collection_mode(data: dict):
     """Called when collection mode starts"""
     global _collection_mode_status
     _collection_mode_status = {
@@ -5267,7 +5266,7 @@ async def start_collection_mode(data: dict):
 
 
 @router.post("/collection-mode/progress")
-async def update_collection_progress(data: dict):
+def update_collection_progress(data: dict):
     """Called periodically with collection progress"""
     global _collection_mode_status
     _collection_mode_status.update({
@@ -5282,7 +5281,7 @@ async def update_collection_progress(data: dict):
 
 
 @router.post("/collection-mode/stop")
-async def stop_collection_mode(data: dict):
+def stop_collection_mode(data: dict):
     """Called when collection mode stops"""
     global _collection_mode_status
     _collection_mode_status.update({
@@ -5315,7 +5314,7 @@ async def get_collection_mode_status():
     }
 
 
-async def get_historical_data_queue_stats():
+def get_historical_data_queue_stats():
     """Get historical data queue statistics"""
     try:
         from server import db
@@ -5388,7 +5387,7 @@ async def get_current_mode():
 
 
 @router.post("/mode/set")
-async def set_operating_mode(data: dict):
+def set_operating_mode(data: dict):
     """
     LEGACY ENDPOINT - Now redirects to priority collection.
     Kept for backwards compatibility with existing scripts.
@@ -5454,7 +5453,7 @@ async def enable_priority_collection():
 
 
 @router.post("/priority-collection/disable")
-async def disable_priority_collection():
+def disable_priority_collection():
     """
     Disable priority collection, return to normal trading mode.
     """

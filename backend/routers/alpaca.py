@@ -50,7 +50,7 @@ class BarData(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("/status")
-async def get_alpaca_status():
+def get_alpaca_status():
     """Get Alpaca service status"""
     if not _alpaca_service:
         raise HTTPException(status_code=500, detail="Alpaca service not initialized")
@@ -253,7 +253,7 @@ async def get_account():
 
 
 @router.delete("/cache")
-async def clear_cache():
+def clear_cache():
     """Clear the quote cache"""
     if not _alpaca_service:
         raise HTTPException(status_code=500, detail="Alpaca service not initialized")

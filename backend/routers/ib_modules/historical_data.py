@@ -30,7 +30,7 @@ def _get_historical_data_service():
 
 
 @router.get("/historical-data/pending")
-async def get_pending_historical_data_requests():
+def get_pending_historical_data_requests():
     """
     Get pending historical data requests for the IB Data Pusher to fulfill.
     Called by the local IB Data Pusher to check for work.
@@ -48,7 +48,7 @@ async def get_pending_historical_data_requests():
 
 
 @router.post("/historical-data/claim/{request_id}")
-async def claim_historical_data_request(request_id: str):
+def claim_historical_data_request(request_id: str):
     """
     Claim a historical data request (prevents duplicate processing).
     Called by IB Data Pusher before fetching data.
@@ -290,7 +290,7 @@ async def report_historical_data_batch_result(request: Request):
 
 
 @router.post("/historical-data/optimize-indexes")
-async def optimize_historical_data_indexes():
+def optimize_historical_data_indexes():
     """
     Create/verify optimal indexes for historical data collections.
     
@@ -437,7 +437,7 @@ async def optimize_historical_data_indexes():
 
 
 @router.get("/mongodb/diagnostics")
-async def get_mongodb_diagnostics():
+def get_mongodb_diagnostics():
     """
     Get comprehensive MongoDB Atlas diagnostics and recommendations.
     
@@ -619,7 +619,7 @@ async def get_mongodb_diagnostics():
 
 
 @router.get("/historical-data/status/{request_id}")
-async def get_historical_data_request_status(request_id: str):
+def get_historical_data_request_status(request_id: str):
     """Get the status of a historical data request"""
     service = _get_historical_data_service()
     if not service:

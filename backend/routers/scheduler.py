@@ -39,7 +39,7 @@ class ScheduleConfig(BaseModel):
 # ===================== Endpoints =====================
 
 @router.get("/status")
-async def get_scheduler_status():
+def get_scheduler_status():
     """Get the current status of the scheduler"""
     if not _scheduler_service:
         raise HTTPException(status_code=500, detail="Scheduler service not initialized")
@@ -54,7 +54,7 @@ async def get_scheduler_status():
 
 
 @router.post("/premarket/schedule")
-async def start_premarket_schedule(config: Optional[ScheduleConfig] = None):
+def start_premarket_schedule(config: Optional[ScheduleConfig] = None):
     """
     Start the pre-market briefing schedule.
     
@@ -114,7 +114,7 @@ async def generate_premarket_now():
 
 
 @router.get("/premarket/latest")
-async def get_latest_premarket():
+def get_latest_premarket():
     """
     Get the latest cached pre-market briefing.
     
@@ -143,7 +143,7 @@ async def get_latest_premarket():
 
 
 @router.delete("/premarket/stop")
-async def stop_premarket_schedule():
+def stop_premarket_schedule():
     """
     Stop the pre-market briefing schedule.
     
