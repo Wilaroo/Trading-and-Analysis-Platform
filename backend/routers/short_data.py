@@ -106,7 +106,7 @@ async def get_bulk_short_data(symbols: Optional[str] = None, limit: int = 100):
 
 
 @router.get("/summary")
-async def get_short_data_summary():
+def get_short_data_summary():
     """
     Get a summary of available short data.
     """

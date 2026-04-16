@@ -55,6 +55,93 @@ def inject_services(
     _ai_consultation = ai_consultation
     _agent_data_service = agent_data_service
     
+
+# ==================== AGGREGATED ENDPOINTS ====================
+
+@router.get("/insights-summary")
+def get_insights_summary():
+    """
+    Single aggregated endpoint for AI Insights panel.
+    Returns shadow decisions, performance, timeseries status, predictions in ONE call.
+    Replaces 5 separate API calls on the frontend.
+    """
+    result = {
+        "success": True,
+        "shadow_decisions": [],
+        "shadow_performance": None,
+        "timeseries_status": None,
+        "prediction_accuracy": None,
+        "recent_predictions": [],
+    }
+    
+    # Shadow decisions
+    try:
+        if _shadow_tracker:
+            decisions = _shadow_tracker.get_decisions(limit=10)
+            result["shadow_decisions"] = decisions if decisions else []
+    except Exception as e:
+        logging.debug(f"Shadow decisions error: {e}")
+    
+    # Shadow performance
+    try:
+        if _shadow_tracker:
+            perf = _shadow_tracker.get_performance(days=7)
+            result["shadow_performance"] = perf
+    except Exception as e:
+        logging.debug(f"Shadow performance error: {e}")
+    
+    # Timeseries status
+    try:
+        from server import db as model_db
+        if model_db:
+            ts_model = model_db.get("timeseries_models")
+            if ts_model:
+                count = model_db["timeseries_models"].count_documents({})
+                result["timeseries_status"] = {"model_count": count, "status": "active" if count > 0 else "no_models"}
+    except Exception as e:
+        logging.debug(f"Timeseries status error: {e}")
+    
+    # Prediction accuracy
+    try:
+        from server import db as model_db
+        if model_db:
+            predictions_col = model_db.get("timeseries_predictions")
+            if predictions_col:
+                from datetime import datetime, timezone, timedelta
+                cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                pipeline = [
+                    {"$match": {"created_at": {"$gte": cutoff.isoformat()}, "verified": True}},
+                    {"$group": {
+                        "_id": None,
+                        "total": {"$sum": 1},
+                        "correct": {"$sum": {"$cond": ["$correct", 1, 0]}},
+                    }}
+                ]
+                agg = list(model_db["timeseries_predictions"].aggregate(pipeline))
+                if agg:
+                    total = agg[0].get("total", 0)
+                    correct = agg[0].get("correct", 0)
+                    result["prediction_accuracy"] = {
+                        "total": total,
+                        "correct": correct,
+                        "accuracy": round(correct / total * 100, 1) if total > 0 else 0,
+                    }
+    except Exception as e:
+        logging.debug(f"Prediction accuracy error: {e}")
+    
+    # Recent predictions
+    try:
+        from server import db as model_db
+        if model_db:
+            preds = list(model_db["timeseries_predictions"].find(
+                {}, {"_id": 0}
+            ).sort("created_at", -1).limit(10))
+            result["recent_predictions"] = preds
+    except Exception as e:
+        logging.debug(f"Recent predictions error: {e}")
+    
+    return result
+
     # Connect data service to debate agents
     if _debate_agents and _agent_data_service:
         _debate_agents.set_data_service(_agent_data_service)
@@ -622,7 +709,7 @@ async def track_pending_outcomes():
 
 
 @router.get("/shadow/stats")
-async def get_shadow_stats():
+def get_shadow_stats():
     """Get quick stats from shadow tracker"""
     if not _shadow_tracker:
         raise HTTPException(status_code=503, detail="Shadow tracker not initialized")
@@ -1374,7 +1461,7 @@ async def get_prediction_accuracy(days: int = 30):
 
 
 @router.get("/timeseries/predictions")
-async def get_recent_predictions(limit: int = 20, verified_only: bool = False):
+def get_recent_predictions(limit: int = 20, verified_only: bool = False):
     """Get recent predictions with optional filtering"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
@@ -1410,7 +1497,7 @@ async def get_recent_predictions(limit: int = 20, verified_only: bool = False):
 # =====================
 
 @router.get("/training-status")
-async def get_training_status():
+def get_training_status():
     """
     Get comprehensive training status including:
     - Last training time
@@ -1810,7 +1897,7 @@ async def predict_for_setup(request: SetupPredictRequest):
 # ===== ADV (Average Daily Volume) Cache Endpoints =====
 
 @router.get("/adv/stats")
-async def get_adv_stats():
+def get_adv_stats():
     """
     Get ADV cache statistics and threshold breakdown.
     Shows how many symbols qualify at each training tier.
@@ -1888,7 +1975,7 @@ async def recalculate_adv_cache():
 # ===== Model Validation History Endpoint =====
 
 @router.get("/validation/history")
-async def get_validation_history(
+def get_validation_history(
     setup_type: str = None,
     limit: int = 50,
 ):
@@ -1928,7 +2015,7 @@ async def get_validation_history(
 
 
 @router.get("/validation/baselines")
-async def get_model_baselines():
+def get_model_baselines():
     """
     Get current baseline metrics for all models.
     """
@@ -1952,7 +2039,7 @@ async def get_model_baselines():
 
 
 @router.get("/validation/latest")
-async def get_latest_validations():
+def get_latest_validations():
     """
     Get the most recent validation for each (setup_type, bar_size) combo.
     Used by the frontend to display per-card validation status.
@@ -1994,7 +2081,7 @@ async def get_latest_validations():
 
 
 @router.get("/validation/batch-history")
-async def get_batch_validation_history(limit: int = 10):
+def get_batch_validation_history(limit: int = 10):
     """
     Get batch validation results (Phases 4-5: Multi-Strategy + Market-Wide).
     """
@@ -2112,7 +2199,7 @@ async def finbert_score_articles(request: FinBERTScoreRequest = None):
 
 
 @router.get("/finbert/stats")
-async def finbert_stats():
+def finbert_stats():
     """Get news collection and sentiment scoring statistics."""
     try:
         from services.ai_modules.finbert_sentiment import FinnhubNewsCollector, FinBERTSentiment
@@ -2355,7 +2442,7 @@ async def train_all_dl_models(request: DLTrainRequest = None):
 
 
 @router.get("/dl/status")
-async def dl_model_status():
+def dl_model_status():
     """Get status of all Phase 5 deep learning models + FinBERT."""
     model_db = _timeseries_ai._db if _timeseries_ai else None
     if model_db is None:

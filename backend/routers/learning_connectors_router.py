@@ -34,7 +34,7 @@ def init_learning_connectors_router(
 
 
 @router.get("/connections")
-async def get_connection_status():
+def get_connection_status():
     """Get status of all learning connections"""
     try:
         service = get_learning_connectors()
@@ -50,7 +50,7 @@ async def get_connection_status():
 
 
 @router.get("/status")
-async def get_status():
+def get_status():
     """Get overall learning connectors status (alias for /connections)"""
     try:
         service = get_learning_connectors()
@@ -66,7 +66,7 @@ async def get_status():
 
 
 @router.get("/metrics")
-async def get_learning_metrics():
+def get_learning_metrics():
     """Get overall learning system metrics"""
     try:
         service = get_learning_connectors()
@@ -82,7 +82,7 @@ async def get_learning_metrics():
 
 
 @router.get("/weights")
-async def get_module_weights():
+def get_module_weights():
     """Get current AI module weights"""
     try:
         service = get_learning_connectors()
@@ -98,7 +98,7 @@ async def get_module_weights():
 
 
 @router.get("/calibration-history")
-async def get_calibration_history(
+def get_calibration_history(
     calibration_type: Optional[str] = None,
     limit: int = 20
 ):

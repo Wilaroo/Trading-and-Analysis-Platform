@@ -160,28 +160,28 @@ async def chat_test(request: ChatRequest):
 
 
 @router.post("/chat")
-def chat(request: ChatRequest):
+async def chat(request: ChatRequest):
     """
     Proxy to dedicated chat server (port 8002).
-    Chat runs in its own process — immune to event loop/thread pool issues.
+    Uses async httpx — doesn't block any threads.
     """
-    import requests as sync_requests
+    import httpx
     
     chat_url = os.environ.get("CHAT_SERVER_URL", "http://127.0.0.1:8002")
     try:
-        r = sync_requests.post(
-            f"{chat_url}/chat",
-            json={"message": request.message, "session_id": request.session_id},
-            timeout=90
-        )
-        return r.json()
-    except sync_requests.ConnectionError:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(
+                f"{chat_url}/chat",
+                json={"message": request.message, "session_id": request.session_id},
+            )
+            return r.json()
+    except httpx.ConnectError:
         return {
             "success": False,
             "response": "Chat server is starting up. Please try again in a few seconds.",
             "source": "sentcom_proxy"
         }
-    except sync_requests.Timeout:
+    except httpx.TimeoutException:
         return {
             "success": False,
             "response": "Our AI took too long to respond. Please try again.",

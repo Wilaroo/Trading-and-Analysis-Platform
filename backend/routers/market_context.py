@@ -151,7 +151,7 @@ async def get_watchlist_context(db=None):
 
 
 @router.get("/strategies/{context}")
-async def get_strategies_for_context(context: str):
+def get_strategies_for_context(context: str):
     """
     Get recommended strategies for a specific market context
     """
@@ -289,7 +289,7 @@ async def get_smart_recommendations(symbol: str, include_secondary: bool = True,
 
 
 @router.get("/matrix")
-async def get_context_strategy_matrix():
+def get_context_strategy_matrix():
     """
     Get a matrix showing which strategies work best for each market context
     """
@@ -467,7 +467,7 @@ async def get_volume_threshold(symbol: str):
 
 
 @router.get("/session/status")
-async def get_market_session():
+def get_market_session():
     """
     Get current market session status based on US Eastern time.
     Returns session name, whether market is open, and relevant times.

@@ -352,7 +352,7 @@ async def close_position(request: ClosePositionRequest):
 # ===================== Add to Watchlist =====================
 
 @router.post("/add-to-watchlist")
-async def add_to_watchlist(request: AddToWatchlistRequest):
+def add_to_watchlist(request: AddToWatchlistRequest):
     """Add a symbol to the smart watchlist"""
     if _db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
@@ -413,7 +413,7 @@ async def add_to_watchlist(request: AddToWatchlistRequest):
 
 
 @router.delete("/remove-from-watchlist/{symbol}")
-async def remove_from_watchlist(symbol: str):
+def remove_from_watchlist(symbol: str):
     """Remove a symbol from the smart watchlist"""
     if _db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
@@ -443,7 +443,7 @@ async def remove_from_watchlist(symbol: str):
 # ===================== Price Alerts =====================
 
 @router.post("/create-alert")
-async def create_alert(request: CreateAlertRequest):
+def create_alert(request: CreateAlertRequest):
     """Create a price or condition alert"""
     if _db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
@@ -500,7 +500,7 @@ async def create_alert(request: CreateAlertRequest):
 
 
 @router.get("/alerts")
-async def get_active_alerts():
+def get_active_alerts():
     """Get all active alerts"""
     if _db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
@@ -530,7 +530,7 @@ async def get_active_alerts():
 
 
 @router.delete("/alerts/{symbol}")
-async def delete_alerts_for_symbol(symbol: str):
+def delete_alerts_for_symbol(symbol: str):
     """Delete all alerts for a symbol"""
     if _db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")

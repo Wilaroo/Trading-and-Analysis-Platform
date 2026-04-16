@@ -259,8 +259,8 @@ class TradeExecutorService:
             
             logger.info(f"Order queued for IB execution: {order_id} - {action} {trade.shares} {trade.symbol}")
             
-            # Wait for execution result (timeout 60s)
-            result = get_order_result(order_id, timeout=60.0)
+            # Wait for execution result in thread (blocking call — don't freeze event loop)
+            result = await asyncio.to_thread(get_order_result, order_id, 60.0)
             
             if result:
                 order_result = result.get("result", {})
@@ -589,8 +589,8 @@ class TradeExecutorService:
             
             logger.info(f"Close order queued: {order_id} - {action} {trade.shares} {trade.symbol}")
             
-            # Wait for execution result
-            result = get_order_result(order_id, timeout=60.0)
+            # Wait for execution result in thread (blocking call — don't freeze event loop)
+            result = await asyncio.to_thread(get_order_result, order_id, 60.0)
             
             if result:
                 order_result = result.get("result", {})

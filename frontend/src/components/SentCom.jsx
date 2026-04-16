@@ -1054,8 +1054,8 @@ const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, actionLoadi
 // AI INSIGHTS DASHBOARD - Phase 4 Implementation
 // ============================================================================
 
-// Hook for AI Insights data
-const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 429s
+// Hook for AI Insights data — uses single aggregated endpoint instead of 5 separate calls
+const useAIInsights = (pollInterval = 60000) => {
   const [shadowDecisions, setShadowDecisions] = useState([]);
   const [shadowPerformance, setShadowPerformance] = useState(null);
   const [timeseriesStatus, setTimeseriesStatus] = useState(null);
@@ -1065,19 +1065,14 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
 
   const fetchInsights = useCallback(async () => {
     try {
-      const [decisionsData, performanceData, timeseriesData, accuracyData, predictionsData] = await Promise.all([
-        safeGet('/api/ai-modules/shadow/decisions?limit=10'),
-        safeGet('/api/ai-modules/shadow/performance?days=7'),
-        safeGet('/api/ai-modules/timeseries/status'),
-        safeGet('/api/ai-modules/timeseries/prediction-accuracy?days=30'),
-        safeGet('/api/ai-modules/timeseries/predictions?limit=10')
-      ]);
-
-      if (decisionsData?.success) setShadowDecisions(decisionsData.decisions || []);
-      if (performanceData?.success) setShadowPerformance(performanceData.performance || null);
-      if (timeseriesData?.success) setTimeseriesStatus(timeseriesData.status || null);
-      if (accuracyData?.success) setPredictionAccuracy(accuracyData.accuracy || null);
-      if (predictionsData?.success) setRecentPredictions(predictionsData.predictions || []);
+      const data = await safeGet('/api/ai-modules/insights-summary');
+      if (data?.success) {
+        setShadowDecisions(data.shadow_decisions || []);
+        setShadowPerformance(data.shadow_performance || null);
+        setTimeseriesStatus(data.timeseries_status || null);
+        setPredictionAccuracy(data.prediction_accuracy || null);
+        setRecentPredictions(data.recent_predictions || []);
+      }
     } catch (err) {
       console.error('Error fetching AI insights:', err);
     } finally {
@@ -1086,8 +1081,8 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
   }, []);
 
   useEffect(() => {
-    // Delay initial 5-request burst — AI insights are non-critical
-    const timer = setTimeout(() => fetchInsights(), 12000);
+    // Single call instead of 5 — reduced startup delay from 12s to 6s
+    const timer = setTimeout(() => fetchInsights(), 6000);
     const cleanup = safePolling(fetchInsights, pollInterval, { immediate: false });
     return () => { clearTimeout(timer); cleanup(); };
   }, [fetchInsights, pollInterval]);

@@ -1260,10 +1260,10 @@ async def report_order_result(result: OrderExecutionResult):
 
 
 @router.get("/orders/result/{order_id}")
-async def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float = 30.0):
+def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float = 30.0):
     """
-    Get the result of an order.
-    If wait=True, blocks until the order completes or timeout expires.
+    Get the result of an order. Sync handler — runs in thread pool.
+    If wait=True, blocks thread (not event loop) until order completes or timeout.
     """
     if wait:
         result = get_order_result(order_id, timeout)

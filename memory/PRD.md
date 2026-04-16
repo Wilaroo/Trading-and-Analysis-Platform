@@ -1,53 +1,61 @@
 # SentCom AI Trading Platform — PRD
 
 ## Original Problem Statement
-AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serve data skew by removing Alpaca dependencies, eliminate scanning bottlenecks, refactor the subtractive confidence gate to an additive system, integrate Deep Learning models across the dual-GPU architecture (DGX Spark + Windows PC), and optimize feature extraction for 128GB DGX Spark memory.
+AI trading platform optimization across DGX Spark + Windows PC dual-GPU architecture.
 
 ## Architecture
-- **DGX Spark** (Linux, Blackwell GPU, 128GB unified memory): Backend/Frontend + local MongoDB `tradecommand` (178M+ bars). Runs XGBoost + DL models.
-- **Windows PC** (Ryzen 7, RTX 5060 Ti): IB Gateway/Turbo Collectors + (Future) distributed DL training over LAN.
-- **Data**: 100% Interactive Brokers via local MongoDB. No Alpaca/Finnhub/TwelveData in trading paths.
+- **DGX Spark** (Linux, Blackwell GPU, 128GB): Backend + Frontend + MongoDB (178M+ bars)
+- **Windows PC** (Ryzen 7, RTX 5060 Ti): IB Gateway/Pusher + Collectors
+- **Data**: 100% Interactive Brokers via local MongoDB
 
-## Thread Exhaustion Fix (DONE — Apr 16, 2026)
+## Completed Work (Apr 16, 2026)
 
-### Phase 1: Dedicated Chat Server (DONE)
-- Extracted LLM Chat from main backend into isolated `chat_server.py` on port 8002
+### Thread Exhaustion Fix
+- Phase 1: Dedicated Chat Server (port 8002)
+- Phase 1.5: Chat Context via MongoDB (zero HTTP to main backend)
+- Phase 2: Streaming Cache Layer (1 thread/cycle vs 26+)
+- Server Health Badge (inline in SENTCOM header)
 
-### Phase 1.5: Chat Context via MongoDB (DONE)
-- Chat server reads ALL context from MongoDB directly — zero HTTP calls to main backend
-- IB push endpoint writes snapshots to `ib_live_snapshot` collection
+### Stability Optimization Pass
+- **Chat proxy**: `sync requests.post` → `async httpx` (zero threads for chat)
+- **28 async endpoints → def**: Stopped blocking event loop with sync MongoDB
+  - ai_modules.py: 10 endpoints
+  - quick_actions.py: 5 endpoints
+  - learning_connectors_router.py: 5 endpoints
+  - ai_training.py: 4 endpoints (+ response caching)
+  - market_context.py: 3 endpoints
+  - short_data.py: 1 endpoint
+- **IB order execution**: `get_order_result` wrapped in `asyncio.to_thread` (was blocking event loop for 60s during trade execution)
+- **IB order result endpoint**: `async def` → `def` (time.sleep in loop)
+- **Aggregated insights endpoint**: `/api/ai-modules/insights-summary` replaces 5 separate calls
+- **Request throttler**: `maxConcurrent` 2 → 4
+- **WS first-broadcast fix**: Scanner/trades/sentcom now broadcast on first cycle
+- **SentCom WS delay**: 15s → 5s, cache defaults include positions key
 
-### Phase 2: Streaming Cache Layer (DONE)
-- One `_streaming_cache_loop()` gathers ALL data in 1 thread every 10s
-- All 17 stream functions read from Python dict — zero threads
-- Thread pool: 32 → 64, health/startup endpoints made async
-- Heavy blocking endpoints converted from `async def` to `def`
-- Response caching (30s TTL) for `regime-live` and `model-inventory`
-
-### Server Health Badge (DONE)
-- Compact inline badge in SENTCOM header showing latency, threads, memory
-- Native hover tooltip with full details
-- Polls `/api/cache-status` every 20s
-- Green dot based on backend health status, latency color-coded separately
-
-### uvloop (DISABLED)
-- Conflicts with APScheduler's event loop handling at module load time
-- TODO: Move scheduler init to startup event, then re-enable
+## Key Endpoints
+- `localhost:8001/api/health` — Backend health (async)
+- `localhost:8001/ping` — Minimal diagnostic
+- `localhost:8001/api/cache-status` — Cache health + memory + threads
+- `localhost:8002/health` — Chat server
+- `localhost:8002/chat` — Chat endpoint
+- `localhost:8002/context-debug` — Chat context diagnostic
+- `localhost:8001/api/ai-modules/insights-summary` — Aggregated AI insights
 
 ## Upcoming Tasks
 - Phase 5e: RL Position Sizer
 - Phase 6: Distributed PC Worker
-- Phase 7: Infrastructure Polish (systemd services)
+- Phase 7: Infrastructure Polish (systemd)
 - Per-signal weight optimizer
 - Wire confidence gate into Phase 13 validation
+- Re-enable uvloop (after moving APScheduler init to startup event)
 
 ## Key Files
-- `/app/backend/server.py` — Main backend + streaming cache layer
-- `/app/backend/chat_server.py` — Isolated chat server (port 8002)
-- `/app/backend/routers/system_router.py` — Health, startup, cache-status endpoints
-- `/app/backend/routers/ib.py` — IB endpoints + MongoDB snapshot write
-- `/app/backend/routers/ai_training.py` — Training endpoints (sync fixes + response cache)
-- `/app/frontend/src/components/ServerHealthBadge.jsx` — Server health badge
-- `/app/frontend/src/components/SentCom.jsx` — Main UI (imports health badge)
-- `/app/scripts/spark_start.sh` — Starts all services
-- `/app/scripts/spark_stop.sh` — Ordered shutdown
+- `/backend/server.py` — Main backend + streaming cache
+- `/backend/chat_server.py` — Isolated chat server (port 8002)
+- `/backend/routers/sentcom.py` — Chat proxy (now async httpx)
+- `/backend/routers/ai_modules.py` — AI endpoints + insights-summary
+- `/backend/routers/ai_training.py` — Training endpoints + response cache
+- `/backend/services/trade_executor_service.py` — IB trade execution
+- `/frontend/src/components/ServerHealthBadge.jsx` — Health badge
+- `/frontend/src/utils/requestThrottler.js` — Throttler (maxConcurrent=4)
+- `/scripts/spark_start.sh` — Startup script
