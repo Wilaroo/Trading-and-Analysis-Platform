@@ -359,6 +359,90 @@ def _get_portfolio_context() -> dict:
     except Exception as e:
         debug["scanner_error"] = str(e)
 
+    # 7. Account summary (buying power, net liquidation, daily P&L)
+    try:
+        import requests
+        acct_resp = requests.get("http://127.0.0.1:8001/api/ib/account/summary", timeout=3)
+        if acct_resp.status_code == 200:
+            acct = acct_resp.json()
+            if acct.get("success"):
+                net_liq = acct.get("net_liquidation", 0)
+                bp = acct.get("buying_power", 0)
+                daily_pnl_val = acct.get("daily_pnl", 0)
+                daily_pnl_pct = acct.get("daily_pnl_pct", 0)
+                if net_liq:
+                    parts.append(
+                        f"Account Summary: Net Liquidation ${net_liq:,.2f}, "
+                        f"Buying Power ${bp:,.2f}, "
+                        f"Daily P&L ${daily_pnl_val:+,.2f} ({daily_pnl_pct:+.2f}%)"
+                    )
+    except Exception:
+        pass
+
+    # 8. Confidence gate stats (today's decisions)
+    try:
+        from datetime import timedelta
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
+        gate_stats = db["confidence_gate_log"].aggregate([
+            {"$match": {"timestamp": {"$gte": today_start.isoformat()}}},
+            {"$group": {
+                "_id": None,
+                "total": {"$sum": 1},
+                "go": {"$sum": {"$cond": [{"$eq": ["$decision", "GO"]}, 1, 0]}},
+                "reduce": {"$sum": {"$cond": [{"$eq": ["$decision", "REDUCE"]}, 1, 0]}},
+                "skip": {"$sum": {"$cond": [{"$eq": ["$decision", "SKIP"]}, 1, 0]}},
+                "avg_score": {"$avg": "$confidence_score"},
+            }}
+        ])
+        gate_stats = list(gate_stats)
+        if gate_stats:
+            gs = gate_stats[0]
+            total = gs["total"]
+            go = gs["go"]
+            take_rate = (go / total * 100) if total > 0 else 0
+            parts.append(
+                f"Confidence Gate Today: {total} evaluated, {go} GO, {gs['reduce']} REDUCE, {gs['skip']} SKIP "
+                f"({take_rate:.0f}% take rate, avg score {gs['avg_score']:.0f})"
+            )
+    except Exception:
+        pass
+
+    # 9. Risk concentration analysis
+    try:
+        snapshot = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0, "positions": 1})
+        positions = (snapshot or {}).get("positions", [])
+        if positions:
+            total_value = 0
+            position_values = []
+            for p in positions:
+                qty = abs(p.get("quantity", p.get("position", 0)) or 0)
+                price = p.get("marketPrice", p.get("market_price", p.get("avgCost", 0))) or 0
+                val = qty * price
+                total_value += val
+                position_values.append((p.get("symbol", "?"), val))
+            
+            if total_value > 0:
+                position_values.sort(key=lambda x: x[1], reverse=True)
+                conc_lines = []
+                for sym, val in position_values[:5]:
+                    pct = val / total_value * 100
+                    conc_lines.append(f"  {sym}: ${val:,.0f} ({pct:.1f}%)")
+                parts.append(
+                    f"Position Concentration (top 5 of {len(positions)}, total ${total_value:,.0f}):\n"
+                    + "\n".join(conc_lines)
+                )
+    except Exception:
+        pass
+
+    # 10. Bot risk parameters
+    try:
+        parts.append(
+            "Risk Parameters: $2,500 max risk/trade, 1.5:1 min R:R, "
+            "50% max position size, 10 max open positions, 1% max daily loss"
+        )
+    except Exception:
+        pass
+
     text = "\n\n".join(parts) if parts else "No portfolio data available at this moment. IB Pusher may not be connected or market is closed."
     debug["context_sections"] = len(parts)
     logger.info(f"Portfolio context: {len(parts)} sections, debug={json.dumps(debug)}")
