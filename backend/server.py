@@ -216,208 +216,1072 @@ db = mongo_client[os.environ.get("DB_NAME", "tradecommand")]
 from database import set_database
 set_database(db)
 
-# Initialize services
-stock_service = get_stock_service()
-notification_service = get_notification_service(db)
-market_context_service = get_market_context_service()
-trade_journal_service = get_trade_journal_service(db)
-catalyst_scoring_service = get_catalyst_scoring_service(db)
-trading_rules_engine = get_trading_rules_engine()
-ib_service = get_ib_service()
-strategy_service = get_strategy_service(db)
-scoring_engine = get_scoring_engine(db)
-feature_engine = get_feature_engine()
-quality_service = init_quality_service(ib_service, db)
+# Service variables — initialized in _init_all_services() during startup
+_orchestrator = None
+_order_queue = None
+ai_consultation = None
+ai_module_config = None
+ai_risk_manager = None
+alert_system = None
+alerts_col = None
+alpaca_service = None
+assistant_service = None
+background_scanner = None
+calibration_log_col = None
+calibration_service = None
+catalyst_scoring_service = None
+chart_pattern_service = None
+circuit_breaker_service = None
+confidence_gate = None
+context_awareness_service = None
+cot_col = None
+debate_agents = None
+degradation_service = None
+dynamic_risk_engine = None
+dynamic_threshold_service = None
+earnings_col = None
+eod_service = None
+execution_tracker = None
+feature_engine = None
+health_monitor_service = None
+historical_data_service = None
+ib_service = None
+index_universe = None
+insider_col = None
+institutional_flow = None
+learning_context_provider = None
+learning_loop_service = None
+learning_stats_col = None
+market_context_service = None
+market_intel_service = None
+market_regime_engine = None
+news_service = None
+notification_service = None
+orchestrator_services = None
+perf_service = None
+portfolios_col = None
+position_sizer_service = None
+predictive_scanner = None
+quality_service = None
+rag_service = None
+realtime_tech_service = None
+regime_performance_service = None
+scans_col = None
+scheduler_service = None
+scoring_engine = None
+sector_service = None
+sentcom_services = None
+sentcom_svc = None
+sentiment_service = None
+shadow_tracker = None
+simulation_engine = None
+smart_stop_service = None
+smart_watchlist = None
+smart_watchlist_col = None
+social_feed_service = None
+stock_service = None
+strategies_col = None
+strategy_service = None
+timeseries_ai = None
+tqs_engine = None
+trade_context_service = None
+trade_executor = None
+trade_journal_service = None
+trade_outcomes_col = None
+trade_snapshot_service = None
+trader_profile_col = None
+trading_bot = None
+trading_intelligence = None
+trading_rules_engine = None
+trading_scheduler = None
+volume_anomaly = None
+watchlists_col = None
+wave_scanner = None
 
-# Initialize End-of-Day Generation Service (scheduler starts in startup event)
-eod_service = get_eod_service(db)
+def _init_all_services():
+    """Initialize all services. Called from startup event after event loop exists."""
+    global \
+        _orchestrator, _order_queue, ai_consultation, ai_module_config, ai_risk_manager, \
+        alert_system, alerts_col, alpaca_service, assistant_service, background_scanner, \
+        calibration_log_col, calibration_service, catalyst_scoring_service, \
+        chart_pattern_service, circuit_breaker_service, confidence_gate, \
+        context_awareness_service, cot_col, debate_agents, degradation_service, \
+        dynamic_risk_engine, dynamic_threshold_service, earnings_col, eod_service, \
+        execution_tracker, feature_engine, health_monitor_service, \
+        historical_data_service, ib_service, index_universe, insider_col, \
+        institutional_flow, learning_context_provider, learning_loop_service, \
+        learning_stats_col, market_context_service, market_intel_service, \
+        market_regime_engine, news_service, notification_service, orchestrator_services, \
+        perf_service, portfolios_col, position_sizer_service, predictive_scanner, \
+        quality_service, rag_service, realtime_tech_service, regime_performance_service, \
+        scans_col, scheduler_service, scoring_engine, sector_service, sentcom_services, \
+        sentcom_svc, sentiment_service, shadow_tracker, simulation_engine, \
+        smart_stop_service, smart_watchlist, smart_watchlist_col, social_feed_service, \
+        stock_service, strategies_col, strategy_service, timeseries_ai, tqs_engine, \
+        trade_context_service, trade_executor, trade_journal_service, trade_outcomes_col, \
+        trade_snapshot_service, trader_profile_col, trading_bot, trading_intelligence, \
+        trading_rules_engine, trading_scheduler, volume_anomaly, watchlists_col, \
+        wave_scanner
 
-# Initialize Alpaca service early and wire it to stock_service
-alpaca_service = init_alpaca_service()
-stock_service.set_alpaca_service(alpaca_service)  # DEPRECATED: Alpaca removed from trading path
-stock_service.set_db(db)  # Wire MongoDB for IB data queries
-market_context_service.set_db(db)  # Wire MongoDB for IB historical data
+    stock_service = get_stock_service()
+    notification_service = get_notification_service(db)
+    market_context_service = get_market_context_service()
+    trade_journal_service = get_trade_journal_service(db)
+    catalyst_scoring_service = get_catalyst_scoring_service(db)
+    trading_rules_engine = get_trading_rules_engine()
+    ib_service = get_ib_service()
+    strategy_service = get_strategy_service(db)
+    scoring_engine = get_scoring_engine(db)
+    feature_engine = get_feature_engine()
+    quality_service = init_quality_service(ib_service, db)
 
-# Seed strategies if not already done
-if not strategy_service.is_seeded():
-    seeded_count = strategy_service.seed_strategies(ALL_STRATEGIES_DATA)
-    print(f"Seeded {seeded_count} trading strategies to database")
+    # Initialize End-of-Day Generation Service (scheduler starts in startup event)
+    eod_service = get_eod_service(db)
 
-# Initialize routers with services
-init_notification_service(notification_service)
-init_market_context_service(market_context_service)
-init_trade_journal_service(trade_journal_service)
+    # Initialize Alpaca service early and wire it to stock_service
+    alpaca_service = init_alpaca_service()
+    stock_service.set_alpaca_service(alpaca_service)  # DEPRECATED: Alpaca removed from trading path
+    stock_service.set_db(db)  # Wire MongoDB for IB data queries
+    market_context_service.set_db(db)  # Wire MongoDB for IB historical data
 
-# Trade Snapshot Service
-from services.trade_snapshot_service import TradeSnapshotService
-trade_snapshot_service = TradeSnapshotService(db)
-init_snapshot_service(trade_snapshot_service)
+    # Seed strategies if not already done
+    if not strategy_service.is_seeded():
+        seeded_count = strategy_service.seed_strategies(ALL_STRATEGIES_DATA)
+        print(f"Seeded {seeded_count} trading strategies to database")
 
-# Initialize Social Feed service
-social_feed_service = init_social_feed_service(db)
-init_social_feed_router(social_feed_service)
+    # Initialize routers with services
+    init_notification_service(notification_service)
+    init_market_context_service(market_context_service)
+    init_trade_journal_service(trade_journal_service)
 
-# Wire snapshot service into trade journal for auto-generation on manual trade close
-trade_journal_service._snapshot_service = trade_snapshot_service
+    # Trade Snapshot Service
+    from services.trade_snapshot_service import TradeSnapshotService
+    trade_snapshot_service = TradeSnapshotService(db)
+    init_snapshot_service(trade_snapshot_service)
 
-init_catalyst_service(catalyst_scoring_service, stock_service)
-init_trading_rules(trading_rules_engine)
-init_ib_service(ib_service)
-init_strategy_service(strategy_service)
-init_quality_router(quality_service, ib_service)
-assistant_service = init_assistant_service(db)
-init_assistant_router(assistant_service)
-init_snapshot_assistant(assistant_service)  # Must come after assistant_service is created
-news_service = init_news_service(ib_service)
-scheduler_service = init_scheduler_service()
-# Scheduler starts in startup event (needs event loop for APScheduler)
-init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
-init_alpaca_router(alpaca_service)
+    # Initialize Social Feed service
+    social_feed_service = init_social_feed_service(db)
+    init_social_feed_router(social_feed_service)
 
-# Initialize sector analysis service
-sector_service = get_sector_analysis_service()
-sector_service.set_alpaca_service(alpaca_service)
+    # Wire snapshot service into trade journal for auto-generation on manual trade close
+    trade_journal_service._snapshot_service = trade_snapshot_service
 
-# Initialize chart pattern service
-chart_pattern_service = get_chart_pattern_service()
-chart_pattern_service.set_alpaca_service(alpaca_service)
+    init_catalyst_service(catalyst_scoring_service, stock_service)
+    init_trading_rules(trading_rules_engine)
+    init_ib_service(ib_service)
+    init_strategy_service(strategy_service)
+    init_quality_router(quality_service, ib_service)
+    assistant_service = init_assistant_service(db)
+    init_assistant_router(assistant_service)
+    init_snapshot_assistant(assistant_service)  # Must come after assistant_service is created
+    news_service = init_news_service(ib_service)
+    scheduler_service = init_scheduler_service()
+    # Scheduler starts in startup event (needs event loop for APScheduler)
+    init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
+    init_alpaca_router(alpaca_service)
 
-# Initialize sentiment analysis service
-sentiment_service = get_sentiment_service()
-sentiment_service.set_services(news_service=None, llm_service=None)  # Will be wired to news/llm later if available
+    # Initialize sector analysis service
+    sector_service = get_sector_analysis_service()
+    sector_service.set_alpaca_service(alpaca_service)
 
-# Initialize quick actions router with technical service for volatility-adjusted sizing
-from services.realtime_technical_service import get_technical_service
-realtime_tech_service = get_technical_service()
-init_quick_actions_router(alpaca_service, db, trading_bot=None, technical_service=realtime_tech_service)
+    # Initialize chart pattern service
+    chart_pattern_service = get_chart_pattern_service()
+    chart_pattern_service.set_alpaca_service(alpaca_service)
 
-# Initialize user viewed symbols tracker
-from services.user_viewed_tracker import init_user_viewed_tracker
-init_user_viewed_tracker(db)
+    # Initialize sentiment analysis service
+    sentiment_service = get_sentiment_service()
+    sentiment_service.set_services(news_service=None, llm_service=None)  # Will be wired to news/llm later if available
 
-# Initialize predictive scanner
-predictive_scanner = get_predictive_scanner()
-init_scanner_router(predictive_scanner)
+    # Initialize quick actions router with technical service for volatility-adjusted sizing
+    from services.realtime_technical_service import get_technical_service
+    realtime_tech_service = get_technical_service()
+    init_quick_actions_router(alpaca_service, db, trading_bot=None, technical_service=realtime_tech_service)
 
-# Initialize advanced alert system
-alert_system = get_alert_system()
-init_alerts_router(alert_system)
+    # Initialize user viewed symbols tracker
+    from services.user_viewed_tracker import init_user_viewed_tracker
+    init_user_viewed_tracker(db)
 
-# Initialize ENHANCED background scanner for live alerts (200+ symbols, all SMB strategies)
-from services.enhanced_scanner import get_enhanced_scanner
-background_scanner = get_enhanced_scanner()
-init_live_scanner_router(background_scanner)
-register_service('enhanced_scanner', background_scanner)  # Register for learning connectors
+    # Initialize predictive scanner
+    predictive_scanner = get_predictive_scanner()
+    init_scanner_router(predictive_scanner)
 
-# Wire enhanced scanner into predictive scanner for shared market data
-predictive_scanner.set_enhanced_scanner(background_scanner)
+    # Initialize advanced alert system
+    alert_system = get_alert_system()
+    init_alerts_router(alert_system)
 
-# Initialize trading bot
-trading_bot = get_trading_bot_service()
-trade_executor = get_trade_executor()
-from services.alpaca_service import get_alpaca_service
-alpaca_service = get_alpaca_service()
-trading_bot.set_services(
-    alert_system=alert_system,
-    trading_intelligence=None,
-    alpaca_service=alpaca_service,
-    trade_executor=trade_executor,
-    db=db
-)
-init_trading_bot_router(trading_bot, trade_executor)
-init_circuit_breaker_router(trading_bot)
+    # Initialize ENHANCED background scanner for live alerts (200+ symbols, all SMB strategies)
+    from services.enhanced_scanner import get_enhanced_scanner
+    background_scanner = get_enhanced_scanner()
+    init_live_scanner_router(background_scanner)
+    register_service('enhanced_scanner', background_scanner)  # Register for learning connectors
 
-# Wire AI assistant ↔ Trading bot integration
-assistant_service.set_trading_bot(trading_bot)
-assistant_service.set_alpaca_service(alpaca_service)  # Wire Alpaca for positions
-trading_bot._ai_assistant = assistant_service
+    # Wire enhanced scanner into predictive scanner for shared market data
+    predictive_scanner.set_enhanced_scanner(background_scanner)
 
-# Wire Scanner ↔ Trading bot for auto-execution
-background_scanner.set_trading_bot(trading_bot)
-background_scanner.set_db(db)
+    # Initialize trading bot
+    trading_bot = get_trading_bot_service()
+    trade_executor = get_trade_executor()
+    from services.alpaca_service import get_alpaca_service
+    alpaca_service = get_alpaca_service()
+    trading_bot.set_services(
+        alert_system=alert_system,
+        trading_intelligence=None,
+        alpaca_service=alpaca_service,
+        trade_executor=trade_executor,
+        db=db
+    )
+    init_trading_bot_router(trading_bot, trade_executor)
+    init_circuit_breaker_router(trading_bot)
 
-# Wire Trading bot ↔ Scanner for Smart Strategy Filtering (access to strategy stats)
-trading_bot.set_enhanced_scanner(background_scanner)
+    # Wire AI assistant ↔ Trading bot integration
+    assistant_service.set_trading_bot(trading_bot)
+    assistant_service.set_alpaca_service(alpaca_service)  # Wire Alpaca for positions
+    trading_bot._ai_assistant = assistant_service
 
-# Wire Scanner ↔ AI assistant for proactive coaching notifications
-background_scanner.set_ai_assistant(assistant_service)
+    # Wire Scanner ↔ Trading bot for auto-execution
+    background_scanner.set_trading_bot(trading_bot)
+    background_scanner.set_db(db)
 
-# Initialize strategy performance & learning service
-from services.strategy_performance_service import get_performance_service
-perf_service = get_performance_service()
-perf_service._db = db
-perf_service.set_services(trading_bot=trading_bot, ai_assistant=assistant_service)
-trading_bot._perf_service = perf_service
-init_learning_dashboard(perf_service)
+    # Wire Trading bot ↔ Scanner for Smart Strategy Filtering (access to strategy stats)
+    trading_bot.set_enhanced_scanner(background_scanner)
 
-# Initialize SentCom - Unified AI Command Center
-from agents.orchestrator import get_orchestrator, init_orchestrator
-try:
-    from services.order_queue_service import get_order_queue_service
-    _order_queue = get_order_queue_service()
-except:
-    _order_queue = None
+    # Wire Scanner ↔ AI assistant for proactive coaching notifications
+    background_scanner.set_ai_assistant(assistant_service)
 
-# Initialize Historical Data Queue Service (for IB Data Pusher)
-try:
-    from services.historical_data_queue_service import init_historical_data_queue_service
-    init_historical_data_queue_service(db)
-    print("[SERVER] Historical Data Queue Service initialized")
-except Exception as e:
-    print(f"[SERVER] Warning: Historical Data Queue Service not initialized: {e}")
+    # Initialize strategy performance & learning service
+    from services.strategy_performance_service import get_performance_service
+    perf_service = get_performance_service()
+    perf_service._db = db
+    perf_service.set_services(trading_bot=trading_bot, ai_assistant=assistant_service)
+    trading_bot._perf_service = perf_service
+    init_learning_dashboard(perf_service)
 
-# Initialize the orchestrator with basic services first
-# More services will be injected later when they're ready
-orchestrator_services = {
-    "ib_router": ib_service,
-    "scanner": None,  # Will be injected later
-    "order_queue": _order_queue,
-    "db": db,
-    "performance_analyzer": perf_service,
-    "technical_service": None,  # Will be injected later
-    "sector_service": None,
-    "sentiment_service": None,
-    "tqs_engine": None,  # Will be injected later
-}
+    # Initialize SentCom - Unified AI Command Center
+    from agents.orchestrator import get_orchestrator, init_orchestrator
+    try:
+        from services.order_queue_service import get_order_queue_service
+        _order_queue = get_order_queue_service()
+    except:
+        _order_queue = None
 
-# Initialize orchestrator with services injected
-_orchestrator = init_orchestrator(services=orchestrator_services)
-print("[SERVER] Orchestrator initialized (basic services)")
+    # Initialize Historical Data Queue Service (for IB Data Pusher)
+    try:
+        from services.historical_data_queue_service import init_historical_data_queue_service
+        init_historical_data_queue_service(db)
+        print("[SERVER] Historical Data Queue Service initialized")
+    except Exception as e:
+        print(f"[SERVER] Warning: Historical Data Queue Service not initialized: {e}")
 
-sentcom_services = {
-    "trading_bot": trading_bot,
-    "orchestrator": _orchestrator,
-    "ib_service": ib_service,
-    "regime_engine": None,  # Will be set later when regime engine is ready
-    "order_queue": _order_queue,
-    "db": db
-}
-init_sentcom_service(sentcom_services)
-print("[SERVER] SentCom service initialized")
+    # Initialize the orchestrator with basic services first
+    # More services will be injected later when they're ready
+    orchestrator_services = {
+        "ib_router": ib_service,
+        "scanner": None,  # Will be injected later
+        "order_queue": _order_queue,
+        "db": db,
+        "performance_analyzer": perf_service,
+        "technical_service": None,  # Will be injected later
+        "sector_service": None,
+        "sentiment_service": None,
+        "tqs_engine": None,  # Will be injected later
+    }
 
-# Initialize Dynamic Risk Engine
-dynamic_risk_engine = get_dynamic_risk_engine()
-dynamic_risk_engine.inject_services({
-    "trading_bot": trading_bot,
-    "market_data": None,  # Will be set later if needed
-    "db": db
-})
-print("[SERVER] Dynamic Risk Engine initialized")
+    # Initialize orchestrator with services injected
+    _orchestrator = init_orchestrator(services=orchestrator_services)
+    print("[SERVER] Orchestrator initialized (basic services)")
 
-# Wire Dynamic Risk into SentCom for risk-aware responses
-sentcom_svc = get_sentcom_service()
-sentcom_svc.inject_dynamic_risk(dynamic_risk_engine)
-print("[SERVER] Dynamic Risk wired into SentCom")
+    sentcom_services = {
+        "trading_bot": trading_bot,
+        "orchestrator": _orchestrator,
+        "ib_service": ib_service,
+        "regime_engine": None,  # Will be set later when regime engine is ready
+        "order_queue": _order_queue,
+        "db": db
+    }
+    init_sentcom_service(sentcom_services)
+    print("[SERVER] SentCom service initialized")
 
-# Include routers
+    # Initialize Dynamic Risk Engine
+    dynamic_risk_engine = get_dynamic_risk_engine()
+    dynamic_risk_engine.inject_services({
+        "trading_bot": trading_bot,
+        "market_data": None,  # Will be set later if needed
+        "db": db
+    })
+    print("[SERVER] Dynamic Risk Engine initialized")
+
+    # Wire Dynamic Risk into SentCom for risk-aware responses
+    sentcom_svc = get_sentcom_service()
+    sentcom_svc.inject_dynamic_risk(dynamic_risk_engine)
+    print("[SERVER] Dynamic Risk wired into SentCom")
+
+    # Include routers
+    # Refactored IB historical endpoints available but not active yet
+    # app.include_router(ib_historical_router, prefix="/api/ib")
+    init_smart_stop_router()  # Initialize smart stop service
+
+    # Initialize job queue manager with sync database (uses asyncio.to_thread internally)
+    job_queue_manager.set_db(db)
+
+    # Collections
+    strategies_col = db["strategies"]
+    watchlists_col = db["watchlists"]
+    smart_watchlist_col = db["smart_watchlist"]  # New: for hybrid auto/manual watchlist
+    alerts_col = db["alerts"]
+    portfolios_col = db["portfolios"]
+    scans_col = db["scans"]
+    insider_col = db["insider_trades"]
+    cot_col = db["cot_data"]
+    earnings_col = db["earnings"]
+
+    # NEW: Learning Architecture Collections (Phase 1)
+    trade_outcomes_col = db["trade_outcomes"]  # Full trade records with context
+    learning_stats_col = db["learning_stats"]  # Aggregated statistics by context
+    calibration_log_col = db["calibration_log"]  # Threshold adjustment history
+    trader_profile_col = db["trader_profile"]  # Trader patterns for RAG
+
+    # Initialize smart watchlist and wave scanner
+    smart_watchlist = init_smart_watchlist(smart_watchlist_col)
+    index_universe = get_index_universe()
+    wave_scanner = init_wave_scanner(smart_watchlist, index_universe)
+
+    # Initialize market intel service (moved here to wire smart_watchlist)
+    market_intel_service = get_market_intel_service()
+    market_intel_service._db = db
+    market_intel_service.set_services(
+        ai_assistant=assistant_service,
+        trading_bot=trading_bot,
+        perf_service=perf_service,
+        alpaca_service=alpaca_service,
+        news_service=news_service,
+        scanner_service=background_scanner,
+        smart_watchlist=smart_watchlist,
+        alert_system=alert_system
+    )
+    register_service('market_intel_service', market_intel_service)
+    init_market_intel_router(market_intel_service)
+
+    # ===================== LEARNING ARCHITECTURE (Phase 1) =====================
+    # Initialize Three-Speed Learning Architecture services
+
+    # 1. Graceful Degradation Service - handles service failures
+    degradation_service = init_degradation_service()
+
+    # 2. Execution Tracker - tracks trade execution quality
+    execution_tracker = init_execution_tracker(db=db, alpaca_service=alpaca_service)
+
+    # 3. Trade Context Service - captures market context at trade time
+    trade_context_service = init_trade_context_service(
+        alpaca_service=alpaca_service,
+        ib_service=ib_service,
+        sector_service=sector_service,
+        news_service=news_service,
+        technical_service=realtime_tech_service,
+        sentiment_service=sentiment_service,
+        db=db
+    )
+
+    # 4. Learning Loop Service - orchestrates the learning system
+    learning_loop_service = init_learning_loop_service(db=db)
+    learning_loop_service.set_services(
+        context_service=trade_context_service,
+        execution_tracker=execution_tracker,
+        degradation_service=degradation_service
+    )
+
+    # Wire learning loop to trading bot for trade outcome recording
+    trading_bot._learning_loop = learning_loop_service
+
+    # Register learning services in registry for later use
+    register_service('learning_loop_service', learning_loop_service)
+    register_service('trade_context_service', trade_context_service)
+    register_service('execution_tracker', execution_tracker)
+    register_service('alpaca_service', alpaca_service)
+
+    print("Three-Speed Learning Architecture Phase 1 initialized")
+    print("  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
+    print("  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
+
+    # ===================== TQS ENGINE (Phase 2) =====================
+    # Initialize Trade Quality Score engine with all 5 pillars
+
+    tqs_engine = init_tqs_engine(
+        learning_loop=learning_loop_service,
+        alpaca_service=alpaca_service,
+        ib_service=ib_service,
+        technical_service=realtime_tech_service,
+        sector_service=sector_service,
+        scanner=background_scanner
+    )
+
+    print("TQS Engine (Phase 2) initialized")
+    print("  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
+    print("  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
+
+    # Register TQS engine
+    register_service('tqs_engine', tqs_engine)
+
+    # Late injection of full services to orchestrator (now that TQS and scanner are ready)
+    try:
+        _orchestrator.inject_services({
+            "ib_router": ib_service,
+            "scanner": background_scanner,
+            "order_queue": _order_queue,
+            "db": db,
+            "performance_analyzer": perf_service,
+            "technical_service": realtime_tech_service,
+            "sector_service": sector_service,
+            "sentiment_service": None,
+            "tqs_engine": tqs_engine,
+        })
+        print("[SERVER] Orchestrator fully wired with all services (scanner, TQS, technical)")
+    except Exception as e:
+        print(f"[SERVER] Warning: Orchestrator late injection failed: {e}")
+
+    # ===================== MARKET REGIME ENGINE (Phase 2.5) =====================
+    # Initialize Market Regime Engine for market state detection
+
+    market_regime_engine = MarketRegimeEngine(
+        alpaca_service=alpaca_service,
+        ib_service=ib_service,
+        db=db
+    )
+    init_market_regime_engine(market_regime_engine)
+    register_service('market_regime_engine', market_regime_engine)
+
+    print("Market Regime Engine (Phase 2.5) initialized")
+    print("  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, internals")
+    print("  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
+    print("  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
+
+    # Wire Market Regime to Trading Bot for regime-aware position sizing
+    trading_bot.set_market_regime_engine(market_regime_engine)
+    print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
+
+    # Wire Market Regime to SentCom for regime-aware briefings and chat
+    sentcom_svc = get_sentcom_service()
+    sentcom_svc.inject_regime_engine(market_regime_engine)
+    print("  - Wired to SentCom: Briefings and chat now use real market regime data")
+
+    # Inject dependencies for regime performance endpoint
+    from routers.market_regime import inject_dependencies as inject_market_regime_deps
+    inject_market_regime_deps(db=db, trading_bot=trading_bot)
+    print("  - Regime Performance: Personalized stats wired to /api/market-regime/performance")
+
+    # Initialize Regime Performance Tracking Service
+    regime_performance_service = init_regime_performance_service(db=db)
+    init_regime_performance_router(regime_performance_service)
+    register_service('regime_performance_service', regime_performance_service)
+
+    # Wire Regime Performance Service to Trading Bot for trade logging
+    trading_bot.set_regime_performance_service(regime_performance_service)
+    print("  - Regime Performance Tracking: Strategy performance by market regime")
+    print("  - Wired to Trading Bot: Closed trades logged with regime data")
+    print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
+
+    # Wire Trade Journal to Trading Bot for auto-recording
+    trading_bot.set_trade_journal(trade_journal_service)
+    trading_bot._snapshot_service = trade_snapshot_service
+    print("  - Trade Journal: Auto-recording enabled for bot trades")
+    print("  - Trade Snapshots: Auto-generation enabled for closed trades")
+
+    # ===================== AI CONFIDENCE GATE =====================
+    from services.ai_modules.confidence_gate import init_confidence_gate
+    confidence_gate = init_confidence_gate(db=db)
+    register_service('confidence_gate', confidence_gate)
+    print("AI Confidence Gate initialized")
+    print("  - Pre-trade intelligence: Regime + Model Consensus → GO/REDUCE/SKIP")
+    print("  - Endpoints: /api/ai-training/confidence-gate/summary, decisions, stats")
+
+    # Wire Confidence Gate to Trading Bot
+    trading_bot.set_confidence_gate(confidence_gate)
+    print("  - Wired to Trading Bot: Every trade now passes through the confidence gate")
+
+    # ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
+    # Initialize Context Awareness Service for smarter AI responses
+    context_awareness_service = init_context_awareness_service(
+        regime_engine=market_regime_engine,
+        db=db
+    )
+    init_context_router(context_awareness_service)
+    register_service('context_awareness', context_awareness_service)
+    print("Context Awareness Service (Phase 2 AI) initialized")
+    print("  - Time-of-day awareness: Pre-market, Open, Midday, Close, After-hours")
+    print("  - Regime awareness: Integrated with Market Regime Engine")
+    print("  - Position awareness: Real-time position and exposure tracking")
+    print("  - Endpoints: /api/context/session, /api/context/regime, /api/context/full")
+
+    # ===================== UNIFIED SMART STOP SYSTEM =====================
+    # Initialize Smart Stop Service with all external services for intelligent analysis
+    from services.smart_stop_service import get_smart_stop_service, init_smart_stop_service
+    smart_stop_service = init_smart_stop_service(
+        regime_service=market_regime_engine,
+        sector_service=sector_service,
+        data_service=alpaca_service
+    )
+    # Inject MongoDB for historical data access (uses unified ib_historical_data collection)
+    smart_stop_service.set_db(db)
+    register_service('smart_stop_service', smart_stop_service)
+    print("Unified Smart Stop System initialized")
+    print("  - 6 Stop Modes: original, atr_dynamic, anti_hunt, volatility_adjusted, layered, chandelier")
+    print("  - 8 Setup Rules: breakout, pullback, momentum, mean_reversion, gap_and_go, vwap_reversal, earnings_play, default")
+    print("  - Volume Profile Analysis: POC, VAH/VAL, HVN/LVN detection (from ib_historical_data)")
+    print("  - Sector Correlation: Relative strength-based adjustments")
+    print("  - Stop Hunt Protection: Anti-hunt, layered stops, round number avoidance")
+    print("  - Endpoints: /api/smart-stops/calculate, /api/smart-stops/intelligent-calculate, /api/smart-stops/analyze-trade")
+
+    # ===================== FAST LEARNING (Phase 3A & 3B) =====================
+    # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
+
+    # 1. Circuit Breaker Service - risk controls
+    circuit_breaker_service = init_circuit_breaker_service(
+        learning_loop=learning_loop_service,
+        db=db
+    )
+
+    # 2. Position Sizer Service - TQS-based sizing
+    position_sizer_service = init_position_sizer_service(
+        circuit_breaker=circuit_breaker_service,
+        learning_loop=learning_loop_service
+    )
+
+    # 3. Dynamic Threshold Service - context-aware gating
+    dynamic_threshold_service = init_dynamic_threshold_service(
+        learning_loop=learning_loop_service
+    )
+
+    # 4. Health Monitor Service - system status
+    health_monitor_service = init_health_monitor_service(
+        alpaca_service=alpaca_service,
+        ib_service=ib_service,
+        scanner=background_scanner,
+        tqs_engine=tqs_engine,
+        circuit_breaker=circuit_breaker_service,
+        learning_loop=learning_loop_service,
+        db=db
+    )
+
+    print("Fast Learning (Phase 3A & 3B) initialized")
+    print("  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, tilt_detection")
+    print("  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
+    print("  - Dynamic Thresholds: regime-based, time-based, VIX-based")
+    print("  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
+
+    # ===================== RAG KNOWLEDGE BASE (Phase 4) =====================
+    # Initialize Retrieval-Augmented Generation for personalized AI context
+
+    try:
+        rag_service = init_rag_service(db=db, learning_loop=learning_loop_service)
+        register_service('rag_service', rag_service)
+        print("RAG Knowledge Base (Phase 4) initialized")
+        print("  - Vector Store: ChromaDB at /app/backend/data/chromadb")
+        print("  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
+        print("  - Endpoints: /api/rag/retrieve, /api/rag/augment-prompt, /api/rag/sync")
+    except Exception as e:
+        print(f"RAG Knowledge Base initialization deferred: {e}")
+        print("  - Will initialize on first use (embedding model loading)")
+        rag_service = None
+
+    # ===================== MEDIUM LEARNING (Phase 5) =====================
+    # Initialize end-of-day analysis services
+
+    try:
+        # Initialize all Medium Learning services with database
+        calibration_service = init_calibration_service(db=db)
+
+        context_perf_service = get_context_performance_service()
+        context_perf_service.set_db(db)
+
+        confirmation_service = get_confirmation_validator_service()
+        confirmation_service.set_db(db)
+
+        playbook_perf_service = get_playbook_performance_service()
+        playbook_perf_service.set_db(db)
+
+        edge_decay_service = get_edge_decay_service()
+        edge_decay_service.set_db(db)
+
+        # Register Medium Learning services
+        register_service('calibration_service', calibration_service)
+        register_service('context_perf_service', context_perf_service)
+        register_service('confirmation_service', confirmation_service)
+        register_service('playbook_perf_service', playbook_perf_service)
+        register_service('edge_decay_service', edge_decay_service)
+
+        print("Medium Learning (Phase 5) initialized")
+        print("  - Calibration Service: TQS threshold recommendations")
+        print("  - Context Performance: Setup+regime+time tracking")
+        print("  - Confirmation Validator: Signal effectiveness analysis")
+        print("  - Playbook Performance: Theory vs reality linkage")
+        print("  - Edge Decay: Strategy degradation detection")
+        print("  - Endpoints: /api/medium-learning/*")
+    except Exception as e:
+        print(f"Medium Learning initialization deferred: {e}")
+        calibration_service = None
+
+    # ===================== SLOW LEARNING (Phase 6) =====================
+    # Initialize backtesting, historical data, and shadow mode services
+
+    try:
+        # Initialize Historical Data Service
+        historical_data_service = init_historical_data_service(db=db, alpaca_service=alpaca_service)
+
+        # Initialize Backtest Engine
+        backtest_engine = init_backtest_engine(
+            db=db,
+            historical_data_service=historical_data_service
+        )
+
+        # Initialize Shadow Mode Service
+        shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
+
+        # Initialize Advanced Backtest Engine (new!)
+        from services.slow_learning.advanced_backtest_engine import init_advanced_backtest_engine
+        advanced_backtest_engine = init_advanced_backtest_engine(
+            db=db,
+            historical_data_service=historical_data_service,
+            alpaca_service=alpaca_service,
+            tqs_engine=get_service_optional('tqs_engine')
+        )
+        init_advanced_backtest_router(advanced_backtest_engine)
+
+        # Register Slow Learning services
+        register_service('shadow_mode_service', shadow_mode_service)
+        register_service('historical_data_service', historical_data_service)
+        register_service('backtest_engine', backtest_engine)
+        register_service('advanced_backtest_engine', advanced_backtest_engine)
+
+        # Initialize Hybrid Data Service (IB primary, Alpaca fallback)
+        hybrid_data_service = init_hybrid_data_service(
+            db=db,
+            ib_service=ib_service,
+            alpaca_service=alpaca_service
+        )
+        init_hybrid_data_router(hybrid_data_service)
+        register_service('hybrid_data_service', hybrid_data_service)
+
+        # Wire hybrid data service to advanced backtest engine
+        advanced_backtest_engine.set_hybrid_data_service(hybrid_data_service)
+
+        # Initialize Market Scanner Service (full US market scanning)
+        market_scanner_service = init_market_scanner_service(
+            db=db,
+            hybrid_data_service=hybrid_data_service,
+            alpaca_service=alpaca_service
+        )
+        init_market_scanner_router(market_scanner_service)
+        register_service('market_scanner_service', market_scanner_service)
+
+        print("Slow Learning (Phase 6) initialized")
+        print("  - Historical Data Service: Alpaca data download and storage")
+        print("  - Hybrid Data Service: IB primary, Alpaca fallback, MongoDB cache")
+        print("  - Market Scanner: Full US market strategy scanning")
+        print("  - Backtest Engine: Strategy backtesting on historical data")
+        print("  - Advanced Backtest Engine: Multi-strategy, Walk-forward, Monte Carlo")
+        print("  - Shadow Mode: Paper trading filter validation")
+        print("  - Endpoints: /api/slow-learning/*, /api/backtest/*, /api/data/*, /api/scanner/*")
+    except Exception as e:
+        print(f"Slow Learning initialization deferred: {e}")
+        historical_data_service = None
+
+    # ===================== LEARNING CONTEXT PROVIDER =====================
+    # Provides personalized learning insights for AI coaching
+
+    try:
+        from services.weekly_report_service import get_weekly_report_service
+
+        learning_context_provider = init_learning_context_provider(
+            db=db,
+            calibration_service=get_service_optional('calibration_service'),
+            context_performance_service=get_service_optional('context_perf_service'),
+            confirmation_validator_service=get_service_optional('confirmation_service'),
+            playbook_performance_service=get_service_optional('playbook_perf_service'),
+            edge_decay_service=get_service_optional('edge_decay_service'),
+            rag_service=get_service_optional('rag_service')
+        )
+        register_service('learning_context_provider', learning_context_provider)
+        print("Learning Context Provider initialized")
+        print("  - Provides TQS + Learning insights for AI coaching")
+        # Wire to AI assistant
+        if assistant_service is not None:
+            assistant_service.set_learning_context_provider(learning_context_provider)
+
+        # Wire learning services to SentCom (late injection)
+        try:
+            sentcom_svc = get_sentcom_service()
+            sentcom_svc.inject_learning_services(
+                learning_loop=learning_loop_service,
+                learning_context_provider=learning_context_provider
+            )
+            print("[SERVER] SentCom wired to Learning services")
+        except Exception as e:
+            print(f"[SERVER] SentCom learning wire deferred: {e}")
+
+    except Exception as e:
+        print(f"Learning Context Provider initialization deferred: {e}")
+        learning_context_provider = None
+
+    # ===================== AI MODULES (Institutional-Grade) =====================
+    # Initialize AI trading modules: Shadow Mode, Bull/Bear Debate, AI Risk Manager
+    try:
+        # Initialize AI Module Configuration (toggles, settings)
+        ai_module_config = init_ai_module_config(db=db)
+
+        # Initialize Shadow Tracker (logs all AI decisions for learning)
+        shadow_tracker = init_shadow_tracker(db=db, alpaca_service=alpaca_service)
+
+        # Initialize Debate Agents (Bull/Bear deliberation)
+        # Get config dict from module settings
+        debate_config = ai_module_config.get_module_settings("debate_agents")
+        debate_config_dict = debate_config.custom_settings if debate_config else None
+        debate_agents = init_debate_agents(
+            llm_service=None,  # Uses rule-based for now, can add LLM later
+            learning_provider=learning_context_provider,
+            config=debate_config_dict
+        )
+
+        # Initialize AgentDataService (NEW - breaks agent silos)
+        agent_data_service = init_agent_data_service(db=db)
+        debate_agents.set_data_service(agent_data_service)  # Connect to debate agents
+
+        # Initialize AI Risk Manager
+        risk_config = ai_module_config.get_module_settings("ai_risk_manager")
+        risk_config_dict = risk_config.custom_settings if risk_config else None
+        ai_risk_manager = init_ai_risk_manager(config=risk_config_dict)
+        ai_risk_manager.set_services(
+            portfolio_service=None,  # Can wire later
+            learning_provider=learning_context_provider,
+            news_service=news_service
+        )
+
+        # Initialize Institutional Flow Service (Phase 5 - FREE SEC EDGAR)
+        institutional_flow = init_institutional_flow_service(db=db)
+
+        # Initialize Volume Anomaly Service (Phase 6 - Uses existing data)
+        volume_anomaly = init_volume_anomaly_service(db=db)
+
+        # Initialize Time-Series AI (Phase 3 - LightGBM directional forecasting)
+        timeseries_ai = init_timeseries_ai(db=db, historical_service=alpaca_service)
+
+        # Initialize AI Trade Consultation (wires modules into trading bot)
+        ai_consultation = init_ai_consultation(
+            module_config=ai_module_config,
+            shadow_tracker=shadow_tracker,
+            debate_agents=debate_agents,
+            risk_manager=ai_risk_manager,
+            institutional_flow=institutional_flow,
+            volume_anomaly=volume_anomaly,
+            timeseries_ai=timeseries_ai
+        )
+
+        # Inject services into AI modules router (AFTER ai_consultation is created)
+        from routers.ai_modules import inject_timeseries_service
+        inject_ai_module_services(
+            ai_module_config, 
+            shadow_tracker, 
+            debate_agents, 
+            ai_risk_manager,
+            institutional_flow,
+            volume_anomaly,
+            ai_consultation,
+            agent_data_service  # NEW
+        )
+        inject_timeseries_service(timeseries_ai)
+
+        # Register AI module services
+        register_service('ai_module_config', ai_module_config)
+        register_service('shadow_tracker', shadow_tracker)
+        register_service('debate_agents', debate_agents)
+        register_service('ai_risk_manager', ai_risk_manager)
+        register_service('institutional_flow', institutional_flow)
+        register_service('volume_anomaly', volume_anomaly)
+        register_service('ai_consultation', ai_consultation)
+        register_service('timeseries_ai', timeseries_ai)
+        register_service('agent_data_service', agent_data_service)  # NEW
+
+        # Wire Time-Series AI model into Advanced Backtest Engine for AI comparison backtesting
+        if timeseries_ai is not None:
+            from services.ai_modules.timeseries_gbm import get_timeseries_model
+            ts_model = get_timeseries_model()
+            if ts_model is not None:
+                advanced_backtest_engine.set_timeseries_model(ts_model)
+                print("Time-Series AI model wired into Advanced Backtest Engine for AI comparison")
+
+        print("AI Modules (Institutional-Grade) initialized")
+        print("  - Module Config: Toggle individual AI modules on/off")
+        print("  - Shadow Tracker: Logs all AI decisions without execution")
+        print("  - Debate Agents: Bull/Bear deliberation before trades")
+        print("  - AI Risk Manager: Multi-factor risk assessment")
+        print("  - Institutional Flow: 13F tracking, ownership context (FREE)")
+        print("  - Volume Anomaly: Z-score detection, accumulation/distribution")
+        print("  - Time-Series AI: LightGBM directional forecasting (Phase 3)")
+        print("  - Trade Consultation: Pre-trade AI analysis integration")
+        print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/timeseries/*")
+
+    except Exception as e:
+        print(f"AI Modules initialization deferred: {e}")
+        import traceback
+        traceback.print_exc()
+        ai_module_config = None
+        shadow_tracker = None
+        debate_agents = None
+        ai_risk_manager = None
+        institutional_flow = None
+        volume_anomaly = None
+        ai_consultation = None
+        timeseries_ai = None
+
+    # Wire AI Consultation into Trading Bot (Phase 2 Integration)
+    if ai_consultation is not None:
+        trading_bot.set_ai_consultation(ai_consultation)
+        print("AI Trade Consultation wired into Trading Bot")
+        print("  - Pre-trade analysis: Debate + Risk + Institutional + Volume")
+        print("  - Shadow Mode: AI analyzes but doesn't block trades (learning mode)")
+        print("  - Live Mode: AI can block/reduce trades based on analysis")
+
+    # ===================== HISTORICAL SIMULATION ENGINE =====================
+    # Full SentCom backtesting on historical data
+    try:
+        from services.simulation_engine import init_simulation_engine, get_simulation_engine
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+
+        simulation_engine = init_simulation_engine(
+            db=db,
+            alpaca_service=alpaca_service,
+            timeseries_model=get_timeseries_model() if timeseries_ai else None,
+            trade_consultation=ai_consultation,
+            scoring_engine=scoring_engine
+        )
+
+        # Simulation engine initialization deferred to startup event (no running event loop at module load)
+
+        # Initialize router (simulation engine unified into advanced backtest)
+
+        register_service('simulation_engine', simulation_engine)
+
+        # Wire simulation engine into the advanced backtest router (unified access)
+        init_advanced_backtest_router(advanced_backtest_engine, simulation_engine=simulation_engine)
+
+        print("Historical Simulation Engine initialized")
+        print("  - Full SentCom bot backtesting on 1+ year of data")
+        print("  - Uses all AI agents (Debate, Risk, Time-Series, Institutional)")
+        print("  - Tracks all decisions for learning")
+        print("  - Endpoints: /api/simulation/*")
+    except Exception as e:
+        print(f"Historical Simulation Engine initialization deferred: {e}")
+        import traceback
+        traceback.print_exc()
+        simulation_engine = None
+
+    # ===================== LEARNING CONNECTORS =====================
+    # Orchestrates data flow between learning systems
+
+    try:
+        from services.learning_connectors_service import init_learning_connectors
+        from services.ai_modules.shadow_tracker import get_shadow_tracker
+        from services.learning_loop_service import get_learning_loop_service
+
+        learning_connectors = init_learning_connectors(
+            db=db,
+            timeseries_ai=get_service_optional('timeseries_ai'),
+            shadow_tracker=get_shadow_tracker(),
+            learning_loop=get_learning_loop_service(),
+            scanner=get_service_optional('enhanced_scanner'),
+            simulation_engine=simulation_engine
+        )
+
+        init_learning_connectors_router(
+            db=db,
+            timeseries_ai=get_service_optional('timeseries_ai'),
+            shadow_tracker=get_shadow_tracker(),
+            learning_loop=get_learning_loop_service(),
+            scanner=get_service_optional('enhanced_scanner'),
+            simulation_engine=simulation_engine,
+            dynamic_thresholds=get_service_optional('dynamic_threshold_service')
+        )
+
+        register_service('learning_connectors', learning_connectors)
+
+        print("Learning Connectors initialized")
+        print("  - Simulation → Time-Series Model retraining")
+        print("  - Shadow Tracker → Module weight calibration")
+        print("  - Alert Outcomes → Scanner threshold tuning (NOW AUTO-APPLIES)")
+        print("  - Endpoints: /api/learning-connectors/*")
+    except Exception as e:
+        print(f"Learning Connectors initialization deferred: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # ===================== STRATEGY PROMOTION SERVICE =====================
+    # Autonomous learning loop: SIMULATION → PAPER → LIVE
+
+    try:
+        init_strategy_promotion_router(db=db)
+        strategy_promotion_service = get_strategy_promotion_service()
+        register_service('strategy_promotion', strategy_promotion_service)
+
+        # Connect Strategy Promotion Service to Trading Bot
+        # This enables the SIM → PAPER → LIVE trade gating
+        trading_bot.set_strategy_promotion_service(strategy_promotion_service)
+
+        print("Strategy Promotion Service initialized")
+        print("  - Manages strategy lifecycle: SIMULATION → PAPER → LIVE")
+        print("  - Auto-promotes strategies that prove profitable")
+        print("  - Connected to Trading Bot for trade execution gating")
+        print("  - Endpoints: /api/strategy-promotion/*")
+    except Exception as e:
+        print(f"Strategy Promotion Service initialization deferred: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # ===================== IB HISTORICAL DATA COLLECTOR =====================
+    # Systematically collects historical data from IB Gateway for learning
+
+    try:
+        from services.ib_historical_collector import init_ib_collector
+
+        # Get Alpaca service for fetching US stock universe
+        alpaca_historical_service = get_service_optional('alpaca_historical_service')
+
+        ib_collector = init_ib_collector(
+            db=db, 
+            ib_service=ib_service,
+            alpaca_service=alpaca_historical_service or alpaca_service  # Use main alpaca_service as fallback
+        )
+
+        # Wire market scanner for robust full-market symbol fetching
+        market_scanner = get_service_optional('market_scanner_service')
+        if market_scanner:
+            ib_collector.set_market_scanner(market_scanner)
+            print("  - Market scanner wired for full-market symbol universe")
+
+        register_service('ib_collector', ib_collector)
+
+        print("IB Historical Data Collector initialized")
+        print("  - Collects OHLCV data from IB Gateway")
+        print("  - Supports multiple bar sizes (1min, 5min, 1hour, 1day)")
+        print("  - Full market collection: ALL US stocks via Alpaca")
+        print("  - Stores in MongoDB for model training")
+        print("  - Endpoints: /api/ib-collector/*")
+    except Exception as e:
+        print(f"IB Historical Collector initialization deferred: {e}")
+
+    # ===================== DATA STORAGE MANAGER =====================
+    # Ensures proper data persistence and indexing for all learning data
+
+    try:
+        from services.data_storage_manager import init_storage_manager
+
+        storage_manager = init_storage_manager(db=db)
+        register_service('storage_manager', storage_manager)
+
+        print("Data Storage Manager initialized")
+        print("  - Manages 14 collections for learning data")
+        print("  - Ensures proper indexes for fast retrieval")
+        print("  - Endpoints: /api/data-storage/*")
+    except Exception as e:
+        print(f"Data Storage Manager initialization deferred: {e}")
+
+    # ===================== TRADING SCHEDULER =====================
+    # Automated daily/weekly analysis tasks
+
+    try:
+        from services.weekly_report_service import get_weekly_report_service, init_weekly_report_service
+
+        # Initialize weekly report service with all required dependencies
+        weekly_report_svc = init_weekly_report_service(
+            db=db,
+            calibration_service=get_service_optional('calibration_service'),
+            context_performance_service=get_service_optional('context_perf_service'),
+            confirmation_validator_service=get_service_optional('confirmation_service'),
+            playbook_performance_service=get_service_optional('playbook_perf_service'),
+            edge_decay_service=get_service_optional('edge_decay_service')
+        )
+
+        trading_scheduler = init_trading_scheduler(
+            db=db,
+            calibration_service=get_service_optional('calibration_service'),
+            context_performance_service=get_service_optional('context_perf_service'),
+            confirmation_validator_service=get_service_optional('confirmation_service'),
+            playbook_performance_service=get_service_optional('playbook_perf_service'),
+            edge_decay_service=get_service_optional('edge_decay_service'),
+            weekly_report_service=weekly_report_svc,
+            shadow_mode_service=get_service_optional('shadow_mode_service'),
+            shadow_tracker=shadow_tracker,
+            start=True  # Auto-start scheduler
+        )
+        print("Trading Scheduler initialized")
+        print("  - Daily Analysis: 4:00 PM ET (Mon-Fri)")
+        print("  - Weekly Report: Friday 4:30 PM ET")
+        print("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
+        print("  - Shadow Updates: Every 5 min (market hours)")
+        print("  - Endpoints: /api/scheduler/*")
+    except Exception as e:
+        print(f"Trading Scheduler initialization deferred: {e}")
+        trading_scheduler = None
+
+    # ===================== MULTI-AGENT SYSTEM =====================
+    # Initialize the new multi-agent architecture for AI-powered trading
+    try:
+        from services.order_queue_service import get_order_queue_service
+
+        # Register perf_service for agent access
+        register_service('perf_service', perf_service)
+
+        # Initialize agent system with all required services (using service registry)
+        init_agents_router({
+            "ib_router": ib_router,
+            "scanner": background_scanner,
+            "order_queue": get_order_queue_service(),
+            "db": db,
+            "performance_analyzer": perf_service,
+            "learning_service": get_service_optional('learning_loop_service'),
+            "trading_bot": trading_bot,
+            "alpaca_service": alpaca_service,
+            # Three-Speed Learning Architecture services
+            "learning_context_provider": get_service_optional('learning_context_provider'),
+            "learning_loop_service": get_service_optional('learning_loop_service'),
+            # TQS Engine for Analyst
+            "tqs_engine": get_service_optional('tqs_engine'),
+            # Phase 2 AI: Context Awareness Service
+            "context_awareness": get_service_optional('context_awareness')
+        })
+        print("Multi-Agent System initialized")
+        print("  - Agents: Router, Trade Executor, Coach, Analyst")
+        print("  - LLM: GPT-OSS cloud → llama3.5 8b fallback")
+        print("  - Learning: Integrated with Three-Speed Architecture")
+        print("  - TQS: Trade Quality Score integrated with Analyst")
+        print("  - Context Awareness: Phase 2 AI (time/regime/position aware)")
+        print("  - Endpoints: /api/agents/chat, /api/agents/status, /api/agents/metrics")
+    except Exception as e:
+        print(f"Multi-Agent System initialization deferred: {e}")
+
+    # ===================== STRATEGY HELPERS =====================
+    # Strategies are now stored in MongoDB and accessed via strategy_service
+    # Use strategy_service.get_all_strategies() to get all strategies
+    # Use strategy_service.get_strategy_by_id(id) to get a specific strategy
+
+    def get_all_strategies_cached():
+        """Get all strategies from database (cached in service)"""
+        return strategy_service.get_all_strategies()
+
+    def get_strategy_by_id_cached(strategy_id: str):
+        """Get a strategy by ID from database"""
+        return strategy_service.get_strategy_by_id(strategy_id)
+
+
+    print('[INIT] All services initialized')
+
+
+# ===================== PYDANTIC MODELS =====================
+
+# Register all routers (module-level — routes exist before startup)
 app.include_router(notifications_router)
 app.include_router(market_context_router)
 app.include_router(trades_router)
 app.include_router(catalyst_router)
 app.include_router(rules_router)
 app.include_router(ib_router)
-# Refactored IB historical endpoints available but not active yet
-# app.include_router(ib_historical_router, prefix="/api/ib")
 app.include_router(strategies_router)
 app.include_router(scoring_router)
 app.include_router(features_router)
@@ -461,7 +1325,6 @@ app.include_router(market_regime_router)  # Market regime engine
 app.include_router(regime_performance_router)  # Regime-based performance tracking
 app.include_router(context_awareness_router)  # Phase 2 AI context awareness
 app.include_router(smart_stops_router)  # Unified Smart Stop System
-init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 app.include_router(dynamic_risk_router)  # Dynamic Risk Management Engine
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
@@ -484,756 +1347,6 @@ app.include_router(market_data_router)  # Market data, quotes, fundamentals (ext
 app.include_router(system_router)  # System health, startup-check, consolidated-status, LLM status, system monitor
 app.include_router(dashboard_router)  # Dashboard stats/init, alerts CRUD, scanner, wave-scanner, universe
 
-# Initialize job queue manager with sync database (uses asyncio.to_thread internally)
-job_queue_manager.set_db(db)
-
-# Collections
-strategies_col = db["strategies"]
-watchlists_col = db["watchlists"]
-smart_watchlist_col = db["smart_watchlist"]  # New: for hybrid auto/manual watchlist
-alerts_col = db["alerts"]
-portfolios_col = db["portfolios"]
-scans_col = db["scans"]
-insider_col = db["insider_trades"]
-cot_col = db["cot_data"]
-earnings_col = db["earnings"]
-
-# NEW: Learning Architecture Collections (Phase 1)
-trade_outcomes_col = db["trade_outcomes"]  # Full trade records with context
-learning_stats_col = db["learning_stats"]  # Aggregated statistics by context
-calibration_log_col = db["calibration_log"]  # Threshold adjustment history
-trader_profile_col = db["trader_profile"]  # Trader patterns for RAG
-
-# Initialize smart watchlist and wave scanner
-smart_watchlist = init_smart_watchlist(smart_watchlist_col)
-index_universe = get_index_universe()
-wave_scanner = init_wave_scanner(smart_watchlist, index_universe)
-
-# Initialize market intel service (moved here to wire smart_watchlist)
-market_intel_service = get_market_intel_service()
-market_intel_service._db = db
-market_intel_service.set_services(
-    ai_assistant=assistant_service,
-    trading_bot=trading_bot,
-    perf_service=perf_service,
-    alpaca_service=alpaca_service,
-    news_service=news_service,
-    scanner_service=background_scanner,
-    smart_watchlist=smart_watchlist,
-    alert_system=alert_system
-)
-register_service('market_intel_service', market_intel_service)
-init_market_intel_router(market_intel_service)
-
-# ===================== LEARNING ARCHITECTURE (Phase 1) =====================
-# Initialize Three-Speed Learning Architecture services
-
-# 1. Graceful Degradation Service - handles service failures
-degradation_service = init_degradation_service()
-
-# 2. Execution Tracker - tracks trade execution quality
-execution_tracker = init_execution_tracker(db=db, alpaca_service=alpaca_service)
-
-# 3. Trade Context Service - captures market context at trade time
-trade_context_service = init_trade_context_service(
-    alpaca_service=alpaca_service,
-    ib_service=ib_service,
-    sector_service=sector_service,
-    news_service=news_service,
-    technical_service=realtime_tech_service,
-    sentiment_service=sentiment_service,
-    db=db
-)
-
-# 4. Learning Loop Service - orchestrates the learning system
-learning_loop_service = init_learning_loop_service(db=db)
-learning_loop_service.set_services(
-    context_service=trade_context_service,
-    execution_tracker=execution_tracker,
-    degradation_service=degradation_service
-)
-
-# Wire learning loop to trading bot for trade outcome recording
-trading_bot._learning_loop = learning_loop_service
-
-# Register learning services in registry for later use
-register_service('learning_loop_service', learning_loop_service)
-register_service('trade_context_service', trade_context_service)
-register_service('execution_tracker', execution_tracker)
-register_service('alpaca_service', alpaca_service)
-
-print("Three-Speed Learning Architecture Phase 1 initialized")
-print("  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
-print("  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
-
-# ===================== TQS ENGINE (Phase 2) =====================
-# Initialize Trade Quality Score engine with all 5 pillars
-
-tqs_engine = init_tqs_engine(
-    learning_loop=learning_loop_service,
-    alpaca_service=alpaca_service,
-    ib_service=ib_service,
-    technical_service=realtime_tech_service,
-    sector_service=sector_service,
-    scanner=background_scanner
-)
-
-print("TQS Engine (Phase 2) initialized")
-print("  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
-print("  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
-
-# Register TQS engine
-register_service('tqs_engine', tqs_engine)
-
-# Late injection of full services to orchestrator (now that TQS and scanner are ready)
-try:
-    _orchestrator.inject_services({
-        "ib_router": ib_service,
-        "scanner": background_scanner,
-        "order_queue": _order_queue,
-        "db": db,
-        "performance_analyzer": perf_service,
-        "technical_service": realtime_tech_service,
-        "sector_service": sector_service,
-        "sentiment_service": None,
-        "tqs_engine": tqs_engine,
-    })
-    print("[SERVER] Orchestrator fully wired with all services (scanner, TQS, technical)")
-except Exception as e:
-    print(f"[SERVER] Warning: Orchestrator late injection failed: {e}")
-
-# ===================== MARKET REGIME ENGINE (Phase 2.5) =====================
-# Initialize Market Regime Engine for market state detection
-
-market_regime_engine = MarketRegimeEngine(
-    alpaca_service=alpaca_service,
-    ib_service=ib_service,
-    db=db
-)
-init_market_regime_engine(market_regime_engine)
-register_service('market_regime_engine', market_regime_engine)
-
-print("Market Regime Engine (Phase 2.5) initialized")
-print("  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, internals")
-print("  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
-print("  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
-
-# Wire Market Regime to Trading Bot for regime-aware position sizing
-trading_bot.set_market_regime_engine(market_regime_engine)
-print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
-
-# Wire Market Regime to SentCom for regime-aware briefings and chat
-sentcom_svc = get_sentcom_service()
-sentcom_svc.inject_regime_engine(market_regime_engine)
-print("  - Wired to SentCom: Briefings and chat now use real market regime data")
-
-# Inject dependencies for regime performance endpoint
-from routers.market_regime import inject_dependencies as inject_market_regime_deps
-inject_market_regime_deps(db=db, trading_bot=trading_bot)
-print("  - Regime Performance: Personalized stats wired to /api/market-regime/performance")
-
-# Initialize Regime Performance Tracking Service
-regime_performance_service = init_regime_performance_service(db=db)
-init_regime_performance_router(regime_performance_service)
-register_service('regime_performance_service', regime_performance_service)
-
-# Wire Regime Performance Service to Trading Bot for trade logging
-trading_bot.set_regime_performance_service(regime_performance_service)
-print("  - Regime Performance Tracking: Strategy performance by market regime")
-print("  - Wired to Trading Bot: Closed trades logged with regime data")
-print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
-
-# Wire Trade Journal to Trading Bot for auto-recording
-trading_bot.set_trade_journal(trade_journal_service)
-trading_bot._snapshot_service = trade_snapshot_service
-print("  - Trade Journal: Auto-recording enabled for bot trades")
-print("  - Trade Snapshots: Auto-generation enabled for closed trades")
-
-# ===================== AI CONFIDENCE GATE =====================
-from services.ai_modules.confidence_gate import init_confidence_gate
-confidence_gate = init_confidence_gate(db=db)
-register_service('confidence_gate', confidence_gate)
-print("AI Confidence Gate initialized")
-print("  - Pre-trade intelligence: Regime + Model Consensus → GO/REDUCE/SKIP")
-print("  - Endpoints: /api/ai-training/confidence-gate/summary, decisions, stats")
-
-# Wire Confidence Gate to Trading Bot
-trading_bot.set_confidence_gate(confidence_gate)
-print("  - Wired to Trading Bot: Every trade now passes through the confidence gate")
-
-# ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
-# Initialize Context Awareness Service for smarter AI responses
-context_awareness_service = init_context_awareness_service(
-    regime_engine=market_regime_engine,
-    db=db
-)
-init_context_router(context_awareness_service)
-register_service('context_awareness', context_awareness_service)
-print("Context Awareness Service (Phase 2 AI) initialized")
-print("  - Time-of-day awareness: Pre-market, Open, Midday, Close, After-hours")
-print("  - Regime awareness: Integrated with Market Regime Engine")
-print("  - Position awareness: Real-time position and exposure tracking")
-print("  - Endpoints: /api/context/session, /api/context/regime, /api/context/full")
-
-# ===================== UNIFIED SMART STOP SYSTEM =====================
-# Initialize Smart Stop Service with all external services for intelligent analysis
-from services.smart_stop_service import get_smart_stop_service, init_smart_stop_service
-smart_stop_service = init_smart_stop_service(
-    regime_service=market_regime_engine,
-    sector_service=sector_service,
-    data_service=alpaca_service
-)
-# Inject MongoDB for historical data access (uses unified ib_historical_data collection)
-smart_stop_service.set_db(db)
-register_service('smart_stop_service', smart_stop_service)
-print("Unified Smart Stop System initialized")
-print("  - 6 Stop Modes: original, atr_dynamic, anti_hunt, volatility_adjusted, layered, chandelier")
-print("  - 8 Setup Rules: breakout, pullback, momentum, mean_reversion, gap_and_go, vwap_reversal, earnings_play, default")
-print("  - Volume Profile Analysis: POC, VAH/VAL, HVN/LVN detection (from ib_historical_data)")
-print("  - Sector Correlation: Relative strength-based adjustments")
-print("  - Stop Hunt Protection: Anti-hunt, layered stops, round number avoidance")
-print("  - Endpoints: /api/smart-stops/calculate, /api/smart-stops/intelligent-calculate, /api/smart-stops/analyze-trade")
-
-# ===================== FAST LEARNING (Phase 3A & 3B) =====================
-# Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
-
-# 1. Circuit Breaker Service - risk controls
-circuit_breaker_service = init_circuit_breaker_service(
-    learning_loop=learning_loop_service,
-    db=db
-)
-
-# 2. Position Sizer Service - TQS-based sizing
-position_sizer_service = init_position_sizer_service(
-    circuit_breaker=circuit_breaker_service,
-    learning_loop=learning_loop_service
-)
-
-# 3. Dynamic Threshold Service - context-aware gating
-dynamic_threshold_service = init_dynamic_threshold_service(
-    learning_loop=learning_loop_service
-)
-
-# 4. Health Monitor Service - system status
-health_monitor_service = init_health_monitor_service(
-    alpaca_service=alpaca_service,
-    ib_service=ib_service,
-    scanner=background_scanner,
-    tqs_engine=tqs_engine,
-    circuit_breaker=circuit_breaker_service,
-    learning_loop=learning_loop_service,
-    db=db
-)
-
-print("Fast Learning (Phase 3A & 3B) initialized")
-print("  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, tilt_detection")
-print("  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
-print("  - Dynamic Thresholds: regime-based, time-based, VIX-based")
-print("  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
-
-# ===================== RAG KNOWLEDGE BASE (Phase 4) =====================
-# Initialize Retrieval-Augmented Generation for personalized AI context
-
-try:
-    rag_service = init_rag_service(db=db, learning_loop=learning_loop_service)
-    register_service('rag_service', rag_service)
-    print("RAG Knowledge Base (Phase 4) initialized")
-    print("  - Vector Store: ChromaDB at /app/backend/data/chromadb")
-    print("  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
-    print("  - Endpoints: /api/rag/retrieve, /api/rag/augment-prompt, /api/rag/sync")
-except Exception as e:
-    print(f"RAG Knowledge Base initialization deferred: {e}")
-    print("  - Will initialize on first use (embedding model loading)")
-    rag_service = None
-
-# ===================== MEDIUM LEARNING (Phase 5) =====================
-# Initialize end-of-day analysis services
-
-try:
-    # Initialize all Medium Learning services with database
-    calibration_service = init_calibration_service(db=db)
-    
-    context_perf_service = get_context_performance_service()
-    context_perf_service.set_db(db)
-    
-    confirmation_service = get_confirmation_validator_service()
-    confirmation_service.set_db(db)
-    
-    playbook_perf_service = get_playbook_performance_service()
-    playbook_perf_service.set_db(db)
-    
-    edge_decay_service = get_edge_decay_service()
-    edge_decay_service.set_db(db)
-    
-    # Register Medium Learning services
-    register_service('calibration_service', calibration_service)
-    register_service('context_perf_service', context_perf_service)
-    register_service('confirmation_service', confirmation_service)
-    register_service('playbook_perf_service', playbook_perf_service)
-    register_service('edge_decay_service', edge_decay_service)
-    
-    print("Medium Learning (Phase 5) initialized")
-    print("  - Calibration Service: TQS threshold recommendations")
-    print("  - Context Performance: Setup+regime+time tracking")
-    print("  - Confirmation Validator: Signal effectiveness analysis")
-    print("  - Playbook Performance: Theory vs reality linkage")
-    print("  - Edge Decay: Strategy degradation detection")
-    print("  - Endpoints: /api/medium-learning/*")
-except Exception as e:
-    print(f"Medium Learning initialization deferred: {e}")
-    calibration_service = None
-
-# ===================== SLOW LEARNING (Phase 6) =====================
-# Initialize backtesting, historical data, and shadow mode services
-
-try:
-    # Initialize Historical Data Service
-    historical_data_service = init_historical_data_service(db=db, alpaca_service=alpaca_service)
-    
-    # Initialize Backtest Engine
-    backtest_engine = init_backtest_engine(
-        db=db,
-        historical_data_service=historical_data_service
-    )
-    
-    # Initialize Shadow Mode Service
-    shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
-    
-    # Initialize Advanced Backtest Engine (new!)
-    from services.slow_learning.advanced_backtest_engine import init_advanced_backtest_engine
-    advanced_backtest_engine = init_advanced_backtest_engine(
-        db=db,
-        historical_data_service=historical_data_service,
-        alpaca_service=alpaca_service,
-        tqs_engine=get_service_optional('tqs_engine')
-    )
-    init_advanced_backtest_router(advanced_backtest_engine)
-    
-    # Register Slow Learning services
-    register_service('shadow_mode_service', shadow_mode_service)
-    register_service('historical_data_service', historical_data_service)
-    register_service('backtest_engine', backtest_engine)
-    register_service('advanced_backtest_engine', advanced_backtest_engine)
-    
-    # Initialize Hybrid Data Service (IB primary, Alpaca fallback)
-    hybrid_data_service = init_hybrid_data_service(
-        db=db,
-        ib_service=ib_service,
-        alpaca_service=alpaca_service
-    )
-    init_hybrid_data_router(hybrid_data_service)
-    register_service('hybrid_data_service', hybrid_data_service)
-    
-    # Wire hybrid data service to advanced backtest engine
-    advanced_backtest_engine.set_hybrid_data_service(hybrid_data_service)
-    
-    # Initialize Market Scanner Service (full US market scanning)
-    market_scanner_service = init_market_scanner_service(
-        db=db,
-        hybrid_data_service=hybrid_data_service,
-        alpaca_service=alpaca_service
-    )
-    init_market_scanner_router(market_scanner_service)
-    register_service('market_scanner_service', market_scanner_service)
-    
-    print("Slow Learning (Phase 6) initialized")
-    print("  - Historical Data Service: Alpaca data download and storage")
-    print("  - Hybrid Data Service: IB primary, Alpaca fallback, MongoDB cache")
-    print("  - Market Scanner: Full US market strategy scanning")
-    print("  - Backtest Engine: Strategy backtesting on historical data")
-    print("  - Advanced Backtest Engine: Multi-strategy, Walk-forward, Monte Carlo")
-    print("  - Shadow Mode: Paper trading filter validation")
-    print("  - Endpoints: /api/slow-learning/*, /api/backtest/*, /api/data/*, /api/scanner/*")
-except Exception as e:
-    print(f"Slow Learning initialization deferred: {e}")
-    historical_data_service = None
-
-# ===================== LEARNING CONTEXT PROVIDER =====================
-# Provides personalized learning insights for AI coaching
-
-try:
-    from services.weekly_report_service import get_weekly_report_service
-    
-    learning_context_provider = init_learning_context_provider(
-        db=db,
-        calibration_service=get_service_optional('calibration_service'),
-        context_performance_service=get_service_optional('context_perf_service'),
-        confirmation_validator_service=get_service_optional('confirmation_service'),
-        playbook_performance_service=get_service_optional('playbook_perf_service'),
-        edge_decay_service=get_service_optional('edge_decay_service'),
-        rag_service=get_service_optional('rag_service')
-    )
-    register_service('learning_context_provider', learning_context_provider)
-    print("Learning Context Provider initialized")
-    print("  - Provides TQS + Learning insights for AI coaching")
-    # Wire to AI assistant
-    if assistant_service is not None:
-        assistant_service.set_learning_context_provider(learning_context_provider)
-    
-    # Wire learning services to SentCom (late injection)
-    try:
-        sentcom_svc = get_sentcom_service()
-        sentcom_svc.inject_learning_services(
-            learning_loop=learning_loop_service,
-            learning_context_provider=learning_context_provider
-        )
-        print("[SERVER] SentCom wired to Learning services")
-    except Exception as e:
-        print(f"[SERVER] SentCom learning wire deferred: {e}")
-        
-except Exception as e:
-    print(f"Learning Context Provider initialization deferred: {e}")
-    learning_context_provider = None
-
-# ===================== AI MODULES (Institutional-Grade) =====================
-# Initialize AI trading modules: Shadow Mode, Bull/Bear Debate, AI Risk Manager
-try:
-    # Initialize AI Module Configuration (toggles, settings)
-    ai_module_config = init_ai_module_config(db=db)
-    
-    # Initialize Shadow Tracker (logs all AI decisions for learning)
-    shadow_tracker = init_shadow_tracker(db=db, alpaca_service=alpaca_service)
-    
-    # Initialize Debate Agents (Bull/Bear deliberation)
-    # Get config dict from module settings
-    debate_config = ai_module_config.get_module_settings("debate_agents")
-    debate_config_dict = debate_config.custom_settings if debate_config else None
-    debate_agents = init_debate_agents(
-        llm_service=None,  # Uses rule-based for now, can add LLM later
-        learning_provider=learning_context_provider,
-        config=debate_config_dict
-    )
-    
-    # Initialize AgentDataService (NEW - breaks agent silos)
-    agent_data_service = init_agent_data_service(db=db)
-    debate_agents.set_data_service(agent_data_service)  # Connect to debate agents
-    
-    # Initialize AI Risk Manager
-    risk_config = ai_module_config.get_module_settings("ai_risk_manager")
-    risk_config_dict = risk_config.custom_settings if risk_config else None
-    ai_risk_manager = init_ai_risk_manager(config=risk_config_dict)
-    ai_risk_manager.set_services(
-        portfolio_service=None,  # Can wire later
-        learning_provider=learning_context_provider,
-        news_service=news_service
-    )
-    
-    # Initialize Institutional Flow Service (Phase 5 - FREE SEC EDGAR)
-    institutional_flow = init_institutional_flow_service(db=db)
-    
-    # Initialize Volume Anomaly Service (Phase 6 - Uses existing data)
-    volume_anomaly = init_volume_anomaly_service(db=db)
-    
-    # Initialize Time-Series AI (Phase 3 - LightGBM directional forecasting)
-    timeseries_ai = init_timeseries_ai(db=db, historical_service=alpaca_service)
-    
-    # Initialize AI Trade Consultation (wires modules into trading bot)
-    ai_consultation = init_ai_consultation(
-        module_config=ai_module_config,
-        shadow_tracker=shadow_tracker,
-        debate_agents=debate_agents,
-        risk_manager=ai_risk_manager,
-        institutional_flow=institutional_flow,
-        volume_anomaly=volume_anomaly,
-        timeseries_ai=timeseries_ai
-    )
-    
-    # Inject services into AI modules router (AFTER ai_consultation is created)
-    from routers.ai_modules import inject_timeseries_service
-    inject_ai_module_services(
-        ai_module_config, 
-        shadow_tracker, 
-        debate_agents, 
-        ai_risk_manager,
-        institutional_flow,
-        volume_anomaly,
-        ai_consultation,
-        agent_data_service  # NEW
-    )
-    inject_timeseries_service(timeseries_ai)
-    
-    # Register AI module services
-    register_service('ai_module_config', ai_module_config)
-    register_service('shadow_tracker', shadow_tracker)
-    register_service('debate_agents', debate_agents)
-    register_service('ai_risk_manager', ai_risk_manager)
-    register_service('institutional_flow', institutional_flow)
-    register_service('volume_anomaly', volume_anomaly)
-    register_service('ai_consultation', ai_consultation)
-    register_service('timeseries_ai', timeseries_ai)
-    register_service('agent_data_service', agent_data_service)  # NEW
-    
-    # Wire Time-Series AI model into Advanced Backtest Engine for AI comparison backtesting
-    if timeseries_ai is not None:
-        from services.ai_modules.timeseries_gbm import get_timeseries_model
-        ts_model = get_timeseries_model()
-        if ts_model is not None:
-            advanced_backtest_engine.set_timeseries_model(ts_model)
-            print("Time-Series AI model wired into Advanced Backtest Engine for AI comparison")
-    
-    print("AI Modules (Institutional-Grade) initialized")
-    print("  - Module Config: Toggle individual AI modules on/off")
-    print("  - Shadow Tracker: Logs all AI decisions without execution")
-    print("  - Debate Agents: Bull/Bear deliberation before trades")
-    print("  - AI Risk Manager: Multi-factor risk assessment")
-    print("  - Institutional Flow: 13F tracking, ownership context (FREE)")
-    print("  - Volume Anomaly: Z-score detection, accumulation/distribution")
-    print("  - Time-Series AI: LightGBM directional forecasting (Phase 3)")
-    print("  - Trade Consultation: Pre-trade AI analysis integration")
-    print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/timeseries/*")
-    
-except Exception as e:
-    print(f"AI Modules initialization deferred: {e}")
-    import traceback
-    traceback.print_exc()
-    ai_module_config = None
-    shadow_tracker = None
-    debate_agents = None
-    ai_risk_manager = None
-    institutional_flow = None
-    volume_anomaly = None
-    ai_consultation = None
-    timeseries_ai = None
-
-# Wire AI Consultation into Trading Bot (Phase 2 Integration)
-if ai_consultation is not None:
-    trading_bot.set_ai_consultation(ai_consultation)
-    print("AI Trade Consultation wired into Trading Bot")
-    print("  - Pre-trade analysis: Debate + Risk + Institutional + Volume")
-    print("  - Shadow Mode: AI analyzes but doesn't block trades (learning mode)")
-    print("  - Live Mode: AI can block/reduce trades based on analysis")
-
-# ===================== HISTORICAL SIMULATION ENGINE =====================
-# Full SentCom backtesting on historical data
-try:
-    from services.simulation_engine import init_simulation_engine, get_simulation_engine
-    from services.ai_modules.timeseries_gbm import get_timeseries_model
-    
-    simulation_engine = init_simulation_engine(
-        db=db,
-        alpaca_service=alpaca_service,
-        timeseries_model=get_timeseries_model() if timeseries_ai else None,
-        trade_consultation=ai_consultation,
-        scoring_engine=scoring_engine
-    )
-    
-    # Simulation engine initialization deferred to startup event (no running event loop at module load)
-    
-    # Initialize router (simulation engine unified into advanced backtest)
-    
-    register_service('simulation_engine', simulation_engine)
-    
-    # Wire simulation engine into the advanced backtest router (unified access)
-    init_advanced_backtest_router(advanced_backtest_engine, simulation_engine=simulation_engine)
-    
-    print("Historical Simulation Engine initialized")
-    print("  - Full SentCom bot backtesting on 1+ year of data")
-    print("  - Uses all AI agents (Debate, Risk, Time-Series, Institutional)")
-    print("  - Tracks all decisions for learning")
-    print("  - Endpoints: /api/simulation/*")
-except Exception as e:
-    print(f"Historical Simulation Engine initialization deferred: {e}")
-    import traceback
-    traceback.print_exc()
-    simulation_engine = None
-
-# ===================== LEARNING CONNECTORS =====================
-# Orchestrates data flow between learning systems
-
-try:
-    from services.learning_connectors_service import init_learning_connectors
-    from services.ai_modules.shadow_tracker import get_shadow_tracker
-    from services.learning_loop_service import get_learning_loop_service
-    
-    learning_connectors = init_learning_connectors(
-        db=db,
-        timeseries_ai=get_service_optional('timeseries_ai'),
-        shadow_tracker=get_shadow_tracker(),
-        learning_loop=get_learning_loop_service(),
-        scanner=get_service_optional('enhanced_scanner'),
-        simulation_engine=simulation_engine
-    )
-    
-    init_learning_connectors_router(
-        db=db,
-        timeseries_ai=get_service_optional('timeseries_ai'),
-        shadow_tracker=get_shadow_tracker(),
-        learning_loop=get_learning_loop_service(),
-        scanner=get_service_optional('enhanced_scanner'),
-        simulation_engine=simulation_engine,
-        dynamic_thresholds=get_service_optional('dynamic_threshold_service')
-    )
-    
-    register_service('learning_connectors', learning_connectors)
-    
-    print("Learning Connectors initialized")
-    print("  - Simulation → Time-Series Model retraining")
-    print("  - Shadow Tracker → Module weight calibration")
-    print("  - Alert Outcomes → Scanner threshold tuning (NOW AUTO-APPLIES)")
-    print("  - Endpoints: /api/learning-connectors/*")
-except Exception as e:
-    print(f"Learning Connectors initialization deferred: {e}")
-    import traceback
-    traceback.print_exc()
-
-# ===================== STRATEGY PROMOTION SERVICE =====================
-# Autonomous learning loop: SIMULATION → PAPER → LIVE
-
-try:
-    init_strategy_promotion_router(db=db)
-    strategy_promotion_service = get_strategy_promotion_service()
-    register_service('strategy_promotion', strategy_promotion_service)
-    
-    # Connect Strategy Promotion Service to Trading Bot
-    # This enables the SIM → PAPER → LIVE trade gating
-    trading_bot.set_strategy_promotion_service(strategy_promotion_service)
-    
-    print("Strategy Promotion Service initialized")
-    print("  - Manages strategy lifecycle: SIMULATION → PAPER → LIVE")
-    print("  - Auto-promotes strategies that prove profitable")
-    print("  - Connected to Trading Bot for trade execution gating")
-    print("  - Endpoints: /api/strategy-promotion/*")
-except Exception as e:
-    print(f"Strategy Promotion Service initialization deferred: {e}")
-    import traceback
-    traceback.print_exc()
-
-# ===================== IB HISTORICAL DATA COLLECTOR =====================
-# Systematically collects historical data from IB Gateway for learning
-
-try:
-    from services.ib_historical_collector import init_ib_collector
-    
-    # Get Alpaca service for fetching US stock universe
-    alpaca_historical_service = get_service_optional('alpaca_historical_service')
-    
-    ib_collector = init_ib_collector(
-        db=db, 
-        ib_service=ib_service,
-        alpaca_service=alpaca_historical_service or alpaca_service  # Use main alpaca_service as fallback
-    )
-    
-    # Wire market scanner for robust full-market symbol fetching
-    market_scanner = get_service_optional('market_scanner_service')
-    if market_scanner:
-        ib_collector.set_market_scanner(market_scanner)
-        print("  - Market scanner wired for full-market symbol universe")
-    
-    register_service('ib_collector', ib_collector)
-    
-    print("IB Historical Data Collector initialized")
-    print("  - Collects OHLCV data from IB Gateway")
-    print("  - Supports multiple bar sizes (1min, 5min, 1hour, 1day)")
-    print("  - Full market collection: ALL US stocks via Alpaca")
-    print("  - Stores in MongoDB for model training")
-    print("  - Endpoints: /api/ib-collector/*")
-except Exception as e:
-    print(f"IB Historical Collector initialization deferred: {e}")
-
-# ===================== DATA STORAGE MANAGER =====================
-# Ensures proper data persistence and indexing for all learning data
-
-try:
-    from services.data_storage_manager import init_storage_manager
-    
-    storage_manager = init_storage_manager(db=db)
-    register_service('storage_manager', storage_manager)
-    
-    print("Data Storage Manager initialized")
-    print("  - Manages 14 collections for learning data")
-    print("  - Ensures proper indexes for fast retrieval")
-    print("  - Endpoints: /api/data-storage/*")
-except Exception as e:
-    print(f"Data Storage Manager initialization deferred: {e}")
-
-# ===================== TRADING SCHEDULER =====================
-# Automated daily/weekly analysis tasks
-
-try:
-    from services.weekly_report_service import get_weekly_report_service, init_weekly_report_service
-    
-    # Initialize weekly report service with all required dependencies
-    weekly_report_svc = init_weekly_report_service(
-        db=db,
-        calibration_service=get_service_optional('calibration_service'),
-        context_performance_service=get_service_optional('context_perf_service'),
-        confirmation_validator_service=get_service_optional('confirmation_service'),
-        playbook_performance_service=get_service_optional('playbook_perf_service'),
-        edge_decay_service=get_service_optional('edge_decay_service')
-    )
-    
-    trading_scheduler = init_trading_scheduler(
-        db=db,
-        calibration_service=get_service_optional('calibration_service'),
-        context_performance_service=get_service_optional('context_perf_service'),
-        confirmation_validator_service=get_service_optional('confirmation_service'),
-        playbook_performance_service=get_service_optional('playbook_perf_service'),
-        edge_decay_service=get_service_optional('edge_decay_service'),
-        weekly_report_service=weekly_report_svc,
-        shadow_mode_service=get_service_optional('shadow_mode_service'),
-        shadow_tracker=shadow_tracker,
-        start=True  # Auto-start scheduler
-    )
-    print("Trading Scheduler initialized")
-    print("  - Daily Analysis: 4:00 PM ET (Mon-Fri)")
-    print("  - Weekly Report: Friday 4:30 PM ET")
-    print("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
-    print("  - Shadow Updates: Every 5 min (market hours)")
-    print("  - Endpoints: /api/scheduler/*")
-except Exception as e:
-    print(f"Trading Scheduler initialization deferred: {e}")
-    trading_scheduler = None
-
-# ===================== MULTI-AGENT SYSTEM =====================
-# Initialize the new multi-agent architecture for AI-powered trading
-try:
-    from services.order_queue_service import get_order_queue_service
-    
-    # Register perf_service for agent access
-    register_service('perf_service', perf_service)
-    
-    # Initialize agent system with all required services (using service registry)
-    init_agents_router({
-        "ib_router": ib_router,
-        "scanner": background_scanner,
-        "order_queue": get_order_queue_service(),
-        "db": db,
-        "performance_analyzer": perf_service,
-        "learning_service": get_service_optional('learning_loop_service'),
-        "trading_bot": trading_bot,
-        "alpaca_service": alpaca_service,
-        # Three-Speed Learning Architecture services
-        "learning_context_provider": get_service_optional('learning_context_provider'),
-        "learning_loop_service": get_service_optional('learning_loop_service'),
-        # TQS Engine for Analyst
-        "tqs_engine": get_service_optional('tqs_engine'),
-        # Phase 2 AI: Context Awareness Service
-        "context_awareness": get_service_optional('context_awareness')
-    })
-    print("Multi-Agent System initialized")
-    print("  - Agents: Router, Trade Executor, Coach, Analyst")
-    print("  - LLM: GPT-OSS cloud → llama3.5 8b fallback")
-    print("  - Learning: Integrated with Three-Speed Architecture")
-    print("  - TQS: Trade Quality Score integrated with Analyst")
-    print("  - Context Awareness: Phase 2 AI (time/regime/position aware)")
-    print("  - Endpoints: /api/agents/chat, /api/agents/status, /api/agents/metrics")
-except Exception as e:
-    print(f"Multi-Agent System initialization deferred: {e}")
-
-# ===================== STRATEGY HELPERS =====================
-# Strategies are now stored in MongoDB and accessed via strategy_service
-# Use strategy_service.get_all_strategies() to get all strategies
-# Use strategy_service.get_strategy_by_id(id) to get a specific strategy
-
-def get_all_strategies_cached():
-    """Get all strategies from database (cached in service)"""
-    return strategy_service.get_all_strategies()
-
-def get_strategy_by_id_cached(strategy_id: str):
-    """Get a strategy by ID from database"""
-    return strategy_service.get_strategy_by_id(strategy_id)
-
-# ===================== PYDANTIC MODELS =====================
 class StockQuote(BaseModel):
     symbol: str
     price: float
@@ -3469,9 +3582,14 @@ def _run_adv_recalc():
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background streaming task and background scanner"""
+    """Initialize services and start background streaming tasks"""
     
-    # Expand the default thread pool to prevent starvation from blocking I/O
+    # Step 1: Initialize all services (runs in thread pool to not block event loop)
+    print("[STARTUP] Initializing services...")
+    await asyncio.to_thread(_init_all_services)
+    print("[STARTUP] Services ready")
+    
+    # Step 2: Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=64))
     loop.slow_callback_duration = 0.5  # Log warning if a callback takes >500ms
