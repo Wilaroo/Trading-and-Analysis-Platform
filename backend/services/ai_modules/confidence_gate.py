@@ -194,16 +194,21 @@ class ConfidenceGate:
         if model_signals.get("has_models"):
             avg_confidence = model_signals.get("avg_confidence", 0)
             agreement_pct = model_signals.get("agreement_pct", 0)
+            models_count = model_signals.get("models_checked", 0)
 
             if agreement_pct >= 0.7:
                 confidence_points += 15
-                reasoning.append(f"Model consensus STRONG ({agreement_pct:.0%} agree, avg conf {avg_confidence:.0%}) (+15)")
+                reasoning.append(f"Model consensus STRONG ({agreement_pct:.0%} of {models_count} models, avg acc {avg_confidence:.0%}) (+15)")
             elif agreement_pct >= 0.5:
                 confidence_points += 8
-                reasoning.append(f"Model consensus MODERATE ({agreement_pct:.0%} agree) (+8)")
+                reasoning.append(f"Model consensus MODERATE ({agreement_pct:.0%} of {models_count} models) (+8)")
+            elif agreement_pct >= 0.3:
+                # Weak but present — neutral, don't penalize
+                reasoning.append(f"Model consensus MIXED ({agreement_pct:.0%} of {models_count} models, avg acc {avg_confidence:.0%}) — no score adjustment")
             else:
-                confidence_points -= 5  # Floor: max -5 for model disagreement
-                reasoning.append(f"Model consensus WEAK ({agreement_pct:.0%} agree) — models disagree (-5)")
+                # Very low agreement — small penalty
+                confidence_points -= 3
+                reasoning.append(f"Model consensus LOW ({agreement_pct:.0%} of {models_count} models) — weak signal (-3)")
         else:
             reasoning.append("No trained models for this setup — using regime + quality score only")
 
@@ -685,7 +690,9 @@ class ConfidenceGate:
                 }
 
             avg_accuracy = sum(accuracies) / len(accuracies)
-            high_confidence_models = sum(1 for a in accuracies if a > 0.55)
+            # For 3-class models (up/down/flat), random chance = 33%.
+            # Accuracy > 40% = meaningful edge. For 2-class, > 52% = edge.
+            high_confidence_models = sum(1 for a in accuracies if a > 0.40)
             agreement_pct = high_confidence_models / len(accuracies) if accuracies else 0
 
             # Categorize what voted
