@@ -111,12 +111,34 @@ def _get_portfolio_context() -> dict:
                         f"current ${mkt:.2f}, P&L ${pnl:+,.2f}"
                     )
                 parts.append(
-                    f"Current Positions ({len(pos_lines)}):\n"
+                    f"Current IB Positions ({len(positions)} total, showing {len(pos_lines)}):\n"
                     + "\n".join(pos_lines)
                     + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
                 )
             else:
                 parts.append(f"IB Connected: {connected}. No open positions currently.")
+            
+            # Bot-tracked trades with stops/targets
+            bot_trades = snapshot.get("bot_open_trades", [])
+            if bot_trades:
+                bot_lines = []
+                for bt in bot_trades[:10]:
+                    sym = bt.get("symbol", "?")
+                    d = bt.get("direction", "?")
+                    entry = bt.get("entry_price", 0)
+                    stop = bt.get("stop_price", 0)
+                    targets = bt.get("target_prices", [])
+                    setup = bt.get("setup_type", "")
+                    shares = bt.get("shares", 0)
+                    target_str = ", ".join([f"${t:.2f}" for t in targets[:2]]) if targets else "none"
+                    bot_lines.append(
+                        f"  {sym} ({d}): {shares} shares, entry=${entry:.2f}, "
+                        f"stop=${stop:.2f}, targets=[{target_str}] — {setup}"
+                    )
+                parts.append(
+                    f"Bot-Tracked Trades ({len(bot_trades)} open):\n"
+                    + "\n".join(bot_lines)
+                )
             
             if account:
                 netliq = account.get("NetLiquidation", account.get("net_liquidation", ""))

@@ -3086,6 +3086,56 @@ async def _streaming_cache_loop():
                     pass
                 
                 await asyncio.sleep(10)  # Refresh every 10s
+                
+                # Write IB live snapshot to MongoDB every ~30s (for chat_server context)
+                _ib_snapshot_counter = getattr(_streaming_cache_loop, '_snap_counter', 0) + 1
+                _streaming_cache_loop._snap_counter = _ib_snapshot_counter
+                if _ib_snapshot_counter % 3 == 0:  # Every 3rd loop = ~30s
+                    try:
+                        from routers.ib import get_pushed_positions, is_pusher_connected, get_pushed_quotes
+                        if is_pusher_connected():
+                            positions = get_pushed_positions() or []
+                            quotes = get_pushed_quotes() or {}
+                            # Also get bot open trades
+                            bot_positions = []
+                            try:
+                                from services.trading_bot_service import get_trading_bot_service
+                                tbot = get_trading_bot_service()
+                                if tbot:
+                                    for t in tbot._open_trades:
+                                        bot_positions.append({
+                                            "symbol": t.symbol,
+                                            "direction": t.direction.value if hasattr(t.direction, 'value') else str(t.direction),
+                                            "shares": t.shares,
+                                            "entry_price": t.entry_price,
+                                            "stop_price": t.stop_price,
+                                            "target_prices": t.target_prices,
+                                            "setup_type": t.setup_type,
+                                            "status": t.status.value if hasattr(t.status, 'value') else str(t.status),
+                                            "pnl": getattr(t, 'unrealized_pnl', 0),
+                                            "created_at": t.created_at,
+                                        })
+                            except Exception:
+                                pass
+                            
+                            snapshot_doc = {
+                                "_id": "current",
+                                "connected": True,
+                                "positions": positions,
+                                "quotes": {k: v for k, v in list(quotes.items())[:50]},
+                                "account": {},
+                                "bot_open_trades": bot_positions,
+                                "last_update": datetime.now(timezone.utc).isoformat(),
+                                "source": "main_backend_cache_loop",
+                            }
+                            await asyncio.to_thread(
+                                lambda: db["ib_live_snapshot"].replace_one(
+                                    {"_id": "current"}, snapshot_doc, upsert=True
+                                )
+                            )
+                    except Exception as e:
+                        if "get_pushed" not in str(e):
+                            logger.debug(f"IB snapshot write failed: {e}")
             elif has_clients and is_training:
                 # Minimal refresh during training (training status only)
                 try:
