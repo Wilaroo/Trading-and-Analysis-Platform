@@ -36,83 +36,33 @@ from services.market_context import get_market_context_service
 from services.trade_journal import get_trade_journal_service
 from services.catalyst_scoring import get_catalyst_scoring_service
 from services.trading_rules import get_trading_rules_engine
+# --- Tier 1 CORE routers (loaded eagerly for immediate availability) ---
 from routers.notifications import router as notifications_router, init_notification_service
 from routers.market_context import router as market_context_router, init_market_context_service
 from routers.trades import router as trades_router, init_trade_journal_service
-from routers.catalyst import router as catalyst_router, init_catalyst_service
-from routers.rules import router as rules_router, init_trading_rules
 from routers.ib import router as ib_router, init_ib_service
-# Refactored IB modules are available at routers.ib_modules but not yet active
-# from routers.ib_modules import router as ib_historical_router
 from routers.strategies import router as strategies_router, init_strategy_service
 from routers.scoring import router as scoring_router
 from routers.features import router as features_router
-from routers.knowledge import router as knowledge_router
-from routers.learning import router as learning_router
 from routers.quality import router as quality_router, init_quality_router
 from routers.assistant import router as assistant_router, init_assistant_router
-from routers.scheduler import router as scheduler_router, init_scheduler_router
-from routers.alpaca import router as alpaca_router, init_alpaca_router
-from routers.trade_history import router as trade_history_router
-from routers.scanner import router as scanner_router, init_scanner_router
-from routers.alerts import router as alerts_router, init_alerts_router
-from routers.technicals import router as technicals_router
+from routers.scheduler import init_scheduler_router
 from routers.live_scanner import router as live_scanner_router, init_live_scanner_router
-from routers.circuit_breaker import router as circuit_breaker_router, init_circuit_breaker_router
 from services.ollama_proxy_manager import ollama_proxy_manager, handle_ollama_proxy_websocket
 from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
-from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
-from routers.market_intel import router as market_intel_router, init_market_intel_router
-from routers.research import router as research_router
 from routers.config import router as config_router
-from routers.tqs_router import router as tqs_router
-from routers.risk_router import router as risk_router
-from routers.rag_router import router as rag_router
-from routers.medium_learning_router import router as medium_learning_router
-from routers.slow_learning_router import router as slow_learning_router
-from routers.scheduler_router import router as scheduler_router
-from routers.portfolio_awareness import router as portfolio_awareness_router
-from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
-from routers.sectors import router as sectors_router
-from routers.patterns import router as patterns_router
-from routers.sentiment import router as sentiment_router
-from routers.simulator import router as simulator_router
-from routers.ev_tracking import router as ev_tracking_router
-from routers.smb_router import router as smb_router
-from routers.journal_router import router as journal_router
-from routers.agents import router as agents_router, init_agents_router
-from routers.advanced_backtest_router import router as advanced_backtest_router, init_advanced_backtest_router
-from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
-from routers.market_scanner import router as market_scanner_router, init_market_scanner_router
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
-from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
-from routers.context_awareness import router as context_awareness_router, init_context_router
-from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
 from routers.sentcom import router as sentcom_router
 from routers.dynamic_risk_router import router as dynamic_risk_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
-from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
-from routers.ib_collector_router import router as ib_collector_router
-from routers.data_storage_router import router as data_storage_router
-from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
 from routers.scripts import router as scripts_router
 from routers.startup_status import router as startup_status_router
 from routers.focus_mode_router import router as focus_mode_router
 from routers.watchlist import router as watchlist_router, init_watchlist_router, get_watchlist as _watchlist_get_watchlist
-from routers.portfolio import router as portfolio_router, init_portfolio_router, get_portfolio as _portfolio_get_portfolio
-from routers.earnings_router import router as earnings_router, init_earnings_router
-from routers.ollama_proxy import (
-    router as ollama_proxy_router, init_ollama_proxy_router,
-    is_http_ollama_proxy_connected, call_ollama_via_http_proxy,
-    get_http_proxy_info, track_ollama_request
-)
-from routers.market_data import router as market_data_router, init_market_data_router
 from routers.system_router import router as system_router, init_system_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from routers.ai_training import router as ai_training_router
-from routers.short_data import router as short_data_router
-from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service, init_snapshot_assistant
-from routers.social_feed import router as social_feed_router, init_social_feed_router
+# --- Tier 2-4 routers deferred to _init_all_services() during startup ---
 from services.social_feed_service import init_social_feed_service
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
@@ -297,6 +247,7 @@ trading_scheduler = None
 volume_anomaly = None
 watchlists_col = None
 wave_scanner = None
+_deferred_routers = []
 
 def _init_all_services():
     """Initialize all services. Called from startup event after event loop exists."""
@@ -321,7 +272,62 @@ def _init_all_services():
         trade_context_service, trade_executor, trade_journal_service, trade_outcomes_col, \
         trade_snapshot_service, trader_profile_col, trading_bot, trading_intelligence, \
         trading_rules_engine, trading_scheduler, volume_anomaly, watchlists_col, \
-        wave_scanner
+        wave_scanner, _deferred_routers
+
+    # --- Lazy Tier 2-4 router imports (deferred from module level for faster boot) ---
+    # Tier 2: Active Trading
+    from routers.alerts import router as alerts_router, init_alerts_router
+    from routers.circuit_breaker import router as circuit_breaker_router, init_circuit_breaker_router
+    from routers.context_awareness import router as context_awareness_router, init_context_router
+    from routers.earnings_router import router as earnings_router, init_earnings_router
+    from routers.market_data import router as market_data_router, init_market_data_router
+    from routers.ollama_proxy import (
+        router as ollama_proxy_router, init_ollama_proxy_router,
+        is_http_ollama_proxy_connected
+    )
+    from routers.portfolio import router as portfolio_router, init_portfolio_router, get_portfolio as _portfolio_get_portfolio
+    from routers.portfolio_awareness import router as portfolio_awareness_router
+    from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
+    from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
+    from routers.risk_router import router as risk_router
+    from routers.short_data import router as short_data_router
+    from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
+    from routers.technicals import router as technicals_router
+    from routers.tqs_router import router as tqs_router
+    from routers.trade_snapshots import router as trade_snapshots_router, init_snapshot_service, init_snapshot_assistant
+    # Tier 3: NIA/Training
+    from routers.advanced_backtest_router import router as advanced_backtest_router, init_advanced_backtest_router
+    from routers.data_storage_router import router as data_storage_router
+    from routers.ev_tracking import router as ev_tracking_router
+    from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
+    from routers.ib_collector_router import router as ib_collector_router
+    from routers.learning import router as learning_router
+    from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
+    from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
+    from routers.market_scanner import router as market_scanner_router, init_market_scanner_router
+    from routers.medium_learning_router import router as medium_learning_router
+    from routers.scanner import router as scanner_router, init_scanner_router
+    from routers.scheduler_router import router as scheduler_router_ext
+    from routers.simulator import router as simulator_router
+    from routers.slow_learning_router import router as slow_learning_router
+    from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
+    # Tier 4: Utilities
+    from routers.agents import router as agents_router, init_agents_router
+    from routers.alpaca import router as alpaca_router, init_alpaca_router
+    from routers.catalyst import router as catalyst_router, init_catalyst_service
+    from routers.journal_router import router as journal_router
+    from routers.knowledge import router as knowledge_router
+    from routers.market_intel import router as market_intel_router, init_market_intel_router
+    from routers.patterns import router as patterns_router
+    from routers.rag_router import router as rag_router
+    from routers.research import router as research_router
+    from routers.rules import router as rules_router, init_trading_rules
+    from routers.sectors import router as sectors_router
+    from routers.sentiment import router as sentiment_router
+    from routers.smb_router import router as smb_router
+    from routers.social_feed import router as social_feed_router, init_social_feed_router
+    from routers.trade_history import router as trade_history_router
+    print(f'[INIT] Tier 2-4 router modules imported ({_time.time() - _server_start_time:.1f}s since boot)')
 
     stock_service = get_stock_service()
     notification_service = get_notification_service(db)
@@ -1316,80 +1322,57 @@ def _init_all_services():
     )
     print('[INIT] Router wiring complete')
 
+    # Collect Tier 2-4 routers for deferred registration in startup event
+    _deferred_routers = [
+        # Tier 2: Active Trading
+        alerts_router, circuit_breaker_router, context_awareness_router,
+        earnings_router, market_data_router, ollama_proxy_router,
+        portfolio_router, portfolio_awareness_router, quick_actions_router,
+        regime_performance_router, risk_router, short_data_router,
+        smart_stops_router, technicals_router, tqs_router, trade_snapshots_router,
+        # Tier 3: NIA/Training
+        advanced_backtest_router, data_storage_router, ev_tracking_router,
+        hybrid_data_router, ib_collector_router, learning_router,
+        learning_connectors_router, learning_dashboard_router,
+        market_scanner_router, medium_learning_router, scanner_router,
+        scheduler_router_ext, simulator_router, slow_learning_router,
+        strategy_promotion_router,
+        # Tier 4: Utilities
+        agents_router, alpaca_router, catalyst_router, journal_router,
+        knowledge_router, market_intel_router, patterns_router, rag_router,
+        research_router, rules_router, sectors_router, sentiment_router,
+        smb_router, social_feed_router, trade_history_router,
+    ]
+    print(f'[INIT] {len(_deferred_routers)} Tier 2-4 routers collected for deferred registration')
+
 
 # ===================== PYDANTIC MODELS =====================
 
-# Register all routers (module-level — routes exist before startup)
+# Register Tier 1 CORE routers (module-level — available before startup)
 app.include_router(notifications_router)
 app.include_router(market_context_router)
 app.include_router(trades_router)
-app.include_router(catalyst_router)
-app.include_router(rules_router)
 app.include_router(ib_router)
 app.include_router(strategies_router)
 app.include_router(scoring_router)
 app.include_router(features_router)
-app.include_router(knowledge_router)
-app.include_router(learning_router)
 app.include_router(quality_router)
-app.include_router(alpaca_router)
 app.include_router(assistant_router)
-app.include_router(scheduler_router)
-app.include_router(trade_history_router)
-app.include_router(scanner_router)
-app.include_router(alerts_router)
-app.include_router(technicals_router)
 app.include_router(live_scanner_router)
 app.include_router(trading_bot_router)
-app.include_router(learning_dashboard_router)
-app.include_router(market_intel_router)
-app.include_router(research_router)
 app.include_router(config_router)
-app.include_router(portfolio_awareness_router)
-app.include_router(quick_actions_router)
-app.include_router(sectors_router)
-app.include_router(patterns_router)
-app.include_router(sentiment_router)
-app.include_router(simulator_router)
-app.include_router(ev_tracking_router)
-app.include_router(smb_router)
-app.include_router(journal_router)
-app.include_router(tqs_router)
-app.include_router(risk_router)
-app.include_router(rag_router)
-app.include_router(medium_learning_router)
-app.include_router(slow_learning_router)
-app.include_router(scheduler_router)
-app.include_router(circuit_breaker_router)
-app.include_router(agents_router)  # Multi-agent system
-app.include_router(advanced_backtest_router)  # Advanced backtesting system
-app.include_router(hybrid_data_router)  # Hybrid IB/Alpaca data service
-app.include_router(market_scanner_router)  # Market-wide strategy scanner
-app.include_router(market_regime_router)  # Market regime engine
-app.include_router(regime_performance_router)  # Regime-based performance tracking
-app.include_router(context_awareness_router)  # Phase 2 AI context awareness
-app.include_router(smart_stops_router)  # Unified Smart Stop System
-app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
-app.include_router(dynamic_risk_router)  # Dynamic Risk Management Engine
-app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
-app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
-app.include_router(ib_collector_router)  # IB Historical Data Collector
-app.include_router(ai_training_router)  # AI Bulk Training Pipeline
-app.include_router(short_data_router)  # Short Interest Data (IB + FINRA)
-app.include_router(trade_snapshots_router)  # Trade Chart Snapshots with AI Annotations
-app.include_router(social_feed_router)  # Twitter/X Social Feed & AI Sentiment
-app.include_router(data_storage_router)  # Data Storage Management
-app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
-app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
-app.include_router(startup_status_router)  # Startup Status Dashboard
-app.include_router(focus_mode_router)  # Focus Mode & Job Queue System
-app.include_router(watchlist_router)  # Watchlist CRUD (extracted from server.py)
-app.include_router(portfolio_router)  # Portfolio positions (extracted from server.py)
-app.include_router(earnings_router)  # Earnings calendar & analysis (extracted from server.py)
-app.include_router(ollama_proxy_router)  # Ollama proxy HTTP endpoints (extracted from server.py)
-app.include_router(market_data_router)  # Market data, quotes, fundamentals (extracted from server.py)
-app.include_router(system_router)  # System health, startup-check, consolidated-status, LLM status, system monitor
-app.include_router(dashboard_router)  # Dashboard stats/init, alerts CRUD, scanner, wave-scanner, universe
+app.include_router(market_regime_router)
+app.include_router(sentcom_router)
+app.include_router(dynamic_risk_router)
+app.include_router(ai_modules_router)
+app.include_router(ai_training_router)
+app.include_router(scripts_router)
+app.include_router(startup_status_router)
+app.include_router(focus_mode_router)
+app.include_router(watchlist_router)
+app.include_router(system_router)
+app.include_router(dashboard_router)
+# Tier 2-4 routers registered during startup via _deferred_routers
 
 class StockQuote(BaseModel):
     symbol: str
@@ -3583,7 +3566,10 @@ async def startup_event():
     # Step 1: Initialize all services (runs in thread pool to not block event loop)
     print("[STARTUP] Initializing services...")
     await asyncio.to_thread(_init_all_services)
-    print("[STARTUP] Services ready")
+    # Register Tier 2-4 routers (deferred from module level for faster boot)
+    for _r in _deferred_routers:
+        app.include_router(_r)
+    print(f"[STARTUP] Services ready — {len(_deferred_routers)} deferred routers registered")
     
     # Step 2: Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()

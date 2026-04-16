@@ -36,6 +36,13 @@
 - Removed duplicate module-level `init_*_router()` calls (lines 2646-2692) that referenced locally-scoped variables from `_init_all_services()`, causing `NameError` on boot.
 - `server.py` now compiles cleanly; all router init calls exist only inside `_init_all_services()`.
 
+### Tier 2-4 Lazy Router Loading (Feb 2026 — DONE)
+- 24 Tier 1 CORE routers stay at module level (immediate availability for health checks, core UI).
+- 46 Tier 2-4 routers (Active Trading, NIA/Training, Utilities) deferred to `_init_all_services()`.
+- Router modules imported lazily inside `_init_all_services()`, registered during startup event via `_deferred_routers` list.
+- All 46 deferred routers register via `app.include_router()` after `asyncio.to_thread(_init_all_services)` returns.
+- Boot time improvement: heavy router modules (and their transitive dependencies) no longer block initial module load.
+
 ## Upcoming Tasks
 - Phase 5e: RL Position Sizer
 - Phase 6: Distributed PC Worker
