@@ -417,8 +417,9 @@ async def is_training_active():
 
 
 @router.get("/models")
-async def list_trained_models():
-    """List ALL trained models across all collections (XGBoost, CNN, DL)."""
+def list_trained_models():
+    """List ALL trained models across all collections (XGBoost, CNN, DL).
+    Sync handler — runs in thread pool, doesn't block event loop."""
     try:
         from server import db as mongo_db
         if mongo_db is None:
@@ -471,10 +472,10 @@ async def list_trained_models():
 
 
 @router.get("/data-readiness")
-async def check_data_readiness():
+def check_data_readiness():
     """
     Check how much training data is available per bar size.
-    Helps decide when to start training.
+    Sync handler — runs in thread pool, doesn't block event loop.
     """
     try:
         from server import db as mongo_db
@@ -516,7 +517,7 @@ async def check_data_readiness():
 
 
 @router.get("/regime-live")
-async def get_live_regime():
+def get_live_regime():
     """
     Get live market regime classification from SPY, QQQ, IWM daily bars.
     Returns the current regime (bull/bear/range/high_vol) plus per-index metrics.
@@ -624,15 +625,15 @@ async def get_live_regime():
 
 
 @router.get("/model-inventory")
-async def get_model_inventory():
+def get_model_inventory():
     """
     Get complete inventory of all model definitions with their training status.
-    Shows which models are defined, which are trained, and their accuracy.
+    Sync handler — runs in thread pool, doesn't block event loop.
     """
     try:
         from server import db as mongo_db
 
-        # Get trained models from DB (run in thread to avoid blocking event loop)
+        # Get trained models from DB
         trained_models = {}
         if mongo_db is not None:
             def _fetch_trained_models():
@@ -647,7 +648,7 @@ async def get_model_inventory():
                             "promoted_at": doc.get("saved_at", doc.get("promoted_at", "")),
                         }
                 return models
-            trained_models = await asyncio.to_thread(_fetch_trained_models)
+            trained_models = _fetch_trained_models()
 
         from services.ai_modules.volatility_model import VOL_MODEL_CONFIGS
         from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS

@@ -3445,7 +3445,7 @@ async def startup_event():
     
     # Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()
-    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=64))
     loop.slow_callback_duration = 0.5  # Log warning if a callback takes >500ms
     
     # Start WebSocket streaming tasks (lightweight, non-blocking)
@@ -4089,4 +4089,4 @@ async def get_script(script_name: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8001, backlog=4096, limit_concurrency=200)
