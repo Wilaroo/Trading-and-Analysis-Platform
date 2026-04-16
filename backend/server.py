@@ -4108,4 +4108,4 @@ async def get_script(script_name: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001, backlog=4096, limit_concurrency=200)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
