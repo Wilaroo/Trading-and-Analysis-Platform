@@ -3614,6 +3614,19 @@ async def startup_event():
     
     asyncio.create_task(_deferred_heavy_init())
     print("Heavy initialization deferred to background task")
+    
+    # === DEBUG: Log event loop health after init ===
+    async def _debug_event_loop():
+        import time
+        await asyncio.sleep(15)
+        while True:
+            t0 = time.monotonic()
+            await asyncio.sleep(0)
+            lag = time.monotonic() - t0
+            conns = len(manager.active_connections)
+            print(f"[DEBUG] Event loop lag: {lag*1000:.0f}ms, WS clients: {conns}, cache_refresh: {_streaming_cache.get('last_refresh', 'never')}")
+            await asyncio.sleep(10)
+    asyncio.create_task(_debug_event_loop())
 
 
 def _kill_orphan_processes():
