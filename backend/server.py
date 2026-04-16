@@ -194,6 +194,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Ultra-minimal diagnostic — bypasses all routers/middleware
+@app.get("/ping")
+async def ping():
+    return {"pong": True}
+
+
 # MongoDB connection
 mongo_client = MongoClient(os.environ.get("MONGO_URL"))
 db = mongo_client[os.environ.get("DB_NAME", "tradecommand")]
