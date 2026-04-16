@@ -455,17 +455,17 @@ class ConfidenceGate:
             go_threshold = cal["go"]
             reduce_threshold = cal["reduce"]
         elif mode == TradingMode.AGGRESSIVE:
-            go_threshold = 20
-            reduce_threshold = 10
+            go_threshold = 28
+            reduce_threshold = 18
         elif mode == TradingMode.NORMAL:
-            go_threshold = 35
-            reduce_threshold = 20
+            go_threshold = 38
+            reduce_threshold = 25
         elif mode == TradingMode.CAUTIOUS:
             go_threshold = 50
-            reduce_threshold = 30
+            reduce_threshold = 35
         else:  # DEFENSIVE
             go_threshold = 60
-            reduce_threshold = 40
+            reduce_threshold = 45
 
         if confidence_score >= go_threshold:
             decision = "GO"

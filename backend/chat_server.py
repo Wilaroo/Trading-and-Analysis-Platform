@@ -93,7 +93,9 @@ def _get_portfolio_context() -> dict:
             if positions:
                 pos_lines = []
                 total_pnl = 0
-                for p in positions[:10]:
+                winners = []
+                losers = []
+                for p in positions:  # ALL positions, not just top 10
                     symbol = p.get("symbol", "?")
                     qty = p.get("quantity", p.get("position", 0)) or 0
                     direction = "LONG" if qty > 0 else "SHORT"
@@ -106,15 +108,25 @@ def _get_portfolio_context() -> dict:
                     if quote:
                         mkt = quote.get("last", quote.get("close", mkt)) or mkt
                     
+                    pnl_pct = ((mkt - avg) / avg * 100) if avg > 0 else 0
+                    if direction == "SHORT":
+                        pnl_pct = -pnl_pct
+                    
                     pos_lines.append(
-                        f"  {symbol} ({direction}): {abs(qty):.0f} shares @ ${avg:.2f}, "
-                        f"current ${mkt:.2f}, P&L ${pnl:+,.2f}"
+                        f"  {symbol} ({direction}): {abs(qty):.0f} sh @ ${avg:.2f}, "
+                        f"now ${mkt:.2f}, P&L ${pnl:+,.2f} ({pnl_pct:+.1f}%)"
                     )
-                parts.append(
-                    f"Current IB Positions ({len(positions)} total, showing {len(pos_lines)}):\n"
-                    + "\n".join(pos_lines)
-                    + f"\n  Total Unrealized P&L: ${total_pnl:+,.2f}"
-                )
+                    if pnl > 0:
+                        winners.append(f"{symbol} +${pnl:,.0f}")
+                    elif pnl < -500:
+                        losers.append(f"{symbol} ${pnl:,.0f}")
+                
+                summary = f"Current Positions ({len(positions)} total), Unrealized P&L: ${total_pnl:+,.2f}"
+                if winners:
+                    summary += f"\n  Winners: {', '.join(winners[:5])}"
+                if losers:
+                    summary += f"\n  Losers: {', '.join(losers[:5])}"
+                parts.append(summary + "\n" + "\n".join(pos_lines))
             else:
                 parts.append(f"IB Connected: {connected}. No open positions currently.")
             
@@ -189,7 +201,7 @@ def _get_portfolio_context() -> dict:
     except Exception as e:
         debug["regime_error"] = str(e)
 
-    # 4. Recent trade history (from MongoDB)
+    # 4. Recent trade history (from MongoDB — both trades and bot_trades)
     try:
         recent_trades = list(
             db["trades"]
@@ -199,25 +211,52 @@ def _get_portfolio_context() -> dict:
             .sort("entry_time", -1)
             .limit(10)
         )
-        debug["trades_count"] = len(recent_trades)
-        if recent_trades:
+        # Also get recent bot_trades for richer history
+        bot_closed = list(
+            db["bot_trades"]
+            .find({"status": {"$in": ["closed", "stopped_out", "target_hit"]}},
+                  {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
+                   "exit_price": 1, "pnl": 1, "status": 1, "setup_type": 1,
+                   "close_reason": 1, "created_at": 1})
+            .sort("created_at", -1)
+            .limit(15)
+        )
+        all_trades = recent_trades + bot_closed
+        debug["trades_count"] = len(all_trades)
+        if all_trades:
+            # Deduplicate by symbol+status
+            seen = set()
             trade_lines = []
-            wins = sum(1 for t in recent_trades if (t.get("pnl") or 0) > 0)
-            total = len(recent_trades)
-            for t in recent_trades[:5]:
+            wins = 0
+            losses = 0
+            total_pnl_closed = 0
+            for t in all_trades:
                 sym = t.get("symbol", "?")
-                direction = t.get("direction", "?") or "?"
                 pnl = t.get("pnl") or 0
+                key = f"{sym}_{t.get('status')}_{pnl}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                direction = t.get("direction", "?") or "?"
                 status = t.get("status", "?") or "?"
                 setup = t.get("setup_type", "") or ""
+                close_reason = t.get("close_reason", "") or ""
+                total_pnl_closed += pnl
+                if pnl > 0:
+                    wins += 1
+                elif pnl < 0:
+                    losses += 1
                 trade_lines.append(
                     f"  {sym} ({direction}): ${pnl:+,.2f} [{status}]"
                     + (f" — {setup}" if setup else "")
+                    + (f" ({close_reason})" if close_reason else "")
                 )
+            total = wins + losses
             wr = (wins / total * 100) if total > 0 else 0
             parts.append(
-                f"Recent Trades (last {total}): {wins}W / {total-wins}L "
-                f"({wr:.0f}% win rate)\n" + "\n".join(trade_lines)
+                f"Closed Trades ({total} recent): {wins}W / {losses}L "
+                f"({wr:.0f}% win rate), net ${total_pnl_closed:+,.2f}\n"
+                + "\n".join(trade_lines[:10])
             )
     except Exception as e:
         debug["trades_error"] = str(e)

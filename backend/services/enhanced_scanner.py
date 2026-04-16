@@ -3959,7 +3959,6 @@ class EnhancedBackgroundScanner:
         bb_width = (bb_upper - bb_lower) / sma20 * 100 if sma20 > 0 else 999
         
         # Keltner Channels (20-period EMA + 1.5 * ATR)
-        # Simple ATR calculation
         atrs = []
         for i in range(1, min(15, len(bars))):
             tr = max(
@@ -3974,8 +3973,27 @@ class EnhancedBackgroundScanner:
         
         # Squeeze: BB inside KC
         is_squeeze = bb_upper < kc_upper and bb_lower > kc_lower
-        if not is_squeeze or bb_width > 15:
+        if not is_squeeze:
             return None
+        
+        # Adaptive BB width threshold: compare to stock's own historical BB width
+        # Calculate median BB width over last 40 bars
+        hist_widths = []
+        for i in range(20, min(40, len(closes))):
+            s = sum(closes[i-20:i]) / 20
+            sd = (sum((c - s) ** 2 for c in closes[i-20:i]) / 20) ** 0.5
+            w = (4 * sd) / s * 100 if s > 0 else 0
+            hist_widths.append(w)
+        
+        if hist_widths:
+            median_width = sorted(hist_widths)[len(hist_widths) // 2]
+            # Squeeze is significant if current width is < 70% of historical median
+            if bb_width > median_width * 0.7:
+                return None  # Not tight enough relative to this stock's norm
+        else:
+            # Fallback: absolute threshold
+            if bb_width > 15:
+                return None
         
         # Determine direction from momentum (close vs SMA)
         momentum = closes[-1] - sma20
@@ -4092,12 +4110,24 @@ class EnhancedBackgroundScanner:
         # Need to be above the 20-day high
         breakout_pct = (current - prev_high) / prev_high * 100 if prev_high > 0 else 0
         if breakout_pct < 0.5 or breakout_pct > 8:
-            return None  # Not a breakout or too extended
+            return None
         
-        # Need above-average volume
+        # Adaptive volume threshold: use ATR-based volatility to adjust
+        # Higher volatility stocks need more volume confirmation
+        atrs = []
+        lows = [b["low"] for b in bars]
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i+1)]), abs(lows[-(i)] - closes[-(i+1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+        atr_pct = (atr / current * 100) if current > 0 else 2
+        
+        # Low vol stocks (ATR < 2%) need 1.5x vol; high vol (ATR > 4%) need 1.2x
+        vol_threshold = 1.5 if atr_pct < 2 else 1.3 if atr_pct < 4 else 1.2
+        
         rvol = today_vol / avg_vol if avg_vol > 0 else 0
-        if rvol < 1.3:
-            return None  # Weak volume
+        if rvol < vol_threshold:
+            return None
         
         # ATR for stop
         lows = [b["low"] for b in bars]
@@ -4141,6 +4171,10 @@ class EnhancedBackgroundScanner:
         lows = [b["low"] for b in bars]
         volumes = [b["volume"] for b in bars]
         
+        # Calculate the stock's typical daily range for context
+        daily_ranges = [(highs[i] - lows[i]) / closes[i] * 100 for i in range(-40, -1) if closes[i] > 0]
+        avg_daily_range = sum(daily_ranges) / len(daily_ranges) if daily_ranges else 2
+        
         # Check for tight range in last 20 bars (base)
         base_highs = highs[-20:-1]
         base_lows = lows[-20:-1]
@@ -4148,8 +4182,10 @@ class EnhancedBackgroundScanner:
         base_low = min(base_lows)
         base_range_pct = (base_high - base_low) / base_low * 100 if base_low > 0 else 999
         
-        # Base should be tight (< 15% range over 20 days)
-        if base_range_pct > 15 or base_range_pct < 2:
+        # Adaptive tightness: base range should be < 5x the avg daily range
+        # (e.g., if avg daily range is 3%, base should be < 15%)
+        max_base_range = max(8, avg_daily_range * 5)
+        if base_range_pct > max_base_range or base_range_pct < 2:
             return None
         
         current = closes[-1]
