@@ -229,10 +229,8 @@ scoring_engine = get_scoring_engine(db)
 feature_engine = get_feature_engine()
 quality_service = init_quality_service(ib_service, db)
 
-# Initialize End-of-Day Generation Service (for automatic DRC & Playbook generation at 4:30 PM ET)
+# Initialize End-of-Day Generation Service (scheduler starts in startup event)
 eod_service = get_eod_service(db)
-eod_service.start_scheduler()
-print("End-of-Day auto-generation scheduler started (4:30 PM ET weekdays)")
 
 # Initialize Alpaca service early and wire it to stock_service
 alpaca_service = init_alpaca_service()
@@ -272,7 +270,7 @@ init_assistant_router(assistant_service)
 init_snapshot_assistant(assistant_service)  # Must come after assistant_service is created
 news_service = init_news_service(ib_service)
 scheduler_service = init_scheduler_service()
-scheduler_service.start()
+# Scheduler starts in startup event (needs event loop for APScheduler)
 init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
 init_alpaca_router(alpaca_service)
 
@@ -2856,16 +2854,32 @@ def _compute_all_sync_data(last_notification_time_iso: str = None):
     except Exception:
         result["market_intel"] = {}
     
-    # --- Data Collection Coverage (MongoDB aggregation) ---
+    # --- Data Collection Coverage (MongoDB aggregation — cached in summary collection) ---
     try:
-        coverage_result = list(db["ib_historical_data"].aggregate([
-            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-            {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
-        ]))
-        coverage = {}
-        for doc in coverage_result:
-            coverage = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
-        result["data_collection_coverage"] = coverage
+        # Check summary collection first (pre-computed, fast)
+        summary = db["ib_data_summary"].find_one({"_id": "coverage"})
+        if summary:
+            result["data_collection_coverage"] = {
+                "symbols": summary.get("symbols", 0),
+                "total_bars": summary.get("total_bars", 0),
+                "last_computed": summary.get("last_computed"),
+            }
+        else:
+            # Fallback: compute and cache (only runs once, then summary is used)
+            coverage_result = list(db["ib_historical_data"].aggregate([
+                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                {"$group": {"_id": None, "symbols": {"$sum": 1}, "total_bars": {"$sum": "$count"}}}
+            ]))
+            coverage = {}
+            for doc in coverage_result:
+                coverage = {"symbols": doc.get("symbols", 0), "total_bars": doc.get("total_bars", 0)}
+            result["data_collection_coverage"] = coverage
+            # Cache the result
+            db["ib_data_summary"].update_one(
+                {"_id": "coverage"},
+                {"$set": {**coverage, "last_computed": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
     except Exception:
         result["data_collection_coverage"] = {}
     
@@ -3622,6 +3636,18 @@ async def startup_event():
     
     asyncio.create_task(_deferred_heavy_init())
     print("Heavy initialization deferred to background task")
+    
+    # Start schedulers here (needs event loop for APScheduler)
+    try:
+        eod_service.start_scheduler()
+        print("End-of-day generation scheduler started")
+    except Exception as e:
+        print(f"[WARN] EOD scheduler failed: {e}")
+    try:
+        scheduler_service.start()
+        print("Trading scheduler started")
+    except Exception as e:
+        print(f"[WARN] Trading scheduler failed: {e}")
     
     # === DEBUG: Log event loop health after init ===
     async def _debug_event_loop():

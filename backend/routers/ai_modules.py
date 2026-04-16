@@ -17,10 +17,15 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import logging
 import asyncio
+import time as _time
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai-modules", tags=["ai-modules"])
+
+# Simple response cache for expensive endpoints (30s TTL)
+_endpoint_cache = {}
+_CACHE_TTL = 30
 
 # Service references (injected at startup)
 _module_config = None
@@ -467,15 +472,12 @@ async def get_agent_data_service_status():
 
 @router.get("/report-card")
 async def get_trading_report_card(days: int = 90):
-    """
-    Get your personal Trading Report Card.
+    """Get your personal Trading Report Card — cached 30s."""
+    cache_key = f"report_card_{days}"
+    cached = _endpoint_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
     
-    Shows your historical performance by symbol, setup type, and conditions.
-    This is the same data that AI agents use to make decisions about your trades.
-    
-    Args:
-        days: Number of days of history to analyze (default 90)
-    """
     if not _agent_data_service:
         return {
             "success": False,
@@ -564,7 +566,9 @@ async def get_trading_report_card(days: int = 90):
                 "has_data": user_stats.get("total_trades", 0) > 0
             }
 
-        return await asyncio.to_thread(_build_report_card)
+        result = await asyncio.to_thread(_build_report_card)
+        _endpoint_cache[cache_key] = {"data": result, "ts": _time.time()}
+        return result
         
     except Exception as e:
         logger.error(f"Error generating report card: {e}")
@@ -710,14 +714,21 @@ async def track_pending_outcomes():
 
 @router.get("/shadow/stats")
 def get_shadow_stats():
-    """Get quick stats from shadow tracker"""
+    """Get quick stats from shadow tracker — cached 30s"""
+    cache_key = "shadow_stats"
+    cached = _endpoint_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+    
     if not _shadow_tracker:
         raise HTTPException(status_code=503, detail="Shadow tracker not initialized")
     
-    return {
+    result = {
         "success": True,
         "stats": _shadow_tracker.get_stats()
     }
+    _endpoint_cache[cache_key] = {"data": result, "ts": _time.time()}
+    return result
 
 
 # =====================
