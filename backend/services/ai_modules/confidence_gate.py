@@ -591,28 +591,27 @@ class ConfidenceGate:
             for mb in model_bases:
                 # Setup-specific models (e.g., vwap_5min_predictor, breakout_1min_predictor)
                 relevant_patterns.append(
-                    {"model_name": {"$regex": f"^{mb.lower()}_.*_predictor$", "$options": "i"}}
+                    {"name": {"$regex": f"^{mb.lower()}_.*_predictor$", "$options": "i"}}
                 )
                 # Short-specific variant if this is a short trade
                 if is_short and not mb.startswith("SHORT_"):
                     relevant_patterns.append(
-                        {"model_name": {"$regex": f"^short_{mb.lower()}_.*_predictor$", "$options": "i"}}
+                        {"name": {"$regex": f"^short_{mb.lower()}_.*_predictor$", "$options": "i"}}
                     )
             
             # General direction model (always relevant — it's direction-agnostic)
             relevant_patterns.append(
-                {"model_name": {"$regex": "^direction_.*_predictor$", "$options": "i"}}
+                {"name": {"$regex": "^direction_.*_predictor$", "$options": "i"}}
             )
             
             # Ensemble model (cross-timeframe consensus — always relevant)
             relevant_patterns.append(
-                {"model_name": {"$regex": "^ensemble_", "$options": "i"}}
+                {"name": {"$regex": "^ensemble_", "$options": "i"}}
             )
 
             models = list(self._db["timeseries_models"].find(
                 {"$or": relevant_patterns},
-                {"_id": 0, "model_name": 1, "accuracy": 1, "training_samples": 1, 
-                 "setup_type": 1, "bar_size": 1}
+                {"_id": 0, "name": 1, "metrics": 1, "version": 1}
             ))
 
             if not models:
@@ -622,41 +621,54 @@ class ConfidenceGate:
             # E.g., if trade is LONG, exclude any model with "short_" prefix
             filtered_models = []
             for m in models:
-                name = m.get("model_name", "").lower()
+                mname = m.get("name", "").lower()
                 if is_short:
-                    # For short trades: include short-specific + general, exclude long-specific
-                    # General models (direction_, ensemble_) are always included
-                    if name.startswith("short_") or name.startswith("direction_") or name.startswith("ensemble_"):
+                    if mname.startswith("short_") or mname.startswith("direction_") or mname.startswith("ensemble_"):
                         filtered_models.append(m)
-                    elif not any(name.startswith(f"{s.lower()}_") for s in [
+                    elif not any(mname.startswith(f"{s.lower()}_") for s in [
                         "scalp", "orb", "gap_and_go", "vwap", "breakout", "range",
                         "mean_reversion", "reversal", "trend_continuation", "momentum"
                     ]):
-                        # Not a known long setup prefix — include (could be general)
                         filtered_models.append(m)
-                    # else: it's a long setup model, skip it
                 else:
-                    # For long trades: include long-specific + general, exclude short-specific
-                    if not name.startswith("short_"):
+                    if not mname.startswith("short_"):
                         filtered_models.append(m)
 
             if not filtered_models:
                 return {"has_models": False, "summary": f"No relevant models for {base_setup} {direction}"}
 
-            # Calculate consensus from filtered models
-            accuracies = [m.get("accuracy", 0) for m in filtered_models if m.get("accuracy", 0) > 0]
+            # Extract accuracy from metrics sub-document (metrics.accuracy)
+            accuracies = []
+            for m in filtered_models:
+                metrics = m.get("metrics", {}) or {}
+                acc = metrics.get("accuracy", 0) or 0
+                if acc > 0:
+                    accuracies.append(acc)
 
             if not accuracies:
-                return {"has_models": False, "summary": "Models exist but no accuracy data"}
+                # Models exist but haven't been evaluated yet — treat as available with baseline
+                return {
+                    "has_models": True,
+                    "models_checked": len(filtered_models),
+                    "models_with_accuracy": 0,
+                    "avg_confidence": 0.5,  # Baseline: no data = neutral
+                    "agreement_pct": 0.5,
+                    "high_confidence_count": 0,
+                    "setup_models_count": len(filtered_models),
+                    "general_models_count": 0,
+                    "ensemble_models_count": 0,
+                    "direction_filter": direction,
+                    "summary": f"{len(filtered_models)} models found (no accuracy data yet — neutral consensus)",
+                }
 
             avg_accuracy = sum(accuracies) / len(accuracies)
             high_confidence_models = sum(1 for a in accuracies if a > 0.55)
             agreement_pct = high_confidence_models / len(accuracies) if accuracies else 0
 
             # Categorize what voted
-            setup_models = [m for m in filtered_models if base_setup.lower() in m.get("model_name", "").lower()]
-            general_models = [m for m in filtered_models if "direction_" in m.get("model_name", "")]
-            ensemble_models = [m for m in filtered_models if "ensemble_" in m.get("model_name", "")]
+            setup_models = [m for m in filtered_models if any(mb.lower() in m.get("name", "").lower() for mb in model_bases)]
+            general_models = [m for m in filtered_models if "direction_" in m.get("name", "")]
+            ensemble_models = [m for m in filtered_models if "ensemble_" in m.get("name", "")]
 
             return {
                 "has_models": True,
