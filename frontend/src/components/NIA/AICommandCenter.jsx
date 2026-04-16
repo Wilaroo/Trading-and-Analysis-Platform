@@ -5,6 +5,7 @@ import {
   Shield, Database, Zap, CheckCircle2, AlertTriangle, XCircle
 } from 'lucide-react';
 import SetupModelsPanel from './SetupModelsPanel';
+import ServerHealthWidget from './ServerHealthWidget';
 
 const AICommandCenter = memo(({ aiData, connectors, thresholds, onRefresh, onRunCalibrations }) => {
   const [expanded, setExpanded] = useState(true);
@@ -53,7 +54,12 @@ const AICommandCenter = memo(({ aiData, connectors, thresholds, onRefresh, onRun
             exit={{ height: 0, opacity: 0 }}
             className="border-t border-white/10"
           >
-            <div className="flex border-b border-white/10">
+            {/* Server Health Widget */}
+            <div className="px-4 pt-3">
+              <ServerHealthWidget />
+            </div>
+
+            <div className="flex border-b border-white/10 mt-2">
               {tabs.map(tab => (
                 <button
                   key={tab.id}

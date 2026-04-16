@@ -15,8 +15,17 @@ import httpx
 import asyncio
 import random
 import json
+import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
+
+# Install uvloop for 2-4x faster event loop (if available)
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    print("[UVLOOP] Fast event loop enabled")
+except ImportError:
+    print("[UVLOOP] Not installed — using default asyncio loop")
 
 # Load environment variables
 load_dotenv()
@@ -185,6 +194,7 @@ from data.strategies_data import ALL_STRATEGIES_DATA
 services = get_service_registry()
 
 app = FastAPI(title="TradeCommand API")
+_server_start_time = _time.time()
 
 app.add_middleware(
     CORSMiddleware,
@@ -4108,4 +4118,5 @@ async def get_script(script_name: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    loop_impl = "uvloop" if 'uvloop' in dir() else "auto"
+    uvicorn.run(app, host="0.0.0.0", port=8001, loop=loop_impl)

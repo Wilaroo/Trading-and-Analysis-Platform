@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from datetime import datetime, timezone
 from typing import Optional
 import os
+import asyncio
 
 router = APIRouter(tags=["System Status"])
 
@@ -74,15 +75,48 @@ async def health_check():
 @router.get("/api/cache-status")
 async def cache_status():
     """Check streaming cache health — async, no threads."""
+    import resource
     try:
-        # Import from server module where cache lives
         import server as _srv
         cache = getattr(_srv, '_streaming_cache', {})
+        
+        # Memory info
+        try:
+            import psutil
+            proc = psutil.Process()
+            mem = proc.memory_info()
+            mem_mb = round(mem.rss / 1024 / 1024, 1)
+        except Exception:
+            mem_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+        
+        # Thread count
+        import threading
+        thread_count = threading.active_count()
+        
+        # WebSocket connections
+        ws_count = 0
+        try:
+            manager = getattr(_srv, 'manager', None)
+            if manager:
+                ws_count = len(manager.active_connections)
+        except Exception:
+            pass
+        
+        # Uptime
+        import time
+        start_time = getattr(_srv, '_server_start_time', None)
+        uptime_s = round(time.time() - start_time, 0) if start_time else None
+        
         return {
             "status": "healthy",
             "last_refresh": cache.get("last_refresh"),
-            "keys_populated": [k for k, v in cache.items() if v is not None and k != "last_refresh"],
-            "keys_empty": [k for k, v in cache.items() if v is None and k != "last_refresh"],
+            "keys_populated": len([k for k, v in cache.items() if v is not None and k != "last_refresh"]),
+            "keys_total": len(cache) - 1,
+            "memory_mb": mem_mb,
+            "threads": thread_count,
+            "ws_connections": ws_count,
+            "uptime_seconds": uptime_s,
+            "loop": "uvloop" if 'uvloop' in str(type(asyncio.get_event_loop())) else "asyncio",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:

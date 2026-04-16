@@ -46,6 +46,8 @@ elif [ -f "$REPO_DIR/venv/bin/activate" ]; then
 else
     echo "  Using system Python"
 fi
+# Ensure uvloop is installed (2-4x faster event loop)
+pip install -q uvloop 2>/dev/null && echo "  uvloop: installed" || echo "  uvloop: skipped"
 echo ""
 
 # Step 3: Start backend

@@ -10,6 +10,7 @@ import asyncio
 import subprocess
 import sys
 import os
+import time as _time
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
@@ -18,6 +19,10 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai-training", tags=["AI Training"])
+
+# Simple response cache for expensive endpoints
+_endpoint_cache = {}
+_CACHE_TTL = 30  # seconds
 
 
 class _TrainingProcess:
@@ -521,7 +526,13 @@ def get_live_regime():
     """
     Get live market regime classification from SPY, QQQ, IWM daily bars.
     Returns the current regime (bull/bear/range/high_vol) plus per-index metrics.
+    Cached for 30s to avoid redundant heavy DB aggregations.
     """
+    cache_key = "regime_live"
+    cached = _endpoint_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+    
     try:
         from server import db as mongo_db
         if mongo_db is None:
@@ -610,12 +621,14 @@ def get_live_regime():
                 "rotation_qqq_iwm": cross_feats.get("regime_rotation_qqq_iwm", 0),
             }
 
-        return {
+        result = {
             "success": True,
             "regime": regime,
             "indexes": indexes,
             "cross": cross,
         }
+        _endpoint_cache[cache_key] = {"data": result, "ts": _time.time()}
+        return result
 
     except Exception as e:
         logger.error(f"Live regime error: {e}")
@@ -627,7 +640,13 @@ def get_model_inventory():
     """
     Get complete inventory of all model definitions with their training status.
     Sync handler — runs in thread pool, doesn't block event loop.
+    Cached for 30s to prevent repeated heavy DB queries.
     """
+    cache_key = "model_inventory"
+    cached = _endpoint_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+    
     try:
         from server import db as mongo_db
 
@@ -926,12 +945,14 @@ def get_model_inventory():
         except Exception as e:
             logger.debug(f"Validation summary fetch error: {e}")
 
-        return {
+        result = {
             "success": True,
             "total_defined": total_defined,
             "total_trained": total_trained,
             "categories": categories,
         }
+        _endpoint_cache[cache_key] = {"data": result, "ts": _time.time()}
+        return result
 
     except Exception as e:
         logger.error(f"Model inventory error: {e}")
