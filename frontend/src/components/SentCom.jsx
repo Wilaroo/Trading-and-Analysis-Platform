@@ -27,6 +27,7 @@ import { safePolling } from '../utils/safePolling';
 import EnhancedTickerModal from './EnhancedTickerModal';
 import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
+import ServerHealthBadge from './ServerHealthBadge';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import ChatBubbleOverlay from './ChatBubbleOverlay';
@@ -3154,7 +3155,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
             {/* Dynamic Risk Badge */}
             <DynamicRiskBadge onClick={() => setShowRiskPanel(!showRiskPanel)} />
             
-            {/* Removed IB badge - now shown in ticker tape */}
+            {/* Server Health Badge */}
+            <ServerHealthBadge />
           </div>
           
           <div className="flex items-center gap-2">
