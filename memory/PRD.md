@@ -49,6 +49,9 @@
 - **Fixed evaluation order**: Trading mode now updated BEFORE threshold evaluation (was after, causing stale mode for each decision).
 - **Result**: In AGGRESSIVE + BULLISH regime, a setup with regime +20 and quality +5 now scores 25 → GO (was SKIP at old threshold 55).
 - **Fixed model lookup mismatch**: Scanner setup types (vwap_bounce, squeeze, second_chance, etc.) now map to training model base names (VWAP, BREAKOUT, MEAN_REVERSION, etc.) via SETUP_TO_MODEL dict. Previously `^vwap_bounce_.*_predictor$` could never match `vwap_5min_predictor`, causing "No trained models" for every setup despite models being available.
+- **Fixed model DB field mismatch**: Confidence gate queried `model_name` field but DB stores `name`. Accuracy is at `metrics.accuracy` not top-level `accuracy`. Both fixed. Models with no accuracy data now return neutral consensus instead of "no models".
+- **Bypassed Strategy Promotion gate**: All 105 strategies were stuck in SIMULATION phase (zero promotion records). Since IB paper account provides safety, the SIM→PAPER→LIVE check is bypassed. Re-enable when switching to live money.
+- **Stale trades filtered**: SentCom stream now shows only today's closed trades (was showing weeks-old NIO/KOS trades).
 
 ### SentCom S.O.C. Enhancements (Feb 2026 — DONE)
 - **Fix Score 0.0**: SentCom now reads `tqs_score` (0-100) from LiveAlert instead of non-existent `score` field. Falls back to `smb_score_total * 2` if TQS unavailable.
