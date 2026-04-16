@@ -1134,15 +1134,23 @@ def _init_all_services():
         # IB paper account provides the safety layer during testing.
         # When switching to live money, demote strategies to PAPER and let them re-earn LIVE.
         ALL_SETUP_TYPES = [
-            "9_ema_scalp", "abc_scalp", "approaching_breakout", "approaching_hod",
-            "approaching_orb", "approaching_range_break", "backside", "big_dog",
-            "breakout_confirmed", "chart_pattern", "fashionably_late",
-            "first_vwap_pullback", "gap_fade", "gap_give_go", "hitchhiker",
-            "hod_breakout", "mean_reversion_long", "mean_reversion_short",
-            "off_sides_short", "opening_drive", "orb_long_confirmed", "puppy_dog",
-            "range_break_confirmed", "rubber_band_long", "rubber_band_short",
-            "second_chance", "spencer_scalp", "squeeze", "tidal_wave",
-            "volume_capitulation", "vwap_bounce", "vwap_fade_long", "vwap_fade_short",
+            # Scalp
+            "9_ema_scalp", "abc_scalp", "backside", "fashionably_late",
+            "first_vwap_pullback", "gap_give_go", "hitchhiker", "off_sides_short",
+            "opening_drive", "puppy_dog", "rubber_band_long", "rubber_band_short",
+            "second_chance", "spencer_scalp", "tidal_wave", "volume_capitulation",
+            "vwap_bounce", "vwap_fade_long", "vwap_fade_short", "gap_fade",
+            "short_squeeze_fade",
+            # Intraday
+            "big_dog", "hod_breakout", "breakout_confirmed", "range_break_confirmed",
+            "orb_long_confirmed", "chart_pattern", "mean_reversion_long",
+            "mean_reversion_short", "approaching_breakout", "approaching_hod",
+            "approaching_orb", "approaching_range_break", "breakdown_confirmed",
+            # Swing
+            "squeeze", "trend_continuation", "daily_squeeze", "daily_breakout",
+            "earnings_momentum", "sector_rotation", "gap_fade_daily",
+            # Position
+            "base_breakout", "accumulation_entry", "relative_strength_position",
         ]
         from services.strategy_promotion_service import StrategyPhase
         seeded = 0

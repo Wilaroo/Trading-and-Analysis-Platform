@@ -1752,6 +1752,10 @@ class EnhancedBackgroundScanner:
                 # Clean up expired alerts
                 self._cleanup_expired_alerts()
                 
+                # Run daily/swing/position scans every 10th cycle
+                if self._scan_count % 10 == 0:
+                    await self._scan_daily_setups()
+                
                 # Wait for next scan
                 await asyncio.sleep(self._scan_interval)
                 
@@ -3841,6 +3845,433 @@ class EnhancedBackgroundScanner:
             )
         return None
     
+
+    # ==================== DAILY/SWING/POSITION SETUPS ====================
+    # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB
+    
+    async def _scan_daily_setups(self):
+        """Scan for swing and position setups using daily bar data from ib_historical_data."""
+        try:
+            if not self.db:
+                return
+            
+            # Get symbols with daily data (use ADV cache for filtering)
+            symbols = list(self._symbol_adv_cache.keys())[:200]  # Top 200 by liquidity
+            if not symbols:
+                return
+            
+            scanned = 0
+            for symbol in symbols:
+                try:
+                    # Get last 60 daily bars
+                    bars = list(self.db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                    ).sort("date", -1).limit(60))
+                    
+                    if len(bars) < 20:
+                        continue
+                    
+                    bars.reverse()  # Oldest first
+                    
+                    # Run daily setup checks
+                    for check in [
+                        self._check_daily_squeeze,
+                        self._check_trend_continuation,
+                        self._check_daily_breakout,
+                        self._check_base_breakout,
+                        self._check_accumulation_entry,
+                        self._check_breakdown_confirmed_daily,
+                    ]:
+                        try:
+                            alert = await check(symbol, bars)
+                            if alert:
+                                await self._process_new_alert(alert)
+                        except Exception:
+                            pass
+                    
+                    scanned += 1
+                except Exception:
+                    pass
+            
+            logger.info(f"📊 Daily scan complete: {scanned} symbols checked for swing/position setups")
+        except Exception as e:
+            logger.error(f"Daily scan error: {e}")
+
+    async def _check_daily_squeeze(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Bollinger Bands inside Keltner Channels on DAILY bars = multi-day squeeze."""
+        if len(bars) < 20:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        
+        # 20-period SMA and Bollinger Bands
+        sma20 = sum(closes[-20:]) / 20
+        std20 = (sum((c - sma20) ** 2 for c in closes[-20:]) / 20) ** 0.5
+        bb_upper = sma20 + 2 * std20
+        bb_lower = sma20 - 2 * std20
+        bb_width = (bb_upper - bb_lower) / sma20 * 100 if sma20 > 0 else 999
+        
+        # Keltner Channels (20-period EMA + 1.5 * ATR)
+        # Simple ATR calculation
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(
+                highs[-(i)] - lows[-(i)],
+                abs(highs[-(i)] - closes[-(i+1)]),
+                abs(lows[-(i)] - closes[-(i+1)])
+            )
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else 0
+        kc_upper = sma20 + 1.5 * atr
+        kc_lower = sma20 - 1.5 * atr
+        
+        # Squeeze: BB inside KC
+        is_squeeze = bb_upper < kc_upper and bb_lower > kc_lower
+        if not is_squeeze or bb_width > 15:
+            return None
+        
+        # Determine direction from momentum (close vs SMA)
+        momentum = closes[-1] - sma20
+        direction = "long" if momentum > 0 else "short"
+        
+        current = closes[-1]
+        stop = current * (0.95 if direction == "long" else 1.05)
+        target = current * (1.10 if direction == "long" else 0.90)
+        
+        return LiveAlert(
+            id=f"daily_squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="daily_squeeze",
+            direction=direction,
+            priority=AlertPriority.HIGH,
+            trigger_price=current,
+            stop_loss=round(stop, 2),
+            target=round(target, 2),
+            risk_reward=abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0,
+            headline=f"📊 {symbol} DAILY SQUEEZE ({direction.upper()}) - BB Width {bb_width:.1f}%",
+            reasoning=[
+                f"Daily Bollinger Bands INSIDE Keltner Channels = multi-day volatility squeeze",
+                f"BB Width: {bb_width:.1f}% (tight = explosive breakout imminent)",
+                f"Momentum: {'bullish' if momentum > 0 else 'bearish'} (close {'above' if momentum > 0 else 'below'} 20 SMA)",
+                f"ATR: ${atr:.2f} | Swing trade — hold overnight",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
+    async def _check_trend_continuation(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Higher highs + higher lows on daily chart, pulling back to rising 20 EMA."""
+        if len(bars) < 25:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        
+        # 20 EMA
+        ema20 = closes[-20]
+        multiplier = 2 / 21
+        for c in closes[-19:]:
+            ema20 = c * multiplier + ema20 * (1 - multiplier)
+        
+        # Check EMA is rising (current > 5 bars ago)
+        ema20_5ago = closes[-25]
+        for c in closes[-24:-5]:
+            ema20_5ago = c * multiplier + ema20_5ago * (1 - multiplier)
+        
+        if ema20 <= ema20_5ago:
+            return None  # EMA not rising
+        
+        # Check higher highs and higher lows (last 3 swings)
+        recent_highs = [max(highs[i:i+5]) for i in range(-15, 0, 5)]
+        recent_lows = [min(lows[i:i+5]) for i in range(-15, 0, 5)]
+        
+        hh = all(recent_highs[i] > recent_highs[i-1] for i in range(1, len(recent_highs)))
+        hl = all(recent_lows[i] > recent_lows[i-1] for i in range(1, len(recent_lows)))
+        
+        if not (hh and hl):
+            return None  # No uptrend structure
+        
+        # Price pulling back near 20 EMA (within 2%)
+        current = closes[-1]
+        dist_from_ema = (current - ema20) / ema20 * 100
+        if dist_from_ema < -0.5 or dist_from_ema > 2.0:
+            return None  # Not near EMA
+        
+        # ATR for stop
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i+1)]), abs(lows[-(i)] - closes[-(i+1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+        
+        stop = round(ema20 - atr * 1.5, 2)
+        target = round(current + atr * 3, 2)
+        rr = abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0
+        
+        return LiveAlert(
+            id=f"trend_continuation_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="trend_continuation",
+            direction="long",
+            priority=AlertPriority.MEDIUM,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            headline=f"📈 {symbol} Trend Continuation - Pullback to rising 20 EMA",
+            reasoning=[
+                f"Daily uptrend: Higher highs + higher lows confirmed",
+                f"Price {dist_from_ema:.1f}% from rising 20 EMA (pullback entry zone)",
+                f"EMA slope: rising (current ${ema20:.2f} > 5-bar-ago ${ema20_5ago:.2f})",
+                f"ATR: ${atr:.2f} | R:R {rr:.1f}:1 | Swing hold",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
+    async def _check_daily_breakout(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Breaking above multi-day resistance on above-average volume."""
+        if len(bars) < 20:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        volumes = [b["volume"] for b in bars]
+        
+        current = closes[-1]
+        prev_high = max(highs[-20:-1])  # 20-day high excluding today
+        avg_vol = sum(volumes[-20:-1]) / 19 if len(volumes) >= 20 else 0
+        today_vol = volumes[-1]
+        
+        # Need to be above the 20-day high
+        breakout_pct = (current - prev_high) / prev_high * 100 if prev_high > 0 else 0
+        if breakout_pct < 0.5 or breakout_pct > 8:
+            return None  # Not a breakout or too extended
+        
+        # Need above-average volume
+        rvol = today_vol / avg_vol if avg_vol > 0 else 0
+        if rvol < 1.3:
+            return None  # Weak volume
+        
+        # ATR for stop
+        lows = [b["low"] for b in bars]
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i+1)]), abs(lows[-(i)] - closes[-(i+1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+        
+        stop = round(prev_high - atr * 0.5, 2)  # Stop just below old resistance
+        target = round(current + (current - stop) * 2, 2)
+        rr = abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0
+        
+        return LiveAlert(
+            id=f"daily_breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="daily_breakout",
+            direction="long",
+            priority=AlertPriority.HIGH,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            headline=f"🚀 {symbol} DAILY BREAKOUT - New 20-day high on {rvol:.1f}x volume",
+            reasoning=[
+                f"Price broke 20-day high ${prev_high:.2f} by {breakout_pct:.1f}%",
+                f"Volume confirmation: {rvol:.1f}x average daily volume",
+                f"Stop below old resistance ${stop:.2f} | Target ${target:.2f}",
+                f"Swing trade — hold for follow-through",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
+    async def _check_base_breakout(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Multi-week tight consolidation breakout (position trade)."""
+        if len(bars) < 40:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        volumes = [b["volume"] for b in bars]
+        
+        # Check for tight range in last 20 bars (base)
+        base_highs = highs[-20:-1]
+        base_lows = lows[-20:-1]
+        base_high = max(base_highs)
+        base_low = min(base_lows)
+        base_range_pct = (base_high - base_low) / base_low * 100 if base_low > 0 else 999
+        
+        # Base should be tight (< 15% range over 20 days)
+        if base_range_pct > 15 or base_range_pct < 2:
+            return None
+        
+        current = closes[-1]
+        # Need to break above the base
+        if current <= base_high:
+            return None
+        
+        breakout_pct = (current - base_high) / base_high * 100
+        if breakout_pct < 0.5 or breakout_pct > 5:
+            return None
+        
+        # Volume confirmation
+        avg_vol = sum(volumes[-20:-1]) / 19 if len(volumes) >= 20 else 0
+        rvol = volumes[-1] / avg_vol if avg_vol > 0 else 0
+        if rvol < 1.5:
+            return None
+        
+        stop = round(base_low + (base_high - base_low) * 0.3, 2)  # Stop in lower third of base
+        target = round(current + (base_high - base_low), 2)  # Measured move
+        rr = abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0
+        
+        return LiveAlert(
+            id=f"base_breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="base_breakout",
+            direction="long",
+            priority=AlertPriority.HIGH,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            headline=f"🏗️ {symbol} BASE BREAKOUT - {int(20)}-day base on {rvol:.1f}x volume",
+            reasoning=[
+                f"20-day consolidation base (range: {base_range_pct:.1f}%)",
+                f"Broke above ${base_high:.2f} by {breakout_pct:.1f}%",
+                f"Volume: {rvol:.1f}x average | Measured move target: ${target:.2f}",
+                f"Position trade — multi-week hold expected",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
+        )
+
+    async def _check_accumulation_entry(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Weekly oversold + volume increasing = accumulation zone entry (position)."""
+        if len(bars) < 30:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        volumes = [b["volume"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        
+        # RSI(14) on daily
+        gains, losses = [], []
+        for i in range(1, min(15, len(closes))):
+            change = closes[-i] - closes[-(i+1)]
+            gains.append(max(change, 0))
+            losses.append(max(-change, 0))
+        avg_gain = sum(gains) / len(gains) if gains else 0
+        avg_loss = sum(losses) / len(losses) if losses else 0.001
+        rs = avg_gain / avg_loss if avg_loss > 0 else 100
+        rsi = 100 - (100 / (1 + rs))
+        
+        # Need RSI oversold (< 35)
+        if rsi > 35:
+            return None
+        
+        # Volume increasing (last 5 days avg > previous 10 days avg)
+        recent_vol = sum(volumes[-5:]) / 5 if len(volumes) >= 5 else 0
+        prior_vol = sum(volumes[-15:-5]) / 10 if len(volumes) >= 15 else 0
+        vol_increase = recent_vol / prior_vol if prior_vol > 0 else 0
+        
+        if vol_increase < 1.2:
+            return None  # No volume accumulation
+        
+        # Check price is near 50-day low (within 10%)
+        low_50 = min(lows[-50:]) if len(lows) >= 50 else min(lows)
+        dist_from_low = (closes[-1] - low_50) / low_50 * 100 if low_50 > 0 else 999
+        if dist_from_low > 10:
+            return None
+        
+        current = closes[-1]
+        stop = round(low_50 * 0.97, 2)  # 3% below 50-day low
+        # ATR for target
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i+1)]), abs(lows[-(i)] - closes[-(i+1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.03
+        target = round(current + atr * 5, 2)
+        rr = abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0
+        
+        return LiveAlert(
+            id=f"accumulation_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="accumulation_entry",
+            direction="long",
+            priority=AlertPriority.MEDIUM,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            headline=f"🔋 {symbol} ACCUMULATION - RSI {rsi:.0f} + volume building",
+            reasoning=[
+                f"Daily RSI oversold at {rsi:.0f}",
+                f"Volume accumulating: {vol_increase:.1f}x increase vs prior 10 days",
+                f"Price {dist_from_low:.1f}% from 50-day low ${low_50:.2f}",
+                f"Position trade — weeks to months hold",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
+        )
+
+    async def _check_breakdown_confirmed_daily(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """Confirmed breakdown below daily support on volume (short setup)."""
+        if len(bars) < 20:
+            return None
+        
+        closes = [b["close"] for b in bars]
+        lows = [b["low"] for b in bars]
+        highs = [b["high"] for b in bars]
+        volumes = [b["volume"] for b in bars]
+        
+        current = closes[-1]
+        prev_low = min(lows[-20:-1])  # 20-day low excluding today
+        avg_vol = sum(volumes[-20:-1]) / 19 if len(volumes) >= 20 else 0
+        
+        # Need to break below 20-day low
+        breakdown_pct = (prev_low - current) / prev_low * 100 if prev_low > 0 else 0
+        if breakdown_pct < 0.5 or breakdown_pct > 8:
+            return None
+        
+        # Volume confirmation
+        rvol = volumes[-1] / avg_vol if avg_vol > 0 else 0
+        if rvol < 1.3:
+            return None
+        
+        # ATR
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i+1)]), abs(lows[-(i)] - closes[-(i+1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+        
+        stop = round(prev_low + atr * 0.5, 2)
+        target = round(current - (stop - current) * 2, 2)
+        rr = abs(current - target) / abs(stop - current) if abs(stop - current) > 0 else 0
+        
+        return LiveAlert(
+            id=f"breakdown_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="breakdown_confirmed",
+            direction="short",
+            priority=AlertPriority.HIGH,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            headline=f"📉 {symbol} BREAKDOWN - Below 20-day low on {rvol:.1f}x volume",
+            reasoning=[
+                f"Price broke 20-day low ${prev_low:.2f} by {breakdown_pct:.1f}%",
+                f"Volume confirmation: {rvol:.1f}x average",
+                f"Stop above old support ${stop:.2f} | Target ${target:.2f}",
+                f"Short swing trade",
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
     # ==================== ALERT MANAGEMENT ====================
     
     async def _process_new_alert(self, alert: LiveAlert):

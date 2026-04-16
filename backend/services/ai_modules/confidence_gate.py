@@ -608,6 +608,18 @@ class ConfidenceGate:
                 "BACKSIDE": ["REVERSAL", "SHORT_REVERSAL"],
                 "OFF_SIDES_SHORT": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
                 "CHART_PATTERN": ["BREAKOUT", "RANGE"],
+                # Swing/Position setups map to broader model categories
+                "DAILY_SQUEEZE": ["BREAKOUT", "RANGE"],
+                "DAILY_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
+                "TREND_CONTINUATION": ["TREND_CONTINUATION", "MOMENTUM"],
+                "BASE_BREAKOUT": ["BREAKOUT", "TREND_CONTINUATION"],
+                "ACCUMULATION_ENTRY": ["REVERSAL", "MEAN_REVERSION"],
+                "RELATIVE_STRENGTH_POSITION": ["MOMENTUM", "TREND_CONTINUATION"],
+                "EARNINGS_MOMENTUM": ["MOMENTUM", "BREAKOUT"],
+                "SECTOR_ROTATION": ["MOMENTUM", "TREND_CONTINUATION"],
+                "BREAKDOWN_CONFIRMED": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
+                "GAP_FADE_DAILY": ["SHORT_GAP_FADE", "SHORT_VWAP"],
+                "SHORT_SQUEEZE_FADE": ["SHORT_SCALP", "REVERSAL"],
             }
             
             # Get mapped model base names, fallback to the raw setup name

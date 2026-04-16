@@ -302,12 +302,144 @@ STRATEGY_CONFIG = {
         "scale_out_pcts": [0.25, 0.25, 0.5],
         "close_at_eod": False
     },
+    "daily_squeeze": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.03,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "daily_breakout": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "earnings_momentum": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.03,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "sector_rotation": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "base_breakout": {
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False
+    },
+    "accumulation_entry": {
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.05,
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False
+    },
+    "relative_strength_position": {
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False
+    },
     "position_trade": {
         "timeframe": TradeTimeframe.POSITION,
         "trail_pct": 0.03,
         "scale_out_pcts": [0.2, 0.3, 0.5],
         "close_at_eod": False
-    }
+    },
+    
+    # ==================== CONFIRMED BREAKOUTS (INTRADAY) ====================
+    "breakout_confirmed": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "range_break_confirmed": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "orb_long_confirmed": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "chart_pattern": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "gap_fade": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "mean_reversion_long": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "mean_reversion_short": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    
+    # ==================== APPROACHING (Alerts — trade on confirmation) ====================
+    "approaching_breakout": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "approaching_hod": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "approaching_orb": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "approaching_range_break": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    
+    # ==================== SHORT SETUPS ====================
+    "breakdown_confirmed": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "gap_fade_daily": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "short_squeeze_fade": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
 }
 
 # Default config for unknown setups
