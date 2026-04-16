@@ -130,11 +130,14 @@ class ConfidenceGate:
             except Exception as e:
                 logger.warning(f"Regime check failed: {e}")
 
-        # AI regime classification
+        # AI regime classification (logged for analysis but no longer penalizes scoring)
         try:
             ai_regime = await self._get_ai_regime()
         except Exception:
             pass
+
+        # Update trading mode FIRST so thresholds are mode-aware for this evaluation
+        self._update_trading_mode(regime_state, ai_regime, regime_score)
 
         # Regime contribution — graduated scale
         if regime_state == "CONFIRMED_UP" and direction == "long":
@@ -164,23 +167,9 @@ class ConfidenceGate:
         else:
             reasoning.append(f"Regime state '{regime_state}' (score {regime_score})")
 
-        # AI regime refinement (max +10 / floor -5)
-        if ai_regime == "high_vol":
-            confidence_points -= 5  # Floor: max -5 for volatility
-            position_multiplier *= 0.8
-            reasoning.append("AI detects HIGH VOLATILITY — reducing exposure 20% (-5)")
-        elif ai_regime == "bull_trend" and direction == "long":
-            confidence_points += 10
-            reasoning.append("AI confirms BULL TREND — confirmation for longs (+10)")
-        elif ai_regime == "bear_trend" and direction == "short":
-            confidence_points += 10
-            reasoning.append("AI confirms BEAR TREND — confirmation for shorts (+10)")
-        elif ai_regime == "bull_trend" and direction == "short":
-            confidence_points -= 5  # Floor
-            reasoning.append("AI sees BULL TREND — caution on shorts (-5)")
-        elif ai_regime == "bear_trend" and direction == "long":
-            confidence_points -= 5  # Floor
-            reasoning.append("AI sees BEAR TREND — caution on longs (-5)")
+        # AI regime: DEPRECATED — logged for reference only, no score impact
+        if ai_regime and ai_regime != "unknown":
+            reasoning.append(f"(AI regime: {ai_regime} — logged only, not scored)")
 
         # --- 2. MODEL CONSENSUS (max +15 / floor -5) ---
         model_signals = await self._query_model_consensus(symbol, setup_type, direction)
@@ -431,30 +420,40 @@ class ConfidenceGate:
             else:
                 reasoning.append(f"CNN-LSTM temporal: neutral ({lstm_win_prob:.0%})")
 
-        # --- 6. DETERMINE DECISION (Additive thresholds) ---
+        # --- 6. DETERMINE DECISION (Mode-aware thresholds) ---
         # Additive scoring: base 0, earn points from confirmation
-        # Max theoretical: ~115 pts (regime 20 + AI 10 + consensus 15 + live 15 + cross 5 + quality 10 + learning 8 + CNN 12 + TFT 12 + VAE 8 + CNN-LSTM 10)
-        # Thresholds calibrated for additive scale:
         confidence_score = max(0, min(100, confidence_points))
 
-        if confidence_score >= 55:
+        # Thresholds scale with trading mode — AGGRESSIVE takes more trades
+        mode = self._trading_mode
+        if mode == TradingMode.AGGRESSIVE:
+            go_threshold = 20
+            reduce_threshold = 10
+        elif mode == TradingMode.NORMAL:
+            go_threshold = 35
+            reduce_threshold = 20
+        elif mode == TradingMode.CAUTIOUS:
+            go_threshold = 50
+            reduce_threshold = 30
+        else:  # DEFENSIVE
+            go_threshold = 60
+            reduce_threshold = 40
+
+        if confidence_score >= go_threshold:
             decision = "GO"
             self._stats["go_count"] += 1
             self._stats["today_go"] += 1
-        elif confidence_score >= 30:
+        elif confidence_score >= reduce_threshold:
             decision = "REDUCE"
             position_multiplier *= 0.6
             self._stats["reduce_count"] += 1
-            reasoning.append(f"Borderline confidence ({confidence_score}) — reducing to 60% size")
+            reasoning.append(f"Borderline confidence ({confidence_score}, need {go_threshold} for GO) — reducing to 60% size")
         else:
             decision = "SKIP"
             position_multiplier = 0
             self._stats["skip_count"] += 1
             self._stats["today_skip"] += 1
-            reasoning.append(f"Insufficient confirmation ({confidence_score}) — skipping trade")
-
-        # Update trading mode based on recent patterns
-        self._update_trading_mode(regime_state, ai_regime, regime_score)
+            reasoning.append(f"Insufficient confirmation ({confidence_score}, need {reduce_threshold}) — skipping trade")
 
         result = {
             "decision": decision,
