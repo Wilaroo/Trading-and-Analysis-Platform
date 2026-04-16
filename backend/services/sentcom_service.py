@@ -674,10 +674,23 @@ class SentComService:
                     except Exception:
                         pass
                     
-                    # Get recent closed trades (trade decisions/executions)
+                    # Get recent closed trades (trade decisions/executions) — TODAY only
                     try:
-                        closed_trades = trading_bot.get_closed_trades(limit=5)
+                        closed_trades = trading_bot.get_closed_trades(limit=20)
+                        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        today_trades = []
                         for trade in closed_trades:
+                            closed_at = trade.get("closed_at", trade.get("exit_time", ""))
+                            # Only include trades closed today
+                            if closed_at and today_str in str(closed_at):
+                                today_trades.append(trade)
+                            elif not closed_at:
+                                # No close time — check entry time
+                                entry_time = trade.get("entry_time", trade.get("opened_at", ""))
+                                if entry_time and today_str in str(entry_time):
+                                    today_trades.append(trade)
+                        
+                        for trade in today_trades[:5]:
                             symbol = trade.get("symbol", "")
                             side = trade.get("side", trade.get("action", "BUY"))
                             entry_price = trade.get("entry_price", 0)
