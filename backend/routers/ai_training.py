@@ -561,12 +561,10 @@ def get_live_regime():
                 real[0].get("date", ""),
             )
 
-        # Run blocking MongoDB aggregations in thread pool to avoid freezing the event loop
-        spy_result, qqq_result, iwm_result = await asyncio.gather(
-            asyncio.to_thread(_load_index, "SPY"),
-            asyncio.to_thread(_load_index, "QQQ"),
-            asyncio.to_thread(_load_index, "IWM"),
-        )
+        # Run MongoDB aggregations directly (sync handler runs in thread pool)
+        spy_result = _load_index("SPY")
+        qqq_result = _load_index("QQQ")
+        iwm_result = _load_index("IWM")
         spy_c, spy_h, spy_l, spy_date = spy_result
         qqq_c, qqq_h, qqq_l, qqq_date = qqq_result
         iwm_c, iwm_h, iwm_l, iwm_date = iwm_result
