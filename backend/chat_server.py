@@ -64,6 +64,32 @@ def _get_portfolio_context() -> dict:
     parts = []
     debug = {}
     
+    # 0. Current date/time and market status
+    now_utc = datetime.now(timezone.utc)
+    try:
+        import zoneinfo
+        et = now_utc.astimezone(zoneinfo.ZoneInfo("America/New_York"))
+    except Exception:
+        # Fallback: manual ET offset
+        et = now_utc.replace(tzinfo=None)  # Approximate
+    
+    hour = et.hour if hasattr(et, 'hour') else now_utc.hour - 5
+    is_weekday = et.weekday() < 5 if hasattr(et, 'weekday') else True
+    market_open = is_weekday and 9 <= hour < 16
+    pre_market = is_weekday and 4 <= hour < 9
+    after_hours = is_weekday and 16 <= hour < 20
+    
+    if market_open:
+        market_status = "MARKET OPEN (regular trading hours)"
+    elif pre_market:
+        market_status = "PRE-MARKET (limited liquidity)"
+    elif after_hours:
+        market_status = "AFTER HOURS (limited liquidity, prices may be stale)"
+    else:
+        market_status = "MARKET CLOSED (prices are from last session close)"
+    
+    parts.append(f"Current Time: {et.strftime('%A, %B %d, %Y %I:%M %p ET') if hasattr(et, 'strftime') else str(now_utc)}\n{market_status}")
+    
     # 1. Live positions from MongoDB snapshot (written by IB push endpoint)
     try:
         snapshot = db["ib_live_snapshot"].find_one({"_id": "current"})
@@ -173,6 +199,19 @@ def _get_portfolio_context() -> dict:
         idx_quotes = (snapshot or {}).get("quotes", {})
         if idx_quotes:
             idx_lines = []
+            # Check quote freshness
+            sample_q = next(iter(idx_quotes.values()), {})
+            q_timestamp = sample_q.get("timestamp", "")
+            stale_note = ""
+            if q_timestamp:
+                try:
+                    q_dt = datetime.fromisoformat(q_timestamp.replace('Z', '+00:00'))
+                    q_age_min = (datetime.now(timezone.utc) - q_dt).total_seconds() / 60
+                    if q_age_min > 30:
+                        stale_note = f" (last updated {int(q_age_min)} minutes ago — may be stale)"
+                except Exception:
+                    pass
+            
             for idx_sym in ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX', 'NVDA', 'XOM']:
                 q = idx_quotes.get(idx_sym, {})
                 if q:
@@ -183,7 +222,7 @@ def _get_portfolio_context() -> dict:
                     if last > 0:
                         idx_lines.append(f"  {idx_sym}: ${last:.2f} ({chg_pct:+.2f}% today)")
             if idx_lines:
-                parts.append("LIVE Market Prices (use THESE numbers, not from memory):\n" + "\n".join(idx_lines))
+                parts.append(f"LIVE Market Prices{stale_note} (use THESE numbers, not from memory):\n" + "\n".join(idx_lines))
     except Exception as e:
         logger.debug(f"Index quotes error: {e}")
     try:
@@ -223,16 +262,18 @@ def _get_portfolio_context() -> dict:
     try:
         recent_trades = list(
             db["trades"]
-            .find({}, {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
+            .find({"symbol": {"$not": {"$regex": "^TEST"}}},
+                  {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
                        "exit_price": 1, "pnl": 1, "status": 1, "setup_type": 1,
                        "entry_time": 1, "exit_time": 1})
             .sort("entry_time", -1)
             .limit(10)
         )
-        # Also get recent bot_trades for richer history
+        # Also get recent bot_trades for richer history (exclude cancelled and test trades)
         bot_closed = list(
             db["bot_trades"]
-            .find({"status": {"$in": ["closed", "stopped_out", "target_hit"]}},
+            .find({"status": {"$in": ["closed", "stopped_out", "target_hit"]},
+                   "symbol": {"$not": {"$regex": "^TEST"}}},
                   {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
                    "exit_price": 1, "pnl": 1, "status": 1, "setup_type": 1,
                    "close_reason": 1, "created_at": 1})
@@ -492,17 +533,17 @@ PERSONALITY:
 - Keep responses tight. 2-4 short paragraphs max. Only use bullet lists if I ask for a breakdown.
 - Be professional but human. Keep it clean and direct.
 
+CRITICAL RULES — DO NOT BREAK THESE:
+- NEVER state technical indicator values (RSI, MACD, moving averages, support/resistance levels) unless they are explicitly provided in the LIVE DATA below. You do NOT have access to charts.
+- NEVER reference specific news events, earnings dates, Fed meetings, or macro releases. You do NOT have a news feed. If asked about news, say "I don't have a live news feed right now — check your usual sources."
+- NEVER guess prices for symbols not in the LIVE DATA. Say "I don't have a quote on [symbol] right now."
+- When the market is closed, say so. Do not pretend prices are moving in real-time.
+
 TRADE EXECUTION:
 - When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
   <<<TRADE_ACTION: {{"action": "close", "symbol": "LABD", "reason": "user_requested"}}>>>
-  <<<TRADE_ACTION: {{"action": "buy", "symbol": "TSLA", "shares": 100, "reason": "second_chance_scalp"}}>>>
 - Only include this when I'm clearly requesting a trade action, not when discussing hypotheticals.
 - Confirm the action in plain English BEFORE the JSON block.
-
-CONTEXT:
-- If our positions are flat or at zero P&L, they likely just entered — don't panic about them.
-- LABD is a 3x leveraged inverse biotech ETF — it decays over time. If we're holding it as a hedge, mention that.
-- When evaluating the portfolio, focus on: what's working, what's not, and what we should do about it RIGHT NOW.
 
 === LIVE DATA ===
 {context}
