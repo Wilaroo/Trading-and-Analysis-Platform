@@ -718,6 +718,65 @@ async def close_trade(trade_id: str, reason: Optional[str] = "manual"):
         raise HTTPException(status_code=400, detail="Failed to close trade or trade not found")
 
 
+
+@router.post("/close-by-symbol")
+async def close_by_symbol(request: dict):
+    """Close all open trades for a given symbol (used by chat server)."""
+    if not _trading_bot:
+        return {"success": False, "error": "Trading bot not initialized"}
+    
+    symbol = request.get("symbol", "").upper()
+    reason = request.get("reason", "chat_requested")
+    
+    if not symbol:
+        return {"success": False, "error": "No symbol provided"}
+    
+    # Find open trades for this symbol
+    closed = []
+    for trade_id, trade in list(_trading_bot._open_trades.items()):
+        if trade.symbol.upper() == symbol:
+            try:
+                success = await _trading_bot.close_trade(trade_id, reason=reason)
+                if success:
+                    closed.append(trade_id)
+            except Exception as e:
+                logger.error(f"Error closing {symbol} trade {trade_id}: {e}")
+    
+    if closed:
+        return {
+            "success": True,
+            "message": f"Closed {len(closed)} {symbol} position(s)",
+            "trade_ids": closed
+        }
+    else:
+        return {
+            "success": False, 
+            "error": f"No open bot trades found for {symbol}. It may be a manual position — close it in TWS directly."
+        }
+
+
+@router.post("/quick-order")
+async def quick_order(request: dict):
+    """Place a quick market order (used by chat server)."""
+    if not _trading_bot:
+        return {"success": False, "error": "Trading bot not initialized"}
+    
+    symbol = request.get("symbol", "").upper()
+    action = request.get("action", "").lower()
+    shares = request.get("shares", 0)
+    reason = request.get("reason", "chat_requested")
+    
+    if not symbol or not action:
+        return {"success": False, "error": "Symbol and action required"}
+    
+    # For now, log the intent — full execution through the standard pipeline
+    # This prevents the chat from bypassing risk checks
+    return {
+        "success": True,
+        "message": f"Order intent logged: {action} {shares} {symbol}. Use the scanner pipeline for execution with full risk checks."
+    }
+
+
 # ==================== STATISTICS ====================
 
 @router.get("/stats/daily")

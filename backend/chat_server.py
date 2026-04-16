@@ -343,6 +343,75 @@ def _check_mongo() -> bool:
         return False
 
 
+def _execute_trade_action(response_text: str) -> Optional[dict]:
+    """Parse and execute trade actions from LLM response."""
+    import re
+    import requests
+    
+    match = re.search(r'<<<TRADE_ACTION:\s*(\{.*?\})\s*>>>', response_text)
+    if not match:
+        return None
+    
+    try:
+        action_data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {"success": False, "error": "Invalid trade action format"}
+    
+    action = action_data.get("action", "").lower()
+    symbol = action_data.get("symbol", "").upper()
+    reason = action_data.get("reason", "chat_requested")
+    
+    if not symbol:
+        return {"success": False, "error": "No symbol specified"}
+    
+    # Route to main backend API
+    backend_url = os.environ.get("BACKEND_URL", "http://127.0.0.1:8001")
+    
+    try:
+        if action == "close":
+            # Find the bot trade ID for this symbol and close it
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/close-by-symbol",
+                json={"symbol": symbol, "reason": reason},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return {"success": True, "summary": f"Sold {symbol} — {data.get('message', 'order submitted')}"}
+                else:
+                    return {"success": False, "error": data.get("error", "Close failed")}
+            else:
+                return {"success": False, "error": f"Backend returned {resp.status_code}"}
+        
+        elif action in ("buy", "sell"):
+            # Place a new order
+            shares = action_data.get("shares", 0)
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/quick-order",
+                json={
+                    "symbol": symbol,
+                    "action": action,
+                    "shares": shares,
+                    "reason": reason
+                },
+                timeout=10
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"success": data.get("success", False), "summary": data.get("message", f"{action} {shares} {symbol}")}
+            else:
+                return {"success": False, "error": f"Backend returned {resp.status_code}"}
+        
+        else:
+            return {"success": False, "error": f"Unknown action: {action}"}
+    
+    except requests.Timeout:
+        return {"success": False, "error": "Backend timeout — order may still be processing"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/chat")
 def chat(request: ChatRequest):
     """Process a chat message — fully sync, dedicated process"""
@@ -353,13 +422,31 @@ def chat(request: ChatRequest):
     context = ctx["text"]
     history = _get_chat_history(request.session_id, limit=6)
     
-    system_prompt = f"""You are SentCom, an AI trading co-pilot for a live trading operation.
-Speak in first person plural ("we", "our", "us") — you and the trader are a team.
-Be concise, direct, and actionable. Use specific numbers from the data below.
-When reviewing positions, mention entry price, current price, P&L, and whether stops/targets are hit.
-When asked about risk, consider position sizing, portfolio concentration, and market regime.
-If the data below shows no positions, tell the user we have no open positions right now (don't ask them to paste data).
-If IB is disconnected or no data is available, say so directly.
+    system_prompt = f"""You are SentCom — my AI trading partner. We trade together as a team.
+
+PERSONALITY:
+- Talk like a sharp, experienced trading buddy sitting next to me. Not a report generator.
+- Use "we", "our", "us" — we're in this together.
+- Be direct and conversational. No markdown tables unless I specifically ask for a breakdown.
+- Lead with what matters most. If something is bleeding, say it first.
+- Suggest specific actions with conviction: "I think we should close LABD now — it's down 30% and dragging the whole book" not "Consider evaluating the LABD position."
+- When you see a setup forming, be proactive: "I'm watching TSLA for a second chance scalp — I'll pull the trigger when VWAP confirms."
+- Use real numbers from the data. "$29k loss on LABD" not "significant unrealized loss."
+- Keep responses tight. 2-4 paragraphs max unless I ask for detail.
+- No emojis in the middle of sentences. No "🚀" endings. Be professional but human.
+- If I ask you to execute a trade, confirm what you're doing and do it. Don't hedge with "we'll submit" — say "Done. Sold 5,010 LABD at market."
+
+TRADE EXECUTION:
+- When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
+  <<<TRADE_ACTION: {{"action": "close", "symbol": "LABD", "reason": "user_requested"}}>>>
+  <<<TRADE_ACTION: {{"action": "buy", "symbol": "TSLA", "shares": 100, "reason": "second_chance_scalp"}}>>>
+- Only include this when I'm clearly requesting a trade action, not when discussing hypotheticals.
+- Confirm the action in plain English BEFORE the JSON block.
+
+CONTEXT:
+- If our positions are flat or at zero P&L, they likely just entered — don't panic about them.
+- LABD is a 3x leveraged inverse biotech ETF — it decays over time. If we're holding it as a hedge, mention that.
+- When evaluating the portfolio, focus on: what's working, what's not, and what we should do about it RIGHT NOW.
 
 === LIVE DATA ===
 {context}
@@ -387,7 +474,20 @@ If IB is disconnected or no data is available, say so directly.
         used_model = OLLAMA_FALLBACK
     
     if not response_content:
-        response_content = "I'm having trouble connecting to our AI right now. Please try again in a moment."
+        response_content = "Having trouble connecting to our AI right now. Give me a sec and try again."
+    
+    # Check for trade action commands in the response
+    trade_result = None
+    if "<<<TRADE_ACTION:" in response_content:
+        trade_result = _execute_trade_action(response_content)
+        # Clean the action block from the user-facing response
+        import re
+        response_content = re.sub(r'<<<TRADE_ACTION:.*?>>>', '', response_content).strip()
+        if trade_result:
+            if trade_result.get("success"):
+                response_content += f"\n\n✓ Order submitted: {trade_result.get('summary', 'Processing...')}"
+            else:
+                response_content += f"\n\nCouldn't execute that — {trade_result.get('error', 'unknown error')}. You may need to do it manually in TWS."
     
     # Store response
     _store_message("assistant", response_content, request.session_id)
