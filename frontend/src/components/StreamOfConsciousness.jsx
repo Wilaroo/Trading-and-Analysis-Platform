@@ -77,12 +77,13 @@ export const useSOCStream = () => {
   useEffect(() => {
     if (!wsData?.sentcomData?.stream) return;
     const stream = wsData.sentcomData.stream;
-    if (!Array.isArray(stream)) return;
+    if (!Array.isArray(stream) || stream.length === 0) return; // Don't overwrite HTTP data with empty WS
     const socMessages = stream.filter(m => 
       m.type !== 'chat' && 
       m.action_type !== 'chat_response' && 
       m.action_type !== 'user_message'
     );
+    if (socMessages.length === 0) return; // Don't clear existing data
     const newDataStr = JSON.stringify(socMessages.map(m => m.id || m.timestamp));
     if (newDataStr !== lastDataRef.current) {
       lastDataRef.current = newDataStr;
