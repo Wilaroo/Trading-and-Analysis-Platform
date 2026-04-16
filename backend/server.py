@@ -2609,30 +2609,30 @@ def _is_training_active():
 _streaming_cache = {
     "last_refresh": None,
     # System status
-    "ib_status": None,
-    "bot_status": None,
-    "scanner_status": None,
+    "ib_status": {"connected": False, "busy": False, "error": None},
+    "bot_status": {"state": "unknown", "mode": "manual"},
+    "scanner_status": {"running": False},
     # Trades & positions
-    "bot_trades": None,
-    "scanner_alerts": None,
-    "smart_watchlist": None,
+    "bot_trades": [],
+    "scanner_alerts": [],
+    "smart_watchlist": [],
     # AI & analysis
-    "coaching_notifications": None,
-    "confidence_gate": None,
-    "training_status": None,
-    "filter_thoughts": None,
+    "coaching_notifications": [],
+    "confidence_gate": {"summary": {}, "decisions": []},
+    "training_status": {"phase": "idle"},
+    "filter_thoughts": [],
     # Market
-    "market_regime": None,
-    "risk_status": None,
-    "order_queue": None,
+    "market_regime": {},
+    "risk_status": {},
+    "order_queue": {"pending": [], "active": [], "completed": [], "queue_size": 0},
     # SentCom
-    "sentcom_data": None,
+    "sentcom_data": {},
     # Intel & collection
-    "market_intel": None,
-    "data_collection": None,
+    "market_intel": {},
+    "data_collection": {},
     # Mode
-    "focus_mode": None,
-    "simulator": None,
+    "focus_mode": {"mode": "live"},
+    "simulator": {},
 }
 
 
@@ -2881,9 +2881,25 @@ def _compute_all_sync_data(last_notification_time_iso: str = None):
 
 async def _streaming_cache_loop():
     """Master cache refresh — ONE thread per cycle replaces 26+ thread submissions.
-    Only runs when WebSocket clients are connected."""
+    Does an initial refresh immediately, then only refreshes when clients are connected."""
     await asyncio.sleep(3)  # Let server start
     _coaching_last_check = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    # Initial refresh regardless of connections (warm cache on boot)
+    try:
+        sync_data = await asyncio.to_thread(
+            _compute_all_sync_data,
+            _coaching_last_check.isoformat()
+        )
+        _streaming_cache.update(sync_data)
+        try:
+            regime_data = await market_regime_engine.get_current_regime()
+            _streaming_cache["market_regime"] = regime_data
+        except Exception:
+            pass
+        print(f"[CACHE] Initial refresh complete — {sum(1 for v in _streaming_cache.values() if v)} keys populated")
+    except Exception as e:
+        print(f"[CACHE] Initial refresh error (non-fatal): {e}")
     
     while True:
         try:
@@ -3047,7 +3063,7 @@ async def stream_scanner_alerts():
             continue
         if manager.active_connections:
             try:
-                alerts_data = _streaming_cache.get("scanner_alerts", [])
+                alerts_data = _streaming_cache.get("scanner_alerts") or []
                 current_count = len(alerts_data)
                 if current_count != last_alerts_count or current_count > 0:
                     await manager.broadcast({
@@ -3072,7 +3088,7 @@ async def stream_smart_watchlist():
             continue
         if manager.active_connections:
             try:
-                watchlist = _streaming_cache.get("smart_watchlist", [])
+                watchlist = _streaming_cache.get("smart_watchlist") or []
                 watchlist_hash = hash(tuple(w.get("symbol", "") for w in watchlist if isinstance(w, dict)))
                 if watchlist_hash != last_watchlist_hash:
                     await manager.broadcast({
@@ -3119,12 +3135,12 @@ async def stream_confidence_gate():
             continue
         if manager.active_connections:
             try:
-                gate_data = _streaming_cache.get("confidence_gate", {})
-                summary = gate_data.get("summary", {})
-                decisions = gate_data.get("decisions", [])
+                gate_data = _streaming_cache.get("confidence_gate") or {}
+                summary = gate_data.get("summary") or {}
+                decisions = gate_data.get("decisions") or []
                 summary_hash = hash((
                     summary.get("trading_mode"),
-                    summary.get("today", {}).get("evaluated", 0),
+                    (summary.get("today") or {}).get("evaluated", 0),
                     len(decisions),
                 ))
                 if summary_hash != last_summary_hash:
@@ -3226,8 +3242,8 @@ async def stream_order_queue():
             continue
         if manager.active_connections:
             try:
-                queue_data = _streaming_cache.get("order_queue", {})
-                data_hash = hash(str(queue_data.get("queue_size", 0)) + str(len(queue_data.get("active", []))))
+                queue_data = _streaming_cache.get("order_queue") or {}
+                data_hash = hash(str(queue_data.get("queue_size", 0)) + str(len(queue_data.get("active") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "order_queue",
@@ -3250,7 +3266,7 @@ async def stream_risk_status():
             continue
         if manager.active_connections:
             try:
-                status = _streaming_cache.get("risk_status", {})
+                status = _streaming_cache.get("risk_status") or {}
                 status_hash = hash(str(status.get("current_mode")) + str(status.get("daily_pnl", 0)))
                 if status_hash != last_hash:
                     await manager.broadcast({
@@ -3274,8 +3290,8 @@ async def stream_sentcom_data():
             continue
         if manager.active_connections:
             try:
-                sentcom_data = _streaming_cache.get("sentcom_data", {})
-                data_hash = hash(str(sentcom_data.get("status", {}).get("last_updated", "")) + str(len(sentcom_data.get("stream", []))))
+                sentcom_data = _streaming_cache.get("sentcom_data") or {}
+                data_hash = hash(str((sentcom_data.get("status") or {}).get("last_updated", "")) + str(len(sentcom_data.get("stream") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "sentcom_data",
@@ -3298,7 +3314,7 @@ async def stream_market_intel():
             continue
         if manager.active_connections:
             try:
-                intel_data = _streaming_cache.get("market_intel", {})
+                intel_data = _streaming_cache.get("market_intel") or {}
                 data_hash = hash(str((intel_data.get("current") or {}).get("timestamp", "")) + str(len(intel_data.get("reports") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3322,7 +3338,7 @@ async def stream_data_collection():
             continue
         if manager.active_connections:
             try:
-                collection_data = _streaming_cache.get("data_collection", {})
+                collection_data = _streaming_cache.get("data_collection") or {}
                 data_hash = hash(str((collection_data.get("progress") or {}).get("active_collections", [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3343,7 +3359,7 @@ async def stream_focus_mode():
     while True:
         if manager.active_connections:
             try:
-                mode_data = _streaming_cache.get("focus_mode", {})
+                mode_data = _streaming_cache.get("focus_mode") or {}
                 data_hash = hash(str(mode_data.get("mode", "")) + str(mode_data.get("start_time", "")))
                 if data_hash != last_hash:
                     await manager.broadcast({
@@ -3367,8 +3383,8 @@ async def stream_simulator():
             continue
         if manager.active_connections:
             try:
-                sim_data = _streaming_cache.get("simulator", {})
-                data_hash = hash(str(sim_data.get("status", {}).get("is_running", False)) + str(len(sim_data.get("alerts", []))))
+                sim_data = _streaming_cache.get("simulator") or {}
+                data_hash = hash(str((sim_data.get("status") or {}).get("is_running", False)) + str(len(sim_data.get("alerts") or [])))
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "simulator",
