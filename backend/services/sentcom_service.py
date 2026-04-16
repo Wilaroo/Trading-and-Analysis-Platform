@@ -344,11 +344,24 @@ class SentComService:
                 for alert in live_alerts[:5]:  # Top 5 alerts
                     setup_name = getattr(alert, 'setup_type', 'setup') or 'setup'
                     symbol = getattr(alert, 'symbol', '')
-                    score = getattr(alert, 'score', 0)
-                    entry_price = getattr(alert, 'entry_price', None)
-                    stop_price = getattr(alert, 'stop_price', None)
-                    target_price = getattr(alert, 'target_price', None)
+                    # Use TQS score (0-100) as primary, fallback to SMB score (0-50, scaled to 100)
+                    tqs = getattr(alert, 'tqs_score', 0) or 0
+                    smb = getattr(alert, 'smb_score_total', 0) or 0
+                    score = tqs if tqs > 0 else (smb * 2)  # Normalize to 0-100 scale
+                    entry_price = getattr(alert, 'entry_price', None) or getattr(alert, 'trigger_price', None)
+                    stop_price = getattr(alert, 'stop_price', None) or getattr(alert, 'stop_loss', None)
+                    target_price = getattr(alert, 'target_price', None) or getattr(alert, 'target', None)
                     timeframe = getattr(alert, 'timeframe', None)
+                    headline = getattr(alert, 'headline', '') or ''
+                    reasoning_list = getattr(alert, 'reasoning', []) or []
+                    tqs_grade = getattr(alert, 'tqs_grade', '') or getattr(alert, 'trade_grade', '') or ''
+                    win_rate = getattr(alert, 'strategy_win_rate', 0) or 0
+                    profit_factor = getattr(alert, 'strategy_profit_factor', 0) or 0
+                    risk_reward = getattr(alert, 'risk_reward', 0) or 0
+                    direction = getattr(alert, 'direction', '') or ''
+                    atr_pct = getattr(alert, 'atr_percent', 0) or 0
+                    volatility = getattr(alert, 'volatility_regime', '') or ''
+                    tape_score_val = getattr(alert, 'tape_score', 0) or 0
                     
                     # Infer trade_type and timeframe from setup_name if not provided
                     setup_lower = setup_name.lower()
@@ -377,30 +390,63 @@ class SentComService:
                     # Format setup name for display
                     setup_display = setup_name.replace('_', ' ').title()
                     
-                    content = f"Found setup: {symbol} {setup_display}"
-                    if entry_price:
-                        content += f" @ ${entry_price:.2f}"
-                    if score and score > 7:
-                        content += f" (Score: {score:.1f})"
+                    # Use headline if available, else build content
+                    if headline:
+                        content = headline
+                    else:
+                        content = f"Found setup: {symbol} {setup_display}"
+                        if entry_price:
+                            content += f" @ ${entry_price:.2f}"
+                    
+                    # Append score to content if significant
+                    if score > 0:
+                        grade_str = f" ({tqs_grade})" if tqs_grade else ""
+                        content += f" — TQS {score:.0f}{grade_str}"
+                    
+                    # Build reasoning from actual alert data
+                    if reasoning_list:
+                        reasoning_text = " | ".join([r for r in reasoning_list if r])
+                    else:
+                        reasoning_text = f"Pattern matches {setup_display} criteria with confluence of technical factors."
+                    
+                    # Add win rate context to reasoning if available
+                    if win_rate > 0:
+                        reasoning_text += f" | Win rate: {win_rate:.0%}"
+                        if profit_factor > 0:
+                            reasoning_text += f", PF: {profit_factor:.1f}"
+                    
+                    # Confidence from TQS (0-100 → clamp to 10-95)
+                    if score > 0:
+                        confidence = max(10, min(95, int(score)))
+                    else:
+                        confidence = 50  # Unknown quality
                     
                     messages.append(SentComMessage(
                         id=self._generate_message_id(),
                         type="alert",
                         content=content,
                         timestamp=getattr(alert, 'timestamp', datetime.now(timezone.utc)).isoformat() if hasattr(getattr(alert, 'timestamp', None), 'isoformat') else datetime.now(timezone.utc).isoformat(),
-                        confidence=int(score * 10) if score else 70,
+                        confidence=confidence,
                         symbol=symbol,
                         action_type="setup_found",
                         metadata={
                             "source": "scanner",
                             "setup_type": setup_name,
-                            "score": score,
+                            "score": round(score, 1),
+                            "tqs_grade": tqs_grade,
                             "entry_price": entry_price,
                             "stop_price": stop_price,
                             "target_price": target_price,
                             "trade_type": trade_type,
                             "timeframe": timeframe,
-                            "reasoning": f"Pattern matches {setup_display} criteria with confluence of technical factors."
+                            "direction": direction,
+                            "risk_reward": round(risk_reward, 1) if risk_reward else None,
+                            "win_rate": round(win_rate * 100, 1) if win_rate else None,
+                            "profit_factor": round(profit_factor, 1) if profit_factor else None,
+                            "atr_percent": round(atr_pct, 2) if atr_pct else None,
+                            "volatility": volatility,
+                            "tape_score": round(tape_score_val, 1) if tape_score_val else None,
+                            "reasoning": reasoning_text
                         }
                     ))
                 
@@ -648,11 +694,39 @@ class SentComService:
                                 action_text = "BOUGHT"
                                 exit_text = "sold"
                             
-                            if exit_price and pnl:
+                            if exit_price and exit_price > 0 and pnl is not None:
                                 pnl_sign = "+" if pnl >= 0 else ""
                                 content = f"Trade closed: {exit_text} {symbol} @ ${exit_price:.2f} ({pnl_sign}${pnl:.2f}, {pnl_sign}{pnl_pct:.1f}%)"
+                            elif exit_price and exit_price > 0:
+                                content = f"Trade closed: {exit_text} {symbol} @ ${exit_price:.2f}"
                             else:
                                 content = f"Trade executed: {action_text} {symbol} @ ${entry_price:.2f}"
+                            
+                            # Calculate hold duration if timestamps available
+                            hold_info = ""
+                            try:
+                                entry_time = trade.get("entry_time", trade.get("opened_at"))
+                                if entry_time and closed_at:
+                                    from datetime import datetime as dt
+                                    t1 = dt.fromisoformat(str(entry_time).replace('Z', '+00:00')) if isinstance(entry_time, str) else entry_time
+                                    t2 = dt.fromisoformat(str(closed_at).replace('Z', '+00:00')) if isinstance(closed_at, str) else closed_at
+                                    hold_mins = int((t2 - t1).total_seconds() / 60)
+                                    if hold_mins < 60:
+                                        hold_info = f" | Held {hold_mins}min"
+                                    else:
+                                        hold_info = f" | Held {hold_mins // 60}h{hold_mins % 60}m"
+                            except Exception:
+                                pass
+                            
+                            # Build richer reasoning
+                            if pnl and pnl > 0:
+                                reasoning_text = f"Winner: Hit target on {symbol} trade.{hold_info}"
+                            elif pnl and pnl < 0:
+                                reasoning_text = f"Loser: Stopped out on {symbol} trade ({pnl_sign}${abs(pnl):.2f}).{hold_info}"
+                            elif pnl == 0:
+                                reasoning_text = f"Breakeven: Exited {symbol} at entry.{hold_info}"
+                            else:
+                                reasoning_text = f"Trade {'closed' if exit_price else 'executed'}: {symbol}.{hold_info}"
                             
                             messages.append(SentComMessage(
                                 id=self._generate_message_id(),
@@ -669,7 +743,9 @@ class SentComService:
                                     "exit_price": exit_price,
                                     "pnl": pnl,
                                     "pnl_percent": pnl_pct,
-                                    "reasoning": f"{'Winner' if pnl > 0 else 'Loser'}: {'Hit target' if pnl > 0 else 'Stopped out'} on {symbol} trade."
+                                    "setup_type": trade.get("setup_type", trade.get("strategy", "")),
+                                    "r_multiple": trade.get("r_multiple", trade.get("actual_r_multiple")),
+                                    "reasoning": reasoning_text
                                 }
                             ))
                     except Exception as e:
@@ -1464,7 +1540,7 @@ class SentComService:
                             "trigger_price": alert.get("trigger_price", alert.get("price")),
                             "current_price": alert.get("current_price", alert.get("price")),
                             "risk_reward": alert.get("risk_reward", "2:1"),
-                            "confidence": alert.get("score", alert.get("confidence", 60)),
+                            "confidence": alert.get("tqs_score", alert.get("smb_score_total", alert.get("score", alert.get("confidence", 50)))),
                             "timestamp": alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
                             "source": "scanner"
                         })

@@ -3844,13 +3844,35 @@ class EnhancedBackgroundScanner:
     # ==================== ALERT MANAGEMENT ====================
     
     async def _process_new_alert(self, alert: LiveAlert):
-        """Process a new alert"""
-        # Check for duplicate
+        """Process a new alert — enforces per-symbol dedup (max 1 active per symbol)"""
+        # Check for duplicate: same symbol + same setup_type
         for existing in self._live_alerts.values():
             if (existing.symbol == alert.symbol and 
                 existing.setup_type == alert.setup_type and
                 existing.status == "active"):
                 return
+        
+        # Per-symbol dedup: if another active alert exists for this symbol,
+        # only keep the higher priority one (replaces if new is better)
+        existing_for_symbol = [
+            (aid, a) for aid, a in self._live_alerts.items()
+            if a.symbol == alert.symbol and a.status == "active"
+        ]
+        if existing_for_symbol:
+            priority_order = {
+                AlertPriority.CRITICAL: 0, AlertPriority.HIGH: 1,
+                AlertPriority.MEDIUM: 2, AlertPriority.LOW: 3
+            }
+            best_existing = min(existing_for_symbol, key=lambda x: priority_order.get(x[1].priority, 4))
+            new_prio = priority_order.get(alert.priority, 4)
+            existing_prio = priority_order.get(best_existing[1].priority, 4)
+            if new_prio >= existing_prio:
+                # New alert is same or lower priority — skip it
+                return
+            else:
+                # New alert is higher priority — replace the existing one
+                del self._live_alerts[best_existing[0]]
+                logger.info(f"Dedup: Replaced {best_existing[1].setup_type} with higher-priority {alert.setup_type} for {alert.symbol}")
         
         # Update strategy stats
         base_setup = alert.setup_type.split("_long")[0].split("_short")[0]

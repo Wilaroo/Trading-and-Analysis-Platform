@@ -43,6 +43,15 @@
 - All 46 deferred routers register via `app.include_router()` after `asyncio.to_thread(_init_all_services)` returns.
 - Boot time improvement: heavy router modules (and their transitive dependencies) no longer block initial module load.
 
+### SentCom S.O.C. Enhancements (Feb 2026 — DONE)
+- **Fix Score 0.0**: SentCom now reads `tqs_score` (0-100) from LiveAlert instead of non-existent `score` field. Falls back to `smb_score_total * 2` if TQS unavailable.
+- **Richer setup descriptions**: Uses `alert.headline` (e.g., "LUNR Rubber Band LONG - 4.2% extended") and `alert.reasoning` list (RSI, RVOL, R:R, support/resistance) instead of generic "Pattern matches criteria" text.
+- **Signal deduplication**: Enhanced scanner enforces max 1 active alert per symbol. Higher-priority alerts replace lower-priority ones. Prevents duplicate NOG/NIO signals.
+- **Trade P&L fix**: Fixed falsy check (`pnl=0` treated as no P&L). Now shows actual P&L for breakeven/stopped trades. Added hold duration and R-multiple to trade metadata.
+- **Color-coded FILTER cards**: SKIP = red/XCircle, REDUCE = amber/AlertTriangle, GO = green/CheckCircle, unknown = gray.
+- **Confidence derived from TQS**: Setup confidence now maps 1:1 from TQS score (0-100) instead of hardcoded 70%.
+- **New data chips**: TQS grade (A/B/C), direction (LONG/SHORT), R:R ratio, win rate %, tape score, R-multiple on closed trades.
+
 ## Upcoming Tasks
 - Phase 5e: RL Position Sizer
 - Phase 6: Distributed PC Worker

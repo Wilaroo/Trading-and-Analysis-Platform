@@ -217,15 +217,48 @@ const getEntryStyle = (entry) => {
   
   // Filter decisions
   if (type === 'filter' || actionType === 'filter') {
+    const content = entry.content || '';
     const decision = entry.metadata?.decision || entry.action_type || '';
-    const isPassed = decision.toLowerCase().includes('pass') || decision.toLowerCase().includes('approved');
+    const isSkip = content.includes('SKIP') || decision.toLowerCase().includes('skip');
+    const isReduce = content.includes('REDUCE') || decision.toLowerCase().includes('reduce');
+    const isPassed = decision.toLowerCase().includes('pass') || decision.toLowerCase().includes('approved') || 
+                     content.includes(' GO ') || decision.toLowerCase().includes('go');
+    
+    if (isSkip) {
+      return {
+        icon: <XCircle className="w-4 h-4" />,
+        label: 'FILTER',
+        gradient: 'from-rose-500 to-red-500',
+        glowColor: 'rgba(244,63,94,0.3)',
+        textColor: 'text-rose-400',
+        bgColor: 'bg-rose-500/20',
+      };
+    } else if (isReduce) {
+      return {
+        icon: <AlertTriangle className="w-4 h-4" />,
+        label: 'FILTER',
+        gradient: 'from-amber-500 to-orange-500',
+        glowColor: 'rgba(245,158,11,0.3)',
+        textColor: 'text-amber-400',
+        bgColor: 'bg-amber-500/20',
+      };
+    } else if (isPassed) {
+      return {
+        icon: <CheckCircle className="w-4 h-4" />,
+        label: 'FILTER',
+        gradient: 'from-emerald-500 to-green-500',
+        glowColor: 'rgba(16,185,129,0.3)',
+        textColor: 'text-emerald-400',
+        bgColor: 'bg-emerald-500/20',
+      };
+    }
     return {
-      icon: isPassed ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
+      icon: <Filter className="w-4 h-4" />,
       label: 'FILTER',
-      gradient: isPassed ? 'from-emerald-500 to-green-500' : 'from-zinc-500 to-gray-500',
-      glowColor: isPassed ? 'rgba(16,185,129,0.3)' : 'rgba(113,113,122,0.3)',
-      textColor: isPassed ? 'text-emerald-400' : 'text-zinc-400',
-      bgColor: isPassed ? 'bg-emerald-500/20' : 'bg-zinc-500/20',
+      gradient: 'from-zinc-500 to-gray-500',
+      glowColor: 'rgba(113,113,122,0.3)',
+      textColor: 'text-zinc-400',
+      bgColor: 'bg-zinc-500/20',
     };
   }
   
@@ -311,6 +344,18 @@ const buildDataChips = (entry) => {
     });
   }
   
+  // R-multiple (for closed trades)
+  if (meta.r_multiple !== undefined && meta.r_multiple !== null) {
+    const r = parseFloat(meta.r_multiple);
+    const sign = r >= 0 ? '+' : '';
+    chips.push({
+      icon: <Hash className="w-3 h-3" />,
+      label: `${sign}${r.toFixed(1)}R`,
+      color: r >= 0 ? 'text-emerald-400' : 'text-rose-400',
+      bg: r >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
+    });
+  }
+  
   // P&L
   if (meta.pnl !== undefined && meta.pnl !== null) {
     const pnl = parseFloat(meta.pnl);
@@ -359,12 +404,54 @@ const buildDataChips = (entry) => {
   }
   
   // Score
-  if (meta.score !== undefined) {
+  if (meta.score !== undefined && meta.score > 0) {
+    const grade = meta.tqs_grade || '';
     chips.push({ 
       icon: <BarChart2 className="w-3 h-3" />,
-      label: `Score ${parseFloat(meta.score).toFixed(1)}`, 
-      color: 'text-cyan-400', 
-      bg: 'bg-cyan-500/10 border-cyan-500/30' 
+      label: `TQS ${parseFloat(meta.score).toFixed(0)}${grade ? ` (${grade})` : ''}`, 
+      color: meta.score >= 70 ? 'text-emerald-400' : meta.score >= 40 ? 'text-cyan-400' : 'text-amber-400', 
+      bg: meta.score >= 70 ? 'bg-emerald-500/10 border-emerald-500/30' : meta.score >= 40 ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-amber-500/10 border-amber-500/30'
+    });
+  }
+  
+  // Direction
+  if (meta.direction) {
+    const isLong = meta.direction.toLowerCase() === 'long';
+    chips.push({
+      icon: isLong ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />,
+      label: meta.direction.toUpperCase(),
+      color: isLong ? 'text-emerald-400' : 'text-rose-400',
+      bg: isLong ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
+    });
+  }
+  
+  // Risk/Reward
+  if (meta.risk_reward && meta.risk_reward > 0) {
+    chips.push({
+      icon: <Target className="w-3 h-3" />,
+      label: `R:R ${parseFloat(meta.risk_reward).toFixed(1)}:1`,
+      color: meta.risk_reward >= 2 ? 'text-emerald-400' : 'text-amber-400',
+      bg: meta.risk_reward >= 2 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'
+    });
+  }
+  
+  // Win rate
+  if (meta.win_rate && meta.win_rate > 0) {
+    chips.push({
+      icon: <Percent className="w-3 h-3" />,
+      label: `${parseFloat(meta.win_rate).toFixed(0)}% Win`,
+      color: meta.win_rate >= 50 ? 'text-emerald-400' : 'text-rose-400',
+      bg: meta.win_rate >= 50 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'
+    });
+  }
+  
+  // Tape score
+  if (meta.tape_score && meta.tape_score > 0) {
+    chips.push({
+      icon: <Activity className="w-3 h-3" />,
+      label: `Tape ${parseFloat(meta.tape_score).toFixed(0)}`,
+      color: meta.tape_score >= 60 ? 'text-emerald-400' : 'text-zinc-400',
+      bg: meta.tape_score >= 60 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-zinc-500/10 border-zinc-500/30'
     });
   }
   
