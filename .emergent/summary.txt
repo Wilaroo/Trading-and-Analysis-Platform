@@ -1,130 +1,140 @@
-<analysis>**original_problem_statement**: AI trading platform optimization. Implement XGBoost GPU swap, resolve Train/Serve data skew, eliminate scanning bottlenecks, refactor confidence gate to an additive system, and integrate Deep Learning models (Phase 5) across the dual-GPU architecture (DGX Spark + Windows PC). Include FinBERT sentiment analysis. PRODUCT REQUIREMENTS: Stable 13-phase massive XGBoost/PyTorch training pipeline that doesn't crash the server.
+<analysis>**original_problem_statement**: AI trading platform optimization across DGX Spark + Windows PC dual-GPU architecture. Resolve Train/Serve data skew, optimize SentCom chat context injection, eliminate scanning bottlenecks, fix severe thread/event loop exhaustion that was causing connection timeouts, and implement a streaming cache layer for real-time WebSocket data. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, SentCom chat aware of live portfolio status without hanging the backend.
 
 **User's preferred language**: English (INSTRUCT NEXT AGENT: Respond in English only)
 
-**what currently exists?**: A full-stack React + FastAPI + MongoDB distributed AI trading platform running across a Windows PC (IB Gateway, data pushers,  orchestrators) and a physical DGX Spark (Linux, 128GB RAM). The backend has a massive 13-phase XGBoost/PyTorch AI training pipeline that extracts features via . Extensive NVMe disk caching () and strict memory safety mechanisms (, chunk accumulation) are in place.
+**what currently exists?**: A full-stack AI trading platform running on a physical DGX Spark (Linux) and Windows PC (IB Gateway + data pushers). The architecture uses FastAPI for the backend, React for the frontend, and MongoDB. The system uses a dedicated  (port 8002) for LLM interactions to avoid blocking the main backend (port 8001). The main backend handles 17 real-time WebSocket streams, market scanning, and AI training orchestration.
 
 **Last working item**: 
-    - Last item agent was working: Vectorizing the pure-Python per-bar feature extraction loops (specifically in  and ). The pipeline memory issues are fixed, but the CPU compute time is bottlenecked by iterating row-by-row over 50,000 bars per symbol, taking ~17 minutes per 50 symbols. The agent was actively replacing these with  to process all bars simultaneously.
-    - Status: IN PROGRESS
+    - Last item agent was working: Refactoring  to move ~1,000 lines of module-level service initialization into a  function that runs during the FastAPI  event. This was done to massively speed up boot time and prevent module-import crashes. However, the agent failed to delete the old module-level  wiring calls (around lines 2600-2650). Because these calls reference variables that are now locally scoped inside ,  is crashing on boot with .
+    - Status: IN PROGRESS / BLOCKED
     - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by bash (monitoring system RAM, logs on the physical DGX Spark, and timing the batches)
+    - Which testing method agent to use? manual testing by bash/python -c
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Phase 3/5/7 CPU Compute Bottleneck (Per-Bar Python Loops) (P0)
-     - Attempted fixes: Agent analyzed the pipeline and identified that  creates 125 million iterations for 5-min data, accounting for 65% of the pipeline's runtime.
-     - Next debug checklist: 
-       1. Pre-cache  by unique date.
-       2. Vectorize  and  using numpy sliding windows.
-       3. Update  to use a single MongoDB  batch query instead of a loop of 50 individual queries.
-       4. Vectorize .
-       5. Enforce  in .
-     - Why fix this issue and what will be achieved with the fix? Will cut batch processing time from ~17 minutes to 1-3 minutes, reducing total pipeline runtime from many hours to under an hour.
+  Issue 1: Backend  Startup Crash (NameError) (P0)
+     - Attempted fixes: The agent successfully appended the , , etc., calls to the bottom of the  function, but the final  command to delete the duplicate calls from the module level failed.
+     - Next debug checklist: Open . Find the block of code around lines 2600-2650 containing module-level calls to , , , , , , and . Delete this entire block from the module level. Verify with  and have the user test startup.
+     - Why fix this issue and what will be achieved with the fix? Fixes a fatal syntax/scoping error that completely prevents the backend from booting.
      - Status: IN PROGRESS
-     - Is recurring issue? Y (Performance bottleneck)
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
-
-  Issue 2:  deprecation (P3)
-     - Attempted fixes: None
-     - Next debug checklist: Remove/refactor legacy proxy manager since native Ollama on Spark is being used.
-     - Why fix this issue and what will be achieved with the fix? Cleans up legacy cloud infrastructure.
-     - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
+  Issue 2: Verify UI Data Population (Positions/Alerts/Insights) (P1)
+     - Attempted fixes: Increased the React  maxConcurrent limit from 2 to 4, aggregated 5 AI insight API calls into 1, fixed WS streams to broadcast initial empty states, and reduced WS start delays. 
+     - Next debug checklist: Once the backend boots (Issue 1), ask the user to verify if the frontend positions, scanner alerts, and AI insights load promptly without timing out.
+     - Why fix this issue and what will be achieved with the fix? Ensures the UI is responsive and data is rendered quickly without HTTP queue gridlock.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? Y (Data loading timeouts were severe prior to this session)
+     - Should Test frontend/backend/both after fix? frontend
+     - Blocked on other issue: Issue 1
+
 **In progress Task List**: 
-  Task 1: Vectorize  and 
-     - Where to resume: Modify  to calculate volatility targets and features across the whole array at once instead of inside a loop. Cache regime lookups by unique date in .
-     - What will be achieved with this? Eliminates the 99% GPU idle time by removing the CPU bottleneck.
+  Task 1: Phase A1 - Initialization Refactor
+     - Where to resume: Complete the cleanup of  module-level router initializations (Issue 1).
+     - What will be achieved with this? Eliminates dependency loading crashes and drops backend boot time by 5-10 seconds.
      - Status: IN PROGRESS
      - Should Test frontend/backend/both after fix? backend
      - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🟡 (P1) Phase 5e: RL Position Sizer - Add reinforcement learning for position sizing based on confidence gate scores.
-    - 🟡 (P2) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy CNN/DL models to the Windows PC (RTX 5060 Ti) over LAN.
+    - 🟡 (P1) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy CNN/DL models to the Windows PC over LAN.
+    - 🟡 (P2) Re-enable . (It was temporarily disabled because it crashed APScheduler. Now that schedulers are moved to the  event,  can be safely restored for performance).
     
     Future Tasks:
-    - ⚪ (P2) Phase 7: Infrastructure Polish - Convert startup  scripts to robust systemd services on the Spark, add auto-startup and Windows toast notifications.
-    - ⚪ (P3) Enhancement: Build a per-signal weight optimizer to auto-tune the additive gate point values based on logged trade outcomes.
+    - ⚪ (P2) Phase 7: Infrastructure Polish - Convert bash start/stop scripts to systemd services.
+    - ⚪ (P3) Enhancement: Build a per-signal weight optimizer to auto-tune the additive gate point values.
+    - ⚪ (P3) Enhancement: Wire confidence gate into Phase 13 validation backtest.
 
 **Completed work in this session**
-- Verified and documented P0 OOM () and P1 BSON () fixes (DONE)
-- Fixed 8 systemic pipeline memory leaks: added missing  calls, forced  to prevent overlapping workers, converted accumulation to chunk-based instead of per-row, forced , and added missing  across all phases (DONE)
-- Built massive NVMe Caching System ( and ) to bypass MongoDB bottlenecks (DONE)
-- Implemented Pipeline Resume logic to auto-skip already trained models within the last 24h (DONE)
-- Added  sharing to load SPY/QQQ/IWM once per pipeline run (DONE)
-- Fixed severe OOM OS-Kill crash in Phase 3 by capping  based on frequency (e.g., 5-min capped to 500 symbols instead of 2500) (DONE)
-- Added  and  options to the subprocess CLI and API (DONE)
+- Phase 1.5: Chat Server Context — Rewrote  to read portfolio data directly from MongoDB () instead of making blocking HTTP requests to the main backend. (DONE)
+- Phase 2: Streaming Cache Layer — Created  to compute dashboard data in 1 thread/cycle instead of 26+. All 17 WebSocket streams now read from a fast in-memory Python dictionary. (DONE)
+- Async Endpoint Overhaul — Converted 367  endpoints containing synchronous MongoDB calls into standard  endpoints so they execute in the ThreadPoolExecutor instead of blocking the main FastAPI event loop. (DONE)
+- AI Insights Aggregation — Combined 5 separate AI insight HTTP calls into a single endpoint () to reduce frontend connection flooding. (DONE)
+- Frontend Tuning — Added  for real-time latency monitoring, and increased  from 2 to 4. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None
+None. 
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: OOM (Out Of Memory) issues during accumulation ().
-  - Recurrence count: 5+ (Happened again in Phase 3 because 2500 symbols * 50k bars = 100GB peak RAM).
-  - Status: RESOLVED (Mitigated by introducing frequency-scaled symbol caps and pre-vstack memory safety guards. Pipeline is now stable with 79GB free).
+  - Issue recurrence in previous fork: Async Event Loop / Thread Pool Saturation.
+  - Recurrence count: 5+ 
+  - Status: RESOLVED (Massive architectural changes applied: 367 endpoints converted to , and a streaming cache layer implemented. Event loop lag confirmed to be down to ~1ms).
 
 **Code Architecture**
-- **DGX Spark (192.168.50.2)**: Runs Backend (FastAPI :8001), Frontend (React :3000), internal workers, Docker MongoDB. Has 4TB NVMe used for temp file caching.
-- **Windows PC (192.168.50.1)**: Runs IB Gateway, data pushers, orchestrator  scripts.
+- **DGX Spark (192.168.50.2)**: 
+  - Main Backend ( running on :8001).
+  - Chat Server ( running on :8002) - Isolated LLM microservice.
+  - Frontend (React :3000).
+- **Windows PC (192.168.50.1)**: Runs IB Gateway, Data Pusher, and Historical Collectors.
 
 **Key Technical Concepts**
-XGBoost CUDA Native, Memory Management (, GC, chunk accumulation, ), NVMe Disk Caching (Pickle/Numpy), Vectorized Feature Extraction (pandas/numpy ), Subprocess Orchestration.
+FastAPI  vs  threading behaviors, Event loop blocking, React WebSocket streaming, Request Throttling, MongoDB Aggregation pipelines.
 
 **key DB schema**
-  - : Stores XGBoost JSON representations ( format). Checked for pipeline resume.
-  -  & : Tracks progress metrics & ETAs for UI.
-  - : Raw bar data (queried heavily).
+  - : Added to allow multi-process (chat server & main backend) access to real-time IB positions/quotes without HTTP overhead.
 
 **changes in tech stack**
-  - Introduction of a local NVMe disk caching system at  using Python  and  formats to drastically reduce MongoDB network overhead during multi-phase runs.
+  -  was temporarily disabled.
+  -  component added to frontend.
 
 **All files of reference**
-  -  (Core pipeline logic, highly modified for caching, resume, and strict memory limits)
-  -  (Target for vectorization)
-  -  (Target for unique date caching)
-  -  (API endpoints, now accepts )
-  -  (CLI runner)
+  -  (Massively refactored initialization routine; currently broken due to leftover module-level code)
+  -  (367 endpoints modified to )
+  -  (New aggregated insight endpoint)
+  -  (Integrated Health Badge)
+  -  (New)
+  -  (Throttler limit changed)
 
 **Areas that need refactoring**: 
-  - **Feature Extraction Loops:** Every  loop across the pipeline modules must be refactored into vectorized numpy array operations. 50K iterations per symbol in pure Python is currently crippling the pipeline.
+  - : Lines ~2600-2650 containing module-level  function calls must be deleted as they were already moved inside .
 
 **key api endpoints**
-  -  (Now accepts  boolean and  boolean).
+  -  (Ultra-fast minimal health check)
+  - 
+  - 
   - 
 
 **Critical Info for New Agent**
-  - **HARDWARE WARNING:** The user is running code on a physical DGX Spark (128GB RAM). Memory is the absolute limit. DO NOT remove any memory protections (, , chunk accumulations, or symbol caps).
-  - **PERFORMANCE PARADIGM:** The pipeline currently runs perfectly without crashing, but is extremely slow. The user is actively monitoring the Spark terminal. **Your immediate goal is to vectorize , , and  (inner loops and MongoDB queries) to eliminate the Python compute bottleneck.**
-  - **Testing:** The user must trigger the script via SSH locally (e.g., ). You cannot mock this. Work with the user.
+  - **HARDWARE WARNING:** The codebase runs on a physical DGX Spark (Linux) and relies on an Interactive Brokers Gateway on a Windows LAN. You cannot test the pipeline natively in your environment. Rely on the user to execute bash commands, scripts, and provide logs.
+  - Fix the  module-level  calls *immediately* as your first action, otherwise the user cannot test anything.
 
 **documents and test reports created in this job**
-  - 
+  -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - *User*: Requested vectorization of the pipeline after discovering that a batch of 50 symbols for 5-min data takes 17 minutes to load. Approved the agent's plan to implement date-based regime caching, vectorized targets, and MongoDB  query batching.
- - *Pending*: The agent was just viewing  to apply the vectorized sliding window logic. Pick up right there.
+ - *User*: Reported that after pulling and restarting, the backend failed to start.
+ - *User*: Provided logs showing  in  at line 2644.
+ - *Agent*: Identified that module-level router initialization calls were left behind and tried to remove them via .
+ - *Agent*:  failed to find the exact block.
+ - *Pending*: The agent finished the session before completing the cleanup of the module-level calls in . The next agent must complete this removal so the backend can boot.
 
 **Project Health Check:**
-Broken (Technically functional without OOMs, but completely bottlenecked by pure Python loops taking hours).
+Broken (Backend fails to start due to  in ).
 
 **3rd Party Integrations**
   - Interactive Brokers (Primary Data & Execution)
-  - Finnhub (News Data for FinBERT)
-  - HuggingFace Transformers (FinBERT Sentiment)
+  - Ollama (Local , Cloud  via API)
+  - Finnhub (Sentiment analysis)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Requires the user's physical DGX Spark and proprietary MongoDB data to test pipeline runs).
+  - Testing agent used after significant changes: NO (Due to physical DGX Spark requirement)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: None
+  - Known regressions:  startup broken by the initialization refactoring logic.
 
-**Credentials to test flow:** N/A
+**Credentials to test flow:** N/A (User handles execution)
 
 **What agent forgot to execute**
-The agent drafted an excellent 6-step plan to vectorize the pipeline and eliminate the 17-minute batch times, but hit the context limit before it could write the code for  and .</analysis>
+The agent failed to delete the duplicate , , , , , , and  calls from the module level (around lines 2600-2650) in . 
+
+**Debugging checklist for current issue**
+    Issue: Backend fails to start with 
+    Backend files to check: 
+    Actions: 
+    1. Locate the block of  calls scattered around line 2600-2650.
+    2. Confirm that these calls *already exist* at the end of the  function block.
+    3. Delete the redundant module-level calls.
+    4. Run  to verify syntax/scoping before handing back to the user.</analysis>

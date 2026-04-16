@@ -1272,6 +1272,50 @@ def _init_all_services():
 
     print('[INIT] All services initialized')
 
+    # Wire services into routers (must happen after services are created)
+    init_watchlist_router(db, smart_watchlist, fetch_multiple_quotes, score_stock_for_strategies, generate_ai_analysis)
+    init_portfolio_router(db, fetch_multiple_quotes)
+    init_earnings_router(stock_service, get_all_symbols_set)
+    init_ollama_proxy_router(ollama_proxy_manager)
+    init_market_data_router(
+        get_stock_service, fetch_quote, fetch_multiple_quotes, fetch_fundamentals,
+        get_full_vst_analysis, fetch_historical_data, fetch_insider_trades,
+        get_unusual_insider_activity, fetch_cot_data, get_cot_summary, fetch_market_news
+    )
+    init_system_router(
+        ib_service=ib_service,
+        assistant_service=assistant_service,
+        ollama_proxy_manager=ollama_proxy_manager,
+        is_http_ollama_proxy_connected=is_http_ollama_proxy_connected,
+        strategy_promotion_service=get_service_optional('strategy_promotion'),
+        simulation_engine=get_service_optional('simulation_engine'),
+        strategy_service=strategy_service,
+        db=db,
+        get_feature_engine=get_feature_engine,
+        get_scoring_engine=get_scoring_engine,
+        get_stock_service=get_stock_service,
+        get_service_optional=get_service_optional,
+        background_scanner=background_scanner,
+        LLMProvider=LLMProvider,
+    )
+    init_dashboard_router(
+        get_portfolio=_portfolio_get_portfolio,
+        get_watchlist=_watchlist_get_watchlist,
+        strategy_service=strategy_service,
+        get_ib_service=get_ib_service,
+        get_smart_watchlist=get_smart_watchlist,
+        background_scanner=background_scanner,
+        assistant_service=assistant_service,
+        alerts_col=alerts_col,
+        fetch_multiple_quotes=fetch_multiple_quotes,
+        score_stock_for_strategies=score_stock_for_strategies,
+        get_all_strategies_cached=get_all_strategies_cached,
+        scans_col=scans_col,
+        wave_scanner=wave_scanner,
+        index_universe=index_universe,
+    )
+    print('[INIT] Router wiring complete')
+
 
 # ===================== PYDANTIC MODELS =====================
 
@@ -2598,54 +2642,6 @@ async def score_stock_for_strategies(symbol: str, quote_data: Dict, fundamentals
         "daily_range": round(daily_range, 2),
         "above_vwap": above_vwap
     }
-
-# Initialize watchlist & portfolio routers (dependencies defined above)
-init_watchlist_router(db, smart_watchlist, fetch_multiple_quotes, score_stock_for_strategies, generate_ai_analysis)
-init_portfolio_router(db, fetch_multiple_quotes)
-init_earnings_router(stock_service, get_all_symbols_set)
-init_ollama_proxy_router(ollama_proxy_manager)
-init_market_data_router(
-    get_stock_service, fetch_quote, fetch_multiple_quotes, fetch_fundamentals,
-    get_full_vst_analysis, fetch_historical_data, fetch_insider_trades,
-    get_unusual_insider_activity, fetch_cot_data, get_cot_summary, fetch_market_news
-)
-
-# ===================== INITIALIZE EXTRACTED ROUTERS =====================
-# System router: health, startup-check, consolidated-status, LLM status, system monitor
-init_system_router(
-    ib_service=ib_service,
-    assistant_service=assistant_service,
-    ollama_proxy_manager=ollama_proxy_manager,
-    is_http_ollama_proxy_connected=is_http_ollama_proxy_connected,
-    strategy_promotion_service=get_service_optional('strategy_promotion'),
-    simulation_engine=get_service_optional('simulation_engine'),
-    strategy_service=strategy_service,
-    db=db,
-    get_feature_engine=get_feature_engine,
-    get_scoring_engine=get_scoring_engine,
-    get_stock_service=get_stock_service,
-    get_service_optional=get_service_optional,
-    background_scanner=background_scanner,
-    LLMProvider=LLMProvider,
-)
-
-# Dashboard router: dashboard stats/init, alerts CRUD, scanner, wave-scanner, universe
-init_dashboard_router(
-    get_portfolio=_portfolio_get_portfolio,
-    get_watchlist=_watchlist_get_watchlist,
-    strategy_service=strategy_service,
-    get_ib_service=get_ib_service,
-    get_smart_watchlist=get_smart_watchlist,
-    background_scanner=background_scanner,
-    assistant_service=assistant_service,
-    alerts_col=alerts_col,
-    fetch_multiple_quotes=fetch_multiple_quotes,
-    score_stock_for_strategies=score_stock_for_strategies,
-    get_all_strategies_cached=get_all_strategies_cached,
-    scans_col=scans_col,
-    wave_scanner=wave_scanner,
-    index_universe=index_universe,
-)
 
 # ===================== WEBSOCKET REAL-TIME STREAMING =====================
 

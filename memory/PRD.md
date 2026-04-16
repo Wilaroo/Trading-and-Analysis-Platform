@@ -32,6 +32,10 @@
 - Tier 3 NIA/TRAINING (14 routers): ib_collector, advanced_backtest, slow_learning, medium_learning, learning_connectors, strategy_promotion, learning_dashboard, learning, data_storage, market_scanner, scanner, hybrid_data, simulator, ev_tracking
 - Tier 4 UTILITIES (12 routers): agents, rag, journal, research, knowledge, smb, social_feed, catalyst, sentiment, market_intel, ollama_proxy, alpaca
 
+### A1 Cleanup (Feb 2026 — DONE)
+- Removed duplicate module-level `init_*_router()` calls (lines 2646-2692) that referenced locally-scoped variables from `_init_all_services()`, causing `NameError` on boot.
+- `server.py` now compiles cleanly; all router init calls exist only inside `_init_all_services()`.
+
 ## Upcoming Tasks
 - Phase 5e: RL Position Sizer
 - Phase 6: Distributed PC Worker
