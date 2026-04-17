@@ -528,8 +528,8 @@ function App() {
           <div className="absolute top-1/2 right-0 w-1/3 h-1/3 bg-cyan-400/[0.05] rounded-full blur-[100px]" />
         </div>
         
-        {/* Ticker Tape with glass effect */}
-        <div className="glass-header sticky top-0 z-10">
+        {/* Ticker Tape */}
+        <div>
           <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
         </div>
         
