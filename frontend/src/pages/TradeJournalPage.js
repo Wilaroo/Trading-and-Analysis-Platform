@@ -780,7 +780,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
             
             <p className="text-xs text-zinc-500 mt-2">
               {new Date(trade.entry_date).toLocaleDateString()} 
-              {trade.holding_days !== null && ` • ${trade.holding_days} day${trade.holding_days !== 1 ? 's' : ''}`}
+              {trade.holding_days != null && trade.holding_days !== undefined && ` • ${trade.holding_days} day${trade.holding_days !== 1 ? 's' : ''}`}
               {trade.close_reason && (
                 <span className="ml-2 text-zinc-400">
                   • Closed: <span className="text-white">{trade.close_reason.replace(/_/g, ' ')}</span>
