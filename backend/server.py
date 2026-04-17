@@ -3513,7 +3513,15 @@ async def stream_sentcom_data():
         if manager.active_connections:
             try:
                 sentcom_data = _streaming_cache.get("sentcom_data") or {}
-                data_hash = hash(str((sentcom_data.get("status") or {}).get("last_updated", "")) + str(len(sentcom_data.get("stream") or [])))
+                # Hash on stream content + positions count to detect real changes
+                stream_items = sentcom_data.get("stream") or []
+                positions_items = sentcom_data.get("positions") or []
+                hash_parts = str(len(stream_items)) + str(len(positions_items))
+                if stream_items:
+                    # Include first item's id/timestamp to detect content rotation
+                    first = stream_items[0] if stream_items else {}
+                    hash_parts += str(first.get("id", "")) + str(first.get("timestamp", ""))
+                data_hash = hash(hash_parts)
                 if data_hash != last_hash:
                     await manager.broadcast({
                         "type": "sentcom_data",
