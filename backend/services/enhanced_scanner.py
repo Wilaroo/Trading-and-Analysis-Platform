@@ -3907,6 +3907,12 @@ class EnhancedBackgroundScanner:
             symbols = list(self._symbol_adv_cache.keys())[:200]
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
+            if not symbols:
+                # Fallback: get symbols that have daily bars in MongoDB
+                try:
+                    symbols = self.db["ib_historical_data"].distinct("symbol", {"bar_size": "1 day"})[:200]
+                except Exception:
+                    pass
             
             scanned = 0
             alerts_found = 0
@@ -3995,10 +4001,15 @@ class EnhancedBackgroundScanner:
             except Exception:
                 pass
             
-            # Get symbols: use ADV cache first, then pushed quotes
+            # Get symbols: use ADV cache first, then pushed quotes, then MongoDB
             symbols = list(self._symbol_adv_cache.keys())[:300]
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
+            if not symbols:
+                try:
+                    symbols = self.db["ib_historical_data"].distinct("symbol", {"bar_size": "1 day"})[:200]
+                except Exception:
+                    pass
             
             if not symbols:
                 logger.debug("Pre-market scan: no symbols available")
@@ -4027,14 +4038,33 @@ class EnhancedBackgroundScanner:
                     if prev_close <= 0:
                         continue
                     
-                    # Get pre-market price from pushed quotes
+                    # Get current price: live IB pushed data first, then yesterday's close
                     quote = live_quotes.get(symbol, {})
                     pm_price = quote.get("last") or quote.get("close") or quote.get("price") or 0
                     pm_volume = quote.get("volume", 0) or 0
+                    has_live_data = pm_price > 0
                     
-                    # Calculate gap if we have pre-market price
+                    # Fallback: check IB positions for market price
+                    if not has_live_data:
+                        try:
+                            from routers.ib import _pushed_ib_data
+                            for pos in _pushed_ib_data.get("positions", []):
+                                if pos.get("symbol", "").upper() == symbol.upper():
+                                    mp = pos.get("marketPrice", 0) or pos.get("market_price", 0)
+                                    if mp and mp > 0:
+                                        pm_price = mp
+                                        has_live_data = True
+                                        break
+                        except Exception:
+                            pass
+                    
+                    # Final fallback: use yesterday's close (still useful for daily chart analysis)
+                    if not has_live_data:
+                        pm_price = prev_close
+                    
+                    # Calculate gap — only meaningful with live pre-market data
                     gap_pct = 0
-                    if pm_price > 0:
+                    if has_live_data and pm_price > 0:
                         gap_pct = ((pm_price - prev_close) / prev_close) * 100
                     
                     # Calculate average volume (20-day)
@@ -4131,10 +4161,10 @@ class EnhancedBackgroundScanner:
                             await self._process_new_alert(alert)
                             alerts_found += 1
                     
-                    # ── ORB CANDIDATE (high pre-market volume, narrow range yesterday) ──
+                    # ── ORB CANDIDATE (high pre-market volume OR tight daily range setting up) ──
+                    prev_range_pct = ((prev_high - prev_low) / prev_close * 100) if prev_close > 0 else 0
                     if pm_volume > 0 and avg_volume > 0:
                         pm_rvol = pm_volume / (avg_volume * 0.1)  # PM volume vs 10% of daily avg
-                        prev_range_pct = ((prev_high - prev_low) / prev_close * 100) if prev_close > 0 else 0
                         
                         if pm_rvol > 1.5 and prev_range_pct < 3.0:
                             # High PM volume + tight previous range = ORB setup
@@ -4158,8 +4188,31 @@ class EnhancedBackgroundScanner:
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
-                    
-                    # ── OPENING DRIVE CANDIDATE (strong trend + gap in direction) ──
+                    elif prev_range_pct < 2.0 and len(bars) >= 5:
+                        # No PM volume data, but very tight daily range = potential ORB
+                        # Check if last 3 days were contracting range
+                        ranges = [((b["high"] - b["low"]) / b["close"] * 100) if b["close"] > 0 else 99 for b in bars[-3:]]
+                        if all(r < 2.5 for r in ranges):
+                            orb_price = pm_price if pm_price > 0 else prev_close
+                            stop = orb_price - atr
+                            target = orb_price + (atr * 2.5)
+                            alert = LiveAlert(
+                                id=f"pm_orb_tight_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="orb",
+                                direction="long",
+                                trigger_price=orb_price,
+                                current_price=orb_price,
+                                stop_price=stop,
+                                target_price=target,
+                                score=60,
+                                scan_tier="intraday",
+                                reasoning=f"ORB candidate: 3-day contracting range ({ranges[-1]:.1f}%, {ranges[-2]:.1f}%, {ranges[-3]:.1f}%). Breakout watch at open.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
                     if abs(gap_pct) > 1.0 and pm_price > 0 and len(bars) >= 20:
                         closes = [b["close"] for b in bars]
                         sma20 = sum(closes[-20:]) / 20
