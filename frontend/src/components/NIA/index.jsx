@@ -295,8 +295,8 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       {/* 1. Quick Stats Bar — system status at a glance */}
       <QuickStatsBar data={quickStatsData} />
 
-      {/* 2. AI Training Pipeline — unified training hub: setup models + model inventory + regime */}
-      <TrainingPipelinePanel onRefresh={handleRefresh} wsTrainingStatus={wsTrainingStatus} wsMarketRegime={wsMarketRegime} />
+      {/* 2. AI Training Pipeline — unified training hub: setup models + model inventory */}
+      <TrainingPipelinePanel onRefresh={handleRefresh} wsTrainingStatus={wsTrainingStatus} />
 
       {/* 2.75 SentCom Intelligence — confidence gate decisions, trading mode */}
       <SentComIntelligencePanel onRefresh={handleRefresh} wsConfidenceGate={wsConfidenceGate} />

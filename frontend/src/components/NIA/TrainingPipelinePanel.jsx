@@ -13,14 +13,6 @@ import { toast } from 'sonner';
 import api from '../../utils/api';
 import { useConnectionManager } from '../../contexts/ConnectionManagerContext';
 
-const REGIME_COLORS = {
-  bull_trend: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'BULL' },
-  bear_trend: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'BEAR' },
-  range_bound: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'RANGE' },
-  high_vol: { bg: 'bg-violet-500/10', border: 'border-violet-500/30', text: 'text-violet-400', label: 'HIGH VOL' },
-  unknown: { bg: 'bg-zinc-500/10', border: 'border-zinc-500/30', text: 'text-zinc-400', label: 'UNKNOWN' },
-};
-
 const CATEGORY_ICONS = {
   generic_directional: TrendingUp,
   setup_specific: Target,
@@ -284,41 +276,6 @@ const MetricBar = memo(({ value, max = 1, color = 'bg-cyan-500' }) => {
   );
 });
 
-const IndexCard = memo(({ name, data: idx }) => {
-  if (!idx || !idx.price) return null;
-  const trendColor = idx.trend > 0.1 ? 'text-emerald-400' : idx.trend < -0.1 ? 'text-red-400' : 'text-amber-400';
-  const rsiNorm = ((idx.rsi + 1) / 2) * 100;
-  return (
-    <div className="p-3 rounded-lg border border-white/5 bg-white/[0.02]" data-testid={`index-card-${name}`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-bold text-white">{name}</span>
-        <span className="text-xs font-mono text-zinc-300">${idx.price?.toFixed(2)}</span>
-      </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">Trend</span>
-          <span className={`font-mono ${trendColor}`}>{idx.trend > 0 ? '+' : ''}{(idx.trend * 100).toFixed(0)}%</span>
-        </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">RSI</span>
-          <span className="font-mono text-zinc-300">{rsiNorm.toFixed(0)}</span>
-        </div>
-        <MetricBar value={rsiNorm} max={100} color={rsiNorm > 70 ? 'bg-red-500' : rsiNorm < 30 ? 'bg-emerald-500' : 'bg-cyan-500'} />
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">Mom</span>
-          <span className={`font-mono ${idx.momentum > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {idx.momentum > 0 ? '+' : ''}{(idx.momentum * 100).toFixed(2)}%
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">Vol</span>
-          <span className="font-mono text-zinc-300">{(idx.volatility * 100).toFixed(2)}%</span>
-        </div>
-      </div>
-    </div>
-  );
-});
-
 const CategoryRow = memo(({ categoryKey, category }) => {
   const [expanded, setExpanded] = useState(false);
   const Icon = CATEGORY_ICONS[categoryKey] || Brain;
@@ -399,15 +356,13 @@ const CategoryRow = memo(({ categoryKey, category }) => {
   );
 });
 
-const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegime }) => {
-  const [regime, setRegime] = useState(null);
+const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
   const [inventory, setInventory] = useState(null);
   const [pipelineStatus, setPipelineStatus] = useState(null);
   const [cnnModels, setCnnModels] = useState([]);
   const [gpuInfo, setGpuInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [showRegime, setShowRegime] = useState(false);
   const optimisticUntilRef = useRef(0); // timestamp until which we ignore "idle" WS updates
 
   useEffect(() => {
@@ -430,14 +385,9 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
     }
   }, [wsTrainingStatus]);
 
-  useEffect(() => {
-    if (wsMarketRegime) setRegime(prev => ({ ...prev, ...wsMarketRegime }));
-  }, [wsMarketRegime]);
-
   const fetchData = useCallback(async () => {
     try {
-      const [regimeRes, inventoryRes, statusRes, cnnRes, gpuRes] = await Promise.allSettled([
-        api.get('/api/ai-training/regime-live'),
+      const [inventoryRes, statusRes, cnnRes, gpuRes] = await Promise.allSettled([
         api.get('/api/ai-training/model-inventory'),
         api.get('/api/ai-training/status'),
         api.get('/api/ai-training/cnn/models'),
@@ -447,7 +397,6 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
       // Debug logging
       console.log('[TrainingPanel] inventoryRes:', inventoryRes);
       
-      if (regimeRes.status === 'fulfilled' && regimeRes.value.data?.success) setRegime(regimeRes.value.data);
       if (inventoryRes.status === 'fulfilled' && inventoryRes.value.data?.success) {
         console.log('[TrainingPanel] Setting inventory:', inventoryRes.value.data);
         setInventory(inventoryRes.value.data);
@@ -473,7 +422,6 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const regimeStyle = REGIME_COLORS[regime?.regime] || REGIME_COLORS.unknown;
   const isTraining = pipelineStatus?.task_status === 'running';
 
   useEffect(() => {
@@ -657,64 +605,8 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
         )}
       </div>
 
-      {/* Model Inventory + Regime Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left Column: Market Regime (collapsible) */}
-        <div className="lg:col-span-1 space-y-3">
-          <div className={`rounded-lg border ${regimeStyle.border} ${regimeStyle.bg} overflow-hidden`} data-testid="regime-badge">
-            <button onClick={() => setShowRegime(!showRegime)} className="w-full flex items-center justify-between px-4 py-3 hover:brightness-110 transition-all" data-testid="regime-toggle">
-              <span className="text-xs text-zinc-400 uppercase tracking-wider">Market Regime</span>
-              <div className="flex items-center gap-2">
-                <span className={`text-sm font-bold ${regimeStyle.text}`}>{regimeStyle.label}</span>
-                <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform duration-200 ${showRegime ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            {showRegime && (
-              <div className="px-4 pb-4 border-t border-white/5">
-                <div className="space-y-2 mt-3">
-                  {regime?.indexes && Object.entries(regime.indexes).map(([name, data]) => (
-                    <IndexCard key={name} name={name} data={data} />
-                  ))}
-                </div>
-                {regime?.cross && (
-                  <div className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
-                    <span className="text-xs text-zinc-500 uppercase tracking-wider">Correlations & Rotation</span>
-                    <div className="grid grid-cols-2 gap-1.5 mt-1">
-                      {[
-                        { label: 'SPY-QQQ', value: regime.cross.spy_qqq_corr },
-                        { label: 'SPY-IWM', value: regime.cross.spy_iwm_corr },
-                        { label: 'QQQ-IWM', value: regime.cross.qqq_iwm_corr },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
-                          <span className="text-zinc-500">{label}</span>
-                          <span className={`font-mono ${value > 0.7 ? 'text-emerald-400' : value < 0.3 ? 'text-red-400' : 'text-amber-400'}`}>{value?.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-1 mt-2">
-                      {[
-                        { label: 'Growth vs Market', key: 'rotation_qqq_spy' },
-                        { label: 'Small vs Large', key: 'rotation_iwm_spy' },
-                        { label: 'Growth vs Value', key: 'rotation_qqq_iwm' },
-                      ].map(({ label, key }) => {
-                        const val = regime.cross[key] || 0;
-                        return (
-                          <div key={key} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white/[0.02]">
-                            <span className="text-zinc-500">{label}</span>
-                            <span className={`font-mono ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{val > 0 ? '+' : ''}{(val * 100).toFixed(2)}%</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Model Categories grouped */}
-        <div className="lg:col-span-2 space-y-4">
+      {/* Model Inventory */}
+      <div className="space-y-4">
           {/* Trade Signal Generators */}
           <div data-testid="signal-generators-group">
             <div className="flex items-center gap-2 mb-2">
@@ -784,7 +676,6 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegim
               </div>
             </div>
           )}
-        </div>
       </div>
     </div>
   );
