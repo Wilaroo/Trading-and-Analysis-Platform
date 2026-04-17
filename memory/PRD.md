@@ -5,82 +5,110 @@
 - **Windows PC** (Ryzen 7, RTX 5060 Ti): IB Gateway/Pusher + Collectors
 - **Data**: 100% Interactive Brokers via local MongoDB
 
-## Completed Work (Apr 17, 2026)
+## Completed Work
 
-### Critical: DST Timezone Bug Fix (Apr 17 — DONE)
-- Scanner `_get_current_time_window()` used hardcoded EST `timezone(timedelta(hours=-5))`, but April = EDT (UTC-4)
-- Scanner was blind to market hours since daylight saving started March 9th
+### Apr 17, 2026 — Session 2 (Major Overhaul)
+
+#### Critical: DST Timezone Bug Fix
+- Scanner `_get_current_time_window()` used hardcoded EST, but April = EDT
+- Scanner was blind to market hours since March 9th daylight saving
 - Fixed in `enhanced_scanner.py`, `trade_context_service.py`, `circuit_breaker.py`, `tqs/context_quality.py`
-- All now use `ZoneInfo("America/New_York")` which auto-handles EST/EDT
+- All now use `ZoneInfo("America/New_York")`
 
-### Critical: SentCom Stream Fix (Apr 17 — DONE)
-- `server.py` streaming cache imported non-existent `sentcom_engine` module — silently failed
-- WS stream `sentcom_data.stream` was ALWAYS empty (never populated)
+#### Critical: SentCom Stream Fix
+- `server.py` imported non-existent `sentcom_engine` module — silently failed
+- WS stream `sentcom_data.stream` was ALWAYS empty
 - Fixed: replaced with `sentcom_service.get_unified_stream()` as async call in cache loop
-- Also fixed WS push hash that was based on missing `status.last_updated` field
+- Fixed WS push hash that was based on missing field
 
-### Scanner Stale Price Fix (Apr 17 — DONE)
-- Removed MongoDB bar fallback for price data — scanner now requires live IB quotes only
-- Added 8% price-drift cleanup in `_cleanup_expired_alerts()` (removes alerts where live price diverged)
-- Added `ib_connected` to scanner stats for frontend display
-- Frontend shows "IB Not Connected" warning banner when IB is disconnected
+#### Critical: Confidence Gate DB Writes
+- `insert_one` was failing silently due to numpy types (from CNN-LSTM/TFT signals)
+- Fixed with JSON round-trip serialization (`json.loads(json.dumps(data, default=str))`)
+- Upgraded error logging from debug→warning
+- Added `_load_from_db()` on startup: loads recent decisions, today's stats, lifetime counters
 
-### Scanner Loop Bug Fix (Apr 17 — DONE)
-- Min-interval safety check was trapped inside an `except` block (dead code)
-- Fixed indentation so it properly enforces 10s minimum between scan cycles
+#### Scanner Fixes
+- Removed MongoDB bar fallback for pricing — scanner requires live IB quotes only
+- Added IB disconnected warning banner in frontend
+- Fixed scan loop min-interval check (was dead code inside except block)
+- Fixed PyMongo boolean check on db objects (`if not self.db` → `if self.db is None`)
+- Added `ib_connected` and `scan_mode` to scanner status
 
-### Confidence Gate DB Hydration (Apr 17 — DONE)
-- All gate stats/decisions were in-memory only, reset to zeros on restart
-- Added `_load_from_db()` on startup: loads recent decisions, today's stats, lifetime counters, trading mode
-- NIA "SentCom Intelligence" panel now shows historical data immediately after restart
+#### After-Hours Scanning Mode (NEW)
+- When market CLOSED: scanner runs `_scan_daily_setups()` every 5 min on daily bars
+- Checks: daily_squeeze, trend_continuation, daily_breakout, base_breakout, accumulation_entry
+- Daily scan no longer requires live quotes (works from MongoDB bars alone)
+- S.O.C. generates after-hours content:
+  - Session status ("After-hours — scanning daily charts")
+  - Session recap (trades, W/L, P&L)
+  - Portfolio review (open positions count, tight stops)
+  - Daily swing/position setups found
 
-### Positions Panel Overhaul (Apr 17 — DONE)
-- Backend: added `market_value`, `cost_basis`, `portfolio_weight`, `risk_level`, `today_change` to positions
-- Frontend: risk badges (CRITICAL >-30%, DANGER >-15%, WARNING >-7%), NO STOP warnings
-- Sort controls (P&L $, P&L %, Value, Weight), source filter (All/Bot/IB)
-- Portfolio-level stats: total_market_value, positions_at_risk, bot/ib counts
+#### EnhancedTickerModal Overhaul
+- Analysis endpoint now reads pushed IB data (quote priority: pushed IB → positions → direct IB → Alpaca → MongoDB)
+- Historical endpoint falls back to MongoDB for intraday bars
+- Data freshness indicators: "LIVE" green pulse vs "Last known (date)" amber
+- Cache TTL 60s→180s, AbortController for fetch cancellation
+- Removed fake earnings endpoint (random data), fixed quality data access path
+- Ticker search now actually navigates via `openTickerModal()`
 
-### Scanner Panel Reorder (Apr 17 — DONE)
-- Watching list (top 10, was 6) now appears ABOVE All Alerts section
-- IB connection warning banner when disconnected
+#### Positions Panel Overhaul
+- Risk badges: CRITICAL (>-30%), DANGER (>-15%), WARNING (>-7%)
+- NO STOP warnings for IB positions without stops
+- Portfolio weight %, market value, sort controls, source filter (All/Bot/IB)
+- Backend returns enriched data: market_value, cost_basis, portfolio_weight, risk_level, today_change
 
-### Prior Completed Work (Feb 2026)
+#### Clickable Tickers
+- All symbols across app now use `ClickableTicker` → opens `EnhancedTickerModal`
+- Wired in: DetailedPositionsPanel, ScannerAlertsPanel, StreamOfConsciousness, SentCom stream
 
-#### A1: Service Init → Startup Event (DONE)
-- Moved 1017 lines of service initialization from module-level into `_init_all_services()` function
-- Server accepts connections BEFORE services fully initialized
+#### S.O.C. Stream Improvements
+- Accumulating buffer (100 entries) — messages persist across refresh cycles
+- Sorted by timestamp (newest first)
+- Removed fake demo message generator
+- Container height 500px→700px
 
-#### Stability Optimization (DONE)
-- 367 async→def endpoint conversions (event loop fully unblocked)
-- Streaming cache layer (1 thread/cycle vs 26+)
-- Chat server isolated on port 8002 with MongoDB-only context
-- Response caching on 6 heavy endpoints
+#### UI Cleanup
+- Removed deprecated AI regime from NIA TrainingPipelinePanel
+- TickerTape: removed sticky overlay, hidden when no data
+- HeaderBar: removed z-index overlap
+- Scanner Watching list: 6→10, positioned above alerts
+- Learning Insights widget: hidden when no data
+- Fixed NIA QuickStatsBar polling (was blocked during training)
+- Wired WS training updates to QuickStatsBar
 
-#### Confidence Gate Fix (DONE)
-- Disabled AI Regime scoring, mode-aware thresholds, fixed model lookup mismatch
+#### Trade Management
+- LABD trade purged via new DELETE `/api/trading-bot/trades/{symbol}` endpoint
+- Learning exclusion not needed (LABD was IB-only, never went through gate)
+- IB order queue verified working (queued LABD sell → Windows pusher executed)
+
+### Feb 2026 — Session 1
+
+#### Stability & Performance
+- Moved 1017 lines init into `_init_all_services()`
+- 367 async→def endpoint conversions
+- Streaming cache layer
+- Chat server isolated on port 8002
+
+#### Confidence Gate
+- Disabled AI Regime scoring, mode-aware thresholds
 - Bypassed Strategy Promotion gate for paper trading
+- Gate Auto-Calibrator (`gate_calibrator.py`)
 
-#### SentCom S.O.C. Enhancements (DONE)
-- TQS score integration, richer setup descriptions, signal deduplication
-- Color-coded FILTER cards, new data chips
-
-#### Gate Auto-Calibration (DONE)
-- `gate_calibrator.py`: analyzes outcomes by 5-point score buckets
-- Scheduled nightly at 4:30 PM ET
-
-#### LLM-Enriched Setup Descriptions (DONE)
-- Ollama-powered human-readable narratives for S.O.C. stream
+#### SentCom S.O.C.
+- TQS integration, LLM-enriched descriptions, deduplication
+- Swing/position scanner with daily bars
 
 ## Upcoming Tasks
 - Trade Journal page data population (performance stats include bot trades)
 - Verify chat hallucination fix from last session
-- Phase 6: Distributed PC Worker
-- Automated Daily Bar Collection Scheduling
-- Re-enable uvloop
+- Deploy and validate after-hours scanning overnight
 
 ## Future Tasks
+- Phase 6: Distributed PC Worker (offload training to Windows PC)
+- Automated Daily Bar Collection Scheduling
+- Re-enable uvloop
 - Phase 7: Infrastructure Polish (systemd)
 - Per-signal weight optimizer for gate auto-tuning
+- Real earnings calendar integration
 - Wire scanner technical indicators fully into chat context
-- Earnings calendar & news feed integration for Chat
-- Refactor `chat_server.py` context generation into modular context builders

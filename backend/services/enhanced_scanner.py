@@ -1734,8 +1734,16 @@ class EnhancedBackgroundScanner:
                 # Check if market is open
                 current_window = self._get_current_time_window()
                 if current_window == TimeWindow.CLOSED:
-                    logger.debug("Market closed, skipping scan")
-                    await asyncio.sleep(60)
+                    # AFTER-HOURS MODE: Scan daily charts for swing/position setups
+                    if self._scan_count % 20 == 0 or self._scan_count == 0:
+                        logger.info("Market closed — running daily chart scan for swing/position setups")
+                        try:
+                            await self._scan_daily_setups()
+                            self._cleanup_expired_alerts()
+                        except Exception as e:
+                            logger.debug(f"After-hours daily scan error: {e}")
+                    self._scan_count += 1
+                    await asyncio.sleep(300)  # 5 minutes between after-hours scans
                     continue
                 
                 # Run optimized scan
@@ -3864,7 +3872,7 @@ class EnhancedBackgroundScanner:
         reasonable results by appending today's live bar.
         """
         try:
-            if not self.db:
+            if self.db is None:
                 return
             
             # Get today's live data from pushed quotes
@@ -3877,8 +3885,7 @@ class EnhancedBackgroundScanner:
                 pass
             
             if not live_quotes:
-                logger.debug("Daily scan: no live quotes available, skipping")
-                return
+                logger.debug("Daily scan: no live quotes, using MongoDB bars only")
             
             # Get symbols with daily data (use ADV cache for filtering)
             symbols = list(self._symbol_adv_cache.keys())[:200]
@@ -4828,6 +4835,7 @@ class EnhancedBackgroundScanner:
             "enabled_setups": list(self._enabled_setups),
             "market_regime": self._market_regime.value,
             "time_window": self._get_current_time_window().value,
+            "scan_mode": "after_hours_daily" if self._get_current_time_window() == TimeWindow.CLOSED else "live_intraday",
             "last_scan": self._last_scan_time.isoformat() if self._last_scan_time else None,
             "auto_execute_enabled": self._auto_execute_enabled,
             "min_rvol_filter": self._min_rvol_filter,

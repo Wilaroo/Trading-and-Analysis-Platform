@@ -905,7 +905,126 @@ class SentComService:
             ))
         
         # =====================================================================
-        # 7. FALLBACK - System status if no activity
+        # 7. AFTER-HOURS MODE - Daily setups, session recap, portfolio review
+        # =====================================================================
+        try:
+            from zoneinfo import ZoneInfo
+            ny_now = datetime.now(ZoneInfo("America/New_York"))
+            market_open = ny_now.hour * 60 + ny_now.minute >= 570  # 9:30 AM
+            market_close = ny_now.hour * 60 + ny_now.minute >= 960  # 4:00 PM
+            is_weekend = ny_now.weekday() >= 5
+            is_after_hours = is_weekend or not market_open or market_close
+            
+            if is_after_hours:
+                non_chat = [m for m in messages if m.type != 'chat']
+                
+                # After-hours status message
+                if is_weekend:
+                    session_label = "Weekend"
+                elif not market_open:
+                    session_label = "Pre-market"
+                else:
+                    session_label = "After-hours"
+                
+                messages.append(SentComMessage(
+                    id=self._generate_message_id(),
+                    type="system",
+                    content=f"{session_label} — scanning daily charts for swing and position setups",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    confidence=60,
+                    action_type="market_status",
+                    metadata={"source": "sentcom_system", "session": session_label.lower()}
+                ))
+                
+                # Session recap from bot trades
+                if trading_bot:
+                    try:
+                        daily_stats = trading_bot._daily_stats if hasattr(trading_bot, '_daily_stats') else {}
+                        trades_today = daily_stats.get("trades_executed", 0)
+                        wins = daily_stats.get("trades_won", 0)
+                        losses = daily_stats.get("trades_lost", 0)
+                        net_pnl = daily_stats.get("net_pnl", 0)
+                        
+                        if trades_today > 0:
+                            win_rate = (wins / trades_today * 100) if trades_today > 0 else 0
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="thought",
+                                content=f"Today's session: {trades_today} trades, {wins}W/{losses}L ({win_rate:.0f}% WR), net P&L: ${net_pnl:+,.0f}",
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                confidence=85,
+                                action_type="session_recap",
+                                metadata={"source": "trading_bot", "trades": trades_today, "pnl": net_pnl}
+                            ))
+                        
+                        # Portfolio review — flag positions at risk
+                        open_trades = trading_bot.get_open_trades() if hasattr(trading_bot, 'get_open_trades') else []
+                        if isinstance(open_trades, list) and len(open_trades) > 0:
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="thought",
+                                content=f"Monitoring {len(open_trades)} open positions overnight",
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                confidence=70,
+                                action_type="portfolio_review",
+                                metadata={"source": "trading_bot", "open_count": len(open_trades)}
+                            ))
+                            
+                            # Highlight any positions with tight stops
+                            for trade in open_trades[:3]:
+                                stop = trade.get("stop_price")
+                                current = trade.get("current_price", 0)
+                                symbol = trade.get("symbol", "")
+                                if stop and current and current > 0:
+                                    dist_pct = abs(current - stop) / current * 100
+                                    if dist_pct < 3:
+                                        messages.append(SentComMessage(
+                                            id=self._generate_message_id(),
+                                            type="risk",
+                                            content=f"{symbol} stop at ${stop:.2f} — only {dist_pct:.1f}% away from current ${current:.2f}",
+                                            timestamp=datetime.now(timezone.utc).isoformat(),
+                                            confidence=80,
+                                            symbol=symbol,
+                                            action_type="stop_proximity",
+                                            metadata={"source": "portfolio_review", "stop_distance_pct": dist_pct}
+                                        ))
+                    except Exception as e:
+                        logger.debug(f"Session recap error: {e}")
+                
+                # Show swing/position alerts from daily scanner
+                try:
+                    from services.enhanced_scanner import get_enhanced_scanner
+                    scanner = get_enhanced_scanner()
+                    if scanner:
+                        daily_alerts = [a for a in scanner.get_live_alerts() 
+                                       if getattr(a, 'scan_tier', '') in ('swing', 'position', 'SWING', 'POSITION')]
+                        for alert in daily_alerts[:8]:
+                            symbol = getattr(alert, 'symbol', '')
+                            setup = getattr(alert, 'setup_type', '')
+                            price = getattr(alert, 'trigger_price', 0)
+                            tier = getattr(alert, 'scan_tier', 'swing')
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="alert",
+                                content=f"Daily setup: {symbol} {setup.replace('_', ' ').title()} @ ${price:.2f}",
+                                timestamp=getattr(alert, 'timestamp', datetime.now(timezone.utc)).isoformat() if hasattr(getattr(alert, 'timestamp', None), 'isoformat') else datetime.now(timezone.utc).isoformat(),
+                                confidence=65,
+                                symbol=symbol,
+                                action_type="daily_setup",
+                                metadata={
+                                    "source": "daily_scanner",
+                                    "setup_type": setup,
+                                    "trigger_price": price,
+                                    "timeframe": tier,
+                                }
+                            ))
+                except Exception as e:
+                    logger.debug(f"After-hours daily alerts error: {e}")
+        except Exception as e:
+            logger.debug(f"After-hours mode error: {e}")
+        
+        # =====================================================================
+        # 8. FALLBACK - System status if no activity
         # =====================================================================
         if len(messages) == 0:
             status = await self.get_status()
