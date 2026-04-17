@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://backend-boot-repair.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://chat-context-fix.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""

@@ -20,7 +20,7 @@ echo.
 :: =====================================================
 :: CONFIGURATION
 :: =====================================================
-set CLOUD_URL=https://backend-boot-repair.preview.emergentagent.com
+set CLOUD_URL=https://chat-context-fix.preview.emergentagent.com
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 set SCRIPT_DIR=%~dp0
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe

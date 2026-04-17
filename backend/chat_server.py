@@ -225,23 +225,33 @@ def _get_portfolio_context() -> dict:
                 parts.append(f"LIVE Market Prices{stale_note} (use THESE numbers, not from memory):\n" + "\n".join(idx_lines))
     except Exception as e:
         logger.debug(f"Index quotes error: {e}")
+    # 2. Recent AI Gate Decisions (from confidence_gate_log — TODAY only, not stale shadow_decisions)
     try:
-        recent = list(
-            db["shadow_decisions"]
-            .find({}, {"_id": 0, "symbol": 1, "combined_recommendation": 1, "confidence_score": 1})
-            .sort("created_at", -1)
-            .limit(5)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
+        recent_gate = list(
+            db["confidence_gate_log"]
+            .find(
+                {"timestamp": {"$gte": today_start.isoformat()}},
+                {"_id": 0, "symbol": 1, "setup_type": 1, "decision": 1,
+                 "confidence_score": 1, "reasoning": 1}
+            )
+            .sort("timestamp", -1)
+            .limit(8)
         )
-        debug["shadow_decisions_count"] = len(recent)
-        if recent:
-            gate_lines = [
-                f"  {r.get('symbol','?')}: {r.get('combined_recommendation','?').upper()} "
-                f"(score: {r.get('confidence_score', 0)})"
-                for r in recent
-            ]
-            parts.append("Recent AI Gate Decisions:\n" + "\n".join(gate_lines))
+        debug["gate_decisions_today"] = len(recent_gate)
+        if recent_gate:
+            gate_lines = []
+            for r in recent_gate:
+                sym = r.get("symbol", "?")
+                setup = r.get("setup_type", "?")
+                decision = r.get("decision", "?")
+                score = r.get("confidence_score", 0)
+                gate_lines.append(f"  {sym} {setup}: {decision} ({score} pts)")
+            parts.append("Today's Confidence Gate Decisions (most recent):\n" + "\n".join(gate_lines))
+        else:
+            parts.append("No confidence gate decisions yet today (pre-market or scanner not active).")
     except Exception as e:
-        debug["shadow_error"] = str(e)
+        debug["gate_error"] = str(e)
 
     # 3. Market regime (from MongoDB)
     try:
@@ -455,7 +465,8 @@ def _get_portfolio_context() -> dict:
                 held_symbols.append(idx)
         
         tech_lines = []
-        # Batch fetch technicals for held positions (limit to top 12 by position size)
+        symbols_without_tech = []
+        # Batch fetch technicals for held positions (limit to top 12)
         for sym in held_symbols[:12]:
             try:
                 resp = requests.get(f"http://127.0.0.1:8001/api/technicals/{sym}", timeout=2)
@@ -478,23 +489,34 @@ def _get_portfolio_context() -> dict:
                         rs_spy = s.get("rs_vs_spy", 0)
                         price = s.get("current_price", 0)
                         
-                        line = f"  {sym} ${price:.2f}: RSI {rsi:.0f}"
-                        line += f", {'above' if above_vwap else 'below'} VWAP (${vwap:.2f}, {dist_vwap:+.1f}%)"
-                        line += f", EMA9 ${ema9:.2f}, EMA20 ${ema20:.2f}"
-                        line += f", trend={trend}, RVOL {rvol:.1f}x"
-                        line += f", ATR {atr_pct:.1f}%"
-                        if support: line += f", support ${support:.2f}"
-                        if resistance: line += f", resistance ${resistance:.2f}"
-                        if squeeze: line += " ** SQUEEZE ACTIVE **"
-                        if abs(rs_spy) > 1: line += f", RS vs SPY {rs_spy:+.1f}%"
-                        tech_lines.append(line)
+                        if rsi > 0 and price > 0:
+                            line = f"  {sym} ${price:.2f}: RSI {rsi:.0f}"
+                            line += f", {'above' if above_vwap else 'below'} VWAP (${vwap:.2f}, {dist_vwap:+.1f}%)"
+                            line += f", EMA9 ${ema9:.2f}, EMA20 ${ema20:.2f}"
+                            line += f", trend={trend}, RVOL {rvol:.1f}x, ATR {atr_pct:.1f}%"
+                            if support: line += f", support ${support:.2f}"
+                            if resistance: line += f", resistance ${resistance:.2f}"
+                            if squeeze: line += " ** SQUEEZE ACTIVE **"
+                            if abs(rs_spy) > 1: line += f", RS vs SPY {rs_spy:+.1f}%"
+                            tech_lines.append(line)
+                        else:
+                            symbols_without_tech.append(sym)
+                    else:
+                        symbols_without_tech.append(sym)
+                else:
+                    symbols_without_tech.append(sym)
             except Exception:
-                pass
+                symbols_without_tech.append(sym)
         
         if tech_lines:
             parts.append(
                 f"Technical Indicators (LIVE — use these when discussing technicals):\n"
                 + "\n".join(tech_lines)
+            )
+        if symbols_without_tech:
+            parts.append(
+                f"No technical data for: {', '.join(symbols_without_tech)} "
+                f"(pre-market or no bars — do NOT guess their technicals)"
             )
     except Exception:
         pass

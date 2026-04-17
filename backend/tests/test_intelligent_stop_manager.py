@@ -17,7 +17,7 @@ import requests
 import os
 
 # Base URL from environment (using the public-facing URL)
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://backend-boot-repair.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://chat-context-fix.preview.emergentagent.com').rstrip('/')
 
 
 class TestIntelligentStopSetupRules:
