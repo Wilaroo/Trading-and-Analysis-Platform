@@ -60,6 +60,7 @@ class MarketRegime(Enum):
 
 
 class TimeWindow(Enum):
+    PREMARKET = "premarket"                  # 7:00-9:30 (pre-market prep)
     OPENING_AUCTION = "opening_auction"      # 9:30-9:35
     OPENING_DRIVE = "opening_drive"          # 9:35-9:45
     MORNING_MOMENTUM = "morning_momentum"    # 9:45-10:00
@@ -68,7 +69,7 @@ class TimeWindow(Enum):
     MIDDAY = "midday"                        # 11:30-13:30
     AFTERNOON = "afternoon"                  # 13:30-15:00
     CLOSE = "close"                          # 15:00-16:00
-    CLOSED = "closed"                        # Outside market hours
+    CLOSED = "closed"                        # Outside market hours (before 7 AM, after 4 PM, weekends)
 
 
 class TapeSignal(Enum):
@@ -1505,8 +1506,10 @@ class EnhancedBackgroundScanner:
         total_minutes = hour * 60 + minute
         
         # Pre-market or after hours
-        if total_minutes < 570:  # Before 9:30
+        if total_minutes < 420:  # Before 7:00 AM
             return TimeWindow.CLOSED
+        if total_minutes < 570:  # 7:00-9:30 = Pre-market
+            return TimeWindow.PREMARKET
         if total_minutes >= 960:  # After 16:00
             return TimeWindow.CLOSED
         
@@ -1744,6 +1747,19 @@ class EnhancedBackgroundScanner:
                             logger.debug(f"After-hours daily scan error: {e}")
                     self._scan_count += 1
                     await asyncio.sleep(300)  # 5 minutes between after-hours scans
+                    continue
+                
+                if current_window == TimeWindow.PREMARKET:
+                    # PRE-MARKET MODE: Build morning watchlist for opening trades
+                    if self._scan_count % 10 == 0 or self._scan_count == 0:
+                        logger.info("Pre-market — building morning watchlist for opening trades")
+                        try:
+                            await self._scan_premarket_setups()
+                            self._cleanup_expired_alerts()
+                        except Exception as e:
+                            logger.debug(f"Pre-market scan error: {e}")
+                    self._scan_count += 1
+                    await asyncio.sleep(120)  # 2 minutes between pre-market scans
                     continue
                 
                 # Run optimized scan
@@ -3954,6 +3970,245 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.error(f"Daily scan error: {e}")
 
+
+    async def _scan_premarket_setups(self):
+        """Pre-market scanner: Build morning watchlist for opening trades.
+        
+        Identifies stocks setting up for early-session trades by analyzing:
+        1. Gap from yesterday's close (gap ups/downs for Gap Give and Go, Gap Fade)
+        2. Pre-market volume vs average (high PM volume = catalyst/interest)
+        3. Daily chart context (near support/resistance, squeeze firing, breakout)
+        4. Prioritizes: ORB candidates, Opening Drive, First Move, Gap plays
+        
+        Runs 7:00-9:30 AM ET, every 2 minutes.
+        """
+        try:
+            if self.db is None:
+                return
+            
+            # Get live pre-market quotes from IB pusher
+            live_quotes = {}
+            try:
+                from routers.ib import get_pushed_quotes, is_pusher_connected
+                if is_pusher_connected():
+                    live_quotes = get_pushed_quotes() or {}
+            except Exception:
+                pass
+            
+            # Get symbols: use ADV cache first, then pushed quotes
+            symbols = list(self._symbol_adv_cache.keys())[:300]
+            if not symbols:
+                symbols = list(live_quotes.keys())[:200]
+            
+            if not symbols:
+                logger.debug("Pre-market scan: no symbols available")
+                return
+            
+            scanned = 0
+            alerts_found = 0
+            
+            for symbol in symbols:
+                try:
+                    # Get yesterday's daily bars from MongoDB
+                    bars = list(self.db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                    ).sort("date", -1).limit(60))
+                    
+                    if len(bars) < 5:
+                        continue
+                    bars.reverse()  # Oldest first
+                    
+                    prev_close = bars[-1].get("close", 0)
+                    prev_high = bars[-1].get("high", 0)
+                    prev_low = bars[-1].get("low", 0)
+                    prev_volume = bars[-1].get("volume", 0)
+                    
+                    if prev_close <= 0:
+                        continue
+                    
+                    # Get pre-market price from pushed quotes
+                    quote = live_quotes.get(symbol, {})
+                    pm_price = quote.get("last") or quote.get("close") or quote.get("price") or 0
+                    pm_volume = quote.get("volume", 0) or 0
+                    
+                    # Calculate gap if we have pre-market price
+                    gap_pct = 0
+                    if pm_price > 0:
+                        gap_pct = ((pm_price - prev_close) / prev_close) * 100
+                    
+                    # Calculate average volume (20-day)
+                    volumes = [b.get("volume", 0) for b in bars[-20:] if b.get("volume", 0) > 0]
+                    avg_volume = sum(volumes) / len(volumes) if volumes else 0
+                    
+                    # Calculate daily ATR for stop sizing
+                    atr_values = []
+                    for i in range(1, min(15, len(bars))):
+                        tr = max(
+                            bars[i]["high"] - bars[i]["low"],
+                            abs(bars[i]["high"] - bars[i-1]["close"]),
+                            abs(bars[i]["low"] - bars[i-1]["close"])
+                        )
+                        atr_values.append(tr)
+                    atr = sum(atr_values) / len(atr_values) if atr_values else prev_close * 0.02
+                    
+                    # ── GAP GIVE AND GO (gap > 2%, strong momentum stock) ──
+                    if gap_pct > 2.0 and pm_price > 0:
+                        # Check if stock is in an uptrend (above 20 SMA)
+                        closes = [b["close"] for b in bars]
+                        sma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else prev_close
+                        if prev_close > sma20:
+                            stop = pm_price - atr
+                            target = pm_price + (atr * 2)
+                            alert = LiveAlert(
+                                id=f"pm_gap_go_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="gap_give_go",
+                                direction="long",
+                                trigger_price=pm_price,
+                                current_price=pm_price,
+                                stop_price=stop,
+                                target_price=target,
+                                score=70 + min(gap_pct * 3, 20),
+                                scan_tier="intraday",
+                                reasoning=f"Pre-market gap +{gap_pct:.1f}% from ${prev_close:.2f}. Uptrend intact (above 20 SMA). Watch for opening drive continuation.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                    
+                    # ── GAP FADE (gap > 3% into resistance, overextended) ──
+                    if gap_pct > 3.0 and pm_price > 0:
+                        closes = [b["close"] for b in bars]
+                        sma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else prev_close
+                        # Overextended above 20 SMA = fade candidate
+                        dist_from_sma = ((pm_price - sma20) / sma20) * 100 if sma20 > 0 else 0
+                        if dist_from_sma > 5:
+                            stop = pm_price + atr
+                            target = pm_price - (atr * 1.5)
+                            alert = LiveAlert(
+                                id=f"pm_gap_fade_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="gap_fade",
+                                direction="short",
+                                trigger_price=pm_price,
+                                current_price=pm_price,
+                                stop_price=stop,
+                                target_price=target,
+                                score=65 + min(gap_pct * 2, 15),
+                                scan_tier="intraday",
+                                reasoning=f"Pre-market gap +{gap_pct:.1f}%, {dist_from_sma:.1f}% extended above 20 SMA. Fade candidate at open.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                    
+                    # ── GAP DOWN REVERSAL (gap < -2%, near support) ──
+                    if gap_pct < -2.0 and pm_price > 0:
+                        # Check if gapping into a support zone (recent lows)
+                        recent_lows = [b["low"] for b in bars[-10:]]
+                        support_zone = min(recent_lows) if recent_lows else prev_low
+                        if pm_price <= support_zone * 1.02:  # Within 2% of support
+                            stop = support_zone - atr
+                            target = pm_price + (atr * 2)
+                            alert = LiveAlert(
+                                id=f"pm_gap_reversal_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="gap_give_go",
+                                direction="long",
+                                trigger_price=pm_price,
+                                current_price=pm_price,
+                                stop_price=stop,
+                                target_price=target,
+                                score=65,
+                                scan_tier="intraday",
+                                reasoning=f"Gap down {gap_pct:.1f}% into support at ${support_zone:.2f}. Watch for reversal off the open.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                    
+                    # ── ORB CANDIDATE (high pre-market volume, narrow range yesterday) ──
+                    if pm_volume > 0 and avg_volume > 0:
+                        pm_rvol = pm_volume / (avg_volume * 0.1)  # PM volume vs 10% of daily avg
+                        prev_range_pct = ((prev_high - prev_low) / prev_close * 100) if prev_close > 0 else 0
+                        
+                        if pm_rvol > 1.5 and prev_range_pct < 3.0:
+                            # High PM volume + tight previous range = ORB setup
+                            orb_price = pm_price if pm_price > 0 else prev_close
+                            stop = orb_price - atr
+                            target = orb_price + (atr * 2.5)
+                            alert = LiveAlert(
+                                id=f"pm_orb_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="orb",
+                                direction="long",
+                                trigger_price=orb_price,
+                                current_price=orb_price,
+                                stop_price=stop,
+                                target_price=target,
+                                score=60 + min(pm_rvol * 5, 25),
+                                scan_tier="intraday",
+                                reasoning=f"ORB candidate: PM volume {pm_rvol:.1f}x avg, yesterday's range {prev_range_pct:.1f}% (tight). Watch first 5-min candle for breakout.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                    
+                    # ── OPENING DRIVE CANDIDATE (strong trend + gap in direction) ──
+                    if abs(gap_pct) > 1.0 and pm_price > 0 and len(bars) >= 20:
+                        closes = [b["close"] for b in bars]
+                        sma20 = sum(closes[-20:]) / 20
+                        # Gap aligns with trend = opening drive candidate
+                        if gap_pct > 1.0 and prev_close > sma20:
+                            alert = LiveAlert(
+                                id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="opening_drive",
+                                direction="long",
+                                trigger_price=pm_price,
+                                current_price=pm_price,
+                                stop_price=pm_price - atr,
+                                target_price=pm_price + (atr * 2),
+                                score=65 + min(gap_pct * 3, 15),
+                                scan_tier="intraday",
+                                reasoning=f"Opening drive candidate: gap +{gap_pct:.1f}% aligned with daily uptrend. Above 20 SMA.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                        elif gap_pct < -1.0 and prev_close < sma20:
+                            alert = LiveAlert(
+                                id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol,
+                                setup_type="opening_drive",
+                                direction="short",
+                                trigger_price=pm_price,
+                                current_price=pm_price,
+                                stop_price=pm_price + atr,
+                                target_price=pm_price - (atr * 2),
+                                score=65 + min(abs(gap_pct) * 3, 15),
+                                scan_tier="intraday",
+                                reasoning=f"Opening drive candidate: gap {gap_pct:.1f}% aligned with daily downtrend. Below 20 SMA.",
+                                timestamp=datetime.now(timezone.utc),
+                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                            )
+                            await self._process_new_alert(alert)
+                            alerts_found += 1
+                    
+                    scanned += 1
+                except Exception:
+                    pass
+            
+            logger.info(f"📊 Pre-market scan: {scanned} symbols, {alerts_found} morning watchlist alerts")
+        except Exception as e:
+            logger.error(f"Pre-market scan error: {e}")
+
     async def _check_daily_squeeze(self, symbol: str, bars: list) -> Optional[LiveAlert]:
         """Bollinger Bands inside Keltner Channels on DAILY bars = multi-day squeeze."""
         if len(bars) < 20:
@@ -4835,7 +5090,7 @@ class EnhancedBackgroundScanner:
             "enabled_setups": list(self._enabled_setups),
             "market_regime": self._market_regime.value,
             "time_window": self._get_current_time_window().value,
-            "scan_mode": "after_hours_daily" if self._get_current_time_window() == TimeWindow.CLOSED else "live_intraday",
+            "scan_mode": "premarket_watchlist" if self._get_current_time_window() == TimeWindow.PREMARKET else "after_hours_daily" if self._get_current_time_window() == TimeWindow.CLOSED else "live_intraday",
             "last_scan": self._last_scan_time.isoformat() if self._last_scan_time else None,
             "auto_execute_enabled": self._auto_execute_enabled,
             "min_rvol_filter": self._min_rvol_filter,

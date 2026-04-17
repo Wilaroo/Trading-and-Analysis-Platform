@@ -922,21 +922,65 @@ class SentComService:
                 if is_weekend:
                     session_label = "Weekend"
                 elif not market_open:
-                    session_label = "Pre-market"
+                    # Check if pre-market (7:00-9:30)
+                    is_premarket = ny_now.hour >= 7 and not is_weekend
+                    session_label = "Pre-market" if is_premarket else "Pre-market (early)"
                 else:
                     session_label = "After-hours"
                 
-                messages.append(SentComMessage(
-                    id=self._generate_message_id(),
-                    type="system",
-                    content=f"{session_label} — scanning daily charts for swing and position setups",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    confidence=60,
-                    action_type="market_status",
-                    metadata={"source": "sentcom_system", "session": session_label.lower()}
-                ))
+                if session_label.startswith("Pre-market") and ny_now.hour >= 7:
+                    # Pre-market mode: show opening trade prep
+                    messages.append(SentComMessage(
+                        id=self._generate_message_id(),
+                        type="system",
+                        content=f"Pre-market — building morning watchlist: gaps, ORB candidates, opening drives",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        confidence=70,
+                        action_type="market_status",
+                        metadata={"source": "sentcom_system", "session": "premarket"}
+                    ))
+                    
+                    # Show pre-market alerts (gap plays, ORB candidates)
+                    try:
+                        from services.enhanced_scanner import get_enhanced_scanner
+                        scanner = get_enhanced_scanner()
+                        if scanner:
+                            pm_alerts = [a for a in scanner.get_live_alerts()
+                                        if getattr(a, 'id', '').startswith('pm_')]
+                            for alert in pm_alerts[:10]:
+                                symbol = getattr(alert, 'symbol', '')
+                                setup = getattr(alert, 'setup_type', '')
+                                price = getattr(alert, 'trigger_price', 0)
+                                reasoning = getattr(alert, 'reasoning', '')
+                                messages.append(SentComMessage(
+                                    id=self._generate_message_id(),
+                                    type="alert",
+                                    content=f"{symbol} {setup.replace('_', ' ').title()} @ ${price:.2f} — {reasoning[:80]}",
+                                    timestamp=getattr(alert, 'timestamp', datetime.now(timezone.utc)).isoformat() if hasattr(getattr(alert, 'timestamp', None), 'isoformat') else datetime.now(timezone.utc).isoformat(),
+                                    confidence=70,
+                                    symbol=symbol,
+                                    action_type="premarket_setup",
+                                    metadata={
+                                        "source": "premarket_scanner",
+                                        "setup_type": setup,
+                                        "trigger_price": price,
+                                    }
+                                ))
+                    except Exception as e:
+                        logger.debug(f"Pre-market alerts error: {e}")
+                else:
+                    # After-hours or weekend: daily chart scanning mode
+                    messages.append(SentComMessage(
+                        id=self._generate_message_id(),
+                        type="system",
+                        content=f"{session_label} — scanning daily charts for swing and position setups",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        confidence=60,
+                        action_type="market_status",
+                        metadata={"source": "sentcom_system", "session": session_label.lower()}
+                    ))
                 
-                # Session recap from bot trades
+                # Session recap from bot trades (applies to all after-hours modes)
                 if trading_bot:
                     try:
                         daily_stats = trading_bot._daily_stats if hasattr(trading_bot, '_daily_stats') else {}
