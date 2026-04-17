@@ -3904,7 +3904,7 @@ class EnhancedBackgroundScanner:
                 logger.debug("Daily scan: no live quotes, using MongoDB bars only")
             
             # Get symbols with daily data (use ADV cache for filtering)
-            symbols = list(self._symbol_adv_cache.keys())[:200]
+            symbols = list(self._adv_cache.keys())[:200]
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
             if not symbols:
@@ -4002,7 +4002,7 @@ class EnhancedBackgroundScanner:
                 pass
             
             # Get symbols: use ADV cache first, then pushed quotes, then MongoDB
-            symbols = list(self._symbol_adv_cache.keys())[:300]
+            symbols = list(self._adv_cache.keys())[:300]
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
             if not symbols:

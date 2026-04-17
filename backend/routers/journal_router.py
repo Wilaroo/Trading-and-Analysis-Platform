@@ -137,11 +137,8 @@ def get_services():
     global _playbook_service, _drc_service, _gameplan_service
     
     if _playbook_service is None:
-        from pymongo import MongoClient
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "trading_app")
-        client = MongoClient(mongo_url)
-        db = client[db_name]
+        from database import get_database
+        db = get_database()
         
         from services.playbook_service import PlaybookService
         from services.drc_service import DRCService
@@ -485,11 +482,8 @@ def get_import_services():
     global _tradersync_service, _ai_journal_service
     
     if _tradersync_service is None:
-        from pymongo import MongoClient
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "trading_app")
-        client = MongoClient(mongo_url)
-        db = client[db_name]
+        from database import get_database
+        db = get_database()
         
         from services.tradersync_import_service import TraderSyncImportService
         from services.ai_journal_generation_service import AIJournalGenerationService
@@ -857,15 +851,11 @@ async def save_generated_playbook(playbook_data: dict):
 def get_eod_service_instance():
     """Get the singleton EOD service instance"""
     from services.eod_generation_service import get_eod_service
-    from pymongo import MongoClient
     
     eod_svc = get_eod_service()
     if eod_svc is None:
-        # Initialize if not yet created (fallback)
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "trading_app")
-        client = MongoClient(mongo_url)
-        db = client[db_name]
+        from database import get_database
+        db = get_database()
         eod_svc = get_eod_service(db)
     
     return eod_svc
@@ -962,11 +952,8 @@ def get_weekly_report_service_instance():
     global _weekly_report_service
     
     if _weekly_report_service is None:
-        from pymongo import MongoClient
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "trading_app")
-        client = MongoClient(mongo_url)
-        db = client[db_name]
+        from database import get_database
+        db = get_database()
         
         from services.weekly_report_service import init_weekly_report_service
         from services.medium_learning import (

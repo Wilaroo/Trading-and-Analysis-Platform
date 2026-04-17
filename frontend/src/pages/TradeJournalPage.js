@@ -1287,16 +1287,36 @@ const TradeJournalPage = () => {
       if (filter !== 'all') params.status = filter;
       if (sourceFilter !== 'all') params.source = sourceFilter;
 
-      const [tradesRes, perfRes, matrixRes, templatesRes, aiStatsRes, aiInsightsRes] = await Promise.all([
+      // Critical data first — trades + templates (fast)
+      const [tradesRes, templatesRes] = await Promise.all([
         api.get('/api/trades/unified', { params }),
-        api.get('/api/trades/performance'),
-        api.get('/api/trades/performance/matrix'),
         api.get('/api/trades/templates/list'),
-        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } })),
-        api.get('/api/trades/ai/strategy-insights').catch(() => ({ data: { insights: {} } }))
       ]);
+      
+      const tradesData = tradesRes.data.trades || [];
+      setTrades(tradesData);
+      setTemplates(templatesRes.data.templates || []);
+      setAppData('journalTrades', tradesData);
+      setLoading(false);  // Unblock UI early — trades are visible
 
-      // Load IB account data in parallel (non-blocking)
+      // Secondary data in background (non-blocking)
+      Promise.all([
+        api.get('/api/trades/performance').catch(() => ({ data: {} })),
+        api.get('/api/trades/performance/matrix').catch(() => ({ data: {} })),
+        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } })),
+        api.get('/api/trades/ai/strategy-insights').catch(() => ({ data: { insights: {} } })),
+      ]).then(([perfRes, matrixRes, aiStatsRes, aiInsightsRes]) => {
+        const perfData = perfRes.data;
+        const matrixData = matrixRes.data;
+        setPerformance(perfData);
+        setMatrix(matrixData);
+        setAiStats(aiStatsRes.data?.stats || null);
+        setAiInsights(aiInsightsRes.data?.insights || null);
+        setAppData('journalPerformance', perfData);
+        setAppData('journalMatrix', matrixData);
+      });
+
+      // IB account data (non-blocking)
       Promise.all([
         api.get('/api/ib/account/summary').catch(() => ({ data: null })),
         api.get('/api/portfolio').catch(() => ({ data: { positions: [] } }))
@@ -1304,25 +1324,8 @@ const TradeJournalPage = () => {
         if (acctRes.data && acctRes.data.net_liquidation > 0) setIbAccount(acctRes.data);
         setIbPositions(portRes.data?.positions || []);
       });
-      
-      const tradesData = tradesRes.data.trades || [];
-      const perfData = perfRes.data;
-      const matrixData = matrixRes.data;
-      
-      setTrades(tradesData);
-      setPerformance(perfData);
-      setMatrix(matrixData);
-      setTemplates(templatesRes.data.templates || []);
-      setAiStats(aiStatsRes.data?.stats || null);
-      setAiInsights(aiInsightsRes.data?.insights || null);
-      
-      // Cache in AppState for persistence across tab switches
-      setAppData('journalTrades', tradesData);
-      setAppData('journalPerformance', perfData);
-      setAppData('journalMatrix', matrixData);
     } catch (err) {
       console.error('Failed to load trade data:', err);
-    } finally {
       setLoading(false);
     }
   }, [filter, sourceFilter, setAppData]);

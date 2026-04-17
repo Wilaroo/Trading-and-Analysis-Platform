@@ -403,22 +403,13 @@ class TradeJournalService:
             query["symbol"] = symbol.upper()
         
         trades = list(self.trades_col.find(
-            query,
-            {"_id": 1}  # Include _id for now
+            query
         ).sort("entry_date", -1).limit(limit))
         
-        # Convert ObjectId to string
+        # Convert ObjectId to string id and remove _id in one pass
+        result = []
         for trade in trades:
             trade["id"] = str(trade.pop("_id"))
-        
-        # Re-fetch without _id
-        result = []
-        for trade_ref in trades:
-            trade = self.trades_col.find_one(
-                {"_id": ObjectId(trade_ref["id"])},
-                {"_id": 0}
-            )
-            trade["id"] = trade_ref["id"]
             result.append(trade)
         
         return result
@@ -473,11 +464,11 @@ class TradeJournalService:
     
     async def get_performance_summary(self) -> Dict:
         """Get overall performance summary — merges manual journal + bot trades"""
-        # Get closed trades from manual journal
+        # Get closed trades from manual journal (cap at 500 for performance)
         closed_trades = list(self.trades_col.find(
             {"status": "closed"},
             {"_id": 0, "pnl": 1, "pnl_percent": 1, "strategy_id": 1, "market_context": 1, "source": 1}
-        ))
+        ).sort("entry_date", -1).limit(500))
         
         # Also get closed bot trades
         try:
@@ -486,7 +477,7 @@ class TradeJournalService:
                 {"_id": 0, "realized_pnl": 1, "pnl_percent": 1, "setup_type": 1, 
                  "market_regime": 1, "close_reason": 1, "direction": 1,
                  "fill_price": 1, "close_price": 1, "shares": 1}
-            ))
+            ).sort("closed_at", -1).limit(500))
             for bt in bot_closed:
                 # Normalize bot trade to match journal format
                 pnl = bt.get("realized_pnl", 0) or 0
@@ -732,16 +723,12 @@ class TradeJournalService:
         if template_type:
             query["template_type"] = template_type
         
-        templates = list(self.templates_col.find(query, {"_id": 1}))
+        templates = list(self.templates_col.find(query))
         
         result = []
         for t in templates:
-            template = self.templates_col.find_one(
-                {"_id": t["_id"]},
-                {"_id": 0}
-            )
-            template["id"] = str(t["_id"])
-            result.append(template)
+            t["id"] = str(t.pop("_id"))
+            result.append(t)
         
         return result
     

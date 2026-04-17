@@ -124,18 +124,13 @@ async def get_open_trades():
 def get_ai_learning_stats():
     """
     Get AI learning loop stats derived from journal trades.
-    Sync endpoint — FastAPI runs in thread pool automatically.
+    Reuses the shared DB connection instead of creating a new one each request.
     """
     try:
-        import os
-        from pymongo import MongoClient
-        mongo_url = os.environ.get("MONGO_URL", "")
-        db_name = os.environ.get("DB_NAME", "sentcom")
-        if not mongo_url:
+        from database import get_database
+        db = get_database()
+        if db is None:
             return {"success": True, "stats": {"journal_outcomes": 0}}
-
-        client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
-        db = client[db_name]
 
         journal_count = db.trade_outcomes.count_documents({"source": "trade_journal"})
 
@@ -163,7 +158,6 @@ def get_ai_learning_stats():
         except Exception:
             pass
 
-        client.close()
         return {"success": True, "stats": stats}
     except Exception as e:
         return {"success": True, "stats": {"journal_outcomes": 0, "error": str(e)}}
@@ -173,18 +167,13 @@ def get_ai_learning_stats():
 def get_ai_strategy_insights():
     """
     Per-strategy AI performance breakdown.
-    Sync endpoint — FastAPI runs in thread pool automatically.
+    Reuses the shared DB connection instead of creating a new one each request.
     """
     try:
-        import os
-        from pymongo import MongoClient
-        mongo_url = os.environ.get("MONGO_URL", "")
-        db_name = os.environ.get("DB_NAME", "sentcom")
-        if not mongo_url:
+        from database import get_database
+        db = get_database()
+        if db is None:
             return {"success": True, "insights": {}}
-
-        client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
-        db = client[db_name]
 
         pipeline = [
             {"$group": {
@@ -212,7 +201,6 @@ def get_ai_strategy_insights():
         for g in gate_results:
             setup = g["_id"].get("setup", "unknown")
             decision = g["_id"].get("decision", "unknown")
-            # Guard against non-string keys from MongoDB
             if not isinstance(setup, str):
                 setup = str(setup) if setup else "unknown"
             if not isinstance(decision, str):
@@ -264,7 +252,6 @@ def get_ai_strategy_insights():
                 "edge_trend": edge_trends.get(setup, {}),
             }
 
-        client.close()
         return {"success": True, "insights": insights}
     except Exception as e:
         return {"success": True, "insights": {}, "error": str(e)}
