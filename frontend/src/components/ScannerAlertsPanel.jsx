@@ -8,10 +8,10 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { 
   Activity, Bell, Crosshair, TrendingUp, TrendingDown,
-  Loader, Radio, AlertCircle, Zap, Target
+  Loader, Radio, AlertCircle, Zap, Target, WifiOff
 } from 'lucide-react';
 
-const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) => {
+const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibConnected }) => {
   return (
     <div className="rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 overflow-hidden" data-testid="scanner-alerts-panel">
       {/* Header */}
@@ -35,6 +35,17 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
           )}
         </div>
       </div>
+
+      {/* IB Disconnected Warning */}
+      {ibConnected === false && (
+        <div className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="scanner-ib-warning">
+          <WifiOff className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <div>
+            <p className="text-[11px] font-bold text-red-400">IB Not Connected</p>
+            <p className="text-[10px] text-red-400/70">Scanner requires live IB data. Alerts may be stale.</p>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">

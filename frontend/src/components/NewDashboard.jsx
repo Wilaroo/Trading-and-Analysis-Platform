@@ -701,6 +701,7 @@ const NewDashboard = ({
             setups={liveSetups.length > 0 ? liveSetups : effectiveWatchingSetups}
             alertsLoading={alertsLoading}
             setupsLoading={setupsLoading}
+            ibConnected={accountData?.ib_connected}
           />
         </div>
       </div>

@@ -320,28 +320,12 @@ class RealTimeTechnicalService:
             # Get daily bars for ATR, average volume, daily levels from MongoDB
             daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, symbol, 50)
             
-            # Get current quote - IB Pusher (already fetched above for staleness check)
+            # Get current quote - IB Pusher ONLY (no stale MongoDB fallback)
             if ib_pusher_live:
                 quote = ib_quote
             else:
-                # Fallback: use latest bar close from MongoDB as estimated price
-                # BUT: reject if bars are stale (>1 trading day old) — prevents phantom alerts
-                if daily_bars and len(daily_bars) > 0:
-                    if self._check_staleness(daily_bars, max_age_hours=24):
-                        logger.debug(f"Stale daily bar data for {symbol}, no live IB quote — skipping")
-                        return None
-                    last_bar = daily_bars[-1]
-                    quote = {
-                        "symbol": symbol,
-                        "price": last_bar["close"],
-                        "bid": last_bar["close"],
-                        "ask": last_bar["close"],
-                        "volume": last_bar.get("volume", 0),
-                        "source": "mongodb_bar"
-                    }
-                else:
-                    logger.debug(f"No IB quote or MongoDB data for {symbol}")
-                    return None
+                # No live IB data = no scan. Scanner requires real-time prices.
+                return None
             
             if not quote or not daily_bars:
                 logger.warning(f"Insufficient data for {symbol}")

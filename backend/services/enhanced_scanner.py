@@ -4816,6 +4816,7 @@ class EnhancedBackgroundScanner:
         
         return {
             "running": self._running,
+            "ib_connected": self._is_ib_connected(),
             "scan_count": self._scan_count,
             "alerts_generated": self._alerts_generated,
             "active_alerts": len(self._live_alerts),
