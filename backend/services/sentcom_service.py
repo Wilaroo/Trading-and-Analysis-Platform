@@ -937,13 +937,15 @@ class SentComService:
             dedup_key = f"{msg.type}:{msg.symbol or ''}:{msg.content[:40]}"
             if dedup_key not in self._stream_seen_keys:
                 self._stream_seen_keys.add(dedup_key)
-                self._stream_buffer.insert(0, msg)  # Newest first
+                self._stream_buffer.append(msg)
         
-        # Trim buffer to max size
+        # Sort entire buffer by timestamp — newest first
+        self._stream_buffer.sort(key=lambda m: m.timestamp, reverse=True)
+        
+        # Trim buffer to max size (remove oldest)
         if len(self._stream_buffer) > self._stream_max_size:
             removed = self._stream_buffer[self._stream_max_size:]
             self._stream_buffer = self._stream_buffer[:self._stream_max_size]
-            # Clean up dedup keys for removed entries
             for r in removed:
                 key = f"{r.type}:{r.symbol or ''}:{r.content[:40]}"
                 self._stream_seen_keys.discard(key)

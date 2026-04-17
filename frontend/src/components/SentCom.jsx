@@ -3363,7 +3363,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
         {/* Main Content */}
         <div className="relative p-3 space-y-3">
           {/* Full Width S.O.C. with floating Chat Bubble Overlay */}
-          <div className="relative rounded-2xl border border-white/10 overflow-hidden" style={{ height: '500px' }} data-testid="neural-split-container">
+          <div className="relative rounded-2xl border border-white/10 overflow-hidden" style={{ height: '700px' }} data-testid="neural-split-container">
             {/* SOC takes 100% */}
             <div className="h-full overflow-hidden">
               <StreamOfConsciousness />
