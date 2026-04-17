@@ -272,15 +272,27 @@ async def get_unified_trades(
 
     # 1. Journal trades (always include unless source=bot)
     if source != "bot":
-        journal_trades = []
-        if trade_journal_service:
-            journal_trades = await trade_journal_service.get_trades(
-                status=status, limit=limit
-            )
-        for t in journal_trades:
-            t.setdefault("source", "manual")
-            t["_sort_date"] = t.get("entry_date", "")
-            unified.append(t)
+        def _fetch_journal_trades():
+            jlist = []
+            try:
+                from database import get_database
+                db = get_database()
+                if db is not None:
+                    query = {}
+                    if status:
+                        query["status"] = status
+                    docs = list(db.trades.find(query).sort("entry_date", -1).limit(limit))
+                    for doc in docs:
+                        doc["id"] = str(doc.pop("_id"))
+                        doc.setdefault("source", "manual")
+                        doc["_sort_date"] = doc.get("entry_date", "")
+                        jlist.append(doc)
+            except Exception:
+                pass
+            return jlist
+        
+        journal_trades = await asyncio.to_thread(_fetch_journal_trades)
+        unified.extend(journal_trades)
 
     # 2. Bot trades from MongoDB directly (in thread pool)
     if source != "manual":
@@ -355,8 +367,20 @@ async def get_performance_summary():
     if not trade_journal_service:
         raise HTTPException(500, "Trade journal service not initialized")
     
-    summary = await trade_journal_service.get_performance_summary()
-    return summary
+    import asyncio
+    try:
+        summary = await asyncio.wait_for(
+            trade_journal_service.get_performance_summary(),
+            timeout=10.0
+        )
+        return summary
+    except asyncio.TimeoutError:
+        return {
+            "total_trades": 0, "winning_trades": 0, "losing_trades": 0,
+            "win_rate": 0, "total_pnl": 0, "avg_pnl": 0,
+            "best_strategy": None, "worst_strategy": None, "best_context": None,
+            "timeout": True
+        }
 
 
 @router.get("/performance/strategy/{strategy_id}")

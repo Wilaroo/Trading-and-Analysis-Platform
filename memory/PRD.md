@@ -7,108 +7,98 @@
 
 ## Completed Work
 
+### Apr 18, 2026 — Session 3 (Trade Journal Performance Fix)
+
+#### Critical: Trade Journal N+1 Query Fix
+- `get_trades()` in `trade_journal.py` was doing 51 MongoDB queries for 50 trades (fetch IDs, then re-fetch each individually)
+- Fixed to single query with in-memory `_id` conversion
+- Same fix applied to `get_templates()`
+
+#### Critical: Database Connection Reuse
+- `/api/trades/ai/learning-stats` and `/api/trades/ai/strategy-insights` were creating new `MongoClient()` on every request
+- `journal_router.py` services (`get_services()`, `get_import_services()`, `get_eod_service_instance()`, `get_weekly_report_service_instance()`) each created their own MongoClient
+- All now use shared `get_database()` from `database.py`
+
+#### Critical: Wrong Database Name Defaults
+- `trades.py` AI endpoints defaulted to `"sentcom"` instead of `"tradecommand"`
+- `journal_router.py` services defaulted to `"trading_app"` instead of `"tradecommand"`
+- All corrected to use `database.py` which defaults to `"tradecommand"`
+
+#### Critical: Weekly Report Hang Fix
+- `generate_weekly_report()` called 7 medium learning services with synchronous PyMongo queries inside async functions, blocking the event loop
+- Added `asyncio.to_thread()` for `_get_week_trades()` blocking DB queries
+- Added 10-second per-section timeouts via `_safe_call()` wrapper
+- Added 12-second endpoint-level timeout on `/weekly-report/current`
+- Frontend: 15s timeout on Weekly Report API calls
+
+#### Performance: Unified Trades Endpoint
+- Both journal trades AND bot trades now fetch via `asyncio.to_thread()` — neither blocks the event loop
+- `/api/trades/performance` has 10s timeout protection
+
+#### Performance: Client-Side Filtering
+- Frontend loads ALL trades once on mount, filters client-side for all/open/closed and source
+- Switching filters is now instant (no API call)
+- Explicit timeouts on all Trade Journal API calls
+
+#### Performance: Unbounded Query Caps
+- `get_performance_summary()` capped at 500 closed trades each for journal + bot
+- Weekly report `bot_trades` query capped at 500
+
+#### Bug Fix: Scanner `_symbol_adv_cache`
+- `enhanced_scanner.py` referenced `self._symbol_adv_cache` but attribute is `self._adv_cache`
+- Daily/pre-market scans were crashing every cycle
+- Fixed both references (lines 3907, 4005)
+
 ### Apr 17, 2026 — Session 2 (Major Overhaul)
 
 #### Critical: DST Timezone Bug Fix
-- Scanner `_get_current_time_window()` used hardcoded EST, but April = EDT
-- Scanner was blind to market hours since March 9th daylight saving
-- Fixed in `enhanced_scanner.py`, `trade_context_service.py`, `circuit_breaker.py`, `tqs/context_quality.py`
-- All now use `ZoneInfo("America/New_York")`
+- Scanner used hardcoded EST but April = EDT
+- Fixed with `ZoneInfo("America/New_York")` in scanner, trade_context, circuit_breaker, tqs
 
 #### Critical: SentCom Stream Fix
-- `server.py` imported non-existent `sentcom_engine` module — silently failed
-- WS stream `sentcom_data.stream` was ALWAYS empty
-- Fixed: replaced with `sentcom_service.get_unified_stream()` as async call in cache loop
-- Fixed WS push hash that was based on missing field
+- WS stream was always empty due to wrong import
+- Fixed with `sentcom_service.get_unified_stream()`, 100-msg buffer
 
 #### Critical: Confidence Gate DB Writes
-- `insert_one` was failing silently due to numpy types (from CNN-LSTM/TFT signals)
-- Fixed with JSON round-trip serialization (`json.loads(json.dumps(data, default=str))`)
-- Upgraded error logging from debug→warning
-- Added `_load_from_db()` on startup: loads recent decisions, today's stats, lifetime counters
+- `insert_one` failing due to numpy types
+- Fixed with JSON round-trip serialization
 
-#### Scanner Fixes
-- Removed MongoDB bar fallback for pricing — scanner requires live IB quotes only
-- Added IB disconnected warning banner in frontend
-- Fixed scan loop min-interval check (was dead code inside except block)
-- Fixed PyMongo boolean check on db objects (`if not self.db` → `if self.db is None`)
-- Added `ib_connected` and `scan_mode` to scanner status
-
-#### After-Hours Scanning Mode (NEW)
-- When market CLOSED: scanner runs `_scan_daily_setups()` every 5 min on daily bars
-- Checks: daily_squeeze, trend_continuation, daily_breakout, base_breakout, accumulation_entry
-- Daily scan no longer requires live quotes (works from MongoDB bars alone)
-- S.O.C. generates after-hours content:
-  - Session status ("After-hours — scanning daily charts")
-  - Session recap (trades, W/L, P&L)
-  - Portfolio review (open positions count, tight stops)
-  - Daily swing/position setups found
+#### After-Hours & Pre-Market Scanning Modes
+- 3 scanning modes: Pre-market (watchlists), Live Intraday, After-hours (daily bars)
 
 #### EnhancedTickerModal Overhaul
-- Analysis endpoint now reads pushed IB data (quote priority: pushed IB → positions → direct IB → Alpaca → MongoDB)
-- Historical endpoint falls back to MongoDB for intraday bars
-- Data freshness indicators: "LIVE" green pulse vs "Last known (date)" amber
-- Cache TTL 60s→180s, AbortController for fetch cancellation
-- Removed fake earnings endpoint (random data), fixed quality data access path
-- Ticker search now actually navigates via `openTickerModal()`
+- Data freshness indicators, AbortController, removed fake earnings
 
-#### Positions Panel Overhaul
-- Risk badges: CRITICAL (>-30%), DANGER (>-15%), WARNING (>-7%)
-- NO STOP warnings for IB positions without stops
-- Portfolio weight %, market value, sort controls, source filter (All/Bot/IB)
-- Backend returns enriched data: market_value, cost_basis, portfolio_weight, risk_level, today_change
+#### LLM Chat Memory System
+- 4 new MongoDB collections for persistent AI memory
 
-#### Clickable Tickers
-- All symbols across app now use `ClickableTicker` → opens `EnhancedTickerModal`
-- Wired in: DetailedPositionsPanel, ScannerAlertsPanel, StreamOfConsciousness, SentCom stream
+#### Playbook & DRC Auto-Generation (EOD Service)
+- Scheduled at 4:30/4:45/5:00 PM ET
+- Granular per-symbol, per-regime, per-direction tracking in playbook trade_review
+- Weak symbol/regime detection via `edge_notes`
 
-#### S.O.C. Stream Improvements
-- Accumulating buffer (100 entries) — messages persist across refresh cycles
-- Sorted by timestamp (newest first)
-- Removed fake demo message generator
-- Container height 500px→700px
-
-#### UI Cleanup
-- Removed deprecated AI regime from NIA TrainingPipelinePanel
-- TickerTape: removed sticky overlay, hidden when no data
-- HeaderBar: removed z-index overlap
-- Scanner Watching list: 6→10, positioned above alerts
-- Learning Insights widget: hidden when no data
-- Fixed NIA QuickStatsBar polling (was blocked during training)
-- Wired WS training updates to QuickStatsBar
-
-#### Trade Management
-- LABD trade purged via new DELETE `/api/trading-bot/trades/{symbol}` endpoint
-- Learning exclusion not needed (LABD was IB-only, never went through gate)
-- IB order queue verified working (queued LABD sell → Windows pusher executed)
+#### Trade Deletion
+- `DELETE /api/trading-bot/trades/{symbol}` endpoint
 
 ### Feb 2026 — Session 1
 
 #### Stability & Performance
-- Moved 1017 lines init into `_init_all_services()`
-- 367 async→def endpoint conversions
-- Streaming cache layer
-- Chat server isolated on port 8002
+- `_init_all_services()`, async→def conversions, streaming cache, chat server isolation
 
 #### Confidence Gate
-- Disabled AI Regime scoring, mode-aware thresholds
-- Bypassed Strategy Promotion gate for paper trading
-- Gate Auto-Calibrator (`gate_calibrator.py`)
+- Mode-aware thresholds, gate auto-calibrator
 
-#### SentCom S.O.C.
-- TQS integration, LLM-enriched descriptions, deduplication
-- Swing/position scanner with daily bars
+## Pending Verification
+- Granular Playbook Tracking — User needs to trigger EOD endpoint and verify per-symbol breakdowns appear
 
 ## Upcoming Tasks
-- Trade Journal page data population (performance stats include bot trades)
-- Verify chat hallucination fix from last session
-- Deploy and validate after-hours scanning overnight
-
-## Future Tasks
 - Phase 6: Distributed PC Worker (offload training to Windows PC)
 - Automated Daily Bar Collection Scheduling
 - Re-enable uvloop
+
+## Future Tasks
 - Phase 7: Infrastructure Polish (systemd)
 - Per-signal weight optimizer for gate auto-tuning
 - Real earnings calendar integration
 - Wire scanner technical indicators fully into chat context
+- Consider splitting Trade Journal to separate microservice if latency issues persist

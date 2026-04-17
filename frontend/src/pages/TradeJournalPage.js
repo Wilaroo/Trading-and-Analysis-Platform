@@ -1248,7 +1248,7 @@ const TradeJournalPage = () => {
   const [activeTab, setActiveTab] = useState('trades'); // trades, playbook, drc, gameplan
   
   // Initialize from cached state for instant display on tab switch
-  const [trades, setTrades] = useState(() => getData('journalTrades') || []);
+  const [allTrades, setAllTrades] = useState(() => getData('journalTrades') || []);
   const [performance, setPerformance] = useState(() => getData('journalPerformance'));
   const [matrix, setMatrix] = useState(() => getData('journalMatrix'));
   const [loading, setLoading] = useState(() => !getData('journalTrades'));
@@ -1258,6 +1258,22 @@ const TradeJournalPage = () => {
   const [sourceFilter, setSourceFilter] = useState('all'); // all, manual, bot
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  
+  // Client-side filtered view (no API call needed)
+  const trades = React.useMemo(() => {
+    let filtered = allTrades;
+    if (filter !== 'all') {
+      filtered = filtered.filter(t => {
+        if (filter === 'open') return t.status === 'open' || t.status === 'pending' || t.status === 'filled';
+        if (filter === 'closed') return t.status === 'closed';
+        return true;
+      });
+    }
+    if (sourceFilter !== 'all') {
+      filtered = filtered.filter(t => t.source === sourceFilter);
+    }
+    return filtered;
+  }, [allTrades, filter, sourceFilter]);
   
   // New trade form state
   const [newTrade, setNewTrade] = useState({
@@ -1283,28 +1299,24 @@ const TradeJournalPage = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {};
-      if (filter !== 'all') params.status = filter;
-      if (sourceFilter !== 'all') params.source = sourceFilter;
-
-      // Critical data first — trades + templates (fast)
+      // Always fetch ALL trades — filtering happens client-side
       const [tradesRes, templatesRes] = await Promise.all([
-        api.get('/api/trades/unified', { params }),
-        api.get('/api/trades/templates/list'),
+        api.get('/api/trades/unified', { params: { limit: 200 }, timeout: 20000 }),
+        api.get('/api/trades/templates/list', { timeout: 10000 }),
       ]);
       
       const tradesData = tradesRes.data.trades || [];
-      setTrades(tradesData);
+      setAllTrades(tradesData);
       setTemplates(templatesRes.data.templates || []);
       setAppData('journalTrades', tradesData);
       setLoading(false);  // Unblock UI early — trades are visible
 
       // Secondary data in background (non-blocking)
       Promise.all([
-        api.get('/api/trades/performance').catch(() => ({ data: {} })),
-        api.get('/api/trades/performance/matrix').catch(() => ({ data: {} })),
-        api.get('/api/trades/ai/learning-stats').catch(() => ({ data: { stats: {} } })),
-        api.get('/api/trades/ai/strategy-insights').catch(() => ({ data: { insights: {} } })),
+        api.get('/api/trades/performance', { timeout: 15000 }).catch(() => ({ data: {} })),
+        api.get('/api/trades/performance/matrix', { timeout: 15000 }).catch(() => ({ data: {} })),
+        api.get('/api/trades/ai/learning-stats', { timeout: 10000 }).catch(() => ({ data: { stats: {} } })),
+        api.get('/api/trades/ai/strategy-insights', { timeout: 10000 }).catch(() => ({ data: { insights: {} } })),
       ]).then(([perfRes, matrixRes, aiStatsRes, aiInsightsRes]) => {
         const perfData = perfRes.data;
         const matrixData = matrixRes.data;
@@ -1328,7 +1340,7 @@ const TradeJournalPage = () => {
       console.error('Failed to load trade data:', err);
       setLoading(false);
     }
-  }, [filter, sourceFilter, setAppData]);
+  }, [setAppData]);  // No filter deps — always loads all trades
 
   useEffect(() => { loadData(); }, [loadData]);
 
