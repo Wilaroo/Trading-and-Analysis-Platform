@@ -274,14 +274,42 @@ class WeeklyReportService:
         # Get trades for this week
         trades = await self._get_week_trades(start_date, end_date)
         
-        # Generate each section
-        report.performance = await self._generate_performance_snapshot(trades, start_date)
-        report.top_contexts = await self._get_top_contexts()
-        report.struggling_contexts = await self._get_struggling_contexts()
-        report.edge_alerts = await self._get_edge_alerts()
-        report.calibration_suggestions = await self._get_calibration_suggestions()
-        report.confirmation_insights = await self._get_confirmation_insights()
-        report.playbook_focus = await self._get_playbook_focus()
+        # Generate each section with individual timeouts to prevent hangs
+        import asyncio
+        
+        async def _safe_call(coro, default, label=""):
+            """Run an async call with a 10s timeout, return default on failure"""
+            try:
+                return await asyncio.wait_for(coro, timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"Weekly report section timed out: {label}")
+                return default
+            except Exception as e:
+                logger.warning(f"Weekly report section failed ({label}): {e}")
+                return default
+        
+        report.performance = await _safe_call(
+            self._generate_performance_snapshot(trades, start_date),
+            PerformanceSnapshot(), "performance"
+        )
+        report.top_contexts = await _safe_call(
+            self._get_top_contexts(), [], "top_contexts"
+        )
+        report.struggling_contexts = await _safe_call(
+            self._get_struggling_contexts(), [], "struggling_contexts"
+        )
+        report.edge_alerts = await _safe_call(
+            self._get_edge_alerts(), [], "edge_alerts"
+        )
+        report.calibration_suggestions = await _safe_call(
+            self._get_calibration_suggestions(), [], "calibration_suggestions"
+        )
+        report.confirmation_insights = await _safe_call(
+            self._get_confirmation_insights(), [], "confirmation_insights"
+        )
+        report.playbook_focus = await _safe_call(
+            self._get_playbook_focus(), [], "playbook_focus"
+        )
         
         # Save to database
         if self._weekly_reports_col is not None:
@@ -300,66 +328,70 @@ class WeeklyReportService:
         start_date: datetime,
         end_date: datetime
     ) -> List[Dict]:
-        """Get trades for a specific week — merges trade_outcomes + bot_trades"""
-        trades = []
+        """Get trades for a specific week — merges trade_outcomes + bot_trades.
+        Runs blocking PyMongo queries in thread pool to avoid blocking the event loop.
+        """
+        import asyncio
         
-        # 1. Manual trade outcomes
-        if self._trade_outcomes_col is not None:
+        def _fetch_trades():
+            trades = []
+            # 1. Manual trade outcomes
+            if self._trade_outcomes_col is not None:
+                try:
+                    outcome_trades = list(self._trade_outcomes_col.find({
+                        "created_at": {
+                            "$gte": start_date.isoformat(),
+                            "$lte": (end_date + timedelta(days=1)).isoformat()
+                        }
+                    }, {"_id": 0}))
+                    trades.extend(outcome_trades)
+                except Exception:
+                    pass
+            
+            # 2. Bot trades (closed) from bot_trades collection
             try:
-                outcome_trades = list(self._trade_outcomes_col.find({
-                    "created_at": {
-                        "$gte": start_date.isoformat(),
-                        "$lte": (end_date + timedelta(days=1)).isoformat()
-                    }
-                }, {"_id": 0}))
-                trades.extend(outcome_trades)
+                if self._db is not None:
+                    bot_closed = list(self._db["bot_trades"].find({
+                        "status": "closed",
+                        "$or": [
+                            {"closed_at": {
+                                "$gte": start_date.isoformat(),
+                                "$lte": (end_date + timedelta(days=1)).isoformat()
+                            }},
+                            {"executed_at": {
+                                "$gte": start_date.isoformat(),
+                                "$lte": (end_date + timedelta(days=1)).isoformat()
+                            }}
+                        ]
+                    }, {"_id": 0}).limit(500))
+                    
+                    for bt in bot_closed:
+                        pnl = bt.get("realized_pnl", 0) or 0
+                        if pnl == 0 and bt.get("fill_price") and bt.get("close_price") and bt.get("shares"):
+                            entry = bt["fill_price"]
+                            exit_p = bt["close_price"]
+                            shares = bt["shares"]
+                            if bt.get("direction", "long") == "short":
+                                pnl = (entry - exit_p) * shares
+                            else:
+                                pnl = (exit_p - entry) * shares
+                        
+                        trades.append({
+                            "symbol": bt.get("symbol"),
+                            "setup_type": bt.get("setup_type"),
+                            "direction": bt.get("direction"),
+                            "pnl": pnl,
+                            "pnl_percent": bt.get("pnl_percent", 0),
+                            "outcome": "won" if pnl > 0 else "lost" if pnl < 0 else "scratch",
+                            "market_regime": bt.get("market_regime"),
+                            "created_at": bt.get("executed_at") or bt.get("closed_at"),
+                            "source": "bot"
+                        })
             except Exception:
                 pass
+            return trades
         
-        # 2. Bot trades (closed) from bot_trades collection
-        try:
-            if self._db is not None:
-                bot_closed = list(self._db["bot_trades"].find({
-                    "status": "closed",
-                    "$or": [
-                        {"closed_at": {
-                            "$gte": start_date.isoformat(),
-                            "$lte": (end_date + timedelta(days=1)).isoformat()
-                        }},
-                        {"executed_at": {
-                            "$gte": start_date.isoformat(),
-                            "$lte": (end_date + timedelta(days=1)).isoformat()
-                        }}
-                    ]
-                }, {"_id": 0}))
-                
-                # Normalize bot trades to match trade_outcomes format
-                for bt in bot_closed:
-                    pnl = bt.get("realized_pnl", 0) or 0
-                    if pnl == 0 and bt.get("fill_price") and bt.get("close_price") and bt.get("shares"):
-                        entry = bt["fill_price"]
-                        exit_p = bt["close_price"]
-                        shares = bt["shares"]
-                        if bt.get("direction", "long") == "short":
-                            pnl = (entry - exit_p) * shares
-                        else:
-                            pnl = (exit_p - entry) * shares
-                    
-                    trades.append({
-                        "symbol": bt.get("symbol"),
-                        "setup_type": bt.get("setup_type"),
-                        "direction": bt.get("direction"),
-                        "pnl": pnl,
-                        "pnl_percent": bt.get("pnl_percent", 0),
-                        "outcome": "won" if pnl > 0 else "lost" if pnl < 0 else "scratch",
-                        "market_regime": bt.get("market_regime"),
-                        "created_at": bt.get("executed_at") or bt.get("closed_at"),
-                        "source": "bot"
-                    })
-        except Exception:
-            pass
-        
-        return trades
+        return await asyncio.to_thread(_fetch_trades)
         
     async def _generate_performance_snapshot(
         self,

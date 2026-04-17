@@ -1004,11 +1004,32 @@ async def generate_weekly_report(week_start: str = None, force: bool = False):
 
 @router.get("/weekly-report/current")
 async def get_current_weekly_report():
-    """Get or generate the current week's report"""
+    """Get or generate the current week's report with timeout protection"""
+    import asyncio
     service = get_weekly_report_service_instance()
     try:
-        report = await service.generate_weekly_report()
+        report = await asyncio.wait_for(
+            service.generate_weekly_report(),
+            timeout=12.0
+        )
         return {"success": True, "report": report.to_dict()}
+    except asyncio.TimeoutError:
+        # Return an empty report rather than hanging
+        from services.weekly_report_service import WeeklyIntelligenceReport
+        from datetime import datetime as dt, timezone as tz, timedelta
+        today = dt.now(tz.utc)
+        days_since_monday = today.weekday()
+        start = today - timedelta(days=days_since_monday)
+        wn = start.isocalendar()[1]
+        empty = WeeklyIntelligenceReport(
+            id=f"wir_{start.year}_w{wn}",
+            week_number=wn, year=start.year,
+            week_start=start.strftime("%Y-%m-%d"),
+            week_end=(start + timedelta(days=4)).strftime("%Y-%m-%d"),
+            generated_at=today.isoformat(),
+            last_updated=today.isoformat()
+        )
+        return {"success": True, "report": empty.to_dict(), "timeout": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

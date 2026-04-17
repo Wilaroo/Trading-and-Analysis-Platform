@@ -507,7 +507,7 @@ const WeeklyReportTab = () => {
   const loadCurrentReport = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/journal/weekly-report/current');
+      const res = await api.get('/api/journal/weekly-report/current', { timeout: 15000 });
       if (res.data.success && res.data.report) {
         setReport(res.data.report);
         setReflection(res.data.report.reflection || {});
@@ -522,7 +522,7 @@ const WeeklyReportTab = () => {
   // Load report archive
   const loadArchive = useCallback(async () => {
     try {
-      const res = await api.get('/api/journal/weekly-report?limit=12');
+      const res = await api.get('/api/journal/weekly-report?limit=12', { timeout: 10000 });
       if (res.data.success) {
         setReports(res.data.reports || []);
       }
