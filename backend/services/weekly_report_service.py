@@ -300,16 +300,64 @@ class WeeklyReportService:
         start_date: datetime,
         end_date: datetime
     ) -> List[Dict]:
-        """Get trades for a specific week"""
-        if self._trade_outcomes_col is None:
-            return []
-            
-        trades = list(self._trade_outcomes_col.find({
-            "created_at": {
-                "$gte": start_date.isoformat(),
-                "$lte": (end_date + timedelta(days=1)).isoformat()
-            }
-        }))
+        """Get trades for a specific week — merges trade_outcomes + bot_trades"""
+        trades = []
+        
+        # 1. Manual trade outcomes
+        if self._trade_outcomes_col is not None:
+            try:
+                outcome_trades = list(self._trade_outcomes_col.find({
+                    "created_at": {
+                        "$gte": start_date.isoformat(),
+                        "$lte": (end_date + timedelta(days=1)).isoformat()
+                    }
+                }, {"_id": 0}))
+                trades.extend(outcome_trades)
+            except Exception:
+                pass
+        
+        # 2. Bot trades (closed) from bot_trades collection
+        try:
+            if self._db is not None:
+                bot_closed = list(self._db["bot_trades"].find({
+                    "status": "closed",
+                    "$or": [
+                        {"closed_at": {
+                            "$gte": start_date.isoformat(),
+                            "$lte": (end_date + timedelta(days=1)).isoformat()
+                        }},
+                        {"executed_at": {
+                            "$gte": start_date.isoformat(),
+                            "$lte": (end_date + timedelta(days=1)).isoformat()
+                        }}
+                    ]
+                }, {"_id": 0}))
+                
+                # Normalize bot trades to match trade_outcomes format
+                for bt in bot_closed:
+                    pnl = bt.get("realized_pnl", 0) or 0
+                    if pnl == 0 and bt.get("fill_price") and bt.get("close_price") and bt.get("shares"):
+                        entry = bt["fill_price"]
+                        exit_p = bt["close_price"]
+                        shares = bt["shares"]
+                        if bt.get("direction", "long") == "short":
+                            pnl = (entry - exit_p) * shares
+                        else:
+                            pnl = (exit_p - entry) * shares
+                    
+                    trades.append({
+                        "symbol": bt.get("symbol"),
+                        "setup_type": bt.get("setup_type"),
+                        "direction": bt.get("direction"),
+                        "pnl": pnl,
+                        "pnl_percent": bt.get("pnl_percent", 0),
+                        "outcome": "won" if pnl > 0 else "lost" if pnl < 0 else "scratch",
+                        "market_regime": bt.get("market_regime"),
+                        "created_at": bt.get("executed_at") or bt.get("closed_at"),
+                        "source": "bot"
+                    })
+        except Exception:
+            pass
         
         return trades
         
