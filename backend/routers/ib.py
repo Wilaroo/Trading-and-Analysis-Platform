@@ -1121,6 +1121,48 @@ async def get_historical_data(
         except Exception as e:
             print(f"Alpaca historical data error for {symbol}: {e}")
     
+    # For intraday: also try MongoDB ib_historical_data with matching bar_size
+    if not is_daily_or_higher:
+        try:
+            from database import get_database
+            db_ref = get_database()
+            if db_ref is not None:
+                limit = _convert_ib_duration_to_limit(duration, bar_size)
+                mongo_bars = list(db_ref["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": bar_size},
+                    {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                ).sort("date", -1).limit(limit))
+                
+                if not mongo_bars or len(mongo_bars) < 5:
+                    # Try daily bars as fallback for chart display
+                    mongo_bars = list(db_ref["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                    ).sort("date", -1).limit(200))
+                
+                if mongo_bars and len(mongo_bars) >= 5:
+                    mongo_bars.reverse()
+                    formatted_bars = [{
+                        "time": bar.get("date"),
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume")
+                    } for bar in mongo_bars]
+                    
+                    return {
+                        "symbol": symbol,
+                        "bars": formatted_bars,
+                        "count": len(formatted_bars),
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                        "is_cached": False,
+                        "is_realtime": False,
+                        "source": "mongodb_fallback"
+                    }
+        except Exception as e:
+            print(f"MongoDB intraday fallback error for {symbol}: {e}")
+    
     # Check IB Gateway connection status
     is_connected = False
     if _ib_service:
@@ -2887,8 +2929,48 @@ async def get_comprehensive_analysis(symbol: str):
             if quote and quote.get("price"):
                 analysis["quote"] = quote
                 base_price = quote.get("price", base_price)
+                quote_fetched = True
         except Exception as e:
             print(f"IB quote error: {e}")
+    
+    # Fallback to pushed IB data (from Windows PC pusher)
+    if not quote_fetched:
+        try:
+            ib_quotes = _pushed_ib_data.get("quotes", {})
+            pushed_quote = ib_quotes.get(symbol, {})
+            if pushed_quote and pushed_quote.get("price", 0) > 0:
+                analysis["quote"] = {
+                    "symbol": symbol,
+                    "price": pushed_quote["price"],
+                    "bid": pushed_quote.get("bid", 0),
+                    "ask": pushed_quote.get("ask", 0),
+                    "change": pushed_quote.get("change", 0),
+                    "change_percent": pushed_quote.get("change_pct", pushed_quote.get("changePct", 0)),
+                    "volume": pushed_quote.get("volume", 0),
+                    "source": "ib_pushed"
+                }
+                base_price = pushed_quote["price"]
+                quote_fetched = True
+        except Exception:
+            pass
+    
+    # Fallback to IB positions data (for symbols we hold)
+    if not quote_fetched:
+        try:
+            for pos in _pushed_ib_data.get("positions", []):
+                if pos.get("symbol", "").upper() == symbol:
+                    mp = pos.get("marketPrice", 0) or pos.get("market_price", 0)
+                    if mp and mp > 0:
+                        analysis["quote"] = {
+                            "symbol": symbol,
+                            "price": mp,
+                            "source": "ib_position"
+                        }
+                        base_price = mp
+                        quote_fetched = True
+                        break
+        except Exception:
+            pass
     
     # Try IB for fundamentals only if not busy (Alpaca doesn't have fundamentals)
     if is_connected and _ib_service and not ib_is_busy:
@@ -2929,6 +3011,31 @@ async def get_comprehensive_analysis(symbol: str):
             bars = hist_data if isinstance(hist_data, list) else hist_data.get("bars", [])
         except Exception as e:
             print(f"IB historical error: {e}")
+    
+    # Fallback to MongoDB ib_historical_data (daily bars)
+    if not bars:
+        try:
+            from database import get_database
+            db_ref = get_database()
+            if db_ref is not None:
+                mongo_bars = list(db_ref["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                ).sort("date", -1).limit(200))
+                if mongo_bars and len(mongo_bars) > 5:
+                    mongo_bars.reverse()
+                    bars = mongo_bars
+                    # Update base_price from latest bar
+                    if bars:
+                        base_price = bars[-1].get("close", base_price)
+                        if not quote_fetched:
+                            analysis["quote"] = {
+                                "symbol": symbol,
+                                "price": base_price,
+                                "source": "mongodb_daily"
+                            }
+        except Exception as e:
+            print(f"MongoDB historical fallback error: {e}")
     
     if bars and len(bars) > 20:
         try:
