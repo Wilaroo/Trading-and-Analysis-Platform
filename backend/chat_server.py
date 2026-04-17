@@ -32,6 +32,18 @@ DB_NAME = os.environ.get("DB_NAME", "tradecommand")
 mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
 db = mongo_client[DB_NAME]
 
+# Ensure indexes for fast queries on chat collections
+try:
+    db["sentcom_chat_history"].create_index([("session_id", 1), ("timestamp", -1)])
+    db["sentcom_chat_history"].create_index([("timestamp", -1)])
+    db["sentcom_memory"].create_index([("active", 1), ("created_at", -1)])
+    db["sentcom_chat_sessions"].create_index([("session_id", 1)], unique=True)
+    db["sentcom_chat_sessions"].create_index([("created_at", -1)])
+    db["sentcom_context_archive"].create_index([("hash", 1), ("session_id", 1)])
+    db["sentcom_context_archive"].create_index([("timestamp", -1)])
+except Exception:
+    pass  # Indexes may already exist
+
 # Ollama config
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
@@ -620,8 +632,8 @@ def _get_portfolio_context() -> dict:
     return {"text": text, "debug": debug}
 
 
-def _get_chat_history(session_id: str = "default", limit: int = 10) -> list:
-    """Get recent chat history for context"""
+def _get_chat_history(session_id: str = "default", limit: int = 20) -> list:
+    """Get recent chat history for context — expanded to 20 messages for better recall"""
     try:
         docs = list(
             db["sentcom_chat_history"]
@@ -635,17 +647,195 @@ def _get_chat_history(session_id: str = "default", limit: int = 10) -> list:
         return []
 
 
-def _store_message(role: str, content: str, session_id: str = "default"):
-    """Store a chat message"""
+def _store_message(role: str, content: str, session_id: str = "default",
+                   model: str = None, latency_ms: float = None, 
+                   context_hash: str = None, trade_action: dict = None,
+                   session_mode: str = None):
+    """Store a chat message with rich metadata"""
     try:
-        db["sentcom_chat_history"].insert_one({
+        doc = {
             "role": role,
             "content": content,
             "session_id": session_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if model:
+            doc["model"] = model
+        if latency_ms is not None:
+            doc["latency_ms"] = round(latency_ms)
+        if context_hash:
+            doc["context_hash"] = context_hash
+        if trade_action:
+            doc["trade_action"] = trade_action
+        if session_mode:
+            doc["session_mode"] = session_mode
+        db["sentcom_chat_history"].insert_one(doc)
+    except Exception as e:
+        logger.warning(f"Failed to store chat message: {e}")
+
+
+def _archive_context(context_text: str, session_id: str = "default") -> str:
+    """Archive the full context snapshot for audit trail. Returns a hash for linking."""
+    try:
+        import hashlib
+        ctx_hash = hashlib.md5(context_text[:500].encode()).hexdigest()[:12]
+        # Only store if we haven't stored this exact context recently (dedup)
+        existing = db["sentcom_context_archive"].find_one(
+            {"hash": ctx_hash, "session_id": session_id},
+            {"_id": 0, "hash": 1}
+        )
+        if not existing:
+            db["sentcom_context_archive"].insert_one({
+                "hash": ctx_hash,
+                "session_id": session_id,
+                "context": context_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "context_length": len(context_text),
+            })
+        return ctx_hash
+    except Exception as e:
+        logger.debug(f"Context archive error: {e}")
+        return ""
+
+
+def _get_persistent_memories(limit: int = 30) -> list:
+    """Get all persistent memories — trading rules, lessons, preferences."""
+    try:
+        docs = list(
+            db["sentcom_memory"]
+            .find({"active": True}, {"_id": 0, "content": 1, "category": 1, "created_at": 1})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return docs
     except Exception:
-        pass
+        return []
+
+
+def _extract_and_store_memory(user_msg: str, assistant_msg: str, session_id: str):
+    """Auto-extract lessons/decisions from conversation and store as persistent memory.
+    
+    Looks for patterns like:
+    - Explicit agreements ("let's avoid...", "from now on...", "rule:...")
+    - Strategy decisions ("we should always...", "never...")
+    - Lessons learned ("that didn't work because...", "lesson:...")
+    """
+    combined = (user_msg + " " + assistant_msg).lower()
+    
+    # Keywords that signal a persistent memory worth saving
+    memory_triggers = [
+        "from now on", "let's always", "let's never", "new rule", "lesson learned",
+        "remember this", "note to self", "going forward", "we agreed", "our rule is",
+        "don't forget", "important:", "key takeaway", "strategy change",
+        "stop doing", "start doing", "avoid", "preference:"
+    ]
+    
+    triggered = any(trigger in combined for trigger in memory_triggers)
+    if not triggered:
+        return
+    
+    try:
+        # Store the memory with context
+        memory_content = f"[From chat on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]\n"
+        # Use the assistant's response as the memory (it's the synthesized version)
+        # But cap it to keep memories concise
+        if len(assistant_msg) > 300:
+            memory_content += assistant_msg[:300] + "..."
+        else:
+            memory_content += assistant_msg
+        
+        db["sentcom_memory"].insert_one({
+            "content": memory_content,
+            "category": "auto_extracted",
+            "source_user_msg": user_msg[:200],
+            "session_id": session_id,
+            "active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"Stored new persistent memory from chat session {session_id}")
+    except Exception as e:
+        logger.debug(f"Memory extraction error: {e}")
+
+
+def _get_last_session_summary(current_session_id: str) -> str:
+    """Get the most recent session summary (from a different session) for continuity."""
+    try:
+        doc = db["sentcom_chat_sessions"].find_one(
+            {"session_id": {"$ne": current_session_id}},
+            {"_id": 0, "summary": 1, "session_id": 1, "created_at": 1},
+            sort=[("created_at", -1)]
+        )
+        if doc:
+            return f"[Previous session ({doc.get('created_at', '?')[:10]})] {doc.get('summary', '')}"
+        return ""
+    except Exception:
+        return ""
+
+
+def _generate_session_summary(session_id: str):
+    """Generate and store a summary for a session when it ends or goes stale."""
+    try:
+        # Get all messages for this session
+        messages = list(
+            db["sentcom_chat_history"]
+            .find({"session_id": session_id}, {"_id": 0, "role": 1, "content": 1, "timestamp": 1})
+            .sort("timestamp", 1)
+            .limit(50)
+        )
+        if len(messages) < 2:
+            return
+        
+        # Check if summary already exists
+        existing = db["sentcom_chat_sessions"].find_one({"session_id": session_id})
+        if existing:
+            return
+        
+        # Build a simple extractive summary (key topics, decisions, action items)
+        topics = set()
+        decisions = []
+        user_questions = []
+        
+        for msg in messages:
+            content = msg.get("content", "")
+            role = msg.get("role", "")
+            
+            if role == "user" and len(content) > 10:
+                user_questions.append(content[:100])
+            
+            # Look for trade-related content
+            content_lower = content.lower()
+            for keyword in ["close", "buy", "sell", "stop", "target", "exit", "entry"]:
+                if keyword in content_lower:
+                    decisions.append(content[:120])
+                    break
+            
+            # Extract mentioned symbols
+            import re
+            symbols = re.findall(r'\b[A-Z]{2,5}\b', content)
+            for s in symbols:
+                if s not in ('THE', 'AND', 'FOR', 'NOT', 'ARE', 'BUT', 'HAS', 'WAS', 'THIS', 'THAT', 'WITH', 'FROM', 'HAVE', 'WILL', 'BEEN', 'THEY', 'SOME', 'WHAT', 'WHEN', 'YOUR', 'JUST', 'LIKE', 'THAN', 'THEM', 'THEN', 'ALSO', 'INTO', 'OVER', 'SUCH', 'TAKE', 'HERE', 'EACH', 'MAKE', 'VERY', 'AFTER', 'ABOUT'):
+                    topics.add(s)
+        
+        summary = f"Discussed {len(messages)} messages. "
+        if topics:
+            summary += f"Symbols: {', '.join(list(topics)[:10])}. "
+        if user_questions:
+            summary += f"Key questions: {'; '.join(user_questions[:3])}. "
+        if decisions:
+            summary += f"Decisions: {'; '.join(decisions[:3])}"
+        
+        db["sentcom_chat_sessions"].insert_one({
+            "session_id": session_id,
+            "summary": summary[:500],
+            "message_count": len(messages),
+            "topics": list(topics)[:15],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "first_message": messages[0].get("timestamp", ""),
+            "last_message": messages[-1].get("timestamp", ""),
+        })
+        logger.info(f"Generated session summary for {session_id}: {len(messages)} messages")
+    except Exception as e:
+        logger.debug(f"Session summary error: {e}")
 
 
 def _call_ollama(messages: list, model: str, timeout: int = 60) -> Optional[str]:
@@ -773,7 +963,24 @@ def chat(request: ChatRequest):
     # Build context
     ctx = _get_portfolio_context()
     context = ctx["text"]
-    history = _get_chat_history(request.session_id, limit=6)
+    session_mode = ctx.get("debug", {}).get("session_mode", "unknown")
+    history = _get_chat_history(request.session_id, limit=20)
+    
+    # Archive context for audit trail
+    ctx_hash = _archive_context(context, request.session_id)
+    
+    # Load persistent memories (trading rules, lessons, preferences)
+    memories = _get_persistent_memories(limit=30)
+    memory_block = ""
+    if memories:
+        mem_lines = [m.get("content", "") for m in memories]
+        memory_block = "\n\nPERSISTENT MEMORY (our agreed rules, lessons, and preferences — always follow these):\n" + "\n".join(f"- {m}" for m in mem_lines)
+    
+    # Load last session summary for cross-session continuity
+    last_session = _get_last_session_summary(request.session_id)
+    session_block = ""
+    if last_session:
+        session_block = f"\n\nLAST SESSION CONTEXT:\n{last_session}"
     
     system_prompt = f"""You are SentCom — my AI trading partner. We trade together as a team.
 
@@ -857,7 +1064,7 @@ TRADE EXECUTION:
 
 === LIVE DATA ===
 {context}
-=== END DATA ==="""
+=== END DATA ==={memory_block}{session_block}"""
     
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -868,8 +1075,9 @@ TRADE EXECUTION:
     # Add current message
     messages.append({"role": "user", "content": request.message})
     
-    # Store user message
-    _store_message("user", request.message, request.session_id)
+    # Store user message with rich metadata
+    _store_message("user", request.message, request.session_id, 
+                   session_mode=session_mode, context_hash=ctx_hash)
     
     # Call Ollama (try primary, then fallback)
     response_content = _call_ollama(messages, OLLAMA_MODEL)
@@ -885,8 +1093,10 @@ TRADE EXECUTION:
     
     # Check for trade action commands in the response
     trade_result = None
+    trade_action_data = None
     if "<<<TRADE_ACTION:" in response_content:
         trade_result = _execute_trade_action(response_content)
+        trade_action_data = trade_result
         # Clean the action block from the user-facing response
         import re
         response_content = re.sub(r'<<<TRADE_ACTION:.*?>>>', '', response_content).strip()
@@ -896,10 +1106,28 @@ TRADE EXECUTION:
             else:
                 response_content += f"\n\nCouldn't execute that — {trade_result.get('error', 'unknown error')}. You may need to do it manually in TWS."
     
-    # Store response
-    _store_message("assistant", response_content, request.session_id)
-    
     latency = (time.time() - start) * 1000
+    
+    # Store response with full metadata
+    _store_message("assistant", response_content, request.session_id,
+                   model=used_model, latency_ms=latency, context_hash=ctx_hash,
+                   trade_action=trade_action_data, session_mode=session_mode)
+    
+    # Auto-extract persistent memories from this exchange
+    _extract_and_store_memory(request.message, response_content, request.session_id)
+    
+    # Generate session summary if switching sessions (check if last message was from a different session)
+    try:
+        last_msg = db["sentcom_chat_history"].find_one(
+            {"session_id": {"$ne": request.session_id}, "role": "user"},
+            {"_id": 0, "session_id": 1},
+            sort=[("timestamp", -1)]
+        )
+        if last_msg:
+            _generate_session_summary(last_msg["session_id"])
+    except Exception:
+        pass
+    
     logger.info(f"Chat response in {latency:.0f}ms via {used_model}")
     
     return {
@@ -927,6 +1155,115 @@ def get_history(limit: int = 50, session_id: str = "default"):
         return {"success": True, "history": docs}
     except Exception as e:
         return {"success": False, "error": str(e), "history": []}
+
+
+@app.get("/chat/memories")
+def get_memories():
+    """Get all persistent memories"""
+    try:
+        docs = list(
+            db["sentcom_memory"]
+            .find({"active": True}, {"_id": 0})
+            .sort("created_at", -1)
+        )
+        return {"success": True, "memories": docs, "count": len(docs)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "memories": []}
+
+
+@app.post("/chat/memories")
+def add_memory(memory: dict):
+    """Manually add a persistent memory (trading rule, lesson, preference)"""
+    try:
+        content = memory.get("content", "").strip()
+        category = memory.get("category", "manual")
+        if not content:
+            return {"success": False, "error": "Content is required"}
+        
+        db["sentcom_memory"].insert_one({
+            "content": content,
+            "category": category,
+            "source_user_msg": "manual_entry",
+            "session_id": "manual",
+            "active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return {"success": True, "message": "Memory stored"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/chat/memories/{memory_id}")
+def deactivate_memory(memory_id: str):
+    """Deactivate a persistent memory (soft delete)"""
+    try:
+        from bson import ObjectId
+        result = db["sentcom_memory"].update_one(
+            {"_id": ObjectId(memory_id)},
+            {"$set": {"active": False, "deactivated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        if result.modified_count > 0:
+            return {"success": True, "message": "Memory deactivated"}
+        return {"success": False, "error": "Memory not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/chat/sessions")
+def get_sessions(limit: int = 20):
+    """Get session summaries"""
+    try:
+        docs = list(
+            db["sentcom_chat_sessions"]
+            .find({}, {"_id": 0})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return {"success": True, "sessions": docs, "count": len(docs)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "sessions": []}
+
+
+@app.get("/chat/context/{context_hash}")
+def get_archived_context(context_hash: str):
+    """Retrieve an archived context snapshot by hash (for auditing)"""
+    try:
+        doc = db["sentcom_context_archive"].find_one(
+            {"hash": context_hash},
+            {"_id": 0}
+        )
+        if doc:
+            return {"success": True, "context": doc}
+        return {"success": False, "error": "Context not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/chat/stats")
+def get_chat_stats():
+    """Get overall chat system stats"""
+    try:
+        total_messages = db["sentcom_chat_history"].count_documents({})
+        total_memories = db["sentcom_memory"].count_documents({"active": True})
+        total_sessions = db["sentcom_chat_sessions"].count_documents({})
+        total_contexts = db["sentcom_context_archive"].count_documents({})
+        
+        # Recent activity
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).isoformat()
+        today_messages = db["sentcom_chat_history"].count_documents(
+            {"timestamp": {"$gte": today}}
+        )
+        
+        return {
+            "success": True,
+            "total_messages": total_messages,
+            "today_messages": today_messages,
+            "active_memories": total_memories,
+            "session_summaries": total_sessions,
+            "context_archives": total_contexts,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 if __name__ == "__main__":
