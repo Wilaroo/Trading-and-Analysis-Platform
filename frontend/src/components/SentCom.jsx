@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import { safePolling } from '../utils/safePolling';
 import EnhancedTickerModal from './EnhancedTickerModal';
+import ClickableTicker from './shared/ClickableTicker';
 import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import ServerHealthBadge from './ServerHealthBadge';
@@ -309,9 +310,7 @@ const StreamMessage = React.memo(({ msg, index }) => {
                 {getLabel()}
               </span>
               {msg.symbol && (
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${colors.badge} font-medium`}>
-                  {msg.symbol}
-                </span>
+                <ClickableTicker symbol={msg.symbol} variant="badge" className={`text-[10px] ${colors.badge}`} />
               )}
             </div>
             
@@ -1208,7 +1207,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-lg font-bold text-white">{decision.symbol}</span>
+                        <ClickableTicker symbol={decision.symbol} variant="inline" className="text-lg font-bold" />
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
                           decision.combined_recommendation === 'proceed' 
                             ? 'bg-emerald-500/20 text-emerald-400'
@@ -1348,7 +1347,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                 {forecastResult && (
                   <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10" data-testid="forecast-result">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-lg font-bold text-white">{forecastResult.symbol}</span>
+                      <ClickableTicker symbol={forecastResult.symbol} variant="inline" className="text-lg font-bold" />
                       <span className={`text-sm font-bold px-3 py-1 rounded-full ${
                         forecastResult.direction === 'up'
                           ? 'bg-emerald-500/20 text-emerald-400'
@@ -1494,7 +1493,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                         data-testid={`prediction-${i}`}
                       >
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold text-white">{pred.symbol}</span>
+                          <ClickableTicker symbol={pred.symbol} variant="inline" className="text-sm font-bold" />
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             pred.prediction?.direction === 'up' ? 'bg-emerald-500/20 text-emerald-400'
                             : pred.prediction?.direction === 'down' ? 'bg-rose-500/20 text-rose-400'
@@ -2350,7 +2349,7 @@ const PositionsPanel = ({ positions, totalPnl, loading, onSelectPosition }) => {
               className="flex items-center justify-between p-3 rounded-xl bg-black/30 border border-white/5 hover:border-cyan-500/30 cursor-pointer transition-all"
             >
               <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-white">{pos.symbol}</span>
+                <ClickableTicker symbol={pos.symbol} variant="inline" className="text-sm font-bold" />
                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                   pos.status === 'running' ? 'bg-emerald-500/20 text-emerald-400' :
                   pos.status === 'watching' ? 'bg-amber-500/20 text-amber-400' :
@@ -2449,9 +2448,7 @@ const StreamPanel = ({ messages, loading }) => {
                       {getMessageLabel(msg.type, msg.action_type)}
                     </span>
                     {msg.symbol && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                        {msg.symbol}
-                      </span>
+                      <ClickableTicker symbol={msg.symbol} variant="badge" />
                     )}
                     <span className="text-[10px] text-zinc-600">
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -2615,7 +2612,7 @@ const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setupsLoadi
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-sm">{setup.symbol}</span>
+                    <ClickableTicker symbol={setup.symbol} variant="inline" className="font-bold text-sm" />
                     <span className="text-[9px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
                       {setup.setup_type || setup.type}
                     </span>
@@ -2668,7 +2665,7 @@ const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setupsLoadi
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-sm">{alert.symbol}</span>
+                    <ClickableTicker symbol={alert.symbol} variant="inline" className="font-bold text-sm" />
                     <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
                       alert.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' :
                       alert.direction === 'SHORT' ? 'bg-rose-500/20 text-rose-400' :
@@ -2768,7 +2765,7 @@ const SetupsPanel = ({ setups, loading }) => {
           {setups.map((setup, i) => (
             <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white">{setup.symbol}</span>
+                <ClickableTicker symbol={setup.symbol} variant="inline" className="text-xs font-bold" />
                 <span className="text-[10px] text-zinc-500">{setup.setup_type}</span>
               </div>
               {setup.trigger_price && (

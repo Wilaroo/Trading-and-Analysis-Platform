@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api, { safeGet, safePost } from '../utils/api';
 import { useWsData } from '../contexts/WebSocketDataContext';
+import ClickableTicker from './shared/ClickableTicker';
 import { 
   Search, TrendingUp, TrendingDown, AlertTriangle, Activity, 
   Target, Eye, Zap, Brain, RefreshCw, Filter, CheckCircle,
@@ -560,12 +561,10 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
               
               {/* Symbol */}
               {entry.symbol && (
-                <span 
-                  className="text-sm font-bold text-white bg-white/10 px-2 py-0.5 rounded-md"
-                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-                >
-                  {entry.symbol}
-                </span>
+                <ClickableTicker 
+                  symbol={entry.symbol} 
+                  variant="badge"
+                />
               )}
             </div>
             

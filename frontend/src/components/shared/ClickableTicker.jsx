@@ -6,7 +6,7 @@
  *   <ClickableTicker symbol="NVDA" showPrice price={122.50} change={1.5} />
  */
 import React from 'react';
-import { useTickerModal } from '../hooks/useTickerModal';
+import { useTickerModal } from '../../hooks/useTickerModal';
 
 const ClickableTicker = ({ 
   symbol, 

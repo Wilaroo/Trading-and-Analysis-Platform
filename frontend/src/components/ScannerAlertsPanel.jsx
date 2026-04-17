@@ -10,6 +10,7 @@ import {
   Activity, Bell, Crosshair, TrendingUp, TrendingDown,
   Loader, Radio, AlertCircle, Zap, Target, WifiOff
 } from 'lucide-react';
+import ClickableTicker from './shared/ClickableTicker';
 
 const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibConnected }) => {
   return (
@@ -75,7 +76,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                   >
                     <div className="flex items-center gap-2">
                       <Target className="w-3 h-3 text-violet-400" />
-                      <span className="text-xs font-bold text-white">{setup.symbol}</span>
+                      <ClickableTicker symbol={setup.symbol} variant="inline" className="text-xs font-bold" />
                       <span className="text-[9px] text-zinc-500">{setup.setup_type}</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -137,7 +138,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                   <div className="flex-1 min-w-0">
                     {alert.symbol && (
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-xs font-bold text-white">{alert.symbol}</span>
+                        <ClickableTicker symbol={alert.symbol} variant="inline" className="text-xs font-bold" />
                         {alert.setup_type && (
                           <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
                             {alert.setup_type}

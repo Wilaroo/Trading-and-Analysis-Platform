@@ -11,6 +11,7 @@
  */
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import ClickableTicker from './shared/ClickableTicker';
 import {
   Target, TrendingUp, TrendingDown, Clock, Shield, Zap,
   BarChart3, Activity, AlertTriangle, Loader, Eye,
@@ -100,7 +101,7 @@ const PositionRow = ({ pos, onClick }) => {
       {/* Row 1: Symbol + Source + P&L + Value */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-white">{pos.symbol}</span>
+          <ClickableTicker symbol={pos.symbol} variant="inline" className="text-sm font-bold" />
           <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
             pos.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
           }`}>
