@@ -2,6 +2,7 @@
  * ScannerAlertsPanel.jsx - Scanner alerts + setups list for Command Center
  * 
  * Shows live scanner alerts and setups being watched in a list format.
+ * Watching (top priority) appears ABOVE the full scanner alerts list.
  */
 import React from 'react';
 import { motion } from 'framer-motion';
@@ -21,17 +22,81 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
           </div>
           <span className="text-sm font-bold text-white">Scanner</span>
         </div>
-        {alerts.length > 0 && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold">
-            {alerts.length} alerts
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {setups.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 font-bold">
+              {setups.length} watching
+            </span>
+          )}
+          {alerts.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold">
+              {alerts.length} alerts
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Content */}
-      <div className="max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-        {/* Alerts Section */}
+      <div className="max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+
+        {/* Watching Section — TOP PRIORITY, shown first */}
+        {(setups.length > 0 || setupsLoading) && (
+          <div className="px-3 pt-3 pb-2">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Crosshair className="w-3 h-3 text-violet-400" />
+              <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider">Watching</span>
+              {setups.length > 0 && (
+                <span className="text-[9px] text-violet-400/60">{setups.length}</span>
+              )}
+            </div>
+            
+            {setupsLoading && setups.length === 0 ? (
+              <div className="flex items-center justify-center py-2">
+                <Loader className="w-3 h-3 text-violet-400 animate-spin" />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {setups.map((setup, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between p-2 rounded-lg bg-violet-500/5 border border-violet-500/10 hover:border-violet-500/25 transition-all"
+                    data-testid={`setup-watch-${i}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Target className="w-3 h-3 text-violet-400" />
+                      <span className="text-xs font-bold text-white">{setup.symbol}</span>
+                      <span className="text-[9px] text-zinc-500">{setup.setup_type}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {setup.trigger_price && (
+                        <span className="text-[10px] text-cyan-400 font-mono">${setup.trigger_price?.toFixed?.(2) || setup.trigger_price}</span>
+                      )}
+                      {setup.confidence && (
+                        <span className={`text-[9px] px-1 py-0.5 rounded ${
+                          setup.confidence >= 55 ? 'bg-emerald-500/15 text-emerald-400' :
+                          setup.confidence >= 30 ? 'bg-amber-500/15 text-amber-400' :
+                          'bg-zinc-500/15 text-zinc-400'
+                        }`}>
+                          {setup.confidence}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Scanner Alerts Section — below Watching */}
         <div className="p-3 space-y-1.5">
+          {setups.length > 0 && alerts.length > 0 && (
+            <div className="flex items-center gap-1.5 mb-1 pt-1 border-t border-white/5">
+              <AlertCircle className="w-3 h-3 text-amber-400" />
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">All Alerts</span>
+              <span className="text-[9px] text-zinc-600">{alerts.length}</span>
+            </div>
+          )}
           {alertsLoading && alerts.length === 0 ? (
             <div className="flex items-center justify-center py-4">
               <Loader className="w-4 h-4 text-amber-400 animate-spin" />
@@ -47,7 +112,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
                 key={alert.id || i}
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
+                transition={{ delay: i * 0.03 }}
                 className="p-2.5 rounded-lg bg-black/30 border border-white/5 hover:border-white/15 transition-all"
                 data-testid={`scanner-alert-${i}`}
               >
@@ -103,55 +168,6 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading }) =>
             ))
           )}
         </div>
-
-        {/* Setups Section */}
-        {(setups.length > 0 || setupsLoading) && (
-          <div className="px-3 pb-3">
-            <div className="flex items-center gap-1.5 mb-2 pt-2 border-t border-white/5">
-              <Crosshair className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Watching</span>
-              {setups.length > 0 && (
-                <span className="text-[9px] text-violet-400">{setups.length}</span>
-              )}
-            </div>
-            
-            {setupsLoading && setups.length === 0 ? (
-              <div className="flex items-center justify-center py-2">
-                <Loader className="w-3 h-3 text-violet-400 animate-spin" />
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {setups.slice(0, 6).map((setup, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between p-2 rounded-lg bg-black/20 border border-white/5"
-                    data-testid={`setup-watch-${i}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Target className="w-3 h-3 text-violet-400" />
-                      <span className="text-xs font-bold text-white">{setup.symbol}</span>
-                      <span className="text-[9px] text-zinc-500">{setup.setup_type}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {setup.trigger_price && (
-                        <span className="text-[10px] text-cyan-400">${setup.trigger_price?.toFixed?.(2) || setup.trigger_price}</span>
-                      )}
-                      {setup.confidence && (
-                        <span className={`text-[9px] px-1 py-0.5 rounded ${
-                          setup.confidence >= 55 ? 'bg-emerald-500/15 text-emerald-400' :
-                          setup.confidence >= 30 ? 'bg-amber-500/15 text-amber-400' :
-                          'bg-zinc-500/15 text-zinc-400'
-                        }`}>
-                          {setup.confidence}%
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

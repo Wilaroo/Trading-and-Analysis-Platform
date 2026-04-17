@@ -1604,7 +1604,7 @@ class SentComService:
             scanner = get_enhanced_scanner()
             if scanner:
                 live_alerts = scanner.get_live_alerts()
-                for alert in live_alerts[:6]:
+                for alert in live_alerts[:10]:
                     # Handle timestamp - could be datetime or string
                     timestamp = alert.created_at
                     if hasattr(timestamp, 'isoformat'):
