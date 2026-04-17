@@ -300,13 +300,9 @@ async def get_unified_trades(
         def _fetch_bot_trades():
             bot_list = []
             try:
-                import os
-                from pymongo import MongoClient
-                mongo_url = os.environ.get("MONGO_URL", "")
-                db_name = os.environ.get("DB_NAME", "sentcom")
-                if mongo_url:
-                    client = MongoClient(mongo_url, serverSelectionTimeoutMS=3000)
-                    db = client[db_name]
+                from database import get_database
+                db = get_database()
+                if db is not None:
                     query = {}
                     if status == "open":
                         query["status"] = {"$in": ["open", "pending", "filled"]}
@@ -349,7 +345,6 @@ async def get_unified_trades(
                             "outcome": "won" if realized > 0.01 else ("lost" if realized < -0.01 else None),
                             "_sort_date": d.get("executed_at") or d.get("created_at", ""),
                         })
-                    client.close()
             except Exception:
                 pass
             return bot_list

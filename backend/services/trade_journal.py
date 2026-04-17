@@ -472,12 +472,43 @@ class TradeJournalService:
         return perfs
     
     async def get_performance_summary(self) -> Dict:
-        """Get overall performance summary"""
-        # Get all closed trades
+        """Get overall performance summary — merges manual journal + bot trades"""
+        # Get closed trades from manual journal
         closed_trades = list(self.trades_col.find(
             {"status": "closed"},
-            {"_id": 0, "pnl": 1, "pnl_percent": 1, "strategy_id": 1, "market_context": 1}
+            {"_id": 0, "pnl": 1, "pnl_percent": 1, "strategy_id": 1, "market_context": 1, "source": 1}
         ))
+        
+        # Also get closed bot trades
+        try:
+            bot_closed = list(self.db["bot_trades"].find(
+                {"status": "closed"},
+                {"_id": 0, "realized_pnl": 1, "pnl_percent": 1, "setup_type": 1, 
+                 "market_regime": 1, "close_reason": 1, "direction": 1,
+                 "fill_price": 1, "close_price": 1, "shares": 1}
+            ))
+            for bt in bot_closed:
+                # Normalize bot trade to match journal format
+                pnl = bt.get("realized_pnl", 0) or 0
+                if pnl == 0 and bt.get("fill_price") and bt.get("close_price") and bt.get("shares"):
+                    entry = bt["fill_price"]
+                    exit_p = bt["close_price"]
+                    shares = bt["shares"]
+                    direction = bt.get("direction", "long")
+                    if direction == "short":
+                        pnl = (entry - exit_p) * shares
+                    else:
+                        pnl = (exit_p - entry) * shares
+                
+                closed_trades.append({
+                    "pnl": pnl,
+                    "pnl_percent": bt.get("pnl_percent", 0),
+                    "strategy_id": bt.get("setup_type", "bot_trade"),
+                    "market_context": bt.get("market_regime", "UNKNOWN"),
+                    "source": "bot"
+                })
+        except Exception:
+            pass
         
         if not closed_trades:
             return {
