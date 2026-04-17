@@ -445,7 +445,7 @@ def delete_trade_by_symbol(symbol: str):
         removed.append({"count": closed_removed, "source": "closed_trades"})
     
     # Remove from MongoDB bot_trades
-    if _trading_bot._db:
+    if _trading_bot._db is not None:
         result = _trading_bot._db.bot_trades.delete_many({"symbol": symbol})
         if result.deleted_count > 0:
             removed.append({"count": result.deleted_count, "source": "mongodb_bot_trades"})
