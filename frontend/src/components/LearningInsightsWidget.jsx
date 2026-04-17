@@ -106,15 +106,12 @@ const LearningInsightsWidget = ({ onNavigateToHub, className = '' }) => {
   };
 
   if (loading) {
-    return (
-      <div className={`bg-slate-800/30 rounded-xl border border-slate-700/30 p-4 ${className}`}>
-        <div className="flex items-center gap-2">
-          <RefreshCw className="w-4 h-4 text-slate-500 animate-spin" />
-          <span className="text-sm text-slate-500">Loading insights...</span>
-        </div>
-      </div>
-    );
+    return null; // Don't show loading state — appear only when data exists
   }
+
+  // Hide entirely when there's no meaningful data
+  const hasData = data.winRate !== null || data.todayPnl !== null || data.alerts.length > 0;
+  if (!hasData) return null;
 
   return (
     <div 
