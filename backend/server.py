@@ -2938,14 +2938,6 @@ def _compute_all_sync_data(last_notification_time_iso: str = None):
     try:
         sentcom_data = {}
         try:
-            from services.sentcom_engine import get_sentcom_engine
-            engine = get_sentcom_engine()
-            if engine:
-                sentcom_data["status"] = engine.get_status()
-                sentcom_data["stream"] = engine.get_stream(50)
-        except Exception:
-            pass
-        try:
             from routers.ib import get_pushed_positions
             positions = get_pushed_positions()
             sentcom_data["positions"] = positions or []
@@ -2957,6 +2949,7 @@ def _compute_all_sync_data(last_notification_time_iso: str = None):
                 sentcom_data["market_context"] = mcs.get_snapshot()
         except Exception:
             pass
+        # Note: sentcom stream is populated async in _streaming_cache_loop
         result["sentcom_data"] = sentcom_data
     except Exception:
         result["sentcom_data"] = {}
@@ -3052,6 +3045,17 @@ async def _streaming_cache_loop():
             _streaming_cache["market_regime"] = regime_data
         except Exception:
             pass
+        # Initial SentCom stream
+        try:
+            sentcom_svc = get_sentcom_service()
+            if sentcom_svc:
+                stream_messages = await sentcom_svc.get_unified_stream(limit=20)
+                stream_dicts = [m.to_dict() for m in stream_messages] if stream_messages else []
+                sd = _streaming_cache.get("sentcom_data") or {}
+                sd["stream"] = stream_dicts
+                _streaming_cache["sentcom_data"] = sd
+        except Exception:
+            pass
         print(f"[CACHE] Initial refresh complete — {sum(1 for v in _streaming_cache.values() if v)} keys populated")
     except Exception as e:
         print(f"[CACHE] Initial refresh error (non-fatal): {e}")
@@ -3079,6 +3083,19 @@ async def _streaming_cache_loop():
                     _streaming_cache["market_regime"] = regime_data
                 except Exception:
                     pass
+                
+                # SentCom stream (async — uses scanner alerts, bot thoughts, etc.)
+                try:
+                    sentcom_svc = get_sentcom_service()
+                    if sentcom_svc:
+                        stream_messages = await sentcom_svc.get_unified_stream(limit=20)
+                        stream_dicts = [m.to_dict() for m in stream_messages] if stream_messages else []
+                        # Merge into existing sentcom_data
+                        sd = _streaming_cache.get("sentcom_data") or {}
+                        sd["stream"] = stream_dicts
+                        _streaming_cache["sentcom_data"] = sd
+                except Exception as e:
+                    logger.debug(f"SentCom stream refresh error: {e}")
                 
                 # Data collection progress (async)
                 try:
