@@ -260,9 +260,11 @@ async def get_positions():
     """
     Get our current positions with P&L.
     
-    Returns list of positions with:
+    Returns list of positions with enriched data:
     - symbol, shares, entry_price, current_price
-    - pnl (dollar amount), pnl_percent
+    - pnl, pnl_percent, market_value, cost_basis, portfolio_weight
+    - risk_level (ok/warning/danger/critical)
+    - today_change, today_change_pct
     - stop_price, target_prices
     - status, entry_time
     """
@@ -270,14 +272,25 @@ async def get_positions():
         service = _get_service()
         positions = await service.get_our_positions()
         
-        # Calculate totals
         total_pnl = sum(p.get("pnl", 0) for p in positions)
+        total_market_value = sum(p.get("market_value", 0) for p in positions)
+        total_cost_basis = sum(p.get("cost_basis", 0) for p in positions)
+        total_today_change = sum(p.get("today_change", 0) for p in positions)
+        bot_count = sum(1 for p in positions if p.get("source") == "bot")
+        ib_count = sum(1 for p in positions if p.get("source") == "ib")
+        positions_at_risk = sum(1 for p in positions if p.get("risk_level") in ("danger", "critical"))
         
         return {
             "success": True,
             "positions": positions,
             "count": len(positions),
-            "total_pnl": round(total_pnl, 2)
+            "total_pnl": round(total_pnl, 2),
+            "total_market_value": round(total_market_value, 2),
+            "total_cost_basis": round(total_cost_basis, 2),
+            "total_today_change": round(total_today_change, 2),
+            "bot_positions": bot_count,
+            "ib_positions": ib_count,
+            "positions_at_risk": positions_at_risk,
         }
     except Exception as e:
         logger.error(f"Error getting positions: {e}")

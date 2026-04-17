@@ -545,6 +545,7 @@ const NewDashboard = ({
   }, []);
 
   // Fetch positions for the detailed panel
+  const [positionsMeta, setPositionsMeta] = useState({});
   const fetchPositions = useCallback(async () => {
     setPositionsLoading(true);
     try {
@@ -553,6 +554,13 @@ const NewDashboard = ({
         setPositions(data.positions);
         const pnl = data.positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
         setTotalPnl(pnl);
+        setPositionsMeta({
+          totalMarketValue: data.total_market_value || 0,
+          totalTodayChange: data.total_today_change || 0,
+          botCount: data.bot_positions || 0,
+          ibCount: data.ib_positions || 0,
+          positionsAtRisk: data.positions_at_risk || 0,
+        });
       }
     } catch (err) {
       console.error('Failed to fetch positions:', err);
@@ -678,6 +686,11 @@ const NewDashboard = ({
             loading={positionsLoading}
             alerts={liveAlerts.length > 0 ? liveAlerts : scannerAlerts}
             onSelectPosition={() => {}}
+            totalMarketValue={positionsMeta.totalMarketValue}
+            totalTodayChange={positionsMeta.totalTodayChange}
+            botCount={positionsMeta.botCount}
+            ibCount={positionsMeta.ibCount}
+            positionsAtRisk={positionsMeta.positionsAtRisk}
           />
         </div>
         

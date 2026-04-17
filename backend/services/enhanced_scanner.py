@@ -1718,6 +1718,10 @@ class EnhancedBackgroundScanner:
                         continue
                 except Exception:
                     pass
+                
+                # Enforce minimum interval between scans
+                if self._last_scan_time:
+                    now = datetime.now(timezone.utc)
                     elapsed = (now - self._last_scan_time).total_seconds()
                     if elapsed < self._min_scan_interval:
                         await asyncio.sleep(self._min_scan_interval - elapsed)

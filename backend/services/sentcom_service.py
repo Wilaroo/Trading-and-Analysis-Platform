@@ -1402,16 +1402,30 @@ class SentComService:
             }
     
     async def get_our_positions(self) -> List[Dict[str, Any]]:
-        """Get our current positions with P&L from both Trading Bot and IB"""
+        """Get our current positions with P&L from both Trading Bot and IB.
+        
+        Returns enriched position data including:
+        - market_value, cost_basis, portfolio_weight
+        - risk_level (ok/warning/danger/critical based on drawdown)
+        - today_change data from IB quotes when available
+        """
         trading_bot = self._get_trading_bot()
         
         positions = []
         seen_symbols = set()
         
+        # Get IB quotes for today's change data
+        ib_quotes = {}
+        try:
+            from routers.ib import _pushed_ib_data
+            for sym, q in _pushed_ib_data.get("quotes", {}).items():
+                ib_quotes[sym] = q
+        except Exception:
+            pass
+        
         # First, get bot-managed trades (these have more detailed tracking)
         if trading_bot:
             try:
-                # Get open trades directly from trading bot service
                 open_trades = trading_bot.get_open_trades()
                 if isinstance(open_trades, list):
                     for trade in open_trades:
@@ -1432,6 +1446,23 @@ class SentComService:
                             pnl = (current - entry) * shares if entry and current else 0
                             pnl_pct = ((current - entry) / entry * 100) if entry else 0
                         
+                        market_value = abs(shares * current) if current else 0
+                        cost_basis = abs(shares * entry) if entry else 0
+                        
+                        # Today's intraday change from IB quotes
+                        quote = ib_quotes.get(symbol, {})
+                        today_change = quote.get("change") or quote.get("todayChange") or 0
+                        today_change_pct = quote.get("change_pct") or quote.get("todayChangePct") or 0
+                        
+                        # Risk level based on drawdown
+                        risk_level = "ok"
+                        if pnl_pct < -30:
+                            risk_level = "critical"
+                        elif pnl_pct < -15:
+                            risk_level = "danger"
+                        elif pnl_pct < -7:
+                            risk_level = "warning"
+                        
                         positions.append({
                             "symbol": symbol,
                             "shares": shares,
@@ -1440,6 +1471,11 @@ class SentComService:
                             "current_price": current,
                             "pnl": round(pnl, 2),
                             "pnl_percent": round(pnl_pct, 2),
+                            "market_value": round(market_value, 2),
+                            "cost_basis": round(cost_basis, 2),
+                            "today_change": round(today_change * shares, 2) if today_change else 0,
+                            "today_change_pct": round(today_change_pct, 2) if today_change_pct else 0,
+                            "risk_level": risk_level,
                             "stop_price": trade.get("stop_price"),
                             "target_prices": trade.get("target_prices", []),
                             "status": trade.get("status", "open"),
@@ -1465,7 +1501,6 @@ class SentComService:
         
         # Then, get IB positions from pushed data
         try:
-            # Import the global dict directly
             from routers.ib import _pushed_ib_data
             ib_positions = _pushed_ib_data.get("positions", [])
             
@@ -1473,9 +1508,10 @@ class SentComService:
                 symbol = pos.get("symbol")
                 if symbol and symbol not in seen_symbols:
                     shares = pos.get("position", 0)
-                    avg_cost = pos.get("avgCost", 0)
+                    avg_cost = pos.get("avgCost", 0) or pos.get("avg_cost", 0)
                     market_price = pos.get("marketPrice", 0) or pos.get("market_price", 0)
                     unrealized_pnl = pos.get("unrealizedPnL") or pos.get("unrealizedPNL") or pos.get("unrealized_pnl")
+                    realized_pnl = pos.get("realizedPnL") or pos.get("realizedPNL") or pos.get("realized_pnl") or 0
                     
                     # Calculate P&L from prices if unrealized_pnl not available
                     if unrealized_pnl is None and market_price and avg_cost and shares:
@@ -1491,25 +1527,63 @@ class SentComService:
                     else:
                         pnl_pct = 0
                     
-                    # Determine if long or short
                     position_type = "long" if shares > 0 else "short"
+                    abs_shares = abs(shares)
+                    current = market_price if market_price else avg_cost
+                    market_value = abs_shares * current if current else 0
+                    cost_basis_val = abs_shares * avg_cost if avg_cost else 0
+                    
+                    # Today's intraday change from IB quotes
+                    quote = ib_quotes.get(symbol, {})
+                    today_change = quote.get("change") or quote.get("todayChange") or 0
+                    today_change_pct = quote.get("change_pct") or quote.get("todayChangePct") or 0
+                    
+                    # Risk level based on drawdown
+                    risk_level = "ok"
+                    if pnl_pct < -30:
+                        risk_level = "critical"
+                    elif pnl_pct < -15:
+                        risk_level = "danger"
+                    elif pnl_pct < -7:
+                        risk_level = "warning"
                     
                     positions.append({
                         "symbol": symbol,
-                        "shares": abs(shares),
+                        "shares": abs_shares,
                         "direction": position_type,
                         "entry_price": avg_cost,
-                        "current_price": market_price if market_price else avg_cost,
+                        "current_price": current,
                         "pnl": round(unrealized_pnl, 2),
                         "pnl_percent": round(pnl_pct, 2),
+                        "market_value": round(market_value, 2),
+                        "cost_basis": round(cost_basis_val, 2),
+                        "realized_pnl": round(realized_pnl, 2),
+                        "today_change": round(today_change * abs_shares, 2) if today_change else 0,
+                        "today_change_pct": round(today_change_pct, 2) if today_change_pct else 0,
+                        "risk_level": risk_level,
                         "stop_price": None,
                         "target_prices": [],
                         "status": "ib_position",
                         "entry_time": None,
-                        "source": "ib"
+                        "source": "ib",
+                        "setup_type": "",
+                        "setup_variant": "",
+                        "trade_style": "",
+                        "market_regime": "",
+                        "timeframe": "",
+                        "quality_grade": "",
+                        "notes": "",
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")
+        
+        # Compute portfolio totals and weights
+        total_market_value = sum(p.get("market_value", 0) for p in positions)
+        for p in positions:
+            if total_market_value > 0:
+                p["portfolio_weight"] = round(p.get("market_value", 0) / total_market_value * 100, 1)
+            else:
+                p["portfolio_weight"] = 0
         
         return positions
     
