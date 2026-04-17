@@ -995,43 +995,85 @@ async def generate_weekly_report(week_start: str = None, force: bool = False):
     - force: If True, regenerate even if report exists.
     """
     service = get_weekly_report_service_instance()
+    
+    import asyncio
+    
+    def _generate_sync():
+        import asyncio as aio
+        loop = aio.new_event_loop()
+        try:
+            return loop.run_until_complete(service.generate_weekly_report(week_start=week_start, force=force))
+        finally:
+            loop.close()
+    
     try:
-        report = await service.generate_weekly_report(week_start=week_start, force=force)
+        report = await asyncio.wait_for(
+            asyncio.to_thread(_generate_sync),
+            timeout=15.0
+        )
         return {"success": True, "report": report.to_dict()}
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Report generation timed out. Try again — it may complete faster on second attempt."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/weekly-report/current")
 async def get_current_weekly_report():
-    """Get or generate the current week's report with timeout protection"""
+    """Get current week's report — returns cached if available, generates in background if not"""
     import asyncio
+    from datetime import datetime as dt, timezone as tz, timedelta
+    
     service = get_weekly_report_service_instance()
+    
+    # Calculate current week boundaries
+    today = dt.now(tz.utc)
+    days_since_monday = today.weekday()
+    start = today - timedelta(days=days_since_monday)
+    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    wn = start.isocalendar()[1]
+    year = start.year
+    
+    # Fast path: check for cached report first (single MongoDB read, <10ms)
+    try:
+        if service._weekly_reports_col is not None:
+            cached = service._weekly_reports_col.find_one(
+                {"year": year, "week_number": wn},
+                {"_id": 0}
+            )
+            if cached:
+                from services.weekly_report_service import WeeklyIntelligenceReport
+                return {"success": True, "report": WeeklyIntelligenceReport.from_dict(cached).to_dict()}
+    except Exception:
+        pass
+    
+    # No cached report — generate in a thread so blocking PyMongo doesn't freeze event loop
+    def _generate_sync():
+        import asyncio as aio
+        loop = aio.new_event_loop()
+        try:
+            return loop.run_until_complete(service.generate_weekly_report())
+        finally:
+            loop.close()
+    
     try:
         report = await asyncio.wait_for(
-            service.generate_weekly_report(),
+            asyncio.to_thread(_generate_sync),
             timeout=12.0
         )
         return {"success": True, "report": report.to_dict()}
-    except asyncio.TimeoutError:
-        # Return an empty report rather than hanging
+    except (asyncio.TimeoutError, Exception):
+        # Return empty skeleton — user can click "Regenerate" later
         from services.weekly_report_service import WeeklyIntelligenceReport
-        from datetime import datetime as dt, timezone as tz, timedelta
-        today = dt.now(tz.utc)
-        days_since_monday = today.weekday()
-        start = today - timedelta(days=days_since_monday)
-        wn = start.isocalendar()[1]
         empty = WeeklyIntelligenceReport(
-            id=f"wir_{start.year}_w{wn}",
-            week_number=wn, year=start.year,
+            id=f"wir_{year}_w{wn}",
+            week_number=wn, year=year,
             week_start=start.strftime("%Y-%m-%d"),
             week_end=(start + timedelta(days=4)).strftime("%Y-%m-%d"),
             generated_at=today.isoformat(),
             last_updated=today.isoformat()
         )
         return {"success": True, "report": empty.to_dict(), "timeout": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/weekly-report/stats")
