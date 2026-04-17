@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
+import { useTickerModal } from '../hooks/useTickerModal';
 import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 import QuickActionsMenu from './QuickActionsMenu';
@@ -65,8 +66,8 @@ const getCachedSymbolData = (symbol) => {
   const entry = _symbolCache[symbol];
   if (!entry) return null;
   const age = Date.now() - entry.timestamp;
-  // Cache valid for 60s
-  if (age > 60000) return null;
+  // Cache valid for 3 minutes
+  if (age > 180000) return null;
   return entry;
 };
 const setCachedSymbolData = (symbol, data) => {
@@ -524,7 +525,6 @@ const EnhancedTickerModal = ({
   const [analysis, setAnalysis] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
   const [qualityData, setQualityData] = useState(null);
-  const [earningsData, setEarningsData] = useState(null);
   const [newsData, setNewsData] = useState([]);
   const [learningInsights, setLearningInsights] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -543,11 +543,28 @@ const EnhancedTickerModal = ({
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const priceLinesRef = useRef([]);
+  const abortRef = useRef(null);
   
   // ── WebSocket real-time quotes ──
   const { quotes: wsQuotes } = useWsData();
+  
+  // ── Ticker navigation (uses global modal context) ──
+  let openTickerModalFn = null;
+  try {
+    const ctx = useTickerModal();
+    openTickerModalFn = ctx.openTickerModal;
+  } catch (e) {
+    // Modal might be rendered outside provider in some cases
+  }
 
-  // Fetch learning insights for this symbol (now part of deferred phase above)
+  // Handle ticker change — navigate to new symbol
+  const handleTickerChange = useCallback((newSymbol) => {
+    const sym = newSymbol.toUpperCase().trim();
+    if (!sym || sym === ticker?.symbol) return;
+    if (openTickerModalFn) {
+      openTickerModalFn(sym);
+    }
+  }, [ticker?.symbol, openTickerModalFn]);
 
   // Fetch historical data for timeframe
   const fetchHistoricalData = useCallback(async (tf) => {
@@ -603,7 +620,6 @@ const EnhancedTickerModal = ({
       setAnalysis(cached.analysis);
       setHistoricalData(cached.historicalData);
       if (cached.qualityData) setQualityData(cached.qualityData);
-      if (cached.earningsData) setEarningsData(cached.earningsData);
       if (cached.newsData) setNewsData(cached.newsData);
       if (cached.learningInsights) setLearningInsights(cached.learningInsights);
       setLoading(false);
@@ -612,6 +628,11 @@ const EnhancedTickerModal = ({
     }
     
     const fetchCritical = async () => {
+      // Cancel any in-flight requests from previous ticker
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      
       setLoading(true);
       setChartError(null);
       setDeferredLoaded(false);
@@ -619,9 +640,11 @@ const EnhancedTickerModal = ({
       const tfConfig = TIMEFRAMES.find(t => t.id === selectedTimeframe) || TIMEFRAMES[1];
       
       try {
+        const opts = { signal: controller.signal };
         const [analysisRes, histRes] = await Promise.all([
-          api.get(`/api/ib/analysis/${ticker.symbol}`).catch(() => ({ data: null })),
-          api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`).catch((err) => {
+          api.get(`/api/ib/analysis/${ticker.symbol}`, opts).catch(() => ({ data: null })),
+          api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`, opts).catch((err) => {
+            if (err.name === 'CanceledError' || err.name === 'AbortError') throw err;
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
               setChartError('IB Gateway is busy. Using cached data.');
@@ -641,12 +664,14 @@ const EnhancedTickerModal = ({
           historicalData: histRes.data?.bars || [],
         });
       } catch (err) {
+        if (err.name === 'CanceledError' || err.name === 'AbortError') return; // Ticker changed, ignore
         setChartError('Failed to load data. Please try again.');
       }
       setLoading(false);
     };
     
     fetchCritical();
+    return () => { if (abortRef.current) abortRef.current.abort(); };
   }, [ticker?.symbol]);
 
   // ── Phase 2: Deferred data (quality, earnings, news, insights) — loaded after critical ──
@@ -654,15 +679,13 @@ const EnhancedTickerModal = ({
     if (!ticker?.symbol || loading || deferredLoaded) return;
     
     const fetchDeferred = async () => {
-      const [qualityRes, earningsRes, newsRes, insightsRes] = await Promise.all([
+      const [qualityRes, newsRes, insightsRes] = await Promise.all([
         api.get(`/api/quality/score/${ticker.symbol}`).catch(() => ({ data: null })),
-        api.get(`/api/earnings/${ticker.symbol}`).catch(() => ({ data: null })),
         api.get(`/api/ib/news/${ticker.symbol}`).catch(() => ({ data: { news: [] } })),
         api.get(`/api/sentcom/learning/insights?symbol=${ticker.symbol}`).catch(() => ({ data: null })),
       ]);
       
       setQualityData(qualityRes.data);
-      setEarningsData(earningsRes.data);
       setNewsData(newsRes.data?.news || []);
       if (insightsRes.data?.success) setLearningInsights(insightsRes.data.insights);
       setDeferredLoaded(true);
@@ -673,7 +696,6 @@ const EnhancedTickerModal = ({
         setCachedSymbolData(ticker.symbol, {
           ...cached,
           qualityData: qualityRes.data,
-          earningsData: earningsRes.data,
           newsData: newsRes.data?.news || [],
           learningInsights: insightsRes.data?.success ? insightsRes.data.insights : null,
         });
@@ -865,13 +887,6 @@ const EnhancedTickerModal = ({
       chartRef.current.timeScale().fitContent();
     }
   }, [activeTab]);
-
-  // Handle ticker change
-  const handleTickerChange = useCallback((newTicker) => {
-    setTickerInput(newTicker);
-    // This would trigger a parent component to change the ticker prop
-    // For now, we'll show it updates the input
-  }, []);
 
   if (!ticker) return null;
 
@@ -1097,48 +1112,9 @@ const EnhancedTickerModal = ({
                     )}
                   </div>
                   
-                  {/* Earnings Section */}
-                  {earningsData && (
-                    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
-                      <h3 className="text-sm font-medium text-white flex items-center gap-2 mb-4">
-                        <Target className="w-4 h-4 text-purple-400" />
-                        Earnings Calendar
-                      </h3>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-3 bg-black/30 rounded-lg">
-                          <span className="text-xs text-zinc-500">Next Earnings</span>
-                          <p className="text-sm font-medium text-white mt-1">
-                            {earningsData.next_earnings_date || 'TBD'}
-                          </p>
-                        </div>
-                        <div className="p-3 bg-black/30 rounded-lg">
-                          <span className="text-xs text-zinc-500">Days Until</span>
-                          <p className="text-sm font-medium text-white mt-1">
-                            {earningsData.days_until_earnings !== undefined ? `${earningsData.days_until_earnings} days` : '--'}
-                          </p>
-                        </div>
-                        {earningsData.last_eps_surprise && (
-                          <>
-                            <div className="p-3 bg-black/30 rounded-lg">
-                              <span className="text-xs text-zinc-500">Last EPS Surprise</span>
-                              <p className={`text-sm font-medium mt-1 ${earningsData.last_eps_surprise >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {earningsData.last_eps_surprise >= 0 ? '+' : ''}{(earningsData.last_eps_surprise * 100).toFixed(1)}%
-                              </p>
-                            </div>
-                            <div className="p-3 bg-black/30 rounded-lg">
-                              <span className="text-xs text-zinc-500">Earnings Score</span>
-                              <p className="text-sm font-medium text-white mt-1">
-                                {earningsData.earnings_score || '--'}/100
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
                   
                   {/* Quality Score Details */}
-                  {qualityData && (
+                  {qualityData?.data && (
                     <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
                       <h3 className="text-sm font-medium text-white flex items-center gap-2 mb-4">
                         <Brain className="w-4 h-4 text-amber-400" />
@@ -1146,12 +1122,12 @@ const EnhancedTickerModal = ({
                       </h3>
                       <div className="grid grid-cols-3 gap-3">
                         {[
-                          { label: 'Overall', value: qualityData.overall_score, color: 'cyan' },
-                          { label: 'Momentum', value: qualityData.momentum_score, color: 'emerald' },
-                          { label: 'Trend', value: qualityData.trend_score, color: 'purple' },
-                          { label: 'Volume', value: qualityData.volume_score, color: 'yellow' },
-                          { label: 'Volatility', value: qualityData.volatility_score, color: 'orange' },
-                          { label: 'Structure', value: qualityData.structure_score, color: 'pink' },
+                          { label: 'Overall', value: qualityData.data.overall_score, color: 'cyan' },
+                          { label: 'Momentum', value: qualityData.data.momentum_score, color: 'emerald' },
+                          { label: 'Trend', value: qualityData.data.trend_score, color: 'purple' },
+                          { label: 'Volume', value: qualityData.data.volume_score, color: 'yellow' },
+                          { label: 'Volatility', value: qualityData.data.volatility_score, color: 'orange' },
+                          { label: 'Structure', value: qualityData.data.structure_score, color: 'pink' },
                         ].map((item, idx) => (
                           <div key={idx} className="p-3 bg-black/30 rounded-lg text-center">
                             <span className="text-xs text-zinc-500 block mb-1">{item.label}</span>
@@ -1164,15 +1140,15 @@ const EnhancedTickerModal = ({
                           </div>
                         ))}
                       </div>
-                      {qualityData.grade && (
+                      {qualityData.data.grade && (
                         <div className="mt-4 p-3 bg-black/30 rounded-lg flex items-center justify-between">
                           <span className="text-sm text-zinc-400">Quality Grade</span>
                           <span className={`text-xl font-bold ${
-                            qualityData.grade === 'A' ? 'text-emerald-400' :
-                            qualityData.grade === 'B' ? 'text-cyan-400' :
-                            qualityData.grade === 'C' ? 'text-yellow-400' : 'text-red-400'
+                            qualityData.data.grade === 'A' ? 'text-emerald-400' :
+                            qualityData.data.grade === 'B' ? 'text-cyan-400' :
+                            qualityData.data.grade === 'C' ? 'text-yellow-400' : 'text-red-400'
                           }`}>
-                            {qualityData.grade}
+                            {qualityData.data.grade}
                           </span>
                         </div>
                       )}
