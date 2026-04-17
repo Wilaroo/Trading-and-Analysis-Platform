@@ -114,25 +114,80 @@ class GamePlanService:
         return {k: v for k, v in game_plan.items() if k != "_id"}
     
     async def _auto_populate_game_plan(self, game_plan: Dict, date: str) -> Dict:
-        """Auto-populate game plan with scanner and market data"""
+        """Auto-populate game plan with live scanner alerts and market data"""
         
-        # Get scanner alerts
+        # Get LIVE scanner alerts (pre-market watchlist + daily setups)
         try:
-            alerts_col = self.db.get_collection("live_alerts")
-            if alerts_col is not None:
-                # Get recent high-priority alerts
-                alerts = list(alerts_col.find(
-                    {"priority": {"$in": ["high", "A+", "A"]}},
-                    {"_id": 0, "symbol": 1, "setup_type": 1, "direction": 1, 
-                     "trigger_price": 1, "stop_loss": 1, "target": 1, "reasoning": 1}
-                ).sort("created_at", -1).limit(10))
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                live_alerts = scanner.get_live_alerts()
                 
-                # Convert to stocks in play format
-                for i, alert in enumerate(alerts[:5]):
-                    stock_entry = await self._create_stock_in_play_entry(alert)
+                # Separate by type
+                pm_alerts = [a for a in live_alerts if getattr(a, 'id', '').startswith('pm_')]
+                daily_alerts = [a for a in live_alerts if getattr(a, 'scan_tier', '').lower() in ('swing', 'position')]
+                intraday_alerts = [a for a in live_alerts if getattr(a, 'scan_tier', '').lower() in ('intraday', 'scalp')]
+                
+                # Pre-market alerts → Stocks in Play (highest priority)
+                for alert in pm_alerts[:8]:
+                    stock_entry = {
+                        "symbol": getattr(alert, 'symbol', ''),
+                        "setup_type": getattr(alert, 'setup_type', '').replace('_', ' ').title(),
+                        "direction": getattr(alert, 'direction', 'long'),
+                        "key_levels": {
+                            "entry": getattr(alert, 'trigger_price', 0),
+                            "stop": getattr(alert, 'stop_price', 0),
+                            "target": getattr(alert, 'target_price', 0),
+                        },
+                        "catalyst": getattr(alert, 'reasoning', ''),
+                        "timeframe": getattr(alert, 'scan_tier', 'intraday'),
+                        "if_then_statements": [
+                            {
+                                "condition": f"IF {getattr(alert, 'symbol', '')} {'gaps up' if getattr(alert, 'direction', '') == 'long' else 'gaps down'} and holds",
+                                "action": f"THEN enter {getattr(alert, 'direction', 'long')} at ${getattr(alert, 'trigger_price', 0):.2f}",
+                                "notes": getattr(alert, 'reasoning', '')[:80]
+                            }
+                        ],
+                        "source": "premarket_scanner",
+                        "score": getattr(alert, 'score', 0),
+                    }
                     game_plan["stocks_in_play"].append(stock_entry)
+                
+                # Intraday alerts → additional stocks in play
+                for alert in intraday_alerts[:5]:
+                    if not any(s.get("symbol") == getattr(alert, 'symbol', '') for s in game_plan["stocks_in_play"]):
+                        stock_entry = {
+                            "symbol": getattr(alert, 'symbol', ''),
+                            "setup_type": getattr(alert, 'setup_type', '').replace('_', ' ').title(),
+                            "direction": getattr(alert, 'direction', 'long'),
+                            "key_levels": {
+                                "entry": getattr(alert, 'trigger_price', 0),
+                                "stop": getattr(alert, 'stop_price', 0),
+                                "target": getattr(alert, 'target_price', 0),
+                            },
+                            "catalyst": getattr(alert, 'reasoning', ''),
+                            "source": "live_scanner",
+                        }
+                        game_plan["stocks_in_play"].append(stock_entry)
         except Exception as e:
-            print(f"Failed to load scanner alerts: {e}")
+            print(f"Failed to load live scanner alerts: {e}")
+        
+        # Fallback: try MongoDB collection if live scanner not available
+        if not game_plan.get("stocks_in_play"):
+            try:
+                alerts_col = self.db.get_collection("live_alerts")
+                if alerts_col is not None:
+                    alerts = list(alerts_col.find(
+                        {"priority": {"$in": ["high", "A+", "A"]}},
+                        {"_id": 0, "symbol": 1, "setup_type": 1, "direction": 1, 
+                         "trigger_price": 1, "stop_loss": 1, "target": 1, "reasoning": 1}
+                    ).sort("created_at", -1).limit(10))
+                    
+                    for alert in alerts[:5]:
+                        stock_entry = await self._create_stock_in_play_entry(alert)
+                        game_plan["stocks_in_play"].append(stock_entry)
+            except Exception as e:
+                print(f"Failed to load scanner alerts from DB: {e}")
         
         # Get earnings for the date
         try:

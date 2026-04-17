@@ -646,6 +646,200 @@ async def auto_populate_drc(date: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/playbooks/generate-from-bot-strategies")
+async def generate_playbooks_from_bot_strategies():
+    """Auto-generate Bellafiore-style playbook starters from the bot's enabled strategies.
+    
+    Uses real performance data from bot_trades + strategy configs to pre-fill:
+    - Setup type, direction, timeframe, risk params
+    - Win rate and avg P&L from historical bot trades
+    - Trade management rules (scale-out, trail, EOD close)
+    - Suggested IF/THEN statements based on setup type
+    """
+    playbook_svc, _, _ = get_services()
+    if not playbook_svc:
+        raise HTTPException(status_code=503, detail="Playbook service not initialized")
+    
+    try:
+        from database import get_database
+        db = get_database()
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Get bot status for strategy configs
+        from services.trading_bot_service import get_trading_bot
+        bot = get_trading_bot()
+        if not bot:
+            raise HTTPException(status_code=503, detail="Trading bot not initialized")
+        
+        strategy_configs = bot._strategy_configs if hasattr(bot, '_strategy_configs') else {}
+        enabled_setups = bot._enabled_setups if hasattr(bot, '_enabled_setups') else set()
+        
+        generated = []
+        skipped = []
+        
+        for setup_type in enabled_setups:
+            # Check if playbook already exists for this setup
+            existing = playbook_svc.playbooks_col.find_one(
+                {"setup_type": {"$regex": setup_type, "$options": "i"}}
+            )
+            if existing:
+                skipped.append(setup_type)
+                continue
+            
+            config = strategy_configs.get(setup_type, {})
+            timeframe = config.get("timeframe", "scalp")
+            trail_pct = config.get("trail_pct", 0.01)
+            scale_out = config.get("scale_out_pcts", [0.5, 0.3, 0.2])
+            close_eod = config.get("close_at_eod", True)
+            
+            # Get real performance stats from bot_trades
+            closed_trades = list(db["bot_trades"].find(
+                {"setup_type": setup_type, "status": "closed"},
+                {"_id": 0, "realized_pnl": 1, "pnl_percent": 1, "direction": 1,
+                 "fill_price": 1, "close_price": 1, "shares": 1,
+                 "market_regime": 1, "quality_grade": 1}
+            ))
+            
+            total = len(closed_trades)
+            wins = sum(1 for t in closed_trades if (t.get("realized_pnl") or 0) > 0)
+            total_pnl = sum(t.get("realized_pnl") or 0 for t in closed_trades)
+            win_rate = (wins / total * 100) if total > 0 else 0
+            avg_pnl = (total_pnl / total) if total > 0 else 0
+            
+            # Determine primary direction from trades
+            long_count = sum(1 for t in closed_trades if t.get("direction") == "long")
+            short_count = sum(1 for t in closed_trades if t.get("direction") == "short")
+            primary_direction = "long" if long_count >= short_count else "short"
+            
+            # Build IF/THEN statements based on setup type
+            if_thens = _generate_if_thens(setup_type, primary_direction, timeframe)
+            
+            # Format scale-out rules
+            scale_rules = " / ".join([f"{int(p*100)}%" for p in scale_out]) if scale_out else "50% / 30% / 20%"
+            
+            playbook_data = {
+                "name": setup_type.replace("_", " ").title(),
+                "setup_type": setup_type,
+                "direction": primary_direction,
+                "trade_style": "Scalp" if timeframe == "scalp" else "Day Trade" if timeframe == "intraday" else "Swing" if timeframe == "swing" else "Position",
+                
+                "bigger_picture": {
+                    "market_context": "Works best in trending markets with clear direction",
+                    "spy_action": f"Preferred regime: {'trending' if timeframe in ('scalp', 'intraday') else 'any'}",
+                    "trade_rationale": f"{setup_type.replace('_', ' ').title()} — {timeframe} timeframe setup"
+                },
+                
+                "intraday_fundamentals": {
+                    "catalyst_type": "Technical Setup Only",
+                    "why_in_play": f"Scanner-detected {setup_type.replace('_', ' ')} pattern",
+                    "volume_analysis": "Requires RVOL > 0.8x average"
+                },
+                
+                "technical_analysis": {
+                    "chart_pattern": setup_type.replace("_", " ").title(),
+                    "key_support_levels": [],
+                    "key_resistance_levels": [],
+                    "timeframe": timeframe,
+                },
+                
+                "reading_the_tape": {
+                    "tape_patterns": ["Clean price action", "Volume confirmation"],
+                    "clean_or_choppy": "Requires clean tape — skip if choppy",
+                    "key_tape_signals": f"Look for volume surge on {primary_direction} side"
+                },
+                
+                "trade_management": {
+                    "entry_trigger": f"Scanner alert + confidence gate GO",
+                    "trail_pct": f"{trail_pct*100:.1f}%",
+                    "scaling_rules": f"Scale out: {scale_rules}",
+                    "close_at_eod": close_eod,
+                    "max_risk": "$2,500 per trade"
+                },
+                
+                "trade_review": {
+                    "historical_performance": f"{total} trades, {win_rate:.0f}% WR, avg P&L: ${avg_pnl:.0f}",
+                    "what_did_i_learn": "",
+                    "how_could_i_do_better": "",
+                    "what_would_i_do_differently": ""
+                },
+                
+                "if_then_statements": if_thens,
+                
+                "description": f"Auto-generated from bot strategy. {total} historical trades.",
+                "tags": [setup_type, timeframe, primary_direction],
+                "auto_generated": True,
+            }
+            
+            result = await playbook_svc.create_playbook(playbook_data)
+            generated.append({"setup_type": setup_type, "id": result.get("id"), "trades": total, "win_rate": f"{win_rate:.0f}%"})
+        
+        return {
+            "success": True,
+            "generated": len(generated),
+            "skipped": len(skipped),
+            "playbooks": generated,
+            "skipped_existing": skipped,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _generate_if_thens(setup_type: str, direction: str, timeframe: str) -> list:
+    """Generate setup-specific IF/THEN statements (Bellafiore style)"""
+    base = []
+    st = setup_type.lower()
+    
+    if "orb" in st or "opening" in st:
+        base = [
+            {"condition": "IF stock breaks above/below the opening 5-min range with volume", "action": f"THEN enter {direction} with stop at opposite end of range", "notes": "Wait for the 5-min candle to CLOSE before entry"},
+            {"condition": "IF breakout fails and reverses back through range", "action": "THEN exit immediately — failed ORB", "notes": "Don't hold through a failed breakout"},
+            {"condition": "IF it reaches 1R", "action": "THEN scale out 50%, trail stop to breakeven", "notes": "Protect profits on the first target"},
+        ]
+    elif "gap" in st and "go" in st:
+        base = [
+            {"condition": "IF stock gaps up >2% and holds above pre-market low", "action": f"THEN enter long on first pullback to VWAP or 9EMA", "notes": "Gap must be into an uptrend (above 20 SMA)"},
+            {"condition": "IF gap fills more than 50%", "action": "THEN exit — gap fill = failed thesis", "notes": "The gap should hold for this to work"},
+            {"condition": "IF it makes a new high of day after entry", "action": "THEN add to position, trail stop to low of entry candle", "notes": "Strength confirmation = add size"},
+        ]
+    elif "gap" in st and "fade" in st:
+        base = [
+            {"condition": "IF stock gaps up >3% into overhead resistance, extended from 20 SMA", "action": "THEN short on first sign of weakness (failed new high, red candle)", "notes": "Requires overextension — not just any gap"},
+            {"condition": "IF it makes a new high after shorting", "action": "THEN stop out — thesis invalidated", "notes": "Honor the stop on fades"},
+            {"condition": "IF gap starts to fill", "action": "THEN cover 50% at VWAP, trail rest", "notes": "VWAP is first target on gap fades"},
+        ]
+    elif "vwap" in st and "bounce" in st:
+        base = [
+            {"condition": f"IF stock pulls back to VWAP and shows support (hammer, doji)", "action": f"THEN enter {direction} with stop below VWAP by 1 ATR", "notes": "VWAP must be rising (uptrend day)"},
+            {"condition": "IF it breaks through VWAP and doesn't reclaim in 5 min", "action": "THEN exit — VWAP support broken", "notes": "Quick stop on VWAP failures"},
+            {"condition": "IF it bounces and clears HOD", "action": "THEN hold runner, trail at 9EMA", "notes": "VWAP bounce + new high = strong trend"},
+        ]
+    elif "squeeze" in st:
+        base = [
+            {"condition": "IF Bollinger Bands tighten inside Keltner Channels (squeeze fires)", "action": f"THEN enter {direction} on first expansion candle", "notes": "Wait for the squeeze to FIRE, not just form"},
+            {"condition": "IF squeeze fires opposite direction", "action": "THEN flip direction or stand aside", "notes": "Squeezes can fire either way"},
+            {"condition": "IF momentum continues after entry", "action": "THEN hold for 2-3R, trail at 20 SMA", "notes": "Squeezes often produce extended moves"},
+        ]
+    elif "bella" in st or "fade" in st:
+        base = [
+            {"condition": "IF stock spikes on volume then shows distribution (lower highs)", "action": "THEN short on failed new high attempt", "notes": "Bella Fade requires clear distribution pattern"},
+            {"condition": "IF it makes a new high with volume", "action": "THEN cover — thesis invalidated", "notes": "Respect the momentum"},
+            {"condition": "IF it drops below VWAP", "action": "THEN cover 50%, trail rest to breakeven", "notes": "Below VWAP = fade is working"},
+        ]
+    else:
+        # Generic IF/THEN
+        base = [
+            {"condition": f"IF {setup_type.replace('_', ' ')} pattern confirms", "action": f"THEN enter {direction} with defined stop", "notes": "Wait for confirmation, don't anticipate"},
+            {"condition": "IF stop level is hit", "action": "THEN exit full position immediately", "notes": "No hoping — honor every stop"},
+            {"condition": "IF first target reached", "action": "THEN scale out 50%, trail remainder", "notes": "Take profits at planned levels"},
+        ]
+    
+    return base
+
+
+
 @router.post("/playbooks/save-generated")
 async def save_generated_playbook(playbook_data: dict):
     """Save an AI-generated playbook"""

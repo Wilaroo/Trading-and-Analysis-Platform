@@ -198,20 +198,26 @@ class DRCService:
         
         # Get bot trades
         bot_trades = list(bot_trades_col.find({
-            "entry_time": {"$gte": date_start, "$lte": date_end}
+            "$or": [
+                {"entry_time": {"$gte": date_start, "$lte": date_end}},
+                {"executed_at": {"$gte": date_start, "$lte": date_end}},
+            ]
         }, {"_id": 0}))
         
         all_trades = manual_trades + bot_trades
         
         if all_trades:
             total_trades = len(all_trades)
-            closed_trades = [t for t in all_trades if t.get("status") == "closed" or t.get("pnl") is not None]
+            closed_trades = [t for t in all_trades if t.get("status") == "closed" or t.get("pnl") is not None or t.get("realized_pnl") is not None]
             
-            winning = len([t for t in closed_trades if (t.get("pnl") or 0) > 0])
-            losing = len([t for t in closed_trades if (t.get("pnl") or 0) < 0])
-            total_pnl = sum(t.get("pnl", 0) or 0 for t in closed_trades)
+            def _get_pnl(t):
+                return t.get("pnl") or t.get("realized_pnl") or 0
             
-            pnls = [(t.get("symbol", ""), t.get("pnl", 0) or 0) for t in closed_trades]
+            winning = len([t for t in closed_trades if _get_pnl(t) > 0])
+            losing = len([t for t in closed_trades if _get_pnl(t) < 0])
+            total_pnl = sum(_get_pnl(t) for t in closed_trades)
+            
+            pnls = [(t.get("symbol", ""), _get_pnl(t)) for t in closed_trades]
             biggest_winner = max(pnls, key=lambda x: x[1]) if pnls else None
             biggest_loser = min(pnls, key=lambda x: x[1]) if pnls else None
             
