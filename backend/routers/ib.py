@@ -1075,6 +1075,11 @@ async def get_historical_data(
                         "volume": bar.get("volume")
                     } for bar in bars]
                     
+                    # Determine freshness from latest bar date
+                    latest_date = str(bars[-1].get("date", ""))[:10] if bars else ""
+                    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    is_current = latest_date == today_str
+                    
                     return {
                         "symbol": symbol,
                         "bars": formatted_bars,
@@ -1082,7 +1087,9 @@ async def get_historical_data(
                         "last_updated": datetime.now(timezone.utc).isoformat(),
                         "is_cached": False,
                         "is_realtime": False,
-                        "source": "ib_historical_data"
+                        "source": "ib_historical_data",
+                        "data_freshness": "live" if is_current else "stale",
+                        "data_as_of": latest_date
                     }
         except Exception as e:
             print(f"MongoDB historical data error for {symbol}: {e}")
@@ -2867,6 +2874,9 @@ async def get_comprehensive_analysis(symbol: str):
         "is_connected": is_connected,
         "ib_busy": ib_is_busy,
         "busy_operation": busy_operation,
+        "data_freshness": "unknown",  # Will be set to: "live", "delayed", "stale"
+        "data_source": None,
+        "data_as_of": None,
         "quote": {},
         "company_info": {},
         "fundamentals": {},
@@ -2910,19 +2920,57 @@ async def get_comprehensive_analysis(symbol: str):
                    "NVDA": 875.0, "TSLA": 245.0, "JPM": 195.0, "V": 280.0, "JNJ": 155.0}
     base_price = base_prices.get(symbol, 100 + random.random() * 200)
     
-    # Try Alpaca first for quote (always available, not affected by IB busy state)
+    # ── QUOTE PRIORITY: Pushed IB (live) → Direct IB → Alpaca → IB Position → MongoDB ──
     quote_fetched = False
-    if _stock_service:
-        try:
-            quote = await _stock_service.get_quote(symbol)
-            if quote and quote.get("price", 0) > 0:
-                analysis["quote"] = quote
-                base_price = quote.get("price", base_price)
-                quote_fetched = True
-        except Exception as e:
-            print(f"Alpaca quote error: {e}")
     
-    # Fallback to IB for quote if needed AND IB is not busy
+    # 1. Pushed IB data (LIVE — from Windows PC pusher, updates every few seconds)
+    try:
+        ib_quotes = _pushed_ib_data.get("quotes", {})
+        pushed_quote = ib_quotes.get(symbol, {})
+        if pushed_quote and pushed_quote.get("price", 0) > 0:
+            analysis["quote"] = {
+                "symbol": symbol,
+                "price": pushed_quote["price"],
+                "bid": pushed_quote.get("bid", 0),
+                "ask": pushed_quote.get("ask", 0),
+                "change": pushed_quote.get("change", 0),
+                "change_percent": pushed_quote.get("change_pct", pushed_quote.get("changePct", 0)),
+                "volume": pushed_quote.get("volume", 0),
+                "source": "ib_live"
+            }
+            base_price = pushed_quote["price"]
+            quote_fetched = True
+            analysis["data_freshness"] = "live"
+            analysis["data_source"] = "IB (real-time)"
+            analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
+    except Exception:
+        pass
+    
+    # 2. Pushed IB positions (LIVE — for symbols we hold)
+    if not quote_fetched:
+        try:
+            for pos in _pushed_ib_data.get("positions", []):
+                if pos.get("symbol", "").upper() == symbol:
+                    mp = pos.get("marketPrice", 0) or pos.get("market_price", 0)
+                    ac = pos.get("avgCost", 0) or pos.get("avg_cost", 0)
+                    if mp and mp > 0:
+                        analysis["quote"] = {
+                            "symbol": symbol,
+                            "price": mp,
+                            "avg_cost": ac,
+                            "position_size": pos.get("position", 0),
+                            "source": "ib_position"
+                        }
+                        base_price = mp
+                        quote_fetched = True
+                        analysis["data_freshness"] = "live"
+                        analysis["data_source"] = "IB Position (real-time)"
+                        analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
+                        break
+        except Exception:
+            pass
+    
+    # 3. Direct IB service (if available and not busy)
     if not quote_fetched and is_connected and _ib_service and not ib_is_busy:
         try:
             quote = await _ib_service.get_quote(symbol)
@@ -2930,47 +2978,55 @@ async def get_comprehensive_analysis(symbol: str):
                 analysis["quote"] = quote
                 base_price = quote.get("price", base_price)
                 quote_fetched = True
+                analysis["data_freshness"] = "live"
+                analysis["data_source"] = "IB Gateway (direct)"
+                analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
             print(f"IB quote error: {e}")
     
-    # Fallback to pushed IB data (from Windows PC pusher)
-    if not quote_fetched:
+    # 4. Alpaca (if configured)
+    if not quote_fetched and _stock_service:
         try:
-            ib_quotes = _pushed_ib_data.get("quotes", {})
-            pushed_quote = ib_quotes.get(symbol, {})
-            if pushed_quote and pushed_quote.get("price", 0) > 0:
-                analysis["quote"] = {
-                    "symbol": symbol,
-                    "price": pushed_quote["price"],
-                    "bid": pushed_quote.get("bid", 0),
-                    "ask": pushed_quote.get("ask", 0),
-                    "change": pushed_quote.get("change", 0),
-                    "change_percent": pushed_quote.get("change_pct", pushed_quote.get("changePct", 0)),
-                    "volume": pushed_quote.get("volume", 0),
-                    "source": "ib_pushed"
-                }
-                base_price = pushed_quote["price"]
+            quote = await _stock_service.get_quote(symbol)
+            if quote and quote.get("price", 0) > 0:
+                analysis["quote"] = quote
+                base_price = quote.get("price", base_price)
                 quote_fetched = True
-        except Exception:
-            pass
+                analysis["data_freshness"] = "live"
+                analysis["data_source"] = "Alpaca"
+                analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            print(f"Alpaca quote error: {e}")
     
-    # Fallback to IB positions data (for symbols we hold)
+    # 5. MongoDB last known price (STALE — from historical bars)
     if not quote_fetched:
         try:
-            for pos in _pushed_ib_data.get("positions", []):
-                if pos.get("symbol", "").upper() == symbol:
-                    mp = pos.get("marketPrice", 0) or pos.get("market_price", 0)
-                    if mp and mp > 0:
-                        analysis["quote"] = {
-                            "symbol": symbol,
-                            "price": mp,
-                            "source": "ib_position"
-                        }
-                        base_price = mp
-                        quote_fetched = True
-                        break
-        except Exception:
-            pass
+            from database import get_database
+            db_ref = get_database()
+            if db_ref is not None:
+                last_bar = db_ref["ib_historical_data"].find_one(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "date": 1, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1},
+                    sort=[("date", -1)]
+                )
+                if last_bar and last_bar.get("close"):
+                    bar_date = str(last_bar.get("date", ""))[:10]
+                    analysis["quote"] = {
+                        "symbol": symbol,
+                        "price": last_bar["close"],
+                        "open": last_bar.get("open"),
+                        "high": last_bar.get("high"),
+                        "low": last_bar.get("low"),
+                        "volume": last_bar.get("volume", 0),
+                        "source": "mongodb_historical"
+                    }
+                    base_price = last_bar["close"]
+                    quote_fetched = True
+                    analysis["data_freshness"] = "stale"
+                    analysis["data_source"] = f"Last known ({bar_date})"
+                    analysis["data_as_of"] = bar_date
+        except Exception as e:
+            print(f"MongoDB quote fallback error: {e}")
     
     # Try IB for fundamentals only if not busy (Alpaca doesn't have fundamentals)
     if is_connected and _ib_service and not ib_is_busy:

@@ -1015,12 +1015,28 @@ const EnhancedTickerModal = ({
               </div>
             </div>
             
-            {/* Price */}
+            {/* Price + Data Freshness */}
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="font-mono text-xl text-white">${formatPrice(livePrice)}</div>
-                <div className={`text-xs font-medium ${liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {formatPercent(liveChangePct)}
+                <div className="flex items-center gap-2 justify-end">
+                  <span className={`text-xs font-medium ${liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatPercent(liveChangePct)}
+                  </span>
+                  {analysis?.data_freshness && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                      analysis.data_freshness === 'live' 
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' 
+                        : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
+                    }`} data-testid="data-freshness-badge">
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        analysis.data_freshness === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                      }`} />
+                      {analysis.data_freshness === 'live' 
+                        ? (analysis.data_source || 'LIVE')
+                        : (analysis.data_source || `As of ${analysis.data_as_of || '?'}`)}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
