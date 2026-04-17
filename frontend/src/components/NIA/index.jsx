@@ -230,8 +230,7 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
 
     const pollInterval = getPollingInterval(60000, false);
     const interval = setInterval(() => {
-      // Skip fetch entirely during training — saves 9+ API calls per cycle
-      if (!isVisibleRef.current || isTrainingActive) return;
+      if (!isVisibleRef.current) return;
       fetchAllData();
     }, pollInterval);
 
@@ -242,6 +241,33 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
   }, [fetchAllData, getCached, getPollingInterval]);
 
   const handleRefresh = useCallback(() => fetchAllData(), [fetchAllData]);
+
+  // Wire WS training updates to quick stats in real-time
+  useEffect(() => {
+    if (!wsTrainingStatus) return;
+    const updates = {};
+    if (wsTrainingStatus.models_trained != null || wsTrainingStatus.total_profiles != null) {
+      updates.setupModelsStatus = {
+        ...(data.setupModelsStatus || {}),
+        ...wsTrainingStatus,
+      };
+    }
+    if (wsTrainingStatus.collection_pending != null || wsTrainingStatus.collection_completed != null) {
+      updates.collectionQueue = {
+        ...(data.collectionQueue || {}),
+        overall: {
+          pending: wsTrainingStatus.collection_pending ?? 0,
+          completed: wsTrainingStatus.collection_completed ?? 0,
+        },
+      };
+    }
+    if (wsTrainingStatus.historical_bars != null) {
+      updates.historicalBars = wsTrainingStatus.historical_bars;
+    }
+    if (Object.keys(updates).length > 0) {
+      mergeData(updates);
+    }
+  }, [wsTrainingStatus, mergeData]);
   const noopCallback = useCallback(() => {}, []);
 
   const quickStatsData = useMemo(() => ({
