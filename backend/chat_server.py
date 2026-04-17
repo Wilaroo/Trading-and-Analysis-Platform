@@ -626,6 +626,48 @@ def _get_portfolio_context() -> dict:
     except Exception:
         pass
 
+    # 13. Latest self-reflections and playbook learnings (for coaching conversations)
+    try:
+        # Recent DRC reflections
+        latest_drc = db["daily_report_cards"].find_one(
+            {"self_reflection_complete": True},
+            {"_id": 0, "date": 1, "reflections": 1},
+            sort=[("date", -1)]
+        )
+        if latest_drc and latest_drc.get("reflections"):
+            ref = latest_drc["reflections"]
+            drc_text = f"Latest Self-Reflection ({latest_drc.get('date', '?')}): {ref.get('summary', '')}"
+            if ref.get("what_went_right"):
+                drc_text += f" Went right: {'; '.join(ref['what_went_right'][:3])}."
+            if ref.get("what_went_wrong"):
+                drc_text += f" Went wrong: {'; '.join(ref['what_went_wrong'][:3])}."
+            if ref.get("what_to_improve"):
+                drc_text += f" Action items: {'; '.join(ref['what_to_improve'][:2])}."
+            parts.append(drc_text)
+        
+        # Playbook learnings (recent updates)
+        playbooks_with_learnings = list(db["playbooks"].find(
+            {"trade_review.last_updated": {"$exists": True}},
+            {"_id": 0, "setup_type": 1, "name": 1, "trade_review": 1}
+        ).sort("trade_review.last_updated", -1).limit(5))
+        
+        if playbooks_with_learnings:
+            pb_lines = []
+            for pb in playbooks_with_learnings:
+                review = pb.get("trade_review", {})
+                learned = review.get("what_did_i_learn", "")
+                improve = review.get("how_could_i_do_better", "")
+                perf = review.get("historical_performance", "")
+                if learned:
+                    pb_lines.append(f"  {pb.get('name', pb.get('setup_type', '?'))}: {learned[:100]} | Action: {improve[:80]}")
+            if pb_lines:
+                parts.append(
+                    f"Playbook Self-Assessment (use when coaching on specific setups):\n"
+                    + "\n".join(pb_lines)
+                )
+    except Exception:
+        pass
+
     text = "\n\n".join(parts) if parts else "No portfolio data available at this moment. IB Pusher may not be connected or market is closed."
     debug["context_sections"] = len(parts)
     logger.info(f"Portfolio context: {len(parts)} sections, debug={json.dumps(debug)}")
@@ -1055,6 +1097,15 @@ SESSION-AWARE COACHING:
 - MARKET OPEN (9:30-4:00 PM): Full trading mode. React to live data. Suggest entries, exits, stops. Monitor positions actively.
 - AFTER HOURS (4:00+ PM): Review the day's performance. Discuss what worked and what didn't. Look at daily chart setups forming for tomorrow (swing/position trades). Identify which sectors showed relative strength or weakness. Help plan tomorrow's focus areas.
 - WEEKENDS/CLOSED: Discuss longer-term strategy. Review weekly performance. Analyze daily chart setups. Discuss risk management adjustments. Look at portfolio allocation and concentration.
+
+SELF-AWARENESS & COACHING:
+- You have access to your own self-reflections (DRC data, playbook learnings). Use them honestly.
+- When asked "how are we doing on X setup?" — reference the actual playbook win rate and reflections, not guesses.
+- When asked "what should we improve?" — pull from the latest DRC reflections and playbook action items.
+- Be honest about what's working and what isn't. If a setup has a 30% win rate, say so and suggest changes.
+- Track patterns across days: "We've been struggling with [setup] for 3 days — let's pause it and review."
+- The user can challenge your reflections. Be open to discussion, not defensive.
+- Your reflections update daily after market close. Reference the date so the user knows how current the data is.
 
 TRADE EXECUTION:
 - When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
