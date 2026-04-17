@@ -284,28 +284,61 @@ class EndOfDayGenerationService:
                 self._log_generation("self_reflection", date, "skipped", "No trades today")
                 return {"status": "skipped", "reason": "No trades today"}
             
-            # ── 1. Analyze performance by setup type ──
+            # ── 1. Analyze performance by setup type with per-symbol + context breakdowns ──
             setup_stats = {}
             for trade in today_trades:
                 setup = trade.get("setup_type", "unknown")
+                symbol = trade.get("symbol", "?")
                 pnl = trade.get("realized_pnl") or trade.get("pnl") or 0
                 status = trade.get("status", "open")
+                regime = trade.get("market_regime", "unknown")
+                direction = trade.get("direction", "long")
+                timeframe = trade.get("timeframe") or trade.get("trade_style", "")
                 
                 if setup not in setup_stats:
-                    setup_stats[setup] = {"trades": 0, "closed": 0, "wins": 0, "losses": 0, "total_pnl": 0, "reasons": []}
+                    setup_stats[setup] = {
+                        "trades": 0, "closed": 0, "wins": 0, "losses": 0, 
+                        "total_pnl": 0, "reasons": [],
+                        "by_symbol": {},    # Per-symbol tracking
+                        "by_regime": {},    # Per-regime tracking
+                        "by_direction": {"long": {"w": 0, "l": 0, "pnl": 0}, "short": {"w": 0, "l": 0, "pnl": 0}},
+                    }
                 
-                setup_stats[setup]["trades"] += 1
+                ss = setup_stats[setup]
+                ss["trades"] += 1
+                
+                # Per-symbol bucket
+                if symbol not in ss["by_symbol"]:
+                    ss["by_symbol"][symbol] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0}
+                ss["by_symbol"][symbol]["trades"] += 1
+                
+                # Per-regime bucket
+                if regime not in ss["by_regime"]:
+                    ss["by_regime"][regime] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0}
+                ss["by_regime"][regime]["trades"] += 1
+                
                 if status == "closed":
-                    setup_stats[setup]["closed"] += 1
-                    if pnl > 0:
-                        setup_stats[setup]["wins"] += 1
+                    ss["closed"] += 1
+                    won = pnl > 0
+                    if won:
+                        ss["wins"] += 1
+                        ss["by_symbol"][symbol]["wins"] += 1
+                        ss["by_regime"][regime]["wins"] += 1
+                        ss["by_direction"][direction]["w"] += 1
                     elif pnl < 0:
-                        setup_stats[setup]["losses"] += 1
-                    setup_stats[setup]["total_pnl"] += pnl
+                        ss["losses"] += 1
+                        ss["by_symbol"][symbol]["losses"] += 1
+                        ss["by_regime"][regime]["losses"] += 1
+                        ss["by_direction"][direction]["l"] += 1
+                    
+                    ss["total_pnl"] += pnl
+                    ss["by_symbol"][symbol]["pnl"] += pnl
+                    ss["by_regime"][regime]["pnl"] += pnl
+                    ss["by_direction"][direction]["pnl"] += pnl
                 
                 close_reason = trade.get("close_reason", "")
                 if close_reason:
-                    setup_stats[setup]["reasons"].append(close_reason)
+                    ss["reasons"].append(close_reason)
             
             # ── 2. Update playbook learnings for each setup ──
             playbook_updates = []
@@ -371,6 +404,57 @@ class EndOfDayGenerationService:
                         cumulative = f"7-day avg WR: {avg_recent_wr:.0f}% ({trend}). "
                         cumulative += f"Total reflections: {len(history)} days."
                         
+                        # ── Per-symbol cumulative stats (merge today into historical) ──
+                        symbol_stats = existing_review.get("symbol_breakdown", {})
+                        for sym, sym_data in stats["by_symbol"].items():
+                            if sym not in symbol_stats:
+                                symbol_stats[sym] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0}
+                            symbol_stats[sym]["trades"] += sym_data["trades"]
+                            symbol_stats[sym]["wins"] += sym_data["wins"]
+                            symbol_stats[sym]["losses"] += sym_data["losses"]
+                            symbol_stats[sym]["pnl"] += sym_data["pnl"]
+                        
+                        # ── Per-regime cumulative stats ──
+                        regime_stats = existing_review.get("regime_breakdown", {})
+                        for reg, reg_data in stats["by_regime"].items():
+                            if reg not in regime_stats:
+                                regime_stats[reg] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0}
+                            regime_stats[reg]["trades"] += reg_data["trades"]
+                            regime_stats[reg]["wins"] += reg_data["wins"]
+                            regime_stats[reg]["losses"] += reg_data["losses"]
+                            regime_stats[reg]["pnl"] += reg_data["pnl"]
+                        
+                        # ── Per-direction cumulative stats ──
+                        dir_stats = existing_review.get("direction_breakdown", {
+                            "long": {"w": 0, "l": 0, "pnl": 0},
+                            "short": {"w": 0, "l": 0, "pnl": 0}
+                        })
+                        for d in ("long", "short"):
+                            dir_stats[d]["w"] += stats["by_direction"][d]["w"]
+                            dir_stats[d]["l"] += stats["by_direction"][d]["l"]
+                            dir_stats[d]["pnl"] += stats["by_direction"][d]["pnl"]
+                        
+                        # ── Find weak spots (symbols/regimes that underperform) ──
+                        weak_symbols = []
+                        for sym, sd in symbol_stats.items():
+                            if sd["trades"] >= 3:
+                                sym_wr = (sd["wins"] / sd["trades"] * 100) if sd["trades"] > 0 else 0
+                                if sym_wr < 35 or sd["pnl"] < -500:
+                                    weak_symbols.append(f"{sym} ({sd['trades']}t, {sym_wr:.0f}%WR, ${sd['pnl']:+,.0f})")
+                        
+                        weak_regimes = []
+                        for reg, rd in regime_stats.items():
+                            if rd["trades"] >= 3:
+                                reg_wr = (rd["wins"] / rd["trades"] * 100) if rd["trades"] > 0 else 0
+                                if reg_wr < 35:
+                                    weak_regimes.append(f"{reg} ({rd['trades']}t, {reg_wr:.0f}%WR)")
+                        
+                        edge_notes = ""
+                        if weak_symbols:
+                            edge_notes += f"Weak symbols: {', '.join(weak_symbols[:5])}. "
+                        if weak_regimes:
+                            edge_notes += f"Weak regimes: {', '.join(weak_regimes[:3])}. "
+                        
                         self.playbooks_col.update_one(
                             {"_id": playbook["_id"]},
                             {"$set": {
@@ -379,6 +463,10 @@ class EndOfDayGenerationService:
                                 "trade_review.what_would_i_do_differently": improvement,
                                 "trade_review.historical_performance": cumulative,
                                 "trade_review.daily_reflections": history,
+                                "trade_review.symbol_breakdown": symbol_stats,
+                                "trade_review.regime_breakdown": regime_stats,
+                                "trade_review.direction_breakdown": dir_stats,
+                                "trade_review.edge_notes": edge_notes,
                                 "trade_review.last_updated": date,
                             }}
                         )

@@ -15,7 +15,7 @@ import sys
 # Add backend to path for direct imports
 sys.path.insert(0, '/app/backend')
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://chat-context-fix.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://playbook-engine-4.preview.emergentagent.com').rstrip('/')
 
 
 class TestSmartFilterDelegation:
