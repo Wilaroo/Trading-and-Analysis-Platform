@@ -91,19 +91,26 @@ class ConfidenceGate:
                 {"_id": 0, "model_signals": 0}
             ).sort("timestamp", -1).limit(50))
             
-            for d in reversed(recent):  # oldest first so deque order is correct
-                self._decision_log.appendleft(d)
+            # Add to deque — newest first (appendleft maintains order since we iterate newest→oldest)
+            for d in recent:
+                self._decision_log.append(d)
             
-            # Compute today's stats from DB
-            today_docs = list(self._db["confidence_gate_log"].find(
-                {"timestamp": {"$regex": f"^{today}"}},
-                {"_id": 0, "decision": 1}
-            ))
-            
-            today_go = sum(1 for d in today_docs if d.get("decision") == "GO")
-            today_reduce = sum(1 for d in today_docs if d.get("decision") == "REDUCE")
-            today_skip = sum(1 for d in today_docs if d.get("decision") == "SKIP")
-            today_eval = len(today_docs)
+            # Compute today's stats directly from loaded decisions
+            today_go = 0
+            today_reduce = 0
+            today_skip = 0
+            today_eval = 0
+            for d in recent:
+                ts = str(d.get("timestamp", ""))
+                if ts.startswith(today):
+                    today_eval += 1
+                    dec = d.get("decision", "")
+                    if dec == "GO":
+                        today_go += 1
+                    elif dec == "REDUCE":
+                        today_reduce += 1
+                    elif dec == "SKIP":
+                        today_skip += 1
             
             # Compute lifetime stats from DB
             total = self._db["confidence_gate_log"].count_documents({})
@@ -126,7 +133,6 @@ class ConfidenceGate:
             if recent:
                 last = recent[0]
                 regime = last.get("regime_state", "")
-                ai_regime = last.get("ai_regime", "")
                 mode = last.get("trading_mode", "normal")
                 if mode and mode != "normal":
                     self._trading_mode = mode
@@ -251,9 +257,7 @@ class ConfidenceGate:
         else:
             reasoning.append(f"Regime state '{regime_state}' (score {regime_score})")
 
-        # AI regime: DEPRECATED — logged for reference only, no score impact
-        if ai_regime and ai_regime != "unknown":
-            reasoning.append(f"(AI regime: {ai_regime} — logged only, not scored)")
+        # AI regime classification removed — no longer logged in reasoning
 
         # --- 2. MODEL CONSENSUS (max +15 / floor -5) ---
         model_signals = await self._query_model_consensus(symbol, setup_type, direction)

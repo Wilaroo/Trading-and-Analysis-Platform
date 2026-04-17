@@ -124,7 +124,9 @@ const DecisionRow = memo(({ decision }) => {
         </div>
         {decision.reasoning && decision.reasoning.length > 0 && (
           <div className="mt-1 space-y-0.5">
-            {decision.reasoning.slice(0, 3).map((r, i) => (
+            {decision.reasoning
+              .filter(r => !r.includes('logged only') && !r.includes('AI regime'))
+              .slice(0, 3).map((r, i) => (
               <p key={i} className="text-[10px] text-zinc-500 leading-tight">{r}</p>
             ))}
           </div>
