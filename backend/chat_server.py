@@ -81,14 +81,23 @@ def _get_portfolio_context() -> dict:
     
     if market_open:
         market_status = "MARKET OPEN (regular trading hours)"
+        session_mode = "live"
     elif pre_market:
-        market_status = "PRE-MARKET (limited liquidity)"
+        if hour >= 7:
+            market_status = "PRE-MARKET (7:00-9:30 ET) — Scanner is building morning watchlist: gaps, ORB candidates, opening drives"
+            session_mode = "premarket_active"
+        else:
+            market_status = "EARLY PRE-MARKET — Market opens at 9:30 AM ET. Scanner analyzing daily charts."
+            session_mode = "premarket_early"
     elif after_hours:
-        market_status = "AFTER HOURS (limited liquidity, prices may be stale)"
+        market_status = "AFTER HOURS — Scanner analyzing daily charts for swing/position setups forming for tomorrow"
+        session_mode = "after_hours"
     else:
-        market_status = "MARKET CLOSED (prices are from last session close)"
+        market_status = "MARKET CLOSED — Using last session data. Scanner analyzing daily charts for swing/position setups."
+        session_mode = "closed"
     
     parts.append(f"Current Time: {et.strftime('%A, %B %d, %Y %I:%M %p ET') if hasattr(et, 'strftime') else str(now_utc)}\n{market_status}")
+    debug["session_mode"] = session_mode
     
     # 1. Live positions from MongoDB snapshot (written by IB push endpoint)
     try:
@@ -369,7 +378,69 @@ def _get_portfolio_context() -> dict:
     except Exception as e:
         debug["scanner_error"] = str(e)
 
-    # 7. Account summary (buying power, net liquidation, daily P&L)
+    # 6b. Scanner mode + pre-market/after-hours setups (from main backend)
+    try:
+        scanner_resp = requests.get("http://127.0.0.1:8001/api/live-scanner/status", timeout=3)
+        if scanner_resp.status_code == 200:
+            scanner = scanner_resp.json()
+            scan_mode = scanner.get("scan_mode", "unknown")
+            time_window = scanner.get("time_window", "unknown")
+            active_alerts = scanner.get("active_alerts", 0)
+            regime = scanner.get("market_regime", "unknown")
+            parts.append(
+                f"Scanner Status: mode={scan_mode}, window={time_window}, "
+                f"{active_alerts} active alerts, regime={regime}"
+            )
+        
+        # Get live alerts for pre-market/after-hours context
+        alerts_resp = requests.get("http://127.0.0.1:8001/api/live-scanner/alerts", timeout=3)
+        if alerts_resp.status_code == 200:
+            live_alerts = alerts_resp.json().get("alerts", [])
+            if live_alerts:
+                # Separate by type
+                pm_alerts = [a for a in live_alerts if a.get("id", "").startswith("pm_")]
+                daily_alerts = [a for a in live_alerts if a.get("scan_tier", "").lower() in ("swing", "position")]
+                intraday_alerts = [a for a in live_alerts if a.get("scan_tier", "").lower() in ("intraday", "scalp")]
+                
+                if pm_alerts:
+                    pm_lines = []
+                    for a in pm_alerts[:8]:
+                        sym = a.get("symbol", "?")
+                        setup = a.get("setup_type", "")
+                        direction = a.get("direction", "?")
+                        price = a.get("trigger_price", 0)
+                        reasoning = a.get("reasoning", "")
+                        pm_lines.append(f"  {sym} ({direction}): {setup} @ ${price:.2f} — {reasoning[:80]}")
+                    parts.append(
+                        f"PRE-MARKET WATCHLIST ({len(pm_alerts)} setups for the open):\n"
+                        + "\n".join(pm_lines)
+                    )
+                
+                if daily_alerts:
+                    daily_lines = []
+                    for a in daily_alerts[:6]:
+                        sym = a.get("symbol", "?")
+                        setup = a.get("setup_type", "")
+                        price = a.get("trigger_price", 0)
+                        daily_lines.append(f"  {sym}: {setup} @ ${price:.2f}")
+                    parts.append(
+                        f"Daily Chart Setups (swing/position, {len(daily_alerts)} total):\n"
+                        + "\n".join(daily_lines)
+                    )
+                
+                if intraday_alerts and session_mode == "live":
+                    intra_lines = []
+                    for a in intraday_alerts[:6]:
+                        sym = a.get("symbol", "?")
+                        setup = a.get("setup_type", "")
+                        price = a.get("trigger_price", 0)
+                        intra_lines.append(f"  {sym}: {setup} @ ${price:.2f}")
+                    parts.append(
+                        f"Intraday Alerts ({len(intraday_alerts)} active):\n"
+                        + "\n".join(intra_lines)
+                    )
+    except Exception as e:
+        debug["scanner_status_error"] = str(e)
     try:
         import requests
         acct_resp = requests.get("http://127.0.0.1:8001/api/ib/account/summary", timeout=3)
@@ -770,6 +841,13 @@ When Asked About Tomorrow / Next Session:
 - Suggest watching the opening 5-15 minutes for direction
 - Identify which positions need attention based on their levels
 - Do NOT make predictions — instead say "If X happens, we should do Y. If Z happens, we should do W."
+- Reference the PRE-MARKET WATCHLIST if available — those are real setups the scanner identified
+
+SESSION-AWARE COACHING:
+- PRE-MARKET (7:00-9:30 AM): Focus on the morning watchlist. Discuss which gap plays look best, which ORB candidates have the tightest ranges, and what the opening drive might look like based on pre-market action. Help prioritize which 2-3 names to focus on at the bell. Review overnight positions and whether any stops need adjusting before the open.
+- MARKET OPEN (9:30-4:00 PM): Full trading mode. React to live data. Suggest entries, exits, stops. Monitor positions actively.
+- AFTER HOURS (4:00+ PM): Review the day's performance. Discuss what worked and what didn't. Look at daily chart setups forming for tomorrow (swing/position trades). Identify which sectors showed relative strength or weakness. Help plan tomorrow's focus areas.
+- WEEKENDS/CLOSED: Discuss longer-term strategy. Review weekly performance. Analyze daily chart setups. Discuss risk management adjustments. Look at portfolio allocation and concentration.
 
 TRADE EXECUTION:
 - When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
