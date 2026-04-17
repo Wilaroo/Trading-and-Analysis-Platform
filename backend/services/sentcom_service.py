@@ -116,7 +116,7 @@ class SentComService:
         # Stream accumulator — persists messages across get_unified_stream calls
         self._stream_buffer: List[SentComMessage] = []
         self._stream_seen_keys: set = set()  # Dedup keys (type+symbol+content_hash)
-        self._stream_max_size = 50  # Keep last 50 entries
+        self._stream_max_size = 100  # Keep last 100 entries
         
         # Load recent chat messages (current day only, for continuity)
         self._load_recent_chat_history()
