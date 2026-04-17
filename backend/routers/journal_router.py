@@ -661,13 +661,13 @@ async def generate_playbooks_from_bot_strategies():
             raise HTTPException(status_code=503, detail="Database not available")
         
         # Get bot status for strategy configs
-        from services.trading_bot_service import get_trading_bot
-        bot = get_trading_bot()
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
         if not bot:
             raise HTTPException(status_code=503, detail="Trading bot not initialized")
         
-        strategy_configs = bot._strategy_configs if hasattr(bot, '_strategy_configs') else {}
-        enabled_setups = bot._enabled_setups if hasattr(bot, '_enabled_setups') else set()
+        strategy_configs = bot.get_strategy_configs() if hasattr(bot, 'get_strategy_configs') else {}
+        enabled_setups = bot._enabled_setups if hasattr(bot, '_enabled_setups') else []
         
         generated = []
         skipped = []
