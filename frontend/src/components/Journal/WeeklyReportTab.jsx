@@ -110,7 +110,7 @@ const PerformanceSnapshot = ({ performance }) => {
         </div>
       </div>
       
-      {(performance.best_day || performance.worst_day) && (
+      {(performance.best_day || performance.worst_day) && performance.best_day !== performance.worst_day && (
         <div className="grid grid-cols-2 gap-4 mt-4">
           {performance.best_day && (
             <div className="flex items-center gap-3 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
@@ -118,7 +118,7 @@ const PerformanceSnapshot = ({ performance }) => {
               <div>
                 <p className="text-xs text-zinc-400">Best Day</p>
                 <p className="font-medium text-green-400">
-                  {performance.best_day} (+${performance.best_day_pnl?.toFixed(0) || 0})
+                  {performance.best_day} (${performance.best_day_pnl >= 0 ? '+' : ''}{performance.best_day_pnl?.toFixed(0) || 0})
                 </p>
               </div>
             </div>
@@ -129,7 +129,7 @@ const PerformanceSnapshot = ({ performance }) => {
               <div>
                 <p className="text-xs text-zinc-400">Worst Day</p>
                 <p className="font-medium text-red-400">
-                  {performance.worst_day} (${performance.worst_day_pnl?.toFixed(0) || 0})
+                  {performance.worst_day} (${performance.worst_day_pnl >= 0 ? '+' : ''}{performance.worst_day_pnl?.toFixed(0) || 0})
                 </p>
               </div>
             </div>
