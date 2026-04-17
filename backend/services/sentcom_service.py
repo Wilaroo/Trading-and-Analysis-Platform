@@ -905,15 +905,7 @@ class SentComService:
             ))
         
         # =====================================================================
-        # 7. DEMO MODE - Generate sample messages when no real data
-        # =====================================================================
-        non_chat_messages = [m for m in messages if m.type != 'chat']
-        if len(non_chat_messages) < 3:
-            demo_messages = self._generate_demo_stream_messages()
-            messages.extend(demo_messages)
-        
-        # =====================================================================
-        # 8. FALLBACK - System status if no activity
+        # 7. FALLBACK - System status if no activity
         # =====================================================================
         if len(messages) == 0:
             status = await self.get_status()

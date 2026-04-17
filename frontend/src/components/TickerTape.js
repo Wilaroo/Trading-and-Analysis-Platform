@@ -48,8 +48,11 @@ const InlineStatus = ({ serviceId, label }) => {
 export const TickerTape = ({ indices = [], isConnected, lastUpdate }) => {
   const { openTickerModal } = useTickerModal();
   
+  // Hide entirely when no index data
+  if (!indices || indices.length === 0) return null;
+  
   return (
-    <div className="bg-paper/80 backdrop-blur-md border-b border-white/5 py-2 px-4 sticky top-0 z-30">
+    <div className="bg-paper/80 backdrop-blur-md border-b border-white/5 py-2 px-4">
       <div className="flex items-center justify-between">
         {/* Left: Market Indices */}
         <div className="flex items-center gap-4 overflow-x-auto flex-shrink">
