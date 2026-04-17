@@ -75,6 +75,73 @@ class ConfidenceGate:
         }
         # Load calibrated thresholds if available
         self._load_calibrated_thresholds()
+        # Hydrate from MongoDB (recent decisions + today's stats)
+        self._load_from_db()
+
+    def _load_from_db(self):
+        """Load recent decisions and today's stats from confidence_gate_log in MongoDB."""
+        if self._db is None:
+            return
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            
+            # Load recent decisions (last 50) into memory
+            recent = list(self._db["confidence_gate_log"].find(
+                {},
+                {"_id": 0, "model_signals": 0}
+            ).sort("timestamp", -1).limit(50))
+            
+            for d in reversed(recent):  # oldest first so deque order is correct
+                self._decision_log.appendleft(d)
+            
+            # Compute today's stats from DB
+            today_docs = list(self._db["confidence_gate_log"].find(
+                {"timestamp": {"$regex": f"^{today}"}},
+                {"_id": 0, "decision": 1}
+            ))
+            
+            today_go = sum(1 for d in today_docs if d.get("decision") == "GO")
+            today_reduce = sum(1 for d in today_docs if d.get("decision") == "REDUCE")
+            today_skip = sum(1 for d in today_docs if d.get("decision") == "SKIP")
+            today_eval = len(today_docs)
+            
+            # Compute lifetime stats from DB
+            total = self._db["confidence_gate_log"].count_documents({})
+            go_total = self._db["confidence_gate_log"].count_documents({"decision": "GO"})
+            reduce_total = self._db["confidence_gate_log"].count_documents({"decision": "REDUCE"})
+            skip_total = self._db["confidence_gate_log"].count_documents({"decision": "SKIP"})
+            
+            self._stats.update({
+                "total_evaluated": total,
+                "go_count": go_total,
+                "reduce_count": reduce_total,
+                "skip_count": skip_total,
+                "today_evaluated": today_eval,
+                "today_go": today_go,
+                "today_skip": today_skip,
+                "today_date": today,
+            })
+            
+            # Set trading mode from most recent decision's regime
+            if recent:
+                last = recent[0]
+                regime = last.get("regime_state", "")
+                ai_regime = last.get("ai_regime", "")
+                mode = last.get("trading_mode", "normal")
+                if mode and mode != "normal":
+                    self._trading_mode = mode
+                    self._mode_reason = f"Restored from last session — {regime}"
+                elif regime:
+                    self._mode_reason = f"Last regime: {regime}"
+            
+            if total > 0:
+                logger.info(
+                    f"Confidence gate loaded from DB: {total} total, "
+                    f"{today_eval} today ({today_go} GO, {today_skip} SKIP), "
+                    f"{len(recent)} recent decisions in memory"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to load confidence gate history from DB: {e}")
 
     def _load_calibrated_thresholds(self):
         """Load auto-calibrated thresholds from DB (if available)."""
