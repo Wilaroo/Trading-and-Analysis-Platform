@@ -13,6 +13,7 @@ Data sources:
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from dataclasses import asdict
 
 from models.learning_models import (
@@ -190,7 +191,7 @@ class TradeContextService:
         
     def _capture_time_context(self, context: TradeContext):
         """Capture time-of-day context"""
-        now = datetime.now(timezone(timedelta(hours=-5)))  # Eastern time
+        now = datetime.now(ZoneInfo("America/New_York"))  # Eastern time
         
         context.day_of_week = now.weekday()
         

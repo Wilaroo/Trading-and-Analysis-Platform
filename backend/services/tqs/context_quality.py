@@ -13,6 +13,7 @@ import logging
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ class ContextQualityService:
             setup_category = "default"
             
         # Get current time info
-        now = datetime.now(timezone(timedelta(hours=-5)))  # ET
+        now = datetime.now(ZoneInfo("America/New_York"))  # ET
         result.day_of_week = now.weekday()
         
         # Determine time of day if not provided

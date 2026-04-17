@@ -19,6 +19,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -363,7 +364,7 @@ class CircuitBreakerService:
         if not config.enabled:
             return None
             
-        now = datetime.now(timezone(timedelta(hours=-5)))  # ET
+        now = datetime.now(ZoneInfo("America/New_York"))  # ET
         hour = now.hour
         minute = now.minute
         time_minutes = hour * 60 + minute

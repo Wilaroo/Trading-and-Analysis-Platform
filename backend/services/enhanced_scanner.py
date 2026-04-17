@@ -1498,7 +1498,8 @@ class EnhancedBackgroundScanner:
     
     def _get_current_time_window(self) -> TimeWindow:
         """Determine current time window for strategy filtering"""
-        now = datetime.now(timezone(timedelta(hours=-5)))  # EST
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))  # Handles EST/EDT automatically
         hour = now.hour
         minute = now.minute
         total_minutes = hour * 60 + minute
