@@ -234,12 +234,11 @@ class PlaybookService:
         if is_active is not None:
             query["is_active"] = is_active
         
-        playbooks = list(self.playbooks_col.find(query, {"_id": 0}).sort("updated_at", -1).limit(limit))
+        playbooks = list(self.playbooks_col.find(query).sort("updated_at", -1).limit(limit))
         
+        # Convert _id to string id in one pass
         for pb in playbooks:
-            doc = self.playbooks_col.find_one({"name": pb["name"]})
-            if doc:
-                pb["id"] = str(doc["_id"])
+            pb["id"] = str(pb.pop("_id"))
         
         return playbooks
     

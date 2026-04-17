@@ -84,19 +84,23 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
   const loadPlaybooks = useCallback(async () => {
     try {
       setLoading(true);
-      const [playbooksRes, summaryRes, pendingRes, eodStatusRes] = await Promise.all([
-        api.get('/api/journal/playbooks'),
-        api.get('/api/journal/playbooks/summary'),
-        api.get('/api/journal/eod/pending-playbooks'),
-        api.get('/api/journal/eod/status')
-      ]);
+      // Critical: load playbooks first (fast)
+      const playbooksRes = await api.get('/api/journal/playbooks', { timeout: 15000 });
       setPlaybooks(playbooksRes.data.playbooks || []);
-      setSummary(summaryRes.data);
-      setPendingPlaybooks(pendingRes.data.pending_playbooks || []);
-      setEodStatus(eodStatusRes.data);
+      setLoading(false);  // Unblock UI — playbooks are visible
+      
+      // Secondary data in background (non-blocking)
+      Promise.all([
+        api.get('/api/journal/playbooks/summary', { timeout: 10000 }).catch(() => ({ data: {} })),
+        api.get('/api/journal/eod/pending-playbooks', { timeout: 10000 }).catch(() => ({ data: { pending_playbooks: [] } })),
+        api.get('/api/journal/eod/status', { timeout: 10000 }).catch(() => ({ data: {} }))
+      ]).then(([summaryRes, pendingRes, eodStatusRes]) => {
+        setSummary(summaryRes.data);
+        setPendingPlaybooks(pendingRes.data.pending_playbooks || []);
+        setEodStatus(eodStatusRes.data);
+      });
     } catch (err) {
       console.error('Failed to load playbooks:', err);
-    } finally {
       setLoading(false);
     }
   }, []);

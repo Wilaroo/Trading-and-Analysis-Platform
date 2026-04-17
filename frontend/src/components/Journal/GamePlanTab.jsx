@@ -37,18 +37,22 @@ const GamePlanTab = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [todayRes, recentRes, statsRes] = await Promise.all([
-        api.get('/api/journal/gameplan/today'),
-        api.get('/api/journal/gameplan/recent?limit=7'),
-        api.get('/api/journal/gameplan/stats?days=30')
-      ]);
+      // Load today's game plan first (critical)
+      const todayRes = await api.get('/api/journal/gameplan/today', { timeout: 15000 });
       setGamePlan(todayRes.data.game_plan);
       setEditedPlan(todayRes.data.game_plan);
-      setRecentPlans(recentRes.data.game_plans || []);
-      setStats(statsRes.data);
+      setLoading(false);  // Unblock UI
+      
+      // Secondary data in background
+      Promise.all([
+        api.get('/api/journal/gameplan/recent?limit=7', { timeout: 10000 }).catch(() => ({ data: { game_plans: [] } })),
+        api.get('/api/journal/gameplan/stats?days=30', { timeout: 10000 }).catch(() => ({ data: {} }))
+      ]).then(([recentRes, statsRes]) => {
+        setRecentPlans(recentRes.data.game_plans || []);
+        setStats(statsRes.data);
+      });
     } catch (err) {
       console.error('Failed to load Game Plan data:', err);
-    } finally {
       setLoading(false);
     }
   }, []);

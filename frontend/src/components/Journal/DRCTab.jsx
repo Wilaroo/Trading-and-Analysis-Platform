@@ -24,20 +24,24 @@ const DRCTab = () => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [todayRes, recentRes, statsRes, eodStatusRes] = await Promise.all([
-        api.get('/api/journal/drc/today'),
-        api.get('/api/journal/drc/recent?limit=7'),
-        api.get('/api/journal/drc/stats?days=30'),
-        api.get('/api/journal/eod/status')
-      ]);
+      // Load today's DRC first (critical)
+      const todayRes = await api.get('/api/journal/drc/today', { timeout: 15000 });
       setDrc(todayRes.data.drc);
       setEditedDrc(todayRes.data.drc);
-      setRecentDrcs(recentRes.data.drcs || []);
-      setStats(statsRes.data);
-      setEodStatus(eodStatusRes.data);
+      setLoading(false);  // Unblock UI
+      
+      // Secondary data in background
+      Promise.all([
+        api.get('/api/journal/drc/recent?limit=7', { timeout: 10000 }).catch(() => ({ data: { drcs: [] } })),
+        api.get('/api/journal/drc/stats?days=30', { timeout: 10000 }).catch(() => ({ data: {} })),
+        api.get('/api/journal/eod/status', { timeout: 10000 }).catch(() => ({ data: {} }))
+      ]).then(([recentRes, statsRes, eodStatusRes]) => {
+        setRecentDrcs(recentRes.data.drcs || []);
+        setStats(statsRes.data);
+        setEodStatus(eodStatusRes.data);
+      });
     } catch (err) {
       console.error('Failed to load DRC data:', err);
-    } finally {
       setLoading(false);
     }
   }, []);
