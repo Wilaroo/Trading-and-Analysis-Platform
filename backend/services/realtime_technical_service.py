@@ -206,8 +206,10 @@ class RealTimeTechnicalService:
                 if check_date.weekday() < 5:  # Mon-Fri
                     days_elapsed += 1
             
-            # Allow up to 3 trading days (covers weekends + Monday holidays)
-            return days_elapsed > 3
+            # Convert max_age_hours to trading days threshold
+            # 24h = 1 trading day, 72h (default) = 3 trading days
+            max_trading_days = max(1, max_age_hours // 24)
+            return days_elapsed > max_trading_days
             
         except Exception:
             return True  # Error parsing = treat as stale
@@ -323,7 +325,11 @@ class RealTimeTechnicalService:
                 quote = ib_quote
             else:
                 # Fallback: use latest bar close from MongoDB as estimated price
+                # BUT: reject if bars are stale (>1 trading day old) — prevents phantom alerts
                 if daily_bars and len(daily_bars) > 0:
+                    if self._check_staleness(daily_bars, max_age_hours=24):
+                        logger.debug(f"Stale daily bar data for {symbol}, no live IB quote — skipping")
+                        return None
                     last_bar = daily_bars[-1]
                     quote = {
                         "symbol": symbol,

@@ -4586,20 +4586,44 @@ class EnhancedBackgroundScanner:
                 pass
     
     def _cleanup_expired_alerts(self):
+        """Remove expired alerts AND alerts with stale/drifted prices."""
         now = datetime.now(timezone.utc)
-        expired = []
+        to_remove = []
         
         for alert_id, alert in self._live_alerts.items():
+            # Check expiration
             if alert.expires_at:
                 try:
                     expires = datetime.fromisoformat(alert.expires_at.replace('Z', '+00:00'))
                     if now > expires:
-                        expired.append(alert_id)
-                except:
+                        to_remove.append(alert_id)
+                        continue
+                except Exception:
                     pass
+            
+            # Check price drift: if live IB price available, compare to trigger
+            # Remove alerts where price has moved >8% from trigger (stale data)
+            try:
+                ib_quote = self._get_ib_quote(alert.symbol)
+                if ib_quote and ib_quote.get("price", 0) > 0 and alert.trigger_price > 0:
+                    live_price = ib_quote["price"]
+                    drift_pct = abs(live_price - alert.trigger_price) / alert.trigger_price * 100
+                    if drift_pct > 8:
+                        logger.info(
+                            f"Removing stale alert {alert.symbol} {alert.setup_type}: "
+                            f"trigger=${alert.trigger_price:.2f} vs live=${live_price:.2f} "
+                            f"({drift_pct:.1f}% drift)"
+                        )
+                        to_remove.append(alert_id)
+                        continue
+            except Exception:
+                pass
         
-        for alert_id in expired:
+        for alert_id in to_remove:
             del self._live_alerts[alert_id]
+        
+        if to_remove:
+            logger.info(f"Cleaned up {len(to_remove)} expired/stale alerts")
     
     def _enforce_alert_limit(self):
         if len(self._live_alerts) > self._max_alerts:
