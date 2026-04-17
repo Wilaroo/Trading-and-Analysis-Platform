@@ -585,17 +585,20 @@ class ConfidenceGate:
         # GAP 5: Persist to DB with outcome-trackable fields for auto-calibration
         if self._db is not None:
             try:
-                self._db["confidence_gate_log"].insert_one({
-                    **{k: v for k, v in result.items() if k != "model_signals"},
-                    "model_signal_summary": model_signals.get("summary", ""),
-                    "scoring_version": "additive_v1",  # Distinguish from legacy subtractive logs
-                    # GAP 5 fields: enable correlating gate decisions with trade outcomes
-                    "outcome_tracked": False,  # Set to True when trade outcome is recorded
-                    "trade_outcome": None,      # Filled by learning loop: "win", "loss", "scratch"
-                    "outcome_pnl": None,         # Filled by learning loop: actual P&L
-                })
+                # Safely serialize — convert numpy types to Python natives
+                import json
+                log_data = {k: v for k, v in result.items() if k != "model_signals"}
+                log_data["model_signal_summary"] = model_signals.get("summary", "")
+                log_data["scoring_version"] = "additive_v1"
+                log_data["outcome_tracked"] = False
+                log_data["trade_outcome"] = None
+                log_data["outcome_pnl"] = None
+                
+                # Force JSON round-trip to convert numpy/non-standard types
+                clean = json.loads(json.dumps(log_data, default=str))
+                self._db["confidence_gate_log"].insert_one(clean)
             except Exception as e:
-                logger.debug(f"Failed to persist confidence gate log: {e}")
+                logger.warning(f"Failed to persist confidence gate log: {e}")
 
         return result
 
