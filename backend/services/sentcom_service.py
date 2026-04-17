@@ -113,6 +113,10 @@ class SentComService:
         self._session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         self._llm_cache: Dict[str, str] = {}  # Cache LLM-enriched descriptions per symbol+setup
         self._llm_cache_ttl: Dict[str, float] = {}  # Expiry timestamps
+        # Stream accumulator — persists messages across get_unified_stream calls
+        self._stream_buffer: List[SentComMessage] = []
+        self._stream_seen_keys: set = set()  # Dedup keys (type+symbol+content_hash)
+        self._stream_max_size = 50  # Keep last 50 entries
         
         # Load recent chat messages (current day only, for continuity)
         self._load_recent_chat_history()
@@ -926,7 +930,25 @@ class SentComService:
         
         # Sort by timestamp (newest first) and limit
         messages.sort(key=lambda m: m.timestamp, reverse=True)
-        return messages[:limit]
+        
+        # Accumulate into stream buffer — add new messages, keep old ones
+        for msg in messages:
+            # Dedup key: type + symbol + first 40 chars of content
+            dedup_key = f"{msg.type}:{msg.symbol or ''}:{msg.content[:40]}"
+            if dedup_key not in self._stream_seen_keys:
+                self._stream_seen_keys.add(dedup_key)
+                self._stream_buffer.insert(0, msg)  # Newest first
+        
+        # Trim buffer to max size
+        if len(self._stream_buffer) > self._stream_max_size:
+            removed = self._stream_buffer[self._stream_max_size:]
+            self._stream_buffer = self._stream_buffer[:self._stream_max_size]
+            # Clean up dedup keys for removed entries
+            for r in removed:
+                key = f"{r.type}:{r.symbol or ''}:{r.content[:40]}"
+                self._stream_seen_keys.discard(key)
+        
+        return self._stream_buffer[:limit]
     
     def _generate_demo_stream_messages(self) -> List[SentComMessage]:
         """
