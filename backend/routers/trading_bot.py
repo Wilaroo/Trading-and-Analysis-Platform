@@ -418,6 +418,50 @@ def get_all_trades():
     return {"success": True, **summary}
 
 
+@router.delete("/trades/{symbol}")
+def delete_trade_by_symbol(symbol: str):
+    """
+    Delete a trade from bot_trades by symbol. 
+    Use for removing erroneous or imported trades that should not be in the system.
+    Removes from both in-memory tracking and MongoDB.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    symbol = symbol.upper()
+    removed = []
+    
+    # Remove from in-memory open trades
+    to_remove = [tid for tid, t in _trading_bot._open_trades.items() if t.symbol.upper() == symbol]
+    for tid in to_remove:
+        del _trading_bot._open_trades[tid]
+        removed.append({"id": tid, "source": "open_trades"})
+    
+    # Remove from in-memory closed trades
+    before = len(_trading_bot._closed_trades)
+    _trading_bot._closed_trades = [t for t in _trading_bot._closed_trades if t.symbol.upper() != symbol]
+    closed_removed = before - len(_trading_bot._closed_trades)
+    if closed_removed > 0:
+        removed.append({"count": closed_removed, "source": "closed_trades"})
+    
+    # Remove from MongoDB bot_trades
+    if _trading_bot._db:
+        result = _trading_bot._db.bot_trades.delete_many({"symbol": symbol})
+        if result.deleted_count > 0:
+            removed.append({"count": result.deleted_count, "source": "mongodb_bot_trades"})
+        
+        # Also remove any confidence gate logs for this symbol (prevent learning)
+        cg_result = _trading_bot._db.confidence_gate_log.delete_many({"symbol": symbol})
+        if cg_result.deleted_count > 0:
+            removed.append({"count": cg_result.deleted_count, "source": "confidence_gate_log"})
+    
+    if not removed:
+        return {"success": True, "message": f"No trades found for {symbol}", "removed": []}
+    
+    return {"success": True, "message": f"Deleted all {symbol} trade data", "removed": removed}
+
+
+
 @router.get("/positions/reconcile")
 async def reconcile_positions():
     """

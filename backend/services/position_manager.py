@@ -433,15 +433,16 @@ class PositionManager:
             # Auto-record exit to Trade Journal
             await bot._log_trade_to_journal(trade, "exit")
 
-            # Record performance for learning loop
+            # Record performance for learning loop (skip imported IB positions — not bot decisions)
             if hasattr(bot, '_perf_service') and bot._perf_service:
                 try:
-                    bot._perf_service.record_trade(trade.to_dict())
+                    if trade.setup_type != "imported_from_ib":
+                        bot._perf_service.record_trade(trade.to_dict())
                 except Exception as e:
                     logger.warning(f"Failed to record trade performance: {e}")
 
-            # NEW: Record to Learning Loop (Phase 1)
-            if hasattr(bot, '_learning_loop') and bot._learning_loop:
+            # NEW: Record to Learning Loop (Phase 1) — skip imported positions
+            if hasattr(bot, '_learning_loop') and bot._learning_loop and trade.setup_type != "imported_from_ib":
                 try:
                     outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
                     asyncio.create_task(bot._learning_loop.record_trade_outcome(
@@ -465,8 +466,9 @@ class PositionManager:
                 except Exception as e:
                     logger.warning(f"Failed to record trade to learning loop: {e}")
 
-            # Log to regime performance tracking
-            await bot._log_trade_to_regime_performance(trade)
+            # Log to regime performance tracking (skip imported IB positions)
+            if trade.setup_type != "imported_from_ib":
+                await bot._log_trade_to_regime_performance(trade)
 
             # Auto-generate chart snapshot with AI annotations
             try:
