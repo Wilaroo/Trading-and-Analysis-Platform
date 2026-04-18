@@ -7,8 +7,21 @@ from typing import Optional, List, Dict
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 import os
+import asyncio
 
 router = APIRouter(prefix="/api/journal", tags=["Trading Journal"])
+
+
+async def _in_thread(coro):
+    """Run a fake-async coroutine (sync PyMongo inside async def) in a thread
+    to avoid blocking the FastAPI event loop."""
+    def _run():
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    return await asyncio.to_thread(_run)
 
 # Pydantic Models for Request/Response
 class IfThenStatement(BaseModel):
@@ -175,20 +188,19 @@ async def get_playbooks(
 ):
     """Get all playbooks with optional filters"""
     playbook_svc, _, _ = get_services()
-    # Note: market_context filter not yet implemented in PlaybookService
-    playbooks = await playbook_svc.get_playbooks(
+    playbooks = await _in_thread(playbook_svc.get_playbooks(
         setup_type=setup_type,
         trade_style=trade_style,
         is_active=is_active,
         limit=limit
-    )
+    ))
     return {"success": True, "playbooks": playbooks}
 
 @router.get("/playbooks/summary")
 async def get_playbook_summary():
     """Get summary of all playbooks including available options"""
     playbook_svc, _, _ = get_services()
-    summary = await playbook_svc.get_playbook_summary()
+    summary = await _in_thread(playbook_svc.get_playbook_summary())
     return {"success": True, **summary}
 
 @router.get("/playbooks/best")
@@ -267,16 +279,16 @@ async def get_today_drc():
     """Get or create today's DRC"""
     _, drc_svc, _ = get_services()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    drc = await drc_svc.get_drc(today)
+    drc = await _in_thread(drc_svc.get_drc(today))
     if not drc:
-        drc = await drc_svc.create_drc(date=today, auto_populate=True)
+        drc = await _in_thread(drc_svc.create_drc(date=today, auto_populate=True))
     return {"success": True, "drc": drc}
 
 @router.get("/drc/date/{date}")
 async def get_drc_by_date(date: str):
     """Get DRC for a specific date"""
     _, drc_svc, _ = get_services()
-    drc = await drc_svc.get_drc(date)
+    drc = await _in_thread(drc_svc.get_drc(date))
     if not drc:
         raise HTTPException(status_code=404, detail="DRC not found for this date")
     return {"success": True, "drc": drc}
@@ -285,7 +297,7 @@ async def get_drc_by_date(date: str):
 async def get_recent_drcs(limit: int = 30):
     """Get recent DRCs"""
     _, drc_svc, _ = get_services()
-    drcs = await drc_svc.get_recent_drcs(limit=limit)
+    drcs = await _in_thread(drc_svc.get_recent_drcs(limit=limit))
     return {"success": True, "drcs": drcs}
 
 @router.put("/drc/date/{date}")
@@ -293,7 +305,7 @@ async def update_drc(date: str, updates: DRCUpdate):
     """Update a DRC"""
     _, drc_svc, _ = get_services()
     update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-    drc = await drc_svc.update_drc(date, update_dict)
+    drc = await _in_thread(drc_svc.update_drc(date, update_dict))
     if not drc:
         raise HTTPException(status_code=404, detail="DRC not found")
     return {"success": True, "drc": drc}
@@ -302,7 +314,7 @@ async def update_drc(date: str, updates: DRCUpdate):
 async def get_drc_stats(days: int = 30):
     """Get DRC statistics"""
     _, drc_svc, _ = get_services()
-    stats = await drc_svc.get_drc_stats(days=days)
+    stats = await _in_thread(drc_svc.get_drc_stats(days=days))
     return {"success": True, **stats}
 
 @router.get("/drc/date/{date}/summary")
@@ -347,16 +359,16 @@ async def get_today_game_plan():
     """Get or create today's Game Plan"""
     _, _, gameplan_svc = get_services()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    plan = await gameplan_svc.get_game_plan(today)
+    plan = await _in_thread(gameplan_svc.get_game_plan(today))
     if not plan:
-        plan = await gameplan_svc.create_game_plan(date=today, auto_populate=True)
+        plan = await _in_thread(gameplan_svc.create_game_plan(date=today, auto_populate=True))
     return {"success": True, "game_plan": plan}
 
 @router.get("/gameplan/date/{date}")
 async def get_game_plan_by_date(date: str):
     """Get Game Plan for a specific date"""
     _, _, gameplan_svc = get_services()
-    plan = await gameplan_svc.get_game_plan(date)
+    plan = await _in_thread(gameplan_svc.get_game_plan(date))
     if not plan:
         raise HTTPException(status_code=404, detail="Game Plan not found for this date")
     return {"success": True, "game_plan": plan}
@@ -365,7 +377,7 @@ async def get_game_plan_by_date(date: str):
 async def get_recent_game_plans(limit: int = 14):
     """Get recent Game Plans"""
     _, _, gameplan_svc = get_services()
-    plans = await gameplan_svc.get_recent_game_plans(limit=limit)
+    plans = await _in_thread(gameplan_svc.get_recent_game_plans(limit=limit))
     return {"success": True, "game_plans": plans}
 
 @router.put("/gameplan/date/{date}")
@@ -373,10 +385,17 @@ async def update_game_plan(date: str, updates: GamePlanUpdate):
     """Update a Game Plan"""
     _, _, gameplan_svc = get_services()
     update_dict = {k: v for k, v in updates.dict().items() if v is not None}
-    plan = await gameplan_svc.update_game_plan(date, update_dict)
+    plan = await _in_thread(gameplan_svc.update_game_plan(date, update_dict))
     if not plan:
         raise HTTPException(status_code=404, detail="Game Plan not found")
     return {"success": True, "game_plan": plan}
+
+@router.get("/gameplan/stats")
+async def get_game_plan_stats(days: int = 30):
+    """Get Game Plan statistics"""
+    _, _, gameplan_svc = get_services()
+    stats = await _in_thread(gameplan_svc.get_game_plan_stats(days=days))
+    return {"success": True, **stats}
 
 @router.post("/gameplan/date/{date}/stocks")
 async def add_stock_in_play(date: str, stock: StockInPlay):

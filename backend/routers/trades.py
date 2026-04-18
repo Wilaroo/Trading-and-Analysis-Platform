@@ -4,8 +4,20 @@ Trades Router - API endpoints for trade journal and performance tracking
 from fastapi import APIRouter, HTTPException
 from typing import Optional, List
 from pydantic import BaseModel
+import asyncio
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
+
+
+async def _in_thread(coro):
+    """Run a fake-async coroutine (sync PyMongo inside async def) in a thread"""
+    def _run():
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    return await asyncio.to_thread(_run)
 
 # Will be initialized from main server
 trade_journal_service = None
@@ -367,19 +379,14 @@ async def get_performance_summary():
     if not trade_journal_service:
         raise HTTPException(500, "Trade journal service not initialized")
     
-    import asyncio
     try:
-        summary = await asyncio.wait_for(
-            trade_journal_service.get_performance_summary(),
-            timeout=10.0
-        )
+        summary = await _in_thread(trade_journal_service.get_performance_summary())
         return summary
-    except asyncio.TimeoutError:
+    except Exception:
         return {
             "total_trades": 0, "winning_trades": 0, "losing_trades": 0,
             "win_rate": 0, "total_pnl": 0, "avg_pnl": 0,
             "best_strategy": None, "worst_strategy": None, "best_context": None,
-            "timeout": True
         }
 
 
@@ -389,10 +396,10 @@ async def get_strategy_performance(strategy_id: str, market_context: Optional[st
     if not trade_journal_service:
         raise HTTPException(500, "Trade journal service not initialized")
     
-    perfs = await trade_journal_service.get_strategy_performance(
+    perfs = await _in_thread(trade_journal_service.get_strategy_performance(
         strategy_id=strategy_id,
         market_context=market_context
-    )
+    ))
     
     return {
         "strategy_id": strategy_id,
@@ -409,7 +416,7 @@ async def get_strategy_context_matrix():
     if not trade_journal_service:
         raise HTTPException(500, "Trade journal service not initialized")
     
-    matrix = await trade_journal_service.get_strategy_context_matrix()
+    matrix = await _in_thread(trade_journal_service.get_strategy_context_matrix())
     return matrix
 
 
