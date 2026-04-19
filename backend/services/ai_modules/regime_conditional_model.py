@@ -152,7 +152,7 @@ def get_all_regime_model_names(base_model_name: str) -> Dict[str, str]:
 
 # Minimum samples needed to train a regime-specific model
 # If fewer samples are available, we skip that regime and fall back to generic
-MIN_REGIME_SAMPLES = 200
+MIN_REGIME_SAMPLES = 100
 
 # Feature that gets added to each sample identifying the regime
 # (even generic models get this so they have regime awareness)

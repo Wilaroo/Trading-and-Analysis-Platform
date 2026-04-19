@@ -174,7 +174,9 @@ def compute_gap_fill_target(
 
 
 GAP_MODEL_CONFIGS = {
-    "5 mins":  {"max_bars": 78,  "model_name": "gap_fill_5min"},   # ~6.5 hours
     "1 min":   {"max_bars": 390, "model_name": "gap_fill_1min"},   # Full day
+    "5 mins":  {"max_bars": 78,  "model_name": "gap_fill_5min"},   # ~6.5 hours
     "15 mins": {"max_bars": 26,  "model_name": "gap_fill_15min"},  # ~6.5 hours
+    "1 day":   {"max_bars": 20,  "model_name": "gap_fill_daily"},  # 20 trading days lookback
+    "1 week":  {"max_bars": 12,  "model_name": "gap_fill_weekly"}, # 12 weeks lookback
 }

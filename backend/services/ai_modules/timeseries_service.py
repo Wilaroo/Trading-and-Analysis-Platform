@@ -1820,7 +1820,9 @@ class TimeSeriesAIService:
             logger.info(f"Loaded {loaded} setup-specific models from database")
     
     def get_setup_models_status(self) -> Dict[str, Any]:
-        """Get status of all setup-specific models, organized by profile."""
+        """Get status of all setup-specific models, organized by profile.
+        Checks MongoDB for trained models if not found in memory cache.
+        """
         from services.ai_modules.setup_training_config import (
             get_setup_profiles, get_model_name, get_all_profile_count
         )
@@ -1857,15 +1859,45 @@ class TimeSeriesAIService:
                         "num_classes": profile.get("num_classes", 3),
                     })
                 else:
-                    profile_statuses.append({
-                        "bar_size": bar_size,
-                        "trained": False,
-                        "description": profile.get("description", ""),
-                        "model_name": get_model_name(st_name, bar_size),
-                        "forecast_horizon": profile["forecast_horizon"],
-                        "noise_threshold": profile["noise_threshold"],
-                        "num_classes": profile.get("num_classes", 3),
-                    })
+                    # Check MongoDB for trained model not yet loaded into memory
+                    model_name = get_model_name(st_name, bar_size)
+                    db_model = None
+                    if self._db is not None:
+                        try:
+                            db_model = self._db["timeseries_models"].find_one(
+                                {"name": model_name},
+                                {"_id": 0, "metrics": 1, "version": 1, "saved_at": 1}
+                            )
+                        except Exception:
+                            pass
+                    
+                    if db_model and db_model.get("metrics"):
+                        trained_count += 1
+                        m = db_model["metrics"]
+                        profile_statuses.append({
+                            "bar_size": bar_size,
+                            "trained": True,
+                            "description": profile.get("description", ""),
+                            "version": db_model.get("version", "unknown"),
+                            "model_name": model_name,
+                            "accuracy": m.get("accuracy"),
+                            "training_samples": m.get("training_samples", 0),
+                            "validation_samples": m.get("validation_samples", 0),
+                            "trained_at": m.get("last_trained") or db_model.get("saved_at"),
+                            "forecast_horizon": profile["forecast_horizon"],
+                            "noise_threshold": profile["noise_threshold"],
+                            "num_classes": profile.get("num_classes", 3),
+                        })
+                    else:
+                        profile_statuses.append({
+                            "bar_size": bar_size,
+                            "trained": False,
+                            "description": profile.get("description", ""),
+                            "model_name": model_name,
+                            "forecast_horizon": profile["forecast_horizon"],
+                            "noise_threshold": profile["noise_threshold"],
+                            "num_classes": profile.get("num_classes", 3),
+                        })
             
             models[st_name] = {
                 "description": st_config["description"],

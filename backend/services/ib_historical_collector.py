@@ -2067,45 +2067,41 @@ class IBHistoricalCollector:
         return {"success": True, "job": None, "message": "No job running"}
         
     def get_collection_stats(self) -> Dict[str, Any]:
-        """Get statistics about collected data"""
+        """Get statistics about collected data.
+        Uses estimated_document_count() for total bars (reads collection metadata, nearly instant).
+        """
         if self._data_col is None:
             return {"success": False, "error": "Database not connected"}
             
         try:
-            # Count by bar size
-            pipeline = [
-                {"$group": {
-                    "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
-                    "count": {"$sum": 1},
-                    "earliest": {"$min": "$date"},
-                    "latest": {"$max": "$date"}
-                }},
-                {"$group": {
-                    "_id": "$_id.bar_size",
-                    "symbols": {"$sum": 1},
-                    "total_bars": {"$sum": "$count"}
-                }}
-            ]
+            # Fast total count from collection metadata (instant, no scan)
+            total_bars = self._data_col.estimated_document_count()
             
-            bar_stats = list(self._data_col.aggregate(pipeline))
+            # Quick bar_size breakdown using a lighter aggregation with allowDiskUse
+            bar_stats = []
+            try:
+                pipeline = [
+                    {"$group": {
+                        "_id": "$bar_size",
+                        "count": {"$sum": 1}
+                    }}
+                ]
+                bar_stats = list(self._data_col.aggregate(pipeline, allowDiskUse=True, maxTimeMS=8000))
+            except Exception:
+                pass  # Fall back to just total count
             
-            # Total unique symbols
-            unique_symbols = self._data_col.distinct("symbol")
-            
-            # Recent collections
-            recent = list(self._data_col.find(
-                {},
-                {"symbol": 1, "bar_size": 1, "collected_at": 1, "_id": 0}
-            ).sort("collected_at", -1).limit(10))
+            # Unique symbol count from index (fast)
+            try:
+                unique_count = len(self._data_col.distinct("symbol", maxTimeMS=5000))
+            except Exception:
+                unique_count = 0
             
             return {
                 "success": True,
                 "stats": {
-                    "unique_symbols": len(unique_symbols),
-                    "symbols_list": unique_symbols[:50],  # First 50
-                    "by_bar_size": {s["_id"]: {"symbols": s["symbols"], "bars": s["total_bars"]} for s in bar_stats},
-                    "total_bars": sum(s["total_bars"] for s in bar_stats),
-                    "recent_collections": recent
+                    "unique_symbols": unique_count,
+                    "by_bar_size": {s["_id"]: {"bars": s["count"]} for s in bar_stats},
+                    "total_bars": total_bars,
                 }
             }
             
