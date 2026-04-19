@@ -119,9 +119,10 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
 
   const handleCollectData = useCallback(async () => {
     setCollecting(true);
+    toast.info('Scanning for data gaps... This may take a few minutes with large datasets.');
     try {
       const params = new URLSearchParams({ use_max_lookback: 'true', enable_priority: 'true' });
-      const res = await api.post(`/api/ib-collector/fill-gaps?${params}`);
+      const res = await api.post(`/api/ib-collector/fill-gaps?${params}`, null, { timeout: 600000 });
       if (res.data?.success) {
         if (res.data.gaps_found === 0) {
           toast.success('No gaps found! Data coverage is complete.');
@@ -134,7 +135,12 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
         toast.error(res.data?.error || 'Failed to start collection');
       }
     } catch (err) {
-      toast.error('Error starting collection');
+      // Don't show error for timeouts — the backend continues processing
+      if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
+        toast.info('Gap scan is still running in the background. Collectors will start when ready.');
+      } else {
+        toast.error('Error starting collection: ' + (err?.response?.data?.detail || err.message));
+      }
     } finally {
       setCollecting(false);
     }
