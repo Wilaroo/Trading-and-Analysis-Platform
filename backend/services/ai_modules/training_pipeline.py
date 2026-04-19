@@ -3195,14 +3195,46 @@ async def run_training_pipeline(
                     logger.warning("Could not get timeseries service for validation rollback — continuing without rollback support")
 
                 # Determine which setup types were actually trained in this run
+                # Model names from Phase 2/2.5 use format: "momentum_5min_predictor" (lowercase slug)
+                # We need to extract the setup_type and bar_size from this format
+                from services.ai_modules.setup_training_config import get_model_name, bar_size_to_slug
+                
                 trained_model_names = [m["name"] if isinstance(m, dict) else m for m in results["models_trained"]]
-                trained_long_setups = [n.split("/")[0] for n in trained_model_names if "/" in n and not n.startswith("SHORT_") and n.split("/")[0] in ALL_SETUP_TYPES]
-                trained_short_setups = [n.split("/")[0] for n in trained_model_names if "/" in n and n.startswith("SHORT_")]
-                all_trained_setups = list(set(trained_long_setups + trained_short_setups))
-
+                
+                # Build a lookup: model_name -> (accuracy, bar_size) for quick matching
+                model_accuracy_lookup = {}
+                for m in results["models_trained"]:
+                    if isinstance(m, dict):
+                        model_accuracy_lookup[m["name"]] = m.get("accuracy", 0)
+                
+                # Extract setup types from model names using the actual naming convention
+                trained_setups_with_bar = []  # list of (setup_type, bar_size, accuracy)
+                for setup_type in ALL_SETUP_TYPES:
+                    for bs in BAR_SIZE_CONFIGS.keys():
+                        model_name = get_model_name(setup_type, bs)
+                        if model_name in model_accuracy_lookup:
+                            trained_setups_with_bar.append((setup_type, bs, model_accuracy_lookup[model_name]))
+                for setup_type in ALL_SHORT_SETUP_TYPES:
+                    for bs in BAR_SIZE_CONFIGS.keys():
+                        model_name = get_model_name(setup_type, bs)
+                        if model_name in model_accuracy_lookup:
+                            trained_setups_with_bar.append((setup_type, bs, model_accuracy_lookup[model_name]))
+                
+                # Deduplicate by setup_type (keep the bar_size with highest accuracy)
+                best_by_setup = {}
+                for st, bs, acc in trained_setups_with_bar:
+                    if st not in best_by_setup or acc > best_by_setup[st][1]:
+                        best_by_setup[st] = (bs, acc)
+                
+                all_trained_setups = list(best_by_setup.keys())
+                
                 if not all_trained_setups:
                     # Fall back to all known setup types if we can't parse from results
+                    logger.warning("[VALIDATE] Could not match any trained models to setup types — using all known types")
                     all_trained_setups = ALL_SETUP_TYPES + ALL_SHORT_SETUP_TYPES
+                    best_by_setup = {st: ("5 mins", 0) for st in all_trained_setups}
+                else:
+                    logger.info(f"[VALIDATE] Matched {len(all_trained_setups)} setup types from {len(trained_model_names)} trained models")
 
                 validated_count = 0
                 validation_results = []
@@ -3214,26 +3246,13 @@ async def run_training_pipeline(
                     if status._status.get("phase") == "cancelled":
                         break
 
-                    # Find the bar_size this model was trained on (default to "5 mins")
-                    bar_size = "5 mins"
-                    for m in results["models_trained"]:
-                        m_name = m["name"] if isinstance(m, dict) else m
-                        if m_name.startswith(f"{setup_type}/"):
-                            bar_size = m_name.split("/")[1] if "/" in m_name else "5 mins"
-                            break
+                    bar_size, accuracy = best_by_setup.get(setup_type, ("5 mins", 0))
 
                     status.update(current_model=f"Validating {setup_type}/{bar_size}")
-                    logger.info(f"[VALIDATE] Phase 13: Validating {setup_type}/{bar_size}")
+                    logger.info(f"[VALIDATE] Phase 13: Validating {setup_type}/{bar_size} (training acc: {accuracy:.1%})")
 
                     try:
-                        training_result = {"metrics": {"accuracy": 0}}
-                        # Find accuracy from training results
-                        for m in results["models_trained"]:
-                            m_name = m["name"] if isinstance(m, dict) else m
-                            if m_name.startswith(f"{setup_type}/"):
-                                if isinstance(m, dict):
-                                    training_result["metrics"]["accuracy"] = m.get("accuracy", 0)
-                                break
+                        training_result = {"metrics": {"accuracy": accuracy}}
 
                         val_result = await validate_trained_model(
                             db=db,
