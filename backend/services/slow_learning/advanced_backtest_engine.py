@@ -323,6 +323,8 @@ class AIComparisonResult:
     setup_only: Dict = field(default_factory=dict)     # Traditional setup signals
     ai_filtered: Dict = field(default_factory=dict)    # Setup + AI confirmation
     ai_only: Dict = field(default_factory=dict)        # AI predictions only
+    gate_filtered: Dict = field(default_factory=dict)  # Full confidence gate (10 signals)
+    gate_stats: Dict = field(default_factory=dict)     # Gate decision breakdown (GO/REDUCE/SKIP counts)
     
     # Comparison metrics
     ai_trades_filtered: int = 0           # How many setup trades AI blocked
@@ -364,6 +366,7 @@ class AdvancedBacktestEngine:
         self._tqs_engine = None
         self._hybrid_data_service = None  # IB + Alpaca hybrid data
         self._timeseries_model = None     # LightGBM time-series predictor
+        self._confidence_gate = None      # Full 10-signal confidence gate
         
         # Background jobs
         self._running_jobs: Dict[str, BacktestJob] = {}
@@ -397,6 +400,11 @@ class AdvancedBacktestEngine:
         """Set the LightGBM time-series model for AI-enhanced backtesting"""
         self._timeseries_model = model
         logger.info("Advanced Backtest Engine: Time-series AI model connected")
+
+    def set_confidence_gate(self, gate):
+        """Set the full confidence gate for gate-filtered backtesting"""
+        self._confidence_gate = gate
+        logger.info("Advanced Backtest Engine: Confidence gate connected")
 
     def _cleanup_stale_jobs(self):
         """Mark orphaned pending/running jobs as cancelled on startup.
@@ -985,15 +993,19 @@ class AdvancedBacktestEngine:
         )
         
         has_ai = self._timeseries_model is not None and getattr(self._timeseries_model, '_model', None) is not None
+        has_gate = self._confidence_gate is not None
         
         # Aggregate trades across all symbols for each mode
         all_setup_trades = []
         all_ai_filtered_trades = []
         all_ai_only_trades = []
+        all_gate_filtered_trades = []
         all_setup_equity = []
         all_ai_filtered_equity = []
         all_ai_only_equity = []
+        all_gate_filtered_equity = []
         symbol_details = []
+        gate_aggregate_stats = {"evaluated": 0, "go": 0, "reduce": 0, "skip": 0}
         
         total_ai_signals_correct = 0
         total_ai_signals = 0
@@ -1052,33 +1064,51 @@ class AdvancedBacktestEngine:
                 ai_only_trades = []
                 ai_only_equity_curve = []
             
+            # --- MODE 4: Gate-Filtered (full 10-signal confidence gate) ---
+            gate_trades = []
+            gate_equity_curve = []
+            if has_gate:
+                gate_trades, gate_equity_curve, gate_stats = await self._simulate_strategy_with_gate(
+                    symbol, filtered_bars, strategy, starting_capital,
+                    lookback_bars=ai_lookback_bars
+                )
+                for k in gate_aggregate_stats:
+                    gate_aggregate_stats[k] += gate_stats.get(k, 0)
+            
             # Track per-symbol results
             setup_pnl = sum(t.pnl for t in setup_trades)
             ai_filt_pnl = sum(t.pnl for t in ai_filtered_trades)
             ai_only_pnl = sum(t.pnl for t in ai_only_trades)
+            gate_pnl = sum(t.pnl for t in gate_trades)
             
             setup_wr = (len([t for t in setup_trades if t.pnl > 0]) / len(setup_trades) * 100) if setup_trades else 0
             ai_filt_wr = (len([t for t in ai_filtered_trades if t.pnl > 0]) / len(ai_filtered_trades) * 100) if ai_filtered_trades else 0
             ai_only_wr = (len([t for t in ai_only_trades if t.pnl > 0]) / len(ai_only_trades) * 100) if ai_only_trades else 0
+            gate_wr = (len([t for t in gate_trades if t.pnl > 0]) / len(gate_trades) * 100) if gate_trades else 0
             
             symbol_details.append({
                 "symbol": symbol,
                 "setup_only": {"trades": len(setup_trades), "pnl": round(setup_pnl, 2), "win_rate": round(setup_wr, 1)},
                 "ai_filtered": {"trades": len(ai_filtered_trades), "pnl": round(ai_filt_pnl, 2), "win_rate": round(ai_filt_wr, 1)},
-                "ai_only": {"trades": len(ai_only_trades), "pnl": round(ai_only_pnl, 2), "win_rate": round(ai_only_wr, 1)}
+                "ai_only": {"trades": len(ai_only_trades), "pnl": round(ai_only_pnl, 2), "win_rate": round(ai_only_wr, 1)},
+                "gate_filtered": {"trades": len(gate_trades), "pnl": round(gate_pnl, 2), "win_rate": round(gate_wr, 1)},
             })
             
             all_setup_trades.extend(setup_trades)
             all_ai_filtered_trades.extend(ai_filtered_trades)
             all_ai_only_trades.extend(ai_only_trades)
+            all_gate_filtered_trades.extend(gate_trades)
             all_setup_equity.extend(setup_equity)
             all_ai_filtered_equity.extend(ai_filtered_equity_curve if has_ai else setup_equity)
             all_ai_only_equity.extend(ai_only_equity_curve if has_ai else [])
+            all_gate_filtered_equity.extend(gate_equity_curve)
         
         # Calculate aggregate metrics for each mode
         result.setup_only = self._compute_mode_metrics(all_setup_trades, starting_capital)
         result.ai_filtered = self._compute_mode_metrics(all_ai_filtered_trades, starting_capital) if has_ai else result.setup_only
         result.ai_only = self._compute_mode_metrics(all_ai_only_trades, starting_capital) if has_ai else {}
+        result.gate_filtered = self._compute_mode_metrics(all_gate_filtered_trades, starting_capital) if has_gate else {}
+        result.gate_stats = gate_aggregate_stats if has_gate else {}
         
         # Comparison metrics
         if has_ai and all_setup_trades:
@@ -1259,6 +1289,166 @@ class AdvancedBacktestEngine:
         except Exception as e:
             logger.debug(f"AI prediction error for {symbol}: {e}")
             return None
+
+    async def _simulate_strategy_with_gate(
+        self,
+        symbol: str,
+        bars: List[Dict],
+        strategy: StrategyConfig,
+        starting_capital: float,
+        lookback_bars: int = 50
+    ) -> Tuple[List[BacktestTrade], List[Dict]]:
+        """
+        Simulate a strategy with the full 10-signal confidence gate.
+        Only enters trades when setup signal fires AND the gate returns GO or REDUCE.
+        Position size is adjusted by the gate's position_multiplier.
+        
+        This is the most realistic backtest mode — matches live trading behavior.
+        """
+        trades: List[BacktestTrade] = []
+        equity_curve: List[Dict] = []
+        
+        capital = starting_capital
+        in_position = False
+        current_trade: BacktestTrade = None
+        gate = self._confidence_gate
+        
+        gate_stats = {"evaluated": 0, "go": 0, "reduce": 0, "skip": 0}
+        
+        for i, bar in enumerate(bars):
+            current_price = bar.get("close", bar.get("c", 0))
+            timestamp = bar.get("timestamp", "")
+            high = bar.get("high", bar.get("h", current_price))
+            low = bar.get("low", bar.get("l", current_price))
+            
+            # Track equity
+            equity = capital
+            if in_position and current_trade:
+                unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
+                equity = capital + unrealized_pnl
+                
+                if unrealized_pnl > current_trade.max_favorable_excursion:
+                    current_trade.max_favorable_excursion = unrealized_pnl
+                if unrealized_pnl < current_trade.max_adverse_excursion:
+                    current_trade.max_adverse_excursion = unrealized_pnl
+            
+            equity_curve.append({"timestamp": timestamp, "equity": equity, "price": current_price})
+            
+            if in_position and current_trade:
+                current_trade.bars_held += 1
+                
+                # Exit logic
+                exit_price = None
+                exit_reason = ""
+                
+                if low <= current_trade.stop_price:
+                    exit_price = current_trade.stop_price
+                    exit_reason = "stop"
+                elif high >= current_trade.target_price:
+                    exit_price = current_trade.target_price
+                    exit_reason = "target"
+                elif current_trade.bars_held >= strategy.max_bars_to_hold:
+                    exit_price = current_price
+                    exit_reason = "time"
+                elif i == len(bars) - 1:
+                    exit_price = current_price
+                    exit_reason = "end_of_data"
+                
+                if exit_price:
+                    current_trade.exit_price = exit_price
+                    current_trade.exit_date = timestamp[:10]
+                    current_trade.exit_time = timestamp[11:19] if len(timestamp) > 10 else ""
+                    current_trade.exit_reason = exit_reason
+                    current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
+                    current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
+                    
+                    risk = current_trade.entry_price - current_trade.stop_price
+                    if risk > 0:
+                        current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
+                    
+                    trades.append(current_trade)
+                    capital += current_trade.pnl
+                    in_position = False
+                    current_trade = None
+            
+            else:
+                # Check setup signal first
+                setup_signal = self._check_entry_signal(bar, strategy, bars[:i+1])
+                if setup_signal and i >= lookback_bars:
+                    # Run the full confidence gate
+                    gate_stats["evaluated"] += 1
+                    try:
+                        gate_result = await gate.evaluate(
+                            symbol=symbol,
+                            setup_type=strategy.setup_type,
+                            direction="long",
+                            quality_score=70,  # Default quality for backtest
+                            entry_price=current_price,
+                            stop_price=current_price * (1 - strategy.stop_pct / 100),
+                        )
+                        
+                        decision = gate_result.get("decision", "SKIP")
+                        position_multiplier = gate_result.get("position_multiplier", 1.0)
+                        
+                        if decision == "GO":
+                            gate_stats["go"] += 1
+                            position_value = capital * (strategy.position_size_pct / 100) * position_multiplier
+                            shares = int(position_value / current_price)
+                            
+                            if shares > 0:
+                                stop_price = current_price * (1 - strategy.stop_pct / 100)
+                                target_price = current_price * (1 + strategy.target_pct / 100)
+                                
+                                current_trade = BacktestTrade(
+                                    id=f"t_{uuid.uuid4().hex[:8]}",
+                                    symbol=symbol,
+                                    strategy_name=strategy.name,
+                                    setup_type=strategy.setup_type,
+                                    direction="long",
+                                    entry_date=timestamp[:10],
+                                    entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
+                                    entry_price=current_price,
+                                    shares=shares,
+                                    stop_price=stop_price,
+                                    target_price=target_price,
+                                    bars_held=0
+                                )
+                                in_position = True
+                        
+                        elif decision == "REDUCE":
+                            gate_stats["reduce"] += 1
+                            # REDUCE: enter but with smaller size (gate already set multiplier)
+                            position_value = capital * (strategy.position_size_pct / 100) * position_multiplier
+                            shares = int(position_value / current_price)
+                            
+                            if shares > 0:
+                                stop_price = current_price * (1 - strategy.stop_pct / 100)
+                                target_price = current_price * (1 + strategy.target_pct / 100)
+                                
+                                current_trade = BacktestTrade(
+                                    id=f"t_{uuid.uuid4().hex[:8]}",
+                                    symbol=symbol,
+                                    strategy_name=strategy.name,
+                                    setup_type=strategy.setup_type,
+                                    direction="long",
+                                    entry_date=timestamp[:10],
+                                    entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
+                                    entry_price=current_price,
+                                    shares=shares,
+                                    stop_price=stop_price,
+                                    target_price=target_price,
+                                    bars_held=0
+                                )
+                                in_position = True
+                        
+                        else:
+                            gate_stats["skip"] += 1
+                    
+                    except Exception as e:
+                        logger.debug(f"Gate evaluation error for {symbol}: {e}")
+                        gate_stats["skip"] += 1
+        
+        return trades, equity_curve, gate_stats
     
     def _compute_mode_metrics(self, trades: List[BacktestTrade], starting_capital: float) -> Dict:
         """Compute aggregate metrics for a set of trades"""

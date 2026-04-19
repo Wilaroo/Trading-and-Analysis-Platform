@@ -1012,6 +1012,11 @@ def _init_all_services():
             if ts_model is not None:
                 advanced_backtest_engine.set_timeseries_model(ts_model)
                 print("Time-Series AI model wired into Advanced Backtest Engine for AI comparison")
+            
+            # Wire confidence gate into backtest engine for gate-filtered backtesting
+            if confidence_gate is not None:
+                advanced_backtest_engine.set_confidence_gate(confidence_gate)
+                print("Confidence Gate wired into Advanced Backtest Engine for gate-filtered backtesting")
 
         print("AI Modules (Institutional-Grade) initialized")
         print("  - Module Config: Toggle individual AI modules on/off")
