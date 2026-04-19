@@ -48,6 +48,9 @@ const DEFAULT_DATA = {
   setupModelsStatus: null,
   historicalBars: 0,
   simulationJobs: [],
+  backtestResults: [],
+  backtestJobs: [],
+  validationResults: { total: 0, promoted: 0, rejected: 0, records: [] },
   collectionQueue: null,
   dataSource: null,
 };
@@ -167,10 +170,13 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       const slowResults = await Promise.allSettled([
         withTimeout(api.get('/api/ib-collector/stats'), 10000),
         withTimeout(api.get('/api/ib-collector/queue-progress'), 10000),
-        withTimeout(api.get('/api/simulator/status'), 10000)
+        withTimeout(api.get('/api/simulator/status'), 10000),
+        withTimeout(api.get('/api/backtest/results'), 10000),
+        withTimeout(api.get('/api/backtest/jobs'), 10000),
+        withTimeout(api.get('/api/ai-modules/validation/history?limit=20'), 10000),
       ]);
 
-      const [collectionStatsRes, collectionQueueRes, simulationJobsRes] = slowResults;
+      const [collectionStatsRes, collectionQueueRes, simulationJobsRes, backtestResultsRes, backtestJobsRes, validationRes] = slowResults;
       const slowUpdates = {};
 
       if (collectionStatsRes.status === 'fulfilled' && collectionStatsRes.value.data?.success) {
@@ -184,6 +190,18 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
 
       if (simulationJobsRes.status === 'fulfilled' && simulationJobsRes.value.data?.success) {
         slowUpdates.simulationJobs = simulationJobsRes.value.data.jobs || [];
+      }
+
+      if (backtestResultsRes.status === 'fulfilled' && backtestResultsRes.value.data?.success) {
+        slowUpdates.backtestResults = backtestResultsRes.value.data.results || [];
+      }
+
+      if (backtestJobsRes.status === 'fulfilled' && backtestJobsRes.value.data?.success) {
+        slowUpdates.backtestJobs = backtestJobsRes.value.data.jobs || [];
+      }
+
+      if (validationRes.status === 'fulfilled' && validationRes.value.data?.success) {
+        slowUpdates.validationResults = validationRes.value.data;
       }
 
       if (Object.keys(slowUpdates).length > 0) {
@@ -327,9 +345,12 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       {/* 2.75 SentCom Intelligence — confidence gate decisions, trading mode */}
       <SentComIntelligencePanel onRefresh={handleRefresh} wsConfidenceGate={wsConfidenceGate} />
 
-      {/* 3. Data & Backtesting — collection + scanner + simulations */}
+      {/* 3. Data & Backtesting — collection + scanner + simulations + validation */}
       <DataBacktestingPanel
         simulationJobs={memoizedSimulationJobs}
+        backtestResults={data.backtestResults}
+        backtestJobs={data.backtestJobs}
+        validationResults={data.validationResults}
         loading={stableLoading}
         onRefresh={handleRefresh}
       />

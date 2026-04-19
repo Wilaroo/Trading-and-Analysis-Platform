@@ -7,7 +7,7 @@ import {
 import { toast } from 'sonner';
 import api from '../../utils/api';
 
-const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
+const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(null);
   const [simBarSize, setSimBarSize] = useState('1 day');
@@ -273,10 +273,109 @@ const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
                   })}
                 </div>
               ) : (
-                <div className="text-center py-6">
-                  <FlaskConical className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No simulations yet</p>
-                  <p className="text-xs text-zinc-500">Click "Quick Test" or "Market-Wide" to run a backtest</p>
+                <div className="text-center py-4">
+                  <FlaskConical className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No simulator jobs yet</p>
+                </div>
+              )}
+
+              {/* Advanced Backtest Results (AI Comparison with Gate) */}
+              {(backtestResults || []).length > 0 && (
+                <div className="mt-4 space-y-3">
+                  <h4 className="text-xs text-zinc-500 uppercase flex items-center gap-2">
+                    Advanced Backtests
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-violet-500/20 text-violet-400">{backtestResults.length}</span>
+                  </h4>
+                  {backtestResults.slice(0, 6).map((result, idx) => {
+                    const setup = result.setup_only || {};
+                    const aiFiltered = result.ai_filtered || {};
+                    const gateFiltered = result.gate_filtered || {};
+                    const gateStats = result.gate_stats || {};
+                    const hasGate = gateFiltered.total_trades > 0;
+                    const hasAi = aiFiltered.total_trades > 0 && aiFiltered.total_trades !== setup.total_trades;
+                    
+                    return (
+                      <div key={result.id || idx} className="rounded-lg border border-white/5 bg-white/[0.02] overflow-hidden" data-testid={`backtest-result-${idx}`}>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs text-zinc-300 font-medium">{result.strategy_name || result.setup_type || 'Backtest'}</div>
+                            <div className="text-[10px] text-zinc-500">{result.date_range || ''}</div>
+                          </div>
+                          
+                          {/* 4-way comparison grid */}
+                          <div className={`grid ${hasGate ? 'grid-cols-4' : hasAi ? 'grid-cols-3' : 'grid-cols-1'} gap-1`}>
+                            {/* Setup Only */}
+                            <div className="p-2 rounded bg-white/[0.03] border border-white/5">
+                              <div className="text-[9px] text-zinc-500 uppercase mb-1">Setup Only</div>
+                              <div className="text-sm font-bold text-white">{setup.total_trades || 0}</div>
+                              <div className="text-[10px] text-zinc-400">trades</div>
+                              <div className={`text-xs font-medium mt-1 ${(setup.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                {(setup.win_rate || 0).toFixed(0)}% WR
+                              </div>
+                              <div className={`text-[10px] ${(setup.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                ${(setup.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                              </div>
+                            </div>
+                            
+                            {/* AI Filtered */}
+                            {hasAi && (
+                              <div className="p-2 rounded bg-cyan-500/[0.05] border border-cyan-500/20">
+                                <div className="text-[9px] text-cyan-500 uppercase mb-1">AI Filter</div>
+                                <div className="text-sm font-bold text-white">{aiFiltered.total_trades || 0}</div>
+                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className={`text-xs font-medium mt-1 ${(aiFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                  {(aiFiltered.win_rate || 0).toFixed(0)}% WR
+                                </div>
+                                <div className={`text-[10px] ${(aiFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  ${(aiFiltered.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Gate Filtered */}
+                            {hasGate && (
+                              <div className="p-2 rounded bg-amber-500/[0.05] border border-amber-500/20">
+                                <div className="text-[9px] text-amber-500 uppercase mb-1">Gate Filter</div>
+                                <div className="text-sm font-bold text-white">{gateFiltered.total_trades || 0}</div>
+                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className={`text-xs font-medium mt-1 ${(gateFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                  {(gateFiltered.win_rate || 0).toFixed(0)}% WR
+                                </div>
+                                <div className={`text-[10px] ${(gateFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  ${(gateFiltered.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* AI Only (if available) */}
+                            {hasAi && (result.ai_only?.total_trades || 0) > 0 && (
+                              <div className="p-2 rounded bg-violet-500/[0.05] border border-violet-500/20">
+                                <div className="text-[9px] text-violet-500 uppercase mb-1">AI Only</div>
+                                <div className="text-sm font-bold text-white">{result.ai_only.total_trades}</div>
+                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className={`text-xs font-medium mt-1 ${(result.ai_only.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                  {(result.ai_only.win_rate || 0).toFixed(0)}% WR
+                                </div>
+                                <div className={`text-[10px] ${(result.ai_only.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  ${(result.ai_only.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Gate Stats */}
+                          {hasGate && gateStats.evaluated > 0 && (
+                            <div className="mt-2 flex items-center gap-3 text-[10px]">
+                              <span className="text-zinc-500">Gate: {gateStats.evaluated} evaluated</span>
+                              <span className="text-emerald-400">{gateStats.go} GO</span>
+                              <span className="text-yellow-400">{gateStats.reduce} REDUCE</span>
+                              <span className="text-red-400">{gateStats.skip} SKIP</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -1,22 +1,35 @@
 import React, { useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Database, ChevronDown, Search, FlaskConical } from 'lucide-react';
+import { Database, ChevronDown, Search, FlaskConical, ShieldCheck } from 'lucide-react';
 import DataCollectionPanel from './DataCollectionPanel';
 import MarketScannerPanel from '../MarketScannerPanel';
 import SimulationQuickPanel from './SimulationQuickPanel';
+import ValidationResultsPanel from './ValidationResultsPanel';
 
-const DataBacktestingPanel = memo(({ simulationJobs, loading, onRefresh }) => {
+const DataBacktestingPanel = memo(({ simulationJobs, backtestResults, backtestJobs, validationResults, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState('data');
 
   const runningJobs = (simulationJobs || []).filter(j => j.status === 'running');
   const completedJobs = (simulationJobs || []).filter(j => j.status === 'completed');
+  const btResults = backtestResults || [];
+  const valResults = validationResults || { total: 0, promoted: 0, rejected: 0, records: [] };
 
   const tabs = [
     { id: 'data', label: 'Data Collection', icon: Database, color: 'emerald' },
     { id: 'scanner', label: 'Market Scanner', icon: Search, color: 'cyan' },
     { id: 'backtest', label: 'Backtesting', icon: FlaskConical, color: 'violet' },
+    { id: 'validation', label: 'Validation', icon: ShieldCheck, color: 'amber' },
   ];
+
+  const summaryText = () => {
+    const parts = [];
+    if (runningJobs.length > 0) parts.push(`${runningJobs.length} running`);
+    if (completedJobs.length > 0) parts.push(`${completedJobs.length} sims`);
+    if (btResults.length > 0) parts.push(`${btResults.length} backtests`);
+    if (valResults.total > 0) parts.push(`${valResults.promoted} validated`);
+    return parts.length > 0 ? parts.join(' | ') : 'No activity yet';
+  };
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }} data-testid="data-backtesting-panel">
@@ -30,10 +43,8 @@ const DataBacktestingPanel = memo(({ simulationJobs, loading, onRefresh }) => {
             <Database className="w-4 h-4 text-white" />
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Data & Backtesting</h3>
-            <p className="text-xs text-zinc-400">
-              {runningJobs.length > 0 ? `${runningJobs.length} backtests running` : `${completedJobs.length} backtests completed`}
-            </p>
+            <h3 className="text-sm font-semibold text-white">Data, Backtesting & Validation</h3>
+            <p className="text-xs text-zinc-400">{summaryText()}</p>
           </div>
         </div>
         <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
@@ -60,6 +71,12 @@ const DataBacktestingPanel = memo(({ simulationJobs, loading, onRefresh }) => {
                   data-testid={`data-tab-${tab.id}`}
                 >
                   <tab.icon className="w-3 h-3" /> {tab.label}
+                  {tab.id === 'validation' && valResults.total > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500/20 text-amber-400">{valResults.total}</span>
+                  )}
+                  {tab.id === 'backtest' && btResults.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-violet-500/20 text-violet-400">{btResults.length}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -68,7 +85,19 @@ const DataBacktestingPanel = memo(({ simulationJobs, loading, onRefresh }) => {
               {activeTab === 'data' && <DataCollectionPanel onRefresh={onRefresh} />}
               {activeTab === 'scanner' && <MarketScannerPanel />}
               {activeTab === 'backtest' && (
-                <SimulationQuickPanel jobs={simulationJobs} loading={loading} onRefresh={onRefresh} />
+                <SimulationQuickPanel
+                  jobs={simulationJobs}
+                  backtestResults={btResults}
+                  backtestJobs={backtestJobs}
+                  loading={loading}
+                  onRefresh={onRefresh}
+                />
+              )}
+              {activeTab === 'validation' && (
+                <ValidationResultsPanel
+                  validationResults={valResults}
+                  onRefresh={onRefresh}
+                />
               )}
             </div>
           </motion.div>
