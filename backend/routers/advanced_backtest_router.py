@@ -906,6 +906,22 @@ def list_recent_jobs(
     }
 
 
+@router.post("/cleanup-stale")
+def cleanup_stale_data():
+    """Remove cancelled jobs, empty backtest results (0 trades), and empty validations"""
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    result = _advanced_engine.clear_stale_results()
+    total = sum(result.values())
+    return {
+        "success": True,
+        **result,
+        "message": f"Cleaned up {total} stale records ({result['removed_results']} empty results, {result['removed_jobs']} cancelled jobs, {result['removed_validations']} empty validations, {result['removed_batch_validations']} empty batch validations)"
+    }
+
+
+
 # ============================================================================
 # Results
 # ============================================================================

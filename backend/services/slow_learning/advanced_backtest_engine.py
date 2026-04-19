@@ -379,6 +379,9 @@ class AdvancedBacktestEngine:
             # Create indexes for performance
             self._backtest_cache_col.create_index([("symbol", 1), ("timeframe", 1), ("date", 1)])
             
+            # Clean up orphaned jobs from previous server sessions
+            self._cleanup_stale_jobs()
+            
     def set_services(self, historical_data_service=None, alpaca_service=None, tqs_engine=None):
         """Set required services"""
         self._historical_data_service = historical_data_service
@@ -394,6 +397,62 @@ class AdvancedBacktestEngine:
         """Set the LightGBM time-series model for AI-enhanced backtesting"""
         self._timeseries_model = model
         logger.info("Advanced Backtest Engine: Time-series AI model connected")
+
+    def _cleanup_stale_jobs(self):
+        """Mark orphaned pending/running jobs as cancelled on startup.
+        These are jobs from previous server sessions that never completed."""
+        if self._backtest_jobs_col is None:
+            return
+        try:
+            result = self._backtest_jobs_col.update_many(
+                {"status": {"$in": ["pending", "running"]}},
+                {"$set": {
+                    "status": "cancelled",
+                    "error": "Server restarted before job completed. Re-submit to retry.",
+                    "completed_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            if result.modified_count > 0:
+                logger.info(f"[BACKTEST] Cleaned up {result.modified_count} orphaned jobs from previous session")
+        except Exception as e:
+            logger.warning(f"[BACKTEST] Failed to cleanup stale jobs: {e}")
+
+    def clear_stale_results(self):
+        """Remove empty backtest results (0 trades), cancelled jobs, and empty validations."""
+        removed_results = 0
+        removed_jobs = 0
+        removed_validations = 0
+        removed_batch_validations = 0
+        if self._backtest_results_col is not None:
+            try:
+                r = self._backtest_results_col.delete_many({"total_trades": {"$in": [0, None]}})
+                removed_results = r.deleted_count
+            except Exception:
+                pass
+        if self._backtest_jobs_col is not None:
+            try:
+                r = self._backtest_jobs_col.delete_many({"status": "cancelled"})
+                removed_jobs = r.deleted_count
+            except Exception:
+                pass
+        # Clean empty validations (0% accuracy, auto-promoted without real data)
+        if self._db is not None:
+            try:
+                r = self._db["model_validations"].delete_many({"training_accuracy": 0})
+                removed_validations = r.deleted_count
+            except Exception:
+                pass
+            try:
+                r = self._db["batch_validations"].delete_many({"total_tests": {"$in": [0, None]}})
+                removed_batch_validations = r.deleted_count
+            except Exception:
+                pass
+        return {
+            "removed_results": removed_results,
+            "removed_jobs": removed_jobs,
+            "removed_validations": removed_validations,
+            "removed_batch_validations": removed_batch_validations,
+        }
 
     # ========================================================================
     # Multi-Strategy Backtesting
