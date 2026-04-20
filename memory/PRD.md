@@ -1,104 +1,66 @@
-# SentCom AI Trading Platform — PRD
+# TradeCommand / SentCom — Product Requirements
+
+## Original problem statement
+AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). Goal: stable massive training pipeline, real-time responsive UI, SentCom chat aware of live portfolio status without hanging the backend, and a bot that can go live for automated trading with accurate dashboards.
 
 ## Architecture
-- **DGX Spark** (Linux, Blackwell GPU, 128GB): Backend + Frontend + MongoDB (178M+ bars)
-- **Windows PC** (Ryzen 7, RTX 5060 Ti): IB Gateway/Pusher + Collectors
-- **Data**: 100% Interactive Brokers via local MongoDB
+- **DGX Spark (Linux, 192.168.50.2)**: Backend FastAPI :8001, Chat :8002, MongoDB :27017, Frontend React :3000, Ollama :11434, worker, Blackwell GPU
+- **Windows PC (192.168.50.1)**: IB Gateway :4002, IB Data Pusher (client 15), 4 Turbo Collectors (clients 16–19)
+- Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
+- Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed Work
+## Completed in this session (2026-04-20)
+### P0 Morning Briefing bogus-position bug — RESOLVED
+- Root-caused: `MorningBriefingModal.jsx` calls `/api/portfolio`, which pulls IB-pushed positions. When marketPrice=0 on restart, `gain_loss = 0 − cost_basis` produced fake -$1.2M.
+- Fix: `backend/routers/portfolio.py` — added `quote_ready` flag per position and `quotes_ready` in summary; trusts IB's `unrealizedPNL` until live quote arrives; filters zero-share rows.
+- Fix: `frontend/src/components/MorningBriefingModal.jsx` — shows amber "awaiting quotes" badge instead of fake PnL.
 
-### Apr 18, 2026 — Session 3 (Trade Journal Performance Fix)
+### New `POST /api/portfolio/flatten-paper` endpoint
+- 4 guard rails: `confirm=FLATTEN` token, paper-account-only (code starts with 'D'), 120s cooldown, pre-flight cancel of stale `flatten_*` orders.
+- UI button in MorningBriefingModal with JS confirm dialog.
 
-#### Critical: Trade Journal N+1 Query Fix
-- `get_trades()` in `trade_journal.py` was doing 51 MongoDB queries for 50 trades (fetch IDs, then re-fetch each individually)
-- Fixed to single query with in-memory `_id` conversion
-- Same fix applied to `get_templates()`
+### Cleared 19 stale IB paper-account bagholds
+Via flatten endpoint + manual TC2000/TWS cleanup.
 
-#### Critical: Database Connection Reuse
-- `/api/trades/ai/learning-stats` and `/api/trades/ai/strategy-insights` were creating new `MongoClient()` on every request
-- `journal_router.py` services (`get_services()`, `get_import_services()`, `get_eod_service_instance()`, `get_weekly_report_service_instance()`) each created their own MongoClient
-- All now use shared `get_database()` from `database.py`
+## Active P0 Blockers
+### 🔴 Pusher double-execution bug (NEW — blocks flatten endpoint)
+- **Symptom**: Every MKT order queued by flatten endpoint gets submitted to IB twice (3× for at least one order). Long positions became inverse-magnitude shorts on first flatten, then doubled again on second flatten.
+- **Scope**: The Windows IB Data Pusher, not the backend. Backend queue correctly held N orders; pusher submitted 2N (or more) fills to IB.
+- **Hypothesis**: Pusher polls `/api/ib/orders/pending` and submits without atomically claiming via `/api/ib/orders/claim/{id}`, or has a retry loop that fires too aggressively. Needs source-code review of pusher on Windows PC.
+- **Next session P0**: Locate pusher source (`find ~/Trading-and-Analysis-Platform -name "*pusher*"`), audit polling loop, enforce `claim → submit → report_result` sequence with idempotency.
 
-#### Critical: Wrong Database Name Defaults
-- `trades.py` AI endpoints defaulted to `"sentcom"` instead of `"tradecommand"`
-- `journal_router.py` services defaulted to `"trading_app"` instead of `"tradecommand"`
-- All corrected to use `database.py` which defaults to `"tradecommand"`
+## P1 Outstanding
+- Phase 13 revalidation: `backend/scripts/revalidate_all.py` against the fixed fail-closed validator (was next after Morning Briefing)
+- Phase 6 Distributed PC Worker: offload CNN/DL training to Windows PC over LAN
+- Rebuild TFT / CNN-LSTM with triple-barrier targets (binary up/down → majority-class collapse)
+- Wire FinBERT into confidence gate as Layer 12
+- Wire confidence gate into live validation
 
-#### Critical: Weekly Report Hang Fix
-- `generate_weekly_report()` called 7 medium learning services with synchronous PyMongo queries inside async functions, blocking the event loop
-- Added `asyncio.to_thread()` for `_get_week_trades()` blocking DB queries
-- Added 10-second per-section timeouts via `_safe_call()` wrapper
-- Added 12-second endpoint-level timeout on `/weekly-report/current`
-- Frontend: 15s timeout on Weekly Report API calls
-
-#### Performance: Unified Trades Endpoint
-- Both journal trades AND bot trades now fetch via `asyncio.to_thread()` — neither blocks the event loop
-- `/api/trades/performance` has 10s timeout protection
-
-#### Performance: Client-Side Filtering
-- Frontend loads ALL trades once on mount, filters client-side for all/open/closed and source
-- Switching filters is now instant (no API call)
-- Explicit timeouts on all Trade Journal API calls
-
-#### Performance: Unbounded Query Caps
-- `get_performance_summary()` capped at 500 closed trades each for journal + bot
-- Weekly report `bot_trades` query capped at 500
-
-#### Bug Fix: Scanner `_symbol_adv_cache`
-- `enhanced_scanner.py` referenced `self._symbol_adv_cache` but attribute is `self._adv_cache`
-- Daily/pre-market scans were crashing every cycle
-- Fixed both references (lines 3907, 4005)
-
-### Apr 17, 2026 — Session 2 (Major Overhaul)
-
-#### Critical: DST Timezone Bug Fix
-- Scanner used hardcoded EST but April = EDT
-- Fixed with `ZoneInfo("America/New_York")` in scanner, trade_context, circuit_breaker, tqs
-
-#### Critical: SentCom Stream Fix
-- WS stream was always empty due to wrong import
-- Fixed with `sentcom_service.get_unified_stream()`, 100-msg buffer
-
-#### Critical: Confidence Gate DB Writes
-- `insert_one` failing due to numpy types
-- Fixed with JSON round-trip serialization
-
-#### After-Hours & Pre-Market Scanning Modes
-- 3 scanning modes: Pre-market (watchlists), Live Intraday, After-hours (daily bars)
-
-#### EnhancedTickerModal Overhaul
-- Data freshness indicators, AbortController, removed fake earnings
-
-#### LLM Chat Memory System
-- 4 new MongoDB collections for persistent AI memory
-
-#### Playbook & DRC Auto-Generation (EOD Service)
-- Scheduled at 4:30/4:45/5:00 PM ET
-- Granular per-symbol, per-regime, per-direction tracking in playbook trade_review
-- Weak symbol/regime detection via `edge_notes`
-
-#### Trade Deletion
-- `DELETE /api/trading-bot/trades/{symbol}` endpoint
-
-### Feb 2026 — Session 1
-
-#### Stability & Performance
-- `_init_all_services()`, async→def conversions, streaming cache, chat server isolation
-
-#### Confidence Gate
-- Mode-aware thresholds, gate auto-calibrator
-
-## Pending Verification
-- Granular Playbook Tracking — User needs to trigger EOD endpoint and verify per-symbol breakdowns appear
-
-## Upcoming Tasks
-- Phase 6: Distributed PC Worker (offload training to Windows PC)
-- Automated Daily Bar Collection Scheduling
-- Re-enable uvloop
-
-## Future Tasks
-- Phase 7: Infrastructure Polish (systemd)
+## P2 / Backlog
+- Motor async MongoDB driver migration (replace sync PyMongo in hot paths)
 - Per-signal weight optimizer for gate auto-tuning
-- Real earnings calendar integration
-- Wire scanner technical indicators fully into chat context
-- Consider splitting Trade Journal to separate microservice if latency issues persist
+- Earnings calendar + news feed in Chat
+- Sparkline (12-wk promotion rate) on ValidationSummaryCard
+- `server.py` breakup → `routers/` + `models/` + `tests/`
+
+## Key API surface
+- `GET /api/portfolio` — IB pushed positions + manual fallback; quote_ready guard
+- `POST /api/portfolio/flatten-paper?confirm=FLATTEN` — flatten paper account, 120s cooldown
+- `GET /api/assistant/coach/morning-briefing` — coach prompt only (not position source)
+- `GET /api/ai-modules/validation/summary` — promotion-rate dashboard
+- `POST /api/ib/push-data` — receive pusher snapshot
+- `GET /api/ib/orders/pending` — pusher polls this
+- `POST /api/ib/orders/claim/{id}`, `POST /api/ib/orders/result` — claim/complete hooks pusher should use but may not
+
+## Key files
+- `backend/routers/portfolio.py` — portfolio endpoint + new flatten-paper
+- `backend/routers/ib.py` — push-data + order queue glue
+- `backend/services/order_queue_service.py` — Mongo-backed queue with auto-expire
+- `frontend/src/components/MorningBriefingModal.jsx` — briefing UI + Flatten button
+- `backend/services/ai_modules/post_training_validator.py` — 9 fail-closed gates
+- `backend/scripts/revalidate_all.py` — Phase 13 revalidation script
+
+## Hardware runtime notes
+- Can't test this codebase in the Emergent container (no IB, no pusher, no GPU). All verification is curl/python on the user's Spark. Testing agents unavailable for integration flows.
+- Code changes reach Spark via "Save to Github" → `git pull` on both Windows and Spark.
+- Backend restart: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &` (Spark uses `.venv`, not supervisor)
