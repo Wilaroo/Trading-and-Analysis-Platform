@@ -28,7 +28,12 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 SEQUENCE_LENGTH = 5  # Number of chart windows to look back
-DIRECTIONS = ["down", "up", "flat"]
+DIRECTIONS = ["down", "flat", "up"]  # Triple-barrier class order: -1/0/+1
+
+# Triple-barrier hyperparameters (ATR multiples)
+TB_PT_MULT = 2.0   # 2 × ATR profit target
+TB_SL_MULT = 1.0   # 1 × ATR stop loss
+TB_ATR_PERIOD = 14  # Lookback for ATR estimation
 
 
 def _try_import_torch():
@@ -111,7 +116,7 @@ class CNNLSTMModel:
                     nn.Linear(lstm_hidden, 64),
                     nn.GELU(),
                     nn.Dropout(0.2),
-                    nn.Linear(64, 3),  # up, down, flat
+                    nn.Linear(64, 3),  # triple-barrier: down / flat / up
                 )
 
                 # Win probability head
@@ -223,22 +228,39 @@ class CNNLSTMModel:
 
         all_bar_features = np.array(all_bar_features, dtype=np.float32)
 
-        # Create sequences
+        # Create sequences with triple-barrier labels
+        from services.ai_modules.triple_barrier_labeler import (
+            triple_barrier_label_single, atr as _atr, label_to_class_index
+        )
+
+        atr_series = _atr(highs, lows, closes, period=TB_ATR_PERIOD)
+
         sequences = []
         targets = []
         n_feats = len(all_bar_features)
 
         for i in range(SEQUENCE_LENGTH, n_feats - forecast_horizon):
             seq = all_bar_features[i - SEQUENCE_LENGTH:i]
-            sequences.append(seq)
 
-            # Target: direction of close after forecast_horizon bars
+            # Target: triple-barrier label from entry at current bar.
+            # Horizon for max_bars uses forecast_horizon so callers control it.
             current_close_idx = lookback + i
-            future_close_idx = current_close_idx + forecast_horizon
-            if future_close_idx < n:
-                targets.append(1 if closes[future_close_idx] > closes[current_close_idx] else 0)
-            else:
-                targets.append(0)
+            if current_close_idx >= len(atr_series):
+                continue
+            atr_val = atr_series[current_close_idx]
+            if not np.isfinite(atr_val) or atr_val <= 0:
+                continue
+
+            tb_label = triple_barrier_label_single(
+                highs, lows, closes,
+                entry_idx=current_close_idx,
+                pt_atr_mult=TB_PT_MULT,
+                sl_atr_mult=TB_SL_MULT,
+                max_bars=forecast_horizon,
+                atr_value=float(atr_val),
+            )
+            sequences.append(seq)
+            targets.append(label_to_class_index(tb_label))  # -1/0/+1 → 0/1/2
 
         if not sequences:
             return None, None
@@ -304,13 +326,23 @@ class CNNLSTMModel:
         logger.info(f"[CNN-LSTM] Sequence shape: {X.shape} (samples, seq_len={SEQUENCE_LENGTH}, features=46)")
 
         # Class balance diagnostic — detects majority-class collapse.
-        # "Always predict UP" baseline on U.S. equities sits around 52-53%.
-        class_counts = np.bincount(y, minlength=2)
+        # With triple-barrier targets, there are 3 classes: 0=down (SL hit),
+        # 1=flat (time exit), 2=up (PT hit). Healthy distribution has all three
+        # classes with flat often dominating (30-60%). If any single class
+        # exceeds ~55%, the model will likely collapse onto it.
+        class_counts = np.bincount(y, minlength=3)
         majority_pct = class_counts.max() / len(y) if len(y) > 0 else 0.5
         logger.info(
-            f"[CNN-LSTM] Class balance: down={class_counts[0]}, up={class_counts[1]}, "
+            f"[CNN-LSTM] Class balance (triple-barrier): "
+            f"down={class_counts[0]}, flat={class_counts[1]}, up={class_counts[2]}, "
             f"majority={majority_pct:.3%} (always-predict-majority baseline)"
         )
+        if majority_pct > 0.55:
+            logger.warning(
+                f"[CNN-LSTM] Heavy class imbalance ({majority_pct:.1%}) — consider tightening "
+                f"PT/SL multiples (current: PT={TB_PT_MULT}x ATR, SL={TB_SL_MULT}x ATR, "
+                f"horizon={X.shape[0] // max(symbols_used,1)} samples/symbol)"
+            )
 
         # Normalize features
         X_flat = X.reshape(-1, X.shape[-1])
@@ -350,8 +382,10 @@ class CNNLSTMModel:
                 direction, win_prob, attn = self._model(batch_x)
                 loss = criterion(direction, batch_y)
 
-                # Add win probability auxiliary loss
-                win_target = (batch_y == 1).float().unsqueeze(-1)
+                # Add win probability auxiliary loss.
+                # Triple-barrier class 2 = "up" = profit target hit = win.
+                # Class 1 = flat (time exit) and 0 = down (stop hit) are not wins.
+                win_target = (batch_y == 2).float().unsqueeze(-1)
                 loss += 0.3 * nn.functional.binary_cross_entropy(win_prob, win_target)
 
                 optimizer.zero_grad()
@@ -410,10 +444,20 @@ class CNNLSTMModel:
             "accuracy": best_val_acc,
             "majority_baseline": float(majority_pct),
             "edge_above_baseline": float(edge_vs_baseline),
-            "class_counts": {"down": int(class_counts[0]), "up": int(class_counts[1])},
+            "class_counts": {
+                "down": int(class_counts[0]),
+                "flat": int(class_counts[1]),
+                "up": int(class_counts[2]),
+            },
             "training_samples": len(X),
             "symbols_used": symbols_used,
             "device": str(self._device),
+            "label_scheme": "triple_barrier_atr",
+            "label_params": {
+                "pt_atr_mult": TB_PT_MULT,
+                "sl_atr_mult": TB_SL_MULT,
+                "atr_period": TB_ATR_PERIOD,
+            },
         }
 
     def predict(self, bars: List[Dict], symbol: str = "UNKNOWN") -> Dict[str, Any]:
