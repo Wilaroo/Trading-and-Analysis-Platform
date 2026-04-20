@@ -15,7 +15,7 @@ import os
 import time
 import concurrent.futures
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://xgb-triple-barrier.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ml-quant-spark.preview.emergentagent.com').rstrip('/')
 
 
 class TestAIComparisonStatus:

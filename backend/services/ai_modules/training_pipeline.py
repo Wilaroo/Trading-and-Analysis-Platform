@@ -321,7 +321,20 @@ def _extract_setup_long_worker(args):
             # TRIPLE-BARRIER 3-class labels (López de Prado); per-setup PT/SL/ATR
             # resolved by the caller via triple_barrier_config.get_tb_config.
             from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+            from services.ai_modules.cusum_filter import cusum_enabled, filter_entry_indices
             idx = np.arange(50, 50 + max_rows)
+
+            # CUSUM event filter (flag-gated)
+            if cusum_enabled():
+                filtered = filter_entry_indices(
+                    idx, closes.astype(np.float64),
+                    bar_size="5 mins",   # worker doesn't know bar_size; conservative default
+                    target_events_per_year=100,
+                    min_distance=max(1, fh // 2),
+                )
+                if len(filtered) >= 50:
+                    idx = filtered
+
             raw_lbl = triple_barrier_labels(
                 highs.astype(np.float64), lows.astype(np.float64), closes.astype(np.float64),
                 entry_indices=idx,
@@ -332,17 +345,16 @@ def _extract_setup_long_worker(args):
             )
             y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
-            X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
+            X_buf = np.empty((len(idx), n_base + n_setup), dtype=np.float32)
             valid = 0
 
-            for j in range(max_rows):
-                row_idx = j + 1  # base_matrix row for bar 50+j
-                if row_idx >= len(base_matrix):
-                    break
-
-                # Pre-computed windows: c_wins[k] = closes[k:k+50][::-1]
-                # For bar i=50+j, window starts at i-49=j+1
-                win_idx = j + 1
+            # Iterate over the (possibly CUSUM-filtered) entry indices.
+            # Each entry i in `idx` corresponds to bar i; base_matrix row is (i - 49).
+            for pos, bar_i in enumerate(idx):
+                row_idx = int(bar_i) - 49
+                if row_idx < 0 or row_idx >= len(base_matrix):
+                    continue
+                win_idx = row_idx   # same alignment as before (was j+1)
                 sf = get_setup_features(setup_type, o_wins[win_idx], h_wins[win_idx], l_wins[win_idx], c_wins[win_idx], v_wins[win_idx])
                 setup_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
 
@@ -404,7 +416,17 @@ def _extract_setup_short_worker(args):
 
             # TRIPLE-BARRIER 3-class labels for SHORT trades via negated-series trick.
             from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+            from services.ai_modules.cusum_filter import cusum_enabled, filter_entry_indices
             idx = np.arange(50, 50 + max_rows)
+            if cusum_enabled():
+                filtered = filter_entry_indices(
+                    idx, closes.astype(np.float64),
+                    bar_size="5 mins",
+                    target_events_per_year=100,
+                    min_distance=max(1, fh // 2),
+                )
+                if len(filtered) >= 50:
+                    idx = filtered
             raw_lbl = triple_barrier_labels(
                 (-lows).astype(np.float64),
                 (-highs).astype(np.float64),
@@ -417,15 +439,14 @@ def _extract_setup_short_worker(args):
             )
             y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
-            X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
+            X_buf = np.empty((len(idx), n_base + n_setup), dtype=np.float32)
             valid = 0
 
-            for j in range(max_rows):
-                row_idx = j + 1
-                if row_idx >= len(base_matrix):
-                    break
-
-                win_idx = j + 1
+            for pos, bar_i in enumerate(idx):
+                row_idx = int(bar_i) - 49
+                if row_idx < 0 or row_idx >= len(base_matrix):
+                    continue
+                win_idx = row_idx
                 sf = get_short_setup_features(setup_type, o_wins[win_idx], h_wins[win_idx], l_wins[win_idx], c_wins[win_idx], v_wins[win_idx])
                 short_vec = np.array([sf.get(f, 0.0) for f in feat_names], dtype=np.float32)
 
