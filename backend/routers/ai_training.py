@@ -539,6 +539,75 @@ def get_triple_barrier_configs():
 
 
 
+@router.get("/scorecard/{model_name}")
+def get_model_scorecard(model_name: str):
+    """Return the stored ModelScorecard for a given model (from timeseries_models.scorecard)."""
+    try:
+        from server import db as mongo_db
+        if mongo_db is None:
+            return {"success": False, "error": "DB not available"}
+        doc = mongo_db["timeseries_models"].find_one(
+            {"name": model_name},
+            {"_id": 0, "name": 1, "version": 1, "scorecard": 1, "num_classes": 1, "label_scheme": 1, "metrics": 1}
+        )
+        if not doc:
+            return {"success": False, "error": "Model not found"}
+        return {"success": True, **doc}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/scorecards")
+def list_scorecards(setup_type: str = None, bar_size: str = None, min_grade: str = None):
+    """Return all model scorecards, optionally filtered. Used by NIA summary dashboard."""
+    try:
+        from server import db as mongo_db
+        if mongo_db is None:
+            return {"success": False, "scorecards": []}
+        q = {"scorecard": {"$exists": True, "$ne": {}}}
+        cursor = mongo_db["timeseries_models"].find(
+            q,
+            {"_id": 0, "name": 1, "version": 1, "scorecard": 1, "label_scheme": 1}
+        ).limit(500)
+        out = []
+        grade_order = {"A": 5, "B": 4, "C": 3, "D": 2, "F": 1}
+        for d in cursor:
+            sc = d.get("scorecard") or {}
+            if setup_type and sc.get("setup_type", "").upper() != setup_type.upper():
+                continue
+            if bar_size and sc.get("bar_size") != bar_size:
+                continue
+            if min_grade and grade_order.get(sc.get("composite_grade", "F"), 0) < grade_order.get(min_grade, 0):
+                continue
+            out.append({
+                "model_name": d.get("name"),
+                "version": d.get("version"),
+                "scorecard": sc,
+            })
+        # Sort: A first, then by composite_score desc
+        out.sort(key=lambda x: (-grade_order.get(x["scorecard"].get("composite_grade", "F"), 0),
+                                -x["scorecard"].get("composite_score", 0)))
+        return {"success": True, "count": len(out), "scorecards": out}
+    except Exception as e:
+        return {"success": False, "scorecards": [], "error": str(e)}
+
+
+@router.get("/trial-stats/{setup_type}/{bar_size}")
+def get_trial_stats(setup_type: str, bar_size: str, trade_side: str = "long"):
+    """Return trial registry stats for a bucket (used by NIA sidebar)."""
+    try:
+        from server import db as mongo_db
+        if mongo_db is None:
+            return {"success": False}
+        from services.ai_modules.trial_registry import get_trial_statistics, list_recent_trials
+        stats = get_trial_statistics(mongo_db, setup_type, bar_size, trade_side)
+        recent = list_recent_trials(mongo_db, setup_type, bar_size, limit=20)
+        return {"success": True, "stats": stats, "recent_trials": recent}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+
 @router.get("/regime-live")
 def get_live_regime():
     """

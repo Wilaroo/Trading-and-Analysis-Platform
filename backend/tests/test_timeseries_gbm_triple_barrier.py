@@ -58,15 +58,18 @@ def test_extract_symbol_worker_produces_three_classes():
     bars = _synthetic_bars(n=400)
     result = _extract_symbol_worker(("SYN", bars, 50, 10))
     assert result is not None
-    feats, targets = result
+    # Worker now returns (features, targets, event_intervals) — 3-tuple.
+    assert len(result) == 3
+    feats, targets, intervals = result
     assert feats.ndim == 2
     assert targets.ndim == 1
-    # Triple-barrier returns int64 class indices in {0, 1, 2}
     assert targets.dtype == np.int64
     uniques = set(np.unique(targets).tolist())
     assert uniques.issubset({0, 1, 2})
-    # Expect at least two distinct classes in a mixed-regime synthetic series
     assert len(uniques) >= 2
+    # Event intervals present for every sample
+    assert intervals.shape == (len(targets), 2)
+    assert (intervals[:, 0] <= intervals[:, 1]).all()
 
 
 def test_train_from_features_3class_and_predict_3class():
@@ -81,6 +84,7 @@ def test_train_from_features_3class_and_predict_3class():
         assert out is not None
         feats_all.append(out[0])
         tgts_all.append(out[1])
+        # out[2] is event_intervals — ignored here, tested separately
     X = np.vstack(feats_all).astype(np.float32)
     y = np.concatenate(tgts_all).astype(np.int64)
     assert len(X) > 200

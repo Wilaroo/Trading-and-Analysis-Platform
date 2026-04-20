@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ModelScorecard from './ModelScorecard';
 import {
   Crosshair, TrendingUp, Zap, BarChart3, Target,
   ArrowUpDown, GitBranch, Clock, Gauge, Activity,
@@ -210,10 +211,37 @@ const ProfileBadge = ({ profile, validation }) => {
   );
 };
 
+// ─── Profile Scorecard (lazy-loaded) ───────────────────────────────────────
+const ProfileScorecard = memo(({ modelName }) => {
+  const [sc, setSc] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!modelName) { setErr("No model name"); return; }
+    api.get(`/api/ai-training/scorecard/${encodeURIComponent(modelName)}`)
+      .then(res => {
+        if (cancelled) return;
+        if (res.data?.success) setSc(res.data.scorecard || {});
+        else setErr(res.data?.error || "Not found");
+      })
+      .catch(() => !cancelled && setErr("Fetch failed"));
+    return () => { cancelled = true; };
+  }, [modelName]);
+  if (err) return <div className="text-[10px] text-rose-400/70 mt-2">{err}</div>;
+  if (sc === null) return <div className="text-[10px] text-zinc-500 mt-2 italic">Loading scorecard…</div>;
+  return (
+    <div className="mt-2">
+      <ModelScorecard scorecard={sc} />
+    </div>
+  );
+});
+ProfileScorecard.displayName = "ProfileScorecard";
+
 // ─── Setup Card ───────────────────────────
 const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batchData, tbConfigs }) => {
   const [showProfiles, setShowProfiles] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
+  const [scorecardOpen, setScorecardOpen] = useState(null); // bar_size of the open scorecard
   const cfg = SETUP_CONFIG[name] || SETUP_CONFIG.MOMENTUM;
   const Icon = cfg.icon;
 
@@ -408,13 +436,25 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       })()}
                     </div>
                     {p.trained && (
-                      <div className="flex gap-3 mt-1 text-[9px]">
+                      <div className="flex gap-3 mt-1 text-[9px] items-center">
                         <span className="text-zinc-500">{(p.training_samples || 0).toLocaleString()} samples</span>
                         {p.version && <span className="text-zinc-600">{p.version}</span>}
+                        <button
+                          onClick={() => setScorecardOpen(scorecardOpen === p.bar_size ? null : p.bar_size)}
+                          className="ml-auto text-sky-400/80 hover:text-sky-300 underline decoration-dotted"
+                          data-testid={`toggle-scorecard-${name}-${p.bar_size}`}
+                        >
+                          {scorecardOpen === p.bar_size ? 'Hide scorecard' : 'View scorecard'}
+                        </button>
                       </div>
                     )}
                     {pTraining?.status === 'running' && pTraining.message && (
                       <div className="text-[9px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
+                    )}
+
+                    {/* Scorecard expander */}
+                    {scorecardOpen === p.bar_size && (
+                      <ProfileScorecard modelName={p.model_name} />
                     )}
 
                     {/* Per-profile validation detail */}

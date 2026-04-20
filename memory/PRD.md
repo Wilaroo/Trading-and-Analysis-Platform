@@ -10,6 +10,40 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 ## Completed in this session (2026-04-20)
+### Phase 0A — PT/SL Sweep Infrastructure — DONE
+- `/backend/services/ai_modules/triple_barrier_config.py` — get/save per (setup, bar_size, side)
+- `/backend/scripts/sweep_triple_barrier.py` — grid sweep over PT×SL picking balanced class distribution
+- Long + short workers now read per-setup config; callers resolve configs from Mongo before launching workers
+- New API `GET /api/ai-training/triple-barrier-configs`; NIA panel shows PT/SL badge per profile
+
+### Phase 1 — Validator Truth Layer — DONE (code), pending Spark retrain to activate
+- **1A Event Intervals** (`event_intervals.py`): every sample tracked as `[entry_idx, exit_idx]`; concurrency_weights computed via López de Prado avg_uniqueness formula
+- **1B Sample Uniqueness Weights** in `train_from_features(sample_weights=...)` — non-IID correction
+- **1C Purged K-Fold + CPCV** (`purged_cpcv.py`) — `PurgedKFold` and `CombinatorialPurgedKFold` with embargo + purging by event interval overlap
+- **1D Model Scorecard** (`model_scorecard.py`) — `ModelScorecard` dataclass + composite grade A-F from 7 weighted factors
+- **1E Trial Registry** (`trial_registry.py`) — Mongo `research_trials` collection; K_independent from unique feature_set hashes
+- **1F Deflated Sharpe Ratio** (`deflated_sharpe.py`) — Bailey & López de Prado 2014, Euler-Mascheroni expected-max-Sharpe, skew/kurt correction
+- **1G Post-training validator** now auto-builds scorecard + DSR + records trial after every validation
+- **1H Validator** persists scorecard on both `model_validations.scorecard` and `timeseries_models.scorecard`
+- **1I UI** — `ModelScorecard.jsx` color-coded bundle display + expander button per profile in `SetupModelsPanel.jsx`
+- **APIs**: `GET /api/ai-training/scorecard/{model_name}`, `GET /api/ai-training/scorecards`, `GET /api/ai-training/trial-stats/{setup}/{bar_size}`
+
+### Tests — 41 passing (+30 new)
+- `test_phase1_foundation.py` — 19 tests covering event intervals, purged CV, DSR, scorecard
+- `test_trial_registry.py` — 4 tests (mongomock)
+- `test_sample_weights_integration.py` — 2 tests end-to-end
+- `test_triple_barrier_config.py` — 5 tests (mongomock)
+- Existing `test_triple_barrier_labeler.py`, `test_timeseries_gbm_triple_barrier.py` updated for 3-tuple worker return
+
+### Pending on Spark (for Phase 1 to activate)
+1. Save to Github → `git pull` on Spark
+2. `pip install mongomock` in Spark venv (if running pytest)
+3. Restart backend (`pkill server.py` + start)
+4. Run PT/SL sweep: `PYTHONPATH=$HOME/Trading-and-Analysis-Platform/backend python backend/scripts/sweep_triple_barrier.py --symbols 150`
+5. Kick off full retrain via NIA "Start Training" button
+6. After retrain finishes, every model in Mongo `timeseries_models` will have a `scorecard` field; NIA page will show grades + expand-on-click full bundle
+
+## Earlier in this session
 ### XGBoost & setup models rewired to triple-barrier labels (P0) — DONE
 - `_extract_symbol_worker` (Phase 1 generic directional, `timeseries_gbm.py`) now produces
   triple-barrier 3-class labels (0=DOWN/SL-hit, 1=FLAT/time-exit, 2=UP/PT-hit) instead of

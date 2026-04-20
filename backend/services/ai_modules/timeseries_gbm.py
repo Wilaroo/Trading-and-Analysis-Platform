@@ -39,7 +39,7 @@ def _extract_symbol_worker(args):
     """
     Top-level worker function for ProcessPoolExecutor.
 
-    Produces TRIPLE-BARRIER 3-class labels per window:
+    Produces TRIPLE-BARRIER 3-class labels per window and returns event_intervals:
         0 = DOWN (stop-loss hit first)
         1 = FLAT (time barrier hit first)
         2 = UP   (profit target hit first)
@@ -48,12 +48,10 @@ def _extract_symbol_worker(args):
 
     Args:
         args: tuple of (symbol, bars, lookback, forecast_horizon[, pt_mult, sl_mult, atr_period])
-              - bars in chronological order (oldest first)
 
     Returns:
-        (feature_matrix, targets[int64], num_classes=3) or None
+        (feature_matrix, targets[int64], event_intervals[int64 Nx2]) or None
     """
-    # Unpack with sensible defaults — triple-barrier params
     if len(args) == 4:
         symbol, bars, lookback, forecast_horizon = args
         pt_mult, sl_mult, atr_period = 2.0, 1.0, 14
@@ -68,21 +66,18 @@ def _extract_symbol_worker(args):
         if feat_matrix is None or len(feat_matrix) == 0:
             return None
 
-        # Build OHLC arrays for barrier evaluation
         highs = np.array([b.get("high", 0.0) for b in bars], dtype=np.float64)
         lows = np.array([b.get("low", 0.0) for b in bars], dtype=np.float64)
         closes = np.array([b.get("close", 0.0) for b in bars], dtype=np.float64)
         closes = np.where(closes == 0, 1.0, closes)
 
         n_win = len(feat_matrix)
-        # We can only compute targets for windows where future bars exist
         usable = n_win - forecast_horizon
         if usable < 1:
             return None
 
-        # Each window j corresponds to bar index (lookback - 1 + j).
-        # Use triple-barrier labeling from that bar forward.
         from .triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+        from .event_intervals import build_event_intervals_from_triple_barrier
 
         base_idx = lookback - 1
         entry_indices = np.arange(base_idx, base_idx + usable)
@@ -95,13 +90,16 @@ def _extract_symbol_worker(args):
             max_bars=forecast_horizon,
             atr_period=atr_period,
         )
-
-        # Remap {-1, 0, +1} → {0, 1, 2}
         targets = np.array([label_to_class_index(int(lbl)) for lbl in raw_labels], dtype=np.int64)
 
-        feat_matrix = feat_matrix[:usable]
+        intervals = build_event_intervals_from_triple_barrier(
+            highs, lows, closes, entry_indices,
+            pt_atr_mult=pt_mult, sl_atr_mult=sl_mult,
+            max_bars=forecast_horizon, atr_period=atr_period,
+        )
 
-        return (feat_matrix, targets)
+        feat_matrix = feat_matrix[:usable]
+        return (feat_matrix, targets, intervals)
     except Exception as e:
         logger.warning(f"Worker error for {symbol}: {e}")
         return None
@@ -662,6 +660,7 @@ class TimeSeriesGBM:
 
         all_features = []
         all_targets = []
+        all_intervals_per_symbol = []   # List of (n_intervals, 2) arrays — one per symbol
         symbols_processed = 0
 
         # Process symbols in memory-efficient chunks
@@ -696,8 +695,14 @@ class TimeSeriesGBM:
                     if result is not None:
                         chunk_results.append(result)
 
-            # Collect results from this chunk
-            for feat_matrix, targets in chunk_results:
+            # Collect results (worker now returns 3-tuple: features, targets, intervals)
+            for res in chunk_results:
+                if len(res) == 3:
+                    feat_matrix, targets, intervals = res
+                    all_intervals_per_symbol.append(intervals)
+                else:
+                    feat_matrix, targets = res   # backward-compat with 2-tuple
+                    all_intervals_per_symbol.append(None)
                 all_features.append(feat_matrix)
                 all_targets.append(targets)
 
@@ -705,8 +710,6 @@ class TimeSeriesGBM:
             sample_count = sum(len(f) for f in all_features)
             logger.info(f"[Vectorized extraction] {symbols_processed}/{total_symbols} symbols ({sample_count} samples)")
 
-            # Release raw bar data for this chunk to free memory
-            # Delete from the original dict so the caller's memory is freed too
             for symbol, _ in chunk:
                 bars_by_symbol.pop(symbol, None)
             del chunk, worker_args, chunk_results
@@ -719,18 +722,34 @@ class TimeSeriesGBM:
         X = np.vstack(all_features).astype(np.float32)
         y = np.concatenate(all_targets).astype(np.int64)
 
-        # Release individual arrays to free memory before training
-        del all_features, all_targets
+        # Compute per-symbol uniqueness weights, then concatenate in same order as X
+        from .event_intervals import concurrency_weights
+        weights_parts = []
+        for feat_matrix, iv in zip(all_features, all_intervals_per_symbol):
+            n = len(feat_matrix)
+            if iv is None or len(iv) == 0:
+                weights_parts.append(np.ones(n, dtype=np.float32))
+                continue
+            # Per-symbol scope: n_bars = max exit + 1
+            n_bars = int(iv[:, 1].max()) + 2
+            w = concurrency_weights(iv, n_bars=n_bars)
+            # Align length to feature matrix
+            if len(w) != n:
+                w = np.ones(n, dtype=np.float32)
+            weights_parts.append(w)
+        sample_weights = np.concatenate(weights_parts) if weights_parts else None
+
+        del all_features, all_targets, all_intervals_per_symbol, weights_parts
         gc.collect()
 
         logger.info(f"Extracted {len(X)} training samples (vectorized, triple-barrier 3-class)")
 
-        # Filter out any rows with all zeros (failed extraction)
         valid_rows = np.any(X != 0, axis=1)
         X = X[valid_rows]
         y = y[valid_rows]
+        if sample_weights is not None:
+            sample_weights = sample_weights[valid_rows]
 
-        # Delegate to train_from_features so num_classes=3 path is used consistently
         feature_names = feature_engineer.get_feature_names()
         return self.train_from_features(
             X, y, feature_names,
@@ -738,6 +757,7 @@ class TimeSeriesGBM:
             num_boost_round=num_boost_round,
             early_stopping_rounds=early_stopping_rounds,
             num_classes=3,
+            sample_weights=sample_weights,
         )
 
     def train_from_features(
@@ -749,7 +769,8 @@ class TimeSeriesGBM:
         num_boost_round: int = 300,
         early_stopping_rounds: int = 20,
         skip_save: bool = False,
-        num_classes: int = 2
+        num_classes: int = 2,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> 'ModelMetrics':
         """
         Train the model from pre-extracted features and targets.
@@ -766,7 +787,10 @@ class TimeSeriesGBM:
             early_stopping_rounds: Early stopping patience
             skip_save: If True, skip saving to DB (caller will handle saving)
             num_classes: 2 for binary, 3 for UP/FLAT/DOWN
-            
+            sample_weights: Optional per-sample weights for XGBoost (López de Prado
+                            sample-uniqueness; pass `concurrency_weights(event_intervals)`).
+                            Mean should be ~1.0. If None, uniform weighting.
+
         Returns:
             ModelMetrics with training results
         """
@@ -775,7 +799,15 @@ class TimeSeriesGBM:
             return ModelMetrics()
 
         self._num_classes = num_classes
-        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features, {num_classes}-class")
+        uw_note = ""
+        if sample_weights is not None:
+            sw = np.asarray(sample_weights, dtype=np.float32)
+            if len(sw) == len(y):
+                uw_note = f", uniqueness-weighted (mean={sw.mean():.3f}, min={sw.min():.3f})"
+            else:
+                logger.warning(f"sample_weights length {len(sw)} != y length {len(y)} — ignoring")
+                sample_weights = None
+        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features, {num_classes}-class{uw_note}")
 
         # Update feature names for this model
         self._feature_names = feature_names
@@ -797,9 +829,14 @@ class TimeSeriesGBM:
         split_idx = int(len(X) * (1 - validation_split))
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = y[:split_idx], y[split_idx:]
+        if sample_weights is not None:
+            w_train = np.asarray(sample_weights[:split_idx], dtype=np.float32)
+            w_val = np.asarray(sample_weights[split_idx:], dtype=np.float32)
+        else:
+            w_train = w_val = None
 
-        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
-        dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
+        dtrain = xgb.DMatrix(X_train, label=y_train, weight=w_train, feature_names=feature_names)
+        dval = xgb.DMatrix(X_val, label=y_val, weight=w_val, feature_names=feature_names)
 
         self._model = xgb.train(
             train_params,

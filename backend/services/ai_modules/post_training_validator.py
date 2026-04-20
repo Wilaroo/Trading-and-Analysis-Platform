@@ -346,6 +346,120 @@ async def _run_phase3_walk_forward(
         return {"error": str(e), "duration_seconds": 0}
 
 
+# ─── Scorecard Builder (Phase 1 truth layer) ─────────────────────────────────
+
+def _build_scorecard_with_dsr(
+    db,
+    setup_type: str,
+    bar_size: str,
+    model_name: str,
+    version: str,
+    ai_cmp: Dict,
+    mc: Dict,
+    wf: Dict,
+) -> Dict[str, Any]:
+    """
+    Build a ModelScorecard from validator outputs, compute DSR from trial registry,
+    record the trial, and return scorecard dict for persistence + UI.
+    """
+    try:
+        from services.ai_modules.model_scorecard import (
+            ModelScorecard, finalize_scorecard, compute_sortino, compute_calmar,
+        )
+        from services.ai_modules.deflated_sharpe import deflated_sharpe_ratio, sharpe_with_moments
+        from services.ai_modules.trial_registry import record_trial, get_trial_statistics
+    except Exception as e:
+        logger.warning(f"scorecard imports failed: {e}")
+        return {}
+
+    # Pull metrics from validator
+    ai_trades = int(ai_cmp.get("ai_filtered_trades", 0))
+    ai_wr = float(ai_cmp.get("ai_filtered_win_rate", 0))
+    ai_sharpe = float(ai_cmp.get("ai_filtered_sharpe", 0))
+    ai_pnl = float(ai_cmp.get("ai_filtered_pnl", 0))
+    starting_cap = VALIDATION_CONFIG.get("starting_capital", 100000)
+    total_ret = ai_pnl / max(1, starting_cap) * 100.0  # percentage
+    ai_edge_pp = float(ai_wr - ai_cmp.get("setup_only_win_rate", 0))
+
+    max_dd = float(mc.get("worst_case_drawdown", mc.get("expected_max_drawdown", 0)))
+    prob_ruin = float(mc.get("probability_of_ruin", 0))
+    wf_eff = float(wf.get("avg_efficiency_ratio", wf.get("efficiency", 0))) / 100.0
+
+    ai_returns = ai_cmp.get("ai_filtered_returns", []) or []
+    if isinstance(ai_returns, list) and ai_returns:
+        import numpy as _np
+        r_arr = _np.asarray(ai_returns, dtype=_np.float64)
+        sortino = compute_sortino(r_arr)
+        moments = sharpe_with_moments(r_arr, annualization=252.0)
+        skew = moments.get("skew", 0.0)
+        kurt = moments.get("kurt", 3.0)
+    else:
+        sortino = 0.0
+        skew, kurt = 0.0, 3.0
+
+    calmar = compute_calmar(total_ret, max_dd)
+
+    # Profit factor (already in AI cmp)
+    pf = float(ai_cmp.get("ai_filtered_profit_factor", 0))
+
+    # Trial stats for DSR
+    stats = get_trial_statistics(db, setup_type, bar_size)
+    K = stats.get("K_independent", 1)
+    trial_var = stats.get("sharpe_variance", 0.5)  # fall back to reasonable default
+
+    dsr = deflated_sharpe_ratio(
+        sharpe_observed=ai_sharpe,
+        num_trials=max(K, 2),
+        trial_variance=trial_var,
+        sample_length=max(ai_trades, 30),
+        skewness=skew,
+        kurtosis=kurt,
+    )
+
+    sc = ModelScorecard(
+        model_name=model_name,
+        setup_type=setup_type.upper(),
+        bar_size=bar_size,
+        trade_side="long",   # validator runs long-side setups by default
+        version=version,
+        validated_at=datetime.now(timezone.utc).isoformat(),
+        sharpe=ai_sharpe,
+        sortino=sortino,
+        calmar=calmar,
+        deflated_sharpe=dsr["deflated_sharpe"],
+        total_return_pct=total_ret,
+        profit_factor=pf,
+        hit_rate=ai_wr / 100.0,
+        avg_win_loss_ratio=float(ai_cmp.get("ai_filtered_win_loss_ratio", 0)),
+        max_drawdown_pct=max_dd,
+        expected_max_drawdown=float(mc.get("expected_max_drawdown", 0)),
+        worst_case_drawdown=float(mc.get("worst_case_drawdown", 0)),
+        prob_of_ruin=prob_ruin,
+        num_trades=ai_trades,
+        walk_forward_efficiency=wf_eff,
+        oos_sharpe=float(wf.get("oos_sharpe", 0)),
+        ai_vs_setup_edge_pp=ai_edge_pp,
+        num_trials=int(dsr["num_trials"]),
+        dsr_p_value=dsr["p_value"],
+        is_statistically_significant=dsr["is_significant"],
+    )
+    sc = finalize_scorecard(sc)
+
+    # Register this as a new trial (so future DSR calls for this bucket account for it)
+    try:
+        record_trial(
+            db, setup_type, bar_size, "long", model_name,
+            sharpe=ai_sharpe, sample_length=max(ai_trades, 30),
+            skewness=skew, kurtosis=kurt,
+            label_scheme="triple_barrier_3class",
+        )
+    except Exception as e:
+        logger.debug(f"trial_registry record failed: {e}")
+
+    return sc.to_dict()
+
+
+
 # ─── Composite Scoring & Promotion ───────────────────────────────────────────
 
 def _composite_score(metrics: Dict) -> float:
@@ -654,12 +768,32 @@ async def validate_trained_model(
         f"robust={wf.get('is_robust', False)} in {wf['duration_seconds']:.0f}s"
     )
 
+    # ── Scorecard + DSR + Trial Registry (Phase 1 truth layer) ──
+    if progress_callback:
+        await progress_callback(96, "Building scorecard + DSR...")
+    try:
+        scorecard = _build_scorecard_with_dsr(
+            db=db,
+            setup_type=setup_type,
+            bar_size=bar_size,
+            model_name=training_result.get("model_name", ""),
+            version=training_result.get("version", ""),
+            ai_cmp=ai_cmp, mc=mc, wf=wf,
+        )
+    except Exception as sc_err:
+        logger.warning(f"[VALIDATE] scorecard build failed: {sc_err}")
+        scorecard = {}
+
     # ── Promotion Decision ──
     if progress_callback:
         await progress_callback(97, "Computing promotion decision...")
 
     baseline = _load_baseline(db, setup_type, bar_size)
     decision = _make_promotion_decision(ai_cmp, mc, wf, baseline)
+
+    # Attach scorecard to decision for downstream consumers
+    if scorecard:
+        decision["scorecard"] = scorecard
 
     if decision["promote"]:
         baseline_metrics = {
@@ -704,8 +838,22 @@ async def validate_trained_model(
         baseline_metrics=baseline,
         phases_passed=phases_passed,
         total_duration=total_dur,
+        scorecard=decision.get("scorecard", {}),
     )
     _save_validation_record(db, record)
+
+    # Mirror the scorecard onto timeseries_models.scorecard so UI / predict paths
+    # can read it without joining against model_validations.
+    try:
+        if record.get("scorecard") and training_result.get("model_name"):
+            db["timeseries_models"].update_one(
+                {"name": training_result["model_name"]},
+                {"$set": {"scorecard": record["scorecard"]}},
+                upsert=False,
+            )
+    except Exception as e:
+        logger.debug(f"scorecard mirror failed: {e}")
+
     logger.info(f"[VALIDATE] Complete in {total_dur:.0f}s — {record['status']} ({phases_passed}/3 phases passed)")
     return record
 
@@ -861,6 +1009,7 @@ def _build_record(
     reason="", training_accuracy=0,
     ai_comparison=None, monte_carlo=None, walk_forward=None,
     baseline_metrics=None, phases_passed=0, total_duration=0,
+    scorecard=None,
 ):
     return {
         "validation_id": validation_id,
@@ -877,6 +1026,7 @@ def _build_record(
         "phases_passed": phases_passed,
         "phases_total": 3,
         "total_duration_seconds": total_duration,
+        "scorecard": scorecard or {},
     }
 
 
