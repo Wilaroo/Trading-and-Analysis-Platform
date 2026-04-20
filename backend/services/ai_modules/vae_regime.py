@@ -388,6 +388,7 @@ class VAERegimeModel:
         self._trained = True
         self._training_samples = len(features)
         self._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        self._regime_diversity = float(regime_diversity)
 
         # Save model
         self._save_model()
@@ -451,6 +452,7 @@ class VAERegimeModel:
             "regime": regime_name,
             "regime_id": regime_id,
             "confidence": confidence,
+            "regime_diversity": float(getattr(self, "_regime_diversity", 1.0)),
             "all_probs": all_probs,
         }
 
@@ -485,6 +487,7 @@ class VAERegimeModel:
                     "training_samples": self._training_samples,
                     "n_regimes": N_REGIMES,
                     "input_dim": INPUT_DIM,
+                    "regime_diversity": float(getattr(self, "_regime_diversity", 1.0)),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }},
                 upsert=True
@@ -524,10 +527,17 @@ class VAERegimeModel:
             self._scaler_std = np.array(checkpoint["scaler_std"], dtype=np.float32)
             self._version = checkpoint.get("version", "v0.0.0")
             self._training_samples = checkpoint.get("training_samples", 0)
+            # Restore regime_diversity from the outer MongoDB doc (not the torch checkpoint).
+            # Back-compat: older models without this field default to 1.0 which keeps the
+            # confidence-gate diversity floor from kicking in — safe for legacy baselines.
+            self._regime_diversity = float(doc.get("regime_diversity", 1.0))
             self._trained = True
             self._model.eval()
 
-            logger.info(f"[VAE REGIME] Loaded model {self._version} ({self._training_samples} samples)")
+            logger.info(
+                f"[VAE REGIME] Loaded model {self._version} ({self._training_samples} samples, "
+                f"diversity={self._regime_diversity:.3f})"
+            )
             return True
         except Exception as e:
             logger.error(f"[VAE REGIME] Failed to load model: {e}")

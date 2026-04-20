@@ -22,7 +22,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Minimum accuracy to promote a new model over the existing one
-MIN_ACCURACY_THRESHOLD = 0.52  # Better than random (50%)
+MIN_WIN_AUC_THRESHOLD = 0.55  # CNN promotion threshold — must show real edge detecting winners
+MIN_ACCURACY_THRESHOLD = 0.52  # Legacy pattern-classification gate (retained for schema but not primary)
 MIN_TRAINING_SAMPLES = 200
 
 
@@ -440,7 +441,15 @@ def _train_single_model(
         pass
 
     metrics = {
+        # NOTE 2026-04-20: `accuracy` here is pattern-classification accuracy on
+        # a dataset where all samples have the same setup_type (we train one CNN
+        # per setup). That makes it degenerate — it's ~100% for any model that
+        # simply always predicts the majority class. It is NOT a predictive
+        # metric and must NOT be used as the promotion criterion. `win_auc` is
+        # the real metric — it measures whether the CNN can tell winning setups
+        # from losing ones inside the same setup_type.
         "accuracy": round(accuracy, 4),
+        "pattern_classification_accuracy": round(accuracy, 4),
         "win_auc": round(win_auc, 4),
         "test_samples": total,
         "train_samples": n_train,
@@ -450,28 +459,31 @@ def _train_single_model(
         "win_rate_in_data": round(sum(all_win_true) / max(len(all_win_true), 1), 4),
     }
 
-    logger.info(f"CNN {setup_type}/{bar_size}: accuracy={accuracy:.3f}, win_auc={win_auc:.3f}")
+    logger.info(
+        f"CNN {setup_type}/{bar_size}: win_auc={win_auc:.3f} (primary), "
+        f"pattern_acc={accuracy:.3f} (degenerate — same setup_type per sample)"
+    )
 
-    # Save if meets threshold
-    if accuracy >= MIN_ACCURACY_THRESHOLD:
-        # Check if new model beats existing
+    # Save if meets threshold — GATE ON win_auc, not the degenerate pattern accuracy.
+    if win_auc >= MIN_WIN_AUC_THRESHOLD:
+        # Check if new model beats existing on win_auc (the real edge metric).
         existing_model, existing_meta = load_model_from_db(db, setup_type, bar_size)
-        existing_acc = existing_meta.get("metrics", {}).get("accuracy", 0) if existing_meta else 0
+        existing_auc = (existing_meta.get("metrics", {}) or {}).get("win_auc", 0) if existing_meta else 0
 
-        if accuracy >= existing_acc:
+        if win_auc >= existing_auc:
             model_name = save_model_to_db(db, model, setup_type, bar_size, metrics)
             metrics["saved"] = True
             metrics["model_name"] = model_name
-            if existing_acc > 0:
-                logger.info(f"  Model promoted: {accuracy:.3f} > {existing_acc:.3f} (old)")
+            if existing_auc > 0:
+                logger.info(f"  Model promoted: win_auc {win_auc:.3f} >= existing {existing_auc:.3f}")
         else:
             metrics["saved"] = False
-            metrics["reason"] = f"New acc {accuracy:.3f} < existing {existing_acc:.3f}"
-            logger.info(f"  Model NOT promoted: {accuracy:.3f} < {existing_acc:.3f}")
+            metrics["reason"] = f"New win_auc {win_auc:.3f} < existing {existing_auc:.3f}"
+            logger.info(f"  Model NOT promoted: win_auc {win_auc:.3f} < existing {existing_auc:.3f}")
     else:
         metrics["saved"] = False
-        metrics["reason"] = f"Accuracy {accuracy:.3f} below threshold {MIN_ACCURACY_THRESHOLD}"
-        logger.info(f"  Model NOT saved: accuracy {accuracy:.3f} < {MIN_ACCURACY_THRESHOLD}")
+        metrics["reason"] = f"win_auc {win_auc:.3f} below threshold {MIN_WIN_AUC_THRESHOLD}"
+        logger.info(f"  Model NOT saved: win_auc {win_auc:.3f} < {MIN_WIN_AUC_THRESHOLD}")
 
     return {
         "success": True,

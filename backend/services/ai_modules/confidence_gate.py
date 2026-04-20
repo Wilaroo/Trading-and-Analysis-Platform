@@ -468,29 +468,41 @@ class ConfidenceGate:
         if vae_signal.get("has_prediction"):
             vae_regime = vae_signal["regime"]
             vae_confidence = vae_signal["confidence"]
+            vae_diversity = vae_signal.get("regime_diversity", 1.0)
 
-            trade_is_long = direction.lower() in ("long", "buy")
+            # GATE: refuse VAE signal if the trained VAE collapsed to a single
+            # regime (mode collapse). Diversity = entropy of regime assignment
+            # across training samples, normalized to [0,1]. Below 0.3 the VAE
+            # is essentially picking the same regime for every sample and its
+            # regime classification is meaningless.
+            if vae_diversity < 0.3:
+                reasoning.append(
+                    f"VAE signal IGNORED — regime diversity {vae_diversity:.2f} below 0.3 threshold "
+                    f"(mode collapse; rebuild VAE with balanced regime distribution)"
+                )
+            else:
+                trade_is_long = direction.lower() in ("long", "buy")
 
-            if vae_regime == "bull_trending" and trade_is_long:
-                pts = min(8, int(8 * vae_confidence))
-                confidence_points += pts
-                reasoning.append(f"VAE detects BULL TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
-            elif vae_regime == "bear_trending" and not trade_is_long:
-                pts = min(8, int(8 * vae_confidence))
-                confidence_points += pts
-                reasoning.append(f"VAE detects BEAR TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
-            elif vae_regime == "momentum_surge":
-                confidence_points += 5
-                reasoning.append(f"VAE detects MOMENTUM SURGE ({vae_confidence:.0%} conf) — high conviction (+5)")
-            elif vae_regime == "high_volatility":
-                confidence_points -= 5
-                position_multiplier *= 0.85
-                reasoning.append(f"VAE detects HIGH VOLATILITY regime ({vae_confidence:.0%}) — reducing exposure (-5, size -15%)")
-            elif vae_regime == "mean_reverting":
-                reasoning.append(f"VAE detects MEAN REVERTING regime ({vae_confidence:.0%}) — neutral")
-            elif (vae_regime == "bull_trending" and not trade_is_long) or (vae_regime == "bear_trending" and trade_is_long):
-                confidence_points -= 5
-                reasoning.append(f"VAE regime {vae_regime.upper()} AGAINST {direction.upper()} (-5)")
+                if vae_regime == "bull_trending" and trade_is_long:
+                    pts = min(8, int(8 * vae_confidence))
+                    confidence_points += pts
+                    reasoning.append(f"VAE detects BULL TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
+                elif vae_regime == "bear_trending" and not trade_is_long:
+                    pts = min(8, int(8 * vae_confidence))
+                    confidence_points += pts
+                    reasoning.append(f"VAE detects BEAR TRENDING regime ({vae_confidence:.0%} conf) — aligned (+{pts})")
+                elif vae_regime == "momentum_surge":
+                    confidence_points += 5
+                    reasoning.append(f"VAE detects MOMENTUM SURGE ({vae_confidence:.0%} conf) — high conviction (+5)")
+                elif vae_regime == "high_volatility":
+                    confidence_points -= 5
+                    position_multiplier *= 0.85
+                    reasoning.append(f"VAE detects HIGH VOLATILITY regime ({vae_confidence:.0%}) — reducing exposure (-5, size -15%)")
+                elif vae_regime == "mean_reverting":
+                    reasoning.append(f"VAE detects MEAN REVERTING regime ({vae_confidence:.0%}) — neutral")
+                elif (vae_regime == "bull_trending" and not trade_is_long) or (vae_regime == "bear_trending" and trade_is_long):
+                    confidence_points -= 5
+                    reasoning.append(f"VAE regime {vae_regime.upper()} AGAINST {direction.upper()} (-5)")
 
         # --- 5c. CNN-LSTM TEMPORAL SIGNAL (max +10 / floor -5) ---
         cnn_lstm_signal = await self._get_cnn_lstm_signal(symbol, direction)

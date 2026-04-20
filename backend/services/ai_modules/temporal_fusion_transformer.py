@@ -142,7 +142,7 @@ class TFTModel:
                     nn.Linear(hidden_dim * n_timeframes, hidden_dim),
                     nn.GELU(),
                     nn.Dropout(0.2),
-                    nn.Linear(hidden_dim, 3),  # up, down, flat
+                    nn.Linear(hidden_dim, 3),  # triple-barrier: down / flat / up
                 )
 
                 self.confidence_head = nn.Sequential(
@@ -328,9 +328,13 @@ class TFTModel:
             if features is None or len(features) < 10:
                 continue
 
-            # Target: direction of daily close 5 bars ahead
+            # Target: TRIPLE-BARRIER label on daily bars, horizon 5 days, 2× ATR PT, 1× ATR SL.
+            # Replaces the old binary "close > close_t-5" target that caused majority-
+            # class collapse in BULL regimes (always-up predictor ≈ 53% val accuracy).
             daily_bars = bars_by_tf.get("1 day", [])
-            daily_closes = np.array([b["close"] for b in daily_bars], dtype=np.float32)
+            daily_closes = np.array([b["close"] for b in daily_bars], dtype=np.float64)
+            daily_highs = np.array([b.get("high", b["close"]) for b in daily_bars], dtype=np.float64)
+            daily_lows = np.array([b.get("low", b["close"]) for b in daily_bars], dtype=np.float64)
 
             # Align targets with features (features start at bar 20)
             n_feats = len(features)
@@ -343,14 +347,42 @@ class TFTModel:
             if usable < 10:
                 continue
 
-            targets = np.zeros(usable, dtype=np.int64)
-            for i in range(usable):
-                future_idx = 20 + i + 5
-                current_idx = 20 + i
-                if future_idx < n_daily:
-                    targets[i] = 1 if daily_closes[future_idx] > daily_closes[current_idx] else 0
+            from services.ai_modules.triple_barrier_labeler import (
+                triple_barrier_label_single, atr as _atr, label_to_class_index,
+            )
+            atr_series = _atr(daily_highs, daily_lows, daily_closes, period=14)
 
-            all_features.append(features[:usable])
+            # Build triple-barrier targets per usable feature row
+            targets_raw = []
+            keep_mask = []
+            for i in range(usable):
+                current_idx = 20 + i
+                if current_idx >= len(atr_series):
+                    keep_mask.append(False)
+                    continue
+                atr_val = atr_series[current_idx]
+                if not np.isfinite(atr_val) or atr_val <= 0:
+                    keep_mask.append(False)
+                    continue
+                tb = triple_barrier_label_single(
+                    daily_highs, daily_lows, daily_closes,
+                    entry_idx=current_idx,
+                    pt_atr_mult=2.0,
+                    sl_atr_mult=1.0,
+                    max_bars=5,  # 5-bar horizon matches prior design
+                    atr_value=float(atr_val),
+                )
+                targets_raw.append(label_to_class_index(tb))  # 0/1/2
+                keep_mask.append(True)
+
+            if sum(keep_mask) < 10:
+                continue
+
+            keep_mask = np.array(keep_mask, dtype=bool)
+            targets = np.array(targets_raw, dtype=np.int64)
+            features_kept = features[:usable][keep_mask]
+
+            all_features.append(features_kept)
             all_targets.append(targets)
             symbols_used += 1
 
@@ -363,14 +395,22 @@ class TFTModel:
         logger.info(f"[TFT] Training data: {X.shape[0]:,} samples from {symbols_used} symbols, {X.shape[1]} features")
 
         # Class balance diagnostic — detects majority-class collapse.
-        # U.S. equities have a ~3% upward bias, so "always predict UP" gets ~52-53%.
-        # If final val_acc ≤ majority_pct + 1%, the model learned nothing useful.
-        class_counts = np.bincount(y, minlength=2)
+        # Triple-barrier targets: 0=down (SL hit), 1=flat (time exit), 2=up (PT hit).
+        # Healthy distribution has flat often dominating (30-60%) with down/up balanced.
+        # Old binary-target baseline (always predict UP) was ≈52-53%; with TB, no
+        # single class should exceed ~55%.
+        class_counts = np.bincount(y, minlength=3)
         majority_pct = class_counts.max() / len(y) if len(y) > 0 else 0.5
         logger.info(
-            f"[TFT] Class balance: down={class_counts[0]}, up={class_counts[1]}, "
-            f"majority={majority_pct:.3%} (this is the 'always predict majority' baseline)"
+            f"[TFT] Class balance (triple-barrier): "
+            f"down={class_counts[0]}, flat={class_counts[1]}, up={class_counts[2]}, "
+            f"majority={majority_pct:.3%} (always-predict-majority baseline)"
         )
+        if majority_pct > 0.55:
+            logger.warning(
+                f"[TFT] Heavy class imbalance ({majority_pct:.1%}) — consider tightening "
+                f"PT/SL multiples (current: 2x ATR PT, 1x ATR SL, 5-bar horizon)"
+            )
 
         # Normalize
         self._scaler_mean = X.mean(axis=0).astype(np.float32)
@@ -476,11 +516,22 @@ class TFTModel:
             "accuracy": best_val_acc,
             "majority_baseline": float(majority_pct),
             "edge_above_baseline": float(edge_vs_baseline),
-            "class_counts": {"down": int(class_counts[0]), "up": int(class_counts[1])},
+            "class_counts": {
+                "down": int(class_counts[0]),
+                "flat": int(class_counts[1]),
+                "up": int(class_counts[2]),
+            },
             "training_samples": len(X),
             "symbols_used": symbols_used,
             "timeframe_importance": tf_importance,
             "device": str(self._device),
+            "label_scheme": "triple_barrier_atr",
+            "label_params": {
+                "pt_atr_mult": 2.0,
+                "sl_atr_mult": 1.0,
+                "max_bars": 5,
+                "atr_period": 14,
+            },
         }
 
     def predict(self, bars_by_tf: Dict[str, List[Dict]], symbol: str = "UNKNOWN") -> Dict[str, Any]:
@@ -518,9 +569,13 @@ class TFTModel:
             conf = confidence.cpu().item()
             weights = tf_weights.cpu().numpy()[0]
 
-        # Map to direction
+        # Map class index to direction (must match triple-barrier label ordering).
+        # FIXED 2026-04-20: was {0:"down", 1:"up", 2:"flat"} which mis-mapped the
+        # softmax output — the old binary target scheme had class 1 = "up" but our
+        # triple-barrier labeler produces 1 = "flat". Any prior inference with this
+        # model is unreliable until retrained.
         pred_class = int(np.argmax(probs))
-        direction_map = {0: "down", 1: "up", 2: "flat"}
+        direction_map = {0: "down", 1: "flat", 2: "up"}
         direction = direction_map.get(pred_class, "flat")
 
         tf_importance = {tf: float(w) for tf, w in zip(TFT_TIMEFRAMES, weights)}
@@ -528,7 +583,11 @@ class TFTModel:
         return {
             "direction": direction,
             "confidence": conf,
-            "probabilities": {"up": float(probs[1]), "down": float(probs[0]), "flat": float(probs[2]) if len(probs) > 2 else 0.0},
+            "probabilities": {
+                "down": float(probs[0]),
+                "flat": float(probs[1]),
+                "up": float(probs[2]),
+            },
             "timeframe_weights": tf_importance,
             "has_prediction": True,
             "model": self.MODEL_NAME,
