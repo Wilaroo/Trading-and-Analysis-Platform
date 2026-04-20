@@ -1856,7 +1856,8 @@ class TimeSeriesAIService:
                         "trained_at": metrics.last_trained if metrics else None,
                         "forecast_horizon": profile["forecast_horizon"],
                         "noise_threshold": profile["noise_threshold"],
-                        "num_classes": profile.get("num_classes", 3),
+                        "num_classes": int(getattr(model, "_num_classes", profile.get("num_classes", 3))),
+                        "label_scheme": "triple_barrier_3class" if int(getattr(model, "_num_classes", 3)) >= 3 else "binary",
                     })
                 else:
                     # Check MongoDB for trained model not yet loaded into memory
@@ -1866,7 +1867,7 @@ class TimeSeriesAIService:
                         try:
                             db_model = self._db["timeseries_models"].find_one(
                                 {"name": model_name},
-                                {"_id": 0, "metrics": 1, "version": 1, "saved_at": 1}
+                                {"_id": 0, "metrics": 1, "version": 1, "saved_at": 1, "num_classes": 1, "label_scheme": 1}
                             )
                         except Exception:
                             pass
@@ -1874,6 +1875,7 @@ class TimeSeriesAIService:
                     if db_model and db_model.get("metrics"):
                         trained_count += 1
                         m = db_model["metrics"]
+                        nc = int(db_model.get("num_classes", profile.get("num_classes", 3)))
                         profile_statuses.append({
                             "bar_size": bar_size,
                             "trained": True,
@@ -1886,7 +1888,8 @@ class TimeSeriesAIService:
                             "trained_at": m.get("last_trained") or db_model.get("saved_at"),
                             "forecast_horizon": profile["forecast_horizon"],
                             "noise_threshold": profile["noise_threshold"],
-                            "num_classes": profile.get("num_classes", 3),
+                            "num_classes": nc,
+                            "label_scheme": db_model.get("label_scheme") or ("triple_barrier_3class" if nc >= 3 else "binary"),
                         })
                     else:
                         profile_statuses.append({
@@ -1897,6 +1900,7 @@ class TimeSeriesAIService:
                             "forecast_horizon": profile["forecast_horizon"],
                             "noise_threshold": profile["noise_threshold"],
                             "num_classes": profile.get("num_classes", 3),
+                            "label_scheme": "triple_barrier_3class",
                         })
             
             models[st_name] = {

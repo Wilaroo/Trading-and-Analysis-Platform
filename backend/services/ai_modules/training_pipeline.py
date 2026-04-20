@@ -312,11 +312,20 @@ def _extract_setup_long_worker(args):
             if max_rows <= 0:
                 continue
 
-            # VECTORIZED targets: future return for all bars at once
+            # TRIPLE-BARRIER 3-class targets (López de Prado): replaces noise-band labels.
+            # 0=DOWN (SL hit first), 1=FLAT (time exit), 2=UP (PT hit first).
+            # Time barrier = fh bars. PT/SL are ATR multiples (defaults 2.0 / 1.0).
+            from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
             idx = np.arange(50, 50 + max_rows)
-            with np.errstate(divide='ignore', invalid='ignore'):
-                fr = np.where(closes[idx] > 0, (closes[idx + fh] - closes[idx]) / closes[idx], 0.0)
-            y_all = np.where(np.abs(fr) < noise_thr, 1.0, np.where(fr > 0, 2.0, 0.0)).astype(np.float32)
+            raw_lbl = triple_barrier_labels(
+                highs.astype(np.float64), lows.astype(np.float64), closes.astype(np.float64),
+                entry_indices=idx,
+                pt_atr_mult=2.0,
+                sl_atr_mult=1.0,
+                max_bars=fh,
+                atr_period=14,
+            )
+            y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
             X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
             valid = 0
@@ -383,12 +392,29 @@ def _extract_setup_short_worker(args):
             if max_rows <= 0:
                 continue
 
-            # VECTORIZED targets: inverted future return for shorts
+            # TRIPLE-BARRIER 3-class targets for SHORT trades. For shorts we invert
+            # the PT/SL logic: a short "wins" when price falls to the lower barrier
+            # before rising to the upper. We achieve that by negating the close
+            # series when evaluating barriers (equivalently, flipping the label
+            # sign).
+            # Shortcut: run triple-barrier on the NEGATED close/high/low series.
+            # Implementation note: for shorts, the profit target is BELOW entry
+            # and the stop is ABOVE entry. Flipping sign keeps the labeler
+            # identical and just relabels UP/DOWN roles.
+            from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
             idx = np.arange(50, 50 + max_rows)
-            with np.errstate(divide='ignore', invalid='ignore'):
-                fr = np.where(closes[idx] > 0, (closes[idx + fh] - closes[idx]) / closes[idx], 0.0)
-            inv_fr = -fr
-            y_all = np.where(np.abs(inv_fr) < noise_thr, 1.0, np.where(inv_fr > 0, 2.0, 0.0)).astype(np.float32)
+            # Negate series: max entries become min entries, swapping PT/SL roles
+            raw_lbl = triple_barrier_labels(
+                (-lows).astype(np.float64),    # new "highs" = -lows
+                (-highs).astype(np.float64),   # new "lows"  = -highs
+                (-closes).astype(np.float64),
+                entry_indices=idx,
+                pt_atr_mult=2.0,
+                sl_atr_mult=1.0,
+                max_bars=fh,
+                atr_period=14,
+            )
+            y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
             X_buf = np.empty((max_rows, n_base + n_setup), dtype=np.float32)
             valid = 0
@@ -2551,6 +2577,8 @@ async def run_training_pipeline(
                             for sym, bars in batch_bars.items():
 
                                 closes = np.array([b["close"] for b in bars], dtype=np.float32)
+                                highs = np.array([b.get("high", 0) for b in bars], dtype=np.float32)
+                                lows = np.array([b.get("low", 0) for b in bars], dtype=np.float32)
 
                                 # Bulk-extract base features ONCE for this symbol (NVMe cached)
                                 base_matrix = cached_extract_features_bulk(feature_engineer, bars, sym, bs)
@@ -2562,7 +2590,7 @@ async def run_training_pipeline(
                                 if max_rows <= 0:
                                     continue
 
-                                # === VECTORIZED: Targets for all bars at once ===
+                                # === TRIPLE-BARRIER 3-class targets ===
                                 idx_arr = np.arange(50, 50 + max_rows)
                                 fwd_idx = idx_arr + fh
                                 # Clip to valid range
@@ -2575,13 +2603,16 @@ async def run_training_pipeline(
                                 if not valid_mask.any():
                                     continue
 
-                                with np.errstate(divide='ignore', invalid='ignore'):
-                                    future_ret = np.where(
-                                        closes[idx_arr] > 0,
-                                        (closes[fwd_idx] - closes[idx_arr]) / closes[idx_arr],
-                                        0.0,
-                                    )
-                                y_all = np.where(future_ret > 0, 1.0, 0.0).astype(np.float32)
+                                from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+                                raw_lbl = triple_barrier_labels(
+                                    highs.astype(np.float64), lows.astype(np.float64), closes.astype(np.float64),
+                                    entry_indices=idx_arr,
+                                    pt_atr_mult=2.0,
+                                    sl_atr_mult=1.0,
+                                    max_bars=fh,
+                                    atr_period=14,
+                                )
+                                y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
                                 # base_matrix row indices: i - 49 for i in idx_arr → row = i - 49
                                 base_rows = base_matrix[idx_arr - 49]
@@ -2653,7 +2684,7 @@ async def run_training_pipeline(
 
                             logger.info(
                                 f"Training {regime_model_name}: {len(X)} samples, "
-                                f"UP={np.sum(y==1)}, DOWN={np.sum(y==0)}"
+                                f"UP={np.sum(y==2)}, FLAT={np.sum(y==1)}, DOWN={np.sum(y==0)}"
                             )
 
                             model = TimeSeriesGBM(model_name=regime_model_name, forecast_horizon=fh)
@@ -2663,7 +2694,7 @@ async def run_training_pipeline(
                                 X, y, base_names,
                                 num_boost_round=150,
                                 early_stopping_rounds=15,
-                                num_classes=2,
+                                num_classes=3,
                             )
 
                             del X, y
@@ -2793,6 +2824,8 @@ async def run_training_pipeline(
 
                             for sym, bars in batch_bars.items():
                                 closes = np.array([b["close"] for b in bars], dtype=np.float32)
+                                highs_ens = np.array([b.get("high", 0) for b in bars], dtype=np.float64)
+                                lows_ens = np.array([b.get("low", 0) for b in bars], dtype=np.float64)
                                 
                                 # VECTORIZED bulk feature extraction (NVMe cached)
                                 bulk_features = cached_extract_features_bulk(feature_engineer, bars, sym, anchor_bs)
@@ -2804,6 +2837,22 @@ async def run_training_pipeline(
                                     continue
                                 
                                 features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features)
+                                
+                                # Pre-compute TRIPLE-BARRIER labels for all usable windows at once
+                                from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+                                tb_entry_idx = np.arange(n_usable) + (lb - 1)
+                                tb_raw_lbl = triple_barrier_labels(
+                                    highs_ens, lows_ens, closes.astype(np.float64),
+                                    entry_indices=tb_entry_idx,
+                                    pt_atr_mult=2.0,
+                                    sl_atr_mult=1.0,
+                                    max_bars=anchor_fh,
+                                    atr_period=14,
+                                )
+                                tb_targets = np.array(
+                                    [label_to_class_index(int(v)) for v in tb_raw_lbl],
+                                    dtype=np.int64,
+                                )
                                 
                                 # BATCH predict through all sub-models at once (replaces per-bar predict loop)
                                 sub_raw_preds = {}
@@ -2908,16 +2957,8 @@ async def run_training_pipeline(
                                     )
                                     feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
                                     
-                                    # Target: future return over daily forecast horizon
-                                    future_return = (
-                                        (closes[bar_idx + anchor_fh] - closes[bar_idx]) / closes[bar_idx]
-                                    )
-                                    if future_return > 0.003:
-                                        target = 2  # UP
-                                    elif future_return < -0.003:
-                                        target = 0  # DOWN
-                                    else:
-                                        target = 1  # FLAT
+                                    # TRIPLE-BARRIER 3-class target (pre-computed above)
+                                    target = int(tb_targets[i])
                                     
                                     all_X.append(feat_vec)
                                     all_y.append(target)

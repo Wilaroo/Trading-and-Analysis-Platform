@@ -387,7 +387,13 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                     <div className="flex gap-2 mt-1 text-[9px]">
                       <span className="text-zinc-600">h={p.forecast_horizon}</span>
                       <span className="text-zinc-600">thr={((p.noise_threshold || 0) * 100).toFixed(2)}%</span>
-                      {p.num_classes >= 3 && <span className="text-amber-500/60">3-class</span>}
+                      {p.label_scheme === "triple_barrier_3class" && (
+                        <span className="text-emerald-400/80" data-testid={`label-scheme-${name}-${p.bar_size}`}>Triple-Barrier</span>
+                      )}
+                      {p.label_scheme === "binary" && (
+                        <span className="text-rose-400/80" title="Legacy binary model — retrain recommended" data-testid={`label-scheme-${name}-${p.bar_size}`}>Legacy binary</span>
+                      )}
+                      {p.num_classes >= 3 && !p.label_scheme && <span className="text-amber-500/60">3-class</span>}
                     </div>
                     {p.trained && (
                       <div className="flex gap-3 mt-1 text-[9px]">

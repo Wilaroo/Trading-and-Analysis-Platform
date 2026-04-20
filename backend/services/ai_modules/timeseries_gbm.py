@@ -39,41 +39,66 @@ def _extract_symbol_worker(args):
     """
     Top-level worker function for ProcessPoolExecutor.
 
+    Produces TRIPLE-BARRIER 3-class labels per window:
+        0 = DOWN (stop-loss hit first)
+        1 = FLAT (time barrier hit first)
+        2 = UP   (profit target hit first)
+
     Must be at module scope so pickle can serialize it across processes.
 
     Args:
-        args: tuple of (symbol, bars, lookback, forecast_horizon)
+        args: tuple of (symbol, bars, lookback, forecast_horizon[, pt_mult, sl_mult, atr_period])
               - bars in chronological order (oldest first)
 
     Returns:
-        (feature_matrix, targets) or None
+        (feature_matrix, targets[int64], num_classes=3) or None
     """
-    symbol, bars, lookback, forecast_horizon = args
+    # Unpack with sensible defaults — triple-barrier params
+    if len(args) == 4:
+        symbol, bars, lookback, forecast_horizon = args
+        pt_mult, sl_mult, atr_period = 2.0, 1.0, 14
+    elif len(args) == 7:
+        symbol, bars, lookback, forecast_horizon, pt_mult, sl_mult, atr_period = args
+    else:
+        return None
+
     try:
         fe = TimeSeriesFeatureEngineer(lookback)
         feat_matrix = fe.extract_features_bulk(bars)
         if feat_matrix is None or len(feat_matrix) == 0:
             return None
 
-        # feat_matrix row j corresponds to bar at index (lookback - 1 + j)
-        # Target: binary — did price go up over forecast_horizon bars?
-        closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+        # Build OHLC arrays for barrier evaluation
+        highs = np.array([b.get("high", 0.0) for b in bars], dtype=np.float64)
+        lows = np.array([b.get("low", 0.0) for b in bars], dtype=np.float64)
+        closes = np.array([b.get("close", 0.0) for b in bars], dtype=np.float64)
         closes = np.where(closes == 0, 1.0, closes)
 
         n_win = len(feat_matrix)
-        # We can only compute targets for windows where future price exists
+        # We can only compute targets for windows where future bars exist
         usable = n_win - forecast_horizon
         if usable < 1:
             return None
 
-        # Current close for each window
-        base_idx = lookback - 1  # first window's bar index
-        current_prices = closes[base_idx: base_idx + usable]
-        future_prices = closes[base_idx + forecast_horizon: base_idx + forecast_horizon + usable]
+        # Each window j corresponds to bar index (lookback - 1 + j).
+        # Use triple-barrier labeling from that bar forward.
+        from .triple_barrier_labeler import triple_barrier_labels, label_to_class_index
 
-        targets = (future_prices > current_prices).astype(np.float32)
+        base_idx = lookback - 1
+        entry_indices = np.arange(base_idx, base_idx + usable)
 
-        # Trim feature matrix to match
+        raw_labels = triple_barrier_labels(
+            highs, lows, closes,
+            entry_indices=entry_indices,
+            pt_atr_mult=pt_mult,
+            sl_atr_mult=sl_mult,
+            max_bars=forecast_horizon,
+            atr_period=atr_period,
+        )
+
+        # Remap {-1, 0, +1} → {0, 1, 2}
+        targets = np.array([label_to_class_index(int(lbl)) for lbl in raw_labels], dtype=np.int64)
+
         feat_matrix = feat_matrix[:usable]
 
         return (feat_matrix, targets)
@@ -294,7 +319,13 @@ class TimeSeriesGBM:
                 loaded_name = doc.get("name", "unknown")
                 loaded_version = doc.get("version", "v0.0.0")
                 self._metrics = ModelMetrics(**doc.get("metrics", {}))
-                logger.info(f"Loaded model '{loaded_name}' version {loaded_version} (requested: {self.model_name})")
+                # Restore num_classes from persisted metadata (default 2 for legacy binary models)
+                self._num_classes = int(doc.get("num_classes", 2))
+                logger.info(
+                    f"Loaded model '{loaded_name}' version {loaded_version} "
+                    f"({self._num_classes}-class, {doc.get('label_scheme', 'legacy')}) "
+                    f"(requested: {self.model_name})"
+                )
                 if loaded_name == self.model_name:
                     self._version = loaded_version
                 else:
@@ -343,6 +374,8 @@ class TimeSeriesGBM:
                 "model_format": model_format,  # xgboost_json_zlib (compressed)
                 "engine": "xgboost",
                 "version": self._version,
+                "num_classes": int(self._num_classes),
+                "label_scheme": "triple_barrier_3class" if self._num_classes >= 3 else "binary",
                 "metrics": self._metrics.to_dict(),
                 "params": {k: v for k, v in self.params.items() if not callable(v)},
                 "feature_names": self._feature_names,
@@ -420,8 +453,12 @@ class TimeSeriesGBM:
     FEATURE_CACHE_COLLECTION = "feature_cache"
     
     def _get_feature_cache_key(self, symbol: str, bar_size: str = "default") -> str:
-        """Generate a cache key for a symbol's features"""
-        return f"{symbol}_{bar_size}_{self.forecast_horizon}"
+        """Generate a cache key for a symbol's features.
+        
+        Includes target-version tag (tb3c = triple-barrier 3-class) so that
+        switching the labeling scheme invalidates old cached entries.
+        """
+        return f"{symbol}_{bar_size}_{self.forecast_horizon}_tb3c"
     
     def _save_features_to_cache(self, symbol: str, features: List[List[float]], targets: List[int], bar_size: str = "default"):
         """Save precomputed features to MongoDB for reuse across training cycles"""
@@ -539,25 +576,32 @@ class TimeSeriesGBM:
             
             if bulk_features is not None and len(bulk_features) > self.forecast_horizon:
                 # bulk_features shape: (n_windows, 46) — one row per valid window
-                # Calculate targets for each window
-                closes = np.array([b.get("close", 0) for b in bars], dtype=np.float32)
+                # Calculate TRIPLE-BARRIER 3-class targets for each window
+                closes_f = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+                highs_f = np.array([b.get("high", 0) for b in bars], dtype=np.float64)
+                lows_f = np.array([b.get("low", 0) for b in bars], dtype=np.float64)
                 lb = self._feature_engineer.lookback  # 50
                 
-                # Window i corresponds to bar index (lb-1+i) as the "current" bar
-                # Target: price at (current + forecast_horizon) vs current
-                n_usable = min(len(bulk_features), len(closes) - lb - self.forecast_horizon + 1)
+                n_usable = min(len(bulk_features), len(closes_f) - lb - self.forecast_horizon + 1)
                 
                 if n_usable > 0:
                     symbol_features_np = bulk_features[:n_usable]
                     
-                    # Vectorized target computation
-                    current_indices = np.arange(n_usable) + (lb - 1)
-                    future_indices = current_indices + self.forecast_horizon
-                    valid_mask = (future_indices < len(closes)) & (closes[current_indices] > 0)
-                    symbol_targets_np = np.zeros(n_usable, dtype=np.float32)
-                    if valid_mask.any():
-                        returns = (closes[future_indices[valid_mask]] - closes[current_indices[valid_mask]]) / closes[current_indices[valid_mask]]
-                        symbol_targets_np[valid_mask] = (returns > 0).astype(np.float32)
+                    # Triple-barrier labels {-1,0,+1} → 3-class {0,1,2}
+                    from .triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+                    entry_indices = np.arange(n_usable) + (lb - 1)
+                    raw_labels = triple_barrier_labels(
+                        highs_f, lows_f, closes_f,
+                        entry_indices=entry_indices,
+                        pt_atr_mult=2.0,
+                        sl_atr_mult=1.0,
+                        max_bars=self.forecast_horizon,
+                        atr_period=14,
+                    )
+                    symbol_targets_np = np.array(
+                        [label_to_class_index(int(lbl)) for lbl in raw_labels],
+                        dtype=np.int64,
+                    )
                     
                     feature_chunks.append(symbol_features_np)
                     target_chunks.append(symbol_targets_np)
@@ -576,90 +620,21 @@ class TimeSeriesGBM:
             logger.warning(f"Insufficient training data: {total_samples} samples")
             return ModelMetrics()
             
-        logger.info(f"Extracted {total_samples} training samples")
+        logger.info(f"Extracted {total_samples} training samples (triple-barrier 3-class)")
         
         # Combine numpy chunks (no Python list overhead, no double-copy)
         X = np.vstack(feature_chunks).astype(np.float32)
-        y = np.concatenate(target_chunks).astype(np.float32)
+        y = np.concatenate(target_chunks).astype(np.int64)
         del feature_chunks, target_chunks
         
-        # Log class distribution
-        n_up = np.sum(y == 1)
-        n_down = np.sum(y == 0)
-        logger.info(f"Class distribution: UP={n_up} ({n_up/len(y)*100:.1f}%), DOWN={n_down} ({n_down/len(y)*100:.1f}%)")
-        
-        # Split train/validation
-        split_idx = int(len(X) * (1 - validation_split))
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
-        
-        # Create XGBoost DMatrix datasets
-        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=self._feature_names)
-        dval = xgb.DMatrix(X_val, label=y_val, feature_names=self._feature_names)
-        
-        # Train model with early stopping
-        self._model = xgb.train(
-            self.params,
-            dtrain,
-            num_boost_round=num_boost_round * 2,  # More rounds for better learning
-            evals=[(dtrain, "train"), (dval, "val")],
+        # Delegate to train_from_features(num_classes=3) — canonical path
+        return self.train_from_features(
+            X, y, self._feature_names,
+            validation_split=validation_split,
+            num_boost_round=num_boost_round,
             early_stopping_rounds=early_stopping_rounds,
-            verbose_eval=False
+            num_classes=3,
         )
-
-        # Log GPU/device status after training
-        best_iter = getattr(self._model, 'best_iteration', None)
-        device_used = self.params.get("device", "cpu")
-        logger.info(f"[XGB] {self.model_name} trained on device={device_used}, "
-                    f"best_iteration={best_iter}, trees={self._model.num_boosted_rounds()}")
-        
-        # Evaluate with dynamic threshold
-        y_pred_proba = self._model.predict(dval)
-        
-        # Use class-specific threshold for better recall
-        y_pred = (y_pred_proba > self.UP_THRESHOLD).astype(int)
-        
-        # Calculate metrics
-        accuracy = np.mean(y_pred == y_val)
-        
-        # Precision/Recall for up direction
-        tp_up = np.sum((y_pred == 1) & (y_val == 1))
-        fp_up = np.sum((y_pred == 1) & (y_val == 0))
-        fn_up = np.sum((y_pred == 0) & (y_val == 1))
-        
-        precision_up = tp_up / (tp_up + fp_up) if (tp_up + fp_up) > 0 else 0
-        recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
-        f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
-        
-        # Feature importance
-        importance_dict = self._model.get_score(importance_type="gain")
-        # Sort by gain and get top 10
-        sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10]
-        top_features = [f[0] for f in sorted_features]
-        
-        # Update metrics
-        self._metrics = ModelMetrics(
-            accuracy=float(accuracy),
-            precision_up=float(precision_up),
-            recall_up=float(recall_up),
-            f1_up=float(f1_up),
-            training_samples=len(X_train),
-            validation_samples=len(X_val),
-            top_features=top_features,
-            last_trained=datetime.now(timezone.utc).isoformat()
-        )
-        
-        # Update version
-        version_parts = self._version.replace("v", "").split(".")
-        minor = int(version_parts[1]) + 1 if len(version_parts) > 1 else 1
-        self._version = f"v0.{minor}.0"
-        
-        # Save model
-        self._save_model()
-        
-        logger.info(f"Training complete: accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
-        
-        return self._metrics
 
     def train_vectorized(
         self,
@@ -742,71 +717,28 @@ class TimeSeriesGBM:
             return self._metrics
 
         X = np.vstack(all_features).astype(np.float32)
-        y = np.concatenate(all_targets).astype(np.float32)
+        y = np.concatenate(all_targets).astype(np.int64)
 
         # Release individual arrays to free memory before training
         del all_features, all_targets
         gc.collect()
 
-        logger.info(f"Extracted {len(X)} training samples (vectorized)")
+        logger.info(f"Extracted {len(X)} training samples (vectorized, triple-barrier 3-class)")
 
         # Filter out any rows with all zeros (failed extraction)
         valid_rows = np.any(X != 0, axis=1)
         X = X[valid_rows]
         y = y[valid_rows]
 
-        unique, counts = np.unique(y, return_counts=True)
-        dist_str = ", ".join([f"{'UP' if c == 1 else 'DOWN'}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)])
-        logger.info(f"Class distribution: {dist_str}")
-
-        # Split train/validation
-        split_idx = int(len(X) * 0.8)
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
-
+        # Delegate to train_from_features so num_classes=3 path is used consistently
         feature_names = feature_engineer.get_feature_names()
-        dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
-        dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
-
-        self._model = xgb.train(
-            {**self.DEFAULT_PARAMS, **self.params},
-            dtrain,
+        return self.train_from_features(
+            X, y, feature_names,
+            validation_split=0.2,
             num_boost_round=num_boost_round,
-            evals=[(dval, "val")],
             early_stopping_rounds=early_stopping_rounds,
-            verbose_eval=False
+            num_classes=3,
         )
-
-        # Evaluate
-        y_pred = self._model.predict(dval)
-        y_pred_binary = (y_pred > 0.5).astype(int)
-        accuracy = np.mean(y_pred_binary == y_val)
-
-        up_mask = y_val == 1
-        if np.sum(up_mask) > 0:
-            precision_up = np.sum((y_pred_binary == 1) & up_mask) / max(np.sum(y_pred_binary == 1), 1)
-            recall_up = np.sum((y_pred_binary == 1) & up_mask) / np.sum(up_mask)
-            f1_up = 2 * precision_up * recall_up / max(precision_up + recall_up, 1e-10)
-        else:
-            precision_up = recall_up = f1_up = 0.0
-
-        self._metrics = ModelMetrics(
-            accuracy=round(accuracy, 4),
-            precision_up=round(precision_up, 4),
-            recall_up=round(recall_up, 4),
-            f1_up=round(f1_up, 4),
-            training_samples=len(X_train),
-            validation_samples=len(X_val),
-        )
-
-        version_parts = self._version.replace("v", "").split(".")
-        minor = int(version_parts[1]) + 1 if len(version_parts) > 1 else 1
-        self._version = f"v0.{minor}.0"
-
-        self._save_model()
-
-        logger.info(f"Training complete (vectorized): accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
-        return self._metrics
 
     def train_from_features(
         self,
@@ -1002,21 +934,37 @@ class TimeSeriesGBM:
         
         dmatrix = xgb.DMatrix(feature_vector, feature_names=self._feature_names)
         
-        # Predict (XGBoost binary:logistic outputs probability directly)
-        prob_up = float(self._model.predict(dmatrix)[0])
-        prob_down = 1 - prob_up
-        
-        # Determine direction using class-specific thresholds
-        # Use lower threshold for "up" to improve recall
-        if prob_up > self.UP_THRESHOLD:
-            direction = "up"
-            confidence = min((prob_up - self.UP_THRESHOLD) / (1 - self.UP_THRESHOLD), 1.0)
-        elif prob_down > 0.55:
-            direction = "down"
-            confidence = (prob_down - 0.5) * 2
+        # Predict — may be binary (scalar per sample) or multiclass (prob vector)
+        raw = self._model.predict(dmatrix)
+        prob_flat = 0.0
+        if raw.ndim > 1 and raw.shape[1] >= 3:
+            # 3-class triple-barrier: [P(DOWN), P(FLAT), P(UP)]
+            prob_down = float(raw[0][0])
+            prob_flat = float(raw[0][1])
+            prob_up = float(raw[0][2])
+            max_class = int(np.argmax(raw[0]))
+            if max_class == 2:
+                direction = "up"
+                confidence = prob_up
+            elif max_class == 0:
+                direction = "down"
+                confidence = prob_down
+            else:
+                direction = "flat"
+                confidence = prob_flat
         else:
-            direction = "flat"
-            confidence = 0.2
+            # Legacy binary
+            prob_up = float(raw[0])
+            prob_down = 1 - prob_up
+            if prob_up > self.UP_THRESHOLD:
+                direction = "up"
+                confidence = min((prob_up - self.UP_THRESHOLD) / (1 - self.UP_THRESHOLD), 1.0)
+            elif prob_down > 0.55:
+                direction = "down"
+                confidence = (prob_down - 0.5) * 2
+            else:
+                direction = "flat"
+                confidence = 0.2
             
         prediction = Prediction(
             symbol=symbol,
@@ -1229,7 +1177,9 @@ class TimeSeriesGBM:
             "samples_trained": self._metrics.training_samples if self._metrics else 0,
             "model_name": self.model_name,
             "forecast_horizon": self.forecast_horizon,
-            "feature_count": len(self._feature_names)
+            "feature_count": len(self._feature_names),
+            "num_classes": int(self._num_classes),
+            "label_scheme": "triple_barrier_3class" if self._num_classes >= 3 else "binary",
         }
         
     def get_status(self) -> Dict[str, Any]:
@@ -1240,6 +1190,8 @@ class TimeSeriesGBM:
             "trained": self._model is not None,
             "forecast_horizon": self.forecast_horizon,
             "feature_count": len(self._feature_names),
+            "num_classes": int(self._num_classes),
+            "label_scheme": "triple_barrier_3class" if self._num_classes >= 3 else "binary",
             "metrics": self._metrics.to_dict() if self._metrics else None,
             "db_connected": self._db is not None
         }
