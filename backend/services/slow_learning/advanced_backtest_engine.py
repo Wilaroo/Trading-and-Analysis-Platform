@@ -115,7 +115,14 @@ class MonteCarloConfig:
     randomize_trade_order: bool = True
     randomize_trade_size: bool = False  # Optional: vary position sizes
     size_variation_pct: float = 20.0    # +/- 20% if randomize_trade_size
-    
+    # BOOTSTRAP: sample trades with replacement (default on). Without this, shuffling
+    # trade order alone leaves the sum of P&L unchanged — producing a degenerate
+    # distribution where every percentile is identical. Bootstrap simulates
+    # "what if I had experienced a different mix of these same trades?" and
+    # gives a real P&L distribution. Drawdowns still vary from order too.
+    bootstrap: bool = True
+    bootstrap_sample_size: Optional[int] = None  # None => same as len(trades)
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
