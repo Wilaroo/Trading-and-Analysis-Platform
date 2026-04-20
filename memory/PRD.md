@@ -164,6 +164,63 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Wire FinBERT into confidence gate as Layer 12
 - Wire confidence gate into live validation
 
+## Post-Retrain Roadmap (proper sequencing)
+
+The order below is intentional — each step depends on artifacts from the prior step.
+
+### Step 1 — [USER] Full retrain with all flags
+- `TB_USE_CUSUM=1 TB_USE_FFD_FEATURES=1`
+- Populates `timeseries_models.scorecard` with 15-metric grades across all current setups.
+- Produces the first deflated-Sharpe-validated, uniqueness-weighted, CUSUM+FFD-featured model set.
+
+### Step 2 — Scorecard triage
+- Sort all models by composite grade (A-F).
+- **Delete** setups grading D/F that can't be salvaged (REVERSAL/5min almost certainly in this bucket — see `/app/memory/notes_sweep_observations.md`).
+- **Widen PT/SL sweep grid** on daily setups (all converged to pt=1.5/sl=1.5/max_bars=5 — suspicious).
+- Free up training budget for new setups in Step 5.
+
+### Step 3 — Phase 2C: XGBoost meta-labeler (tabular bet-sizer)
+- Secondary XGBoost model: primary signal + regime + features → `P(trade_profitable)` → dynamic position size (0-100%).
+- Wired into `confidence_gate.py`.
+- Converts binary GO/NO-GO signals into continuous bet sizing.
+
+### Step 4 — Phase 6: Distributed PC Worker infrastructure
+- Training coordinator on Spark offloads CNN/DL jobs to Windows PC over LAN.
+- REST endpoint contract + job queue + heartbeat + result sync.
+- Enables Step 5 (CNN visual meta-labeler would otherwise bottleneck Spark's GB10).
+
+### Step 5 — Phase 2E: Setup-Specific Visual CNN Meta-Labeler ⭐ (high conviction)
+Scalp setups (especially SMB-style) are visually defined. Tabular features flatten the chart into 46 numbers; a CNN trained on the actual chart image sees the shape.
+
+**Architecture:** Hybrid multimodal — chart-image CNN + tabular MLP → concat → classifier.
+
+**Pipeline:**
+1. **Chart rendering** — OHLCV window → 96×96 or 128×128 PNG with candlesticks, volume bars, and setup-relevant overlays (9EMA/21EMA/VWAP). No axis labels; pure visual signal.
+2. **Shared backbone** — train one CNN (EfficientNet-Small or similar) on ALL setups' charts with triple-barrier labels. Self-supervised contrastive pre-training optional.
+3. **Per-setup fine-tune heads** — each setup gets a lightweight fine-tuning head on ~5-10k labeled examples.
+4. **Inference** — López de Prado meta-labeling, visual edition: XGBoost says "rubberband scalp candidate" → CNN sees the chart → returns `P(pattern_is_real)`. Combined into bet size.
+5. **Explainability** — Grad-CAM activation overlay surfaced to NIA UI so user can verify the CNN is learning real patterns (exhaustion wick, volume climax) vs spurious noise.
+
+**Distribution (requires Step 4):** Spark GB10 trains the shared backbone once a week; Windows PC fine-tunes per-setup heads overnight.
+
+### Step 6 — Add SMB-specific setups (tiered)
+Only after visual CNN infrastructure exists, and only for setups the CNN/scorecard analysis justifies.
+
+**Tier 1 — Scalp/Intraday (5-min and 1-min):**
+- `RUBBERBAND_SCALP` (long + short) — 2+ ATR stretch from 9EMA/VWAP → reversion scalp
+- `EMA9_PULLBACK` (long + short) — trending stock pulls to 9EMA on lower volume → continuation
+- `FIRST_RED_CANDLE` / `FIRST_GREEN_CANDLE` — first reversal candle after parabolic move
+
+**Tier 2 — Day-structure:**
+- `OPENING_DRIVE_REVERSAL` (5 min) — exhausted opening drive fade
+- `HALFBACK_REVERSION` — 50% morning-range retrace
+- `INSIDE_DAY_BREAKOUT` (1 day)
+
+**Tier 3 — Cross-instrument (needs SPY sync in training data):**
+- `RS_VS_SPY_LONG` / `RW_VS_SPY_SHORT` — relative strength divergence vs SPY
+
+Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor in `setup_features.py`/`short_setup_features.py`, PT/SL sweep entry, and (if visual) chart-render config.
+
 ## P2 / Backlog
 - Motor async MongoDB driver migration (replace sync PyMongo in hot paths)
 - Per-signal weight optimizer for gate auto-tuning
