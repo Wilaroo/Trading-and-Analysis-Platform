@@ -15,6 +15,7 @@ Note: Requires xgboost to be installed. Will gracefully degrade if not available
 """
 
 import logging
+import os
 import base64
 import io
 from typing import Dict, Any, Optional, List
@@ -745,6 +746,13 @@ class TimeSeriesAIService:
             logger.info("")
             logger.info("=" * 70)
             logger.info(f"[FULL UNIVERSE] Starting training for {bar_size}")
+            # Log advanced-feature flag state so retrain logs are self-documenting.
+            _cusum_on = os.environ.get("TB_USE_CUSUM", "0")
+            _ffd_on = os.environ.get("TB_USE_FFD_FEATURES", "0")
+            logger.info(
+                f"[FULL UNIVERSE] Flags: TB_USE_CUSUM={_cusum_on} "
+                f"TB_USE_FFD_FEATURES={_ffd_on}  (triple-barrier labels: ALWAYS ON)"
+            )
             logger.info(f"[FULL UNIVERSE] Batch size: {symbol_batch_size} symbols, Max bars: {max_bars_per_symbol}")
             logger.info("=" * 70)
             sys.stdout.flush()
@@ -854,28 +862,66 @@ class TimeSeriesAIService:
                         
                         # VECTORIZED feature extraction (10-50x faster than per-window loop)
                         bulk_features = feature_engineer.extract_features_bulk(bars)
-                        
+
                         if bulk_features is not None and len(bulk_features) > forecast_horizon:
-                            closes = np.array([b.get("close", 0) for b in bars], dtype=np.float32)
+                            # Phase 2B: FFD augmentation (flag-gated). When ON, bulk_features
+                            # grows from 46 → 51 cols. feature_names must be kept in sync (done
+                            # once below after the first successful augmentation).
+                            from .feature_augmentors import augment_features, ffd_enabled
+                            if ffd_enabled():
+                                bulk_features, _ = augment_features(
+                                    bulk_features, feature_engineer.get_feature_names(),
+                                    bars, lookback=feature_engineer.lookback,
+                                    cache_key=f"{symbol}_{bar_size}",
+                                )
+
+                            highs = np.array([b.get("high", 0.0) for b in bars], dtype=np.float64)
+                            lows = np.array([b.get("low", 0.0) for b in bars], dtype=np.float64)
+                            closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+                            closes = np.where(closes == 0, 1.0, closes)
                             lb = feature_engineer.lookback  # 50
                             n_usable = min(len(bulk_features), len(closes) - lb - forecast_horizon + 1)
-                            
+
                             if n_usable > 0:
-                                # Keep as numpy — no .tolist() (avoids 9x memory overhead)
-                                symbol_features_np = bulk_features[:n_usable]
-                                
-                                # Vectorized target computation (replaces per-element loop)
-                                current_indices = np.arange(n_usable) + (lb - 1)
-                                future_indices = current_indices + forecast_horizon
-                                valid_mask = (future_indices < len(closes)) & (closes[current_indices] > 0)
-                                symbol_targets_np = np.zeros(n_usable, dtype=np.float32)
-                                if valid_mask.any():
-                                    returns = (closes[future_indices[valid_mask]] - closes[current_indices[valid_mask]]) / closes[current_indices[valid_mask]]
-                                    symbol_targets_np[valid_mask] = (returns > 0).astype(np.float32)
-                                
+                                # Triple-barrier labels (replaces legacy returns>0 binary path)
+                                from .triple_barrier_labeler import triple_barrier_labels, label_to_class_index
+                                from .cusum_filter import cusum_enabled, filter_entry_indices
+
+                                base_idx = lb - 1
+                                entry_indices = np.arange(base_idx, base_idx + n_usable)
+
+                                # CUSUM event filter (flag-gated)
+                                if cusum_enabled():
+                                    filtered = filter_entry_indices(
+                                        entry_indices, closes, bar_size=bar_size,
+                                        target_events_per_year=100,
+                                        min_distance=max(1, forecast_horizon // 2),
+                                    )
+                                    if len(filtered) >= 50:
+                                        entry_indices = filtered
+
+                                raw_labels = triple_barrier_labels(
+                                    highs, lows, closes,
+                                    entry_indices=entry_indices,
+                                    pt_atr_mult=2.0,
+                                    sl_atr_mult=1.0,
+                                    max_bars=forecast_horizon,
+                                    atr_period=14,
+                                )
+                                symbol_targets_np = np.array(
+                                    [label_to_class_index(int(lbl)) for lbl in raw_labels],
+                                    dtype=np.int64,
+                                )
+
+                                # Map entry bars → feature rows and align
+                                chosen_rows = entry_indices - base_idx
+                                chosen_rows = chosen_rows[(chosen_rows >= 0) & (chosen_rows < len(bulk_features))]
+                                symbol_features_np = bulk_features[chosen_rows].astype(np.float32)
+                                symbol_targets_np = symbol_targets_np[: len(symbol_features_np)]
+
                                 batch_feat_parts.append(symbol_features_np)
-                                batch_tgt_parts.append(symbol_targets_np)
-                                
+                                batch_tgt_parts.append(symbol_targets_np.astype(np.float32))
+
                                 # Save to feature cache (lists needed for JSON serialization)
                                 model._save_features_to_cache(
                                     symbol, symbol_features_np.tolist(),
@@ -1020,43 +1066,56 @@ class TimeSeriesAIService:
             
             # Combine numpy chunks into final arrays (single allocation, no Python list overhead)
             X = np.vstack(feature_chunks).astype(np.float32)
-            y = np.concatenate(target_chunks).astype(np.float32)
-            
+            y = np.concatenate(target_chunks).astype(np.int64)
+
             logger.info(f"[FULL UNIVERSE] Arrays created: X shape={X.shape}, y shape={y.shape}")
             sys.stdout.flush()
-            
+
+            # Keep feature_names aligned with X when FFD columns were appended.
+            from .feature_augmentors import ffd_enabled, FFD_NAMES
+            if ffd_enabled() and X.shape[1] == len(feature_names) + len(FFD_NAMES):
+                feature_names = list(feature_names) + list(FFD_NAMES)
+                logger.info(f"[FULL UNIVERSE] Extended feature_names to {len(feature_names)} (FFD ON)")
+
             # Free the chunk lists
             del feature_chunks
             del target_chunks
             gc.collect()
-            
-            # Log class distribution
-            n_up = np.sum(y == 1)
-            n_down = np.sum(y == 0)
-            logger.info(f"[FULL UNIVERSE] Class distribution: UP={n_up:,} ({n_up/len(y)*100:.1f}%), DOWN={n_down:,} ({n_down/len(y)*100:.1f}%)")
+
+            # 3-class distribution (triple-barrier: 0=DOWN, 1=FLAT, 2=UP)
+            n_down = int(np.sum(y == 0))
+            n_flat = int(np.sum(y == 1))
+            n_up = int(np.sum(y == 2))
+            total = len(y)
+            logger.info(
+                f"[FULL UNIVERSE] Class distribution: DOWN={n_down:,} ({n_down/total*100:.1f}%), "
+                f"FLAT={n_flat:,} ({n_flat/total*100:.1f}%), "
+                f"UP={n_up:,} ({n_up/total*100:.1f}%)"
+            )
             sys.stdout.flush()
-            
+
             # Train/validation split
             validation_split = 0.2
             split_idx = int(len(X) * (1 - validation_split))
             X_train, X_val = X[:split_idx], X[split_idx:]
             y_train, y_val = y[:split_idx], y[split_idx:]
-            
+
             logger.info(f"[FULL UNIVERSE] Training samples: {len(X_train):,}, Validation: {len(X_val):,}")
             sys.stdout.flush()
-            
+
             # Create XGBoost DMatrix datasets
             import xgboost as xgb
             logger.info("[FULL UNIVERSE] Creating XGBoost DMatrix datasets...")
             sys.stdout.flush()
-            
+
             dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
             dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
-            
-            # XGBoost GPU parameters (matching timeseries_gbm.py defaults)
+
+            # XGBoost GPU parameters — multiclass for 3-class triple-barrier targets.
             xgb_params = {
-                'objective': 'binary:logistic',
-                'eval_metric': 'logloss',
+                'objective': 'multi:softprob',
+                'num_class': 3,
+                'eval_metric': 'mlogloss',
                 'tree_method': 'hist',
                 'device': 'cuda',
                 'max_depth': 8,
@@ -1066,10 +1125,10 @@ class TimeSeriesAIService:
                 'max_bin': 256,
                 'verbosity': 1,
             }
-            
-            logger.info("[FULL UNIVERSE] Starting XGBoost train()...")
+
+            logger.info("[FULL UNIVERSE] Starting XGBoost train() [3-class multi:softprob]...")
             sys.stdout.flush()
-            
+
             trained_model = xgb.train(
                 xgb_params,
                 dtrain,
@@ -1078,21 +1137,23 @@ class TimeSeriesAIService:
                 early_stopping_rounds=20,
                 verbose_eval=50
             )
-            
+
             logger.info("[FULL UNIVERSE] XGBoost training complete!")
             sys.stdout.flush()
-            
-            # Evaluate
-            y_pred_proba = trained_model.predict(dval)
-            y_pred = (y_pred_proba >= 0.52).astype(int)
-            
-            accuracy = np.mean(y_pred == y_val)
-            
-            # Calculate metrics
+
+            # Evaluate (3-class)
+            y_pred_proba = trained_model.predict(dval)   # shape (N, 3)
+            y_pred = np.argmax(y_pred_proba, axis=1)
+
+            accuracy = float(np.mean(y_pred == y_val))
+
+            # UP-class metrics (class idx 2) — keep existing metric schema
             from sklearn.metrics import precision_score, recall_score, f1_score
-            precision_up = precision_score(y_val, y_pred, zero_division=0)
-            recall_up = recall_score(y_val, y_pred, zero_division=0)
-            f1_up = f1_score(y_val, y_pred, zero_division=0)
+            y_val_up = (y_val == 2).astype(int)
+            y_pred_up = (y_pred == 2).astype(int)
+            precision_up = float(precision_score(y_val_up, y_pred_up, zero_division=0))
+            recall_up = float(recall_score(y_val_up, y_pred_up, zero_division=0))
+            f1_up = float(f1_score(y_val_up, y_pred_up, zero_division=0))
             
             logger.info("")
             logger.info("[FULL UNIVERSE] ✓ Training complete!")
@@ -1100,8 +1161,10 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Precision: {precision_up*100:.2f}%, Recall: {recall_up*100:.2f}%, F1: {f1_up*100:.2f}%")
             sys.stdout.flush()
             
-            # Save model
+            # Save model — mark as 3-class triple-barrier so metadata persists correctly.
             model._model = trained_model
+            model._num_classes = 3
+            model._feature_names = list(feature_names)
             model._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
             
             from .timeseries_gbm import ModelMetrics
