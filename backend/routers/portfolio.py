@@ -194,19 +194,36 @@ async def remove_position(symbol: str):
     return {"message": "Position removed"}
 
 
+_last_flatten_ts = {"ts": 0}
+_FLATTEN_COOLDOWN_SEC = 120  # Prevents accidental double-flatten that causes sign-flip shorts
+
+
 @router.post("/portfolio/flatten-paper")
 async def flatten_paper_positions(confirm: str = ""):
     """
     Close every open IB paper-account position by queueing market orders.
-    Guard rail: requires confirm='FLATTEN' to fire. Safe for paper accounts only —
-    refuses to run if the IB account code is not recognised as a paper account
-    (IB paper accounts start with 'D' for DUxxxx).
+    Guard rails:
+      1. requires confirm='FLATTEN' to fire
+      2. only paper accounts (IB paper account codes start with 'D')
+      3. 120s cooldown — blocks a second flatten while the first is still filling
+         (prevents the sign-flip/short bug where a second pass sold again past zero)
+      4. pre-flight cancel of any duplicate open flatten orders for the same symbol
     """
+    import time
     if confirm != "FLATTEN":
         raise HTTPException(status_code=400, detail="Pass confirm=FLATTEN to execute")
     
+    now = time.time()
+    elapsed = now - _last_flatten_ts["ts"]
+    if elapsed < _FLATTEN_COOLDOWN_SEC:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Cooldown active — wait {int(_FLATTEN_COOLDOWN_SEC - elapsed)}s before re-flattening"
+        )
+    
     try:
         from routers.ib import get_pushed_positions, queue_order, is_pusher_connected
+        from services.order_queue_service import get_order_queue_service
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"IB router unavailable: {e}")
     
@@ -225,6 +242,24 @@ async def flatten_paper_positions(confirm: str = ""):
             status_code=403,
             detail=f"Refusing to flatten — non-paper accounts detected: {non_paper}"
         )
+    
+    # Pre-flight: cancel any pending/claimed flatten_* orders already in the queue.
+    # This is what triggered the double-execution last time — leftover orders from a
+    # previous flatten were re-polled by the pusher after the main backend restarted.
+    cancelled_stale = 0
+    try:
+        svc = get_order_queue_service()
+        col = svc._collection  # noqa: SLF001 - intentional internal access
+        result = col.update_many(
+            {
+                "status": {"$in": ["pending", "claimed"]},
+                "trade_id": {"$regex": "^flatten_"},
+            },
+            {"$set": {"status": "cancelled", "error": "Superseded by new flatten call"}},
+        )
+        cancelled_stale = result.modified_count
+    except Exception as e:
+        logger.warning(f"Pre-flight stale-order cleanup failed: {e}")
     
     queued = []
     errors = []
@@ -249,10 +284,14 @@ async def flatten_paper_positions(confirm: str = ""):
         except Exception as e:
             errors.append({"symbol": symbol, "error": str(e)})
     
+    _last_flatten_ts["ts"] = now
+    
     return {
         "success": True,
         "message": f"Queued {len(queued)} flatten order(s)",
         "orders": queued,
         "errors": errors,
+        "cancelled_stale_orders": cancelled_stale,
+        "cooldown_sec": _FLATTEN_COOLDOWN_SEC,
         "account": next(iter(paper_accounts), None)
     }
