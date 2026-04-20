@@ -173,6 +173,23 @@ The order below is intentional — each step depends on artifacts from the prior
 - Populates `timeseries_models.scorecard` with 15-metric grades across all current setups.
 - Produces the first deflated-Sharpe-validated, uniqueness-weighted, CUSUM+FFD-featured model set.
 
+### Step 1.5 — Setup Coverage Audit (run immediately after retrain)
+Run `PYTHONPATH=backend python backend/scripts/audit_setup_coverage.py`.
+
+Writes `/tmp/setup_coverage_audit.md` summarising, per taxonomy code:
+- # of tagged trades across `trades` / `bot_trades` / `trade_snapshots` / `live_alerts`
+- Win rate + avg R-multiple
+- Verdict: `trainable` / `thin` / `negative_edge` / `too_few` / `unknown_outcome`
+- Highlighted Phase 2E Tier-1 candidates (visual-pattern setups with enough data).
+
+This is the critical bridge: TRADING_TAXONOMY.md defines ~35 SMB setups but the
+XGBoost pipeline only trains 10 long + 10 short generic families. The audit tells
+us which of the 35 have the journal coverage to warrant dedicated (setup, bar_size)
+XGBoost + CNN model pairs in Step 5/Step 6.
+
+Inputs to Step 2 (scorecard triage): A-grade generic model + strong audit
+coverage  →  split into dedicated setup-specific model.
+
 ### Step 2 — Scorecard triage
 - Sort all models by composite grade (A-F).
 - **Delete** setups grading D/F that can't be salvaged (REVERSAL/5min almost certainly in this bucket — see `/app/memory/notes_sweep_observations.md`).
