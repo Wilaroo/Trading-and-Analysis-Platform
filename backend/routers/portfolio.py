@@ -41,6 +41,9 @@ async def get_portfolio(source: str = "auto"):
                     for pos in ib_positions:
                         symbol = pos.get("symbol", "")
                         shares = pos.get("position", 0) or pos.get("qty", 0)
+                        # Skip fully-closed positions (IB keeps zero-qty rows briefly post-flatten)
+                        if not shares:
+                            continue
                         avg_cost = pos.get("avg_cost", 0) or pos.get("avgCost", 0)
                         
                         current_price = pos.get("market_price", 0) or pos.get("marketPrice", 0)
