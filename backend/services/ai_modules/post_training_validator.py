@@ -671,18 +671,19 @@ async def validate_trained_model(
         _save_baseline(db, setup_type, bar_size, baseline_metrics, validation_id)
         logger.info(f"[VALIDATE] {setup_type}/{bar_size} PROMOTED — {decision['reason']}")
     else:
+        # Model failed the fail-closed gates. Attempt rollback to previous baseline.
+        # FIXED (2026-04-20): if no previous model exists, DO NOT auto-promote the
+        # failing model as a fallback. That was the second fail-open bug — a brand-new
+        # setup with 0 trades and -42pp edge would still get promoted on first run.
+        # Correct behavior: leave the model file on disk (for reference) but mark it
+        # rejected and do NOT write a baseline. The trading bot reads baselines to
+        # gate entries, so a rejected model won't accidentally go live.
         rolled_back = await _rollback_model(db, timeseries_service, setup_type, bar_size)
-        if not rolled_back:
-            decision["promote"] = True
-            decision["reason"] += " (no previous model, keeping new)"
-            baseline_metrics = {
-                "sharpe_ratio": ai_cmp.get("ai_filtered_sharpe", 0),
-                "win_rate": ai_cmp.get("ai_filtered_win_rate", 0) / 100,
-                "total_return": ai_cmp.get("ai_filtered_pnl", 0) / VALIDATION_CONFIG["starting_capital"],
-                "ai_vs_setup_edge": ai_cmp.get("ai_edge_pnl", 0) / VALIDATION_CONFIG["starting_capital"],
-            }
-            _save_baseline(db, setup_type, bar_size, baseline_metrics, validation_id)
-        logger.info(f"[VALIDATE] {setup_type}/{bar_size} {'KEPT (no backup)' if not rolled_back else 'REJECTED'} — {decision['reason']}")
+        if rolled_back:
+            logger.info(f"[VALIDATE] {setup_type}/{bar_size} REJECTED (rolled back to previous) — {decision['reason']}")
+        else:
+            decision["reason"] += " (no previous model available for rollback; model rejected, no baseline saved)"
+            logger.warning(f"[VALIDATE] {setup_type}/{bar_size} REJECTED (no backup to roll back to) — {decision['reason']}")
 
     if progress_callback:
         label = "PROMOTED" if decision["promote"] else "REJECTED"
