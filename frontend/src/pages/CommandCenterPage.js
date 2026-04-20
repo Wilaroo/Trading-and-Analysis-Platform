@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { safePolling } from '../utils/safePolling';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
+import MorningBriefingModal from '../components/MorningBriefingModal';
 import HeaderBar from '../components/layout/HeaderBar';
 import AICoachTab from '../components/tabs/AICoachTab';
 import ChartsTab from '../components/tabs/ChartsTab';
@@ -35,6 +36,17 @@ const CommandCenterPage = ({
   // Check Ollama status
   const [ollamaStatus, setOllamaStatus] = useState('unknown');
   const [ollamaUsage, setOllamaUsage] = useState(null);
+  const [showBriefing, setShowBriefing] = useState(false);
+  
+  // Auto-show morning briefing on first load (once per day)
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const lastShown = sessionStorage.getItem('briefing_shown_date');
+    if (lastShown !== today) {
+      setShowBriefing(true);
+      sessionStorage.setItem('briefing_shown_date', today);
+    }
+  }, []);
   
   useEffect(() => {
     const checkOllama = async () => {
@@ -147,6 +159,25 @@ const CommandCenterPage = ({
             data.setTradeModal({ isOpen: false, ticker: null, action: null });
           }}
         />
+      )}
+
+      {/* Morning Briefing Modal — auto-shows once per day, re-openable via button */}
+      <MorningBriefingModal
+        isOpen={showBriefing}
+        onClose={() => setShowBriefing(false)}
+      />
+
+      {/* Floating Morning Briefing button */}
+      {!showBriefing && (
+        <button
+          onClick={() => setShowBriefing(true)}
+          className="fixed bottom-6 right-6 z-40 p-3 rounded-full shadow-lg border border-amber-500/30 hover:border-amber-400/50 transition-all hover:scale-105"
+          style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(239,68,68,0.15))', backdropFilter: 'blur(8px)' }}
+          title="Open Morning Briefing"
+          data-testid="open-briefing-btn"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </button>
       )}
     </div>
   );

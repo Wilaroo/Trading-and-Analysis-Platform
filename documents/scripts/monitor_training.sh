@@ -38,13 +38,27 @@ get_mongo_status() {
         let phases = Object.entries(ph).sort((a,b) => (a[1].order||0) - (b[1].order||0));
         print('PHASE: ' + (s.phase || 'idle'));
         print('MODEL: ' + (s.current_model || '-'));
-        print('PROGRESS: ' + (s.models_completed || 0) + '/' + (s.models_total || 0));
+        let done = s.models_completed || 0;
+        let tot = s.models_total || 0;
+        print('PROGRESS: ' + done + '/' + tot);
         print('PHASE_PCT: ' + ((s.current_phase_progress || 0)).toFixed(1) + '%');
         print('STARTED: ' + (s.started_at || '-'));
         let now = new Date();
         let started = s.started_at ? new Date(s.started_at) : now;
-        let elapsed_min = ((now - started) / 60000).toFixed(0);
+        let elapsed_ms = now - started;
+        let elapsed_min = (elapsed_ms / 60000).toFixed(0);
         print('ELAPSED: ' + elapsed_min + 'm');
+        // Overall pipeline ETA
+        if (done > 0 && tot > done) {
+            let per_model_ms = elapsed_ms / done;
+            let remaining_ms = per_model_ms * (tot - done);
+            let eta_min = Math.round(remaining_ms / 60000);
+            let eta_hr = (remaining_ms / 3600000).toFixed(1);
+            let eta_when = new Date(now.getTime() + remaining_ms);
+            print('PIPELINE_ETA: ~' + eta_min + 'm (' + eta_hr + 'h) | finish ≈ ' + eta_when.toISOString().replace('T',' ').substring(0,16) + 'Z');
+        } else {
+            print('PIPELINE_ETA: -');
+        }
         print('ERRORS: ' + (s.errors ? s.errors.length : 0));
         print('---LAST_MODELS---');
         let recent = (s.completed_models || []).slice(-3);
@@ -55,9 +69,23 @@ get_mongo_status() {
         print('---PHASES---');
         phases.forEach(([k, v]) => {
             let status_icon = v.status === 'done' ? 'DONE' : v.status === 'running' ? 'RUNNING' : v.status;
-            let elapsed = v.elapsed_seconds ? (v.elapsed_seconds/60).toFixed(1) + 'm' : '-';
+            let elapsed_p = v.elapsed_seconds ? (v.elapsed_seconds/60).toFixed(1) + 'm' : '-';
             let acc = v.avg_accuracy ? (v.avg_accuracy * 100).toFixed(1) + '%' : '-';
-            print('  P' + (v.phase_num || '?') + ' [' + status_icon + '] ' + (v.label || k) + ' | models: ' + (v.models_trained||0) + '/' + (v.expected_models||'?') + ' | failed: ' + (v.models_failed||0) + ' | acc: ' + acc + ' | time: ' + elapsed);
+            let trained = v.models_trained || 0;
+            let expected = v.expected_models || 0;
+            let eta_str = '-';
+            if (v.status === 'running' && v.started_at && trained > 0 && expected > trained) {
+                let p_started = new Date(v.started_at);
+                let p_elapsed_ms = now - p_started;
+                let p_per = p_elapsed_ms / trained;
+                let p_remaining = p_per * (expected - trained);
+                eta_str = '~' + Math.round(p_remaining / 60000) + 'm';
+            } else if (v.status === 'running' && v.started_at && trained === 0) {
+                let p_started = new Date(v.started_at);
+                let p_elapsed_min = ((now - p_started) / 60000).toFixed(0);
+                eta_str = 'running ' + p_elapsed_min + 'm (no models done yet)';
+            }
+            print('  P' + (v.phase_num || '?') + ' [' + status_icon + '] ' + (v.label || k) + ' | models: ' + trained + '/' + expected + ' | failed: ' + (v.models_failed||0) + ' | acc: ' + acc + ' | time: ' + elapsed_p + ' | eta: ' + eta_str);
         });
         print('---ERRORS---');
         (s.errors || []).slice(-5).forEach(e => {
@@ -95,9 +123,19 @@ get_system_stats() {
             local gpu_mem_total=$(echo "$gpu_info" | cut -d',' -f3 | tr -d ' ')
             local gpu_temp=$(echo "$gpu_info" | cut -d',' -f4 | tr -d ' ')
             local gpu_color=$GREEN
-            if [ "$gpu_temp" -gt 85 ]; then gpu_color=$RED;
-            elif [ "$gpu_temp" -gt 75 ]; then gpu_color=$YELLOW; fi
-            echo -e "  GPU:  ${gpu_color}${gpu_util}% util | ${gpu_mem_used}MB / ${gpu_mem_total}MB | ${gpu_temp}C${NC}"
+            if [[ "$gpu_temp" =~ ^[0-9]+$ ]]; then
+                if [ "$gpu_temp" -gt 85 ]; then gpu_color=$RED
+                elif [ "$gpu_temp" -gt 75 ]; then gpu_color=$YELLOW; fi
+            fi
+            # DGX Spark (GB10 Grace/Blackwell) reports [N/A] for per-GPU memory because
+            # of unified memory — show system RAM delta instead so the display stays useful.
+            if [ "$gpu_mem_used" = "[N/A]" ] || [ "$gpu_mem_total" = "[N/A]" ] || [ -z "$gpu_mem_used" ]; then
+                local unified_used=$(free -m | awk '/^Mem:/ {printf "%d", $3}')
+                local unified_total=$(free -m | awk '/^Mem:/ {printf "%d", $2}')
+                echo -e "  GPU:  ${gpu_color}${gpu_util}% util | ${gpu_temp}C | ${DIM}shared mem: ${unified_used}MB / ${unified_total}MB (unified)${NC}"
+            else
+                echo -e "  GPU:  ${gpu_color}${gpu_util}% util | ${gpu_mem_used}MB / ${gpu_mem_total}MB | ${gpu_temp}C${NC}"
+            fi
         fi
     fi
 
@@ -149,6 +187,14 @@ print_status() {
                 ;;
             ELAPSED:*)
                 echo -e "  Elapsed:  ${DIM}${line#ELAPSED: }${NC}"
+                ;;
+            PIPELINE_ETA:*)
+                local eta="${line#PIPELINE_ETA: }"
+                if [ "$eta" = "-" ]; then
+                    echo -e "  ETA:      ${DIM}-${NC}"
+                else
+                    echo -e "  ETA:      ${CYAN}${eta}${NC}"
+                fi
                 ;;
             ERRORS:*)
                 local err_count="${line#ERRORS: }"

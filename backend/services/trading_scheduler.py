@@ -119,15 +119,28 @@ class TradingScheduler:
             return
             
         try:
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+            from apscheduler.schedulers.background import BackgroundScheduler
             from apscheduler.triggers.cron import CronTrigger
             from apscheduler.triggers.interval import IntervalTrigger
             
-            self._scheduler = AsyncIOScheduler(timezone='US/Eastern')
+            self._scheduler = BackgroundScheduler(timezone='US/Eastern')
+            
+            def _wrap_async(coro_func):
+                """Wrap async job function for BackgroundScheduler"""
+                def wrapper():
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        loop.run_until_complete(coro_func())
+                    except Exception as e:
+                        logger.error(f"Scheduler job {coro_func.__name__} failed: {e}")
+                    finally:
+                        loop.close()
+                return wrapper
             
             # 1. Daily Analysis - 4:00 PM ET (Monday-Friday)
             self._scheduler.add_job(
-                self._run_daily_analysis,
+                _wrap_async(self._run_daily_analysis),
                 CronTrigger(
                     day_of_week='mon-fri',
                     hour=16,
@@ -141,7 +154,7 @@ class TradingScheduler:
             
             # 2. Weekly Report - Friday 4:30 PM ET
             self._scheduler.add_job(
-                self._run_weekly_report,
+                _wrap_async(self._run_weekly_report),
                 CronTrigger(
                     day_of_week='fri',
                     hour=16,
@@ -155,7 +168,7 @@ class TradingScheduler:
             
             # 3. Shadow Signal Updates - Every 5 minutes during market hours
             self._scheduler.add_job(
-                self._run_shadow_update,
+                _wrap_async(self._run_shadow_update),
                 IntervalTrigger(minutes=5),
                 id='shadow_update',
                 name='Shadow Signal Update',
@@ -164,7 +177,7 @@ class TradingScheduler:
             
             # 4. Edge Decay Check - Daily at 4:15 PM ET
             self._scheduler.add_job(
-                self._run_edge_decay_check,
+                _wrap_async(self._run_edge_decay_check),
                 CronTrigger(
                     day_of_week='mon-fri',
                     hour=16,
@@ -178,7 +191,7 @@ class TradingScheduler:
             
             # 5. Learning Sync - Daily at 5:00 PM ET (after market close)
             self._scheduler.add_job(
-                self._run_learning_sync,
+                _wrap_async(self._run_learning_sync),
                 CronTrigger(
                     day_of_week='mon-fri',
                     hour=17,
@@ -192,7 +205,7 @@ class TradingScheduler:
             
             # 6. IB Collection Auto-Resume - Daily at 2:15 AM ET (after IB Gateway restarts ~2:00 AM)
             self._scheduler.add_job(
-                self._run_ib_collection_resume,
+                _wrap_async(self._run_ib_collection_resume),
                 CronTrigger(
                     hour=2,
                     minute=15,
@@ -205,7 +218,7 @@ class TradingScheduler:
             
             # 7. Gate Calibration - Daily at 4:30 PM ET (after daily analysis, uses fresh outcomes)
             self._scheduler.add_job(
-                self._run_gate_calibration,
+                _wrap_async(self._run_gate_calibration),
                 CronTrigger(
                     day_of_week='mon-fri',
                     hour=16,

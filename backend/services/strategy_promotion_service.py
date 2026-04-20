@@ -157,6 +157,7 @@ class StrategyPromotionService:
         self._phases_col = None
         self._paper_trades_col = None
         self._strategy_phases: Dict[str, StrategyPhase] = {}
+        self._paper_account_mode = True  # When True, all strategies execute as LIVE (for IB paper account testing)
         
     def set_db(self, db):
         """Set database connection"""
@@ -533,9 +534,16 @@ class StrategyPromotionService:
         """
         Determine if a trade should be executed for real.
         
+        In paper_account_mode, ALL strategies execute as LIVE (for testing on IB paper account).
+        When switching to real money, set paper_account_mode=False to enforce promotion gates.
+        
         Returns:
             (should_execute: bool, reason: str, should_paper_track: bool)
         """
+        # Paper account mode: bypass all promotion checks, execute everything
+        if self._paper_account_mode:
+            return True, "Paper account mode — all strategies execute as LIVE", False
+        
         phase = self.get_strategy_phase(strategy_name)
         
         if phase == StrategyPhase.LIVE:
@@ -546,6 +554,15 @@ class StrategyPromotionService:
             return False, "Strategy is in SIMULATION phase - not ready for real-time", False
         else:
             return False, f"Strategy is {phase.value} - not trading", False
+    
+    def set_paper_account_mode(self, enabled: bool):
+        """Toggle paper account mode. When enabled, all strategies bypass promotion checks."""
+        self._paper_account_mode = enabled
+        logger.info(f"Paper account mode: {'ENABLED — all strategies trade as LIVE' if enabled else 'DISABLED — promotion gates enforced'}")
+    
+    @property
+    def is_paper_account_mode(self) -> bool:
+        return self._paper_account_mode
 
 
 # Singleton

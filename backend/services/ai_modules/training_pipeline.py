@@ -659,7 +659,7 @@ PHASE_CONFIGS = {
     "risk_of_ruin": {"label": "Risk-of-Ruin", "order": 8, "expected_models": 6, "phase_num": "6"},
     "regime_conditional": {"label": "Regime-Conditional", "order": 9, "expected_models": 28, "phase_num": "7"},
     "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 10, "expected_models": 10, "phase_num": "8"},
-    "cnn_patterns": {"label": "CNN Chart Patterns", "order": 11, "expected_models": 13, "phase_num": "9"},
+    "cnn_patterns": {"label": "CNN Chart Patterns", "order": 11, "expected_models": 34, "phase_num": "9"},
     "deep_learning": {"label": "Deep Learning (VAE/TFT/CNN-LSTM)", "order": 12, "expected_models": 3, "phase_num": "11"},
     "finbert_sentiment": {"label": "FinBERT Sentiment", "order": 13, "expected_models": 1, "phase_num": "12"},
     "auto_validation": {"label": "Auto-Validation", "order": 14, "expected_models": 34, "phase_num": "13"},
@@ -1117,7 +1117,7 @@ def count_total_models() -> int:
     risk_of_ruin = 6  # 1min through daily
     regime_conditional = generic * len(["bull_trend", "bear_trend", "range_bound", "high_vol"])  # 7 * 4 = 28
     ensemble = len(ALL_SETUP_TYPES)  # 10
-    cnn_models = 13  # CNN chart pattern models
+    cnn_models = 34  # CNN chart pattern models (one per SETUP_TRAINING_PROFILES entry)
     dl_models = 3  # VAE Regime, TFT, CNN-LSTM
     finbert = 1    # FinBERT Sentiment pipeline
     return (generic + setup_long + setup_short + volatility + exit_timing +
@@ -2986,12 +2986,23 @@ async def run_training_pipeline(
                 async def cnn_progress(pct, msg):
                     status.update(current_model=msg)
 
+                def cnn_model_done(model_name, accuracy, success, error):
+                    """Called per-model so the UI counter advances in real-time."""
+                    try:
+                        if success:
+                            status.add_completed(model_name, float(accuracy or 0))
+                        else:
+                            status.add_error(model_name, error or "Failed")
+                    except Exception as cb_err:
+                        logger.warning(f"CNN model_callback error for {model_name}: {cb_err}")
+
                 cnn_result = await asyncio.wait_for(
                     run_cnn_training(
                         db=db,
                         setup_type="ALL",
                         max_symbols=200,
                         progress_callback=cnn_progress,
+                        model_callback=cnn_model_done,
                     ),
                     timeout=7200  # 2 hours max for CNN training
                 )
@@ -3006,11 +3017,13 @@ async def run_training_pipeline(
                         "elapsed": cnn_result.get("elapsed_seconds", 0),
                         "gpu_info": cnn_result.get("gpu_info", {}),
                     }
+                    # Per-model status updates already happened via cnn_model_done callback.
+                    # Only append to the results['models_trained'/'models_failed'] list here
+                    # (used for the final summary return value, NOT the live counter).
                     for model_name, model_result in cnn_result.get("models", {}).items():
                         if model_result.get("success"):
                             acc = model_result.get("metrics", {}).get("accuracy", 0)
                             results["models_trained"].append({"name": model_name, "accuracy": acc, "type": "cnn"})
-                            status.add_completed(model_name, acc)
                         else:
                             results["models_failed"].append({"name": model_name, "reason": model_result.get("error", ""), "type": "cnn"})
                 else:

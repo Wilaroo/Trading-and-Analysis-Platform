@@ -32,6 +32,7 @@ async def run_cnn_training(
     bar_size: str = None,
     max_symbols: int = None,
     progress_callback: Optional[Callable] = None,
+    model_callback: Optional[Callable] = None,
 ) -> Dict:
     """
     Full CNN training pipeline for a setup type.
@@ -42,6 +43,8 @@ async def run_cnn_training(
         bar_size: Specific bar size, or None to train all profiles
         max_symbols: Limit symbols for faster training
         progress_callback: async fn(percent, message) for progress updates
+        model_callback: fn(model_name, accuracy, success, error) — called after each model
+                        so the pipeline-level status counter can advance in real time.
 
     Returns:
         Training result dict with metrics per model
@@ -113,6 +116,11 @@ async def run_cnn_training(
             logger.error(f"Image generation failed for {st}/{bs}: {e}")
             results[model_name] = {"success": False, "error": f"Image generation: {str(e)}"}
             skipped_count += 1
+            if model_callback:
+                try:
+                    model_callback(model_name, 0.0, False, f"Image generation: {str(e)}")
+                except Exception:
+                    pass
             continue
 
         if len(samples) < MIN_TRAINING_SAMPLES:
@@ -123,6 +131,11 @@ async def run_cnn_training(
                 "samples": len(samples),
             }
             skipped_count += 1
+            if model_callback:
+                try:
+                    model_callback(model_name, 0.0, False, f"Only {len(samples)} samples")
+                except Exception:
+                    pass
             continue
 
         await _progress(
@@ -144,14 +157,29 @@ async def run_cnn_training(
                     profile_pct_end,
                     f"[{idx + 1}/{total_profiles}] {st}/{bs}: TRAINED (acc={acc:.1%}, win_auc={result.get('metrics', {}).get('win_auc', 0):.3f})"
                 )
+                if model_callback:
+                    try:
+                        model_callback(model_name, float(acc), True, None)
+                    except Exception:
+                        pass
             else:
                 skipped_count += 1
                 await _progress(profile_pct_end, f"[{idx + 1}/{total_profiles}] {st}/{bs}: {result.get('error', 'Failed')}")
+                if model_callback:
+                    try:
+                        model_callback(model_name, 0.0, False, result.get("error", "Failed"))
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error(f"Training failed for {st}/{bs}: {e}", exc_info=True)
             results[model_name] = {"success": False, "error": str(e)}
             skipped_count += 1
+            if model_callback:
+                try:
+                    model_callback(model_name, 0.0, False, str(e))
+                except Exception:
+                    pass
 
     elapsed = time.time() - start_time
     await _progress(100, f"CNN pipeline complete: {trained_count} trained, {skipped_count} skipped in {elapsed:.0f}s")

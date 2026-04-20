@@ -229,38 +229,70 @@ class TradeExecutorService:
     
     async def _ib_entry(self, trade) -> Dict[str, Any]:
         """
-        Execute entry via Interactive Brokers.
+        Execute entry via Interactive Brokers with SMART routing.
         
-        Uses the order queue system which allows the local pusher to execute orders.
-        This works even when the cloud can't directly connect to IB Gateway.
+        Order type selection:
+        - Scalp setups (< 5min timeframe): IOC LIMIT at ask + buffer
+        - Intraday setups: DAY LIMIT at ask + buffer  
+        - Swing/position: DAY LIMIT at ask + wider buffer
+        
+        All orders use IB SMART routing for best execution.
         """
         try:
-            # Import order queue functions
             from routers.ib import queue_order, get_order_result, is_pusher_connected
             
-            # Check if pusher is connected (required for order queue)
             if not is_pusher_connected():
                 logger.warning("IB pusher not connected - falling back to simulation")
                 return await self._simulate_entry(trade)
             
-            # Queue the order for execution by local pusher
             action = "BUY" if trade.direction.value == "long" else "SELL"
+            
+            # Determine order type based on setup
+            setup_type = getattr(trade, 'setup_type', '').lower() if hasattr(trade, 'setup_type') else ''
+            scalp_setups = {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
+            is_scalp = any(s in setup_type for s in scalp_setups)
+            
+            # Calculate limit price with buffer
+            entry_price = trade.entry_price
+            if entry_price and entry_price > 0:
+                if is_scalp:
+                    # Tight buffer for scalps — 0.02% above ask
+                    buffer = max(entry_price * 0.0002, 0.01)
+                    order_type = "LMT"
+                    time_in_force = "IOC"  # Immediate or Cancel for scalps
+                else:
+                    # Standard buffer — 0.05% above ask
+                    buffer = max(entry_price * 0.0005, 0.01)
+                    order_type = "LMT"
+                    time_in_force = "DAY"
+                
+                if action == "BUY":
+                    limit_price = round(entry_price + buffer, 2)
+                else:
+                    limit_price = round(entry_price - buffer, 2)
+            else:
+                # Fallback to market order if no price
+                order_type = "MKT"
+                limit_price = None
+                time_in_force = "DAY"
             
             order_id = queue_order({
                 "symbol": trade.symbol,
                 "action": action,
                 "quantity": trade.shares,
-                "order_type": "MKT",
-                "limit_price": None,
+                "order_type": order_type,
+                "limit_price": limit_price,
                 "stop_price": None,
-                "time_in_force": "DAY",
+                "time_in_force": time_in_force,
+                "exchange": "SMART",
                 "trade_id": trade.id
             })
             
-            logger.info(f"Order queued for IB execution: {order_id} - {action} {trade.shares} {trade.symbol}")
+            logger.info(f"Order queued for IB: {order_id} - {action} {trade.shares} {trade.symbol} @ {order_type} {limit_price or 'MKT'} ({time_in_force}, SMART)")
             
-            # Wait for execution result in thread (blocking call — don't freeze event loop)
-            result = await asyncio.to_thread(get_order_result, order_id, 60.0)
+            # Wait for execution result
+            timeout = 10.0 if is_scalp else 60.0
+            result = await asyncio.to_thread(get_order_result, order_id, timeout)
             
             if result:
                 order_result = result.get("result", {})
@@ -274,7 +306,9 @@ class TradeExecutorService:
                         "fill_price": order_result.get("fill_price", trade.entry_price),
                         "filled_qty": order_result.get("filled_qty", trade.shares),
                         "status": "filled",
-                        "broker": "interactive_brokers"
+                        "broker": "interactive_brokers",
+                        "order_type": order_type,
+                        "routing": "SMART"
                     }
                 elif status == "partial":
                     return {
@@ -284,7 +318,8 @@ class TradeExecutorService:
                         "filled_qty": order_result.get("filled_qty", 0),
                         "remaining_qty": order_result.get("remaining_qty", 0),
                         "status": "partial",
-                        "broker": "interactive_brokers"
+                        "broker": "interactive_brokers",
+                        "order_type": order_type
                     }
                 else:
                     return {
@@ -294,7 +329,6 @@ class TradeExecutorService:
                         "status": status
                     }
             else:
-                # Timeout - order may still execute
                 logger.warning(f"Timeout waiting for order {order_id} - may still execute")
                 return {
                     "success": False,

@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 import asyncio
 import os
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
@@ -35,13 +35,26 @@ class EndOfDayGenerationService:
         self.eod_log_col.create_index([("type", 1), ("date", -1)])
     
     def start_scheduler(self):
-        """Start the background scheduler for end-of-day tasks"""
+        """Start the background scheduler for end-of-day tasks.
+        Uses BackgroundScheduler (runs in its own thread) to avoid AsyncIO event loop issues.
+        """
         if self.scheduler is None:
-            self.scheduler = AsyncIOScheduler(timezone=self.et_timezone)
+            self.scheduler = BackgroundScheduler(timezone=self.et_timezone)
+            
+            def _run_async(coro_func):
+                """Wrapper to run async EOD functions from BackgroundScheduler's sync thread"""
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(coro_func())
+                except Exception as e:
+                    logger.error(f"EOD scheduler job failed: {e}")
+                finally:
+                    loop.close()
             
             # Schedule DRC generation at 4:30 PM ET on weekdays
             self.scheduler.add_job(
-                self.auto_generate_drc,
+                lambda: _run_async(self.auto_generate_drc),
                 CronTrigger(hour=16, minute=30, day_of_week='mon-fri', timezone=self.et_timezone),
                 id='auto_generate_drc',
                 replace_existing=True
@@ -49,7 +62,7 @@ class EndOfDayGenerationService:
             
             # Schedule Playbook analysis at 4:45 PM ET on weekdays
             self.scheduler.add_job(
-                self.auto_analyze_trades_for_playbooks,
+                lambda: _run_async(self.auto_analyze_trades_for_playbooks),
                 CronTrigger(hour=16, minute=45, day_of_week='mon-fri', timezone=self.et_timezone),
                 id='auto_playbook_analysis',
                 replace_existing=True
@@ -57,14 +70,14 @@ class EndOfDayGenerationService:
             
             # Schedule Self-Reflection at 5:00 PM ET — updates playbook learnings + DRC reflections
             self.scheduler.add_job(
-                self.auto_self_reflection,
+                lambda: _run_async(self.auto_self_reflection),
                 CronTrigger(hour=17, minute=0, day_of_week='mon-fri', timezone=self.et_timezone),
                 id='auto_self_reflection',
                 replace_existing=True
             )
             
             self.scheduler.start()
-            print("End-of-day generation scheduler started")
+            logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
     
     def stop_scheduler(self):
         """Stop the scheduler"""
