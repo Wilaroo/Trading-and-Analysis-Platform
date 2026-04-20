@@ -97,8 +97,6 @@ def deflated_sharpe_ratio(
     var_sr = max(var_sr, 1e-8)
     denom = math.sqrt(var_sr / (sample_length - 1.0))
 
-    numerator = (sr - sr0) * math.sqrt(sample_length - 1.0)
-    # Equivalently: z = (sr - sr0) / denom
     z = (sr - sr0) / denom if denom > 0 else 0.0
     p_value = float(stats.norm.cdf(z))
 

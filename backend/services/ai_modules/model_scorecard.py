@@ -105,11 +105,16 @@ def compute_composite(sc: ModelScorecard) -> tuple:
     quality   = 0.10 * _clamp(sc.profit_factor / 2.0)
     sig       = 0.05 * (1.0 if sc.is_statistically_significant else 0.0)
     score = 100.0 * (risk_adj + downside + drawdown + edge + robust + quality + sig)
-    if score >= 80:  g = "A"
-    elif score >= 65: g = "B"
-    elif score >= 50: g = "C"
-    elif score >= 35: g = "D"
-    else:             g = "F"
+    if score >= 80:
+        g = "A"
+    elif score >= 65:
+        g = "B"
+    elif score >= 50:
+        g = "C"
+    elif score >= 35:
+        g = "D"
+    else:
+        g = "F"
     return float(score), g
 
 
