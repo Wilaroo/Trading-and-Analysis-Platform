@@ -52,7 +52,7 @@ const ValidationResultsPanel = memo(({ validationResults, onRefresh }) => {
             const isRejected = record.status === 'rejected';
             const accuracy = record.training_accuracy || 0;
             const phases = record.phases_passed || 0;
-            const maxPhases = 5;
+            const maxPhases = record.phases_total || 3;
 
             return (
               <div
