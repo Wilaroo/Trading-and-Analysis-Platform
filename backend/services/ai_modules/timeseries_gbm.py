@@ -499,11 +499,14 @@ class TimeSeriesGBM:
     
     def _get_feature_cache_key(self, symbol: str, bar_size: str = "default") -> str:
         """Generate a cache key for a symbol's features.
-        
-        Includes target-version tag (tb3c = triple-barrier 3-class) so that
-        switching the labeling scheme invalidates old cached entries.
+
+        Includes target-version tag (tb3c = triple-barrier 3-class) AND
+        current FFD flag state so that toggling TB_USE_FFD_FEATURES does not
+        mix 46-col and 51-col entries under the same key.
         """
-        return f"{symbol}_{bar_size}_{self.forecast_horizon}_tb3c"
+        import os as _os
+        ffd = "ffd1" if _os.environ.get("TB_USE_FFD_FEATURES", "0") == "1" else "ffd0"
+        return f"{symbol}_{bar_size}_{self.forecast_horizon}_tb3c_{ffd}"
     
     def _save_features_to_cache(self, symbol: str, features: List[List[float]], targets: List[int], bar_size: str = "default"):
         """Save precomputed features to MongoDB for reuse across training cycles"""
