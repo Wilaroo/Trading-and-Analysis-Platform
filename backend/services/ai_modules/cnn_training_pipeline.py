@@ -206,7 +206,7 @@ def _train_single_model(
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from torch.utils.data import Dataset, DataLoader, random_split
+    from torch.utils.data import Dataset, DataLoader, Subset
     from services.ai_modules.chart_pattern_cnn import (
         build_cnn_model, save_model_to_db, load_model_from_db,
         CLASS_TO_IDX,
@@ -218,6 +218,7 @@ def _train_single_model(
     images = []
     pattern_labels = []
     win_labels = []
+    symbols_per_sample = []  # Track symbol for group-based train/val/test split
 
     for s in samples:
         try:
@@ -225,6 +226,7 @@ def _train_single_model(
             images.append(tensor)
             pattern_labels.append(CLASS_TO_IDX.get(s["setup_type"], CLASS_TO_IDX["UNKNOWN"]))
             win_labels.append(1.0 if s["outcome"] == "WIN" else 0.0)
+            symbols_per_sample.append(s.get("symbol", "UNKNOWN"))
         except Exception:
             continue
 
@@ -249,12 +251,74 @@ def _train_single_model(
 
     dataset = ChartDataset(X, y_pattern, y_win)
 
-    # Train/val/test split: 70/15/15
+    # ── Train/val/test split: 70/15/15 by SYMBOL (prevents window-overlap leakage) ──
+    # Windows overlap 75% in bars (step = window_size // 4), so random sample splitting
+    # leaks nearly-identical images across train/val/test and inflates accuracy to ~100%.
+    # Group split by symbol ensures all windows from a given stock land in exactly one
+    # split — the CNN is forced to generalize to unseen tickers.
+    import random as _random
+    from collections import defaultdict
+
     n = len(dataset)
-    n_train = int(0.7 * n)
-    n_val = int(0.15 * n)
-    n_test = n - n_train - n_val
-    train_ds, val_ds, test_ds = random_split(dataset, [n_train, n_val, n_test])
+    symbol_to_indices = defaultdict(list)
+    for idx, sym in enumerate(symbols_per_sample):
+        symbol_to_indices[sym].append(idx)
+    unique_symbols = list(symbol_to_indices.keys())
+
+    if len(unique_symbols) >= 10:
+        # Group split by symbol — deterministic seed so val/test are reproducible
+        rng = _random.Random(42)
+        shuffled_symbols = list(unique_symbols)
+        rng.shuffle(shuffled_symbols)
+
+        train_indices, val_indices, test_indices = [], [], []
+        running_count = 0
+        target_train = int(0.70 * n)
+        target_val = int(0.85 * n)  # train + val cutoff
+        for sym in shuffled_symbols:
+            sym_idxs = symbol_to_indices[sym]
+            if running_count < target_train:
+                train_indices.extend(sym_idxs)
+            elif running_count < target_val:
+                val_indices.extend(sym_idxs)
+            else:
+                test_indices.extend(sym_idxs)
+            running_count += len(sym_idxs)
+
+        # Guard against empty val/test when one huge symbol dominates
+        if not val_indices or not test_indices:
+            logger.warning(
+                f"[CNN split] symbol-group split produced empty val/test for {setup_type}/{bar_size} "
+                f"(unique_symbols={len(unique_symbols)}). Falling back to chronological index split."
+            )
+            # Chronological fallback — preserves ordering; no random shuffle
+            cutoff_train = int(0.7 * n)
+            cutoff_val = int(0.85 * n)
+            train_indices = list(range(0, cutoff_train))
+            val_indices = list(range(cutoff_train, cutoff_val))
+            test_indices = list(range(cutoff_val, n))
+        else:
+            logger.info(
+                f"[CNN split] symbol-group split for {setup_type}/{bar_size}: "
+                f"{len(train_indices)} train / {len(val_indices)} val / {len(test_indices)} test "
+                f"from {len(unique_symbols)} symbols"
+            )
+    else:
+        # Too few symbols for a group split — fall back to chronological (no leakage either)
+        logger.warning(
+            f"[CNN split] only {len(unique_symbols)} unique symbols for {setup_type}/{bar_size}, "
+            f"using chronological split instead of random."
+        )
+        cutoff_train = int(0.7 * n)
+        cutoff_val = int(0.85 * n)
+        train_indices = list(range(0, cutoff_train))
+        val_indices = list(range(cutoff_train, cutoff_val))
+        test_indices = list(range(cutoff_val, n))
+
+    train_ds = Subset(dataset, train_indices)
+    val_ds = Subset(dataset, val_indices)
+    test_ds = Subset(dataset, test_indices)
+    n_train, n_val, n_test = len(train_ds), len(val_ds), len(test_ds)
 
     # Batch size based on available memory
     batch_size = 32 if device.type == "cuda" else 16
