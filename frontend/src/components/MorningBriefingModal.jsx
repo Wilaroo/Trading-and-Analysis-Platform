@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, TrendingUp, TrendingDown, AlertTriangle, Target, Clock, Shield, BarChart3, Trash2 } from 'lucide-react';
+import { X, Sun, TrendingUp, TrendingDown, AlertTriangle, Target, Clock, Shield, BarChart3 } from 'lucide-react';
 import api from '../utils/api';
 
 const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [briefing, setBriefing] = useState(null);
-  const [flattening, setFlattening] = useState(false);
-  const [flattenResult, setFlattenResult] = useState(null);
 
   const loadBriefing = useCallback(async () => {
     setLoading(true);
@@ -38,24 +36,6 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen) loadBriefing();
   }, [isOpen, loadBriefing]);
-
-  const handleFlatten = useCallback(async () => {
-    if (!window.confirm('Close ALL open IB paper positions at market? This cannot be undone.')) return;
-    setFlattening(true);
-    setFlattenResult(null);
-    try {
-      const res = await api.post('/api/portfolio/flatten-paper', null, {
-        params: { confirm: 'FLATTEN' },
-        timeout: 30000,
-      });
-      setFlattenResult({ ok: true, message: res.data?.message || 'Flatten queued', count: res.data?.orders?.length || 0 });
-      setTimeout(loadBriefing, 1500);
-    } catch (err) {
-      setFlattenResult({ ok: false, message: err.response?.data?.detail || err.message || 'Flatten failed' });
-    } finally {
-      setFlattening(false);
-    }
-  }, [loadBriefing]);
 
   if (!isOpen) return null;
 
@@ -141,22 +121,6 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                         )}
                       </div>
                     ))}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <button
-                      onClick={handleFlatten}
-                      disabled={flattening}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-medium hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                      data-testid="flatten-paper-btn"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      {flattening ? 'Flattening…' : 'Flatten All (Paper)'}
-                    </button>
-                    {flattenResult && (
-                      <span className={`text-xs ${flattenResult.ok ? 'text-emerald-400' : 'text-red-400'}`} data-testid="flatten-result">
-                        {flattenResult.ok ? `✓ ${flattenResult.count} order(s) queued` : `✗ ${flattenResult.message}`}
-                      </span>
-                    )}
                   </div>
                 </section>
               )}
