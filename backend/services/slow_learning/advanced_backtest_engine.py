@@ -1173,30 +1173,43 @@ class AdvancedBacktestEngine:
     ) -> Tuple[List[BacktestTrade], List[Dict]]:
         """
         Simulate a strategy with AI predictions integrated.
-        
+
         ai_mode:
-          "filter"     - Only enter when BOTH setup signal AND AI agrees (direction=up)
-          "standalone" - Enter whenever AI predicts "up" with sufficient confidence
+          "filter"     - Only enter when BOTH setup signal AND AI agrees with strategy direction
+          "standalone" - Enter whenever AI predicts in strategy direction with sufficient confidence
+
+        Note: Honors the strategy's direction. For SHORT_ setups, entry requires
+        AI prediction "down" (not "up"), stop/target/P&L flip accordingly.
+        Previously hardcoded to long-only, which silently rejected ~99% of short
+        signals because AI predictions for shorts were "down" but filter checked "up".
         """
         trades: List[BacktestTrade] = []
         equity_curve: List[Dict] = []
-        
+
         capital = starting_capital
         in_position = False
         current_trade: BacktestTrade = None
-        
+
+        # Determine strategy direction ONCE (all trades in this call share it)
+        is_short = strategy.setup_type.lower().startswith("short_")
+        trade_direction = "short" if is_short else "long"
+        required_ai_direction = "down" if is_short else "up"
+
         for i, bar in enumerate(bars):
             current_price = bar.get("close", bar.get("c", 0))
             timestamp = bar.get("timestamp", "")
             high = bar.get("high", bar.get("h", current_price))
             low = bar.get("low", bar.get("l", current_price))
-            
-            # Track equity
+
+            # Track equity — P&L direction-aware
             equity = capital
             if in_position and current_trade:
-                unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
+                if is_short:
+                    unrealized_pnl = (current_trade.entry_price - current_price) * current_trade.shares
+                else:
+                    unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
                 equity = capital + unrealized_pnl
-                
+
                 if unrealized_pnl > current_trade.max_favorable_excursion:
                     current_trade.max_favorable_excursion = unrealized_pnl
                 if unrealized_pnl < current_trade.max_adverse_excursion:
@@ -1206,77 +1219,109 @@ class AdvancedBacktestEngine:
             
             if in_position and current_trade:
                 current_trade.bars_held += 1
-                
-                # Same exit logic as standard simulation
+
+                # Exit logic — direction-aware
                 exit_price = None
                 exit_reason = ""
-                
-                if low <= current_trade.stop_price:
-                    exit_price = current_trade.stop_price
-                    exit_reason = "stop"
-                elif high >= current_trade.target_price:
-                    exit_price = current_trade.target_price
-                    exit_reason = "target"
-                elif current_trade.bars_held >= strategy.max_bars_to_hold:
-                    exit_price = current_price
-                    exit_reason = "time"
-                elif i == len(bars) - 1:
-                    exit_price = current_price
-                    exit_reason = "end_of_data"
-                
+
+                if is_short:
+                    # Short: stop is ABOVE entry, target is BELOW entry
+                    if high >= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif low <= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
+                    elif current_trade.bars_held >= strategy.max_bars_to_hold:
+                        exit_price = current_price
+                        exit_reason = "time"
+                    elif i == len(bars) - 1:
+                        exit_price = current_price
+                        exit_reason = "end_of_data"
+                else:
+                    # Long: stop is BELOW entry, target is ABOVE entry
+                    if low <= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif high >= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
+                    elif current_trade.bars_held >= strategy.max_bars_to_hold:
+                        exit_price = current_price
+                        exit_reason = "time"
+                    elif i == len(bars) - 1:
+                        exit_price = current_price
+                        exit_reason = "end_of_data"
+
                 if exit_price:
                     current_trade.exit_price = exit_price
                     current_trade.exit_date = timestamp[:10]
                     current_trade.exit_time = timestamp[11:19] if len(timestamp) > 10 else ""
                     current_trade.exit_reason = exit_reason
-                    current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
-                    current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
-                    
-                    risk = current_trade.entry_price - current_trade.stop_price
+
+                    # P&L direction-aware
+                    if is_short:
+                        current_trade.pnl = (current_trade.entry_price - exit_price) * current_trade.shares
+                        current_trade.pnl_percent = (1 - exit_price / current_trade.entry_price) * 100
+                        risk = current_trade.stop_price - current_trade.entry_price
+                    else:
+                        current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
+                        current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
+                        risk = current_trade.entry_price - current_trade.stop_price
+
                     if risk > 0:
                         current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
-                    
+
                     trades.append(current_trade)
                     capital += current_trade.pnl
                     in_position = False
                     current_trade = None
-            
+
             else:
                 # Entry decision depends on mode
                 enter = False
-                
+
                 if ai_mode == "filter":
-                    # Require setup signal AND AI confirmation
+                    # Require setup signal AND AI confirmation IN THE STRATEGY'S DIRECTION
                     setup_signal = self._check_entry_signal(bar, strategy, bars[:i+1])
                     if setup_signal and i >= lookback_bars:
                         ai_prediction = self._get_ai_prediction(bars[:i+1], symbol, lookback_bars)
-                        if ai_prediction and ai_prediction.direction == "up" and ai_prediction.confidence >= confidence_threshold:
+                        if (ai_prediction
+                            and ai_prediction.direction == required_ai_direction
+                            and ai_prediction.confidence >= confidence_threshold):
                             enter = True
-                
+
                 elif ai_mode == "standalone":
-                    # Only use AI prediction (ignore setup signals)
+                    # Only use AI prediction (ignore setup signals) — again honoring direction
                     if i >= lookback_bars:
                         ai_prediction = self._get_ai_prediction(bars[:i+1], symbol, lookback_bars)
-                        if ai_prediction and ai_prediction.direction == "up" and ai_prediction.confidence >= confidence_threshold:
+                        if (ai_prediction
+                            and ai_prediction.direction == required_ai_direction
+                            and ai_prediction.confidence >= confidence_threshold):
                             # Basic price/volume filters still apply
                             volume = bar.get("volume", bar.get("v", 0))
                             if volume >= 100000 and 5.0 <= current_price <= 500.0:
                                 enter = True
-                
+
                 if enter:
                     position_value = capital * (strategy.position_size_pct / 100)
                     shares = int(position_value / current_price)
-                    
+
                     if shares > 0:
-                        stop_price = current_price * (1 - strategy.stop_pct / 100)
-                        target_price = current_price * (1 + strategy.target_pct / 100)
-                        
+                        # Direction-aware stop/target
+                        if is_short:
+                            stop_price = current_price * (1 + strategy.stop_pct / 100)
+                            target_price = current_price * (1 - strategy.target_pct / 100)
+                        else:
+                            stop_price = current_price * (1 - strategy.stop_pct / 100)
+                            target_price = current_price * (1 + strategy.target_pct / 100)
+
                         current_trade = BacktestTrade(
                             id=f"t_{uuid.uuid4().hex[:8]}",
                             symbol=symbol,
                             strategy_name=strategy.name,
                             setup_type=strategy.setup_type,
-                            direction="long",
+                            direction=trade_direction,
                             entry_date=timestamp[:10],
                             entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
                             entry_price=current_price,
@@ -1286,7 +1331,7 @@ class AdvancedBacktestEngine:
                             bars_held=0
                         )
                         in_position = True
-        
+
         return trades, equity_curve
     
     def _get_ai_prediction(self, bars_up_to_now: List[Dict], symbol: str, lookback: int):
@@ -2407,12 +2452,27 @@ class AdvancedBacktestEngine:
             return self._check_mean_reversion_entry(bar, recent_bars, short=is_short)
         elif clean_type == "reversal":
             return self._check_reversal_entry(bar, recent_bars, short=is_short)
-        elif clean_type == "trend_continuation":
+        elif clean_type in ("trend_continuation", "trend"):
+            # Alias: SHORT_TREND (stripped → "trend") shares logic with TREND_CONTINUATION.
+            # Previously "trend" fell through to the momentum fallback, making SHORT_TREND
+            # produce identical trades to SHORT_MOMENTUM.
             return self._check_trend_continuation_entry(bar, recent_bars, short=is_short)
         elif clean_type == "momentum":
             return self._check_momentum_entry(bar, recent_bars, short=is_short)
         else:
-            # Unknown setup type — use momentum as fallback
+            # Unknown setup — log once (not every bar) and fall back.
+            # Note: silent fallback to momentum was masking real bugs (e.g. SHORT_TREND
+            # aliasing to SHORT_MOMENTUM). We now warn loudly.
+            if not getattr(self, "_warned_unknown_setups", None):
+                self._warned_unknown_setups = set()
+            warn_key = clean_type
+            if warn_key not in self._warned_unknown_setups:
+                logger.warning(
+                    f"[BACKTEST] Unknown setup type '{strategy.setup_type}' "
+                    f"(clean='{clean_type}') — no dedicated entry check, falling back to momentum. "
+                    f"This may produce misleading results. Add an explicit branch."
+                )
+                self._warned_unknown_setups.add(warn_key)
             return self._check_momentum_entry(bar, recent_bars, short=is_short)
     
     def _check_orb_entry(self, bar: Dict, recent_bars: List[Dict], short: bool = False) -> bool:
