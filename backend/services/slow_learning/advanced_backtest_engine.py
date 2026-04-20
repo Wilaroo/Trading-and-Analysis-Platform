@@ -840,12 +840,25 @@ class AdvancedBacktestEngine:
                     (sim_num / mc_config.num_simulations) * 100,
                     f"Running simulation {sim_num + 1}/{mc_config.num_simulations}..."
                 )
-            
-            # Shuffle trade order
-            sim_trades = trades.copy()
-            if mc_config.randomize_trade_order:
-                random.shuffle(sim_trades)
-            
+
+            # Build the trade sequence for this simulation
+            if mc_config.bootstrap:
+                # Bootstrap: sample with replacement — produces a REAL distribution
+                # of P&L outcomes (simulates "a different run of N trades from the
+                # same underlying edge"). Without this, total P&L is deterministic
+                # and every percentile collapses to the same value.
+                sample_size = mc_config.bootstrap_sample_size or len(trades)
+                sim_trades = [random.choice(trades) for _ in range(sample_size)]
+                # Make fresh copies so randomize_trade_size mutations don't leak
+                # back into the original trade list.
+                sim_trades = [BacktestTrade(**{**t.__dict__}) for t in sim_trades]
+            else:
+                # Legacy shuffle-only behavior (note: pnl_distribution will be
+                # degenerate unless randomize_trade_size is enabled).
+                sim_trades = trades.copy()
+                if mc_config.randomize_trade_order:
+                    random.shuffle(sim_trades)
+
             # Optionally randomize trade sizes
             if mc_config.randomize_trade_size:
                 variation = mc_config.size_variation_pct / 100
