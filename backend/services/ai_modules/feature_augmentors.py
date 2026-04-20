@@ -47,34 +47,48 @@ def compute_ffd_columns(
     lookback: int = 50,
     d_cache: Optional[dict] = None,
     cache_key: Optional[str] = None,
+    expected_rows: Optional[int] = None,
 ) -> Optional[np.ndarray]:
     """
     Build (N, 5) matrix of FFD features aligned to feature matrix rows.
 
     Feature-matrix row j corresponds to bar index (lookback - 1 + j), so we
     compute FFD on full closes and slice from (lookback - 1) onward.
+
+    If ``expected_rows`` is given and FFD cannot be computed (too few bars),
+    return a zero matrix of shape (expected_rows, 5) instead of None. This
+    keeps downstream matrix shapes consistent across heterogeneous symbols.
     """
-    if len(bars) < lookback + 10:
+    def _zero_fallback():
+        if expected_rows is not None and expected_rows > 0:
+            return np.zeros((expected_rows, 5), dtype=np.float32)
         return None
-    closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
-    feats = compute_ffd_features(closes, d_cache=d_cache, cache_key=cache_key)
 
-    start = lookback - 1
-    adaptive = feats["ffd_close_adaptive"][start:]
-    ffd_03 = feats["ffd_close_03"][start:]
-    ffd_05 = feats["ffd_close_05"][start:]
-    ffd_07 = feats["ffd_close_07"][start:]
-    d_opt = feats["ffd_optimal_d"]
+    if len(bars) < lookback + 10:
+        return _zero_fallback()
+    try:
+        closes = np.array([b.get("close", 0) for b in bars], dtype=np.float64)
+        feats = compute_ffd_features(closes, d_cache=d_cache, cache_key=cache_key)
 
-    n = len(adaptive)
-    out = np.column_stack([
-        np.nan_to_num(adaptive, nan=0.0, posinf=0.0, neginf=0.0),
-        np.nan_to_num(ffd_03, nan=0.0, posinf=0.0, neginf=0.0),
-        np.nan_to_num(ffd_05, nan=0.0, posinf=0.0, neginf=0.0),
-        np.nan_to_num(ffd_07, nan=0.0, posinf=0.0, neginf=0.0),
-        np.full(n, d_opt, dtype=np.float64),
-    ]).astype(np.float32)
-    return out
+        start = lookback - 1
+        adaptive = feats["ffd_close_adaptive"][start:]
+        ffd_03 = feats["ffd_close_03"][start:]
+        ffd_05 = feats["ffd_close_05"][start:]
+        ffd_07 = feats["ffd_close_07"][start:]
+        d_opt = feats["ffd_optimal_d"]
+
+        n = len(adaptive)
+        out = np.column_stack([
+            np.nan_to_num(adaptive, nan=0.0, posinf=0.0, neginf=0.0),
+            np.nan_to_num(ffd_03, nan=0.0, posinf=0.0, neginf=0.0),
+            np.nan_to_num(ffd_05, nan=0.0, posinf=0.0, neginf=0.0),
+            np.nan_to_num(ffd_07, nan=0.0, posinf=0.0, neginf=0.0),
+            np.full(n, d_opt, dtype=np.float64),
+        ]).astype(np.float32)
+        return out
+    except Exception:
+        # Any numerical / ADF failure → zero-pad to keep shape consistent.
+        return _zero_fallback()
 
 
 def augment_features(
@@ -87,7 +101,9 @@ def augment_features(
 ) -> Tuple[np.ndarray, List[str]]:
     """
     Return (augmented_matrix, augmented_names). Returns originals when all
-    flags are off or augmentor fails.
+    flags are off. When FFD is ON, always appends exactly 5 cols (zero-padded
+    if the symbol can't produce real FFD features) so that per-symbol matrices
+    concatenate cleanly across a heterogeneous universe.
     """
     if base_matrix is None:
         return base_matrix, base_names
@@ -96,15 +112,21 @@ def augment_features(
     aug_names = list(base_names)
 
     if ffd_enabled():
-        ffd_cols = compute_ffd_columns(bars, lookback=lookback,
-                                       d_cache=d_cache, cache_key=cache_key)
-        if ffd_cols is not None:
-            # Align length — slice base_matrix to match ffd_cols length
-            n_aligned = min(len(base_matrix), len(ffd_cols))
-            base_matrix = base_matrix[:n_aligned]
-            ffd_cols = ffd_cols[:n_aligned]
-            aug_cols.append(ffd_cols)
-            aug_names = aug_names + FFD_NAMES
+        ffd_cols = compute_ffd_columns(
+            bars, lookback=lookback,
+            d_cache=d_cache, cache_key=cache_key,
+            expected_rows=len(base_matrix),
+        )
+        # compute_ffd_columns now guarantees shape (len(base_matrix), 5) when
+        # expected_rows is given — real features when possible, zeros when not.
+        if ffd_cols is None:
+            ffd_cols = np.zeros((len(base_matrix), 5), dtype=np.float32)
+        # Align length (defensive; expected_rows should make this a no-op)
+        n_aligned = min(len(base_matrix), len(ffd_cols))
+        base_matrix = base_matrix[:n_aligned]
+        ffd_cols = ffd_cols[:n_aligned]
+        aug_cols.append(ffd_cols)
+        aug_names = aug_names + FFD_NAMES
 
     if not aug_cols:
         return base_matrix, aug_names
