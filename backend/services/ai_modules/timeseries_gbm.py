@@ -66,6 +66,16 @@ def _extract_symbol_worker(args):
         if feat_matrix is None or len(feat_matrix) == 0:
             return None
 
+        # Phase 2B: Fractional Differentiation feature augmentation (flag-gated).
+        # Appends 5 FFD columns when TB_USE_FFD_FEATURES=1. No-op otherwise.
+        from .feature_augmentors import augment_features, ffd_enabled
+        if ffd_enabled():
+            base_names = fe.get_feature_names()
+            feat_matrix, _ = augment_features(
+                feat_matrix, base_names, bars,
+                lookback=lookback, cache_key=f"{symbol}",
+            )
+
         highs = np.array([b.get("high", 0.0) for b in bars], dtype=np.float64)
         lows = np.array([b.get("low", 0.0) for b in bars], dtype=np.float64)
         closes = np.array([b.get("close", 0.0) for b in bars], dtype=np.float64)

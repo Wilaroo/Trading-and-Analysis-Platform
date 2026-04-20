@@ -28,6 +28,20 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - **1I UI** — `ModelScorecard.jsx` color-coded bundle display + expander button per profile in `SetupModelsPanel.jsx`
 - **APIs**: `GET /api/ai-training/scorecard/{model_name}`, `GET /api/ai-training/scorecards`, `GET /api/ai-training/trial-stats/{setup}/{bar_size}`
 
+### Phase 2A — CUSUM Event Filter — DONE
+- `cusum_filter.py` — López de Prado symmetric CUSUM; `calibrate_h` auto-targets ~100 events/yr; `filter_entry_indices` honors a min-distance guard
+- Wired into 3 workers (`_extract_symbol_worker`, `_extract_setup_long_worker`, `_extract_setup_short_worker`) with flag `TB_USE_CUSUM`
+
+### Phase 2B — Fractional Differentiation — DONE (2026-04-21)
+- `fractional_diff.py` — FFD (fixed-width window) + adaptive d (binary-search lowest ADF-passing d)
+- `feature_augmentors.py` — flag-gated `augment_features()` appends 5 FFD cols (`ffd_close_adaptive`, `ffd_close_03/05/07`, `ffd_optimal_d`)
+- Wired into all 3 worker types; 46-col base becomes 51-col when `TB_USE_FFD_FEATURES=1`
+- `test_ffd_pipeline_integration.py` — 6 new tests verify end-to-end shape, finiteness, and all-flags-on combination
+
+### Phase 2D — HRP/NCO Portfolio Allocator — DONE (code, pending wire-up)
+- `hrp_allocator.py` — López de Prado Hierarchical Risk Parity + Nested Clustered Optimization
+- Not yet wired into `trading_bot_service.py` (P1 backlog)
+
 ### Tests — 41 passing (+30 new)
 - `test_phase1_foundation.py` — 19 tests covering event intervals, purged CV, DSR, scorecard
 - `test_trial_registry.py` — 4 tests (mongomock)

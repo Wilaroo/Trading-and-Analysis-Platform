@@ -286,6 +286,15 @@ def _extract_setup_long_worker(args):
         if base_matrix is None:
             return None
 
+        # Phase 2B: FFD feature augmentation (flag-gated via TB_USE_FFD_FEATURES).
+        # Augment once per symbol and reuse across all setup_configs below.
+        from services.ai_modules.feature_augmentors import augment_features, ffd_enabled
+        if ffd_enabled():
+            base_matrix, _ = augment_features(
+                base_matrix, fe.get_feature_names(), bars,
+                lookback=50, cache_key=f"{symbol}_long",
+            )
+
         closes = np.array([b["close"] for b in bars], dtype=np.float32)
         highs = np.array([b["high"] for b in bars], dtype=np.float32)
         lows = np.array([b["low"] for b in bars], dtype=np.float32)
@@ -382,6 +391,14 @@ def _extract_setup_short_worker(args):
         base_matrix = fe.extract_features_bulk(bars)
         if base_matrix is None:
             return None
+
+        # Phase 2B: FFD feature augmentation (flag-gated via TB_USE_FFD_FEATURES).
+        from services.ai_modules.feature_augmentors import augment_features, ffd_enabled
+        if ffd_enabled():
+            base_matrix, _ = augment_features(
+                base_matrix, fe.get_feature_names(), bars,
+                lookback=50, cache_key=f"{symbol}_short",
+            )
 
         closes = np.array([b["close"] for b in bars], dtype=np.float32)
         highs = np.array([b["high"] for b in bars], dtype=np.float32)
