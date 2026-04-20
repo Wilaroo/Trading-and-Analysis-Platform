@@ -187,13 +187,13 @@ SETUP_TRAINING_PROFILES = {
     "TREND_CONTINUATION": [
         {
             "bar_size": "5 mins",
-            "forecast_horizon": 78,
+            "forecast_horizon": 40,
             "noise_threshold": 0.002,
             "scale_pos_weight": 1.15,
             "min_samples": 50,
             "num_boost_round": 200,
             "num_classes": 3,
-            "description": "Full-day intraday trend continuation on 5-min bars",
+            "description": "~3.5h intraday trend continuation on 5-min bars (capped from 78 so FLAT class remains sampleable)",
         },
         {
             "bar_size": "1 day",
@@ -420,14 +420,14 @@ SETUP_TRAINING_PROFILES = {
     "SHORT_TREND": [
         {
             "bar_size": "5 mins",
-            "forecast_horizon": 78,
+            "forecast_horizon": 40,
             "noise_threshold": 0.002,
             "scale_pos_weight": 1.15,
             "min_samples": 50,
             "num_boost_round": 200,
             "num_classes": 3,
             "direction": "short",
-            "description": "Full-day bearish trend continuation on 5-min bars",
+            "description": "~3.5h bearish trend continuation on 5-min bars (capped from 78)",
         },
         {
             "bar_size": "1 day",
