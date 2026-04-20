@@ -86,3 +86,12 @@ backend/models/*.joblib
 /tmp/
 *.tmp
 test_reports/
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
