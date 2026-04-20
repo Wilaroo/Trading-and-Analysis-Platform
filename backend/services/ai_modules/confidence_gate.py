@@ -419,38 +419,49 @@ class ConfidenceGate:
             tft_confidence = tft_signal["confidence"]
             tft_model_acc = tft_signal.get("model_accuracy", 0.5)
 
-            trade_is_long = direction.lower() in ("long", "buy")
-            tft_agrees = (
-                (trade_is_long and tft_direction == "up") or
-                (not trade_is_long and tft_direction == "down")
-            )
-
-            accuracy_weight = min(1.0, max(0.5, (tft_model_acc - 0.45) / 0.2))
-
-            if tft_agrees and tft_confidence >= 0.6:
-                pts = int(12 * accuracy_weight)
-                confidence_points += pts
-                tf_info = tft_signal.get("timeframe_weights", {})
-                top_tf = max(tf_info, key=tf_info.get) if tf_info else "unknown"
+            # GATE: DL models must show real edge (≥52% accuracy) before they can
+            # influence live trade decisions. Below that, they're likely stuck in
+            # majority-class collapse (worse than coin flip). Skipping here is
+            # preferable to the old floor-at-0.5 weight, which let a 35%-accurate
+            # model still contribute 50% weight to every entry.
+            if tft_model_acc < 0.52:
                 reasoning.append(
-                    f"TFT multi-timeframe CONFIRMS {direction.upper()} "
-                    f"({tft_confidence:.0%} conf, top TF: {top_tf}) (+{pts})"
+                    f"TFT signal IGNORED — model accuracy {tft_model_acc:.1%} below 52% threshold "
+                    f"(likely majority-class collapse; rebuild with triple-barrier targets)"
                 )
-            elif tft_agrees:
-                pts = int(5 * accuracy_weight)
-                confidence_points += pts
-                reasoning.append(
-                    f"TFT leans {direction.upper()} ({tft_confidence:.0%} conf) (+{pts})"
-                )
-            elif tft_direction == "flat":
-                confidence_points -= 2
-                reasoning.append(f"TFT sees NO EDGE (flat, {tft_confidence:.0%} conf) (-2)")
             else:
-                confidence_points -= 5
-                reasoning.append(
-                    f"TFT DISAGREES — predicts {tft_direction.upper()} "
-                    f"vs proposed {direction.upper()} (-5)"
+                trade_is_long = direction.lower() in ("long", "buy")
+                tft_agrees = (
+                    (trade_is_long and tft_direction == "up") or
+                    (not trade_is_long and tft_direction == "down")
                 )
+
+                accuracy_weight = min(1.0, max(0.5, (tft_model_acc - 0.45) / 0.2))
+
+                if tft_agrees and tft_confidence >= 0.6:
+                    pts = int(12 * accuracy_weight)
+                    confidence_points += pts
+                    tf_info = tft_signal.get("timeframe_weights", {})
+                    top_tf = max(tf_info, key=tf_info.get) if tf_info else "unknown"
+                    reasoning.append(
+                        f"TFT multi-timeframe CONFIRMS {direction.upper()} "
+                        f"({tft_confidence:.0%} conf, top TF: {top_tf}) (+{pts})"
+                    )
+                elif tft_agrees:
+                    pts = int(5 * accuracy_weight)
+                    confidence_points += pts
+                    reasoning.append(
+                        f"TFT leans {direction.upper()} ({tft_confidence:.0%} conf) (+{pts})"
+                    )
+                elif tft_direction == "flat":
+                    confidence_points -= 2
+                    reasoning.append(f"TFT sees NO EDGE (flat, {tft_confidence:.0%} conf) (-2)")
+                else:
+                    confidence_points -= 5
+                    reasoning.append(
+                        f"TFT DISAGREES — predicts {tft_direction.upper()} "
+                        f"vs proposed {direction.upper()} (-5)"
+                    )
 
         # --- 5b. VAE REGIME SIGNAL (max +8 / floor -5) ---
         vae_signal = await self._get_vae_regime_signal(direction)
@@ -487,31 +498,40 @@ class ConfidenceGate:
             lstm_direction = cnn_lstm_signal["direction"]
             lstm_win_prob = cnn_lstm_signal["win_probability"]
             lstm_confidence = cnn_lstm_signal["confidence"]
+            lstm_model_acc = cnn_lstm_signal.get("model_accuracy", 0.5)
 
-            trade_is_long = direction.lower() in ("long", "buy")
-            lstm_agrees = (
-                (trade_is_long and lstm_direction == "up") or
-                (not trade_is_long and lstm_direction == "down")
-            )
-
-            if lstm_agrees and lstm_win_prob >= 0.6:
-                confidence_points += 10
+            # GATE: same DL-accuracy floor as TFT. Models below 52% are likely
+            # majority-class-collapsed and must not contribute to live scoring.
+            if lstm_model_acc < 0.52:
                 reasoning.append(
-                    f"CNN-LSTM temporal: HIGH win prob ({lstm_win_prob:.0%}), "
-                    f"pattern evolving favorably (+10)"
-                )
-            elif lstm_agrees and lstm_win_prob >= 0.5:
-                confidence_points += 5
-                reasoning.append(f"CNN-LSTM temporal: moderate ({lstm_win_prob:.0%}) (+5)")
-            elif not lstm_agrees and lstm_win_prob < 0.4:
-                confidence_points -= 5
-                position_multiplier *= 0.9
-                reasoning.append(
-                    f"CNN-LSTM temporal: pattern UNFAVORABLE ({lstm_win_prob:.0%}) "
-                    f"predicts {lstm_direction.upper()} (-5, size -10%)"
+                    f"CNN-LSTM signal IGNORED — model accuracy {lstm_model_acc:.1%} below 52% threshold "
+                    f"(likely majority-class collapse; rebuild with triple-barrier targets)"
                 )
             else:
-                reasoning.append(f"CNN-LSTM temporal: neutral ({lstm_win_prob:.0%})")
+                trade_is_long = direction.lower() in ("long", "buy")
+                lstm_agrees = (
+                    (trade_is_long and lstm_direction == "up") or
+                    (not trade_is_long and lstm_direction == "down")
+                )
+
+                if lstm_agrees and lstm_win_prob >= 0.6:
+                    confidence_points += 10
+                    reasoning.append(
+                        f"CNN-LSTM temporal: HIGH win prob ({lstm_win_prob:.0%}), "
+                        f"pattern evolving favorably (+10)"
+                    )
+                elif lstm_agrees and lstm_win_prob >= 0.5:
+                    confidence_points += 5
+                    reasoning.append(f"CNN-LSTM temporal: moderate ({lstm_win_prob:.0%}) (+5)")
+                elif not lstm_agrees and lstm_win_prob < 0.4:
+                    confidence_points -= 5
+                    position_multiplier *= 0.9
+                    reasoning.append(
+                        f"CNN-LSTM temporal: pattern UNFAVORABLE ({lstm_win_prob:.0%}) "
+                        f"predicts {lstm_direction.upper()} (-5, size -10%)"
+                    )
+                else:
+                    reasoning.append(f"CNN-LSTM temporal: neutral ({lstm_win_prob:.0%})")
 
         # --- 6. DETERMINE DECISION (Mode-aware thresholds) ---
         # Additive scoring: base 0, earn points from confirmation
