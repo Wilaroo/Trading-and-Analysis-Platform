@@ -3172,10 +3172,37 @@ async def run_training_pipeline(
                 scored = score_result.get("scored", 0)
                 logger.info(f"[FINBERT] Scored {scored} articles")
 
+                # Compute a MEANINGFUL quality score (not fake accuracy).
+                # FinBERT is pretrained — there's no train/val to measure accuracy against.
+                # Instead report distribution entropy: 1.0 = healthy diverse output,
+                # 0.0 = pathological (all articles forced into one class).
+                distribution = score_result.get("distribution", {}) or {}
+                total_scored = sum(distribution.values())
+                if total_scored > 0:
+                    import math as _math
+                    probs = [c / total_scored for c in distribution.values() if c > 0]
+                    entropy = -sum(p * _math.log(p) for p in probs)
+                    # Normalize against log(3) = max entropy for 3 classes
+                    max_entropy = _math.log(3)
+                    quality_score = entropy / max_entropy if max_entropy > 0 else 0.0
+                else:
+                    quality_score = 0.0
+
+                logger.info(
+                    f"[FINBERT] Distribution quality score: {quality_score:.3f} "
+                    f"(1.0 = perfectly balanced pos/neg/neutral, "
+                    f"0.0 = all in one class). Distribution: {distribution}"
+                )
+
                 results["models_trained"].append({
-                    "name": "finbert_sentiment", "accuracy": scored, "type": "finbert"
+                    "name": "finbert_sentiment",
+                    "accuracy": quality_score,
+                    "type": "finbert",
+                    "articles_scored": scored,
+                    "distribution": distribution,
+                    "quality_metric": "distribution_entropy_normalized",
                 })
-                status.add_completed("finbert_sentiment", 1.0)
+                status.add_completed("finbert_sentiment", quality_score)
 
             except Exception as e:
                 logger.error(f"[FINBERT] Phase failed: {e}", exc_info=True)
