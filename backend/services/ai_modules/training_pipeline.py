@@ -278,6 +278,7 @@ def _extract_setup_long_worker(args):
     # setup_configs: list of (setup_type, forecast_horizon, noise_threshold)
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
     from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+    from services.ai_modules.timeseries_gbm import _log_flag_state_once
     from numpy.lib.stride_tricks import sliding_window_view
 
     try:
@@ -285,6 +286,7 @@ def _extract_setup_long_worker(args):
         base_matrix = fe.extract_features_bulk(bars)
         if base_matrix is None:
             return None
+        _log_flag_state_once()
 
         # Phase 2B: FFD feature augmentation (flag-gated via TB_USE_FFD_FEATURES).
         # Augment once per symbol and reuse across all setup_configs below.
@@ -384,6 +386,7 @@ def _extract_setup_short_worker(args):
     symbol, bars, setup_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
     from services.ai_modules.short_setup_features import get_short_setup_features, get_short_setup_feature_names
+    from services.ai_modules.timeseries_gbm import _log_flag_state_once
     from numpy.lib.stride_tricks import sliding_window_view
 
     try:
@@ -391,6 +394,7 @@ def _extract_setup_short_worker(args):
         base_matrix = fe.extract_features_bulk(bars)
         if base_matrix is None:
             return None
+        _log_flag_state_once()
 
         # Phase 2B: FFD feature augmentation (flag-gated via TB_USE_FFD_FEATURES).
         from services.ai_modules.feature_augmentors import augment_features, ffd_enabled

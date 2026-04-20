@@ -35,6 +35,21 @@ from .timeseries_features import (
 logger = logging.getLogger(__name__)
 
 
+# Per-process flag-state log (fires exactly once per worker subprocess).
+_WORKER_FLAGS_LOGGED = False
+
+
+def _log_flag_state_once():
+    """Print CUSUM/FFD flag state once per subprocess so the retrain log is self-documenting."""
+    global _WORKER_FLAGS_LOGGED
+    if _WORKER_FLAGS_LOGGED:
+        return
+    _WORKER_FLAGS_LOGGED = True
+    cusum = os.environ.get("TB_USE_CUSUM", "0")
+    ffd = os.environ.get("TB_USE_FFD_FEATURES", "0")
+    logger.info(f"[worker_flags pid={os.getpid()}] TB_USE_CUSUM={cusum} TB_USE_FFD_FEATURES={ffd}")
+
+
 def _extract_symbol_worker(args):
     """
     Top-level worker function for ProcessPoolExecutor.
@@ -65,6 +80,7 @@ def _extract_symbol_worker(args):
         feat_matrix = fe.extract_features_bulk(bars)
         if feat_matrix is None or len(feat_matrix) == 0:
             return None
+        _log_flag_state_once()
 
         # Phase 2B: Fractional Differentiation feature augmentation (flag-gated).
         # Appends 5 FFD columns when TB_USE_FFD_FEATURES=1. No-op otherwise.
