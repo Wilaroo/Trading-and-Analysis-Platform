@@ -5,6 +5,7 @@ import DataCollectionPanel from './DataCollectionPanel';
 import MarketScannerPanel from '../MarketScannerPanel';
 import SimulationQuickPanel from './SimulationQuickPanel';
 import ValidationResultsPanel from './ValidationResultsPanel';
+import ValidationSummaryCard from './ValidationSummaryCard';
 
 const DataBacktestingPanel = memo(({ simulationJobs, backtestResults, backtestJobs, validationResults, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(false);
@@ -94,10 +95,13 @@ const DataBacktestingPanel = memo(({ simulationJobs, backtestResults, backtestJo
                 />
               )}
               {activeTab === 'validation' && (
-                <ValidationResultsPanel
-                  validationResults={valResults}
-                  onRefresh={onRefresh}
-                />
+                <div className="space-y-4" data-testid="validation-tab-content">
+                  <ValidationSummaryCard />
+                  <ValidationResultsPanel
+                    validationResults={valResults}
+                    onRefresh={onRefresh}
+                  />
+                </div>
               )}
             </div>
           </motion.div>

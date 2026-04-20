@@ -2091,14 +2091,140 @@ def get_latest_validations():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/validation/summary")
+def get_validation_summary():
+    """
+    High-signal dashboard summary of model validation quality across time windows.
+
+    Returns:
+      - Decision counts for last 24h / 7d / 30d / all-time
+      - Top 5 promoted models by win rate × sharpe
+      - Top rejection reasons grouped by category
+      - Current promotion rate (trend indicator)
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+
+        from datetime import datetime, timezone, timedelta
+        db = _timeseries_ai._db
+        col = db["model_validations"]
+        now = datetime.now(timezone.utc)
+
+        def _window(hours: int):
+            cutoff = (now - timedelta(hours=hours)).isoformat()
+            cursor = col.find(
+                {"validated_at": {"$gte": cutoff}},
+                {"_id": 0, "status": 1, "reason": 1, "validated_at": 1},
+            )
+            promoted = rejected = other = 0
+            for r in cursor:
+                s = (r.get("status") or "").lower()
+                if s == "promoted":
+                    promoted += 1
+                elif s.startswith("reject"):
+                    rejected += 1
+                else:
+                    other += 1
+            total = promoted + rejected + other
+            rate = round((promoted / total) * 100, 1) if total else 0.0
+            return {"total": total, "promoted": promoted, "rejected": rejected, "other": other, "promotion_rate_pct": rate}
+
+        windows = {
+            "last_24h": _window(24),
+            "last_7d": _window(24 * 7),
+            "last_30d": _window(24 * 30),
+            "all_time": _window(24 * 365 * 10),  # effectively "all"
+        }
+
+        # --- Top 5 promoted performers ---
+        # Compute simple score = win_rate * sharpe (guarded against None/NaN)
+        top_promoted = []
+        for r in col.find(
+            {"status": "promoted"},
+            {"_id": 0, "setup_type": 1, "bar_size": 1, "validated_at": 1,
+             "ai_comparison": 1, "reason": 1},
+        ).sort("validated_at", -1).limit(200):
+            ai = r.get("ai_comparison") or {}
+            wr = ai.get("ai_filtered_win_rate") or 0
+            sh = ai.get("ai_filtered_sharpe") or 0
+            trades = ai.get("ai_filtered_trades") or 0
+            if trades < 10 or wr <= 0 or sh <= 0:
+                continue  # exclude low-signal promotions
+            score = (wr / 100.0) * sh
+            top_promoted.append({
+                "setup_type": r.get("setup_type"),
+                "bar_size": r.get("bar_size"),
+                "win_rate": round(wr, 1),
+                "sharpe": round(sh, 2),
+                "trades": trades,
+                "score": round(score, 3),
+                "validated_at": r.get("validated_at"),
+            })
+        top_promoted.sort(key=lambda x: x["score"], reverse=True)
+        top_promoted = top_promoted[:5]
+
+        # --- Rejection reason categorization ---
+        # Bucket reasons into buckets so the UI can show top failure modes.
+        # Order matters: more specific buckets first. Needles are matched as
+        # case-insensitive substrings against the reason text.
+        BUCKETS = [
+            ("monte_carlo_broken", ["monte carlo", "degenerate", "mc simulation"]),
+            ("weak_walk_forward", ["walk-forward", "efficiency", "out-of-sample", "oos "]),
+            ("no_ai_edge", ["ai filter adds", "ai edge", "ai improvement"]),
+            ("low_sharpe", ["sharpe"]),
+            ("low_win_rate", ["win rate", "win_rate"]),
+            ("insufficient_trades", ["insufficient", "too few", "min trades", "statistical significance"]),
+            ("regression", ["regression", "baseline"]),
+            ("validator_bug", ["fail-open", "pre-fix", "legacy"]),
+            ("other", []),
+        ]
+        reason_counts = {b[0]: 0 for b in BUCKETS}
+        sample_reasons = {b[0]: None for b in BUCKETS}
+        for r in col.find(
+            {"status": {"$regex": "^reject", "$options": "i"}},
+            {"_id": 0, "reason": 1, "rejected_reason": 1},
+        ):
+            reason = (r.get("reason") or r.get("rejected_reason") or "").lower()
+            bucket = "other"
+            for name, needles in BUCKETS:
+                if name == "other":
+                    continue
+                if any(n in reason for n in needles):
+                    bucket = name
+                    break
+            reason_counts[bucket] += 1
+            if sample_reasons[bucket] is None:
+                sample_reasons[bucket] = (r.get("reason") or r.get("rejected_reason") or "")[:140]
+
+        rejection_summary = [
+            {"bucket": name, "count": reason_counts[name], "sample": sample_reasons[name]}
+            for name in reason_counts
+            if reason_counts[name] > 0
+        ]
+        rejection_summary.sort(key=lambda x: x["count"], reverse=True)
+
+        return {
+            "success": True,
+            "generated_at": now.isoformat(),
+            "windows": windows,
+            "top_promoted": top_promoted,
+            "rejection_summary": rejection_summary,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting validation summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/validation/batch-history")
 def get_batch_validation_history(limit: int = 10):
     """
     Get batch validation results (Phases 4-5: Multi-Strategy + Market-Wide).
     """
     try:
-        if not _timeseries_ai or _timeseries_ai._db is None:
-            raise HTTPException(status_code=503, detail="AI service not initialized")
+        if not _timeseries_ai or _timeseries_ai._db is None:            raise HTTPException(status_code=503, detail="AI service not initialized")
         
         db = _timeseries_ai._db
         records = list(db["batch_validations"].find(
