@@ -27,10 +27,23 @@ set IB_PORT=4002
 set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
 
 set IB_USERNAME=paperesw100000
-set IB_PASSWORD=Socr1025!@!?
+:: IB password is loaded from a local file that is NOT committed to git.
+:: Create C:\Users\13174\Trading-and-Analysis-Platform\.ib_secret with a single line:
+::     set IB_PASSWORD=your_password_here
+:: Then .gitignore covers *.secret so it never leaks.
+if exist "%REPO_DIR%\.ib_secret" (
+    call "%REPO_DIR%\.ib_secret"
+) else (
+    echo [WARN] .ib_secret not found — create it with: set IB_PASSWORD=your_password
+    echo        See scripts\README_SECRETS.md for instructions
+    set IB_PASSWORD=PLEASE_CREATE_IB_SECRET_FILE
+)
 
 :: IB Client IDs (must be unique per connection)
-set IB_PUSHER_CLIENT_ID=15
+:: Pusher client ID is randomized (20-69) each startup to prevent TWS from
+:: replaying old session state after a Gateway/TWS upgrade or reconnect —
+:: which was the root cause of the double-execution bug on 2026-04-20.
+set /a IB_PUSHER_CLIENT_ID=%RANDOM% %% 50 + 20
 set IB_COLLECTOR_ID_1=16
 set IB_COLLECTOR_ID_2=17
 set IB_COLLECTOR_ID_3=18

@@ -9,6 +9,11 @@
 .env.*
 !.env.example
 
+# Secrets (never commit)
+*.secret
+.ib_secret
+.*_secret
+
 # Python cache
 **/__pycache__/
 *.pyc

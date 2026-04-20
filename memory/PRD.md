@@ -23,11 +23,19 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 Via flatten endpoint + manual TC2000/TWS cleanup.
 
 ## Active P0 Blockers
-### 🔴 Pusher double-execution bug (NEW — blocks flatten endpoint)
-- **Symptom**: Every MKT order queued by flatten endpoint gets submitted to IB twice (3× for at least one order). Long positions became inverse-magnitude shorts on first flatten, then doubled again on second flatten.
-- **Scope**: The Windows IB Data Pusher, not the backend. Backend queue correctly held N orders; pusher submitted 2N (or more) fills to IB.
-- **Hypothesis**: Pusher polls `/api/ib/orders/pending` and submits without atomically claiming via `/api/ib/orders/claim/{id}`, or has a retry loop that fires too aggressively. Needs source-code review of pusher on Windows PC.
-- **Next session P0**: Locate pusher source (`find ~/Trading-and-Analysis-Platform -name "*pusher*"`), audit polling loop, enforce `claim → submit → report_result` sequence with idempotency.
+### 🟢 Pusher double-execution bug — FIXED (pending verification on Windows)
+- **Root cause**: TWS mid-session auto-upgrade caused the pusher's IB client connection (fixed clientId=15) to reconnect with stale session state. Previously-submitted MKT orders got replayed by TWS as if new, causing 2×-3× execution for each flatten order.
+- **Fixes applied (2026-04-20)**:
+  1. `ib_data_pusher.py` — `_recently_submitted` in-memory cache stamps each `order_id → (timestamp, ib_order_id)` immediately after `placeOrder()`. Any duplicate poll of same order_id is blocked + reported rejected within 10-min window.
+  2. `StartTradeCommand.bat` — pusher clientId now randomized 20–69 each startup (`set /a IB_PUSHER_CLIENT_ID=%RANDOM% %% 50 + 20`). TWS can't replay a clientId it's never seen.
+  3. `routers/portfolio.py` flatten endpoint — refuses to fire if pusher snapshot > 30s old (prevents flattening against stale positions).
+  4. Pre-flight cancel of prior `flatten_*` orders (already done in first pass).
+- **Verification plan for next session**: re-enable TWS API, restart pusher with new fixes, queue a single test order, confirm IB shows exactly one fill.
+
+### 🚨 Security — paper password was committed to git
+- `StartTradeCommand.bat` had `set IB_PASSWORD=Socr1025!@!?` hardcoded (line 30, pre-fix).
+- **Fixed**: password moved to local `.ib_secret` file loaded via `call "%REPO_DIR%\.ib_secret"`. `.gitignore` updated to cover `*.secret`. `documents/scripts/README_SECRETS.md` explains setup.
+- **User action required**: rotate the paper password in IB Account Management, then create `.ib_secret` on the Windows PC with the new password.
 
 ## P1 Outstanding
 - Phase 13 revalidation: `backend/scripts/revalidate_all.py` against the fixed fail-closed validator (was next after Morning Briefing)

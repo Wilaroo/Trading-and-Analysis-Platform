@@ -230,6 +230,27 @@ async def flatten_paper_positions(confirm: str = ""):
     if not is_pusher_connected():
         raise HTTPException(status_code=503, detail="IB pusher not connected; cannot flatten")
     
+    # Fix #3: refuse flatten if pusher snapshot is stale — prevents queueing orders
+    # based on a position state that's already out of date.
+    try:
+        from routers.ib import _pushed_ib_data  # noqa: SLF001
+        from datetime import datetime, timezone
+        lu = _pushed_ib_data.get("last_update")
+        if lu:
+            last_dt = datetime.fromisoformat(lu.replace('Z', '+00:00') if 'Z' in lu else lu)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            if age > 30:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Pusher snapshot is {int(age)}s stale (>30s). Refusing to flatten based on outdated positions."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Could not verify pusher freshness: {e}")
+    
     positions = get_pushed_positions()
     if not positions:
         return {"success": True, "message": "No open positions to flatten", "orders": []}

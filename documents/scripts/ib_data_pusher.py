@@ -2244,6 +2244,27 @@ class IBDataPusher:
         if self._claim_failures.get(order_id, 0) >= 3:
             return  # Silently skip — backend will auto-expire it
 
+        # IDEMPOTENCY GUARD: if we already submitted this order_id to IB recently,
+        # refuse to submit it again. Protects against:
+        #   - Duplicate poll results (backend returns claimed orders too)
+        #   - TWS-upgrade-mid-session connection replay
+        #   - Claim HTTP timing out but succeeding server-side
+        if not hasattr(self, '_recently_submitted'):
+            self._recently_submitted = {}  # order_id -> (timestamp, ib_order_id)
+        # Evict entries older than 10 min
+        now_ts = time.time()
+        stale = [oid for oid, (ts, _) in self._recently_submitted.items() if now_ts - ts > 600]
+        for oid in stale:
+            self._recently_submitted.pop(oid, None)
+        
+        if order_id in self._recently_submitted:
+            prev_ts, prev_ib_id = self._recently_submitted[order_id]
+            age = int(now_ts - prev_ts)
+            logger.warning(f"[OrderQueue] IDEMPOTENCY BLOCK: order {order_id} already submitted {age}s ago as IB order {prev_ib_id} — refusing duplicate")
+            # Re-report as filled/pending so backend marks it terminal and stops re-sending
+            self._report_order_result(order_id, "rejected", error=f"Duplicate submission blocked (previous ib_order_id={prev_ib_id}, age={age}s)")
+            return
+
         logger.info(f"[OrderQueue] Executing: {order_id} - {action} {quantity} {symbol}")
         
         try:
@@ -2280,6 +2301,9 @@ class IBDataPusher:
             
             # Place the order
             trade = self.ib.placeOrder(contract, ib_order)
+            # Stamp idempotency cache IMMEDIATELY after placeOrder returns — even if
+            # we crash/disconnect before the fill loop completes, we won't re-submit.
+            self._recently_submitted[order_id] = (now_ts, trade.order.orderId)
             
             # Wait for fill (with timeout)
             max_wait = 30
