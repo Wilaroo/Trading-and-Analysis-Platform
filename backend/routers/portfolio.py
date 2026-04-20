@@ -46,16 +46,30 @@ async def get_portfolio(source: str = "auto"):
                         current_price = pos.get("market_price", 0) or pos.get("marketPrice", 0)
                         if not current_price and symbol in quotes:
                             q = quotes[symbol]
-                            current_price = q.get("last") or q.get("close") or avg_cost
+                            current_price = q.get("last") or q.get("close") or 0
                         
-                        market_value = shares * current_price if current_price else 0
-                        cost_basis = shares * avg_cost if avg_cost else 0
-                        gain_loss = market_value - cost_basis
-                        gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis else 0
-                        
+                        # Prefer IB's authoritative unrealized PnL; only fall back to computed
+                        # values when we actually have a live quote. This prevents the
+                        # "gain_loss = 0 - cost_basis = -$1.2M" display bug that fires
+                        # during the brief window after restart when marketPrice is still 0.
                         unrealized_pnl = pos.get("unrealized_pnl", 0) or pos.get("unrealizedPNL", 0)
-                        if unrealized_pnl == 0 and gain_loss != 0:
-                            unrealized_pnl = gain_loss
+                        quote_ready = bool(current_price)
+                        
+                        if quote_ready:
+                            market_value = shares * current_price
+                            cost_basis = shares * avg_cost if avg_cost else 0
+                            gain_loss = market_value - cost_basis
+                            gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis else 0
+                            if unrealized_pnl == 0 and gain_loss != 0:
+                                unrealized_pnl = gain_loss
+                        else:
+                            # Quote not yet populated. Use IB's marketValue if present,
+                            # otherwise show cost basis to avoid spurious negative PnL.
+                            cost_basis = shares * avg_cost if avg_cost else 0
+                            market_value = pos.get("market_value", 0) or pos.get("marketValue", 0) or cost_basis
+                            gain_loss = unrealized_pnl  # trust IB's number (may be 0)
+                            gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis else 0
+                            current_price = avg_cost  # display placeholder
                         
                         positions.append({
                             "symbol": symbol,
@@ -67,6 +81,7 @@ async def get_portfolio(source: str = "auto"):
                             "gain_loss_percent": round(gain_loss_pct, 2),
                             "unrealized_pnl": round(unrealized_pnl, 2),
                             "realized_pnl": round(pos.get("realized_pnl", 0) or pos.get("realizedPNL", 0), 2),
+                            "quote_ready": quote_ready,
                             "source": "ib_gateway"
                         })
                         
@@ -75,6 +90,7 @@ async def get_portfolio(source: str = "auto"):
                     
                     total_gain = total_value - total_cost
                     total_gain_pct = (total_gain / total_cost * 100) if total_cost else 0
+                    quotes_ready = all(p["quote_ready"] for p in positions) if positions else True
                     
                     return {
                         "positions": positions,
@@ -82,7 +98,8 @@ async def get_portfolio(source: str = "auto"):
                             "total_value": round(total_value, 2),
                             "total_cost": round(total_cost, 2),
                             "total_gain_loss": round(total_gain, 2),
-                            "total_gain_loss_percent": round(total_gain_pct, 2)
+                            "total_gain_loss_percent": round(total_gain_pct, 2),
+                            "quotes_ready": quotes_ready
                         },
                         "source": "ib_gateway",
                         "account": "DUN615665"
@@ -172,3 +189,67 @@ async def remove_position(symbol: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Position not found")
     return {"message": "Position removed"}
+
+
+@router.post("/portfolio/flatten-paper")
+async def flatten_paper_positions(confirm: str = ""):
+    """
+    Close every open IB paper-account position by queueing market orders.
+    Guard rail: requires confirm='FLATTEN' to fire. Safe for paper accounts only —
+    refuses to run if the IB account code is not recognised as a paper account
+    (IB paper accounts start with 'D' for DUxxxx).
+    """
+    if confirm != "FLATTEN":
+        raise HTTPException(status_code=400, detail="Pass confirm=FLATTEN to execute")
+    
+    try:
+        from routers.ib import get_pushed_positions, queue_order, is_pusher_connected
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"IB router unavailable: {e}")
+    
+    if not is_pusher_connected():
+        raise HTTPException(status_code=503, detail="IB pusher not connected; cannot flatten")
+    
+    positions = get_pushed_positions()
+    if not positions:
+        return {"success": True, "message": "No open positions to flatten", "orders": []}
+    
+    # Paper-account safety: IB paper account codes start with 'D' (e.g. DUN615665).
+    paper_accounts = {p.get("account", "") for p in positions if p.get("account")}
+    non_paper = [a for a in paper_accounts if a and not a.startswith("D")]
+    if non_paper:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Refusing to flatten — non-paper accounts detected: {non_paper}"
+        )
+    
+    queued = []
+    errors = []
+    for pos in positions:
+        symbol = pos.get("symbol")
+        qty = pos.get("position", 0) or pos.get("qty", 0)
+        if not symbol or not qty:
+            continue
+        action = "SELL" if qty > 0 else "BUY"
+        try:
+            order_id = queue_order({
+                "symbol": symbol.upper(),
+                "action": action,
+                "quantity": abs(int(qty)),
+                "order_type": "MKT",
+                "limit_price": None,
+                "stop_price": None,
+                "time_in_force": "DAY",
+                "trade_id": f"flatten_{symbol}_{int(datetime.now(timezone.utc).timestamp())}"
+            })
+            queued.append({"symbol": symbol, "action": action, "quantity": abs(int(qty)), "order_id": order_id})
+        except Exception as e:
+            errors.append({"symbol": symbol, "error": str(e)})
+    
+    return {
+        "success": True,
+        "message": f"Queued {len(queued)} flatten order(s)",
+        "orders": queued,
+        "errors": errors,
+        "account": next(iter(paper_accounts), None)
+    }
