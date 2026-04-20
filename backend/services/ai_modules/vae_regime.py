@@ -367,6 +367,24 @@ class VAERegimeModel:
         regime_dist = {REGIME_NAMES.get(int(r), f"regime_{r}"): int(c) for r, c in zip(unique, counts)}
         logger.info(f"[VAE REGIME] Regime distribution: {regime_dist}")
 
+        # Compute a quality metric since VAE is unsupervised (no "accuracy").
+        # regime_diversity = normalized entropy of cluster assignment distribution.
+        #   1.0 = all regimes used roughly equally (healthy)
+        #   ~0.0 = model collapsed into a single regime (degenerate)
+        total_assignments = int(counts.sum()) if len(counts) > 0 else 0
+        if total_assignments > 0 and len(counts) > 1:
+            import math as _math
+            probs = [c / total_assignments for c in counts if c > 0]
+            entropy_val = -sum(p * _math.log(p) for p in probs)
+            max_entropy = _math.log(N_REGIMES)
+            regime_diversity = entropy_val / max_entropy if max_entropy > 0 else 0.0
+        else:
+            regime_diversity = 0.0
+        logger.info(
+            f"[VAE REGIME] Regime diversity score: {regime_diversity:.3f} "
+            f"(1.0 = balanced across {N_REGIMES} regimes, 0.0 = collapsed)"
+        )
+
         self._trained = True
         self._training_samples = len(features)
         self._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -381,6 +399,11 @@ class VAERegimeModel:
             "epochs_trained": epoch + 1,
             "final_loss": best_loss,
             "regime_distribution": regime_dist,
+            "regime_diversity": regime_diversity,
+            # Unsupervised model — use diversity as the "accuracy" surrogate for pipeline reporting.
+            # Downstream consumers should check `metric_type` to know this isn't a classifier accuracy.
+            "accuracy": regime_diversity,
+            "metric_type": "regime_diversity_entropy",
             "training_samples": len(features),
             "device": str(self._device),
         }

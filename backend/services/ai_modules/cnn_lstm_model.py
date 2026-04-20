@@ -303,6 +303,15 @@ class CNNLSTMModel:
         logger.info(f"[CNN-LSTM] Training data: {X.shape[0]:,} sequences from {symbols_used} symbols")
         logger.info(f"[CNN-LSTM] Sequence shape: {X.shape} (samples, seq_len={SEQUENCE_LENGTH}, features=46)")
 
+        # Class balance diagnostic — detects majority-class collapse.
+        # "Always predict UP" baseline on U.S. equities sits around 52-53%.
+        class_counts = np.bincount(y, minlength=2)
+        majority_pct = class_counts.max() / len(y) if len(y) > 0 else 0.5
+        logger.info(
+            f"[CNN-LSTM] Class balance: down={class_counts[0]}, up={class_counts[1]}, "
+            f"majority={majority_pct:.3%} (always-predict-majority baseline)"
+        )
+
         # Normalize features
         X_flat = X.reshape(-1, X.shape[-1])
         self._scaler_mean = X_flat.mean(axis=0).astype(np.float32)
@@ -380,11 +389,28 @@ class CNNLSTMModel:
 
         self._save_model()
 
+        # Edge above majority-class baseline — detects "always predict up" collapse.
+        edge_vs_baseline = best_val_acc - majority_pct
+        if edge_vs_baseline <= 0.01:
+            logger.warning(
+                f"[CNN-LSTM] ⚠️  val_acc={best_val_acc:.4f} is at/below majority baseline "
+                f"({majority_pct:.4f}). Model likely collapsed to always predicting majority class — "
+                f"DO NOT PROMOTE."
+            )
+        else:
+            logger.info(
+                f"[CNN-LSTM] val_acc={best_val_acc:.4f}, majority_baseline={majority_pct:.4f}, "
+                f"edge_above_baseline={edge_vs_baseline:+.4f}"
+            )
+
         return {
             "success": True,
             "model": self.MODEL_NAME,
             "version": self._version,
             "accuracy": best_val_acc,
+            "majority_baseline": float(majority_pct),
+            "edge_above_baseline": float(edge_vs_baseline),
+            "class_counts": {"down": int(class_counts[0]), "up": int(class_counts[1])},
             "training_samples": len(X),
             "symbols_used": symbols_used,
             "device": str(self._device),

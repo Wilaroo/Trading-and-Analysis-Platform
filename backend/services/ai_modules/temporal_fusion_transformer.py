@@ -362,6 +362,16 @@ class TFTModel:
 
         logger.info(f"[TFT] Training data: {X.shape[0]:,} samples from {symbols_used} symbols, {X.shape[1]} features")
 
+        # Class balance diagnostic — detects majority-class collapse.
+        # U.S. equities have a ~3% upward bias, so "always predict UP" gets ~52-53%.
+        # If final val_acc ≤ majority_pct + 1%, the model learned nothing useful.
+        class_counts = np.bincount(y, minlength=2)
+        majority_pct = class_counts.max() / len(y) if len(y) > 0 else 0.5
+        logger.info(
+            f"[TFT] Class balance: down={class_counts[0]}, up={class_counts[1]}, "
+            f"majority={majority_pct:.3%} (this is the 'always predict majority' baseline)"
+        )
+
         # Normalize
         self._scaler_mean = X.mean(axis=0).astype(np.float32)
         self._scaler_std = (X.std(axis=0) + 1e-8).astype(np.float32)
@@ -444,11 +454,29 @@ class TFTModel:
 
         self._save_model()
 
+        # Edge above majority-class baseline — the ONLY number that matters.
+        # If edge ≤ ~1%, the model just learned "predict majority class" (no real signal).
+        edge_vs_baseline = best_val_acc - majority_pct
+        if edge_vs_baseline <= 0.01:
+            logger.warning(
+                f"[TFT] ⚠️  val_acc={best_val_acc:.4f} is at/below majority baseline "
+                f"({majority_pct:.4f}). Model likely collapsed to always predicting majority class — "
+                f"DO NOT PROMOTE."
+            )
+        else:
+            logger.info(
+                f"[TFT] val_acc={best_val_acc:.4f}, majority_baseline={majority_pct:.4f}, "
+                f"edge_above_baseline={edge_vs_baseline:+.4f}"
+            )
+
         return {
             "success": True,
             "model": self.MODEL_NAME,
             "version": self._version,
             "accuracy": best_val_acc,
+            "majority_baseline": float(majority_pct),
+            "edge_above_baseline": float(edge_vs_baseline),
+            "class_counts": {"down": int(class_counts[0]), "up": int(class_counts[1])},
             "training_samples": len(X),
             "symbols_used": symbols_used,
             "timeframe_importance": tf_importance,

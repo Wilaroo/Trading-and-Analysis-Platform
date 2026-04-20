@@ -3094,11 +3094,30 @@ async def run_training_pipeline(
 
                     if dl_result.get("success"):
                         acc = dl_result.get("accuracy", dl_result.get("reconstruction_error", 0))
+                        majority_baseline = dl_result.get("majority_baseline")
+                        edge = dl_result.get("edge_above_baseline")
+                        metric_type = dl_result.get("metric_type", "accuracy")
+
+                        # Flag DL models that are at/below majority-class baseline
+                        # (no real signal — just predicting the majority).
+                        if edge is not None and edge <= 0.01:
+                            logger.warning(
+                                f"[DL] {model_name} has no edge above majority baseline "
+                                f"(val_acc={acc:.4f}, baseline={majority_baseline:.4f}, edge={edge:+.4f}). "
+                                f"Flagging as 'collapsed_to_majority' — do NOT promote to live trading."
+                            )
+
                         results["models_trained"].append({
-                            "name": model_name, "accuracy": acc, "type": "dl"
+                            "name": model_name,
+                            "accuracy": acc,
+                            "majority_baseline": majority_baseline,
+                            "edge_above_baseline": edge,
+                            "metric_type": metric_type,
+                            "type": "dl",
+                            "promotable": (edge is None or edge > 0.01),  # VAE (metric_type != accuracy) is auto-OK
                         })
                         status.add_completed(model_name, acc)
-                        logger.info(f"[DL] {model_name} trained successfully")
+                        logger.info(f"[DL] {model_name} trained successfully (metric_type={metric_type})")
                     else:
                         error = dl_result.get("error", "Unknown DL training error")
                         results["models_failed"].append({
