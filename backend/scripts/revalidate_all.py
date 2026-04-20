@@ -89,9 +89,12 @@ async def main():
     # ── 2. Figure out which setup types have trained models in Mongo ────
     # Each trained setup has a model saved by `_train_and_save_model` under
     # name like "momentum_5min_predictor". We match that to our profile catalog.
+    # Note: SETUP_TRAINING_PROFILES[setup] is a list of profile dicts, each
+    # with a "bar_size" key — we extract the bar_size string per profile.
     trained = []
-    for setup_type, bar_sizes in SETUP_TRAINING_PROFILES.items():
-        for bar_size in bar_sizes:
+    for setup_type, profiles in SETUP_TRAINING_PROFILES.items():
+        for profile in profiles:
+            bar_size = profile["bar_size"] if isinstance(profile, dict) else profile
             model_name = get_model_name(setup_type, bar_size)
             doc = db["timeseries_models"].find_one({"name": model_name}, {"_id": 0, "name": 1, "metrics": 1})
             if doc:
