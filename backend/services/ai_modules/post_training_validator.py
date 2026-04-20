@@ -45,11 +45,23 @@ VALIDATION_CONFIG = {
 }
 
 PROMOTION_CRITERIA = {
-    "min_trades": 10,
-    "min_win_rate": 0.35,
-    "min_sharpe": -0.5,
-    "max_mc_risk": "EXTREME",
-    "min_wf_efficiency": 50,
+    # Statistical significance — can't validate anything below this
+    "min_trades": 30,                   # Was 10; need n≥30 for any claim to mean something
+
+    # Profitability gates (all must pass)
+    "min_win_rate": 0.50,               # Was 0.35 (below breakeven); now require >=50%
+    "min_sharpe": 0.5,                  # Was -0.5 (allowed losers!); now require positive Sharpe
+    "min_wf_efficiency": 80,            # Was 50; need out-of-sample to hold at 80% of in-sample
+    "min_mc_profit_probability": 55,    # NEW: Monte Carlo must show ≥55% chance of profit
+
+    # Risk gates
+    "max_mc_risk": "EXTREME",           # Keep: reject if MC labels risk EXTREME
+
+    # AI-edge requirement
+    "min_ai_edge_vs_setup": 5.0,        # NEW: AI filter must add >=5 percentage points to raw WR
+
+    # Baseline requirement
+    "require_positive_edge_vs_baseline": True,  # NEW: new model must beat prior baseline
 }
 
 # ─── Strategy Config Builder ─────────────────────────────────────────────────
@@ -357,53 +369,119 @@ def _make_promotion_decision(
 ) -> Dict:
     """
     Decide promote/reject using all 3 per-profile phases.
-    """
-    reasons = []
 
-    # --- Check AI Comparison ---
+    Philosophy: FAIL-CLOSED. If we cannot statistically validate a model
+    (insufficient trades, broken MC, errors), we DO NOT promote it.
+    A model must earn promotion by passing every gate — not by default.
+    """
+    rejections = []  # Collect ALL failing gates so the reason explains everything
+
+    # ─── Gate 0: Extract raw values ───
+    ai_error = ai_cmp.get("error")
     ai_trades = ai_cmp.get("ai_filtered_trades", 0)
     ai_wr = ai_cmp.get("ai_filtered_win_rate", 0)
     ai_sharpe = ai_cmp.get("ai_filtered_sharpe", 0)
+    setup_wr = ai_cmp.get("setup_only_win_rate", 0)
+    setup_trades = ai_cmp.get("setup_only_trades", 0)
+    ai_edge = ai_wr - setup_wr  # percentage-point improvement
 
-    if ai_cmp.get("error"):
-        reasons.append(f"AI Comparison error: {ai_cmp['error']}")
-    elif ai_trades < PROMOTION_CRITERIA["min_trades"]:
-        reasons.append(
-            f"Insufficient trades ({ai_trades}), promoting by default"
-        )
-        return {"promote": True, "reason": "; ".join(reasons)}
-
-    if ai_wr / 100 < PROMOTION_CRITERIA["min_win_rate"] and ai_trades >= PROMOTION_CRITERIA["min_trades"]:
-        return {
-            "promote": False,
-            "reason": f"Win rate {ai_wr:.1f}% below minimum {PROMOTION_CRITERIA['min_win_rate']*100:.0f}%",
-        }
-
-    # --- Check Monte Carlo ---
     mc_risk = mc.get("risk_assessment", "UNKNOWN")
-    if mc_risk == PROMOTION_CRITERIA["max_mc_risk"] and not mc.get("skipped") and not mc.get("error"):
+    mc_prob_profit = mc.get("probability_of_profit", 0)
+    mc_broken = mc.get("error") or mc.get("skipped")
+    # Detect degenerate Monte Carlo (all percentiles identical = sim not really running)
+    mc_dist = mc.get("pnl_distribution", {}) or {}
+    mc_values = list(mc_dist.values())
+    mc_degenerate = len(mc_values) >= 2 and len(set(mc_values)) == 1
+
+    wf_eff = wf.get("avg_efficiency_ratio", 0)
+    wf_broken = wf.get("error") or wf.get("skipped")
+
+    # ─── Gate 1: AI Comparison errors ───
+    if ai_error:
+        rejections.append(f"AI Comparison error: {ai_error}")
+
+    # ─── Gate 2: Statistical significance (FAIL-CLOSED — the original bug) ───
+    min_trades = PROMOTION_CRITERIA["min_trades"]
+    if ai_trades < min_trades:
+        rejections.append(
+            f"Insufficient AI-filtered trades for validation "
+            f"({ai_trades} < {min_trades} required for statistical significance)"
+        )
+
+    # ─── Gate 3: Raw strategy must have enough signals too ───
+    if setup_trades < min_trades:
+        rejections.append(
+            f"Insufficient setup trades ({setup_trades} < {min_trades}). "
+            f"Strategy is too rare to validate."
+        )
+
+    # ─── Gate 4: Win rate threshold ───
+    if ai_wr / 100 < PROMOTION_CRITERIA["min_win_rate"]:
+        rejections.append(
+            f"AI-filtered win rate {ai_wr:.1f}% below minimum "
+            f"{PROMOTION_CRITERIA['min_win_rate']*100:.0f}%"
+        )
+
+    # ─── Gate 5: Sharpe ratio must be positive ───
+    if ai_sharpe < PROMOTION_CRITERIA["min_sharpe"]:
+        rejections.append(
+            f"Sharpe {ai_sharpe:.2f} below minimum {PROMOTION_CRITERIA['min_sharpe']:.2f}"
+        )
+
+    # ─── Gate 6: AI filter must actually improve vs raw setup ───
+    if ai_edge < PROMOTION_CRITERIA["min_ai_edge_vs_setup"]:
+        rejections.append(
+            f"AI filter adds only {ai_edge:+.1f}pp win-rate edge vs raw setup "
+            f"(need ≥{PROMOTION_CRITERIA['min_ai_edge_vs_setup']}pp)"
+        )
+
+    # ─── Gate 7: Monte Carlo must not be broken or EXTREME risk ───
+    if mc_broken:
+        rejections.append(f"Monte Carlo validation failed/skipped: {mc_broken}")
+    elif mc_degenerate:
+        rejections.append(
+            "Monte Carlo degenerate (pnl distribution collapsed to single value "
+            "— simulation not actually resampling)"
+        )
+    else:
+        if mc_risk == PROMOTION_CRITERIA["max_mc_risk"]:
+            rejections.append(
+                f"Monte Carlo risk EXTREME (worst DD {mc.get('worst_case_drawdown', 0):.1f}%)"
+            )
+        if mc_prob_profit < PROMOTION_CRITERIA["min_mc_profit_probability"]:
+            rejections.append(
+                f"Monte Carlo probability of profit {mc_prob_profit:.1f}% "
+                f"below minimum {PROMOTION_CRITERIA['min_mc_profit_probability']}%"
+            )
+
+    # ─── Gate 8: Walk-forward robustness ───
+    if wf_broken:
+        rejections.append(f"Walk-forward validation failed/skipped: {wf_broken}")
+    elif wf_eff < PROMOTION_CRITERIA["min_wf_efficiency"]:
+        rejections.append(
+            f"Walk-forward efficiency {wf_eff:.0f}% below "
+            f"{PROMOTION_CRITERIA['min_wf_efficiency']}% (out-of-sample degradation)"
+        )
+
+    # ─── Early exit if ANY gate failed ───
+    if rejections:
         return {
             "promote": False,
-            "reason": f"Monte Carlo risk EXTREME (worst DD {mc.get('worst_case_drawdown', 0):.1f}%)",
+            "reason": " | ".join(rejections),
+            "gates_failed": len(rejections),
         }
 
-    # --- Check Walk-Forward ---
-    wf_eff = wf.get("avg_efficiency_ratio", 100)
-    if (
-        not wf.get("skipped")
-        and not wf.get("error")
-        and wf_eff < PROMOTION_CRITERIA["min_wf_efficiency"]
-    ):
-        reasons.append(
-            f"Walk-forward efficiency {wf_eff:.0f}% below {PROMOTION_CRITERIA['min_wf_efficiency']}%"
-        )
-        return {"promote": False, "reason": "; ".join(reasons) if reasons else f"Poor robustness ({wf_eff:.0f}%)"}
-
-    # --- Baseline comparison ---
+    # ─── Gate 9: Baseline comparison (if we have one) ───
     if baseline is None:
         return {
             "promote": True,
-            "reason": "First model — no baseline. All phase checks passed.",
+            "reason": (
+                f"First model — no baseline. All gates passed: "
+                f"n={ai_trades}, WR={ai_wr:.1f}%, Sharpe={ai_sharpe:.2f}, "
+                f"edge=+{ai_edge:.1f}pp, MC_profit_prob={mc_prob_profit:.0f}%, "
+                f"WF_eff={wf_eff:.0f}%"
+            ),
+            "gates_failed": 0,
         }
 
     new_metrics = {
@@ -417,19 +495,21 @@ def _make_promotion_decision(
 
     if new_score >= old_score:
         pct = ((new_score - old_score) / max(abs(old_score), 0.01)) * 100
-        parts = [
-            f"Score {new_score:.3f} vs baseline {old_score:.3f} (+{pct:.1f}%)",
-            f"WR: {ai_wr:.1f}%",
-            f"Sharpe: {ai_sharpe:.2f}",
-            f"MC Risk: {mc_risk}",
-            f"WF Eff: {wf_eff:.0f}%",
-        ]
-        return {"promote": True, "reason": " | ".join(parts)}
+        return {
+            "promote": True,
+            "reason": (
+                f"Score {new_score:.3f} vs baseline {old_score:.3f} (+{pct:.1f}%) | "
+                f"WR: {ai_wr:.1f}% | Sharpe: {ai_sharpe:.2f} | "
+                f"MC_profit_prob: {mc_prob_profit:.0f}% | WF_eff: {wf_eff:.0f}%"
+            ),
+            "gates_failed": 0,
+        }
     else:
         pct = ((old_score - new_score) / max(abs(old_score), 0.01)) * 100
         return {
             "promote": False,
             "reason": f"Regression: score {new_score:.3f} vs baseline {old_score:.3f} (-{pct:.1f}%)",
+            "gates_failed": 1,
         }
 
 
