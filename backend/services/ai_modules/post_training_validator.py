@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 # ─── Validation Configuration ────────────────────────────────────────────────
 
 VALIDATION_CONFIG = {
-    "num_symbols": 20,
+    "num_symbols": 50,
     "lookback_days": 180,
     "starting_capital": 250000,
     "ai_confidence_threshold": 0.5,
     "ai_lookback_bars": 50,
     # Walk-forward
     "wf_total_days": 365,
-    "wf_symbols": 3,
+    "wf_symbols": 10,
     "wf_in_sample_days": 180,
     "wf_out_of_sample_days": 30,
     "wf_step_days": 30,

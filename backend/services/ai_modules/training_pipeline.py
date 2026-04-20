@@ -3185,12 +3185,30 @@ async def run_training_pipeline(
                 from services.slow_learning.advanced_backtest_engine import get_advanced_backtest_engine
 
                 backtest_engine = get_advanced_backtest_engine()
+                
+                # Ensure backtest engine has DB connection
+                if backtest_engine._db is None:
+                    backtest_engine.set_db(db)
+
+                # Load the freshly trained timeseries model into the backtest engine
+                # (in subprocess, the model isn't auto-loaded like in the main server)
+                try:
+                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+                    ts_model = TimeSeriesGBM(model_name="direction_predictor_5min")
+                    ts_model.set_db(db)  # This triggers _load_model() automatically
+                    if ts_model._model is not None:
+                        backtest_engine.set_timeseries_model(ts_model)
+                        logger.info("[VALIDATE] Loaded timeseries model into backtest engine for AI comparison")
+                    else:
+                        logger.warning("[VALIDATE] Could not load timeseries model — AI comparison will run without predictions")
+                except Exception as e:
+                    logger.warning(f"[VALIDATE] Failed to load timeseries model: {e}")
 
                 # Get timeseries service for model rollback capability
                 timeseries_service = None
                 try:
-                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
-                    timeseries_service = TimeSeriesGBM.get_instance() if hasattr(TimeSeriesGBM, 'get_instance') else None
+                    from services.ai_modules.timeseries_gbm import TimeSeriesGBM as TSClass
+                    timeseries_service = TSClass.get_instance() if hasattr(TSClass, 'get_instance') else None
                 except Exception:
                     logger.warning("Could not get timeseries service for validation rollback — continuing without rollback support")
 
