@@ -80,31 +80,45 @@ def _build_filters(lookback_days: int = None):
 # ─── Symbol Fetching ─────────────────────────────────────────────────────────
 
 def _get_validation_symbols(db, bar_size: str, limit: int = None) -> List[str]:
-    """Get top liquid symbols for validation backtest, sorted by DOLLAR volume.
+    """Get top liquid symbols for validation backtest, sorted by dollar volume.
     
-    The symbol_adv_cache only stores share volume. We look up the latest close price
-    to compute dollar volume (shares × price) so we get truly liquid names like
-    NVDA, SPY, TSLA instead of cheap leveraged ETFs with high share counts.
+    Uses avg_dollar_volume from cache (computed during ADV rebuild).
+    Falls back to share volume × latest close price if dollar volume not cached.
+    Filters by ATR% range to exclude dead stocks and chaotic penny stocks.
     """
-    from services.ai_modules.setup_training_config import get_adv_threshold
+    from services.ai_modules.setup_training_config import get_dollar_vol_threshold, ATR_PCT_MIN, ATR_PCT_MAX
     n = limit or VALIDATION_CONFIG["num_symbols"]
-    threshold = get_adv_threshold(bar_size)
+    min_dollar_vol = get_dollar_vol_threshold(bar_size)
     
-    # Get top 300 by share volume as candidates
+    # Try dollar volume from cache first (fast — no price lookups needed)
+    cursor = db["symbol_adv_cache"].find(
+        {
+            "avg_dollar_volume": {"$gte": min_dollar_vol},
+            "atr_pct": {"$gte": ATR_PCT_MIN, "$lte": ATR_PCT_MAX},
+        },
+        {"_id": 0, "symbol": 1, "avg_dollar_volume": 1}
+    ).sort("avg_dollar_volume", -1).limit(n)
+    
+    results = [doc["symbol"] for doc in cursor]
+    
+    if len(results) >= n // 2:
+        return results
+    
+    # Fallback: compute dollar volume on the fly from share volume + latest price
+    from services.ai_modules.setup_training_config import get_adv_threshold
+    threshold = get_adv_threshold(bar_size)
     candidates = list(db["symbol_adv_cache"].find(
         {"avg_volume": {"$gte": threshold}},
         {"_id": 0, "symbol": 1, "avg_volume": 1}
     ).sort("avg_volume", -1).limit(300))
     
     if not candidates:
-        return []
+        return results  # Return whatever we found above
     
-    # Look up latest close price for each candidate to compute dollar volume
     ranked = []
     for c in candidates:
         sym = c["symbol"]
         avg_vol = c["avg_volume"]
-        # Get latest daily bar close price
         bar = db["ib_historical_data"].find_one(
             {"symbol": sym, "bar_size": "1 day"},
             {"_id": 0, "close": 1},
@@ -115,7 +129,6 @@ def _get_validation_symbols(db, bar_size: str, limit: int = None) -> List[str]:
             dollar_vol = avg_vol * price
             ranked.append((sym, dollar_vol))
     
-    # Sort by dollar volume descending
     ranked.sort(key=lambda x: x[1], reverse=True)
     return [sym for sym, _ in ranked[:n]]
 

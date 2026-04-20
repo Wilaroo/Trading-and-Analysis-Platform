@@ -137,18 +137,31 @@ class IBHistoricalCollector:
         },
     }
     
-    # Timeframes to collect based on stock's ADV tier
+    # Timeframes to collect based on stock's liquidity tier
     TIER_TIMEFRAMES = {
-        "intraday": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],      # 500K+ shares/day
-        "swing": ["5 mins", "30 mins", "1 hour", "1 day"],                   # 100K+ shares/day
-        "investment": ["1 hour", "1 day", "1 week"],                         # 50K+ shares/day
+        "intraday": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],      # $50M+ dollar vol/day
+        "swing": ["5 mins", "30 mins", "1 hour", "1 day"],                   # $10M+ dollar vol/day
+        "investment": ["1 hour", "1 day", "1 week"],                         # $2M+ dollar vol/day
     }
     
-    # ADV thresholds (in shares, not dollars)
+    # Dollar volume thresholds (avg_shares × price)
+    DOLLAR_VOL_THRESHOLDS = {
+        "intraday": 50_000_000,   # $50M/day
+        "swing": 10_000_000,      # $10M/day
+        "investment": 2_000_000,  # $2M/day
+    }
+    
+    # ATR% thresholds (ATR/price as decimal)
+    ATR_PCT_THRESHOLDS = {
+        "min": 0.015,   # 1.5% — minimum movement to trade profitably
+        "max": 0.10,    # 10% — maximum before it's untradeable chaos
+    }
+    
+    # Legacy share volume thresholds (fallback if dollar volume not computed)
     ADV_THRESHOLDS = {
-        "intraday": 500_000,   # 500K shares/day
-        "swing": 100_000,      # 100K shares/day
-        "investment": 50_000,  # 50K shares/day
+        "intraday": 500_000,
+        "swing": 100_000,
+        "investment": 50_000,
     }
     
     def __init__(self):
@@ -381,15 +394,13 @@ class IBHistoricalCollector:
         
     async def rebuild_adv_from_ib_data(self) -> Dict[str, Any]:
         """
-        Rebuild the ADV cache using ACTUAL volume data from IB historical bars.
+        Rebuild the ADV cache with dollar volume and ATR% from IB historical bars.
         
-        This uses the daily bar data already collected from IB Gateway,
-        which has accurate consolidated volume (not just IEX).
-        
-        Process:
-        1. Query all daily bar data from ib_historical_data collection
-        2. Calculate average volume per symbol (last 20 trading days)
-        3. Update symbol_adv_cache with accurate ADV values
+        Computes for each symbol:
+        - avg_volume: Average share volume (last 20 trading days)
+        - avg_dollar_volume: avg_volume × latest close price
+        - atr_pct: Average True Range as % of price (14-day ATR / close)
+        - latest_close: Most recent daily close price
         
         Returns:
             Summary of rebuild operation with new tier counts
@@ -401,75 +412,101 @@ class IBHistoricalCollector:
             return {"success": False, "error": "Historical data collection not initialized"}
         
         logger.info("=" * 60)
-        logger.info("REBUILDING ADV CACHE FROM IB HISTORICAL DATA")
+        logger.info("REBUILDING ADV CACHE — DOLLAR VOLUME + ATR%")
         logger.info("=" * 60)
         
         try:
-            # Aggregate to calculate average volume per symbol from daily bars
+            # Aggregate: get last 20 daily bars per symbol with OHLCV
             pipeline = [
-                # Only use daily bars
                 {"$match": {"bar_size": "1 day"}},
-                # Sort by date descending to get most recent first
                 {"$sort": {"date": -1}},
-                # Group by symbol
                 {"$group": {
                     "_id": "$symbol",
                     "volumes": {"$push": "$volume"},
+                    "highs": {"$push": "$high"},
+                    "lows": {"$push": "$low"},
+                    "closes": {"$push": "$close"},
                     "bar_count": {"$sum": 1},
                     "latest_date": {"$first": "$date"},
-                    "oldest_date": {"$last": "$date"}
                 }},
-                # Calculate average of last 20 bars
                 {"$project": {
                     "symbol": "$_id",
+                    "_id": 0,
                     "bar_count": 1,
                     "latest_date": 1,
-                    "oldest_date": 1,
-                    # Take first 20 volumes (most recent due to sort)
                     "recent_volumes": {"$slice": ["$volumes", 20]},
-                    "_id": 0
+                    "recent_highs": {"$slice": ["$highs", 20]},
+                    "recent_lows": {"$slice": ["$lows", 20]},
+                    "recent_closes": {"$slice": ["$closes", 20]},
+                    "latest_close": {"$arrayElemAt": ["$closes", 0]},
                 }},
                 {"$project": {
                     "symbol": 1,
                     "bar_count": 1,
                     "latest_date": 1,
-                    "oldest_date": 1,
+                    "latest_close": 1,
                     "avg_volume": {"$avg": "$recent_volumes"},
-                    "days_used": {"$size": "$recent_volumes"}
+                    "days_used": {"$size": "$recent_volumes"},
+                    "recent_highs": 1,
+                    "recent_lows": 1,
+                    "recent_closes": 1,
                 }}
             ]
             
-            logger.info("Calculating ADV from IB daily bars...")
+            logger.info("Calculating ADV + ATR from IB daily bars...")
             results = list(self._data_col.aggregate(pipeline, allowDiskUse=True))
-            logger.info(f"Calculated ADV for {len(results)} symbols")
+            logger.info(f"Calculated metrics for {len(results)} symbols")
             
             if not results:
                 return {"success": False, "error": "No daily bar data found"}
             
-            # Update the ADV cache
             adv_cache_col = self._db["symbol_adv_cache"]
-            
-            # Track statistics
-            updated = 0
-            tier_counts = {
-                "1M+": 0,
-                "500K-1M": 0,
-                "250K-500K": 0,
-                "100K-250K": 0,
-                "50K-100K": 0,
-                "10K-50K": 0,
-                "<10K": 0
-            }
             
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc).isoformat()
             
+            updated = 0
+            skipped_atr = 0
+            tier_counts = {"intraday": 0, "swing": 0, "investment": 0, "skip": 0}
+            
             for r in results:
                 symbol = r.get("symbol")
                 avg_vol = r.get("avg_volume", 0)
+                latest_close = r.get("latest_close", 0)
                 
-                if not symbol or avg_vol is None:
+                if not symbol or avg_vol is None or not latest_close or latest_close <= 0:
                     continue
+                
+                # Compute dollar volume
+                avg_dollar_volume = avg_vol * latest_close
+                
+                # Compute ATR% (14-day ATR / close price)
+                highs = r.get("recent_highs", [])
+                lows = r.get("recent_lows", [])
+                closes = r.get("recent_closes", [])
+                
+                atr_pct = 0
+                if len(highs) >= 2 and len(lows) >= 2 and len(closes) >= 2:
+                    true_ranges = []
+                    n = min(len(highs), len(lows), len(closes), 14)
+                    for i in range(n - 1):
+                        h = highs[i] or 0
+                        l = lows[i] or 0
+                        prev_c = closes[i + 1] or 0
+                        if h > 0 and l > 0 and prev_c > 0:
+                            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+                            true_ranges.append(tr)
+                    
+                    if true_ranges and latest_close > 0:
+                        atr = sum(true_ranges) / len(true_ranges)
+                        atr_pct = atr / latest_close
+                
+                # Determine tier
+                tier = self.get_symbol_tier(avg_vol, avg_dollar_volume, atr_pct)
+                tier_counts[tier] = tier_counts.get(tier, 0) + 1
+                
+                if tier == "skip" and atr_pct > 0 and (atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]):
+                    skipped_atr += 1
                 
                 # Upsert into ADV cache
                 adv_cache_col.update_one(
@@ -477,7 +514,11 @@ class IBHistoricalCollector:
                     {"$set": {
                         "symbol": symbol,
                         "avg_volume": avg_vol,
-                        "source": "ib_historical",
+                        "avg_dollar_volume": round(avg_dollar_volume, 2),
+                        "atr_pct": round(atr_pct, 6),
+                        "latest_close": round(latest_close, 2),
+                        "tier": tier,
+                        "source": "ib_historical_recalc",
                         "days_used": r.get("days_used", 0),
                         "bar_count": r.get("bar_count", 0),
                         "latest_date": r.get("latest_date"),
@@ -486,48 +527,31 @@ class IBHistoricalCollector:
                     upsert=True
                 )
                 updated += 1
-                
-                # Count tiers
-                if avg_vol >= 1_000_000:
-                    tier_counts["1M+"] += 1
-                elif avg_vol >= 500_000:
-                    tier_counts["500K-1M"] += 1
-                elif avg_vol >= 250_000:
-                    tier_counts["250K-500K"] += 1
-                elif avg_vol >= 100_000:
-                    tier_counts["100K-250K"] += 1
-                elif avg_vol >= 50_000:
-                    tier_counts["50K-100K"] += 1
-                elif avg_vol >= 10_000:
-                    tier_counts["10K-50K"] += 1
-                else:
-                    tier_counts["<10K"] += 1
             
-            # Calculate new tier totals
-            intraday_total = tier_counts["1M+"] + tier_counts["500K-1M"]
-            swing_total = tier_counts["250K-500K"] + tier_counts["100K-250K"]
-            investment_total = tier_counts["50K-100K"]
+            # Create index on dollar volume for fast tier queries
+            adv_cache_col.create_index([("avg_dollar_volume", -1)])
+            adv_cache_col.create_index([("tier", 1)])
             
             logger.info("=" * 60)
-            logger.info("ADV CACHE REBUILD COMPLETE")
+            logger.info("ADV CACHE REBUILD COMPLETE (DOLLAR VOLUME + ATR%)")
             logger.info(f"  Total symbols updated: {updated}")
-            logger.info(f"  Intraday tier (500K+): {intraday_total}")
-            logger.info(f"  Swing tier (100K-500K): {swing_total}")
-            logger.info(f"  Investment tier (50K-100K): {investment_total}")
+            logger.info(f"  Intraday ($50M+): {tier_counts.get('intraday', 0)}")
+            logger.info(f"  Swing ($10M-$50M): {tier_counts.get('swing', 0)}")
+            logger.info(f"  Investment ($2M-$10M): {tier_counts.get('investment', 0)}")
+            logger.info(f"  Skipped (low $vol or ATR out of range): {tier_counts.get('skip', 0)}")
+            logger.info(f"  Skipped by ATR filter: {skipped_atr}")
             logger.info("=" * 60)
             
             return {
                 "success": True,
-                "message": f"Rebuilt ADV cache from IB data for {updated} symbols",
+                "message": f"Rebuilt ADV cache with dollar volume + ATR% for {updated} symbols",
                 "symbols_updated": updated,
-                "distribution": tier_counts,
-                "tier_summary": {
-                    "intraday_500k_plus": intraday_total,
-                    "swing_100k_500k": swing_total,
-                    "investment_50k_100k": investment_total
+                "tier_summary": tier_counts,
+                "skipped_by_atr": skipped_atr,
+                "thresholds": {
+                    "dollar_volume": self.DOLLAR_VOL_THRESHOLDS,
+                    "atr_pct": self.ATR_PCT_THRESHOLDS,
                 },
-                "source": "ib_historical_data",
-                "note": "ADV calculated from actual IB daily bars (consolidated volume)"
             }
             
         except Exception as e:
@@ -1308,15 +1332,35 @@ class IBHistoricalCollector:
         return chains
 
     
-    def get_symbol_tier(self, avg_volume: float) -> str:
-        """Determine which tier a symbol belongs to based on ADV."""
+    def get_symbol_tier(self, avg_volume: float, avg_dollar_volume: float = None, atr_pct: float = None) -> str:
+        """Determine which tier a symbol belongs to.
+        
+        Uses dollar volume (preferred) with ATR% filtering.
+        Falls back to share volume if dollar volume not available.
+        """
+        # ATR% filter — skip symbols outside tradeable range
+        if atr_pct is not None:
+            if atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]:
+                return "skip"
+        
+        # Use dollar volume if available
+        if avg_dollar_volume is not None and avg_dollar_volume > 0:
+            if avg_dollar_volume >= self.DOLLAR_VOL_THRESHOLDS["intraday"]:
+                return "intraday"
+            elif avg_dollar_volume >= self.DOLLAR_VOL_THRESHOLDS["swing"]:
+                return "swing"
+            elif avg_dollar_volume >= self.DOLLAR_VOL_THRESHOLDS["investment"]:
+                return "investment"
+            return "skip"
+        
+        # Fallback to share volume
         if avg_volume >= self.ADV_THRESHOLDS["intraday"]:
             return "intraday"
         elif avg_volume >= self.ADV_THRESHOLDS["swing"]:
             return "swing"
         elif avg_volume >= self.ADV_THRESHOLDS["investment"]:
             return "investment"
-        return "skip"  # Below minimum threshold
+        return "skip"
     
     async def run_per_stock_collection(
         self,

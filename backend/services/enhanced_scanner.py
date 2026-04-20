@@ -596,9 +596,15 @@ class EnhancedBackgroundScanner:
         self._rvol_cache_ttl = 300  # 5 minutes
         
         # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
-        self._min_adv_general = 100_000      # Min ADV for general/swing setups
-        self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups
-        self._min_adv_investment = 50_000    # Min ADV for investment tier
+        self._min_adv_general = 100_000      # Min ADV for general/swing setups (share volume fallback)
+        self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups (share volume fallback)
+        self._min_adv_investment = 50_000    # Min ADV for investment tier (share volume fallback)
+        # Dollar volume thresholds (preferred over share volume)
+        self._min_dollar_vol_intraday = 50_000_000   # $50M for scalps/intraday
+        self._min_dollar_vol_general = 10_000_000    # $10M for swing/day trades
+        # ATR% range
+        self._min_atr_pct = 0.015   # 1.5% minimum
+        self._max_atr_pct = 0.10    # 10% maximum
         self._adv_cache: Dict[str, Tuple[int, datetime]] = {}  # Cache ADV values with timestamp
         self._adv_cache_ttl = 900  # 15 minutes (reduced from 1 hour for faster re-checks)
         

@@ -494,10 +494,32 @@ ADV_THRESHOLDS = {
     "1 week":   50_000,   # Position/investment
 }
 
+# Dollar volume thresholds — preferred over share volume
+# Used when symbol_adv_cache has avg_dollar_volume field
+DOLLAR_VOL_THRESHOLDS = {
+    "1 min":   50_000_000,  # $50M — scalps need tight spreads
+    "5 mins":  50_000_000,  # $50M
+    "15 mins": 50_000_000,  # $50M
+    "30 mins": 50_000_000,  # $50M
+    "1 hour":  10_000_000,  # $10M — swing tier ok for hourly
+    "1 day":   10_000_000,  # $10M
+    "1 week":   2_000_000,  # $2M — position/investment
+}
+
+# ATR% range — symbols outside this range are skipped
+ATR_PCT_MIN = 0.015  # 1.5% — minimum daily movement to trade profitably
+ATR_PCT_MAX = 0.10   # 10% — maximum before it's untradeable chaos
+
 # Default for unknown bar sizes
 ADV_THRESHOLD_DEFAULT = 100_000
+DOLLAR_VOL_THRESHOLD_DEFAULT = 10_000_000
 
 
 def get_adv_threshold(bar_size: str) -> int:
-    """Get the minimum ADV threshold for a given bar_size."""
+    """Get the minimum ADV threshold for a given bar_size (share volume fallback)."""
     return ADV_THRESHOLDS.get(bar_size, ADV_THRESHOLD_DEFAULT)
+
+
+def get_dollar_vol_threshold(bar_size: str) -> float:
+    """Get the minimum dollar volume threshold for a given bar_size."""
+    return DOLLAR_VOL_THRESHOLDS.get(bar_size, DOLLAR_VOL_THRESHOLD_DEFAULT)
