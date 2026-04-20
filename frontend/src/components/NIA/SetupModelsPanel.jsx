@@ -211,7 +211,7 @@ const ProfileBadge = ({ profile, validation }) => {
 };
 
 // ─── Setup Card ───────────────────────────
-const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batchData }) => {
+const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batchData, tbConfigs }) => {
   const [showProfiles, setShowProfiles] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const cfg = SETUP_CONFIG[name] || SETUP_CONFIG.MOMENTUM;
@@ -384,7 +384,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       )}
                     </div>
                     <div className="text-[9px] text-zinc-500">{p.description}</div>
-                    <div className="flex gap-2 mt-1 text-[9px]">
+                    <div className="flex gap-2 mt-1 text-[9px] flex-wrap">
                       <span className="text-zinc-600">h={p.forecast_horizon}</span>
                       <span className="text-zinc-600">thr={((p.noise_threshold || 0) * 100).toFixed(2)}%</span>
                       {p.label_scheme === "triple_barrier_3class" && (
@@ -394,6 +394,18 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                         <span className="text-rose-400/80" title="Legacy binary model — retrain recommended" data-testid={`label-scheme-${name}-${p.bar_size}`}>Legacy binary</span>
                       )}
                       {p.num_classes >= 3 && !p.label_scheme && <span className="text-amber-500/60">3-class</span>}
+                      {(() => {
+                        const tbc = (tbConfigs || []).find(c => c.setup_type === name && c.bar_size === p.bar_size && c.trade_side === "long");
+                        return tbc ? (
+                          <span
+                            className="text-sky-400/80 border border-sky-500/20 rounded px-1"
+                            title={`PT=${tbc.pt_atr_mult}×ATR  SL=${tbc.sl_atr_mult}×ATR  max_bars=${tbc.max_bars}  swept ${tbc.chosen_at ? new Date(tbc.chosen_at).toLocaleDateString() : 'n/a'}`}
+                            data-testid={`tb-config-${name}-${p.bar_size}`}
+                          >PT {tbc.pt_atr_mult}× / SL {tbc.sl_atr_mult}×</span>
+                        ) : (
+                          <span className="text-zinc-600" title="No PT/SL sweep run yet — using defaults 2.0/1.0">PT 2.0× / SL 1.0× <span className="opacity-60">(default)</span></span>
+                        );
+                      })()}
                     </div>
                     {p.trained && (
                       <div className="flex gap-3 mt-1 text-[9px]">
@@ -576,6 +588,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
   const [activeJobs, setActiveJobs] = useState({});
   const [validations, setValidations] = useState({});
   const [batchData, setBatchData] = useState(null);
+  const [tbConfigs, setTbConfigs] = useState([]);
   const sendTrainCommand = useTrainCommand();
 
   const fetchStatus = useCallback(async () => {
@@ -587,6 +600,15 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
       console.error('Error fetching setup models status:', err);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchTbConfigs = useCallback(async () => {
+    try {
+      const res = await api.get('/api/ai-training/triple-barrier-configs');
+      if (res.data?.success) setTbConfigs(res.data.configs || []);
+    } catch (err) {
+      // Silent — endpoint may not yet be deployed
     }
   }, []);
 
@@ -646,7 +668,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
     }
   }, [activeJobs, fetchStatus, fetchValidations]);
 
-  useEffect(() => { fetchStatus(); fetchValidations(); }, [fetchStatus, fetchValidations]);
+  useEffect(() => { fetchStatus(); fetchValidations(); fetchTbConfigs(); }, [fetchStatus, fetchValidations, fetchTbConfigs]);
 
   const hasActiveJobs = Object.keys(activeJobs).length > 0;
   useEffect(() => {
@@ -769,6 +791,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
             onTrain={handleTrainOne}
             validations={validations}
             batchData={batchData}
+            tbConfigs={tbConfigs}
           />
         ))}
       </div>

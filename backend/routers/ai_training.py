@@ -521,6 +521,24 @@ def check_data_readiness():
 
 
 
+@router.get("/triple-barrier-configs")
+def get_triple_barrier_configs():
+    """
+    Return all triple-barrier sweep configs (per setup_type × bar_size × trade_side).
+    UI displays these as badges on setup profiles so the user can see which PT/SL
+    multiples are active and when they were chosen.
+    """
+    try:
+        from server import db as mongo_db
+        if mongo_db is None:
+            return {"success": False, "configs": [], "error": "DB not available"}
+        from services.ai_modules.triple_barrier_config import list_all_configs
+        return {"success": True, "configs": list_all_configs(mongo_db)}
+    except Exception as e:
+        return {"success": False, "configs": [], "error": str(e)}
+
+
+
 @router.get("/regime-live")
 def get_live_regime():
     """

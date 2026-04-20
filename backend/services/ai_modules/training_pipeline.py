@@ -303,7 +303,13 @@ def _extract_setup_long_worker(args):
         v_wins = sliding_window_view(volumes, 50)[:, ::-1]
 
         results = {}
-        for setup_type, fh, noise_thr in setup_configs:
+        for item in setup_configs:
+            # Accept legacy 3-tuple (type, fh, noise) OR new 6-tuple (type, fh, noise, pt, sl, atr)
+            if len(item) == 3:
+                setup_type, fh, _noise_thr = item
+                tb_pt, tb_sl, tb_atr = 2.0, 1.0, 14
+            else:
+                setup_type, fh, _noise_thr, tb_pt, tb_sl, tb_atr = item
             feat_names = get_setup_feature_names(setup_type)
             n_setup = len(feat_names)
             n_base = base_matrix.shape[1]
@@ -312,18 +318,17 @@ def _extract_setup_long_worker(args):
             if max_rows <= 0:
                 continue
 
-            # TRIPLE-BARRIER 3-class targets (López de Prado): replaces noise-band labels.
-            # 0=DOWN (SL hit first), 1=FLAT (time exit), 2=UP (PT hit first).
-            # Time barrier = fh bars. PT/SL are ATR multiples (defaults 2.0 / 1.0).
+            # TRIPLE-BARRIER 3-class labels (López de Prado); per-setup PT/SL/ATR
+            # resolved by the caller via triple_barrier_config.get_tb_config.
             from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
             idx = np.arange(50, 50 + max_rows)
             raw_lbl = triple_barrier_labels(
                 highs.astype(np.float64), lows.astype(np.float64), closes.astype(np.float64),
                 entry_indices=idx,
-                pt_atr_mult=2.0,
-                sl_atr_mult=1.0,
+                pt_atr_mult=float(tb_pt),
+                sl_atr_mult=float(tb_sl),
                 max_bars=fh,
-                atr_period=14,
+                atr_period=int(tb_atr),
             )
             y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
@@ -383,7 +388,12 @@ def _extract_setup_short_worker(args):
         v_wins = sliding_window_view(volumes, 50)[:, ::-1]
 
         results = {}
-        for setup_type, fh, noise_thr in setup_configs:
+        for item in setup_configs:
+            if len(item) == 3:
+                setup_type, fh, _noise_thr = item
+                tb_pt, tb_sl, tb_atr = 2.0, 1.0, 14
+            else:
+                setup_type, fh, _noise_thr, tb_pt, tb_sl, tb_atr = item
             feat_names = get_short_setup_feature_names(setup_type)
             n_setup = len(feat_names)
             n_base = base_matrix.shape[1]
@@ -392,27 +402,18 @@ def _extract_setup_short_worker(args):
             if max_rows <= 0:
                 continue
 
-            # TRIPLE-BARRIER 3-class targets for SHORT trades. For shorts we invert
-            # the PT/SL logic: a short "wins" when price falls to the lower barrier
-            # before rising to the upper. We achieve that by negating the close
-            # series when evaluating barriers (equivalently, flipping the label
-            # sign).
-            # Shortcut: run triple-barrier on the NEGATED close/high/low series.
-            # Implementation note: for shorts, the profit target is BELOW entry
-            # and the stop is ABOVE entry. Flipping sign keeps the labeler
-            # identical and just relabels UP/DOWN roles.
+            # TRIPLE-BARRIER 3-class labels for SHORT trades via negated-series trick.
             from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
             idx = np.arange(50, 50 + max_rows)
-            # Negate series: max entries become min entries, swapping PT/SL roles
             raw_lbl = triple_barrier_labels(
-                (-lows).astype(np.float64),    # new "highs" = -lows
-                (-highs).astype(np.float64),   # new "lows"  = -highs
+                (-lows).astype(np.float64),
+                (-highs).astype(np.float64),
                 (-closes).astype(np.float64),
                 entry_indices=idx,
-                pt_atr_mult=2.0,
-                sl_atr_mult=1.0,
+                pt_atr_mult=float(tb_pt),
+                sl_atr_mult=float(tb_sl),
                 max_bars=fh,
-                atr_period=14,
+                atr_period=int(tb_atr),
             )
             y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
@@ -1397,9 +1398,19 @@ async def run_training_pipeline(
                 if not symbols:
                     continue
 
-                # Build setup_configs for the worker: all setup types that share this bar_size
-                setup_configs = [(st, p["forecast_horizon"], p.get("noise_threshold", 0.003)) for st, p in st_profiles]
-                max_fh = max(fh for _, fh, _ in setup_configs)
+                # Build setup_configs for the worker: all setup types that share this bar_size.
+                # Per-setup PT/SL/ATR read from triple_barrier_config (populated by
+                # sweep_triple_barrier.py); defaults if no sweep entry exists.
+                from services.ai_modules.triple_barrier_config import get_tb_config
+                setup_configs = []
+                for st, p in st_profiles:
+                    tbc = get_tb_config(db, st, bs, trade_side="long",
+                                        default_max_bars=p["forecast_horizon"])
+                    setup_configs.append((
+                        st, p["forecast_horizon"], p.get("noise_threshold", 0.003),
+                        tbc["pt_atr_mult"], tbc["sl_atr_mult"], tbc["atr_period"],
+                    ))
+                max_fh = max(it[1] for it in setup_configs)
                 min_required = 70 + max_fh
 
                 # Per-model accumulators {(setup_type, fh): {"X": [], "y": [], ...}}
@@ -1569,8 +1580,17 @@ async def run_training_pipeline(
                 if not symbols:
                     continue
 
-                setup_configs = [(st, p["forecast_horizon"], p.get("noise_threshold", 0.003)) for st, p in st_profiles]
-                max_fh = max(fh for _, fh, _ in setup_configs)
+                # Short setup configs with per-setup PT/SL/ATR from triple_barrier_config
+                from services.ai_modules.triple_barrier_config import get_tb_config
+                setup_configs = []
+                for st, p in st_profiles:
+                    tbc = get_tb_config(db, st, bs, trade_side="short",
+                                        default_max_bars=p["forecast_horizon"])
+                    setup_configs.append((
+                        st, p["forecast_horizon"], p.get("noise_threshold", 0.003),
+                        tbc["pt_atr_mult"], tbc["sl_atr_mult"], tbc["atr_period"],
+                    ))
+                max_fh = max(it[1] for it in setup_configs)
                 min_required = 70 + max_fh
 
                 model_accum = {}
