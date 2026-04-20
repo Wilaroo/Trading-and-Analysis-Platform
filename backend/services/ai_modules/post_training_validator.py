@@ -80,15 +80,44 @@ def _build_filters(lookback_days: int = None):
 # ─── Symbol Fetching ─────────────────────────────────────────────────────────
 
 def _get_validation_symbols(db, bar_size: str, limit: int = None) -> List[str]:
-    """Get top liquid symbols for validation backtest."""
+    """Get top liquid symbols for validation backtest, sorted by DOLLAR volume.
+    
+    The symbol_adv_cache only stores share volume. We look up the latest close price
+    to compute dollar volume (shares × price) so we get truly liquid names like
+    NVDA, SPY, TSLA instead of cheap leveraged ETFs with high share counts.
+    """
     from services.ai_modules.setup_training_config import get_adv_threshold
     n = limit or VALIDATION_CONFIG["num_symbols"]
     threshold = get_adv_threshold(bar_size)
-    cursor = db["symbol_adv_cache"].find(
+    
+    # Get top 300 by share volume as candidates
+    candidates = list(db["symbol_adv_cache"].find(
         {"avg_volume": {"$gte": threshold}},
         {"_id": 0, "symbol": 1, "avg_volume": 1}
-    ).sort("avg_volume", -1).limit(n)
-    return [doc["symbol"] for doc in cursor]
+    ).sort("avg_volume", -1).limit(300))
+    
+    if not candidates:
+        return []
+    
+    # Look up latest close price for each candidate to compute dollar volume
+    ranked = []
+    for c in candidates:
+        sym = c["symbol"]
+        avg_vol = c["avg_volume"]
+        # Get latest daily bar close price
+        bar = db["ib_historical_data"].find_one(
+            {"symbol": sym, "bar_size": "1 day"},
+            {"_id": 0, "close": 1},
+            sort=[("date", -1)]
+        )
+        price = bar.get("close", 0) if bar else 0
+        if price > 0:
+            dollar_vol = avg_vol * price
+            ranked.append((sym, dollar_vol))
+    
+    # Sort by dollar volume descending
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    return [sym for sym, _ in ranked[:n]]
 
 
 # ─── Phase 1: AI Comparison ──────────────────────────────────────────────────
