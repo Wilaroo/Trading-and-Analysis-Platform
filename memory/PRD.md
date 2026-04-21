@@ -18,8 +18,9 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 **Fix 2**: `training_pipeline.py` Phase 8 sub_model + setup_model predicts now wrap features in `xgb.DMatrix(..., feature_names=sm._feature_names)` before calling `.predict()`. Added `test_phase8_booster_dmatrix.py` (3 regression tests including source-level guard against future regressions).
 **Verification (user, 2026-04-21 15:24Z)**: Phase 8 now producing real ensembles — 5/10 done at time of writing: meanrev=65.6%, reversal=66.3%, momentum=58.3%, trend=55.3%. All binary meta-labelers with ~44% WIN rate on 390K samples.
 
-### Phase 8 → Live Bet-Sizing Wire-In (2026-04-21) — NEW
+### Phase 8 → Live Bet-Sizing Wire-In (2026-04-21) — COMPLETED & VERIFIED LIVE
 - **`/backend/services/ai_modules/ensemble_live_inference.py`** — runs full ensemble meta-labeling pipeline at trade-decision time: loads sub-models (5min/1h/1d) + setup 1-day model + `ensemble_<setup>` → extracts ensemble features → predicts `P(win)` on current bar. Degrades gracefully (returns `has_prediction=False` with reason) if any piece is missing.
+- **Model cache (10-min TTL, thread-safe)** — `_cached_gbm_load` pins loaded XGBoost Boosters in memory across gate calls. Auto-evicts post-training via `clear_model_cache()` hook in `training_pipeline.py`. Measured speedup on DGX Spark: cold=2.33s, warm=0.33s (**7× faster**), partial miss=0.83s (**2.8×**). Enables ~180 evals/min/core production throughput.
 - **`bet_size_multiplier_from_p_win(p_win)`** — Kelly-inspired tiered ramp:
   - `p_win < 0.50` → 0.0 (**force SKIP** per user requirement)
   - `0.50-0.55` → 0.50× (half size, borderline edge)
@@ -30,8 +31,14 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
   - +15 points if `p_win ≥ 0.75`, +10 if `≥ 0.65`, +5 if `≥ 0.55`, 0 if `≥ 0.50`
   - Position multiplier scaled via `bet_size_multiplier_from_p_win`
   - **Hard SKIP** when `p_win < 0.5` overrides any positive score
-- **`SCANNER_TO_ENSEMBLE_KEY`** — maps 35 scanner setup names (VWAP_BOUNCE, SQUEEZE, RUBBER_BAND, OPENING_DRIVE, etc.) → 10 ensemble config keys
-- **Tests**: `test_ensemble_live_inference.py` (10 tests) — pure bet-size ramp (monotonic, boundary), graceful miss paths (no_db/unmapped_setup/not_trained/not_binary), and full mocked inference path. All 40 Phase 8 / ensemble / preflight / metrics tests passing.
+- **`SCANNER_TO_ENSEMBLE_KEY`** — maps 35 scanner setup names (VWAP_BOUNCE, SQUEEZE, RUBBER_BAND, OPENING_DRIVE, etc.) → 10 ensemble config keys, PLUS canonical key pass-through (`REVERSAL`, `BREAKOUT`, `MEAN_REVERSION`, etc. accepted directly).
+- **Live verification on DGX Spark (2026-04-21)**:
+  - AAPL / BREAKOUT_CONFIRMED → `p_win=40%` → correctly hard-skipped (ensemble_breakout, setup_dir=flat)
+  - NVDA / TREND_CONTINUATION → `p_win=22%` → correctly hard-skipped (ensemble_trend)
+  - TSLA / REVERSAL → `p_win=50.04%` → correctly routed to borderline (0.5× size, ensemble_reversal)
+- **Tests**: `test_ensemble_live_inference.py` (14 tests) — bet-size ramp (monotonic, boundary, cap), graceful miss paths, full mocked inference, model cache reuse/eviction/TTL. **44/44 total Phase 8 / ensemble / preflight / metrics tests passing.**
+
+
 
 ### Phase 2/2.5 FFD name-mismatch crash — FIXED (P0)
 - **Symptom**: `scalp_1min_predictor: expected 57, got 52` when Phase 2 started after Phase 1 completed.
