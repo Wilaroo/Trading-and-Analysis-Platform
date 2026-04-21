@@ -16,14 +16,21 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - **Fix**: `training_pipeline.py` lines 1426 & 1614 now wrap base_names with `augmented_feature_names(...)` from `feature_augmentors.py`, which appends the 5 FFD names when the flag is on.
 - **Guardrail test**: `backend/tests/test_phase2_combined_names_shape.py` (4 tests, all passing) — rebuilds Phase 2 & 2.5 combined_names exactly as the training loop does and asserts `len(combined_names) == X.shape[1]` in both FFD-ON and FFD-OFF modes. Catches any regression of this bug class.
 
-### Pre-flight Shape Validator — NEW (P1)
+### Pre-flight Shape Validator — EXTENDED (P1)
 - `/backend/services/ai_modules/preflight_validator.py` — runs in `run_training_pipeline` immediately after disk-cache clear, BEFORE any phase kicks off heavy work.
-- Uses 600 synthetic bars to drive the real `_extract_setup_long_worker` and `_extract_setup_short_worker` under current env flags (`TB_USE_FFD_FEATURES`, `TB_USE_CUSUM`), rebuilds `combined_names` identically to the pipeline loop, and asserts shape match for every (setup_type, bar_size).
-- Runtime: **~1.6 seconds** for all long+short setups on a full codebase scan (measured).
+- **Now covers every XGBoost training phase** (as of 2026-04-21):
+  - `base_invariant` — `extract_features_bulk` output cols == `get_feature_names()` len (the master invariant; catches hypothetical future FFD-into-bulk drift)
+  - **Phase 2 long** — runs `_extract_setup_long_worker`, rebuilds combined_names, asserts equality
+  - **Phase 2.5 short** — runs `_extract_setup_short_worker`, same
+  - **Phase 4 exit** — runs `_extract_exit_worker`, asserts 46 + len(EXIT_FEATURE_NAMES)
+  - **Phase 6 risk** — runs `_extract_risk_worker`, asserts 46 + len(RISK_FEATURE_NAMES)
+  - **Phases 3/5/5.5/7/8 static** — validates VOL/REGIME/SECTOR_REL/GAP/ENSEMBLE feature name lists are non-empty and dedup'd (their X matrix is built by column-write construction and is correct-by-construction when the base invariant holds)
+- Uses 600 synthetic bars under current env flags (`TB_USE_FFD_FEATURES`, `TB_USE_CUSUM`).
+- **Runtime**: **~2.0 seconds** for all 10 phases with FFD+CUSUM on (measured).
 - Fails the retrain fast with a structured error if ANY mismatch is found (vs a 44h retrain crashing halfway).
 - Result stored in `training_status.preflight` for the UI.
 - Safe-guarded: a bug in the validator itself is logged as a warning and does NOT block training.
-- `backend/tests/test_preflight_validator.py` — 4 tests: FFD-on pass, FFD-off pass, all-flags-on pass, and a **negative test** that injects the 2026-04-21 bug by monkey-patching `augmented_feature_names` and asserts the validator correctly flags every mismatch with `diff=+5`.
+- `backend/tests/test_preflight_validator.py` — 5 tests: all-phases happy path with all flags on, FFD-off pass, only-requested-phases scoping, **negative test** reproducing the 2026-04-21 bug (asserts diff=+5), and **negative test** for base invariant drift (simulates hypothetical future FFD-into-bulk injection and asserts the invariant check catches it).
 - **Next step for user**: restart retrain; Phase 2 onwards should now proceed cleanly AND every future retrain is protected.
 
 ## Completed in this session (2026-04-20)

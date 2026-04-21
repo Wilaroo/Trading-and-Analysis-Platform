@@ -1258,7 +1258,7 @@ async def run_training_pipeline(
         # original 2026-04-21 bug this was built to catch.
         try:
             from services.ai_modules.preflight_validator import preflight_validate_shapes
-            pf = preflight_validate_shapes(phases)
+            pf = preflight_validate_shapes(phases, bar_sizes)
             status.update(preflight=pf)
             if not pf["ok"]:
                 msg = (
