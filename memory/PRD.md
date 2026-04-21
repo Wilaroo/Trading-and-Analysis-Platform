@@ -216,6 +216,22 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Wire FinBERT into confidence gate as Layer 12
 - Wire confidence gate into live validation
 
+## Model Inventory & Deprecation Status (2026-04-21)
+
+| Layer | Model family | Count | Status | Notes |
+|---|---|---|---|---|
+| **Sub-models** | XGBoost `setup_specific_<setup>_<bs>` | 17 long + 17 short = 34 | ✅ Keep (retraining now) | Tabular direction predictor, uses FFD+CUSUM+TB |
+| | XGBoost `direction_predictor_<bs>`, `vol_<bs>`, `exit_*`, `risk_*`, `regime_*`, `sector_*`, `gap_*` | ~65 | ✅ Keep | Generic + specialist tabular models |
+| | DL `cnn_lstm_chart` | 1 | ✅ Keep | 1D CNN+LSTM on OHLCV sequences; feeds Phase 2E tabular arm |
+| | DL `tft_<bs>`, `vae_<bs>` | 2 | ✅ Keep | Temporal fusion + regime encoder |
+| | FinBERT sentiment | 1 | ✅ Keep | Layer 12 of confidence gate (pending wire-in) |
+| | Legacy `cnn_<setup>_<bs>` | 34 | 🗑 **Deprecate post-Phase 2E** | Strict subset of Phase 2E; no unique value |
+| **Meta-labelers** | XGBoost `ensemble_<setup>` (Phase 8) | 10 | ✅ Keep | Tabular meta-labeler, P(win). **Phase 2C equivalent.** Just redesigned 2026-04-21 |
+| | Phase 2E `phase2e_<setup>` (visual+tabular) | 0 | 🔨 **Build** | Hybrid multimodal meta-labeler; will supersede legacy CNN |
+| **Fusion** | `P(win)_final = w_tab·P_tab + w_vis·P_vis` | 0 | 🔮 Future | After both meta-labelers prove individual edge |
+
+**Net reduction once Phase 2E ships**: 34 legacy CNN models → ~10 Phase 2E models. Phase 9 removed from training pipeline. Full-retrain time drops from ~7h to ~5h.
+
 ## Post-Retrain Roadmap (proper sequencing)
 
 The order below is intentional — each step depends on artifacts from the prior step.
@@ -248,10 +264,17 @@ coverage  →  split into dedicated setup-specific model.
 - **Widen PT/SL sweep grid** on daily setups (all converged to pt=1.5/sl=1.5/max_bars=5 — suspicious).
 - Free up training budget for new setups in Step 5.
 
-### Step 3 — Phase 2C: XGBoost meta-labeler (tabular bet-sizer)
-- Secondary XGBoost model: primary signal + regime + features → `P(trade_profitable)` → dynamic position size (0-100%).
-- Wired into `confidence_gate.py`.
-- Converts binary GO/NO-GO signals into continuous bet sizing.
+### Step 3 — Phase 2C: XGBoost Tabular Meta-Labeler ✅ COMPLETED 2026-04-21
+**Consolidated into Phase 8 Ensemble** (see "Phase 8 Ensemble — REDESIGNED as Meta-Labeler" above).
+Each `ensemble_<setup>` now IS the Phase 2C tabular bet-sizer: P(win | setup_direction, meta_features).
+
+### Step 3.5 — Wire bet-sizer into `trading_bot_service.py` (NEXT)
+- `confidence_gate.py` → add `_get_meta_label_signal(setup_type, features)` reading `ensemble_<setup>`
+- Expose `meta_label_p_win` in confidence gate result
+- `opportunity_evaluator.calculate_position_size()` → new `meta_multiplier` (capped [0.3, 1.5]) alongside volatility + regime multipliers
+- Skip trade if `P(win) < 0.50` (meta-labeler says "no edge")
+- Log `meta_label_p_win` + `meta_multiplier` in `trade.entry_context` for backtest uplift tracking
+- Fallback: absent `ensemble_<setup>` → unchanged sizing (safe)
 
 ### Step 4 — Phase 6: Distributed PC Worker infrastructure
 - Training coordinator on Spark offloads CNN/DL jobs to Windows PC over LAN.
@@ -267,10 +290,27 @@ Scalp setups (especially SMB-style) are visually defined. Tabular features flatt
 1. **Chart rendering** — OHLCV window → 96×96 or 128×128 PNG with candlesticks, volume bars, and setup-relevant overlays (9EMA/21EMA/VWAP). No axis labels; pure visual signal.
 2. **Shared backbone** — train one CNN (EfficientNet-Small or similar) on ALL setups' charts with triple-barrier labels. Self-supervised contrastive pre-training optional.
 3. **Per-setup fine-tune heads** — each setup gets a lightweight fine-tuning head on ~5-10k labeled examples.
-4. **Inference** — López de Prado meta-labeling, visual edition: XGBoost says "rubberband scalp candidate" → CNN sees the chart → returns `P(pattern_is_real)`. Combined into bet size.
-5. **Explainability** — Grad-CAM activation overlay surfaced to NIA UI so user can verify the CNN is learning real patterns (exhaustion wick, volume climax) vs spurious noise.
+4. **Tabular fusion** — concat MLP features (46 base + setup + regime + VIX + sub-model probs from cnn_lstm/TFT) with backbone visual features before the classifier head.
+5. **Inference** — López de Prado meta-labeling, visual edition: XGBoost says "rubberband scalp candidate" → multimodal CNN sees the chart + context → returns `P(win)`. Combined into bet size.
+6. **Explainability** — Grad-CAM activation overlay surfaced to NIA UI so user can verify the CNN is learning real patterns (exhaustion wick, volume climax) vs spurious noise.
 
 **Distribution (requires Step 4):** Spark GB10 trains the shared backbone once a week; Windows PC fine-tunes per-setup heads overnight.
+
+### Step 5.5 — DEPRECATE legacy `cnn_<setup>_<bs>` (34 models) — post-Phase 2E
+The current 34 per-setup CNN models in `cnn_models` collection are a **strict subset** of what Phase 2E does:
+- Image-only input (no tabular fusion)
+- Isolated per-setup training (~2K samples each, no shared backbone transfer learning)
+- 17-class pattern head is tautologically 100% (every sample has same setup_type); only the win-AUC head carries signal
+
+**Cutover plan:**
+1. Phase 2E models go live + validated on scorecard (≥2 weeks shadow mode)
+2. Switch `confidence_gate.py` to read `phase2e_<setup>` instead of `cnn_<setup>`
+3. **Remove Phase 9 from the training pipeline** (shaves ~1h 51min off every full retrain — from ~7h to ~5h)
+4. Archive `cnn_models` collection (30-day backup), then drop
+5. Remove `chart_pattern_cnn.py` + per-setup loop in `cnn_training_pipeline.py`
+6. Scorecard: replace 34 `cnn_<setup>` rows with ~10 `phase2e_<setup>` rows
+
+**Keep** `cnn_lstm_chart` (DL model) — different modality (1D CNN+LSTM on OHLCV sequences, not images). Its output feeds into Phase 2E's tabular arm as a stacking feature.
 
 ### Step 6 — Add SMB-specific setups (tiered)
 Only after visual CNN infrastructure exists, and only for setups the CNN/scorecard analysis justifies.
