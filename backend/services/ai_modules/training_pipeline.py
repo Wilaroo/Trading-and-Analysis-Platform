@@ -1419,11 +1419,14 @@ async def run_training_pipeline(
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.feature_augmentors import augmented_feature_names
             from collections import defaultdict
             from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
-            base_names = feature_engineer.get_feature_names()
+            # Include FFD names (when TB_USE_FFD_FEATURES=1) so combined_names matches
+            # the augmented base_matrix produced inside _extract_setup_long_worker.
+            base_names = augmented_feature_names(feature_engineer.get_feature_names())
             n_workers = MAX_EXTRACT_WORKERS
 
             # Group all (setup_type, profile) pairs by bar_size so bars are loaded ONCE per bar_size
@@ -1601,11 +1604,14 @@ async def run_training_pipeline(
             from services.ai_modules.setup_training_config import get_setup_profiles, get_model_name
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.feature_augmentors import augmented_feature_names
             from collections import defaultdict
             from concurrent.futures import ProcessPoolExecutor, as_completed
 
             feature_engineer = get_feature_engineer()
-            base_names = feature_engineer.get_feature_names()
+            # Include FFD names (when TB_USE_FFD_FEATURES=1) so combined_names matches
+            # the augmented base_matrix produced inside _extract_setup_short_worker.
+            base_names = augmented_feature_names(feature_engineer.get_feature_names())
             n_workers = MAX_EXTRACT_WORKERS
 
             # Group by bar_size (same optimization as Phase 2)
