@@ -9,7 +9,20 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed in this session (2026-04-22 — fork 2, execution hardening batch)
+## Completed this fork (2026-04-23 — bracket queue passthrough fix)
+### P0 — Queue schema stripping bracket fields FIXED
+**Root cause:** `OrderQueueService.queue_order()` built its insert document from a hardcoded whitelist (`symbol/action/quantity/order_type/limit_price/stop_price/trade_id/...`) that silently dropped `type`, `parent`, `stop`, `target`, and `oca_group`. The Windows pusher then received a degenerate payload and could not execute atomic IB brackets — the final blocker for Phase 3 bracket orders.
+
+**Fix:**
+- `/app/backend/services/order_queue_service.py` — `queue_order()` now detects `type == "bracket"` and preserves `parent`, `stop`, `target`, `oca_group` in the stored doc. For bracket orders `order_type` is stamped as `"bracket"` and flat `action/quantity` are nulled (they live inside `parent`). Regular flat orders are unchanged.
+- `QueuedOrder` Pydantic model now uses `model_config = ConfigDict(extra="allow")` and explicitly declares `type/parent/stop/target/oca_group`. `action`/`quantity` relaxed to `Optional` (bracket shape has them inside `parent`).
+- `/app/backend/routers/ib.py` — `QueuedOrderRequest` mirrors the same bracket fields + `extra="allow"`. The `/api/ib/orders/queue` endpoint now branches cleanly for bracket vs. flat orders and validates each shape independently.
+
+**Regression coverage:** `/app/backend/tests/test_queue_bracket_passthrough.py` — 5 tests locking in: bracket fields preserved, `oca_group` preserved, flat orders unaffected, Pydantic model accepts bracket shape, Pydantic accepts unknown-future fields. All 8 related tests pass (5 new + 3 existing bracket-wiring).
+
+**Impact:** Windows pusher will now receive the full bracket payload on its next poll of `/api/ib/orders/pending`. Atomic IB bracket orders activate end-to-end — no more naked positions on restart/disconnect.
+
+## Completed in prior session (2026-04-22 — fork 2, execution hardening batch)
 ### Dashboard truthfulness fix — retag bot-side cancels (2026-04-22 evening)
 Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_phase` bot-side filters, not broker cancels. Added dedicated `TradeStatus` values (`PAPER`, `SIMULATED`, `VETOED`) so future filters don't pollute the `cancelled` bucket. Migration script `scripts/retag_bot_side_cancels.py` retro-tagged 6,632 docs; execution-health now reports real failure rate (17.07% — dominated by already-disabled vwap_fade_short).
 

@@ -152,15 +152,28 @@ _order_queue_legacy = {
 
 
 class QueuedOrderRequest(BaseModel):
-    """Request to queue an order for remote execution"""
+    """Request to queue an order for remote execution.
+
+    Supports both flat (regular) orders and nested bracket orders
+    (`type="bracket"` with `parent`, `stop`, `target` children).
+    Extra fields are preserved and forwarded to the pusher.
+    """
+    model_config = {"extra": "allow"}
+
     symbol: str
-    action: str  # BUY or SELL
-    quantity: int
-    order_type: str = "MKT"  # MKT, LMT, STP, STP_LMT
+    action: Optional[str] = None  # BUY or SELL (None for bracket; nested under parent)
+    quantity: Optional[int] = None  # None for bracket; nested under parent
+    order_type: str = "MKT"  # MKT, LMT, STP, STP_LMT, or "bracket"
     limit_price: Optional[float] = None
     stop_price: Optional[float] = None
     time_in_force: str = "DAY"  # DAY, GTC, IOC
     trade_id: Optional[str] = None  # Reference to trading bot's trade
+    # Bracket-order fields (atomic IB native bracket)
+    type: Optional[str] = None  # "bracket" to flag atomic bracket orders
+    parent: Optional[dict] = None
+    stop: Optional[dict] = None
+    target: Optional[dict] = None
+    oca_group: Optional[str] = None
 
 
 class OrderExecutionResult(BaseModel):
@@ -1234,33 +1247,55 @@ def queue_order_for_execution(request: QueuedOrderRequest):
     Queue an order for execution by the local IB pusher.
     The trading bot calls this to submit orders.
     Returns immediately with order_id - use /orders/result/{order_id} to get execution result.
+
+    Supports regular and bracket (type="bracket") orders.
     """
-    # Validate action
-    if request.action.upper() not in ["BUY", "SELL"]:
-        raise HTTPException(status_code=400, detail="Action must be BUY or SELL")
-    
-    # Validate order type
-    valid_order_types = ["MKT", "LMT", "STP", "STP_LMT"]
-    if request.order_type.upper() not in valid_order_types:
-        raise HTTPException(status_code=400, detail=f"Order type must be one of: {valid_order_types}")
-    
-    # Queue the order
-    order_id = queue_order({
+    is_bracket = (request.type or "").lower() == "bracket" or request.order_type.lower() == "bracket"
+
+    # Validate payload shape
+    if is_bracket:
+        if not request.parent or not request.stop or not request.target:
+            raise HTTPException(
+                status_code=400,
+                detail="Bracket orders require 'parent', 'stop', and 'target' fields"
+            )
+    else:
+        # Regular order validation
+        if not request.action or request.action.upper() not in ["BUY", "SELL"]:
+            raise HTTPException(status_code=400, detail="Action must be BUY or SELL")
+        if not request.quantity or request.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Quantity must be > 0")
+        valid_order_types = ["MKT", "LMT", "STP", "STP_LMT"]
+        if request.order_type.upper() not in valid_order_types:
+            raise HTTPException(status_code=400, detail=f"Order type must be one of: {valid_order_types}")
+
+    # Build payload, preserving bracket fields when present
+    payload = {
         "symbol": request.symbol.upper(),
-        "action": request.action.upper(),
+        "action": request.action.upper() if request.action else None,
         "quantity": request.quantity,
-        "order_type": request.order_type.upper(),
+        "order_type": request.order_type.upper() if not is_bracket else "bracket",
         "limit_price": request.limit_price,
         "stop_price": request.stop_price,
         "time_in_force": request.time_in_force,
-        "trade_id": request.trade_id
-    })
-    
+        "trade_id": request.trade_id,
+    }
+    if is_bracket:
+        payload["type"] = "bracket"
+        payload["parent"] = request.parent
+        payload["stop"] = request.stop
+        payload["target"] = request.target
+        if request.oca_group:
+            payload["oca_group"] = request.oca_group
+
+    order_id = queue_order(payload)
+
     return {
         "success": True,
         "order_id": order_id,
         "status": "pending",
-        "message": "Order queued for execution by local pusher"
+        "message": "Order queued for execution by local pusher",
+        "order_type": "bracket" if is_bracket else request.order_type.upper(),
     }
 
 

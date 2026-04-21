@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 from enum import Enum
 from pymongo import MongoClient, DESCENDING
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +27,18 @@ class OrderStatus(str, Enum):
 
 
 class QueuedOrder(BaseModel):
-    """Order queued for remote execution"""
+    """Order queued for remote execution.
+
+    `model_config` allows extra fields (e.g. bracket-order payload fields
+    `type`, `parent`, `stop`, `target`, `oca_group`) to pass through the
+    model without being silently dropped.
+    """
+    model_config = ConfigDict(extra="allow")
+
     order_id: str
     symbol: str
-    action: str  # BUY or SELL
-    quantity: int
+    action: Optional[str] = None  # BUY or SELL (optional for bracket type; nested under parent)
+    quantity: Optional[int] = None  # Optional for bracket type; nested under parent
     order_type: str = "MKT"
     limit_price: Optional[float] = None
     stop_price: Optional[float] = None
@@ -46,6 +53,12 @@ class QueuedOrder(BaseModel):
     ib_order_id: Optional[int] = None
     error: Optional[str] = None
     attempts: int = 0
+    # Bracket-order fields (atomic IB native bracket)
+    type: Optional[str] = None  # "bracket" for atomic bracket orders
+    parent: Optional[Dict[str, Any]] = None
+    stop: Optional[Dict[str, Any]] = None
+    target: Optional[Dict[str, Any]] = None
+    oca_group: Optional[str] = None
 
 
 class OrderQueueService:
@@ -86,18 +99,29 @@ class OrderQueueService:
             raise
     
     def queue_order(self, order: Dict[str, Any]) -> str:
-        """Queue an order for execution by local pusher. Returns order_id."""
+        """Queue an order for execution by local pusher. Returns order_id.
+
+        Supports both:
+          - Regular orders: flat dict with symbol/action/quantity/order_type/etc.
+          - Bracket orders: {"type": "bracket", "symbol": ..., "parent": {...},
+                             "stop": {...}, "target": {...}, "trade_id": ...}
+        """
         if not self._initialized:
             self.initialize()
-            
+
         order_id = str(uuid.uuid4())[:8]
-        
+        is_bracket = order.get("type") == "bracket"
+
         order_doc = {
             "order_id": order_id,
             "symbol": order.get("symbol", "").upper(),
-            "action": order.get("action", "BUY").upper(),
-            "quantity": order.get("quantity", 0),
-            "order_type": order.get("order_type", "MKT"),
+            # For bracket orders, action/quantity live inside `parent`;
+            # leave top-level None so the pusher consults `parent` directly.
+            "action": (order.get("action", "BUY").upper()
+                       if not is_bracket and order.get("action")
+                       else None if is_bracket else "BUY"),
+            "quantity": order.get("quantity", 0) if not is_bracket else None,
+            "order_type": order.get("order_type", "MKT") if not is_bracket else "bracket",
             "limit_price": order.get("limit_price"),
             "stop_price": order.get("stop_price"),
             "time_in_force": order.get("time_in_force", "DAY"),
@@ -110,12 +134,37 @@ class OrderQueueService:
             "filled_qty": None,
             "ib_order_id": None,
             "error": None,
-            "attempts": 0
+            "attempts": 0,
         }
-        
+
+        # Preserve bracket payload fields so they reach the Windows pusher
+        # via /api/ib/orders/pending. Without this, atomic bracket orders
+        # silently degrade to legacy entry-only submissions.
+        if is_bracket:
+            order_doc["type"] = "bracket"
+            order_doc["parent"] = order.get("parent")
+            order_doc["stop"] = order.get("stop")
+            order_doc["target"] = order.get("target")
+            if order.get("oca_group"):
+                order_doc["oca_group"] = order.get("oca_group")
+
         self._collection.insert_one(order_doc)
-        logger.info(f"Order {order_id} queued: {order_doc['symbol']} {order_doc['action']} {order_doc['quantity']}")
-        
+        # Remove _id that MongoDB added to the dict so callers don't leak ObjectId
+        order_doc.pop("_id", None)
+
+        if is_bracket:
+            parent = order_doc.get("parent") or {}
+            logger.info(
+                f"Bracket order {order_id} queued: {order_doc['symbol']} "
+                f"{parent.get('action', '?')} {parent.get('quantity', '?')} "
+                f"(parent+stop+target)"
+            )
+        else:
+            logger.info(
+                f"Order {order_id} queued: {order_doc['symbol']} "
+                f"{order_doc['action']} {order_doc['quantity']}"
+            )
+
         return order_id
     
     def get_pending_orders(self) -> List[Dict]:
