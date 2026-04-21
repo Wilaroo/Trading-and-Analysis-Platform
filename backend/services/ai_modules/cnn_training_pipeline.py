@@ -431,26 +431,43 @@ def _train_single_model(
 
     accuracy = correct_pattern / max(total, 1)
 
-    # Win prediction AUC
+    # Win prediction AUC + full binary classification metrics (primary signals)
     win_auc = 0.5
+    win_acc_binary = 0.0
+    win_precision = 0.0
+    win_recall = 0.0
+    win_f1 = 0.0
     try:
-        from sklearn.metrics import roc_auc_score
+        from sklearn.metrics import (
+            roc_auc_score, accuracy_score, precision_score, recall_score, f1_score,
+        )
+        import numpy as _np
+        y_true_arr = _np.asarray(all_win_true, dtype=_np.int32)
+        y_score_arr = _np.asarray(all_win_preds, dtype=_np.float32)
         if len(set(all_win_true)) > 1:
-            win_auc = roc_auc_score(all_win_true, all_win_preds)
-    except Exception:
-        pass
+            win_auc = float(roc_auc_score(y_true_arr, y_score_arr))
+            y_pred_bin = (y_score_arr >= 0.5).astype(_np.int32)
+            win_acc_binary = float(accuracy_score(y_true_arr, y_pred_bin))
+            # zero_division=0 → avoid NaN when model never predicts a class
+            win_precision = float(precision_score(y_true_arr, y_pred_bin, zero_division=0))
+            win_recall = float(recall_score(y_true_arr, y_pred_bin, zero_division=0))
+            win_f1 = float(f1_score(y_true_arr, y_pred_bin, zero_division=0))
+    except Exception as _e:
+        logger.debug(f"[CNN metrics] skl metrics failed: {_e}")
 
     metrics = {
-        # NOTE 2026-04-20: `accuracy` here is pattern-classification accuracy on
-        # a dataset where all samples have the same setup_type (we train one CNN
-        # per setup). That makes it degenerate — it's ~100% for any model that
-        # simply always predicts the majority class. It is NOT a predictive
-        # metric and must NOT be used as the promotion criterion. `win_auc` is
-        # the real metric — it measures whether the CNN can tell winning setups
-        # from losing ones inside the same setup_type.
-        "accuracy": round(accuracy, 4),
-        "pattern_classification_accuracy": round(accuracy, 4),
+        # `accuracy` is the PRIMARY display metric used by UI + scorecard.
+        # We bind it to win_auc — the real predictive metric — since the
+        # 17-class pattern classification is degenerate (every sample in a
+        # cnn_<setup>_<bs> model has the same setup_type → trivially 100%).
+        # `pattern_classification_accuracy` is kept as a debug-only field.
+        "accuracy": round(win_auc, 4),
         "win_auc": round(win_auc, 4),
+        "win_accuracy": round(win_acc_binary, 4),
+        "win_precision": round(win_precision, 4),
+        "win_recall": round(win_recall, 4),
+        "win_f1": round(win_f1, 4),
+        "pattern_classification_accuracy": round(accuracy, 4),
         "test_samples": total,
         "train_samples": n_train,
         "val_samples": n_val,
