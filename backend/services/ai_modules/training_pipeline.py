@@ -2998,8 +2998,11 @@ async def run_training_pipeline(
                                                 model_feats[:, ci] = features_matrix[:, src_idx]
                                         
                                         sub_raw_preds[tf] = sm._model.predict(model_feats)  # Batch predict!
-                                    except Exception:
-                                        pass
+                                    except Exception as _sub_err:
+                                        logger.warning(
+                                            f"[Phase 8] sub_model predict failed for tf={tf} "
+                                            f"sym={sym}: {type(_sub_err).__name__}: {_sub_err}"
+                                        )
                                 
                                 # Batch predict setup model
                                 setup_raw_preds = None
@@ -3010,8 +3013,11 @@ async def run_training_pipeline(
                                             if 0 <= src_idx < features_matrix.shape[1]:
                                                 model_feats[:, ci] = features_matrix[:, src_idx]
                                         setup_raw_preds = setup_model._model.predict(model_feats)
-                                    except Exception:
-                                        pass
+                                    except Exception as _setup_err:
+                                        logger.warning(
+                                            f"[Phase 8] setup_model predict failed for sym={sym}: "
+                                            f"{type(_setup_err).__name__}: {_setup_err}"
+                                        )
                                 
                                 # Now iterate per-sample for ensemble feature assembly (fast — just dict ops)
                                 for i in range(n_usable):
@@ -3062,9 +3068,16 @@ async def run_training_pipeline(
                                                 prob_up = float(probs[2]) if len(probs) > 2 else float(probs[-1])
                                                 prob_down = float(probs[0])
                                                 conf = float(max(probs) - 1.0 / len(probs))
-                                                direction = "up" if np.argmax(probs) == 2 else (
-                                                    "down" if np.argmax(probs) == 0 else "flat"
-                                                )
+                                                # Threshold-based direction (not strict argmax):
+                                                # sub-model 3-class argmax is FLAT for ~45% of universe bars
+                                                # because TB is class-imbalanced. Using a lean-threshold
+                                                # recovers the "model has a directional preference" signal.
+                                                if prob_up > 0.38 and prob_up > prob_down:
+                                                    direction = "up"
+                                                elif prob_down > 0.38 and prob_down > prob_up:
+                                                    direction = "down"
+                                                else:
+                                                    direction = "flat"
                                             else:
                                                 prob_up = float(raw_pred) if np.isscalar(raw_pred) else float(raw_pred)
                                                 prob_down = 1.0 - prob_up
