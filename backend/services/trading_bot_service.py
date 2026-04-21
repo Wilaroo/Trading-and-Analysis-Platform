@@ -1434,18 +1434,38 @@ class TradingBotService:
             if alerts:
                 print(f"📡 [TradingBot] Found {len(alerts)} eligible alerts to evaluate")
             
+            # Alert de-duplication (2026-04-21): hard veto BEFORE confidence gate.
+            # Blocks repeat fires on open positions AND 5-min cooldown per
+            # (symbol, setup, direction) to stop scanner spam from stacking losers.
+            from services.alert_deduplicator import get_deduplicator
+            _dedup = get_deduplicator()
+
             for alert in alerts:
                 symbol = alert.get('symbol', 'UNKNOWN')
                 setup = alert.get('setup_type', 'unknown')
-                
-                # Skip if already have position in this symbol
+                direction = alert.get('direction', 'long')
+
+                dedup_result = _dedup.should_skip(
+                    symbol=symbol,
+                    setup_type=setup,
+                    direction=direction,
+                    open_trades=list(self._open_trades.values()) + list(self._pending_trades.values()),
+                )
+                if dedup_result.skip:
+                    print(f"🛑 [TradingBot] Dedup skip {symbol} {setup} {direction}: {dedup_result.reason}")
+                    continue
+
+                # Skip if already have position in this symbol (safety net)
                 if any(t.symbol == alert.get('symbol') for t in self._open_trades.values()):
                     continue
-                
+
                 # Skip if pending trade exists
                 if any(t.symbol == alert.get('symbol') for t in self._pending_trades.values()):
                     continue
-                
+
+                # Mark alert as fired (starts cooldown) BEFORE heavy evaluation
+                _dedup.mark_fired(symbol, setup, direction)
+
                 # Evaluate and create trade opportunity
                 print(f"🔍 [TradingBot] Evaluating {symbol} {setup}...")
                 trade = await self._evaluate_opportunity(alert)

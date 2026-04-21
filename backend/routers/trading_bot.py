@@ -129,6 +129,42 @@ async def get_execution_health(
     }
 
 
+@router.get("/trade-autopsy/{trade_id}")
+async def get_trade_autopsy(trade_id: str):
+    """Full forensic view for any closed trade (2026-04-21).
+
+    Assembles bot_trades + gate_decisions + live_alerts into one dict so you
+    can see exactly why a losing trade fired: entry/exit, realized R,
+    stop-honor status, layer-by-layer gate vote, P(win), and the scanner
+    context at entry.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    db = _trading_bot._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from services.trade_autopsy import TradeAutopsy
+    autopsy = TradeAutopsy(db).autopsy(trade_id)
+    if autopsy is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    return {"success": True, "autopsy": autopsy}
+
+
+@router.get("/recent-losses")
+async def get_recent_losses(limit: int = Query(20, ge=1, le=200)):
+    """List the worst recent losing trades for triage-by-autopsy workflow."""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    db = _trading_bot._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from services.trade_autopsy import TradeAutopsy
+    losses = TradeAutopsy(db).recent_losses(limit=limit)
+    return {"success": True, "count": len(losses), "losses": losses}
+
+
 @router.post("/start")
 async def start_bot():
     """Start the trading bot"""

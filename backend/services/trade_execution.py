@@ -116,6 +116,48 @@ class TradeExecution:
                 except Exception as e:
                     logger.warning(f"Failed to start execution tracking: {e}")
 
+            # === PRE-EXECUTION GUARD RAILS (2026-04-21) ===
+            # Block pathologically tight stops and oversized positions BEFORE
+            # any order hits the broker. See services/execution_guardrails.py
+            # and memory/IB_BRACKET_ORDER_MIGRATION.md for the audit that
+            # motivated these (USO $0.03 stop on a $108 stock = -261R bleed).
+            try:
+                from services.execution_guardrails import run_all_guardrails
+
+                # Best-effort ATR lookup — fall back to None if unavailable
+                atr_14 = getattr(trade, "atr_14", None)
+                if atr_14 is None and hasattr(bot, "_atr_cache"):
+                    atr_14 = bot._atr_cache.get(trade.symbol)
+
+                account_equity = None
+                try:
+                    if bot._trade_executor and hasattr(bot._trade_executor, "get_account_info"):
+                        acct = await bot._trade_executor.get_account_info()
+                        if isinstance(acct, dict):
+                            account_equity = acct.get("equity") or acct.get("portfolio_value")
+                except Exception:
+                    account_equity = None
+
+                veto = run_all_guardrails(
+                    entry_price=trade.entry_price,
+                    stop_price=trade.stop_price,
+                    shares=trade.shares,
+                    atr_14=atr_14,
+                    account_equity=account_equity,
+                )
+                if veto.skip:
+                    logger.warning(f"🛡️ [Guardrail VETO] {trade.symbol}: {veto.reason}")
+                    print(f"   🛡️ [Guardrail VETO] {trade.symbol}: {veto.reason}")
+                    trade.status = TradeStatus.REJECTED
+                    trade.notes = (trade.notes or "") + f" [GUARDRAIL: {veto.reason}]"
+                    trade.close_reason = "guardrail_veto"
+                    if trade.id in bot._pending_trades:
+                        del bot._pending_trades[trade.id]
+                    await bot._save_trade(trade)
+                    return
+            except Exception as e:
+                logger.warning(f"Guardrail check failed (allowing trade): {e}")
+
             # Execute entry order
             print("   📤 [_execute_trade] Calling trade_executor.execute_entry...")
             result = await bot._trade_executor.execute_entry(trade)

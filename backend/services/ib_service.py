@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -39,6 +40,7 @@ class IBCommand(Enum):
     GET_QUOTE = "get_quote"
     GET_QUOTES_BATCH = "get_quotes_batch"
     PLACE_ORDER = "place_order"
+    PLACE_BRACKET_ORDER = "place_bracket_order"
     CANCEL_ORDER = "cancel_order"
     GET_OPEN_ORDERS = "get_open_orders"
     GET_EXECUTIONS = "get_executions"
@@ -199,6 +201,9 @@ class IBWorkerThread(threading.Thread):
             
             elif request.command == IBCommand.PLACE_ORDER:
                 return self._do_place_order(request.params)
+
+            elif request.command == IBCommand.PLACE_BRACKET_ORDER:
+                return self._do_place_bracket_order(request.params)
             
             elif request.command == IBCommand.CANCEL_ORDER:
                 return self._do_cancel_order(request.params.get("order_id"))
@@ -479,7 +484,155 @@ class IBWorkerThread(threading.Thread):
         except Exception as e:
             logger.error(f"Error placing order: {e}")
             return IBResponse(success=False, error=str(e))
-    
+
+    def _do_place_bracket_order(self, params: Dict) -> IBResponse:
+        """Atomic IB bracket order: PARENT (LMT/MKT entry) + OCA STOP + OCA TARGET.
+
+        Native IB semantics (see IB_BRACKET_ORDER_MIGRATION.md):
+          - Parent submits with transmit=False (staged at IB, not yet active).
+          - Child STOP uses parentId=parent.orderId, transmit=False.
+          - Child TARGET uses parentId=parent.orderId, transmit=True — this is
+            the atomic commit point. IB activates all 3 together.
+          - Both children share an OCA group so whichever triggers first
+            cancels the other.
+          - Once the parent fills, the stop and target live at IB as GTC.
+            The bot can die/restart/be offline for days — IB enforces the
+            stop. No round-trip to SentCom required.
+
+        Params (all required unless noted):
+          symbol, action ("BUY"|"SELL"), quantity, entry_price, stop_price,
+          target_price, order_type ("LMT" default, "MKT" allowed for entry),
+          time_in_force ("DAY" default), oca_group (optional — auto-generated
+          if not provided).
+
+        Returns data on success:
+          {parent_id, stop_id, target_id, oca_group, symbol, quantity,
+           entry_price, stop_price, target_price, status, timestamp}
+        """
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+
+        try:
+            from ib_insync import Stock
+
+            symbol = params.get("symbol")
+            action = (params.get("action") or "").upper()
+            quantity = int(params.get("quantity") or 0)
+            entry_price = params.get("entry_price")
+            stop_price = params.get("stop_price")
+            target_price = params.get("target_price")
+            order_type = (params.get("order_type") or "LMT").upper()
+            tif = (params.get("time_in_force") or "DAY").upper()
+            oca_group = params.get("oca_group") or f"oca_{symbol}_{uuid.uuid4().hex[:8]}"
+
+            # Validation — bracket is atomic; require the full triple
+            if not symbol or action not in ("BUY", "SELL") or quantity <= 0:
+                return IBResponse(success=False, error="Invalid symbol/action/quantity")
+            if stop_price is None or target_price is None:
+                return IBResponse(success=False, error="stop_price and target_price required")
+            if order_type == "LMT" and entry_price is None:
+                return IBResponse(success=False, error="entry_price required for LMT entry")
+
+            # Child actions are inverse of parent: BUY parent → SELL children and vice versa
+            child_action = "SELL" if action == "BUY" else "BUY"
+
+            # Directional sanity: long needs stop < entry < target; short the reverse
+            if order_type == "LMT":
+                if action == "BUY" and not (stop_price < entry_price < target_price):
+                    return IBResponse(
+                        success=False,
+                        error=f"Long bracket requires stop({stop_price}) < entry({entry_price}) < target({target_price})",
+                    )
+                if action == "SELL" and not (stop_price > entry_price > target_price):
+                    return IBResponse(
+                        success=False,
+                        error=f"Short bracket requires stop({stop_price}) > entry({entry_price}) > target({target_price})",
+                    )
+
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            self.ib.qualifyContracts(contract)
+
+            # Reserve 3 contiguous IDs so the broker sees a coherent batch
+            parent_oid = self.ib.client.getReqId()
+            stop_oid = self.ib.client.getReqId()
+            target_oid = self.ib.client.getReqId()
+
+            # Build raw IB orders (not ib_insync's MarketOrder helper) so we
+            # control every field including parentId/ocaGroup/transmit.
+            from ib_insync import Order
+
+            parent = Order(
+                orderId=parent_oid,
+                action=action,
+                totalQuantity=quantity,
+                orderType=order_type,
+                lmtPrice=float(entry_price) if order_type == "LMT" else 0.0,
+                tif=tif,
+                transmit=False,  # staged — do not activate yet
+                outsideRth=False,
+            )
+            stop = Order(
+                orderId=stop_oid,
+                action=child_action,
+                totalQuantity=quantity,
+                orderType="STP",
+                auxPrice=float(stop_price),
+                parentId=parent_oid,
+                tif="GTC",
+                ocaGroup=oca_group,
+                ocaType=1,  # 1 = cancel on fill with block
+                transmit=False,
+                outsideRth=True,
+            )
+            target = Order(
+                orderId=target_oid,
+                action=child_action,
+                totalQuantity=quantity,
+                orderType="LMT",
+                lmtPrice=float(target_price),
+                parentId=parent_oid,
+                tif="GTC",
+                ocaGroup=oca_group,
+                ocaType=1,
+                transmit=True,  # atomic commit — activates all 3
+                outsideRth=True,
+            )
+
+            # Submit all 3 through ib_insync. Order matters:
+            # parent first (transmit=false), then stop (transmit=false), then
+            # target (transmit=true) — last placement triggers activation.
+            p_trade = self.ib.placeOrder(contract, parent)
+            s_trade = self.ib.placeOrder(contract, stop)
+            t_trade = self.ib.placeOrder(contract, target)
+
+            # Give IB a moment to ack
+            self.ib.sleep(2)
+
+            return IBResponse(success=True, data={
+                "parent_id": p_trade.order.orderId,
+                "stop_id": s_trade.order.orderId,
+                "target_id": t_trade.order.orderId,
+                "parent_perm_id": p_trade.order.permId,
+                "stop_perm_id": s_trade.order.permId,
+                "target_perm_id": t_trade.order.permId,
+                "oca_group": oca_group,
+                "symbol": symbol.upper(),
+                "action": action,
+                "quantity": quantity,
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "target_price": target_price,
+                "order_type": order_type,
+                "parent_status": p_trade.orderStatus.status,
+                "stop_status": s_trade.orderStatus.status,
+                "target_status": t_trade.orderStatus.status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
+        except Exception as e:
+            logger.error(f"Error placing bracket order: {e}")
+            return IBResponse(success=False, error=str(e))
+
     def _do_cancel_order(self, order_id: int) -> IBResponse:
         """Cancel an order"""
         if not self.ib or not self.ib.isConnected():
@@ -1148,6 +1301,49 @@ class IBService:
                 "stop_price": stop_price
             },
             timeout=30.0
+        )
+        if not response.success:
+            raise Exception(response.error)
+        return response.data
+
+    async def place_bracket_order(
+        self,
+        symbol: str,
+        action: str,
+        quantity: int,
+        entry_price: float,
+        stop_price: float,
+        target_price: float,
+        order_type: str = "LMT",
+        time_in_force: str = "DAY",
+        oca_group: Optional[str] = None,
+    ) -> Dict:
+        """Place an atomic IB bracket order (parent + OCA stop + OCA target).
+
+        Phase 1 of the IB bracket migration (see memory/IB_BRACKET_ORDER_MIGRATION.md).
+        Stops live at IB as GTC once the parent fills — they survive bot
+        restarts and pusher disconnects. No more naked positions.
+
+        Returns:
+            Dict with parent_id, stop_id, target_id, oca_group, statuses, etc.
+
+        Raises:
+            Exception if IB refuses the bracket or directional sanity fails.
+        """
+        response = await self._async_request(
+            IBCommand.PLACE_BRACKET_ORDER,
+            {
+                "symbol": symbol,
+                "action": action,
+                "quantity": quantity,
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "target_price": target_price,
+                "order_type": order_type,
+                "time_in_force": time_in_force,
+                "oca_group": oca_group,
+            },
+            timeout=30.0,
         )
         if not response.success:
             raise Exception(response.error)

@@ -9,6 +9,30 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
+## Completed in this session (2026-04-22 — fork 2, execution hardening batch)
+### Alert de-dup wired into scan loop
+`services/trading_bot_service._scan_for_opportunities` runs the `AlertDeduplicator` hard veto BEFORE confidence-gate evaluation. Blocks repeat fires on already-open `(symbol, setup, direction)` and enforces a 5-min cooldown. This stops the PRCT-style stacking disaster where 8 identical vwap_fade_short alerts each bled -8.9R.
+
+### Trade Autopsy API endpoints
+Added to `routers/trading_bot.py`:
+- `GET /api/trading-bot/trade-autopsy/{trade_id}` — full forensic view: outcome, stop-honor, slippage_R, gate snapshot, scanner context.
+- `GET /api/trading-bot/recent-losses?limit=N` — list worst-R trades for triage workflow.
+
+### IB `place_bracket_order()` primitive (Phase 1 of bracket migration)
+`services/ib_service.py` now exposes an atomic native IB bracket: parent LMT/MKT + OCA stop + OCA target. Uses `ib_insync` with explicit `parentId`, `ocaGroup`, `ocaType=1`, and `transmit=false/false/true` flags. Includes directional sanity validation (long: stop<entry<target, short: reverse) and emits a unique `oca_group` id per trade. Once the parent fills, the stop and target live at IB as GTC — the bot can die/restart and the stop remains enforced.
+
+### Pre-execution guard rails
+New pure module `services/execution_guardrails.py` + wired into `services/trade_execution.execute_trade` BEFORE `trade_executor.execute_entry`. Rejects:
+- Stops tighter than 0.3×ATR(14) (or 10 bps of price if ATR unavailable)
+- Positions whose notional exceeds 1% of account equity (temporary cap while bracket migration is in progress)
+Failed trades are marked `TradeStatus.REJECTED` with `close_reason="guardrail_veto"`.
+
+### Pytest coverage (24 new tests, 82/82 passing in exec-hardening suite)
+- `tests/test_alert_deduplicator.py` (8 tests): open-position veto, cooldown window, symbol/setup/direction independence, ordering precedence.
+- `tests/test_execution_guardrails.py` (10 tests): USO-style tight-stop rejection, ATR vs pct fallback, notional cap, no-equity fallback.
+- `tests/test_trade_autopsy.py` (6 tests): long/short verdict, stop-honored vs blown-through slippage, r_multiple precedence.
+
+
 ## Completed in this session (2026-04-21 — continued fork)
 ### Phase 8 DMatrix Fix & Bet-Sizing Wire-In (2026-04-21)
 **Problem 1 (broadcast)**: Phase 8 ensemble failed with `ValueError: could not broadcast input array from shape (2382,) into shape (2431,)` — inline FFD augmentation was dropping 49 lookback rows vs the pre-computed `features_matrix`.
