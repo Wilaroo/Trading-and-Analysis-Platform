@@ -2978,6 +2978,9 @@ async def run_training_pipeline(
                                 )
                                 
                                 # BATCH predict through all sub-models at once (replaces per-bar predict loop)
+                                # NOTE: TimeSeriesGBM._model is an xgb.Booster — requires DMatrix input,
+                                # not raw numpy arrays (otherwise XGBoost raises TypeError).
+                                import xgboost as _xgb_phase8
                                 sub_raw_preds = {}
                                 for tf, sm in sub_models.items():
                                     col_map = sub_model_col_maps.get(tf)
@@ -2989,8 +2992,12 @@ async def run_training_pipeline(
                                         for ci, src_idx in enumerate(col_map):
                                             if 0 <= src_idx < features_matrix.shape[1]:
                                                 model_feats[:, ci] = features_matrix[:, src_idx]
-                                        
-                                        sub_raw_preds[tf] = sm._model.predict(model_feats)  # Batch predict!
+
+                                        sub_dm = _xgb_phase8.DMatrix(
+                                            model_feats,
+                                            feature_names=list(sm._feature_names) if sm._feature_names else None,
+                                        )
+                                        sub_raw_preds[tf] = sm._model.predict(sub_dm)  # Batch predict!
                                     except Exception as _sub_err:
                                         logger.warning(
                                             f"[Phase 8] sub_model predict failed for tf={tf} "
@@ -3005,7 +3012,11 @@ async def run_training_pipeline(
                                         for ci, src_idx in enumerate(setup_col_map):
                                             if 0 <= src_idx < features_matrix.shape[1]:
                                                 model_feats[:, ci] = features_matrix[:, src_idx]
-                                        setup_raw_preds = setup_model._model.predict(model_feats)
+                                        setup_dm = _xgb_phase8.DMatrix(
+                                            model_feats,
+                                            feature_names=list(setup_model._feature_names) if setup_model._feature_names else None,
+                                        )
+                                        setup_raw_preds = setup_model._model.predict(setup_dm)
                                     except Exception as _setup_err:
                                         logger.warning(
                                             f"[Phase 8] setup_model predict failed for sym={sym}: "
