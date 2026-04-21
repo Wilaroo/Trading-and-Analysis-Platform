@@ -594,9 +594,10 @@ class ConfidenceGate:
                 bet_mult = bet_size_multiplier_from_p_win(p_win)
                 position_multiplier *= bet_mult
         else:
-            # No meta-labeler available (setup has no ensemble yet or not binary) — log for debugging only
+            # No meta-labeler available — surface why so we can diagnose live
             miss_reason = ensemble_meta.get("reason_if_missing", "unknown")
-            logger.debug(f"Ensemble meta-labeler unavailable for {symbol}/{setup_type}: {miss_reason}")
+            reasoning.append(f"Ensemble meta-labeler unavailable: {miss_reason}")
+            logger.info(f"Ensemble meta-labeler miss for {symbol}/{setup_type}: {miss_reason}")
 
         # --- 6. DETERMINE DECISION (Mode-aware thresholds) ---
         # Additive scoring: base 0, earn points from confirmation
