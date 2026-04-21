@@ -2827,9 +2827,18 @@ async def run_training_pipeline(
             )
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
+            from services.ai_modules.feature_augmentors import (
+                augment_features as _ens_augment_features,
+                augmented_feature_names as _ens_aug_names,
+                ffd_enabled as _ens_ffd_on,
+            )
 
             feature_engineer = get_feature_engineer()
-            base_names = feature_engineer.get_feature_names()
+            # Sub-models (Phase 1 direction_predictor + Phase 2 setup_specific) were
+            # trained with 46 base + 5 FFD = 51 cols when TB_USE_FFD_FEATURES=1.
+            # Use the augmented name list so col_map can locate FFD column positions;
+            # each symbol's features_matrix is FFD-augmented inline below.
+            base_names = _ens_aug_names(feature_engineer.get_feature_names())
 
             # Load generic sub-models for each stacked timeframe
             sub_models = {}
@@ -2945,6 +2954,19 @@ async def run_training_pipeline(
                                     continue
                                 
                                 features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features)
+
+                                # FFD-augment per-symbol so columns match sub-models' 51-col input
+                                # (Phase 1 direction + Phase 2 setup models were trained FFD-augmented).
+                                # Slice bars to match features_matrix length before augmenting.
+                                if _ens_ffd_on():
+                                    bars_for_ffd = bars[lb - 1 : lb - 1 + n_usable]
+                                    features_matrix, _aug_names = _ens_augment_features(
+                                        features_matrix,
+                                        feature_engineer.get_feature_names(),
+                                        bars_for_ffd,
+                                        lookback=50,
+                                        cache_key=f"ens_{sym}_{anchor_bs}",
+                                    )
                                 
                                 # Pre-compute TRIPLE-BARRIER labels for all usable windows at once
                                 from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index

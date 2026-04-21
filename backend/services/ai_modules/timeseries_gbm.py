@@ -366,9 +366,27 @@ class TimeSeriesGBM:
                 self._metrics = ModelMetrics(**doc.get("metrics", {}))
                 # Restore num_classes from persisted metadata (default 2 for legacy binary models)
                 self._num_classes = int(doc.get("num_classes", 2))
+
+                # CRITICAL: restore feature_names from the booster so inference DMatrix
+                # has matching column names. Without this, FFD-trained models (51 names)
+                # get queried with the 46-name default → feature_names mismatch error
+                # logged as "Forecast error for AAPL: ..." in the backend log.
+                # Fall back to persisted `feature_names` field, then to default.
+                try:
+                    booster_names = list(self._model.feature_names or [])
+                except Exception:
+                    booster_names = []
+                persisted_names = doc.get("feature_names") or []
+                if booster_names:
+                    self._feature_names = booster_names
+                elif persisted_names:
+                    self._feature_names = list(persisted_names)
+                # else: leave the default (46 base) as a last-resort fallback
+
                 logger.info(
                     f"Loaded model '{loaded_name}' version {loaded_version} "
-                    f"({self._num_classes}-class, {doc.get('label_scheme', 'legacy')}) "
+                    f"({self._num_classes}-class, {doc.get('label_scheme', 'legacy')}, "
+                    f"{len(self._feature_names)} features) "
                     f"(requested: {self.model_name})"
                 )
                 if loaded_name == self.model_name:
@@ -1012,10 +1030,29 @@ class TimeSeriesGBM:
         
         if feature_set is None:
             return None
-            
+
+        # Build feature dict — add FFD columns if the loaded model expects them
+        # (model trained with TB_USE_FFD_FEATURES=1 → self._feature_names has 5 FFD names).
+        feats_dict = dict(feature_set.features)
+        try:
+            from services.ai_modules.feature_augmentors import FFD_NAMES, compute_ffd_columns
+            if any(name in self._feature_names for name in FFD_NAMES):
+                # Compute FFD columns on the full bar window and take the most-recent row
+                ffd_cols = compute_ffd_columns(bars, lookback=50, expected_rows=len(bars))
+                if ffd_cols is not None and len(ffd_cols) > 0:
+                    last_row = ffd_cols[-1]
+                    for idx, name in enumerate(FFD_NAMES):
+                        if idx < len(last_row):
+                            feats_dict.setdefault(name, float(last_row[idx]))
+        except Exception as _ffd_err:
+            # Zero-fill fallback (matches training-time zero-padding for degenerate symbols)
+            for name in getattr(self, "_feature_names", []):
+                if name.startswith("ffd_"):
+                    feats_dict.setdefault(name, 0.0)
+
         # Convert to XGBoost DMatrix for prediction
         feature_vector = np.array([[
-            feature_set.features.get(f, 0.0) 
+            feats_dict.get(f, 0.0)
             for f in self._feature_names
         ]], dtype=np.float32)
         
