@@ -83,30 +83,67 @@ def main():
         summary = ", ".join(f"{k}={v}" for k, v in counts.most_common())
         print(f"  {label:<10} : {summary or 'no order_type field'}")
 
-    # Sample 5 cancelled docs to inspect schema
-    print("\n=== Sample 5 cancelled docs (full field set) ===")
-    for d in bt.find({"status": {"$in": ["cancelled", "canceled"]}}).limit(5):
-        # Remove _id for readability, print keys only
-        keys = sorted(d.keys())
-        print(f"  id={d.get('id', '?')} sym={d.get('symbol', '?'):<6} setup={d.get('setup_type', '?')}")
-        print(f"    keys present: {keys}")
-        print(f"    entry={d.get('entry_price')} fill={d.get('fill_price')} "
-              f"stop={d.get('stop_price')} order_type={d.get('order_type')}")
+    # close_reason — the real "why" field on this schema
+    print("\n=== close_reason distribution (cancelled docs) ===")
+    reason_rows = list(bt.aggregate([
+        {"$match": {"status": {"$in": ["cancelled", "canceled"]}}},
+        {"$group": {"_id": "$close_reason", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}},
+        {"$limit": 20},
+    ]))
+    for row in reason_rows:
+        label = str(row["_id"]) if row["_id"] is not None else "(null)"
+        print(f"  {label[:60]:<60} {row['n']}")
 
-    # Age before cancel
-    print("\n=== Age before cancel (created_at → last_updated diff) ===")
+    # entry_order_id presence — did we actually submit to pusher?
+    print("\n=== entry_order_id presence on cancelled docs ===")
+    total_cxl = bt.count_documents({"status": {"$in": ["cancelled", "canceled"]}})
+    with_oid = bt.count_documents({
+        "status": {"$in": ["cancelled", "canceled"]},
+        "entry_order_id": {"$exists": True, "$nin": [None, ""]},
+    })
+    without_oid = total_cxl - with_oid
+    print(f"  has entry_order_id  : {with_oid:>5}  ({with_oid/total_cxl:.1%})")
+    print(f"  missing order_id    : {without_oid:>5}  ({without_oid/total_cxl:.1%}) → never queued / bot-side cancel")
+
+    # Cross-check with order_queue collection (what pusher actually saw)
+    print("\n=== order_queue status for cancelled bot_trades ===")
+    oq = db["order_queue"]
+    if oq.estimated_document_count() > 0:
+        # Sample 2000 cancelled bot_trades that HAVE an entry_order_id, look them up
+        oids = [d["entry_order_id"] for d in bt.find(
+            {"status": {"$in": ["cancelled", "canceled"]},
+             "entry_order_id": {"$exists": True, "$nin": [None, ""]}},
+            {"entry_order_id": 1, "_id": 0}
+        ).limit(2000)]
+        print(f"  sampled {len(oids)} bot_trades with entry_order_id")
+        if oids:
+            oq_status = Counter()
+            for oq_doc in oq.find({"order_id": {"$in": oids}},
+                                  {"order_id": 1, "status": 1, "result": 1, "_id": 0}):
+                oq_status[oq_doc.get("status", "?")] += 1
+            matched = sum(oq_status.values())
+            print(f"  matched in order_queue : {matched}/{len(oids)}")
+            for k, v in oq_status.most_common():
+                print(f"    {str(k):<20} {v}")
+            print(f"  unmatched (not in oq)  : {len(oids) - matched}")
+    else:
+        print("  order_queue collection empty")
+
+    # Age before cancel — use closed_at (last_updated doesn't exist on this schema)
+    print("\n=== Age before cancel (created_at → closed_at) ===")
     ages = []
     for d in bt.find(
         {"status": {"$in": ["cancelled", "canceled"]},
          "created_at": {"$exists": True},
-         "last_updated": {"$exists": True}},
-        {"created_at": 1, "last_updated": 1, "_id": 0}
+         "closed_at": {"$exists": True}},
+        {"created_at": 1, "closed_at": 1, "_id": 0}
     ).limit(5000):
         try:
             # ISO strings → parse
             from datetime import datetime
             a = datetime.fromisoformat(str(d["created_at"]).replace("Z", "+00:00"))
-            b = datetime.fromisoformat(str(d["last_updated"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(d["closed_at"]).replace("Z", "+00:00"))
             ages.append((b - a).total_seconds())
         except Exception:
             continue
