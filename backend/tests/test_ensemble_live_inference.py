@@ -14,6 +14,7 @@ import pytest
 
 from services.ai_modules.ensemble_live_inference import (
     SCANNER_TO_ENSEMBLE_KEY, bet_size_multiplier_from_p_win, predict_meta_label_p_win,
+    clear_model_cache, _cached_gbm_load, _MODEL_CACHE, MODEL_CACHE_TTL_S,
 )
 
 
@@ -165,3 +166,71 @@ def test_predict_full_path_returns_p_win_in_0_1():
     assert result["ensemble_name"] == "ensemble_breakout"
     assert result["setup_direction"] == "up"
     assert "sub_timeframes_used" in result
+
+
+# ── Model cache tests ─────────────────────────────────────────────────────
+
+def test_cache_stores_loaded_model_and_reuses_it():
+    """Second call with same model_name must NOT construct a new TimeSeriesGBM."""
+    clear_model_cache()
+    db = MagicMock()
+    construction_count = {"n": 0}
+
+    def _make_mock_gbm(model_name=None, forecast_horizon=None):
+        construction_count["n"] += 1
+        m = MagicMock()
+        m._model = MagicMock()
+        m._feature_names = ["f0", "f1"]
+        return m
+
+    with patch("services.ai_modules.timeseries_gbm.TimeSeriesGBM", side_effect=_make_mock_gbm):
+        g1 = _cached_gbm_load(db, "direction_predictor_daily", 5)
+        g2 = _cached_gbm_load(db, "direction_predictor_daily", 5)
+        g3 = _cached_gbm_load(db, "direction_predictor_daily", 5)
+
+    assert g1 is g2 is g3, "Cache must return the same object"
+    assert construction_count["n"] == 1, (
+        f"Expected 1 construction, got {construction_count['n']} (cache miss)"
+    )
+    clear_model_cache()
+
+
+def test_cache_returns_none_on_missing_model_and_does_not_cache():
+    """If the Booster doesn't load (no doc in Mongo), cache must NOT poison itself."""
+    clear_model_cache()
+    db = MagicMock()
+
+    def _make_broken_gbm(model_name=None, forecast_horizon=None):
+        m = MagicMock()
+        m._model = None  # simulate failed load
+        m._feature_names = []
+        return m
+
+    with patch("services.ai_modules.timeseries_gbm.TimeSeriesGBM", side_effect=_make_broken_gbm):
+        g = _cached_gbm_load(db, "never_trained_model", 5)
+
+    assert g is None
+    assert "never_trained_model" not in _MODEL_CACHE, (
+        "Cache must not store None — next retrain must have a clean slot to fill"
+    )
+
+
+def test_clear_model_cache_empties_all_entries():
+    clear_model_cache()
+    db = MagicMock()
+    with patch("services.ai_modules.timeseries_gbm.TimeSeriesGBM") as cls:
+        cls.side_effect = lambda model_name=None, forecast_horizon=None: type(
+            "G", (), {"_model": object(), "_feature_names": [], "set_db": lambda self, d: None}
+        )()
+        _cached_gbm_load(db, "m1", 5)
+        _cached_gbm_load(db, "m2", 5)
+
+    assert len(_MODEL_CACHE) == 2
+    evicted = clear_model_cache()
+    assert evicted == 2
+    assert len(_MODEL_CACHE) == 0
+
+
+def test_cache_ttl_is_ten_minutes():
+    """Lock in the 10-minute TTL as a stable contract."""
+    assert MODEL_CACHE_TTL_S == 600

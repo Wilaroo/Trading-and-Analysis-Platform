@@ -3670,4 +3670,14 @@ async def run_training_pipeline(
         clear_symbol_cache()
         # Keep NVMe cache on disk (useful for debugging) — it gets cleared on next run start
 
+        # Evict the live-inference model cache so the confidence gate picks
+        # up the freshly retrained ensembles/sub-models on the next gate call.
+        try:
+            from services.ai_modules.ensemble_live_inference import clear_model_cache as _clear_ens_cache
+            _evicted = _clear_ens_cache()
+            if _evicted:
+                logger.info(f"[POST-TRAIN] Evicted {_evicted} stale models from live-inference cache")
+        except Exception as _cache_err:
+            logger.warning(f"[POST-TRAIN] Could not clear live-inference cache: {_cache_err}")
+
     return results

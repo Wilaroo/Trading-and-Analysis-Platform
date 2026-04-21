@@ -38,6 +38,51 @@ import xgboost as xgb
 logger = logging.getLogger(__name__)
 
 
+# ── Model load cache ──────────────────────────────────────────────────────
+# Heavy XGBoost Boosters are loaded from Mongo once and pinned in memory for
+# MODEL_CACHE_TTL_S seconds. This cuts per-eval load from ~30MB decompress +
+# DMatrix setup to a dict lookup. Safe to share across threads since the
+# cached TimeSeriesGBM objects only use their _model for read-only predict().
+import threading
+import time as _time
+
+MODEL_CACHE_TTL_S = 600  # 10 minutes — matches training-cycle cadence
+_MODEL_CACHE: Dict[str, Any] = {}  # {model_name: (timestamp, TimeSeriesGBM)}
+_CACHE_LOCK = threading.Lock()
+
+
+def _cached_gbm_load(db, model_name: str, forecast_horizon: int):
+    """Load a TimeSeriesGBM from cache (or Mongo on miss) and return it.
+
+    Returns None if the model doesn't exist in Mongo — caller handles that.
+    """
+    now = _time.monotonic()
+    with _CACHE_LOCK:
+        entry = _MODEL_CACHE.get(model_name)
+        if entry is not None:
+            ts, gbm = entry
+            if now - ts < MODEL_CACHE_TTL_S:
+                return gbm
+            # expired — fall through and reload
+    # Load outside the lock (Mongo + DMatrix work should not hold the lock)
+    from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+    gbm = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
+    gbm.set_db(db)
+    if gbm._model is None:
+        return None
+    with _CACHE_LOCK:
+        _MODEL_CACHE[model_name] = (_time.monotonic(), gbm)
+    return gbm
+
+
+def clear_model_cache() -> int:
+    """Evict all cached models. Returns count. Call after retraining."""
+    with _CACHE_LOCK:
+        n = len(_MODEL_CACHE)
+        _MODEL_CACHE.clear()
+    return n
+
+
 # ── Scanner setup → ensemble config key (mirrors confidence_gate SETUP_TO_MODEL) ──
 # Each scanner detection maps to ONE ensemble to query (first is primary).
 SCANNER_TO_ENSEMBLE_KEY: Dict[str, str] = {
@@ -199,9 +244,8 @@ def predict_meta_label_p_win(
     if ens_doc.get("label_scheme") != "meta_label_binary":
         return miss(f"ensemble_not_binary:{ens_model_name}")
 
-    ens_gbm = TimeSeriesGBM(model_name=ens_model_name, forecast_horizon=5)
-    ens_gbm.set_db(db)
-    if ens_gbm._model is None:
+    ens_gbm = _cached_gbm_load(db, ens_model_name, forecast_horizon=5)
+    if ens_gbm is None:
         return miss(f"ensemble_load_failed:{ens_model_name}")
 
     # ── 3. Load directional sub-models ──
@@ -209,9 +253,8 @@ def predict_meta_label_p_win(
     for tf in STACKED_TIMEFRAMES:
         sub_name = DIRECTIONAL_MODEL_NAMES.get(tf, f"direction_predictor_{tf.replace(' ', '_')}")
         sub_fh = BAR_SIZE_CONFIGS.get(tf, {}).get("forecast_horizon", 5)
-        sub = TimeSeriesGBM(model_name=sub_name, forecast_horizon=sub_fh)
-        sub.set_db(db)
-        if sub._model is not None:
+        sub = _cached_gbm_load(db, sub_name, forecast_horizon=sub_fh)
+        if sub is not None:
             sub_gbms[tf] = sub
 
     if not sub_gbms:
@@ -219,9 +262,8 @@ def predict_meta_label_p_win(
 
     # ── 4. Load setup-specific 1-day sub-model ──
     setup_sub_name = _ens_model_name(ens_key, "1 day")
-    setup_sub = TimeSeriesGBM(model_name=setup_sub_name, forecast_horizon=5)
-    setup_sub.set_db(db)
-    if setup_sub._model is None:
+    setup_sub = _cached_gbm_load(db, setup_sub_name, forecast_horizon=5)
+    if setup_sub is None:
         return miss(f"setup_sub_not_trained:{setup_sub_name}")
 
     # ── 5. Run per-timeframe sub-model predictions ──
