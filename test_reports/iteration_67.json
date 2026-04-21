@@ -52,7 +52,7 @@
     }
   },
   "ui_testing_results": {
-    "app_loads": "PASS - Frontend loads correctly at https://ml-quant-spark.preview.emergentagent.com",
+    "app_loads": "PASS - Frontend loads correctly at https://ml-trading-debug.preview.emergentagent.com",
     "command_tab": "PASS - Shows AI Trading Assistant with trade cards (RCKT, CVX visible)",
     "market_tab": "PASS - Shows scanner alerts (MVIS, KOS, CRGY with M2M badges)",
     "trade_cards": "PASS - Display Entry, Target, Stop prices and R:R ratios",
