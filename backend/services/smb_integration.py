@@ -342,7 +342,11 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         display_name="VWAP Fade",
         category=SetupCategory.REVERSAL,
         default_style=TradeStyle.SCALP,
-        direction=SetupDirection.BOTH,  # Fade extension from VWAP
+        # 2026-04-21: DISABLED short side — audit showed vwap_fade_short bled
+        # -9.57R/trade across 51 trades. Only long side remains allowed until
+        # IB bracket orders + ATR-based min-stop check are in place.
+        # See /app/memory/IB_BRACKET_ORDER_MIGRATION.md
+        direction=SetupDirection.LONG,
         typical_r_target=1.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
         valid_regimes=["range_bound", "fade"]

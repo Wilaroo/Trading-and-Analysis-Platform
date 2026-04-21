@@ -7,7 +7,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sentcom-ensemble.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sentcom-trade-heal.preview.emergentagent.com').rstrip('/')
 
 
 class TestEarningsCalendarAPI:

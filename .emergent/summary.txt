@@ -2,66 +2,73 @@
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English)
 
-**what currently exists?**: A full-stack AI trading platform. The massive training pipeline (Phases 1-12) successfully executes. The Phase 2 shape mismatch bug was resolved. A 10-phase  ensures shape validity before long runs. Phase 8 (Ensemble) was redesigned into a Binary Meta-Labeler that predicts P(win) for live bet-sizing. A CNN display metric bug was fixed via a migration script. Currently, the agent just applied a fix to Phase 8 extraction that was dropping rows due to FFD lookback.
+**what currently exists?**: A full-stack AI trading platform. The Phase 8 Ensemble Meta-Labeler is now fully functional, properly converting XGBoost predictions to a Binary P(win) metric, and wired into the Confidence Gate (Layer 12) for dynamic bet-sizing. However, a massive Data Pipeline Audit revealed severe trade execution leaks: stops are being ignored (causing massive R bleed) and 97% of placed orders are cancelled before filling. The system now has robust diagnostic scripts and an Execution Health endpoint.
 
 **Last working item**:
-    - Last item agent was working: Fixing a  in Phase 8 Ensemble training caused by inline FFD augmentation dropping 49 rows. The agent removed the inline augmentation, reverting to the zero-fill fallback.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y (Pytest suite expanded and passing)
+    - Last item agent was working: Fulfilling a batch of execution-hardening requests from the user: scaffolding Trade Autopsy, adding scanner-alert de-duplication (), investigating the 97% order-cancellation rate (), disabling the bleeding  setup, and preparing Phase 1 of the IB Bracket Order migration.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N (Agent just created the files and needs to implement/wire them up into the main services)
     - Which testing method agent to use? manual testing by bash/pytest (Testing agent cannot be used due to physical DGX Spark hardware constraints. Rely on user to execute commands).
-    - User Testing Done: N (User needs to pull the fix and re-run Phase 8).
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: Phase 8 ensemble broadcast shape mismatch (P0)
-     - Attempted fixes: Removed inline FFD augmentation from  in  Phase 8, returning to  zero-fill fallback to prevent dropping lookback rows.
-     - Next debug checklist: User needs to run , restart the backend, and run  to verify Phase 8 successfully trains all ensembles.
-     - Why fix this issue and what will be achieved with the fix? Unblocks the creation of the meta-labeler ensemble models, which are required for the downstream bet-sizing logic.
-     - Status: USER VERIFICATION PENDING
-     - Is recurring issue? N
+  Issue 1: 97% Order-Cancellation Rate (P0)
+     - Attempted fixes: Agent created  to diagnose why 1,216/1,220 orders for setups like  are cancelled before filling.
+     - Next debug checklist: Instruct user to run . Check if limit prices are stale by the time they reach IB, if the order type is too aggressive, or if the confidence gate is cancelling post-submit.
+     - Why fix this issue and what will be achieved with the fix? The bot is severely starved of actual trade data because orders aren't filling. Fixing this restores trade volume.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 2: IB Stops Not Being Honored / Bleeding R (P0)
+     - Attempted fixes: Created architectural plan  to migrate to atomic bracket orders.
+     - Next debug checklist: Implement Phase 1 of the bracket order migration. Modify  and  so entry, target, and stop orders are submitted atomically to Interactive Brokers, rather than sequentially.
+     - Why fix this issue and what will be achieved with the fix? Stops catastrophic losses (e.g., one trade bled -261R because the sequential stop order was never placed/honored due to a bot restart).
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 3: Scanner Alerts Re-firing on Open Positions (P0)
+     - Attempted fixes: Scaffolded  to prevent duplicate alerts.
+     - Next debug checklist: Implement logic to skip alerts if  is already in  OR fired within 5 minutes. Wire this into the main scanner/bot loop.
+     - Why fix this issue and what will be achieved with the fix? Stops the bot from stacking identical losing positions during an adverse move.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Wire bet-sizing into  (P0)
-     - Where to resume: After Phase 8 completes, update  to query  for . Then update  /  to use  to adjust position sizes (multiplier based on confidence) and skip trades if P(win) < 0.5. 
-     - What will be achieved with this? Converts all existing predictions into highly differentiated, confidence-adjusted trading decisions (realizing the Phase 2C Bet-Sizing roadmap item).
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on something: Blocked pending user verification of the Phase 8 ensemble training fix.
-
-  Task 2: Setup Coverage Audit & Scorecard Triage (P1)
-     - Where to resume: After models finish training, ask the user to run  and review the scorecard grades to triage dead setups and find candidates for Phase 2E.
-     - What will be achieved with this? Decides which of the 35 SMB setups should get dedicated Phase 2E models.
-     - Status: BLOCKED
-     - Should Test frontend/backend/both after fix? N/A
-     - Blocked on something: Full completion of training phases.
+  Task 1: Scaffold and Wire Trade Autopsy (P1)
+     - Where to resume:  was created. Wire it to an API endpoint so the frontend can display stop-honor status, gate layer votes, P(win), and initial entry context for closed trades.
+     - What will be achieved with this? Turns losing trades into actionable debugging sessions for the user.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P1) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy CNN/DL models to the Windows PC over LAN.
-    - 🔴 (P1) Phase 2E: Setup-Specific Visual CNN Meta-Labeler - Train hybrid multimodal models (image CNN + tabular MLP) on actual chart windows for SMB-specific setups.
-    - 🟡 (P1) Add SMB-specific setups (Tier 1: rubberband + 9EMA + first red/green).
-    - 🟡 (P1) Wire FinBERT into confidence gate as Layer 12.
+    - 🔴 (P1) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
+    - 🔴 (P1) Phase 2E: Setup-Specific Visual CNN Meta-Labeler - Train hybrid multimodal models for Tier-1 setups. (Note: Blocked until execution fixes gather enough live data; currently only ~150 fully closed trades exist).
+    - 🟡 (P1) Wire FinBERT into confidence gate as Layer 13.
     
     Future Tasks:
-    - ⚪ (P2) Modify  to use its natural  instead of hardcoding 1 day in .
+    - ⚪ (P2) Modify  to use its natural  instead of hardcoding 1 day.
     - ⚪ (P2) Wire HRP/NCO Portfolio Allocator into .
-    - ⚪ (P2) Detect_reversal redesign to fire on true pivots, not mid-move bars.
 
 **Completed work in this session**
-- Fixed Phase 2/2.5 shape mismatch () in  (DONE)
-- Created  protecting all 10 phases from shape/name mismatches (DONE)
-- Fixed CNN accuracy UI bug by surfacing  and migrated 34 legacy models via  (DONE)
-- Redesigned Phase 8 Ensemble from 3-class directional to Binary Meta-Labeler (P(win)) to resolve degenerate FLAT predictions (DONE)
-- Fixed live inference  in  for FFD-enabled models (DONE)
-- Updated PRD with a model consolidation strategy (Deprecate the 34 Phase 9 legacy CNNs post-Phase 2E) (DONE)
+- Fixed Phase 8 DMatrix  by properly wrapping numpy arrays in  during prediction (DONE)
+- Created  with LRU caching and wired the Phase 8 Meta-Labeler into the Confidence Gate (Layer 12) with Kelly bet-sizing ramp (DONE)
+- Wrote and executed data pipeline audit tools: , , ,  (DONE)
+- Developed  and  endpoint, discovering a 17.1% stop failure rate and 97% order cancellation rate (DONE)
+- Disabled the catastrophic  setup in  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: CNN training data has an 8% win-rate imbalance, leaning heavily towards losses. 
-     - Why to solve this issue and what will be achieved with this? May need focal loss or  to improve  for Phase 2E. 
+   - Issue 1: CNN training data has an 8% win-rate imbalance.
+     - Why to solve this issue and what will be achieved with this? May need focal loss or  to improve  for Phase 2E.
      - Should Test frontend/backend/both after fix: backend
      - Is recurring issue? N
-   - Issue 2: Phase 5.5 Gap Fill accuracy is highly imbalanced (90%+ UP), inflating the 94% accuracy metric. Needs scrutiny during scorecard triage.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: None
@@ -72,25 +79,26 @@
 DGX Spark (Linux) runs Backend (FastAPI on :8001), Chat Server (:8002), MongoDB, Frontend (React on :3000). Windows PC runs IB Gateway, Data Pusher, Historical Collectors over LAN.
 
 **Key Technical Concepts**
-Triple-barrier labeling, CUSUM filtering, Fractional Differentiation (FFD), XGBoost, Binary Meta-Labeling (P(win) for bet-sizing), Multimodal CNNs (future), Pytest.
+XGBoost (DMatrix handling), Binary Meta-Labeling (P(win)), Kelly Bet-Sizing Ramp, IB Native Bracket Orders, MongoDB aggregations.
 
 **key DB schema**
-  -  DB -> ,  (now holds  for ensembles), , .
+  -  DB ->  (now backfilled with , , and ), .
 
 **changes in tech stack**
   - None this session.
 
 **All files of reference**
-  -  (Updated Phase 8 ensemble to binary meta-labeling & fixed FFD shape issues)
-  -  (Created to catch shape mismatches before 44h runs)
-  -  (Updated to store  as main accuracy)
-  -  (Fixed live inference feature names restoration for FFD)
-  -  (Created script to fix existing MongoDB CNN metrics)
-  -  &  (Next targets for bet-sizing integration)
-  -  (Updated with deprecated CNN roadmap & phase 8 changes)
+  -  (Created for Layer 12 bet-sizing & LRU cache)
+  -  (Updated to handle Layer 12 and hard skips)
+  -  (Created to monitor IB stop adherence)
+  -  (Crucial architectural plan for atomic IB stops)
+  -  (Scaffolded this session)
+  -  (Scaffolded this session)
+  -  (Scaffolded this session)
+  -  (Disabled )
 
 **Areas that need refactoring**
-Motor async MongoDB migration. Removal of  Phase 9 and  once Phase 2E is active.
+Trade Execution (, ): Sequential order placement (entry, then stop) must be completely refactored into atomic IB bracket orders.
 
 **key api endpoints**
   - 
@@ -98,23 +106,22 @@ Motor async MongoDB migration. Removal of  Phase 9 and  once Phase 2E is active.
 
 **Critical Info for New Agent**
 - **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux). You cannot test the pipeline natively or use the testing subagent. Rely entirely on Pytest and the user executing commands on Spark.
-- The agent just pushed a fix to  to stop Phase 8 ensemble extraction from failing with .
-- The immediate next step is asking the user to , restart the backend, and fire Phase 8 via  to verify the ensemble successfully trains. 
-- Once verified, you MUST proceed to build the Bet-Sizing logic in  (using the new  models to adjust ).
+- Backend often runs as , not via supervisor. Watch out for orphaned processes claiming port 8001.
+- **The primary focus has violently shifted from AI Training to Trade Execution.** We discovered the bot bleeds huge amounts of capital because stops aren't atomic and die on restarts. Implementing **IB Bracket Orders** is an absolute P0.
+- The agent just scaffolded files for the new tasks (deduplication, cancellation investigation, trade autopsy) but needs to finish wiring them up and instruct the user to run the scripts.
 
 **documents and test reports created in this job**
   - 
   - 
   - 
   - 
-  -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
- - *User*: Ran Phase 8 ensemble, but it failed with .
- - *Pending HUMAN message*: Agent pushed a fix removing the inline FFD augmentation to avoid dropping lookback rows. Awaiting user to pull code, restart backend, and rerun Phase 8.
+ - *User*: thats agood potential imporvement. lets scaffold that. then lets also do: Locate and disable vwap_fade_short... Implement IB bracket orders... Add scanner-alert de-duplication... Investigate 97% order-cancellation rate...
+ - *Pending HUMAN message*: Agent created the scripts/files for these requests but hasn't implemented the core logic inside them or provided the user with bash commands to execute/test them. Resume by completing these scripts/features and instructing the user.
 
 **Project Health Check:**
-Broken (Phase 8 ensemble is currently failing on Spark; awaiting user verification of the fix).
+Broken (Execution logic flaws: 97% cancellation rate and missing atomic stops. The files to fix this have just been scaffolded).
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution)
@@ -123,10 +130,10 @@ Broken (Phase 8 ensemble is currently failing on Spark; awaiting user verificati
 **Testing status**
   - Testing agent used after significant changes: NO (Due to physical DGX Spark setup constraints)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 4 new pytest suites (preflight, cnn_metrics, ensemble, inference). Total 31/31 tests passing natively.
-  - Known regressions: None currently.
+  - Test files created: 4 new pytest suites (89/89 tests passing natively).
+  - Known regressions: None code-wise, but severe algorithmic/execution regressions were discovered in production data.
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-Agent was in the middle of executing the Phase 8 ensemble run but was blocked by the shape mismatch . The agent committed the code fix but needs the user to run it. Once the user runs it successfully, the agent must implement the Bet-Sizing wire-in logic.</analysis>
+The agent scaffolded , , and  but finished the turn before implementing the actual logic inside them, writing the bracket order logic, or instructing the user on how to run them. Proceed directly to filling out these files.</analysis>
