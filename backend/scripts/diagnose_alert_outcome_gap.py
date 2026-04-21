@@ -62,11 +62,11 @@ def classify_leak(stages: Dict[str, int]) -> str:
     """Given {'alerts', 'executed', 'closed', 'with_r'} return the biggest leak stage.
 
     Returns one of:
-      - 'no_alerts' / 'no_executed' / 'no_closed' / 'no_r'
+      - 'no_alerts'       — no scanner fires or bot activity at all
+      - 'execution_gap'   — alerts but none executed (scanner-only signal or gate-rejected)
+      - 'closure_gap'     — partial or total closure failure (< 30% of executed are closed)
+      - 'r_gap'           — closure rate healthy but r_multiple missing (run backfill)
       - 'healthy'         — full funnel present
-      - 'execution_gap'   — alerts but none executed
-      - 'closure_gap'     — executed but not closed
-      - 'r_gap'           — closed but no r_multiple
     """
     alerts = stages.get("alerts", 0)
     executed = stages.get("executed", 0)
@@ -77,8 +77,13 @@ def classify_leak(stages: Dict[str, int]) -> str:
         return "no_alerts"
     if alerts > 0 and executed == 0:
         return "execution_gap"
-    if executed > 0 and closed == 0:
-        return "closure_gap"
+
+    # Low closure ratio = broken persistence (not just "a few still open")
+    if executed > 0:
+        closure_rate = closed / executed
+        if closure_rate < 0.30:
+            return "closure_gap"
+
     if closed > 0 and with_r == 0:
         return "r_gap"
     return "healthy"
@@ -206,9 +211,10 @@ def render_compact(funnel: Dict[str, Dict[str, int]]) -> str:
     lines += ["", "Top 10 alert volume — funnel leak:"]
     for code, st in rows[:10]:
         leak = classify_leak(st)
+        closure_rate = (st["closed"] / st["executed"] * 100.0) if st["executed"] else 0.0
         lines.append(
             f"  {code:<28} alerts={st['alerts']:>6} exec={st['executed']:>4} "
-            f"closed={st['closed']:>3} withR={st['with_r']:>3}  → {leak}"
+            f"closed={st['closed']:>3} ({closure_rate:>5.1f}%)  withR={st['with_r']:>3}  → {leak}"
         )
 
     lines += ["", "Full report: /tmp/alert_outcome_gap.md", ""]

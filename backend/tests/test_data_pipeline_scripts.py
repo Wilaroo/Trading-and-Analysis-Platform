@@ -77,6 +77,19 @@ def test_classify_leak_healthy_full_funnel():
     assert gap.classify_leak(_stg(100, 50, 48, 48)) == "healthy"
 
 
+def test_classify_leak_closure_gap_low_ratio():
+    """Low closure ratio (e.g. 4/1220 = 0.3%) must flag as closure_gap,
+    not mask it as r_gap just because a handful got closed."""
+    assert gap.classify_leak(_stg(15000, 1220, 4, 0)) == "closure_gap"
+    assert gap.classify_leak(_stg(14000, 2051, 57, 0)) == "closure_gap"  # 2.8%
+
+
+def test_classify_leak_r_gap_when_closure_healthy():
+    """≥30% closure rate → if r_multiple missing, it's a backfill gap."""
+    assert gap.classify_leak(_stg(100, 50, 40, 0)) == "r_gap"   # 80% closed
+    assert gap.classify_leak(_stg(20, 10, 3, 0)) == "r_gap"     # 30% closed
+
+
 def test_classify_leak_execution_gap():
     # Alerts fire but nothing gets executed
     assert gap.classify_leak(_stg(500, 0, 0, 0)) == "execution_gap"
@@ -88,7 +101,7 @@ def test_classify_leak_closure_gap():
 
 
 def test_classify_leak_r_gap():
-    # Trades closed but r_multiple missing
+    # Trades closed with healthy ratio but r_multiple missing
     assert gap.classify_leak(_stg(100, 50, 48, 0)) == "r_gap"
 
 
