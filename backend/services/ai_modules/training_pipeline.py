@@ -1250,7 +1250,30 @@ async def run_training_pipeline(
         # Clear symbol cache at start of pipeline run
         clear_symbol_cache()
         _clear_disk_cache()
-        
+
+        # ── Pre-flight shape validator ──────────────────────────────────
+        # Catches the FFD/CUSUM name-vs-X-cols mismatch class of bug in <5s
+        # using synthetic bars. Failing here beats a 44h retrain crashing
+        # halfway through Phase 2/2.5. See preflight_validator.py for the
+        # original 2026-04-21 bug this was built to catch.
+        try:
+            from services.ai_modules.preflight_validator import preflight_validate_shapes
+            pf = preflight_validate_shapes(phases)
+            status.update(preflight=pf)
+            if not pf["ok"]:
+                msg = (
+                    f"Pre-flight shape validation FAILED ({len(pf['failures'])} mismatches). "
+                    f"Aborting retrain. See logs for details."
+                )
+                logger.error(f"[PIPELINE] {msg}")
+                results["error"] = msg
+                results["preflight"] = pf
+                status.update(phase="failed", error=msg)
+                return results
+        except Exception as _pf_err:
+            # Never let validator bugs block training — log + continue
+            logger.warning(f"[PIPELINE] Preflight validator errored (continuing): {_pf_err}")
+
         import time as _time
         _pipeline_start = _time.monotonic()
 

@@ -13,9 +13,18 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 ### Phase 2/2.5 FFD name-mismatch crash — FIXED (P0)
 - **Symptom**: `scalp_1min_predictor: expected 57, got 52` when Phase 2 started after Phase 1 completed.
 - **Root cause**: `_extract_setup_long_worker` / `_extract_setup_short_worker` augment `base_matrix` with 5 FFD columns when `TB_USE_FFD_FEATURES=1` (46 → 51). The outer Phase 2/2.5 loop in `training_pipeline.py` built `combined_names` from the NON-augmented `feature_engineer.get_feature_names()` (46) + setup names (6) → 52 names vs 57 X cols.
-- **Fix**: `training_pipeline.py` lines 1426 & 1608 now wrap base_names with `augmented_feature_names(...)` from `feature_augmentors.py`, which appends the 5 FFD names when the flag is on.
+- **Fix**: `training_pipeline.py` lines 1426 & 1614 now wrap base_names with `augmented_feature_names(...)` from `feature_augmentors.py`, which appends the 5 FFD names when the flag is on.
 - **Guardrail test**: `backend/tests/test_phase2_combined_names_shape.py` (4 tests, all passing) — rebuilds Phase 2 & 2.5 combined_names exactly as the training loop does and asserts `len(combined_names) == X.shape[1]` in both FFD-ON and FFD-OFF modes. Catches any regression of this bug class.
-- **Next step for user**: restart retrain; Phase 2 onwards should now proceed cleanly.
+
+### Pre-flight Shape Validator — NEW (P1)
+- `/backend/services/ai_modules/preflight_validator.py` — runs in `run_training_pipeline` immediately after disk-cache clear, BEFORE any phase kicks off heavy work.
+- Uses 600 synthetic bars to drive the real `_extract_setup_long_worker` and `_extract_setup_short_worker` under current env flags (`TB_USE_FFD_FEATURES`, `TB_USE_CUSUM`), rebuilds `combined_names` identically to the pipeline loop, and asserts shape match for every (setup_type, bar_size).
+- Runtime: **~1.6 seconds** for all long+short setups on a full codebase scan (measured).
+- Fails the retrain fast with a structured error if ANY mismatch is found (vs a 44h retrain crashing halfway).
+- Result stored in `training_status.preflight` for the UI.
+- Safe-guarded: a bug in the validator itself is logged as a warning and does NOT block training.
+- `backend/tests/test_preflight_validator.py` — 4 tests: FFD-on pass, FFD-off pass, all-flags-on pass, and a **negative test** that injects the 2026-04-21 bug by monkey-patching `augmented_feature_names` and asserts the validator correctly flags every mismatch with `diff=+5`.
+- **Next step for user**: restart retrain; Phase 2 onwards should now proceed cleanly AND every future retrain is protected.
 
 ## Completed in this session (2026-04-20)
 ### Phase 0A — PT/SL Sweep Infrastructure — DONE
