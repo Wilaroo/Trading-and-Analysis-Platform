@@ -81,12 +81,10 @@ def main(apply: bool = False):
         candidates: List[Dict[str, Any]] = list(bt.find({"id": tid}))
         if len(candidates) < 2:
             continue
-        # Winner = highest informativeness; stable tiebreak on oldest created_at
-        scored = sorted(
-            candidates,
-            key=lambda d: (informativeness(d), -1 * (d.get("_id").generation_time.timestamp() if d.get("_id") else 0)),
-            reverse=True,
-        )
+        # Winner = highest informativeness; ties broken by natural find order
+        # (can't rely on _id.generation_time — some historical docs have
+        # string _ids rather than ObjectIds).
+        scored = sorted(candidates, key=informativeness, reverse=True)
         winner, losers = scored[0], scored[1:]
         print(f"\n  id={tid}  (winners score={informativeness(winner)}, losers={len(losers)})")
         print(f"    KEEP    pnl={winner.get('realized_pnl')} r={winner.get('r_multiple')} reason={winner.get('close_reason')!r}")
