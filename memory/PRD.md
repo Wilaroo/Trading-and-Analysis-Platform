@@ -9,7 +9,16 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-23 — bracket queue passthrough fix)
+## Completed this fork (2026-04-23 — bracket queue passthrough + confirm_trade semantics)
+### P1 — `confirm_trade` false-negative FIXED
+**Root cause:** `TradeExecution.confirm_trade` returned `trade.status == TradeStatus.OPEN` only, so trades correctly filtered by the strategy phase gate (`SIMULATED`, `PAPER`) or pre-trade guardrail (`VETOED`) reported as API failures. The router then raised 400 "Failed to execute trade" on legitimate pipeline outcomes — misleading when demoing trades or using the confirmation mode UI.
+
+**Fix:**
+- `/app/backend/services/trade_execution.py` — confirm_trade now treats `{OPEN, PARTIAL, SIMULATED, VETOED, PAPER}` as the handled-successfully set. Genuine `REJECTED`, stale-alert, and missing-trade paths still return False.
+- `/app/backend/routers/trading_bot.py` — `POST /api/trading-bot/trades/{id}/confirm` now returns 200 with the actual status + a status-specific message (executed / simulated / paper / vetoed / partial). 404 reserved for missing trade, 400 only for real rejections (with `reason` in detail).
+
+**Regression coverage:** `/app/backend/tests/test_confirm_trade_semantics.py` — 8 tests covering every terminal status + stale-alert + missing-trade. All pass.
+
 ### P0 — Queue schema stripping bracket fields FIXED
 **Root cause:** `OrderQueueService.queue_order()` built its insert document from a hardcoded whitelist (`symbol/action/quantity/order_type/limit_price/stop_price/trade_id/...`) that silently dropped `type`, `parent`, `stop`, `target`, and `oca_group`. The Windows pusher then received a degenerate payload and could not execute atomic IB brackets — the final blocker for Phase 3 bracket orders.
 

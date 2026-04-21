@@ -377,7 +377,20 @@ class TradeExecution:
             print(f"   🔄 [CONFIRM] Price adjusted: ${old_entry:.2f}→${current_price:.2f}, shares {old_shares}→{trade.shares}")
 
         await self.execute_trade(trade, bot)
-        return trade.status == TradeStatus.OPEN
+
+        # Treat every terminal status the pre-trade pipeline can *legitimately*
+        # assign as a success. Previously only OPEN counted, so correctly-filtered
+        # trades (phase gate → SIMULATED/PAPER, guardrail → VETOED) were
+        # reported as API failures (400). The router distinguishes these from
+        # a genuine REJECTED via the trade's status field in the response.
+        HANDLED_STATUSES = {
+            TradeStatus.OPEN,
+            TradeStatus.PARTIAL,
+            TradeStatus.SIMULATED,
+            TradeStatus.VETOED,
+            TradeStatus.PAPER,
+        }
+        return trade.status in HANDLED_STATUSES
 
     async def reject_trade(self, trade_id: str, bot: 'TradingBotService') -> bool:
         """Reject a pending trade"""

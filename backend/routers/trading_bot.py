@@ -815,17 +815,58 @@ def get_trade(trade_id: str):
 
 @router.post("/trades/{trade_id}/confirm")
 async def confirm_trade(trade_id: str):
-    """Confirm a pending trade for execution"""
+    """Confirm a pending trade for execution.
+
+    Returns 200 for any correctly-handled outcome (executed, simulated,
+    vetoed by guardrail, paper-phase) with the trade's actual status in
+    the response. Returns 404 only when the trade doesn't exist, 400 for
+    genuine rejections (stale alert, broker error).
+    """
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
-    
+
+    # Capture existence up-front so we can distinguish 404 vs 400 after the call
+    existed_before = trade_id in _trading_bot._pending_trades or _trading_bot.get_trade(trade_id) is not None
+
     success = await _trading_bot.confirm_trade(trade_id)
-    
+    trade = _trading_bot.get_trade(trade_id)
+
     if success:
-        trade = _trading_bot.get_trade(trade_id)
-        return {"success": True, "message": "Trade executed", "trade": trade}
-    else:
-        raise HTTPException(status_code=400, detail="Failed to execute trade or trade not found")
+        # Trade was legitimately handled — surface the actual outcome so the
+        # UI can show "Executed" / "Simulated" / "Paper" / "Vetoed" accurately.
+        status = trade.get("status") if isinstance(trade, dict) else getattr(trade, "status", None)
+        status_str = getattr(status, "value", status) if status is not None else "unknown"
+
+        messages = {
+            "open": "Trade executed — position open",
+            "partial": "Trade partially filled",
+            "simulated": "Trade skipped — strategy in SIMULATION phase",
+            "paper": "Trade logged — strategy in PAPER phase (not sent to broker)",
+            "vetoed": "Trade vetoed by pre-trade guardrail",
+        }
+        return {
+            "success": True,
+            "status": status_str,
+            "message": messages.get(status_str, f"Trade handled: {status_str}"),
+            "trade": trade,
+        }
+
+    # Not handled — distinguish "never existed" from "existed but rejected"
+    if not existed_before:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    # Trade existed but was rejected (stale alert, broker error, etc.)
+    status = trade.get("status") if isinstance(trade, dict) else getattr(trade, "status", None)
+    status_str = getattr(status, "value", status) if status is not None else "rejected"
+    notes = trade.get("notes") if isinstance(trade, dict) else getattr(trade, "notes", "")
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": "Trade rejected",
+            "status": status_str,
+            "reason": notes or "Rejected by execution pipeline",
+        },
+    )
 
 
 @router.post("/trades/{trade_id}/reject")
