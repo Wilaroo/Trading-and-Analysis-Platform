@@ -40,8 +40,14 @@ class TradeStatus(str, Enum):
     OPEN = "open"                # Position is open
     PARTIAL = "partial"          # Partially filled or partially closed
     CLOSED = "closed"            # Position fully closed
-    CANCELLED = "cancelled"      # Trade was cancelled before execution
+    CANCELLED = "cancelled"      # Broker cancelled order before fill (real IB/Alpaca cancel)
     REJECTED = "rejected"        # Trade rejected by user or system
+    # Bot-side pre-execution filters (2026-04-22) — these never touch the
+    # broker and must NOT pollute the CANCELLED bucket on execution-health
+    # dashboards.
+    PAPER = "paper"              # Strategy in PAPER phase — logged, not executed
+    SIMULATED = "simulated"      # Strategy in SIMULATION phase — skipped entirely
+    VETOED = "vetoed"            # Pre-trade guardrail rejected (tight stop, oversized notional)
 
 
 class TradeDirection(str, Enum):

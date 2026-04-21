@@ -74,7 +74,7 @@ class TradeExecution:
                         logger.warning(f"Failed to record paper trade: {e}")
 
                     # Mark trade as not executed (for UI feedback)
-                    trade.status = TradeStatus.CANCELLED
+                    trade.status = TradeStatus.PAPER
                     trade.close_reason = "paper_phase"
                     await bot._save_trade(trade)
                     return
@@ -82,7 +82,7 @@ class TradeExecution:
                     # SIMULATION PHASE: Skip entirely
                     logger.info(f"⏭️ [SKIPPED] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
                     trade.notes = (trade.notes or "") + f" [SKIPPED: {phase_reason}]"
-                    trade.status = TradeStatus.CANCELLED
+                    trade.status = TradeStatus.SIMULATED
                     trade.close_reason = "simulation_phase"
                     await bot._save_trade(trade)
                     return
@@ -148,7 +148,7 @@ class TradeExecution:
                 if veto.skip:
                     logger.warning(f"🛡️ [Guardrail VETO] {trade.symbol}: {veto.reason}")
                     print(f"   🛡️ [Guardrail VETO] {trade.symbol}: {veto.reason}")
-                    trade.status = TradeStatus.REJECTED
+                    trade.status = TradeStatus.VETOED
                     trade.notes = (trade.notes or "") + f" [GUARDRAIL: {veto.reason}]"
                     trade.close_reason = "guardrail_veto"
                     if trade.id in bot._pending_trades:
