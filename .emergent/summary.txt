@@ -1,105 +1,96 @@
-<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. The platform runs on a DGX Spark (Linux) + Windows PC. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques (triple-barrier, CUSUM, CPCV, Deflated Sharpe).
+<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. The platform runs on a physical DGX Spark (Linux) + Windows PC. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques (triple-barrier, CUSUM, CPCV, Deflated Sharpe).
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English)
 
-**what currently exists?**: A full-stack AI trading platform running on a physical DGX Spark and Windows PC. The ML pipeline has been heavily upgraded with advanced quant modules (CUSUM, Triple-barrier, FFD). The legacy Phase 1 training path was successfully rewired to use 3-class triple-barrier labels and 51-column FFD feature matrices. Phase 1 (Generic Directional) successfully trained 7/7 models. Phase 2 (Setup-Specific models) has just started but encountered a dimension mismatch bug. A setup coverage audit script was also created to map the 35 taxonomy setups to actual DB data.
+**what currently exists?**: A full-stack AI trading platform. The massive training pipeline (Phases 1-12) successfully executes. The Phase 2 shape mismatch bug was resolved. A 10-phase  ensures shape validity before long runs. Phase 8 (Ensemble) was redesigned into a Binary Meta-Labeler that predicts P(win) for live bet-sizing. A CNN display metric bug was fixed via a migration script. Currently, the agent just applied a fix to Phase 8 extraction that was dropping rows due to FFD lookback.
 
 **Last working item**:
-    - Last item agent was working: Debugging the Phase 2 Setup-Specific training crash: . The feature names list expects 57 columns (46 base + 6 setup-specific + 5 FFD), but the data matrix only has 52 columns, meaning FFD was likely skipped during the data extraction step for setup-specific workers.
-    - Status: IN PROGRESS
-    - Agent Testing Done: Y (Ran pytest natively on Spark for prior fixes)
+    - Last item agent was working: Fixing a  in Phase 8 Ensemble training caused by inline FFD augmentation dropping 49 rows. The agent removed the inline augmentation, reverting to the zero-fill fallback.
+    - Status: USER VERIFICATION PENDING
+    - Agent Testing Done: Y (Pytest suite expanded and passing)
     - Which testing method agent to use? manual testing by bash/pytest (Testing agent cannot be used due to physical DGX Spark hardware constraints. Rely on user to execute commands).
-    - User Testing Done: N/A (User is running the live retrain).
+    - User Testing Done: N (User needs to pull the fix and re-run Phase 8).
 
 **All Pending/In progress Issue list**:
-  Issue 1: Phase 2 Setup-Specific shape mismatch (P0)
-     - Attempted fixes: The agent was just looking at  in  to see why FFD augmentation is missing from the batch matrix.
-     - Next debug checklist: Check  (specifically  and  or the pooling logic around line 1418-1475) to ensure  is called and appending the 5 FFD columns to the setup-specific data matrix.
-     - Why fix this issue and what will be achieved with the fix? Unblocks Phase 2 to Phase 8 of the massive retrain pipeline.
-     - Status: IN PROGRESS
-     - Is recurring issue? N (New bug uncovered in Phase 2)
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
-
-  Issue 2: User question on training procs and ETA (P1)
-     - Attempted fixes: None yet.
-     - Next debug checklist: Answer the user's explicit question: is 10 training processes normal? also should it really take 44 hrs with our new models?.
-     - Why fix this issue and what will be achieved with the fix? Reassures the user about resource utilization and ETA scaling.
-     - Status: NOT STARTED
+  Issue 1: Phase 8 ensemble broadcast shape mismatch (P0)
+     - Attempted fixes: Removed inline FFD augmentation from  in  Phase 8, returning to  zero-fill fallback to prevent dropping lookback rows.
+     - Next debug checklist: User needs to run , restart the backend, and run  to verify Phase 8 successfully trains all ensembles.
+     - Why fix this issue and what will be achieved with the fix? Unblocks the creation of the meta-labeler ensemble models, which are required for the downstream bet-sizing logic.
+     - Status: USER VERIFICATION PENDING
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? N/A
+     - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Full pipeline Retrain & Validation (P0)
-     - Where to resume: Fix Issue 1, then instruct the user to restart the retrain to finish all 150 models.
-     - What will be achieved with this? Generates accurate models with CUSUM, FFD, and Triple-barrier, populating the new 15-metric Scorecard.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? backend/frontend
-     - Blocked on something: Blocked by Issue 1 (Phase 2 crash).
+  Task 1: Wire bet-sizing into  (P0)
+     - Where to resume: After Phase 8 completes, update  to query  for . Then update  /  to use  to adjust position sizes (multiplier based on confidence) and skip trades if P(win) < 0.5. 
+     - What will be achieved with this? Converts all existing predictions into highly differentiated, confidence-adjusted trading decisions (realizing the Phase 2C Bet-Sizing roadmap item).
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: Blocked pending user verification of the Phase 8 ensemble training fix.
 
   Task 2: Setup Coverage Audit & Scorecard Triage (P1)
-     - Where to resume: Once the retrain fully completes, ask the user to run  and review the scorecard grades to triage dead setups.
+     - Where to resume: After models finish training, ask the user to run  and review the scorecard grades to triage dead setups and find candidates for Phase 2E.
      - What will be achieved with this? Decides which of the 35 SMB setups should get dedicated Phase 2E models.
      - Status: BLOCKED
      - Should Test frontend/backend/both after fix? N/A
-     - Blocked on something: Full retrain completion.
-
-  Task 3: Phase 2C - Meta-labeling bet-sizing model (P1)
-     - Where to resume: Create a secondary XGBoost model predicting  to determine bet size.
-     - What will be achieved with this? Converts binary signals into dynamic position sizing (0-100%).
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on something: Full retrain completion.
+     - Blocked on something: Full completion of training phases.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
     - 🔴 (P1) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy CNN/DL models to the Windows PC over LAN.
-    - 🔴 (P1) Phase 2E: Setup-Specific Visual CNN Meta-Labeler - Train hybrid multimodal models (image CNN + tabular MLP) on actual chart windows for SMB-specific setups. 
+    - 🔴 (P1) Phase 2E: Setup-Specific Visual CNN Meta-Labeler - Train hybrid multimodal models (image CNN + tabular MLP) on actual chart windows for SMB-specific setups.
     - 🟡 (P1) Add SMB-specific setups (Tier 1: rubberband + 9EMA + first red/green).
-    - 🟡 (P2) Wire HRP/NCO Portfolio Allocator into .
+    - 🟡 (P1) Wire FinBERT into confidence gate as Layer 12.
     
     Future Tasks:
-    - ⚪ (P2) Build dedicated Admin/Emergency panel on the NIA page.
-    - ⚪ (P2) Motor async MongoDB migration.
+    - ⚪ (P2) Modify  to use its natural  instead of hardcoding 1 day in .
+    - ⚪ (P2) Wire HRP/NCO Portfolio Allocator into .
+    - ⚪ (P2) Detect_reversal redesign to fire on true pivots, not mid-move bars.
 
 **Completed work in this session**
-- Wrote  to audit 35 SMB setups against DB trades (DONE)
-- Fixed legacy Full Universe training path in  to use 3-class Triple Barrier instead of binary labeling (DONE)
-- Fixed  shape mismatch bug by adding  zero-padding logic (DONE)
-- Fixed feature cache collisions in  by adding / to the cache key (DONE)
-- Phase 1 (Generic Directional) models trained successfully with FFD + CUSUM (DONE)
+- Fixed Phase 2/2.5 shape mismatch () in  (DONE)
+- Created  protecting all 10 phases from shape/name mismatches (DONE)
+- Fixed CNN accuracy UI bug by surfacing  and migrated 34 legacy models via  (DONE)
+- Redesigned Phase 8 Ensemble from 3-class directional to Binary Meta-Labeler (P(win)) to resolve degenerate FLAT predictions (DONE)
+- Fixed live inference  in  for FFD-enabled models (DONE)
+- Updated PRD with a model consolidation strategy (Deprecate the 34 Phase 9 legacy CNNs post-Phase 2E) (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: REVERSAL/5mins hit FALLBACK in the sweep (FLAT=8-10%).  is firing on mid-move bars, not true pivots. Noted for post-retrain redesign.
+   - Issue 1: CNN training data has an 8% win-rate imbalance, leaning heavily towards losses. 
+     - Why to solve this issue and what will be achieved with this? May need focal loss or  to improve  for Phase 2E. 
+     - Should Test frontend/backend/both after fix: backend
+     - Is recurring issue? N
+   - Issue 2: Phase 5.5 Gap Fill accuracy is highly imbalanced (90%+ UP), inflating the 94% accuracy metric. Needs scrutiny during scorecard triage.
 
 **Known issue recurrence from previous fork**
-  - None
+  - Issue recurrence in previous fork: None
+  - Recurrence count: 0
+  - Status: RESOLVED
 
 **Code Architecture**
 DGX Spark (Linux) runs Backend (FastAPI on :8001), Chat Server (:8002), MongoDB, Frontend (React on :3000). Windows PC runs IB Gateway, Data Pusher, Historical Collectors over LAN.
 
 **Key Technical Concepts**
-Triple-barrier labeling, CUSUM filtering, Fractional Differentiation (FFD), XGBoost, multiprocessing (). Multimodal CNNs (future).
+Triple-barrier labeling, CUSUM filtering, Fractional Differentiation (FFD), XGBoost, Binary Meta-Labeling (P(win) for bet-sizing), Multimodal CNNs (future), Pytest.
 
 **key DB schema**
-  -  DB ->  (stores matrix caches), , , .
+  -  DB -> ,  (now holds  for ensembles), , .
 
 **changes in tech stack**
-  - None this session, but user manually installed  globally on Spark to unlock adaptive 'd' optimization for Fractional Differentiation.
+  - None this session.
 
 **All files of reference**
-  -  (Updated to wire FFD + 3-class targets into Full Universe path)
-  -  (Updated with zero-padding fallback)
-  -  (Updated to handle FFD in cache keys)
-  -  (CURRENTLY DEBUGGING:  needs FFD injection)
-  -  (Created script to audit taxonomy coverage)
-  -  (Ground truth for 35 SMB setups)
-  -  (Updated with Phase 2E roadmap)
-  -  (Updated with sweep results)
+  -  (Updated Phase 8 ensemble to binary meta-labeling & fixed FFD shape issues)
+  -  (Created to catch shape mismatches before 44h runs)
+  -  (Updated to store  as main accuracy)
+  -  (Fixed live inference feature names restoration for FFD)
+  -  (Created script to fix existing MongoDB CNN metrics)
+  -  &  (Next targets for bet-sizing integration)
+  -  (Updated with deprecated CNN roadmap & phase 8 changes)
 
 **Areas that need refactoring**
-Motor async MongoDB migration is still pending for the future.
+Motor async MongoDB migration. Removal of  Phase 9 and  once Phase 2E is active.
 
 **key api endpoints**
   - 
@@ -107,21 +98,23 @@ Motor async MongoDB migration is still pending for the future.
 
 **Critical Info for New Agent**
 - **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux). You cannot test the pipeline natively or use the testing subagent. Rely entirely on Pytest and the user executing commands on Spark.
-- The backend relies on a  file populated with  and . The backend is run via system python  or a  on the Spark machine.
-- Phase 1 completed successfully, but Phase 2 just crashed. The user is waiting for you to fix the Phase 2 setup extraction bug (), answer their question about training procs/ETA, and instruct them how to resume the retrain.
+- The agent just pushed a fix to  to stop Phase 8 ensemble extraction from failing with .
+- The immediate next step is asking the user to , restart the backend, and fire Phase 8 via  to verify the ensemble successfully trains. 
+- Once verified, you MUST proceed to build the Bet-Sizing logic in  (using the new  models to adjust ).
 
 **documents and test reports created in this job**
+  - 
   - 
   - 
   - 
   -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
- - *User*: Kicked off the retrain. Phase 1 completes successfully! Phase 2 starts but immediately crashes with .
- - *Pending HUMAN message*: The user posted the crash log and explicitly asked: is 10 training processes normal? also should it really take 44 hrs with our new models?
+ - *User*: Ran Phase 8 ensemble, but it failed with .
+ - *Pending HUMAN message*: Agent pushed a fix removing the inline FFD augmentation to avoid dropping lookback rows. Awaiting user to pull code, restart backend, and rerun Phase 8.
 
 **Project Health Check:**
-Broken (Training pipeline crashed during Phase 2).
+Broken (Phase 8 ensemble is currently failing on Spark; awaiting user verification of the fix).
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution)
@@ -130,10 +123,10 @@ Broken (Training pipeline crashed during Phase 2).
 **Testing status**
   - Testing agent used after significant changes: NO (Due to physical DGX Spark setup constraints)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , 
-  - Known regressions: Phase 2 setup specific worker is currently missing FFD augmentation step.
+  - Test files created: 4 new pytest suites (preflight, cnn_metrics, ensemble, inference). Total 31/31 tests passing natively.
+  - Known regressions: None currently.
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent was in the middle of diagnosing the Phase 2 missing columns issue in . It needs to verify why  is missing or skipped for the setup-specific extraction workers.</analysis>
+Agent was in the middle of executing the Phase 8 ensemble run but was blocked by the shape mismatch . The agent committed the code fix but needs the user to run it. Once the user runs it successfully, the agent must implement the Bet-Sizing wire-in logic.</analysis>

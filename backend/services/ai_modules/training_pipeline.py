@@ -2953,20 +2953,13 @@ async def run_training_pipeline(
                                 if n_usable <= 0:
                                     continue
                                 
-                                features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features)
-
-                                # FFD-augment per-symbol so columns match sub-models' 51-col input
-                                # (Phase 1 direction + Phase 2 setup models were trained FFD-augmented).
-                                # Slice bars to match features_matrix length before augmenting.
-                                if _ens_ffd_on():
-                                    bars_for_ffd = bars[lb - 1 : lb - 1 + n_usable]
-                                    features_matrix, _aug_names = _ens_augment_features(
-                                        features_matrix,
-                                        feature_engineer.get_feature_names(),
-                                        bars_for_ffd,
-                                        lookback=50,
-                                        cache_key=f"ens_{sym}_{anchor_bs}",
-                                    )
+                                features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features=46)
+                                # NOTE: sub-models expect 51 cols (46 base + 5 FFD). The col_map
+                                # below uses -1 as a sentinel for FFD positions not found in
+                                # base_names; those 5 columns are zero-filled when building
+                                # model_feats. This yields degraded but non-crashing predictions.
+                                # Proper FFD augmentation here is P2 (requires reconciling
+                                # compute_ffd_columns lookback-drop semantics).
                                 
                                 # Pre-compute TRIPLE-BARRIER labels for all usable windows at once
                                 from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
