@@ -182,7 +182,7 @@ def predict_meta_label_p_win(
 
     # ── 2. Load ensemble meta-labeler & verify binary ──
     ens_doc = db["timeseries_models"].find_one(
-        {"name": ens_model_name, "is_active": True},
+        {"name": ens_model_name},
         {"_id": 0, "label_scheme": 1, "metrics": 1},
     )
     if not ens_doc:
