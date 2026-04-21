@@ -10,6 +10,29 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 ## Completed in this session (2026-04-21 — continued fork)
+### Phase 8 DMatrix Fix & Bet-Sizing Wire-In (2026-04-21)
+**Problem 1 (broadcast)**: Phase 8 ensemble failed with `ValueError: could not broadcast input array from shape (2382,) into shape (2431,)` — inline FFD augmentation was dropping 49 lookback rows vs the pre-computed `features_matrix`.
+**Fix 1**: Removed inline FFD augmentation; reverted to zero-fill fallback so row counts stay consistent. Pytest suite expanded.
+
+**Problem 2 (DMatrix)**: After broadcast fix, Phase 8 failed with `TypeError: Expecting data to be a DMatrix object, got: numpy.ndarray` — `TimeSeriesGBM._model` is an `xgb.Booster` (not `XGBClassifier`) which requires `DMatrix` input.
+**Fix 2**: `training_pipeline.py` Phase 8 sub_model + setup_model predicts now wrap features in `xgb.DMatrix(..., feature_names=sm._feature_names)` before calling `.predict()`. Added `test_phase8_booster_dmatrix.py` (3 regression tests including source-level guard against future regressions).
+**Verification (user, 2026-04-21 15:24Z)**: Phase 8 now producing real ensembles — 5/10 done at time of writing: meanrev=65.6%, reversal=66.3%, momentum=58.3%, trend=55.3%. All binary meta-labelers with ~44% WIN rate on 390K samples.
+
+### Phase 8 → Live Bet-Sizing Wire-In (2026-04-21) — NEW
+- **`/backend/services/ai_modules/ensemble_live_inference.py`** — runs full ensemble meta-labeling pipeline at trade-decision time: loads sub-models (5min/1h/1d) + setup 1-day model + `ensemble_<setup>` → extracts ensemble features → predicts `P(win)` on current bar. Degrades gracefully (returns `has_prediction=False` with reason) if any piece is missing.
+- **`bet_size_multiplier_from_p_win(p_win)`** — Kelly-inspired tiered ramp:
+  - `p_win < 0.50` → 0.0 (**force SKIP** per user requirement)
+  - `0.50-0.55` → 0.50× (half size, borderline edge)
+  - `0.55-0.65` → 1.00× (full size)
+  - `0.65-0.75` → 1.25× (scale up)
+  - `≥ 0.75` → 1.50× (max boost, cap prevents over-leverage)
+- **`confidence_gate.py` Layer 12** — calls `_get_ensemble_meta_signal()` (async wrapper over thread pool) and contributes:
+  - +15 points if `p_win ≥ 0.75`, +10 if `≥ 0.65`, +5 if `≥ 0.55`, 0 if `≥ 0.50`
+  - Position multiplier scaled via `bet_size_multiplier_from_p_win`
+  - **Hard SKIP** when `p_win < 0.5` overrides any positive score
+- **`SCANNER_TO_ENSEMBLE_KEY`** — maps 35 scanner setup names (VWAP_BOUNCE, SQUEEZE, RUBBER_BAND, OPENING_DRIVE, etc.) → 10 ensemble config keys
+- **Tests**: `test_ensemble_live_inference.py` (10 tests) — pure bet-size ramp (monotonic, boundary), graceful miss paths (no_db/unmapped_setup/not_trained/not_binary), and full mocked inference path. All 40 Phase 8 / ensemble / preflight / metrics tests passing.
+
 ### Phase 2/2.5 FFD name-mismatch crash — FIXED (P0)
 - **Symptom**: `scalp_1min_predictor: expected 57, got 52` when Phase 2 started after Phase 1 completed.
 - **Root cause**: `_extract_setup_long_worker` / `_extract_setup_short_worker` augment `base_matrix` with 5 FFD columns when `TB_USE_FFD_FEATURES=1` (46 → 51). The outer Phase 2/2.5 loop in `training_pipeline.py` built `combined_names` from the NON-augmented `feature_engineer.get_feature_names()` (46) + setup names (6) → 52 names vs 57 X cols.

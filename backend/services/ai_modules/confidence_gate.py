@@ -17,6 +17,7 @@ Scoring Architecture (ADDITIVE — base 0, earn confirmation points):
     Layer 9: TFT Multi-Timeframe (max +12 / floor -5)   [Phase 5 DL]
     Layer 10: VAE Regime Detection (max +8 / floor -5)   [Phase 5 DL]
     Layer 11: CNN-LSTM Temporal (max +10 / floor -5)     [Phase 5 DL]
+    Layer 12: Ensemble Meta-Labeler P(win) (max +15 + bet-sizing)  [Phase 8 — hard skip if <50%]
 
 Decision Thresholds:
     >= 55 pts  → GO (full size)
@@ -545,6 +546,58 @@ class ConfidenceGate:
                 else:
                     reasoning.append(f"CNN-LSTM temporal: neutral ({lstm_win_prob:.0%})")
 
+        # --- Layer 12: ENSEMBLE META-LABELER P(WIN) (bet-sizing + hard skip) ---
+        # Uses the binary ensemble_<setup> trained in Phase 8 to compute P(win)
+        # for the proposed trade. Drives both:
+        #   - Confidence score (up to +15)
+        #   - Position multiplier (0.5× → 1.5× Kelly-inspired ramp)
+        #   - Hard SKIP when p_win < 0.5 (meta-labeler sees no edge)
+        ensemble_meta = await self._get_ensemble_meta_signal(symbol, setup_type)
+        force_skip = False
+        if ensemble_meta.get("has_prediction"):
+            p_win = ensemble_meta["p_win"]
+            ens_name = ensemble_meta.get("ensemble_name", "ensemble")
+            ens_acc = ensemble_meta.get("ensemble_accuracy", 0.0)
+
+            # Scoring contribution
+            if p_win >= 0.75:
+                confidence_points += 15
+                reasoning.append(
+                    f"Ensemble meta-labeler {ens_name}: P(win)={p_win:.0%} STRONG "
+                    f"(model acc {ens_acc:.0%}) — bet-size MAX (+15)"
+                )
+            elif p_win >= 0.65:
+                confidence_points += 10
+                reasoning.append(
+                    f"Ensemble meta-labeler {ens_name}: P(win)={p_win:.0%} high — bet-size boost (+10)"
+                )
+            elif p_win >= 0.55:
+                confidence_points += 5
+                reasoning.append(
+                    f"Ensemble meta-labeler {ens_name}: P(win)={p_win:.0%} moderate — full size (+5)"
+                )
+            elif p_win >= 0.50:
+                # Borderline — no score boost, but keep trade at half size
+                reasoning.append(
+                    f"Ensemble meta-labeler {ens_name}: P(win)={p_win:.0%} borderline — half size"
+                )
+            else:
+                # Meta-labeler says no edge — FORCE SKIP
+                force_skip = True
+                reasoning.append(
+                    f"Ensemble meta-labeler {ens_name}: P(win)={p_win:.0%} < 50% — NO EDGE, skipping trade"
+                )
+
+            # Bet-sizing multiplier (only applied when not force-skipping)
+            if not force_skip:
+                from services.ai_modules.ensemble_live_inference import bet_size_multiplier_from_p_win
+                bet_mult = bet_size_multiplier_from_p_win(p_win)
+                position_multiplier *= bet_mult
+        else:
+            # No meta-labeler available (setup has no ensemble yet or not binary) — log for debugging only
+            miss_reason = ensemble_meta.get("reason_if_missing", "unknown")
+            logger.debug(f"Ensemble meta-labeler unavailable for {symbol}/{setup_type}: {miss_reason}")
+
         # --- 6. DETERMINE DECISION (Mode-aware thresholds) ---
         # Additive scoring: base 0, earn points from confirmation
         confidence_score = max(0, min(100, confidence_points))
@@ -570,7 +623,13 @@ class ConfidenceGate:
             go_threshold = 60
             reduce_threshold = 45
 
-        if confidence_score >= go_threshold:
+        if force_skip:
+            # Meta-labeler hard veto — overrides any positive score
+            decision = "SKIP"
+            position_multiplier = 0
+            self._stats["skip_count"] += 1
+            self._stats["today_skip"] += 1
+        elif confidence_score >= go_threshold:
             decision = "GO"
             self._stats["go_count"] += 1
             self._stats["today_go"] += 1
@@ -604,6 +663,7 @@ class ConfidenceGate:
             "tft_signal": tft_signal if tft_signal.get("has_prediction") else None,
             "vae_regime_signal": vae_signal if vae_signal.get("has_prediction") else None,
             "cnn_lstm_signal": cnn_lstm_signal if cnn_lstm_signal.get("has_prediction") else None,
+            "ensemble_meta_signal": ensemble_meta if ensemble_meta.get("has_prediction") else None,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -1170,6 +1230,27 @@ class ConfidenceGate:
         except Exception as e:
             logger.debug(f"VAE regime signal failed (non-critical): {e}")
             return result
+
+    async def _get_ensemble_meta_signal(self, symbol: str, setup_type: str) -> Dict[str, Any]:
+        """Get ensemble meta-labeler P(win) prediction for this symbol+setup.
+
+        Thin async wrapper that runs the synchronous live inference in a thread
+        executor (because it does DB queries and XGBoost CPU work).
+        """
+        if self._db is None:
+            return {"has_prediction": False, "reason_if_missing": "no_db"}
+        try:
+            import asyncio
+            from services.ai_modules.ensemble_live_inference import predict_meta_label_p_win
+
+            def _run():
+                return predict_meta_label_p_win(self._db, symbol, setup_type)
+
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _run)
+        except Exception as exc:
+            logger.debug(f"Ensemble meta signal failed (non-critical) for {symbol}/{setup_type}: {exc}")
+            return {"has_prediction": False, "reason_if_missing": f"exception:{exc}"}
 
     async def _get_cnn_lstm_signal(self, symbol: str, direction: str) -> Dict[str, Any]:
         """Get CNN-LSTM temporal pattern signal."""
