@@ -1411,6 +1411,92 @@ def get_order_queue_status():
         return {"success": False, "error": str(e)}
 
 
+@router.get("/orders/latency-stats")
+def get_order_latency_stats(limit: int = 50, order_type: str = None):
+    """Latency breakdown for recent orders.
+
+    Computes queue→claim, claim→ack, and total latency from the timestamps
+    already stored on each order. Used by the bracket-latency probe and
+    the execution-health UI.
+
+    Args:
+        limit: Number of most recent orders to analyze (default 50, max 500)
+        order_type: Optional filter — "bracket" to only measure bracket orders
+    """
+    try:
+        from datetime import datetime as _dt
+        service = get_order_queue_service()
+        if not service._initialized:
+            service.initialize()
+        limit = min(max(limit, 1), 500)
+
+        query = {"executed_at": {"$ne": None}, "claimed_at": {"$ne": None}}
+        if order_type:
+            query["order_type"] = order_type
+
+        recent = list(
+            service._collection.find(query, {"_id": 0})
+            .sort("queued_at", -1)
+            .limit(limit)
+        )
+
+        def _parse(ts):
+            if not ts:
+                return None
+            try:
+                return _dt.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                return None
+
+        samples = []
+        for o in recent:
+            q = _parse(o.get("queued_at"))
+            c = _parse(o.get("claimed_at"))
+            e = _parse(o.get("executed_at"))
+            if not (q and c and e):
+                continue
+            samples.append({
+                "order_id": o.get("order_id"),
+                "order_type": o.get("order_type"),
+                "status": o.get("status"),
+                "queue_to_claim_s": round((c - q).total_seconds(), 3),
+                "claim_to_ack_s": round((e - c).total_seconds(), 3),
+                "total_s": round((e - q).total_seconds(), 3),
+                "queued_at": o.get("queued_at"),
+            })
+
+        if not samples:
+            return {"success": True, "count": 0, "samples": [], "stats": None}
+
+        def _stats(values):
+            if not values:
+                return None
+            s = sorted(values)
+            n = len(s)
+            return {
+                "min": round(min(s), 3),
+                "p50": round(s[n // 2], 3),
+                "p95": round(s[min(n - 1, int(0.95 * (n - 1)))], 3),
+                "max": round(max(s), 3),
+                "count": n,
+            }
+
+        return {
+            "success": True,
+            "count": len(samples),
+            "filter": {"order_type": order_type} if order_type else None,
+            "stats": {
+                "queue_to_claim_s": _stats([s["queue_to_claim_s"] for s in samples]),
+                "claim_to_ack_s": _stats([s["claim_to_ack_s"] for s in samples]),
+                "total_s": _stats([s["total_s"] for s in samples]),
+            },
+            "samples": samples[:20],  # return first 20 for inspection
+        }
+    except Exception as e:
+        logger.error(f"Error computing latency stats: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # ==================== HISTORICAL DATA QUEUE ====================
 # These endpoints enable the IB Data Pusher to fulfill historical data requests
 
