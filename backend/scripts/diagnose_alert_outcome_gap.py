@@ -92,9 +92,14 @@ def classify_leak(stages: Dict[str, int]) -> str:
 # ── Data collection ──────────────────────────────────────────────────────
 
 def collect_funnel(db) -> Dict[str, Dict[str, int]]:
-    """Build per-setup funnel counts from 3 Mongo collections."""
+    """Build per-setup funnel counts from 3 Mongo collections.
+
+    "Executed" means an order that was actually FILLED — cancelled/rejected
+    orders never entered a real position and must not count as trades.
+    """
     funnel: Dict[str, Dict[str, int]] = defaultdict(
-        lambda: {"alerts": 0, "executed": 0, "closed": 0, "with_r": 0}
+        lambda: {"alerts": 0, "orders": 0, "cancelled": 0,
+                 "executed": 0, "closed": 0, "with_r": 0}
     )
 
     # Stage 1: live_alerts — every scanner fire
@@ -106,21 +111,31 @@ def collect_funnel(db) -> Dict[str, Dict[str, int]]:
         if code:
             funnel[code]["alerts"] += 1
 
-    # Stages 2-4: bot_trades
+    # Stages 2-5: bot_trades
     for doc in db["bot_trades"].find(
         {"setup_type": {"$exists": True, "$nin": [None, ""]}},
         {"setup_type": 1, "status": 1, "exit_price": 1, "realized_pnl": 1,
-         "r_multiple": 1, "_id": 0},
+         "r_multiple": 1, "fill_price": 1, "entry_price": 1, "_id": 0},
     ):
         code = _norm(doc.get("setup_type"))
         if not code:
             continue
+
+        status = (doc.get("status") or "").lower()
+        funnel[code]["orders"] += 1  # every bot_trades doc is an order attempt
+
+        # Cancelled orders: bot placed, but never filled — not a trade
+        if status in ("cancelled", "canceled", "rejected", "expired"):
+            funnel[code]["cancelled"] += 1
+            continue
+
+        # Everything else counts as "executed" (the bot entered a position)
         funnel[code]["executed"] += 1
 
         closed = (
             doc.get("exit_price") is not None
             or doc.get("realized_pnl") not in (None, 0)
-            or (doc.get("status") or "").lower() in ("closed", "exited", "filled_exited")
+            or status in ("closed", "closed_manual", "exited", "filled_exited")
         )
         if closed:
             funnel[code]["closed"] += 1
@@ -151,19 +166,17 @@ def render_report(funnel: Dict[str, Dict[str, int]]) -> str:
         "",
         "## Per-setup funnel",
         "",
-        "| setup | alerts | executed | closed | with_R | conv % | leak |",
-        "|-------|-------:|---------:|-------:|-------:|-------:|------|",
+        "| setup | alerts | orders | cancelled | filled | closed | with_R | leak |",
+        "|-------|-------:|-------:|----------:|-------:|-------:|-------:|------|",
     ]
     by_leak: Dict[str, list] = defaultdict(list)
     for code, st in rows:
         leak = classify_leak(st)
         by_leak[leak].append(code)
-        alerts = st["alerts"]
-        executed = st["executed"]
-        conv = (executed / alerts * 100.0) if alerts else 0.0
+        orders = st.get("orders", st["executed"] + st.get("cancelled", 0))
         lines.append(
-            f"| `{code}` | {alerts} | {executed} | {st['closed']} | "
-            f"{st['with_r']} | {conv:.2f}% | {leak} |"
+            f"| `{code}` | {st['alerts']} | {orders} | {st.get('cancelled', 0)} | "
+            f"{st['executed']} | {st['closed']} | {st['with_r']} | {leak} |"
         )
 
     lines += ["", "## Summary by leak stage", ""]
@@ -211,10 +224,14 @@ def render_compact(funnel: Dict[str, Dict[str, int]]) -> str:
     lines += ["", "Top 10 alert volume — funnel leak:"]
     for code, st in rows[:10]:
         leak = classify_leak(st)
+        orders = st.get("orders", st["executed"] + st.get("cancelled", 0))
+        cancelled = st.get("cancelled", 0)
+        fill_rate = (st["executed"] / orders * 100.0) if orders else 0.0
         closure_rate = (st["closed"] / st["executed"] * 100.0) if st["executed"] else 0.0
         lines.append(
-            f"  {code:<28} alerts={st['alerts']:>6} exec={st['executed']:>4} "
-            f"closed={st['closed']:>3} ({closure_rate:>5.1f}%)  withR={st['with_r']:>3}  → {leak}"
+            f"  {code:<28} alerts={st['alerts']:>6} orders={orders:>4} "
+            f"canc={cancelled:>4}({100-fill_rate:>4.1f}%) filled={st['executed']:>3} "
+            f"closed={st['closed']:>3}({closure_rate:>4.1f}%) withR={st['with_r']:>3}  → {leak}"
         )
 
     lines += ["", "Full report: /tmp/alert_outcome_gap.md", ""]

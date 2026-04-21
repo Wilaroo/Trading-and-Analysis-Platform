@@ -69,49 +69,52 @@ def test_r_multiple_returns_none_on_bad_inputs():
 gap = _load("diagnose_alert_outcome_gap")
 
 
-def _stg(alerts=0, executed=0, closed=0, with_r=0):
-    return {"alerts": alerts, "executed": executed, "closed": closed, "with_r": with_r}
+def _stg(alerts=0, orders=None, cancelled=0, executed=0, closed=0, with_r=0):
+    if orders is None:
+        orders = executed + cancelled
+    return {"alerts": alerts, "orders": orders, "cancelled": cancelled,
+            "executed": executed, "closed": closed, "with_r": with_r}
 
 
 def test_classify_leak_healthy_full_funnel():
-    assert gap.classify_leak(_stg(100, 50, 48, 48)) == "healthy"
+    assert gap.classify_leak(_stg(alerts=100, executed=50, closed=48, with_r=48)) == "healthy"
 
 
 def test_classify_leak_closure_gap_low_ratio():
     """Low closure ratio (e.g. 4/1220 = 0.3%) must flag as closure_gap,
     not mask it as r_gap just because a handful got closed."""
-    assert gap.classify_leak(_stg(15000, 1220, 4, 0)) == "closure_gap"
-    assert gap.classify_leak(_stg(14000, 2051, 57, 0)) == "closure_gap"  # 2.8%
+    assert gap.classify_leak(_stg(alerts=15000, executed=1220, closed=4, with_r=0)) == "closure_gap"
+    assert gap.classify_leak(_stg(alerts=14000, executed=2051, closed=57, with_r=0)) == "closure_gap"
 
 
 def test_classify_leak_r_gap_when_closure_healthy():
     """≥30% closure rate → if r_multiple missing, it's a backfill gap."""
-    assert gap.classify_leak(_stg(100, 50, 40, 0)) == "r_gap"   # 80% closed
-    assert gap.classify_leak(_stg(20, 10, 3, 0)) == "r_gap"     # 30% closed
+    assert gap.classify_leak(_stg(alerts=100, executed=50, closed=40, with_r=0)) == "r_gap"
+    assert gap.classify_leak(_stg(alerts=20, executed=10, closed=3, with_r=0)) == "r_gap"
 
 
 def test_classify_leak_execution_gap():
-    # Alerts fire but nothing gets executed
-    assert gap.classify_leak(_stg(500, 0, 0, 0)) == "execution_gap"
+    # Alerts fire but nothing gets executed (fills)
+    assert gap.classify_leak(_stg(alerts=500, executed=0, closed=0, with_r=0)) == "execution_gap"
 
 
 def test_classify_leak_closure_gap():
-    # Trades executed but never marked closed
-    assert gap.classify_leak(_stg(100, 50, 0, 0)) == "closure_gap"
+    # Trades filled but never marked closed
+    assert gap.classify_leak(_stg(alerts=100, executed=50, closed=0, with_r=0)) == "closure_gap"
 
 
 def test_classify_leak_r_gap():
     # Trades closed with healthy ratio but r_multiple missing
-    assert gap.classify_leak(_stg(100, 50, 48, 0)) == "r_gap"
+    assert gap.classify_leak(_stg(alerts=100, executed=50, closed=48, with_r=0)) == "r_gap"
 
 
 def test_classify_leak_no_alerts():
-    assert gap.classify_leak(_stg(0, 0, 0, 0)) == "no_alerts"
+    assert gap.classify_leak(_stg()) == "no_alerts"
 
 
 def test_classify_leak_priority_execution_before_closure():
     """If nothing is executed, execution_gap wins even with 0 closed."""
-    assert gap.classify_leak(_stg(100, 0, 0, 0)) == "execution_gap"
+    assert gap.classify_leak(_stg(alerts=100, executed=0, closed=0, with_r=0)) == "execution_gap"
 
 
 # ── diagnose_alert_outcome_gap._norm (matches audit normalization) ────────
@@ -148,3 +151,47 @@ def test_collections_list_matches_audit_scope():
     assert set(collapse.COLLECTIONS) == {
         "trades", "bot_trades", "trade_snapshots", "live_alerts"
     }
+
+
+# ── backfill_closed_no_exit.infer_exit_from_pnl ───────────────────────────
+
+fix_closed = _load("backfill_closed_no_exit")
+
+
+def test_infer_exit_long_profitable():
+    # Long 100 shares, fill=50, pnl=+500 → exit = 50 + 500/100 = 55
+    assert fix_closed.infer_exit_from_pnl(50, 500, 100, "long") == pytest.approx(55.0)
+
+
+def test_infer_exit_long_loss():
+    # Long 100 shares, fill=50, pnl=-200 → exit = 50 - 2 = 48
+    assert fix_closed.infer_exit_from_pnl(50, -200, 100, "long") == pytest.approx(48.0)
+
+
+def test_infer_exit_short_profitable():
+    # Short 100 shares, fill=50, pnl=+300 → exit = 50 - 3 = 47 (price dropped)
+    assert fix_closed.infer_exit_from_pnl(50, 300, 100, "short") == pytest.approx(47.0)
+
+
+def test_infer_exit_returns_none_on_missing_inputs():
+    assert fix_closed.infer_exit_from_pnl(None, 100, 100, "long") is None
+    assert fix_closed.infer_exit_from_pnl(50, None, 100, "long") is None
+    assert fix_closed.infer_exit_from_pnl(50, 100, None, "long") is None
+    assert fix_closed.infer_exit_from_pnl(50, 100, 0, "long") is None
+    assert fix_closed.infer_exit_from_pnl(-1, 100, 100, "long") is None
+    assert fix_closed.infer_exit_from_pnl(50, 100, 100, "sideways") is None
+
+
+def test_infer_exit_direction_aliases():
+    for alias in ("long", "LONG", "buy", "up"):
+        assert fix_closed.infer_exit_from_pnl(50, 500, 100, alias) == pytest.approx(55.0)
+    for alias in ("short", "sell", "down"):
+        assert fix_closed.infer_exit_from_pnl(50, 300, 100, alias) == pytest.approx(47.0)
+
+
+def test_infer_exit_roundtrip_with_r_multiple():
+    """Derived exit must produce a sensible r_multiple when fed back."""
+    # Long 100 sh, entry=50, stop=48 (risk $2), exit=55 → pnl=500, r=+2.5R
+    derived_exit = fix_closed.infer_exit_from_pnl(50, 500, 100, "long")
+    r = backfill.compute_r_multiple(50, 48, derived_exit, "long")
+    assert r == pytest.approx(2.5)
