@@ -95,8 +95,8 @@ async def get_bot_status():
 
 @router.get("/execution-health")
 async def get_execution_health(
-    hours: int = Query(24, ge=1, le=720,
-                       description="Window size in hours (1 — 720)."),
+    hours: int = Query(24, ge=1, le=8760,
+                       description="Window size in hours (1 — 8760 = 1 year)."),
     flag_trades: bool = Query(
         False, description="If true, also persist stop_honored flag onto trade docs."),
 ):

@@ -195,3 +195,31 @@ def test_infer_exit_roundtrip_with_r_multiple():
     derived_exit = fix_closed.infer_exit_from_pnl(50, 500, 100, "long")
     r = backfill.compute_r_multiple(50, 48, derived_exit, "long")
     assert r == pytest.approx(2.5)
+
+
+# ── fix_inverted_short_stops.diagnose_inverted_stop ───────────────────────
+
+fix_inverted = _load("fix_inverted_short_stops")
+
+
+def test_diagnose_correct_short_stop_is_ok():
+    # Short: stop ABOVE entry → fine
+    assert fix_inverted.diagnose_inverted_stop("short", 100, 105, 103) == "ok"
+
+
+def test_diagnose_long_direction_is_ok():
+    """Non-shorts shouldn't be flagged even if stop < entry (that's correct for long)."""
+    assert fix_inverted.diagnose_inverted_stop("long", 100, 95, 110) == "ok"
+
+
+def test_diagnose_inverted_short_flagged_as_direction_flip():
+    # Short with stop BELOW entry = corruption. Classify as direction_flip.
+    assert fix_inverted.diagnose_inverted_stop("short", 100, 95, 110) == "direction_flip"
+    assert fix_inverted.diagnose_inverted_stop("short", 100, 95, 92) == "direction_flip"
+
+
+def test_diagnose_ambiguous_on_missing_inputs():
+    assert fix_inverted.diagnose_inverted_stop(None, 100, 95, 110) == "ambiguous"
+    assert fix_inverted.diagnose_inverted_stop("short", None, 95, 110) == "ambiguous"
+    assert fix_inverted.diagnose_inverted_stop("short", 100, None, 110) == "ambiguous"
+    assert fix_inverted.diagnose_inverted_stop("short", 100, 95, None) == "ambiguous"
