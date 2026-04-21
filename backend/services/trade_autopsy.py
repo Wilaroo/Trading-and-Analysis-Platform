@@ -118,11 +118,30 @@ class TradeAutopsy:
 
     def autopsy(self, trade_id: str) -> Optional[Dict[str, Any]]:
         """Return full autopsy dict, or None if trade not found."""
-        trade = self._db["bot_trades"].find_one(
-            {"id": trade_id}, {"_id": 0}
-        )
-        if not trade:
+        # Defensive: some historical cleanup scripts left duplicate docs with
+        # identical `id` fields (one zeroed-out, one with the real outcome).
+        # Prefer whichever carries real trade data: `r_multiple` set, or
+        # non-zero `realized_pnl`, else fall back to the first match.
+        candidates = list(self._db["bot_trades"].find({"id": trade_id}, {"_id": 0}))
+        if not candidates:
             return None
+
+        def _informativeness(doc: Dict[str, Any]) -> int:
+            score = 0
+            if doc.get("r_multiple") is not None:
+                score += 100
+            pnl = doc.get("realized_pnl")
+            if pnl is not None and abs(float(pnl)) > 0.01:
+                score += 50
+            if doc.get("exit_price") not in (None, 0):
+                score += 20
+            if doc.get("stop_order_id"):
+                score += 5
+            if doc.get("entry_order_id"):
+                score += 5
+            return score
+
+        trade = max(candidates, key=_informativeness)
 
         outcome = summarize_trade_outcome(trade)
 
