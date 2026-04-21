@@ -2816,7 +2816,7 @@ async def run_training_pipeline(
             _phase_memory_cleanup("Phase 7")
             status.update(phase="ensemble_meta")
             _p_elapsed = _time.monotonic() - _pipeline_start
-            logger.info(f"=== Phase 8: Training Ensemble Meta-Learner === [{int(_p_elapsed//60)}m elapsed]")
+            logger.info(f"=== Phase 8: Training Ensemble Meta-Labeler (binary WIN/LOSS, López de Prado ch.3) === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.ensemble_model import (
                 ENSEMBLE_MODEL_CONFIGS, ENSEMBLE_FEATURE_NAMES,
                 extract_ensemble_features, STACKED_TIMEFRAMES,
@@ -2873,6 +2873,9 @@ async def run_training_pipeline(
 
                     try:
                         # Load setup-specific model if daily variant exists
+                        # CRITICAL: ensemble_<setup> is a META-LABELER — it requires a working
+                        # setup sub-model to filter "is this a trade entry?" and provide a
+                        # direction. Without it, the ensemble has no edge to grade.
                         setup_model = None
                         setup_profiles = _get_ens_profiles(setup_type)
                         for prof in setup_profiles:
@@ -2884,6 +2887,20 @@ async def run_training_pipeline(
                                     setup_model = sm
                                     logger.info(f"Loaded setup sub-model: {sname}")
                                 break
+
+                        # Skip entirely if no setup sub-model — training on universe-wide
+                        # bars without a direction signal produces the degenerate "predict
+                        # majority class" model we saw on 2026-04-20 (precision_up=precision_down=0).
+                        if setup_model is None:
+                            logger.warning(
+                                f"[Phase 8] Skipping {model_name}: no setup sub-model "
+                                f"{_get_ens_model_name(setup_type, anchor_bs)} — meta-labeler needs it."
+                            )
+                            results["models_failed"].append({
+                                "name": model_name,
+                                "reason": f"Setup sub-model {_get_ens_model_name(setup_type, anchor_bs)} not trained",
+                            })
+                            continue
 
                         all_X = []
                         all_y = []
@@ -3013,6 +3030,7 @@ async def run_training_pipeline(
                                     
                                     # Parse setup model prediction for this sample
                                     setup_preds = []
+                                    setup_direction = "flat"   # captured for meta-labeling
                                     if setup_raw_preds is not None:
                                         try:
                                             raw_pred = setup_raw_preds[i] if setup_raw_preds.ndim >= 1 else setup_raw_preds
@@ -3039,8 +3057,15 @@ async def run_training_pipeline(
                                                 "confidence": max(0, conf),
                                                 "direction": direction,
                                             })
+                                            setup_direction = direction
                                         except Exception:
                                             pass
+                                    
+                                    # META-LABELING (López de Prado ch.3): only include bars
+                                    # where the setup sub-model signals a trade (UP or DOWN).
+                                    # Skip FLAT → no trade opportunity, matches live inference.
+                                    if setup_direction not in ("up", "down"):
+                                        continue
                                     
                                     # Extract ensemble features from stacked predictions
                                     ens_feats = extract_ensemble_features(
@@ -3048,8 +3073,12 @@ async def run_training_pipeline(
                                     )
                                     feat_vec = [ens_feats.get(f, 0.0) for f in ENSEMBLE_FEATURE_NAMES]
                                     
-                                    # TRIPLE-BARRIER 3-class target (pre-computed above)
-                                    target = int(tb_targets[i])
+                                    # Convert 3-class TB label → binary meta-label WIN(1)/LOSS(0)
+                                    tb_cls = int(tb_targets[i])   # 0=DOWN, 1=FLAT, 2=UP
+                                    if setup_direction == "up":
+                                        target = 1 if tb_cls == 2 else 0
+                                    else:   # setup_direction == "down"
+                                        target = 1 if tb_cls == 0 else 0
                                     
                                     all_X.append(feat_vec)
                                     all_y.append(target)
@@ -3067,31 +3096,77 @@ async def run_training_pipeline(
                             continue
 
                         X = np.array(all_X)
-                        y = np.array(all_y)
+                        y = np.array(all_y, dtype=np.int32)
+                        n_win = int(np.sum(y == 1))
+                        n_loss = int(np.sum(y == 0))
                         logger.info(
-                            f"Training {model_name}: {len(X)} samples, "
-                            f"UP={np.sum(y==2)}, FLAT={np.sum(y==1)}, DOWN={np.sum(y==0)}"
+                            f"Training {model_name} [meta-labeler, binary]: {len(X)} samples, "
+                            f"WIN={n_win} ({n_win/max(len(y),1)*100:.1f}%), "
+                            f"LOSS={n_loss} ({n_loss/max(len(y),1)*100:.1f}%)"
+                        )
+
+                        # Guardrail: require both classes present (XGBoost can't fit otherwise)
+                        if n_win < 50 or n_loss < 50:
+                            logger.warning(
+                                f"[Phase 8] {model_name}: too few WIN or LOSS samples "
+                                f"(win={n_win}, loss={n_loss}) — skipping"
+                            )
+                            results["models_failed"].append({
+                                "name": model_name,
+                                "reason": f"Too few class samples (win={n_win}, loss={n_loss})",
+                            })
+                            del all_X, all_y, X, y
+                            gc.collect()
+                            continue
+
+                        # Class-balancing sample weights: inverse class frequency so the
+                        # model does not collapse to majority-class prediction (the exact
+                        # bug that produced precision_up=precision_down=0 on 2026-04-20).
+                        class_weights = {
+                            0: len(y) / (2.0 * max(n_loss, 1)),
+                            1: len(y) / (2.0 * max(n_win, 1)),
+                        }
+                        sample_weights = np.array(
+                            [class_weights[int(yi)] for yi in y], dtype=np.float32
                         )
 
                         model = TimeSeriesGBM(model_name=model_name, forecast_horizon=anchor_fh)
                         model.set_db(db)
                         metrics = await _run_in_thread(
                             model.train_from_features,
-                            X, y, ENSEMBLE_FEATURE_NAMES,
+                            X, y.astype(np.float32), ENSEMBLE_FEATURE_NAMES,
                             num_boost_round=120,
                             early_stopping_rounds=15,
-                            num_classes=3,
+                            num_classes=2,
+                            sample_weights=sample_weights,
                         )
 
-                        del all_X, all_y, X, y
+                        del all_X, all_y, X, y, sample_weights
                         gc.collect()
 
                         if metrics and metrics.accuracy > 0:
+                            # Tag this model as a META-LABELER so consumers know the
+                            # prediction is P(trade wins | setup_direction), not raw
+                            # direction probability. Used by the bet-sizing path.
+                            try:
+                                db["timeseries_models"].update_one(
+                                    {"name": model_name},
+                                    {"$set": {
+                                        "label_scheme": "meta_label_binary",
+                                        "num_classes": 2,
+                                        "meta_labeler": True,
+                                        "setup_type": setup_type,
+                                    }},
+                                )
+                            except Exception as _tag_err:
+                                logger.warning(f"Could not tag meta-labeler flag on {model_name}: {_tag_err}")
+
                             results["models_trained"].append({
                                 "name": model_name,
                                 "accuracy": metrics.accuracy,
                                 "samples": metrics.training_samples,
-                                "type": "ensemble",
+                                "type": "ensemble_meta_labeler",
+                                "setup_type": setup_type,
                             })
                             results["total_samples"] += metrics.training_samples
                             status.add_completed(model_name, metrics.accuracy)

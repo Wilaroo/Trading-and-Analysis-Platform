@@ -16,6 +16,34 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - **Fix**: `training_pipeline.py` lines 1426 & 1614 now wrap base_names with `augmented_feature_names(...)` from `feature_augmentors.py`, which appends the 5 FFD names when the flag is on.
 - **Guardrail test**: `backend/tests/test_phase2_combined_names_shape.py` (4 tests, all passing) — rebuilds Phase 2 & 2.5 combined_names exactly as the training loop does and asserts `len(combined_names) == X.shape[1]` in both FFD-ON and FFD-OFF modes. Catches any regression of this bug class.
 
+### Phase 8 Ensemble — REDESIGNED as Meta-Labeler (2026-04-21)
+**Problem discovered**: All 10 ensemble models had identical metrics (accuracy=0.4542..., precision_up=0, precision_down=0) — degenerate "always predict FLAT" classifiers. Root cause: (a) 3-class prediction on universe-wide data collapsed to majority class (45% FLAT); (b) no setup-direction filter → training distribution ≠ inference distribution; (c) no class weighting.
+
+**Fix (López de Prado meta-labeling, ch.3)**:
+- Each `ensemble_<setup>` now REQUIRES its `setup_specific_<setup>_1day` sub-model to be present (training skips cleanly otherwise)
+- Filters training bars to those where setup sub-model signals UP or DOWN (matches live inference)
+- Converts 3-class TB target → binary WIN/LOSS conditioned on setup direction:
+  - setup=UP + TB=UP → WIN(1)
+  - setup=DOWN + TB=DOWN → WIN(1)
+  - else → LOSS(0)
+- Class-balanced `sample_weights` (inverse class frequency) to prevent majority-class collapse
+- Skips model if <50 of either class present
+- Tags model with `label_scheme=meta_label_binary`, `meta_labeler=True`, `setup_type=<X>` for downstream bet-sizing consumers
+- Implements Phase 2C roadmap item (meta-labeler bet-sizing) by consolidating it into Phase 8
+- Zero live-trading consumers at time of fix → safe redesign (dormant models)
+- `backend/tests/test_ensemble_meta_labeling.py` — 13 tests covering label transformation (all 6 direction×TB combos), FLAT exclusion, class-balancing weights (balanced/imbalanced/pathological cases), and end-to-end synthetic pipeline
+
+### CNN Metrics Fix (2026-04-21)
+**Problem discovered**: All 34 per-setup CNN models showed `metrics.accuracy=1.0`. UI and scorecard read this field → misleading. Root cause: `accuracy` was saving the 17-class pattern-classification score, which is tautologically 1.0 because every sample in `cnn_<setup>_<bar_size>` has the same setup_type label. Real predictive metric `win_auc` was already computed (~0.55-0.85 range) but not surfaced.
+
+**Fix**:
+- `cnn_training_pipeline.py` now sets `metrics.accuracy = win_auc` (the actual win/loss AUC)
+- Added full binary classifier metrics: `win_accuracy`, `win_precision`, `win_recall`, `win_f1`
+- Kept `pattern_classification_accuracy` as debug-only reference
+- `backend/scripts/migrate_cnn_accuracy_to_win_auc.py` — idempotent one-shot migration to update the 34 existing records in `cnn_models`
+- `backend/tests/test_cnn_metrics_fix.py` — 5 tests covering perfect/realistic/degenerate/single-class cases + migration semantics
+- Promotion gate unchanged (already correctly used `win_auc >= 0.55`)
+
 ### Pre-flight Shape Validator — EXTENDED (P1)
 - `/backend/services/ai_modules/preflight_validator.py` — runs in `run_training_pipeline` immediately after disk-cache clear, BEFORE any phase kicks off heavy work.
 - **Now covers every XGBoost training phase** (as of 2026-04-21):
