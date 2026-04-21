@@ -18,7 +18,22 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 **Fix 2**: `training_pipeline.py` Phase 8 sub_model + setup_model predicts now wrap features in `xgb.DMatrix(..., feature_names=sm._feature_names)` before calling `.predict()`. Added `test_phase8_booster_dmatrix.py` (3 regression tests including source-level guard against future regressions).
 **Verification (user, 2026-04-21 15:24Z)**: Phase 8 now producing real ensembles — 5/10 done at time of writing: meanrev=65.6%, reversal=66.3%, momentum=58.3%, trend=55.3%. All binary meta-labelers with ~44% WIN rate on 390K samples.
 
-### Phase 8 → Live Bet-Sizing Wire-In (2026-04-21) — COMPLETED & VERIFIED LIVE
+### Data Pipeline Audit & Cleanup (2026-04-21) — COMPLETED
+- **`/backend/scripts/diagnose_alert_outcome_gap.py`** — per-setup funnel audit (alerts → orders → filled → closed → with_R) with `classify_leak` helper (ratio-based, not binary) and cancellation tracking.
+- **`/backend/scripts/backfill_r_multiples.py`** — pure-math R-multiple backfill on closed bot_trades. Backfilled **141 docs** (post cleanup = 211 total with r_multiple). Idempotent.
+- **`/backend/scripts/backfill_closed_no_exit.py`** — recovers exit_price from `fill_price + realized_pnl + shares + direction` on orphaned `status=closed, exit_price=None` docs. Recovered **70/70 orphans** (r_multiple_set=70).
+- **`/backend/scripts/collapse_relative_strength.py`** — migrated `relative_strength_leader/laggard` → `relative_strength_long/short`. **Renamed 29,350 docs**. Eliminates "scanner drift" from the audit.
+- **Tests**: `test_data_pipeline_scripts.py` (25 tests) — long/short R-multiple math, direction aliases, classify_leak ratio thresholds, exit inference roundtrip. 25/25 passing.
+
+### 🚨 CRITICAL FINDINGS FROM AUDIT (2026-04-21)
+After data cleanup, the truth is clear:
+1. **`vwap_fade_short` is catastrophic**: 51 trades, 8.9% WR, **avg_R = -9.57** (losing 9.57× risk per trade). Total bleed: ~-488R. Stops are set correctly but **not being honored at IB** — stops are 2-4¢ wide, exits are $0.40-$7.84 past stop. Root cause: either no STP order placed at IB, or stop distance < tick buffer / noise floor.
+2. **97% order cancellation rate**: on top setups, 1,216/1,220 `second_chance` orders cancel before fill (likely stale limit prices). Similar for squeeze, vwap_bounce.
+3. **Only 211 total filled+closed trades exist across all setups** — too few to train Phase 2E CNNs. Needs weeks of live trading (with fixed stop execution) to accumulate.
+4. **Only `vwap_fade_long` has real positive EV** (n=24, WR=58%, avg_R=+0.81 → ~0.36R/trade EV). Everything else scratches or bleeds.
+5. **18/239 shorts have inverted stops** (stop below entry) — 7.5% data corruption, minor fix.
+
+
 - **`/backend/services/ai_modules/ensemble_live_inference.py`** — runs full ensemble meta-labeling pipeline at trade-decision time: loads sub-models (5min/1h/1d) + setup 1-day model + `ensemble_<setup>` → extracts ensemble features → predicts `P(win)` on current bar. Degrades gracefully (returns `has_prediction=False` with reason) if any piece is missing.
 - **Model cache (10-min TTL, thread-safe)** — `_cached_gbm_load` pins loaded XGBoost Boosters in memory across gate calls. Auto-evicts post-training via `clear_model_cache()` hook in `training_pipeline.py`. Measured speedup on DGX Spark: cold=2.33s, warm=0.33s (**7× faster**), partial miss=0.83s (**2.8×**). Enables ~180 evals/min/core production throughput.
 - **`bet_size_multiplier_from_p_win(p_win)`** — Kelly-inspired tiered ramp:
