@@ -461,3 +461,149 @@ class PositionReconciler:
             report["success"] = False
             report["error"] = str(e)
             return report
+
+
+    # ==================== EMERGENCY STOP PROTECTION (Phase 4 — 2026-04-22) ==================
+
+    async def protect_orphan_positions(
+        self,
+        bot: 'TradingBotService',
+        risk_pct: float = 0.01,
+        dry_run: bool = False,
+    ) -> Dict:
+        """Place emergency stops on IB positions that have no working stop.
+
+        Runs at bot startup (and can be invoked manually) to close the gap
+        where an IB position exists without a matching STP order — the exact
+        scenario that caused the 2026-04 USO/WTI/PRCT bleed and the PD/GNW
+        imported_from_ib $11k loss.
+
+        A position is considered unprotected if:
+          - It exists in IB, AND
+          - Either (a) the bot has no corresponding open_trade, OR
+                   (b) the bot has one but `stop_order_id` is falsy.
+
+        Default emergency stop distance is `risk_pct` (1%) below entry for
+        longs, above for shorts. This is conservative — the intent is "stop
+        the bleed now", not "place the optimal stop". The user can refine
+        the stop afterwards.
+
+        Args:
+            risk_pct: Default risk distance if no intended stop is known.
+            dry_run: When True, log what would happen without placing orders.
+
+        Returns:
+            Dict with `protected`, `already_protected`, `skipped`, `errors`.
+        """
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "dry_run": dry_run,
+            "protected": [],
+            "already_protected": [],
+            "skipped": [],
+            "errors": [],
+        }
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected, queue_order
+
+            if not is_pusher_connected():
+                report["errors"].append({"error": "IB pusher not connected"})
+                return report
+
+            ib_positions = _pushed_ib_data.get("positions", []) or []
+
+            # Map bot's open trades by symbol → (trade, has_stop)
+            bot_trades_by_symbol = {}
+            for trade in bot._open_trades.values():
+                bot_trades_by_symbol[trade.symbol] = (trade, bool(trade.stop_order_id))
+
+            for pos in ib_positions:
+                symbol = pos.get("symbol") or (pos.get("contract", {}) or {}).get("symbol")
+                if not symbol:
+                    continue
+                qty = float(pos.get("position", pos.get("qty", 0)) or 0)
+                if abs(qty) < 1:
+                    continue   # flat / phantom residual
+
+                avg_cost = float(pos.get("avgCost", pos.get("avg_cost", 0)) or 0)
+                is_long = qty > 0
+
+                trade_entry = bot_trades_by_symbol.get(symbol)
+                if trade_entry:
+                    trade, has_stop = trade_entry
+                    if has_stop:
+                        report["already_protected"].append({
+                            "symbol": symbol, "qty": qty, "trade_id": trade.id,
+                            "stop_order_id": trade.stop_order_id,
+                        })
+                        continue
+                    # Tracked trade without stop — use its intended stop if known
+                    intended_stop = getattr(trade, "stop_price", None)
+                else:
+                    trade = None
+                    intended_stop = None
+
+                # Compute emergency stop price
+                if intended_stop and intended_stop > 0:
+                    stop_price = float(intended_stop)
+                elif avg_cost > 0:
+                    stop_price = round(
+                        avg_cost * (1 - risk_pct) if is_long else avg_cost * (1 + risk_pct),
+                        2,
+                    )
+                else:
+                    report["skipped"].append({
+                        "symbol": symbol, "qty": qty,
+                        "reason": "no_price_to_derive_stop",
+                    })
+                    continue
+
+                action = "SELL" if is_long else "BUY"
+                stop_payload = {
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": int(abs(qty)),
+                    "order_type": "STP",
+                    "stop_price": stop_price,
+                    "limit_price": None,
+                    "time_in_force": "GTC",
+                    "outside_rth": True,
+                    "trade_id": f"EMERGENCY-STOP-{symbol}-{uuid.uuid4().hex[:6]}",
+                }
+
+                if dry_run:
+                    report["protected"].append({
+                        **stop_payload, "dry_run": True,
+                        "reason": "would_protect",
+                    })
+                    continue
+
+                try:
+                    oid = queue_order(stop_payload)
+                    logger.warning(
+                        f"🛡️ Emergency stop placed on {symbol} qty={qty} "
+                        f"@ {stop_price} (was unprotected)"
+                    )
+                    if trade is not None:
+                        trade.stop_order_id = oid
+                        if not trade.stop_price:
+                            trade.stop_price = stop_price
+                        await bot._save_trade(trade)
+                    report["protected"].append({
+                        "symbol": symbol, "qty": qty, "stop_price": stop_price,
+                        "order_id": oid, "trade_id": trade.id if trade else None,
+                    })
+                except Exception as e:
+                    report["errors"].append({"symbol": symbol, "error": str(e)})
+
+            logger.info(
+                f"Orphan-position protection: protected={len(report['protected'])}, "
+                f"already={len(report['already_protected'])}, "
+                f"skipped={len(report['skipped'])}, errors={len(report['errors'])}"
+            )
+            return report
+
+        except Exception as e:
+            logger.error(f"protect_orphan_positions error: {e}")
+            report["errors"].append({"error": str(e)})
+            return report

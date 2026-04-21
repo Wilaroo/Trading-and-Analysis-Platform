@@ -47,6 +47,8 @@ def summarize_trade_outcome(trade: Dict[str, Any]) -> Dict[str, Any]:
     pnl = trade.get("realized_pnl")
     r = trade.get("r_multiple")
 
+    # Prefer stored r_multiple (set by execution-health audits) — avoids the
+    # "imported_from_ib has exit_price=0" pitfall where recompute would fail.
     if r is None and entry and stop and exit_ and direction:
         try:
             e, s, x = float(entry), float(stop), float(exit_)
@@ -69,6 +71,18 @@ def summarize_trade_outcome(trade: Dict[str, Any]) -> Dict[str, Any]:
             verdict = "loss"
         else:
             verdict = "scratch"
+    elif pnl is not None:
+        # Last-resort: realized_pnl alone gives us at least win/loss
+        try:
+            p = float(pnl)
+            if p > 1:
+                verdict = "win"
+            elif p < -1:
+                verdict = "loss"
+            else:
+                verdict = "scratch"
+        except (TypeError, ValueError):
+            pass
 
     stop_honored = trade.get("stop_honored")
     slippage = None

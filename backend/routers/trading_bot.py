@@ -165,6 +165,29 @@ async def get_recent_losses(limit: int = Query(20, ge=1, le=200)):
     return {"success": True, "count": len(losses), "losses": losses}
 
 
+@router.post("/positions/protect-orphans")
+async def protect_orphan_positions(
+    risk_pct: float = Query(0.01, ge=0.001, le=0.10,
+                            description="Emergency stop distance as pct of avg cost when no intended stop is known"),
+    dry_run: bool = Query(True, description="Default to dry-run for safety; pass false to actually place stops"),
+):
+    """Place emergency STP orders on IB positions that have no working stop.
+
+    Phase 4 of the IB bracket migration (see IB_BRACKET_ORDER_MIGRATION.md).
+    Invoke at startup or after suspected stop failures to close the naked-
+    position gap that caused the PD/GNW imported_from_ib losses.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    if not hasattr(_trading_bot, "_position_reconciler") or not _trading_bot._position_reconciler:
+        raise HTTPException(status_code=503, detail="Position reconciler not initialized")
+
+    report = await _trading_bot._position_reconciler.protect_orphan_positions(
+        _trading_bot, risk_pct=risk_pct, dry_run=dry_run,
+    )
+    return {"success": True, "report": report}
+
+
 @router.post("/start")
 async def start_bot():
     """Start the trading bot"""

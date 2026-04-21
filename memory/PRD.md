@@ -10,6 +10,27 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 ## Completed in this session (2026-04-22 — fork 2, execution hardening batch)
+### Dashboard truthfulness fix — retag bot-side cancels (2026-04-22 evening)
+Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_phase` bot-side filters, not broker cancels. Added dedicated `TradeStatus` values (`PAPER`, `SIMULATED`, `VETOED`) so future filters don't pollute the `cancelled` bucket. Migration script `scripts/retag_bot_side_cancels.py` retro-tagged 6,632 docs; execution-health now reports real failure rate (17.07% — dominated by already-disabled vwap_fade_short).
+
+### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
+`trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
+
+### Phase 4 — Startup orphan-position protection (2026-04-22 evening)
+`PositionReconciler.protect_orphan_positions`: scans `_pushed_ib_data["positions"]`, finds any with no working bot-side stop, places emergency STP using intended stop_price if known else 1% risk from avgCost (SELL for longs, BUY for shorts). Trade docs updated with the new stop_order_id and saved. Wired into `TradingBotService.start()` as a fire-and-forget background task (15s delay so pusher has time to publish positions). New endpoint `POST /api/trading-bot/positions/protect-orphans?dry_run=true|false&risk_pct=0.01` for manual triage.
+
+### Autopsy fallback — use realized_pnl when exit_price missing
+`summarize_trade_outcome` now falls back to `realized_pnl` when `exit_price=0/None` and `r_multiple` can't be recomputed (fixes the imported_from_ib case where PD bled $7.3k but showed `verdict=unknown`).
+
+### New pytest coverage (2026-04-22 evening — 27 new tests, all passing)
+- `tests/test_orphan_protection.py` (7 tests): pusher-disconnected guard, already-protected accounting, unprotected tracked trade gets stop, untracked short derives above-entry stop, dry-run safety, zero-avgcost skip, flat-position ignore.
+- `tests/test_bracket_order_wiring.py` (3 tests): simulated 3-legged return shape, Alpaca fallback signal, missing-stop-or-target graceful decline.
+- `tests/test_trade_autopsy.py` +2 tests: realized_pnl fallback when exit_price=0.
+
+### Pusher contract spec delivered
+`/app/memory/PUSHER_BRACKET_SPEC.md` — full bracket payload contract, reference `ib_insync` handler code, ACK response shape, fallback signaling, smoke-test commands. Pusher-side implementation pending on Windows PC.
+
+
 ### Alert de-dup wired into scan loop
 `services/trading_bot_service._scan_for_opportunities` runs the `AlertDeduplicator` hard veto BEFORE confidence-gate evaluation. Blocks repeat fires on already-open `(symbol, setup, direction)` and enforces a 5-min cooldown. This stops the PRCT-style stacking disaster where 8 identical vwap_fade_short alerts each bled -8.9R.
 

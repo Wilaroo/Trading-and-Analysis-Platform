@@ -1304,7 +1304,24 @@ class TradingBotService:
         logger.info(f"🤖 Trading bot started in {self._mode.value} mode")
         logger.info(f"📊 Trading hours: {self.risk_params.trading_start_hour}:{self.risk_params.trading_start_minute:02d} - {self.risk_params.trading_end_hour}:{self.risk_params.trading_end_minute:02d} ET")
         logger.info(f"💰 Max position: {self.risk_params.max_position_pct}% of account, Max daily loss: {self.risk_params.max_daily_loss_pct}%")
-        
+
+        # Phase 4 (2026-04-22): Protect any orphan IB positions on startup.
+        # Runs in the background — never block start on broker round-trips.
+        if self._position_reconciler is not None:
+            async def _startup_orphan_guard():
+                try:
+                    # Small delay so pusher has time to publish the position snapshot
+                    await asyncio.sleep(15)
+                    report = await self._position_reconciler.protect_orphan_positions(
+                        self, dry_run=False,
+                    )
+                    n_prot = len(report.get("protected", []))
+                    if n_prot:
+                        logger.warning(f"🛡️ Startup orphan-guard placed {n_prot} emergency stops")
+                except Exception as e:
+                    logger.warning(f"Startup orphan-guard failed (non-fatal): {e}")
+            asyncio.create_task(_startup_orphan_guard())
+
         # Persist state
         await self._save_state()
     

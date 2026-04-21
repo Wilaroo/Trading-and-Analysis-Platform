@@ -158,9 +158,40 @@ class TradeExecution:
             except Exception as e:
                 logger.warning(f"Guardrail check failed (allowing trade): {e}")
 
-            # Execute entry order
-            print("   📤 [_execute_trade] Calling trade_executor.execute_entry...")
-            result = await bot._trade_executor.execute_entry(trade)
+            # Execute entry order — Phase 3 (2026-04-22): prefer atomic bracket
+            # over the legacy two-step entry→stop flow so stops can't die on
+            # bot restart. Falls back automatically if pusher hasn't been
+            # upgraded yet (Phase 2 pusher contract in PUSHER_BRACKET_SPEC.md).
+            print("   📤 [_execute_trade] Calling trade_executor.place_bracket_order...")
+            bracket_result = await bot._trade_executor.place_bracket_order(trade)
+            use_legacy = (
+                not bracket_result.get('success') and
+                bracket_result.get('fallback') == 'legacy' or
+                bracket_result.get('error') in ('bracket_not_supported',
+                                                'alpaca_bracket_not_implemented',
+                                                'bracket_missing_stop_or_target')
+            )
+            if use_legacy:
+                logger.info("Bracket unavailable → legacy entry+stop path")
+                print("   ↩️ [_execute_trade] Falling back to legacy execute_entry+place_stop_order")
+                result = await bot._trade_executor.execute_entry(trade)
+            else:
+                # Translate bracket result into the legacy `result` dict shape
+                # so downstream code doesn't have to change.
+                result = {
+                    "success": bracket_result.get("success"),
+                    "order_id": bracket_result.get("entry_order_id"),
+                    "fill_price": bracket_result.get("fill_price", trade.entry_price),
+                    "filled_qty": bracket_result.get("filled_qty", 0),
+                    "status": bracket_result.get("status"),
+                    "broker": bracket_result.get("broker", "interactive_brokers"),
+                    "simulated": bracket_result.get("simulated", False),
+                    "error": bracket_result.get("error"),
+                    "bracket": True,  # flag so we skip the separate stop placement
+                    "stop_order_id": bracket_result.get("stop_order_id"),
+                    "target_order_id": bracket_result.get("target_order_id"),
+                    "oca_group": bracket_result.get("oca_group"),
+                }
             print(f"   📤 [_execute_trade] Result: {result}")
 
             if result.get('success'):
@@ -181,7 +212,8 @@ class TradeExecution:
                     trade.notes = (trade.notes or "") + " [SIMULATED]"
                 else:
                     broker = result.get('broker', 'unknown')
-                    trade.notes = (trade.notes or "") + f" [LIVE-{broker.upper()}]"
+                    tag = "BRACKET" if result.get('bracket') else "LIVE"
+                    trade.notes = (trade.notes or "") + f" [{tag}-{broker.upper()}]"
 
                 print(f"   💰 Entry commission: ${entry_commission:.2f} ({trade.shares} shares @ ${trade.commission_per_share}/share)")
 
@@ -196,10 +228,17 @@ class TradeExecution:
                     except Exception as e:
                         logger.warning(f"Failed to record entry: {e}")
 
-                # Place stop and target orders
-                stop_result = await bot._trade_executor.place_stop_order(trade)
-                if stop_result.get('success'):
-                    trade.stop_order_id = stop_result.get('order_id')
+                # Stop handling — bracket already placed the stop atomically,
+                # otherwise place it sequentially (legacy path)
+                if result.get('bracket'):
+                    trade.stop_order_id = result.get('stop_order_id')
+                    trade.target_order_id = result.get('target_order_id')
+                    if result.get('oca_group'):
+                        trade.notes = (trade.notes or "") + f" [OCA:{result['oca_group']}]"
+                else:
+                    stop_result = await bot._trade_executor.place_stop_order(trade)
+                    if stop_result.get('success'):
+                        trade.stop_order_id = stop_result.get('order_id')
 
                 # Move to open trades
                 if trade.id in bot._pending_trades:

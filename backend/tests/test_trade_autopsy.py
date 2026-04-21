@@ -44,6 +44,22 @@ def test_missing_inputs_returns_unknown():
     assert r["realized_R"] is None
 
 
+def test_pnl_only_fallback_when_exit_price_missing():
+    """imported_from_ib trades can have exit_price=0 but realized_pnl set.
+    Autopsy must still surface a verdict instead of 'unknown'."""
+    t = {"entry_price": 7.305, "stop_price": 7.0, "exit_price": 0,
+         "direction": "long", "realized_pnl": -7294.18}
+    r = summarize_trade_outcome(t)
+    assert r["verdict"] == "loss"
+    assert r["pnl_usd"] == -7294.18
+
+
+def test_pnl_only_positive_is_win():
+    t = {"exit_price": 0, "realized_pnl": 1250.50}
+    r = summarize_trade_outcome(t)
+    assert r["verdict"] == "win"
+
+
 def test_uses_explicit_r_multiple_when_present():
     """If r_multiple is already on the trade doc, use it directly."""
     t = {"entry_price": 100, "stop_price": 98, "exit_price": 104,

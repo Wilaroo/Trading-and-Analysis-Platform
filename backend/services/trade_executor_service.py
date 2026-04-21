@@ -440,7 +440,190 @@ class TradeExecutorService:
         except Exception as e:
             logger.error(f"IB stop order error: {e}")
             return {"success": False, "error": str(e)}
-    
+
+    # ==================== BRACKET ORDERS (Phase 3 — 2026-04-22) ====================
+
+    async def place_bracket_order(self, trade) -> Dict[str, Any]:
+        """Place an atomic IB bracket order (parent + OCA stop + OCA target).
+
+        Replaces the sequential entry→stop flow that left positions naked
+        during bot restarts. Entry, stop, and target are submitted to IB as
+        a single atomic batch (parent transmit=False, stop transmit=False,
+        target transmit=True → IB activates all three together). Once parent
+        fills, stop+target live at IB as GTC — they survive bot crashes,
+        pusher disconnects, and even extended offline periods.
+
+        See `/app/memory/IB_BRACKET_ORDER_MIGRATION.md` for the full spec and
+        `/app/memory/PUSHER_BRACKET_SPEC.md` for the pusher contract.
+
+        Returns:
+            dict with success, entry_order_id, stop_order_id, target_order_id,
+            oca_group, fill info (if parent filled during wait window).
+
+        Falls back to legacy two-step flow if the pusher doesn't support
+        bracket payloads yet (during migration window).
+        """
+        if self._mode == ExecutorMode.SIMULATED:
+            return await self._simulate_bracket(trade)
+
+        if not self._ensure_initialized():
+            return {"success": False, "error": "Executor not initialized"}
+
+        try:
+            if self._mode == ExecutorMode.PAPER:
+                # Alpaca bracket not implemented yet — fall through to legacy entry+stop
+                logger.info("Alpaca bracket not wired — using legacy two-step flow")
+                return {"success": False, "error": "alpaca_bracket_not_implemented"}
+            else:
+                return await self._ib_bracket(trade)
+        except Exception as e:
+            logger.error(f"Bracket order error: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _simulate_bracket(self, trade) -> Dict[str, Any]:
+        """Simulated bracket — no broker calls."""
+        return {
+            "success": True,
+            "entry_order_id": f"SIM-ENTRY-{trade.id}",
+            "stop_order_id": f"SIM-STOP-{trade.id}",
+            "target_order_id": f"SIM-TGT-{trade.id}",
+            "oca_group": f"SIM-OCA-{trade.id}",
+            "fill_price": trade.entry_price,
+            "filled_qty": trade.shares,
+            "status": "filled",
+            "simulated": True,
+        }
+
+    async def _ib_bracket(self, trade) -> Dict[str, Any]:
+        """Atomic IB bracket via the Windows pusher's `type=bracket` payload.
+
+        Pusher contract (see PUSHER_BRACKET_SPEC.md):
+          Request  : {"type": "bracket", "parent": {...}, "stop": {...}, "target": {...}}
+          Response : {"status": "filled"|"working"|"rejected", "entry_order_id",
+                     "stop_order_id", "target_order_id", "oca_group", "fill_price", ...}
+
+        If pusher returns `bracket_not_supported`, we fall back to legacy
+        entry+stop path so the migration can ship in two halves.
+        """
+        try:
+            from routers.ib import queue_order, get_order_result, is_pusher_connected
+
+            if not is_pusher_connected():
+                logger.warning("IB pusher not connected — falling back to simulation")
+                return await self._simulate_bracket(trade)
+
+            action = "BUY" if trade.direction.value == "long" else "SELL"
+            child_action = "SELL" if action == "BUY" else "BUY"
+
+            # Scalp detection — controls parent TIF and limit offset
+            setup_type = (getattr(trade, "setup_type", "") or "").lower()
+            is_scalp = any(s in setup_type for s in
+                           {"scalp", "nine_ema_scalp", "spencer_scalp", "abc_scalp"})
+
+            # Parent limit price with conservative offset (marketable but not aggressive)
+            entry_price = trade.entry_price
+            if entry_price and entry_price > 0:
+                buffer = max(entry_price * (0.0002 if is_scalp else 0.0005), 0.01)
+                limit_price = round(
+                    entry_price + buffer if action == "BUY" else entry_price - buffer, 2
+                )
+            else:
+                limit_price = entry_price
+
+            # Target price — use first scale-out target, else 2R default
+            target_price = None
+            if hasattr(trade, "target_prices") and trade.target_prices:
+                target_price = float(trade.target_prices[0])
+            elif trade.stop_price and trade.entry_price:
+                risk = abs(trade.entry_price - trade.stop_price)
+                target_price = round(
+                    trade.entry_price + 2 * risk if action == "BUY"
+                    else trade.entry_price - 2 * risk, 2
+                )
+
+            if target_price is None or trade.stop_price is None:
+                return {"success": False,
+                        "error": "bracket_missing_stop_or_target", "fallback": "legacy"}
+
+            payload = {
+                "type": "bracket",
+                "trade_id": trade.id,
+                "symbol": trade.symbol,
+                "parent": {
+                    "action": action,
+                    "quantity": trade.shares,
+                    "order_type": "LMT",
+                    "limit_price": limit_price,
+                    "time_in_force": "DAY",
+                    "exchange": "SMART",
+                },
+                "stop": {
+                    "action": child_action,
+                    "quantity": trade.shares,
+                    "order_type": "STP",
+                    "stop_price": float(trade.stop_price),
+                    "time_in_force": "GTC",
+                    "outside_rth": True,
+                },
+                "target": {
+                    "action": child_action,
+                    "quantity": trade.shares,
+                    "order_type": "LMT",
+                    "limit_price": float(target_price),
+                    "time_in_force": "GTC",
+                    "outside_rth": True,
+                },
+            }
+
+            order_id = queue_order(payload)
+            logger.info(
+                f"Bracket queued: {order_id} — {action} {trade.shares} {trade.symbol} "
+                f"parent@{limit_price} stop@{trade.stop_price} target@{target_price}"
+            )
+
+            # Wait for parent fill confirmation
+            timeout = 10.0 if is_scalp else 60.0
+            result = await asyncio.to_thread(get_order_result, order_id, timeout)
+
+            if not result:
+                logger.warning(f"Bracket timeout for {order_id} — may still execute")
+                return {
+                    "success": False, "error": "bracket_submission_timeout",
+                    "entry_order_id": order_id, "status": "timeout",
+                }
+
+            r = result.get("result", {}) or {}
+
+            # Pusher signals it doesn't yet support bracket payload (Phase 2 pending)
+            if r.get("error") == "bracket_not_supported" or r.get("status") == "bracket_not_supported":
+                logger.warning("Pusher does not support bracket payloads — falling back to legacy entry+stop")
+                return {"success": False, "error": "bracket_not_supported", "fallback": "legacy"}
+
+            status = r.get("status", "unknown")
+            if status in ("filled", "working", "submitted", "partial"):
+                return {
+                    "success": True,
+                    "entry_order_id": r.get("entry_order_id") or r.get("parent_id") or order_id,
+                    "stop_order_id": r.get("stop_order_id") or r.get("stop_id"),
+                    "target_order_id": r.get("target_order_id") or r.get("target_id"),
+                    "oca_group": r.get("oca_group"),
+                    "fill_price": r.get("fill_price", trade.entry_price),
+                    "filled_qty": r.get("filled_qty", trade.shares if status == "filled" else 0),
+                    "status": status,
+                    "broker": "interactive_brokers",
+                    "order_type": "bracket",
+                }
+            return {
+                "success": False,
+                "error": r.get("error", f"Bracket {status}"),
+                "entry_order_id": order_id,
+                "status": status,
+            }
+
+        except Exception as e:
+            logger.error(f"IB bracket execution error: {e}")
+            return {"success": False, "error": str(e)}
+
     # ==================== TARGET ORDERS ====================
     
     async def place_target_order(self, trade, target_price: float, shares: int) -> Dict[str, Any]:
