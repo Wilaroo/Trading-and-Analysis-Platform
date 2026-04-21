@@ -93,6 +93,42 @@ async def get_bot_status():
     return {"success": True, **status}
 
 
+@router.get("/execution-health")
+async def get_execution_health(
+    hours: int = Query(24, ge=1, le=720,
+                       description="Window size in hours (1 — 720)."),
+    flag_trades: bool = Query(
+        False, description="If true, also persist stop_honored flag onto trade docs."),
+):
+    """Return Trade Execution Health report.
+
+    Scans closed bot_trades in the window and flags stop-execution failures
+    (losers that blew past 1.5R = their intended stop wasn't honored at IB).
+
+    Alert levels:
+      - `ok`                 : failure rate < 5%
+      - `warning`            : 5% — 15% (investigate)
+      - `critical`           : > 15% (stop trading, fix stop orders)
+      - `insufficient_data`  : < 5 closed trades in window
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    db = _trading_bot._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from services.trade_execution_health import TradeExecutionHealth
+    health = TradeExecutionHealth(db)
+    report = health.audit_recent_trades(hours=hours)
+    flagged = health.flag_trade_docs(hours=hours) if flag_trades else 0
+
+    return {
+        "success": True,
+        "report": report.to_dict(),
+        "flagged_docs": flagged,
+    }
+
+
 @router.post("/start")
 async def start_bot():
     """Start the trading bot"""
