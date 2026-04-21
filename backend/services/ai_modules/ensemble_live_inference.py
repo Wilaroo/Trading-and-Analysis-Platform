@@ -147,6 +147,15 @@ def predict_meta_label_p_win(
     base = setup_type.upper().replace("_LONG", "").replace("_SHORT", "")
     ens_key = SCANNER_TO_ENSEMBLE_KEY.get(base)
     if ens_key is None:
+        # Pass-through: the caller may already be passing a canonical ensemble
+        # config key (e.g. "REVERSAL", "BREAKOUT", "MEAN_REVERSION"). Accept it.
+        try:
+            from services.ai_modules.ensemble_model import ENSEMBLE_MODEL_CONFIGS as _ens_cfg_check
+            if base in _ens_cfg_check:
+                ens_key = base
+        except Exception:
+            pass
+    if ens_key is None:
         return miss(f"unmapped_setup:{base}")
 
     try:
