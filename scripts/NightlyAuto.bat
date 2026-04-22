@@ -21,7 +21,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://pipeline-v5.preview.emergentagent.com
+set CLOUD_URL=https://quantml-pipeline.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%nightly_auto.log
 
 :: Log start time

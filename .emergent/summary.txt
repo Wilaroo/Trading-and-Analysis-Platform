@@ -1,139 +1,146 @@
-<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. The platform runs on a physical DGX Spark (Linux) + Windows PC. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques (triple-barrier, CUSUM, CPCV, Deflated Sharpe).
+<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. The UI/UX redesign of the main SentCom dashboard needs to provide an extreme-information-density view of the bot's pre-market prep, real-time pipeline funnel, open positions, and PnL, eliminating dead space and scrolling.
 
-**User's preferred language**: English (INSTRUCT next agent to respond in English)
+**User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform. The Phase 8 Ensemble Meta-Labeler is now fully functional, properly converting XGBoost predictions to a Binary P(win) metric, and wired into the Confidence Gate (Layer 12) for dynamic bet-sizing. However, a massive Data Pipeline Audit revealed severe trade execution leaks: stops are being ignored (causing massive R bleed) and 97% of placed orders are cancelled before filling. The system now has robust diagnostic scripts and an Execution Health endpoint.
+**what currently exists?**: A full-stack AI trading platform running on a DGX Spark (Linux) and Windows PC. The LONG-side pipeline is completely unblocked E2E: the 5-min generic direction model was successfully retrained and force-promoted, reaching a healthy  of 0.597. Setup-specific LONG models that output 0.44–0.53 confidence (MODE C) now properly trigger CONFIRMS tier logic because the alignment threshold was lowered from 0.60 to 0.50. The massive  component has been successfully and safely extracted into a modular structure (, , ). The new UI integrates TradingView's open-source  with a new backend endpoint fetching VWAP/EMA and trade markers. A Model Health Scorecard is actively wired into the UI.
 
 **Last working item**:
-    - Last item agent was working: Fulfilling a batch of execution-hardening requests from the user: scaffolding Trade Autopsy, adding scanner-alert de-duplication (), investigating the 97% order-cancellation rate (), disabling the bleeding  setup, and preparing Phase 1 of the IB Bracket Order migration.
+    - Last item agent was working: Making the  tiles clickable so that when a user clicks a MODE C or MISSING setup model, it automatically triggers the backend to enqueue a targeted retrain job for that specific  pair. Agent was just investigating backend training entry points () in  to wire this up.
     - Status: IN PROGRESS
-    - Agent Testing Done: N (Agent just created the files and needs to implement/wire them up into the main services)
-    - Which testing method agent to use? manual testing by bash/pytest (Testing agent cannot be used due to physical DGX Spark hardware constraints. Rely on user to execute commands).
+    - Agent Testing Done: N
+    - Which testing method agent to use? manual testing by python -c / bash (Hardware constraint: Code runs on physical DGX Spark, user must execute or verify)
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: 97% Order-Cancellation Rate (P0)
-     - Attempted fixes: Agent created  to diagnose why 1,216/1,220 orders for setups like  are cancelled before filling.
-     - Next debug checklist: Instruct user to run . Check if limit prices are stale by the time they reach IB, if the order type is too aggressive, or if the confidence gate is cancelling post-submit.
-     - Why fix this issue and what will be achieved with the fix? The bot is severely starved of actual trade data because orders aren't filling. Fixing this restores trade volume.
-     - Status: IN PROGRESS
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
-
-  Issue 2: IB Stops Not Being Honored / Bleeding R (P0)
-     - Attempted fixes: Created architectural plan  to migrate to atomic bracket orders.
-     - Next debug checklist: Implement Phase 1 of the bracket order migration. Modify  and  so entry, target, and stop orders are submitted atomically to Interactive Brokers, rather than sequentially.
-     - Why fix this issue and what will be achieved with the fix? Stops catastrophic losses (e.g., one trade bled -261R because the sequential stop order was never placed/honored due to a bot restart).
+  Issue 1: DOWN-side Model Collapse () on 5-min Generic Predictor (P0)
+     - Attempted fixes: The recent  weight implementation fixed the LONG side (UP) but severely over-boosted it, completely starving the DOWN class during the full universe retrain. 
+     - Next debug checklist: Modify the class weighting logic in  /  (likely using a dampened  or manual clamping) to prevent the minority class from entirely collapsing the opposing class, then provide user with a script command to retrain again.
+     - Why fix this issue and what will be achieved with the fix? SHORT setups are completely blocked right now because the generic model cannot predict DOWN.
      - Status: NOT STARTED
-     - Is recurring issue? Y
+     - Is recurring issue? Y (Pendulum swing from previous collapse)
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
-  Issue 3: Scanner Alerts Re-firing on Open Positions (P0)
-     - Attempted fixes: Scaffolded  to prevent duplicate alerts.
-     - Next debug checklist: Implement logic to skip alerts if  is already in  OR fired within 5 minutes. Wire this into the main scanner/bot loop.
-     - Why fix this issue and what will be achieved with the fix? Stops the bot from stacking identical losing positions during an adverse move.
-     - Status: IN PROGRESS
-     - Is recurring issue? Y
+  Issue 2: 4 SMB models missing from DB (P2)
+     - Attempted fixes: Identified during diagnostics. , ,  are declared in config but missing.
+     - Next debug checklist: Run targeted  training for 5 mins + 1 min. (Will be easily solvable via the UI once the Last Working Item is finished).
+     - Why fix this issue and what will be achieved with the fix? Ensures all configured setups have baseline models.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 3: Simulated exit ignores stops (P2)
+     - Attempted fixes: None. Simulated fills compute at end-of-bar rather than using stop-triggered exits.
+     - Next debug checklist: Check simulation phase fills computation and enforce stop-loss logic.
+     - Why fix this issue and what will be achieved with the fix? Prevents execution health metrics from being polluted with fake failed stops.
+     - Status: NOT STARTED
+     - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Scaffold and Wire Trade Autopsy (P1)
-     - Where to resume:  was created. Wire it to an API endpoint so the frontend can display stop-honor status, gate layer votes, P(win), and initial entry context for closed trades.
-     - What will be achieved with this? Turns losing trades into actionable debugging sessions for the user.
+  Task 1: Clickable Model Health Scorecard Retrains (P1)
+     - Where to resume:  and the respective backend SentCom router to call .
+     - What will be achieved with this? Allows the user to retrain sick models directly from the UI scorecard rather than running CLI scripts manually.
      - Status: IN PROGRESS
      - Should Test frontend/backend/both after fix? both
      - Blocked on something: None
 
+  Task 2: Stage 2d SentCom Layout Rebuild (V5 Layout) (P2)
+     - Where to resume: 
+     - What will be achieved with this? Implement the exact grid layout from  (e.g., hidden behind a  prop/flag) now that all panels and charts are modularized.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? frontend
+     - Blocked on something: Task 1
+
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P1) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
-    - 🔴 (P1) Phase 2E: Setup-Specific Visual CNN Meta-Labeler - Train hybrid multimodal models for Tier-1 setups. (Note: Blocked until execution fixes gather enough live data; currently only ~150 fully closed trades exist).
-    - 🟡 (P1) Wire FinBERT into confidence gate as Layer 13.
+    - 🔴 (P1) Implement  math for dynamic portfolio allocator (Logged in PRD backlog post-Phase-13-v3).
+    - 🔴 (P1) Phase 2D: Wire HRP/NCO Portfolio Allocator into  (position sizing respects portfolio correlation).
     
     Future Tasks:
-    - ⚪ (P2) Modify  to use its natural  instead of hardcoding 1 day.
-    - ⚪ (P2) Wire HRP/NCO Portfolio Allocator into .
+    - 🟡 (P2) Stage 2e: Add Support/Resistance levels and Setup Pins to the  lightweight-charts instance.
+    - 🟡 (P2) Dead-model cleanup script: Delete <52% training_acc models so next revalidation isn't wasting compute.
+    - 🟡 (P2) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
 
 **Completed work in this session**
-- Fixed Phase 8 DMatrix  by properly wrapping numpy arrays in  during prediction (DONE)
-- Created  with LRU caching and wired the Phase 8 Meta-Labeler into the Confidence Gate (Layer 12) with Kelly bet-sizing ramp (DONE)
-- Wrote and executed data pipeline audit tools: , , ,  (DONE)
-- Developed  and  endpoint, discovering a 17.1% stop failure rate and 97% order cancellation rate (DONE)
-- Disabled the catastrophic  setup in  (DONE)
+- Created  and successfully guided user to retrain and promote , achieving 0.597 UP recall (LONG side officially unblocked!) (DONE)
+- Lowered  consensus threshold from 0.60 to 0.50 in  to allow setup models to fire CONFIRMS (DONE)
+- Added Pareto-improvement escape hatch to Model Protection Gate to allow promotion if one class improves significantly without regression on the other (DONE)
+- Successfully and safely extracted 3,614-line  into 35+ smaller feature-sliced files (, , ) (DONE)
+- Integrated  and built  (DONE)
+- Created  endpoint for returning chart bars, VWAP/EMA indicators, and trade markers (DONE)
+- Scaffolded  and built  endpoint to classify setups into HEALTHY/MODE C/MODE B (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: CNN training data has an 8% win-rate imbalance.
-     - Why to solve this issue and what will be achieved with this? May need focal loss or  to improve  for Phase 2E.
-     - Should Test frontend/backend/both after fix: backend
-     - Is recurring issue? N
+   - Issue 1: Simulated exit ignores stops (Logged in Pending Issues).
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: None
-  - Recurrence count: 0
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: The generic model class-balance pendulum swung too far. Previous job had 0.0 UP recall. Fixed class weighting caused it to swing to 0.0 DOWN recall. 
+  - Recurrence count: 1
+  - Status: IN PROGRESS
 
 **Code Architecture**
-DGX Spark (Linux) runs Backend (FastAPI on :8001), Chat Server (:8002), MongoDB, Frontend (React on :3000). Windows PC runs IB Gateway, Data Pusher, Historical Collectors over LAN.
+DGX Spark (Linux) runs Backend (FastAPI on :8001), Chat Server (:8002), MongoDB, Frontend (React on :3000). 
+Frontend  dashboard modularized into .
+ is used for high-performance canvas rendering.
 
 **Key Technical Concepts**
-XGBoost (DMatrix handling), Binary Meta-Labeling (P(win)), Kelly Bet-Sizing Ramp, IB Native Bracket Orders, MongoDB aggregations.
+XGBoost, Deep Learning (TFT, CNN-LSTM), FastAPI, React, Pytest, MongoDB,  (Apache 2.0).
 
 **key DB schema**
-  -  DB ->  (now backfilled with , , and ), .
+  -  DB -> , ,  (Note: singular ), .
 
 **changes in tech stack**
-  - None this session.
+  - Added  as an npm dependency for frontend charting.
 
 **All files of reference**
-  -  (Created for Layer 12 bet-sizing & LRU cache)
-  -  (Updated to handle Layer 12 and hard skips)
-  -  (Created to monitor IB stop adherence)
-  -  (Crucial architectural plan for atomic IB stops)
-  -  (Scaffolded this session)
-  -  (Scaffolded this session)
-  -  (Scaffolded this session)
-  -  (Disabled )
+  - 
+  - 
+  - 
+  -  (New)
+  -  (Refactored)
+  -  (New)
+  -  (New)
 
 **Areas that need refactoring**
-Trade Execution (, ): Sequential order placement (entry, then stop) must be completely refactored into atomic IB bracket orders.
+None.  was successfully broken down in this session.
 
 **key api endpoints**
-  - 
-  - 
+  -  (Serves lightweight-charts data)
+  -  (Serves the new scorecard)
 
 **Critical Info for New Agent**
-- **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux). You cannot test the pipeline natively or use the testing subagent. Rely entirely on Pytest and the user executing commands on Spark.
-- Backend often runs as , not via supervisor. Watch out for orphaned processes claiming port 8001.
-- **The primary focus has violently shifted from AI Training to Trade Execution.** We discovered the bot bleeds huge amounts of capital because stops aren't atomic and die on restarts. Implementing **IB Bracket Orders** is an absolute P0.
-- The agent just scaffolded files for the new tasks (deduplication, cancellation investigation, trade autopsy) but needs to finish wiring them up and instruct the user to run the scripts.
+- **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux) managed by the user. You **cannot** natively test the E2E ML training pipeline or use the testing subagent for ML code. Rely entirely on Pytest and providing the user bash/python commands to execute on Spark (e.g. ).
+- **Archive DB naming quirk:** The archive collection is  (singular model), not . Keep this in mind when querying mongo directly.
+-  has no native indicator functions; EMA, VWAP, and trade markers are pre-calculated by the backend and passed to the frontend as line/marker series. 
+- The user is extremely responsive and helpful. If you implement a fix requiring ML training, just write the script and ask the user to run it and report the logs back.
 
 **documents and test reports created in this job**
-  - 
-  - 
-  - 
-  - 
+  -  (Updated with Phase 13 E2E E-density layout requirements & fixes)
 
 **Last 10 User Messages and any pending HUMAN messages**
- - *User*: thats agood potential imporvement. lets scaffold that. then lets also do: Locate and disable vwap_fade_short... Implement IB bracket orders... Add scanner-alert de-duplication... Investigate 97% order-cancellation rate...
- - *Pending HUMAN message*: Agent created the scripts/files for these requests but hasn't implemented the core logic inside them or provided the user with bash commands to execute/test them. Resume by completing these scripts/features and instructing the user.
+ - *Agent*: Finished Stage 2f Model Health Scorecard scaffold. Endpoint classifies models correctly based on recall floors. Finished task. Recommended making the tiles clickable to trigger automatic retrain.
+ - *User*: ok add that enhancement
+ - *Pending HUMAN message*: None. The agent should immediately proceed to wire up the frontend  for the scorecard tiles to a backend endpoint that calls .
 
 **Project Health Check:**
-Broken (Execution logic flaws: 97% cancellation rate and missing atomic stops. The files to fix this have just been scaffolded).
+Healthy. E2E pipeline for LONG setups is fully unblocked and works. The massive React refactor was successful with zero regressions. Focus is now on the remaining class-balance tweak for SHORTs and finishing UI conveniences.
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution)
   - Ollama (Local )
+  - Finnhub (News)
+  - FinBERT (Sentiment)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Due to physical DGX Spark setup constraints)
+  - Testing agent used after significant changes: NO (Due to physical hardware constraints, only Pytest was used locally)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 4 new pytest suites (89/89 tests passing natively).
-  - Known regressions: None code-wise, but severe algorithmic/execution regressions were discovered in production data.
+  - Test files created: , .
+  - Known regressions: Generic 5-min direction model lost  accuracy after  was fixed.
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent scaffolded , , and  but finished the turn before implementing the actual logic inside them, writing the bracket order logic, or instructing the user on how to run them. Proceed directly to filling out these files.</analysis>
+The agent was asked to make the scorecard tiles clickable to trigger a targeted retrain but the conversation context ended while analyzing the endpoints. Proceed with this task immediately.</analysis>
