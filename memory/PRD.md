@@ -53,7 +53,23 @@ Default=True so next retrain gets the fix automatically. `apply_class_balance=Fa
 
 Plus 3 new unit tests for `compute_per_sample_class_weights` in `test_dl_training_utils.py`.
 
-**Full session suite: 46/46 passing** (9 gate-log + 23 DL utils + 4 XGB class balance + 10 setup resolver).
+**Full session suite: 56/56 passing** (9 gate-log + 23 DL utils + 4 XGB class balance + 10 setup resolver + 10 resolver trace endpoint).
+
+### Setup-resolver diagnostic endpoint SHIPPED
+`GET /api/ai-training/setup-resolver-trace` — makes scanner → model routing inspectable.
+  - `?setup=rubber_band_scalp_short` — single trace: returns `resolved_key`, `resolved_loaded`, `match_step` (`exact` / `legacy_vwap_alias` / `short_family` / `long_base_strip` / `family_substring` / `fallback`), `will_use_general`
+  - `?batch=a,b,c` — batch mode with `coverage_rate` across all inputs
+  - Uses the live `timeseries_service._setup_models` so it reflects what's ACTUALLY loaded on Spark, not the trained manifest
+  - Live-verified on preview backend (`loaded_models_count=0` → every input reports `fallback` → this is exactly the coverage-gap signal the endpoint was designed to surface)
+  - `backend/tests/test_setup_resolver_trace_endpoint.py` — 10 tests covering every `match_step` branch, batch parsing, whitespace handling, missing-param 400
+
+**Next step for user (on Spark, post-retrain):**
+```
+curl -s "http://localhost:8001/api/ai-training/setup-resolver-trace?batch=rubber_band_scalp_short,vwap_reclaim_short,halfback_reversal_short,opening_drive_long,reversal_long,vwap_fade" | python3 -m json.tool
+```
+Any trace with `resolved_loaded=false` is a coverage gap → either map it in `_resolve_setup_model_key` or add a training profile.
+
+## Completed prior fork (2026-04-24 — Gate-log diagnostic + DL Phase-1 closure)
 
 **Next step for user (on Spark):**
 1. Save to Github → `git pull` on Spark

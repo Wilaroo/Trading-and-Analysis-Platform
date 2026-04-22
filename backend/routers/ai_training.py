@@ -590,6 +590,86 @@ def list_scorecards(setup_type: str = None, bar_size: str = None, min_grade: str
         return {"success": True, "count": len(out), "scorecards": out}
     except Exception as e:
         return {"success": False, "scorecards": [], "error": str(e)}
+@router.get("/setup-resolver-trace")
+def setup_resolver_trace(setup: Optional[str] = None, batch: Optional[str] = None):
+    """
+    Diagnostic: trace how a scanner-emitted setup_type routes to a trained model.
+
+    Two modes:
+      • `?setup=rubber_band_scalp_short` — single trace
+      • `?batch=short_scalp,vwap_reclaim_short,halfback_reversal_short` — comma-separated list
+
+    For each input, returns:
+      • input:            raw setup_type as sent
+      • normalized:       uppercase version
+      • resolved_key:     the key the resolver picks
+      • resolved_loaded:  whether that key has a loaded model in `_setup_models`
+      • match_step:       which priority branch fired (exact / legacy / short_family / long_base / fallback)
+      • will_use_general: True when no setup model will match → general direction_predictor is used
+
+    Purpose: makes coverage gaps obvious. If scanner emits `my_new_setup_short`
+    and no SHORT_* family contains `MY_NEW_SETUP`, you'll see `will_use_general=true`
+    and know to either add a training profile or map the alias.
+    """
+    from services.ai_modules.timeseries_service import get_timeseries_ai, TimeSeriesAIService
+
+    ts = get_timeseries_ai()
+    available = set(ts._setup_models.keys()) if hasattr(ts, "_setup_models") else set()
+    # Keys are a mix of str and (str, bar_size) tuples — we only care about the
+    # string keys for resolver comparison (those are the canonical model-name lookups)
+    available_str_keys = {k for k in available if isinstance(k, str)}
+
+    def _trace_one(raw: str):
+        if not raw:
+            return {"input": raw, "error": "empty setup"}
+        normalized = raw.upper()
+        resolved = TimeSeriesAIService._resolve_setup_model_key(raw, available_str_keys)
+
+        # Figure out which branch fired — cheap static inspection
+        match_step = "fallback"
+        if resolved == normalized and normalized in available_str_keys:
+            match_step = "exact"
+        elif normalized in ("VWAP_BOUNCE", "VWAP_FADE") and resolved == "VWAP":
+            match_step = "legacy_vwap_alias"
+        elif normalized.endswith("_SHORT") and resolved.startswith("SHORT_"):
+            match_step = "short_family"
+        elif normalized.endswith("_LONG") and resolved == normalized[:-5]:
+            match_step = "long_base_strip"
+        elif resolved != normalized and resolved in available_str_keys:
+            match_step = "family_substring"
+
+        return {
+            "input": raw,
+            "normalized": normalized,
+            "resolved_key": resolved,
+            "resolved_loaded": resolved in available_str_keys,
+            "match_step": match_step,
+            "will_use_general": resolved not in available_str_keys,
+        }
+
+    if batch:
+        items = [s.strip() for s in batch.split(",") if s.strip()]
+        traces = [_trace_one(s) for s in items]
+        coverage = sum(1 for t in traces if t.get("resolved_loaded")) / max(1, len(traces))
+        return {
+            "success": True,
+            "count": len(traces),
+            "coverage_rate": round(coverage, 4),
+            "loaded_models_count": len(available_str_keys),
+            "traces": traces,
+        }
+
+    if setup:
+        return {
+            "success": True,
+            "loaded_models_count": len(available_str_keys),
+            "trace": _trace_one(setup),
+        }
+
+    raise HTTPException(
+        status_code=400,
+        detail="Provide either ?setup=... or ?batch=...,..."
+    )
 
 
 @router.get("/trial-stats/{setup_type}/{bar_size}")
