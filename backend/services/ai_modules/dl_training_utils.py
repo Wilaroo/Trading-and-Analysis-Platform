@@ -77,6 +77,35 @@ def compute_balanced_class_weights(
     return weights.astype(np.float32)
 
 
+def compute_per_sample_class_weights(
+    y: np.ndarray,
+    num_classes: int = 3,
+    clip_ratio: float = 5.0,
+) -> np.ndarray:
+    """
+    Per-sample weight vector for class-balancing with frameworks that consume
+    `sample_weight` (XGBoost DMatrix, sklearn, lightgbm — anywhere class_weight
+    isn't directly supported).
+
+    Each sample gets its class's balanced weight. The output is normalized so
+    mean(w) == 1, which preserves the absolute loss scale.
+
+    Returns float32 array of length len(y). Missing classes in y are silently
+    ignored for the output (they have no samples to weight).
+    """
+    y = np.asarray(y, dtype=np.int64)
+    if len(y) == 0:
+        return np.array([], dtype=np.float32)
+    class_w = compute_balanced_class_weights(y, num_classes=num_classes, clip_ratio=clip_ratio)
+    # Clamp indices into range — defensive against stray labels
+    idx = np.clip(y, 0, num_classes - 1)
+    per_sample = class_w[idx].astype(np.float32)
+    m = float(per_sample.mean())
+    if m > 0:
+        per_sample = per_sample / m
+    return per_sample.astype(np.float32)
+
+
 # ── Sample uniqueness weights ───────────────────────────────────────────
 
 def compute_sample_weights_from_intervals(

@@ -67,6 +67,34 @@ def test_balanced_class_weights_empty_safe():
     assert np.allclose(w, 1.0)
 
 
+# ── compute_per_sample_class_weights ───────────────────────────────────
+
+def test_per_sample_class_weights_mean_is_one():
+    # 70% class 0, 10% class 1, 20% class 2
+    y = np.array([0] * 70 + [1] * 10 + [2] * 20, dtype=np.int64)
+    from services.ai_modules.dl_training_utils import compute_per_sample_class_weights
+    w = compute_per_sample_class_weights(y, num_classes=3, clip_ratio=5.0)
+    assert w.shape == (100,)
+    # Normalized to mean == 1.0 so the absolute loss scale is preserved
+    assert abs(float(w.mean()) - 1.0) < 1e-5
+    # Rare class samples weigh more than majority class samples
+    assert w[75] > w[0]  # sample 75 is class 1; sample 0 is class 0
+    assert w[85] > w[0]  # sample 85 is class 2
+
+
+def test_per_sample_class_weights_uniform_input():
+    y = np.array([0] * 30 + [1] * 30 + [2] * 30, dtype=np.int64)
+    from services.ai_modules.dl_training_utils import compute_per_sample_class_weights
+    w = compute_per_sample_class_weights(y)
+    assert np.allclose(w, 1.0)
+
+
+def test_per_sample_class_weights_empty_safe():
+    from services.ai_modules.dl_training_utils import compute_per_sample_class_weights
+    w = compute_per_sample_class_weights(np.array([], dtype=np.int64), num_classes=3)
+    assert len(w) == 0
+
+
 # ── compute_sample_weights_from_intervals ───────────────────────────────
 
 def test_sample_weights_unique_events_all_ones():

@@ -839,6 +839,7 @@ class TimeSeriesGBM:
         skip_save: bool = False,
         num_classes: int = 2,
         sample_weights: Optional[np.ndarray] = None,
+        apply_class_balance: bool = True,
     ) -> 'ModelMetrics':
         """
         Train the model from pre-extracted features and targets.
@@ -858,6 +859,13 @@ class TimeSeriesGBM:
             sample_weights: Optional per-sample weights for XGBoost (López de Prado
                             sample-uniqueness; pass `concurrency_weights(event_intervals)`).
                             Mean should be ~1.0. If None, uniform weighting.
+            apply_class_balance: When True (default), multiply sample_weights by
+                            sklearn-balanced per-sample class weights. This is the
+                            fix for 3-class majority-class collapse (Phase 13
+                            revalidation showed longs returning 0 trades because
+                            the 3-class softprob was always predicting DOWN/FLAT
+                            on triple-barrier targets skewed by PT=2×ATR vs
+                            SL=1×ATR). Set False to reproduce legacy behavior.
 
         Returns:
             ModelMetrics with training results
@@ -875,7 +883,35 @@ class TimeSeriesGBM:
             else:
                 logger.warning(f"sample_weights length {len(sw)} != y length {len(y)} — ignoring")
                 sample_weights = None
-        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features, {num_classes}-class{uw_note}")
+
+        # ── Class-balance fix (XGBoost 3-class majority-class collapse) ──
+        # Computes inverse-frequency per-sample weights (clip 5×) and multiplies
+        # into existing sample_weights. Mean-normalized afterwards so the
+        # effective loss scale is unchanged.
+        cb_note = ""
+        if apply_class_balance and num_classes >= 2:
+            from services.ai_modules.dl_training_utils import (
+                compute_per_sample_class_weights,
+                compute_balanced_class_weights,
+            )
+            class_w_per_sample = compute_per_sample_class_weights(
+                y, num_classes=num_classes, clip_ratio=5.0,
+            )
+            if sample_weights is None:
+                merged = class_w_per_sample
+            else:
+                merged = np.asarray(sample_weights, dtype=np.float32) * class_w_per_sample
+                m = float(merged.mean()) if len(merged) else 1.0
+                if m > 0:
+                    merged = merged / m
+            sample_weights = merged.astype(np.float32)
+            class_w_vec = compute_balanced_class_weights(y, num_classes=num_classes)
+            cb_note = f", class_balanced (per-class weights={class_w_vec.tolist()})"
+
+        logger.info(
+            f"Training from pre-extracted features: {len(X)} samples, "
+            f"{len(feature_names)} features, {num_classes}-class{uw_note}{cb_note}"
+        )
 
         # Update feature names for this model
         self._feature_names = feature_names

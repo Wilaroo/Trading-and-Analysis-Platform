@@ -9,7 +9,62 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-24 — Gate-log diagnostic + DL Phase-1 closure)
+## Completed this fork (2026-04-24 — Gate diag + DL Phase-1 + Post-Phase-13 fixes)
+
+### Post-Phase-13 findings (user ran `scripts/revalidate_all.py` on Spark)
+- **3 SHORT models PROMOTED** with real edge: SHORT_SCALP/1 min (417 trades, 53.0% WR, **1.52 Sharpe**, +6.5pp edge), SHORT_VWAP/5 mins (525 trades, 54.3% WR, **1.76 Sharpe**, +5.3pp), SHORT_REVERSAL/5 mins (459 trades, 53.4% WR, **1.94 Sharpe**, +7.6pp).
+- **10/10 LONG setups REJECTED — `trades=0` in Phase 1** across every one. Root cause diagnosed: 3-class XGBoost softprob models collapsed to always-predicting DOWN/FLAT (triple-barrier PT=2×ATR vs SL=1×ATR + bearish training regime → DOWN-heavy labels). Neither the 13-layer confidence gate nor the DL class weights (which only affect TFT/CNN-LSTM) could touch this — the XGBoost training loop itself was uniform-weighted for class balance.
+- Secondary: several shorts failed only on MC P(profit) or WF efficiency (SHORT_ORB 52.5% MC, SHORT_BREAKDOWN 68% WF).
+- Multiple models have training_acc <52% (ORB 48.6%, GAP_AND_GO 48.5%, MOMENTUM 44.2%) → dead weight, should be deleted on next cleanup pass.
+
+### Option A — Short-model routing SHIPPED
+**Problem:** Scanner emits fine-grained setup_types like `rubber_band_scalp_short` / `vwap_reclaim_short`; training saves aggregate keys like `SHORT_SCALP` / `SHORT_VWAP` / `SHORT_REVERSAL`. The `predict_for_setup` path did a naive `setup_type.upper()` dict lookup → every promoted short model was unreachable from the live scanner path. The edge was being ignored.
+
+**Fix:** New `TimeSeriesAIService._resolve_setup_model_key(setup_type, available_keys)` static resolver with priority chain:
+  1. Exact uppercase match (preserves existing behavior)
+  2. Legacy `VWAP_BOUNCE` / `VWAP_FADE` → `VWAP`
+  3. Short-side routing: strip `_SHORT` suffix, try `SHORT_<base>` exact, then family substring match against 10 known SHORT_* models (SCALP → SHORT_SCALP, VWAP → SHORT_VWAP, etc.)
+  4. Long-side: strip `_LONG`, try base, then family substring
+  5. Fallback to raw (caller routes to general model)
+
+Wired into `predict_for_setup` line 2492. Existing long-side VWAP_BOUNCE/VWAP_FADE routing preserved. Fully reversible — resolver is pure.
+
+**Impact:** `rubber_band_scalp_short` → `SHORT_SCALP` (newly promoted), `vwap_reclaim_short` → `SHORT_VWAP`, `halfback_reversal_short` → `SHORT_REVERSAL`. All three promoted shorts are now reachable from the live scanner path.
+
+**Regression coverage** — `backend/tests/test_setup_model_resolver.py` (10 tests): exact match, legacy VWAP mapping, 4 scalp-short variants, 3 vwap-short variants, 3 reversal-short variants, long-side suffix strip, unknown-setup fallback, short→base fallback when no SHORT models loaded, empty/None passthrough, VWAP_FADE_SHORT double-suffix case. All 10 pass.
+
+### Option B — XGBoost class-balance fix SHIPPED
+**Problem:** The 10/10 long rejects in Phase 13 were caused by 3-class XGBoost softprob collapsing to "always predict DOWN/FLAT" because `train_from_features` used uniform `sample_weight` for class balance. The triple-barrier label distribution (DOWN ≈ 50-60%, FLAT ≈ 30-40%, UP ≈ 10-15%) meant gradient pressure on the UP class was minimal.
+
+**Fix:** Added `apply_class_balance: bool = True` kwarg to `TimeSeriesGBM.train_from_features`. When True (default), the method:
+  1. Computes sklearn-balanced per-sample weights via new `dl_training_utils.compute_per_sample_class_weights(y, num_classes=3, clip_ratio=5.0)` — inverse-frequency, clipped 5×, mean-normalized to 1.0
+  2. Multiplies element-wise into existing `sample_weights` (uniqueness) — both signals stacked
+  3. Re-normalizes to mean==1 so absolute loss scale is unchanged
+  4. DMatrix receives the blended weight vector → XGBoost sees ~5× more gradient pressure on UP class samples
+  5. Logged as `class_balanced (per-class weights=[1.0, 1.67, 5.0])` in training output
+
+Default=True so next retrain gets the fix automatically. `apply_class_balance=False` reproduces legacy behavior bit-for-bit.
+
+**Regression coverage** — `backend/tests/test_xgb_class_balance.py` (4 tests):
+  - Minority-class samples weigh ~5× majority-class samples for the Phase-13 skew pattern
+  - `train_from_features(apply_class_balance=True)` actually passes class-balanced `weight=` into `xgb.DMatrix` (integration-style with stubbed xgb)
+  - `apply_class_balance=False` → DMatrix weight= is None (legacy uniform)
+  - Uniqueness + class-balance blend: element-wise product, mean-normalized, class skew preserved in the blend
+
+Plus 3 new unit tests for `compute_per_sample_class_weights` in `test_dl_training_utils.py`.
+
+**Full session suite: 46/46 passing** (9 gate-log + 23 DL utils + 4 XGB class balance + 10 setup resolver).
+
+**Next step for user (on Spark):**
+1. Save to Github → `git pull` on Spark
+2. Restart backend
+3. Kick off full retrain. Watch for log lines:
+   - `Training from pre-extracted features: ..., class_balanced (per-class weights=[1.0, 1.6, 4.8])` — confirms class balance is active
+   - `[TFT] Purged split: ... class_weights=[1.0, 0.45, 2.1] sample_w_mean=1.000` (on TFT/CNN-LSTM retrain)
+4. Re-run `scripts/revalidate_all.py` — expect non-zero trade counts on LONG setups and more promotions.
+5. (Optional) `export TB_DL_CPCV_FOLDS=5` before retrain for CPCV stability distribution in the scorecard.
+
+## Completed prior fork (2026-04-24 — Gate-log diagnostic + DL Phase-1 closure)
 
 ### P0 Task 2 — TFT + CNN-LSTM: Phase-1 infra closed SHIPPED
 Background: Phase 1 (sample-uniqueness weights, purged CPCV, scorecard, deflated Sharpe) was wired into XGBoost on 2026-04-20 but never plumbed into the DL training loops. Both models were training with plain `CrossEntropyLoss` on a chronological 80/20 split — the #1 likely cause of the <52% accuracy collapse and the `TFT signal IGNORED` / `CNN-LSTM signal IGNORED` log spam in the confidence gate.

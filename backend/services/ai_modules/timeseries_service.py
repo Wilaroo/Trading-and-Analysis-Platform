@@ -2476,6 +2476,84 @@ class TimeSeriesAIService:
         )
         logger.info(f"Saved setup model {setup_type}/{bar_size} to DB")
     
+    @staticmethod
+    def _resolve_setup_model_key(setup_type: str, available_keys) -> str:
+        """
+        Map a scanner-emitted setup_type to the best matching trained-model key.
+
+        Scanner emits fine-grained names like "rubber_band_scalp_short" or
+        "vwap_reclaim_long". Training uses aggregate names like "SHORT_SCALP",
+        "SHORT_VWAP", "SCALP", "VWAP". This resolver picks the most specific
+        matching model that is actually loaded.
+
+        Priority (first match wins):
+          1. exact uppercase match (legacy direct lookup)
+          2. short-side: try SHORT_<family> for known families
+          3. base-name without _LONG / _SHORT suffix
+          4. fallback to input (caller will miss → general model)
+
+        Keeps routing logic in one place so future taxonomy changes don't
+        fan out across the service.
+        """
+        if not setup_type:
+            return setup_type
+        raw = setup_type.upper()
+        available = set(available_keys) if available_keys is not None else set()
+
+        # 1. Direct hit
+        if raw in available:
+            return raw
+
+        # Manual legacy remaps (existing behavior)
+        legacy_remap = {"VWAP_BOUNCE": "VWAP", "VWAP_FADE": "VWAP"}
+        if raw in legacy_remap and legacy_remap[raw] in available:
+            return legacy_remap[raw]
+
+        is_short = raw.endswith("_SHORT")
+        is_long = raw.endswith("_LONG")
+        base = raw
+        if is_short:
+            base = raw[:-6]
+        elif is_long:
+            base = raw[:-5]
+
+        # 2. Short-side family routing. Substring-based so the 3 promoted
+        # aggregate shorts (SHORT_SCALP / SHORT_VWAP / SHORT_REVERSAL) catch
+        # scanner-specific short variants like RUBBER_BAND_SCALP_SHORT.
+        if is_short:
+            family_map = [
+                ("SCALP", "SHORT_SCALP"),
+                ("VWAP", "SHORT_VWAP"),
+                ("REVERSAL", "SHORT_REVERSAL"),
+                ("ORB", "SHORT_ORB"),
+                ("BREAKDOWN", "SHORT_BREAKDOWN"),
+                ("GAP", "SHORT_GAP_FADE"),
+                ("RANGE", "SHORT_RANGE"),
+                ("MEAN_REVERSION", "SHORT_MEAN_REVERSION"),
+                ("MOMENTUM", "SHORT_MOMENTUM"),
+                ("TREND", "SHORT_TREND"),
+            ]
+            # Try exact SHORT_<base> first
+            short_exact = f"SHORT_{base}"
+            if short_exact in available:
+                return short_exact
+            for fam_key, model_key in family_map:
+                if fam_key in base and model_key in available:
+                    return model_key
+
+        # 3. Long-side / generic: strip direction suffix and try base
+        if base in available:
+            return base
+
+        # Also try family substring for long-side (e.g. RUBBER_BAND_SCALP_LONG → SCALP)
+        for fam_key in ("SCALP", "VWAP", "REVERSAL", "BREAKOUT", "ORB",
+                        "RANGE", "MOMENTUM", "MEAN_REVERSION", "TREND"):
+            if fam_key in base and fam_key in available:
+                return fam_key
+
+        # 4. No mapping — return raw (caller will fall back to general model)
+        return raw
+
     def predict_for_setup(self, symbol: str, bars: list, setup_type: str) -> Optional[Dict]:
         """
         Make a prediction using the setup-specific model if available,
@@ -2489,9 +2567,7 @@ class TimeSeriesAIService:
         market regime alignment with the setup's preferences.
         """
         import numpy as np
-        effective_type = setup_type.upper()
-        if effective_type in ("VWAP_BOUNCE", "VWAP_FADE"):
-            effective_type = "VWAP"
+        effective_type = self._resolve_setup_model_key(setup_type, self._setup_models.keys())
         
         # Try setup-specific model first
         model = self._setup_models.get(effective_type)
