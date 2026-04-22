@@ -162,12 +162,12 @@ const CommandCenterPage = ({
         onClose={() => setShowBriefing(false)}
       />
 
-      {/* Floating Morning Briefing button */}
+      {/* Floating Morning Briefing button — z-50 keeps it above the V5 overlay */}
       {!showBriefing && (
         <button
           onClick={() => setShowBriefing(true)}
-          className="fixed bottom-6 right-6 z-40 p-3 rounded-full shadow-lg border border-amber-500/30 hover:border-amber-400/50 transition-all hover:scale-105"
-          style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(239,68,68,0.15))', backdropFilter: 'blur(8px)' }}
+          className="fixed bottom-14 right-4 z-[55] p-2.5 rounded-full shadow-lg border border-amber-500/40 hover:border-amber-400/70 transition-all hover:scale-105"
+          style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.20), rgba(239,68,68,0.20))', backdropFilter: 'blur(8px)' }}
           title="Open Morning Briefing"
           data-testid="open-briefing-btn"
         >

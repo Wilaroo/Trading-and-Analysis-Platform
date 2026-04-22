@@ -1,52 +1,80 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+/**
+ * MorningBriefingModal — V5-styled deep-dive surface.
+ *
+ * Shares the `useMorningBriefing` hook with the inline V5 Briefings panel so
+ * the modal and the panel never show stale/out-of-sync data.
+ *
+ * Visual language matches option-1-v5-command-center.html:
+ *   • Pure zinc-950 background with a single 1px zinc-800 border
+ *   • JetBrains Mono for numbers and labels
+ *   • IBM Plex Sans for body copy
+ *   • Stage chips (manage/order/eval/close/veto) reused from the V5 CSS
+ *
+ * The modal is opt-in (the CommandCenterPage floating bell) and no longer
+ * auto-popups on page load (that logic was removed 2026-04-22).
+ */
+import React, { memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, TrendingUp, TrendingDown, AlertTriangle, Target, Clock, Shield, BarChart3 } from 'lucide-react';
-import api from '../utils/api';
+import { X, RefreshCw } from 'lucide-react';
+import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
+import { useV5Styles } from './sentcom/v5/useV5Styles';
+
+
+const fmtUsd = (v) => (v == null || Number.isNaN(Number(v))) ? '$—' : `${Number(v) >= 0 ? '+$' : '−$'}${Math.abs(Number(v)).toFixed(0)}`;
+const fmtPct = (v) => (v == null || Number.isNaN(Number(v))) ? '—' : `${(Number(v) * 100).toFixed(0)}%`;
+
+const Section = ({ title, accent = 'text-zinc-200', right, children, testid }) => (
+  <section data-testid={testid} className="border-t border-zinc-800">
+    <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-900 bg-zinc-950/40">
+      <div className={`v5-mono text-[11px] font-bold tracking-widest uppercase ${accent}`}>{title}</div>
+      {right}
+    </div>
+    <div className="px-4 py-3">{children}</div>
+  </section>
+);
+
 
 const MorningBriefingModal = memo(({ isOpen, onClose }) => {
-  const [loading, setLoading] = useState(true);
-  const [briefing, setBriefing] = useState(null);
+  useV5Styles();
+  const { loading, data, reload } = useMorningBriefing({ enabled: isOpen, refreshMs: 0 });
 
-  const loadBriefing = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [gamePlanRes, drcRes, positionsRes, scannerRes, botRes] = await Promise.allSettled([
-        api.get('/api/journal/gameplan/today', { timeout: 10000 }),
-        api.get('/api/journal/drc/today', { timeout: 10000 }),
-        api.get('/api/portfolio', { timeout: 10000 }),
-        api.get('/api/live-scanner/status', { timeout: 10000 }),
-        api.get('/api/trading-bot/status', { timeout: 10000 }),
-      ]);
+  const gp = data?.game_plan;
+  const drc = data?.drc;
+  const scanner = data?.scanner;
+  const bot = data?.bot;
+  const positions = data?.positions || [];
+  const summary = data?.summary;
 
-      setBriefing({
-        gamePlan: gamePlanRes.status === 'fulfilled' ? gamePlanRes.value.data?.game_plan : null,
-        drc: drcRes.status === 'fulfilled' ? drcRes.value.data?.drc : null,
-        positions: positionsRes.status === 'fulfilled' ? positionsRes.value.data?.positions || [] : [],
-        summary: positionsRes.status === 'fulfilled' ? positionsRes.value.data?.summary || null : null,
-        scanner: scannerRes.status === 'fulfilled' ? scannerRes.value.data : null,
-        bot: botRes.status === 'fulfilled' ? botRes.value.data : null,
-      });
-    } catch (err) {
-      console.error('Failed to load morning briefing:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isOpen) loadBriefing();
-  }, [isOpen, loadBriefing]);
+  const { open, closed, totalUnrealizedPnl, totalRealizedPnl } = useMemo(() => {
+    const open = positions.filter(p => (p.quantity || p.shares || 0) !== 0 && p.status !== 'closed');
+    const closed = positions.filter(p => p.status === 'closed');
+    return {
+      open,
+      closed,
+      totalUnrealizedPnl: open.reduce((s, p) => s + (Number(p.unrealized_pnl) || 0), 0),
+      totalRealizedPnl: closed.reduce((s, p) => s + (Number(p.realized_pnl) || Number(p.pnl) || 0), 0),
+    };
+  }, [positions]);
 
   if (!isOpen) return null;
-
-  const gp = briefing?.gamePlan;
-  const positions = briefing?.positions || [];
-  const summary = briefing?.summary;
-  const scanner = briefing?.scanner;
-  const bot = briefing?.bot;
-  const openPositions = positions.filter(p => (p.quantity || p.shares || 0) !== 0);
   const quotesReady = summary?.quotes_ready !== false;
-  const totalUnrealizedPnl = openPositions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+
+  const marketBias = gp?.market_bias || gp?.bias;
+  const stocksInPlay = gp?.stocks_in_play || gp?.watchlist || [];
+  const focusSetups = gp?.focus_setups || gp?.focus;
+  const riskNotes = gp?.risk_notes || drc?.notes;
+  const regime = gp?.regime || gp?.market_regime || scanner?.regime;
+  const drcHealth = drc?.status || drc?.health;
+  const maxRisk = drc?.max_daily_risk ?? drc?.max_daily_r;
+
+  const dateLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
+  const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+  const biasChip = marketBias === 'bullish' || marketBias === 'LONG' ? 'v5-chip-manage'
+                  : marketBias === 'bearish' || marketBias === 'SHORT' ? 'v5-chip-veto'
+                  : 'v5-chip-close';
 
   return (
     <AnimatePresence>
@@ -54,165 +82,270 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        transition={{ duration: 0.12 }}
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
         onClick={onClose}
       >
         <motion.div
-          initial={{ scale: 0.95, opacity: 0, y: 20 }}
+          initial={{ scale: 0.98, opacity: 0, y: 12 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/10"
-          style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(10,15,25,0.98) 100%)' }}
+          exit={{ scale: 0.98, opacity: 0, y: 12 }}
+          transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+          className="w-full max-w-xl max-h-[88vh] overflow-hidden rounded-lg bg-zinc-950 border border-zinc-800 shadow-2xl v5-root"
           onClick={(e) => e.stopPropagation()}
           data-testid="morning-briefing-modal"
         >
           {/* Header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between p-5 border-b border-white/10" style={{ background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(12px)' }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/90">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>
-                <Sun className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white">Morning Briefing</h2>
-                <p className="text-xs text-zinc-400">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-              </div>
+              <span className="v5-mono text-xs font-bold tracking-widest text-violet-400">MORNING BRIEFING</span>
+              <span className="v5-mono text-[10px] v5-dim">{dateLabel}</span>
             </div>
-            <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10 transition-colors" data-testid="close-briefing">
-              <X className="w-5 h-5 text-zinc-400" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={reload}
+                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                data-testid="briefing-refresh"
+                title="Refresh"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                data-testid="close-briefing"
+              >
+                <X className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+            </div>
           </div>
 
-          {loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+          {/* Top HUD — quick summary strip */}
+          <div className="grid grid-cols-3 gap-px bg-zinc-900">
+            <div className="bg-zinc-950 px-4 py-2">
+              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Open P&L</div>
+              <div className={`v5-mono text-lg font-bold ${quotesReady ? (totalUnrealizedPnl >= 0 ? 'v5-up' : 'v5-down') : 'v5-warn'}`}>
+                {quotesReady ? fmtUsd(totalUnrealizedPnl) : 'pending'}
+              </div>
+              <div className="text-[9px] text-zinc-500">{open.length} position{open.length === 1 ? '' : 's'}</div>
             </div>
-          ) : (
-            <div className="p-5 space-y-4">
-              {/* Overnight Positions */}
-              {openPositions.length > 0 && (
-                <section>
-                  <div className="flex items-center gap-2 mb-2">
-                    <BarChart3 className="w-4 h-4 text-cyan-400" />
-                    <h3 className="text-sm font-semibold text-white">Open Positions ({openPositions.length})</h3>
-                    {quotesReady ? (
-                      <span className={`ml-auto text-sm font-bold ${totalUnrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} data-testid="briefing-total-pnl">
-                        {totalUnrealizedPnl >= 0 ? '+' : ''}${totalUnrealizedPnl.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                      </span>
-                    ) : (
-                      <span className="ml-auto text-xs text-amber-400 flex items-center gap-1" data-testid="briefing-quotes-pending">
-                        <Clock className="w-3 h-3" /> awaiting quotes
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {openPositions.slice(0, 6).map((p, i) => (
-                      <div key={i} className="p-2 rounded-lg bg-white/[0.03] border border-white/5 flex items-center justify-between">
-                        <div>
-                          <span className="text-xs font-mono text-white">{p.symbol}</span>
-                          <span className="text-[10px] text-zinc-500 ml-1">{p.quantity || p.shares} shares</span>
+            <div className="bg-zinc-950 px-4 py-2">
+              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Closed today</div>
+              <div className={`v5-mono text-lg font-bold ${closed.length === 0 ? 'text-zinc-500' : (totalRealizedPnl >= 0 ? 'v5-up' : 'v5-down')}`}>
+                {closed.length === 0 ? '—' : fmtUsd(totalRealizedPnl)}
+              </div>
+              <div className="text-[9px] text-zinc-500">{closed.length} fill{closed.length === 1 ? '' : 's'}</div>
+            </div>
+            <div className="bg-zinc-950 px-4 py-2">
+              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">DRC</div>
+              <div className={`v5-mono text-lg font-bold ${
+                !drcHealth ? 'text-zinc-500'
+                : (drcHealth === 'green' || drcHealth === 'healthy') ? 'v5-up'
+                : drcHealth === 'yellow' ? 'v5-warn'
+                : 'v5-down'
+              }`}>
+                {drcHealth ? drcHealth.toUpperCase() : '—'}
+              </div>
+              <div className="text-[9px] text-zinc-500">{maxRisk != null ? `cap $${Math.round(maxRisk)}` : 'no cap set'}</div>
+            </div>
+          </div>
+
+          <div className="max-h-[64vh] overflow-y-auto v5-scroll">
+            {loading && !data && (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="w-4 h-4 text-violet-400 animate-spin" />
+              </div>
+            )}
+
+            {/* GAMEPLAN */}
+            <Section
+              title="Today's game plan"
+              accent="text-violet-400"
+              testid="briefing-section-gameplan"
+              right={
+                regime && (
+                  <span className="v5-chip v5-chip-scan">{regime}</span>
+                )
+              }
+            >
+              {!gp ? (
+                <div className="text-[11px] text-zinc-500 v5-why">
+                  No game plan filed for today. Add one in your journal to see
+                  regime, bias, stocks-in-play and focus setups here tomorrow.
+                </div>
+              ) : (
+                <div className="space-y-2 text-[11px]">
+                  {marketBias && (
+                    <div className="flex items-center gap-2">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Bias</span>
+                      <span className={`v5-chip ${biasChip}`}>{marketBias}</span>
+                    </div>
+                  )}
+                  {stocksInPlay.length > 0 && (
+                    <div>
+                      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Stocks in play</div>
+                      <div className="flex flex-wrap gap-1">
+                        {stocksInPlay.slice(0, 12).map((s, i) => {
+                          const sym = typeof s === 'string' ? s : (s.symbol || s.ticker);
+                          const catalyst = typeof s === 'string' ? null : s.catalyst;
+                          return (
+                            <span key={i} className="v5-chip v5-chip-eval">
+                              {sym}{catalyst && <span className="v5-dim"> · {catalyst}</span>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {focusSetups && (
+                    <div className="v5-why">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Focus: </span>
+                      <span className="text-zinc-300">{focusSetups}</span>
+                    </div>
+                  )}
+                  {riskNotes && (
+                    <div className="v5-why">
+                      <span className="v5-mono text-[10px] text-rose-400 uppercase tracking-wider">Risk: </span>
+                      <span className="text-zinc-300">{riskNotes}</span>
+                    </div>
+                  )}
+                  {gp.thesis && (
+                    <div className="v5-why">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Thesis: </span>
+                      <span className="text-zinc-300">{gp.thesis}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+
+            {/* OPEN POSITIONS */}
+            {open.length > 0 && (
+              <Section
+                title={`Carry-over positions (${open.length})`}
+                accent="text-emerald-400"
+                testid="briefing-section-open"
+                right={
+                  <span className={`v5-mono text-xs font-bold ${quotesReady ? (totalUnrealizedPnl >= 0 ? 'v5-up' : 'v5-down') : 'v5-warn'}`}>
+                    {quotesReady ? fmtUsd(totalUnrealizedPnl) : 'awaiting quotes'}
+                  </span>
+                }
+              >
+                <div className="space-y-1">
+                  {open.slice(0, 8).map((p, i) => {
+                    const dir = (p.direction || p.side || '').toLowerCase();
+                    const chip = dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage';
+                    const pnl = Number(p.unrealized_pnl) || 0;
+                    return (
+                      <div key={p.id || p._id || i} className="flex items-center justify-between gap-3 py-1 border-b border-zinc-900 last:border-b-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="v5-mono text-xs font-bold text-zinc-100">{p.symbol}</span>
+                          <span className={`v5-chip ${chip}`}>{dir === 'short' ? 'SHORT' : 'LONG'}</span>
+                          <span className="v5-mono text-[10px] v5-dim">{p.quantity || p.shares}sh</span>
                         </div>
                         {p.quote_ready === false ? (
-                          <span className="text-xs text-amber-400">…</span>
+                          <span className="v5-mono text-[10px] v5-warn">awaiting…</span>
                         ) : (
-                          <span className={`text-xs font-medium ${(p.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            ${(p.unrealized_pnl || 0).toFixed(0)}
+                          <span className={`v5-mono text-[11px] font-bold ${pnl >= 0 ? 'v5-up' : 'v5-down'}`}>
+                            {fmtUsd(pnl)}
                           </span>
                         )}
                       </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Today's Game Plan */}
-              {gp && (
-                <section>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Target className="w-4 h-4 text-amber-400" />
-                    <h3 className="text-sm font-semibold text-white">Today's Game Plan</h3>
-                  </div>
-                  <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5 space-y-2">
-                    {gp.market_bias && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500">Market Bias:</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          gp.market_bias === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' :
-                          gp.market_bias === 'bearish' ? 'bg-red-500/20 text-red-400' :
-                          'bg-zinc-500/20 text-zinc-400'
-                        }`}>{gp.market_bias}</span>
-                      </div>
-                    )}
-                    {(gp.stocks_in_play || []).length > 0 && (
-                      <div>
-                        <span className="text-xs text-zinc-500">Stocks in Play:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {gp.stocks_in_play.map((s, i) => (
-                            <span key={i} className="text-xs px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                              {s.symbol} {s.catalyst && <span className="text-zinc-500">— {s.catalyst}</span>}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {gp.focus_setups && (
-                      <div className="text-xs text-zinc-400">
-                        <span className="text-zinc-500">Focus:</span> {gp.focus_setups}
-                      </div>
-                    )}
-                    {gp.risk_notes && (
-                      <div className="text-xs text-zinc-400">
-                        <span className="text-zinc-500">Risk:</span> {gp.risk_notes}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              )}
-
-              {/* System Status */}
-              <section>
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield className="w-4 h-4 text-violet-400" />
-                  <h3 className="text-sm font-semibold text-white">System Status</h3>
+                    );
+                  })}
+                  {open.length > 8 && (
+                    <div className="text-[10px] v5-dim pt-1">+ {open.length - 8} more…</div>
+                  )}
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/5 text-center">
-                    <div className={`text-xs font-medium ${scanner?.mode ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                      {scanner?.mode || 'Idle'}
+              </Section>
+            )}
+
+            {/* SYSTEM */}
+            <Section
+              title="System status"
+              accent="text-cyan-400"
+              testid="briefing-section-system"
+            >
+              <div className="grid grid-cols-3 gap-px bg-zinc-900 -mx-4 -my-3">
+                <div className="bg-zinc-950 px-3 py-2">
+                  <div className={`v5-mono text-xs font-bold ${scanner?.mode || scanner?.running ? 'v5-up' : 'text-zinc-500'}`}>
+                    {scanner?.mode || (scanner?.running ? 'ACTIVE' : 'IDLE')}
+                  </div>
+                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Scanner</div>
+                  {scanner?.total_hits != null && (
+                    <div className="text-[10px] text-zinc-400 v5-mono">{scanner.total_hits} hits</div>
+                  )}
+                </div>
+                <div className="bg-zinc-950 px-3 py-2">
+                  <div className={`v5-mono text-xs font-bold ${bot?.is_active || bot?.running ? 'v5-up' : 'text-zinc-500'}`}>
+                    {bot?.is_active || bot?.running ? 'ACTIVE' : 'IDLE'}
+                  </div>
+                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Trading bot</div>
+                  {bot?.mode && <div className="text-[10px] text-zinc-400 v5-mono">{bot.mode}</div>}
+                </div>
+                <div className="bg-zinc-950 px-3 py-2">
+                  <div className="v5-mono text-xs font-bold v5-warn">PAPER</div>
+                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Account mode</div>
+                  <div className="text-[10px] text-zinc-400 v5-mono">{timeLabel}</div>
+                </div>
+              </div>
+            </Section>
+
+            {/* DRC details */}
+            {(drc && (drc.notes || drcHealth)) && (
+              <Section
+                title="Daily risk check"
+                accent="text-rose-400"
+                testid="briefing-section-drc"
+              >
+                <div className="space-y-1 text-[11px]">
+                  {drcHealth && (
+                    <div className="flex items-center gap-2">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Status</span>
+                      <span className={`v5-chip ${drcHealth === 'green' || drcHealth === 'healthy' ? 'v5-chip-manage' : drcHealth === 'yellow' ? 'v5-chip-order' : 'v5-chip-veto'}`}>
+                        {drcHealth.toUpperCase()}
+                      </span>
                     </div>
-                    <div className="text-[10px] text-zinc-500">Scanner</div>
-                  </div>
-                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/5 text-center">
-                    <div className={`text-xs font-medium ${bot?.is_active ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                      {bot?.is_active ? 'Active' : 'Idle'}
+                  )}
+                  {maxRisk != null && (
+                    <div className="v5-why">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Daily risk cap: </span>
+                      <span className="v5-mono text-zinc-200">${Math.round(maxRisk)}</span>
                     </div>
-                    <div className="text-[10px] text-zinc-500">Trading Bot</div>
-                  </div>
-                  <div className="p-2 rounded-lg bg-white/[0.03] border border-white/5 text-center">
-                    <div className="text-xs font-medium text-amber-400">Paper</div>
-                    <div className="text-[10px] text-zinc-500">Account Mode</div>
-                  </div>
+                  )}
+                  {drc.used != null && (
+                    <div className="v5-why">
+                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Used: </span>
+                      <span className={`v5-mono ${drc.used >= maxRisk ? 'v5-down' : 'text-zinc-200'}`}>
+                        ${Math.round(drc.used)} ({fmtPct(drc.used / Math.max(1e-6, maxRisk))})
+                      </span>
+                    </div>
+                  )}
+                  {drc.notes && <div className="v5-why text-zinc-400">{drc.notes}</div>}
                 </div>
-              </section>
+              </Section>
+            )}
+          </div>
 
-              {/* Quick Actions */}
-              <section className="pt-2 border-t border-white/5">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={onClose}
-                    className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-medium hover:brightness-110 transition-all"
-                    data-testid="start-trading-btn"
-                  >
-                    Let's Trade
-                  </button>
-                </div>
-              </section>
-            </div>
-          )}
+          {/* Footer — single CTA */}
+          <div className="px-4 py-3 border-t border-zinc-800 bg-zinc-950/90 flex items-center justify-between">
+            <span className="v5-mono text-[9px] v5-dim">
+              Auto-popup disabled · opens only via the briefing button
+            </span>
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 rounded-sm bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-200 v5-mono text-[11px] font-bold uppercase tracking-widest transition-colors"
+              data-testid="start-trading-btn"
+            >
+              Let's trade →
+            </button>
+          </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
   );
 });
+
+MorningBriefingModal.displayName = 'MorningBriefingModal';
 
 export default MorningBriefingModal;
