@@ -20,25 +20,39 @@
     <p class="text-sm text-zinc-400 max-w-3xl">Three candidate layouts. Open each, compare how they handle: the 5-stage pipeline, the morning briefing, inline "WHY" explanations, and no-scrolling positions/scanner. Desktop 1920×1080+, dark mode, high-density "control room" style. None of these are production code yet.</p>
   </div>
 
+  <div class="mb-4 border border-amber-900/50 bg-amber-950/20 rounded-md p-4">
+    <div class="text-[11px] mono text-amber-400 uppercase tracking-widest mb-1">⚡ v2 — with annotated chart</div>
+    <div class="text-sm text-zinc-300">Each layout now includes a real-time annotated chart for the focused ticker: candles, VWAP, 9/21 EMA, entry/stop/target lines, trigger markers, and CNN-highlighted pattern box. In the live build this will be powered by <span class="mono text-violet-400">TradingView lightweight-charts</span> (free, ~200 KB, WebSocket feed from pusher, bot annotations via <span class="mono">/api/confidence-gate/reasoning</span>).</div>
+  </div>
+
   <div class="grid grid-cols-3 gap-6">
-    <a href="option-1-pipeline-hud.html" class="block border border-zinc-800 rounded-md p-5 hover:border-violet-500 hover:bg-zinc-900/50 transition">
-      <div class="text-xs mono text-violet-400 uppercase tracking-widest mb-1">Option 1</div>
-      <div class="text-xl font-bold mb-2">Pipeline HUD + Follow-Symbol</div>
-      <div class="text-xs text-zinc-400 leading-relaxed mb-4">Persistent top-strip shows Scan→Eval→Order→Manage→Close funnel in real time. 3-column body (scanner / focus / stream + positions). Click any ticker anywhere → every panel filters to it.</div>
-      <div class="text-[10px] mono text-zinc-500">BEST FOR: fleet-level situational awareness + drill-down on demand</div>
+    <a href="option-1-v2-pipeline-hud-chart.html" class="block border border-violet-500/60 rounded-md p-5 hover:border-violet-400 hover:bg-zinc-900/50 transition">
+      <div class="text-xs mono text-violet-400 uppercase tracking-widest mb-1">Option 1 · v2</div>
+      <div class="text-xl font-bold mb-2">Pipeline HUD + Chart</div>
+      <div class="text-xs text-zinc-400 leading-relaxed mb-4">Top 5-stage funnel. 3-col body (scanner / focus with <b class="text-violet-400">chart on top</b> / positions+stream). Click ticker → chart + panels follow it. Mini 5-stage bar per scanner row.</div>
+      <div class="text-[10px] mono text-zinc-500">BEST FOR: fleet awareness + symbol drill-down</div>
     </a>
-    <a href="option-2-lifecycle-matrix.html" class="block border border-zinc-800 rounded-md p-5 hover:border-blue-500 hover:bg-zinc-900/50 transition">
-      <div class="text-xs mono text-blue-400 uppercase tracking-widest mb-1">Option 2</div>
-      <div class="text-xl font-bold mb-2">Unified Lifecycle Matrix</div>
-      <div class="text-xs text-zinc-400 leading-relaxed mb-4">One massive dense grid. Rows = symbols, columns = the 5 lifecycle stages. Every stage of every symbol visible simultaneously. Bloomberg/options-chain density.</div>
-      <div class="text-[10px] mono text-zinc-500">BEST FOR: seeing the whole pipeline state in one glance</div>
+    <a href="option-2-v2-lifecycle-matrix-chart.html" class="block border border-blue-500/60 rounded-md p-5 hover:border-blue-400 hover:bg-zinc-900/50 transition">
+      <div class="text-xs mono text-blue-400 uppercase tracking-widest mb-1">Option 2 · v2</div>
+      <div class="text-xl font-bold mb-2">Lifecycle Matrix + Chart Split</div>
+      <div class="text-xs text-zinc-400 leading-relaxed mb-4">Left 55% = matrix grid (all symbols × all 5 stages). Right 45% = <b class="text-blue-400">chart</b> + 13-layer gate + bracket + stream for active row. Everything visible, nothing hidden.</div>
+      <div class="text-[10px] mono text-zinc-500">BEST FOR: whole-pipeline visibility + focused analysis</div>
     </a>
-    <a href="option-3-timeline-stream.html" class="block border border-zinc-800 rounded-md p-5 hover:border-green-500 hover:bg-zinc-900/50 transition">
-      <div class="text-xs mono text-green-400 uppercase tracking-widest mb-1">Option 3</div>
-      <div class="text-xl font-bold mb-2">Decision Timeline Stream</div>
-      <div class="text-xs text-zinc-400 leading-relaxed mb-4">Chronological event feed (like a Slack from the bot). Left sidebar = morning briefing. Center = stream of decision cards. Right sidebar = active positions with inline rationale.</div>
+    <a href="option-3-v2-timeline-stream-chart.html" class="block border border-green-500/60 rounded-md p-5 hover:border-green-400 hover:bg-zinc-900/50 transition">
+      <div class="text-xs mono text-green-400 uppercase tracking-widest mb-1">Option 3 · v2</div>
+      <div class="text-xl font-bold mb-2">Timeline Stream + Chart Header</div>
+      <div class="text-xs text-zinc-400 leading-relaxed mb-4">Left = morning briefing + plans. Center = <b class="text-green-400">chart on top</b> + chronological decision-card feed below. Right = active positions with mini sparklines.</div>
       <div class="text-[10px] mono text-zinc-500">BEST FOR: following the bot's narrative over time</div>
     </a>
+  </div>
+
+  <div class="mt-8 text-[11px] mono text-zinc-500">
+    <div class="mb-2 text-zinc-400 font-bold">v1 mockups (no chart) — for reference</div>
+    <div class="flex gap-4">
+      <a href="option-1-pipeline-hud.html" class="text-violet-400 hover:underline">Option 1 v1</a>
+      <a href="option-2-lifecycle-matrix.html" class="text-blue-400 hover:underline">Option 2 v1</a>
+      <a href="option-3-timeline-stream.html" class="text-green-400 hover:underline">Option 3 v1</a>
+    </div>
   </div>
 
   <div class="mt-10 text-xs text-zinc-500 border-t border-zinc-900 pt-6">

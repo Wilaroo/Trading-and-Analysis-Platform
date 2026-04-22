@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Option 1 v2 — Pipeline HUD + Annotated Chart</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  h1,h2,h3,.ui { font-family:'Inter'; }
+  .mono { font-family:'JetBrains Mono'; }
+  .panel-title { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:#71717a; }
+  .why { font-size:10px; color:#71717a; line-height:1.4; }
+  .chip { display:inline-block; font-size:9px; font-family:'JetBrains Mono'; padding:1px 5px; border-radius:2px; border:1px solid; }
+  .stage-scan   { color:#a78bfa; border-color:#5b21b6; background:rgba(139,92,246,.08); }
+  .stage-eval   { color:#60a5fa; border-color:#1e3a8a; background:rgba(59,130,246,.08); }
+  .stage-order  { color:#facc15; border-color:#713f12; background:rgba(234,179,8,.08); }
+  .stage-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+  .stage-close  { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08); }
+  .bar { height:3px; background:#27272a; border-radius:1px; overflow:hidden; }
+  .row-ticker:hover { background:#202024; cursor:pointer; }
+  .row-ticker.active { background:#1e1b4b; border-left:2px solid #8b5cf6; }
+  .up { color:#22c55e; } .down { color:#ef4444; } .warn { color:#eab308; } .dim { color:#52525b; }
+  .mini-5stage { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; }
+  .mini-5stage span { height:3px; border-radius:1px; background:#27272a; }
+  .mini-5stage span.on-scan   { background:#8b5cf6; }
+  .mini-5stage span.on-eval   { background:#3b82f6; }
+  .mini-5stage span.on-order  { background:#eab308; }
+  .mini-5stage span.on-manage { background:#22c55e; }
+  .mini-5stage span.on-close  { background:#64748b; }
+
+  /* Chart */
+  .chart-anno-label { font-family:'JetBrains Mono'; font-size:9px; fill:#a1a1aa; }
+  .chart-anno-label-bold { font-family:'JetBrains Mono'; font-size:10px; font-weight:700; }
+  .ann-sl { stroke:#ef4444; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-pt { stroke:#22c55e; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-ent { stroke:#eab308; stroke-width:1; stroke-dasharray:4,3; }
+  .ann-vwap { stroke:#a1a1aa; stroke-width:1; stroke-dasharray:1,2; opacity:.7; }
+  .ann-9ema { stroke:#60a5fa; stroke-width:1; fill:none; }
+  .ann-21ema { stroke:#f472b6; stroke-width:1; fill:none; }
+  .ann-box { stroke:#a855f7; stroke-width:1; stroke-dasharray:2,2; fill:rgba(168,85,247,.06); }
+  .candle-up   { fill:#22c55e; stroke:#22c55e; }
+  .candle-down { fill:#ef4444; stroke:#ef4444; }
+  .candle-wick { stroke-width:1; }
+  .trigger-pulse { fill:#eab308; filter:drop-shadow(0 0 4px rgba(234,179,8,.8)); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- TOP HUD -->
+<div class="border-b border-zinc-800 bg-zinc-950 px-3 py-2">
+  <div class="flex items-center gap-2">
+    <div class="text-[10px] mono text-zinc-500 pr-2 border-r border-zinc-800">SENTCOM</div>
+    <div class="flex items-center gap-1.5 flex-1">
+      <div class="flex-1 px-2 py-1 border border-violet-900/60 rounded-sm bg-violet-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-violet-400">Scan</span><span class="mono text-lg font-bold">47</span></div><div class="text-[9px] text-zinc-500">5min · 12 symbols</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-blue-900/60 rounded-sm bg-blue-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-blue-400">Evaluate</span><span class="mono text-lg font-bold">8</span></div><div class="text-[9px] text-zinc-500">gate pass 17%</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-yellow-900/60 rounded-sm bg-yellow-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-yellow-400">Order</span><span class="mono text-lg font-bold">3</span></div><div class="text-[9px] text-zinc-500">2 filled · 1 pending</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-green-900/60 rounded-sm bg-green-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-green-400">Manage</span><span class="mono text-lg font-bold">2</span><span class="mono text-xs up">+0.6R</span></div><div class="text-[9px] text-zinc-500">NVDA · AMD</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-slate-700 rounded-sm bg-slate-900/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-slate-400">Close today</span><span class="mono text-lg font-bold">4</span><span class="mono text-xs up">+1.8R</span></div><div class="text-[9px] text-zinc-500">WR 75% · $+412</div></div>
+    </div>
+    <div class="flex items-center gap-3 pl-3 border-l border-zinc-800">
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">P&amp;L</div><div class="mono font-bold up">+$412.60</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Equity</div><div class="mono font-bold">$48,921</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Latency</div><div class="mono font-bold up">8.1s</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Phase</div><div class="mono font-bold text-yellow-400">PAPER</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- BODY 3 COL -->
+<div class="grid grid-cols-12 gap-px bg-zinc-900" style="height:calc(100vh - 64px);">
+
+  <!-- LEFT: Scanner (22%) -->
+  <div class="col-span-3 bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800"><div class="panel-title">Scanner · Live</div><div class="text-[9px] mono text-zinc-500">47 hits</div></div>
+    <div class="overflow-y-auto flex-1">
+      <!-- NVDA active with mini 5-stage bar -->
+      <div class="row-ticker active px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">NVDA</span><span class="chip stage-order">ORDER</span></div><span class="mono text-[10px] up">+2.4%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span></span><span></span></div>
+        <div class="why mt-1">rubber_band_scalp_short · SHORT_SCALP · 78 gate · bracket pending</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">AMD</span><span class="chip stage-manage">OPEN</span></div><span class="mono text-[10px] up">+1.9%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1">bull_flag · CNN-LSTM 72% · +$112 unreal · PT $172</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">TSLA</span><span class="chip stage-manage">SHORT</span></div><span class="mono text-[10px] down">-0.3%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1">halfback_rev · SHORT_REVERSAL · +0.2R unreal</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">MSFT</span><span class="chip stage-close">CLOSED W</span></div><span class="mono text-[10px] up">+0.7R</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span class="on-close"></span></div>
+        <div class="why mt-1">vwap_bounce · PT hit @ 420.55 · +$142</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">AAPL</span><span class="chip stage-scan">SCAN</span></div><span class="mono text-[10px] down">-0.8%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span></span><span></span><span></span><span></span></div>
+        <div class="why mt-1">opening_drive · model pending</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">SPY</span><span class="chip stage-eval">EVAL 41</span></div><span class="mono text-[10px] down">-0.2%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span class="on-eval"></span><span></span><span></span><span></span></div>
+        <div class="why mt-1">vwap_bounce · gate 41 borderline SKIP</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">META</span><span class="chip stage-scan">SCAN</span></div><span class="mono text-[10px] up">+1.2%</span></div>
+        <div class="mini-5stage mt-1"><span class="on-scan"></span><span></span><span></span><span></span><span></span></div>
+        <div class="why mt-1">volume surge +340% · setup pending</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: Focus w/ Chart (55%) -->
+  <div class="col-span-6 bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- Title bar -->
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="flex items-center gap-3">
+        <div class="panel-title">Focus · <span class="text-zinc-200 mono">NVDA</span> · rubber_band_scalp_short</div>
+        <span class="chip stage-order">ORDER · pending 8s</span>
+        <span class="text-[10px] mono up">+2.4% · $880.30</span>
+      </div>
+      <div class="flex items-center gap-2 text-[10px] mono dim">
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1m</span>
+        <span class="chip" style="border-color:#3b82f6;color:#60a5fa;background:rgba(59,130,246,.08)">5m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">15m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1h</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1d</span>
+      </div>
+    </div>
+
+    <!-- CHART (real, annotated) -->
+    <div class="bg-zinc-950 border-b border-zinc-900" style="height:360px;">
+      <svg viewBox="0 0 900 360" class="w-full h-full">
+        <!-- grid -->
+        <defs>
+          <pattern id="grid1" width="60" height="36" patternUnits="userSpaceOnUse">
+            <path d="M 60 0 L 0 0 0 36" fill="none" stroke="#18181b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="900" height="360" fill="url(#grid1)"/>
+
+        <!-- price axis labels (right) -->
+        <g class="chart-anno-label">
+          <text x="865" y="40">890.00</text>
+          <text x="865" y="100">885.00</text>
+          <text x="865" y="160">880.00</text>
+          <text x="865" y="220">875.00</text>
+          <text x="865" y="280">870.00</text>
+          <text x="865" y="340">865.00</text>
+        </g>
+
+        <!-- time axis -->
+        <g class="chart-anno-label" opacity="0.6">
+          <text x="80"  y="355">13:50</text>
+          <text x="220" y="355">14:00</text>
+          <text x="360" y="355">14:10</text>
+          <text x="500" y="355">14:20</text>
+          <text x="640" y="355">14:22 (now)</text>
+        </g>
+
+        <!-- VWAP dashed grey -->
+        <path class="ann-vwap" d="M 40 200 L 200 195 L 360 188 L 520 175 L 680 155 L 800 148" fill="none"/>
+        <text x="46" y="196" class="chart-anno-label" fill="#a1a1aa">VWAP 878.90</text>
+
+        <!-- 9 EMA (blue) -->
+        <path class="ann-9ema" d="M 40 208 L 120 200 L 200 195 L 280 184 L 360 174 L 440 160 L 520 150 L 600 140 L 680 134 L 760 142 L 800 148"/>
+        <!-- 21 EMA (pink) -->
+        <path class="ann-21ema" d="M 40 214 L 120 210 L 200 204 L 280 196 L 360 184 L 440 172 L 520 160 L 600 150 L 680 144 L 760 150 L 800 152"/>
+
+        <!-- Candles (12 bars) -->
+        <g stroke-width="1">
+          <!-- bar1 down -->
+          <line class="candle-wick candle-down" x1="70"  y1="210" x2="70"  y2="240"/>
+          <rect class="candle-down" x="64"  y="220" width="12" height="16"/>
+          <!-- bar2 up -->
+          <line class="candle-wick candle-up" x1="130" y1="195" x2="130" y2="228"/>
+          <rect class="candle-up" x="124" y="205" width="12" height="20"/>
+          <!-- bar3 up -->
+          <line class="candle-wick candle-up" x1="190" y1="185" x2="190" y2="218"/>
+          <rect class="candle-up" x="184" y="188" width="12" height="25"/>
+          <!-- bar4 down -->
+          <line class="candle-wick candle-down" x1="250" y1="175" x2="250" y2="210"/>
+          <rect class="candle-down" x="244" y="190" width="12" height="16"/>
+          <!-- bar5 up -->
+          <line class="candle-wick candle-up" x1="310" y1="160" x2="310" y2="200"/>
+          <rect class="candle-up" x="304" y="168" width="12" height="28"/>
+          <!-- bar6 up big (breakout candle) -->
+          <line class="candle-wick candle-up" x1="370" y1="125" x2="370" y2="180"/>
+          <rect class="candle-up" x="364" y="128" width="12" height="48"/>
+          <!-- bar7 up -->
+          <line class="candle-wick candle-up" x1="430" y1="118" x2="430" y2="140"/>
+          <rect class="candle-up" x="424" y="120" width="12" height="16"/>
+          <!-- bar8 exhaustion wick (long upper) -->
+          <line class="candle-wick candle-down" x1="490" y1="92"  x2="490" y2="145"/>
+          <rect class="candle-down" x="484" y="120" width="12" height="22"/>
+          <!-- bar9 down -->
+          <line class="candle-wick candle-down" x1="550" y1="118" x2="550" y2="155"/>
+          <rect class="candle-down" x="544" y="130" width="12" height="22"/>
+          <!-- bar10 down (rejection) -->
+          <line class="candle-wick candle-down" x1="610" y1="130" x2="610" y2="172"/>
+          <rect class="candle-down" x="604" y="140" width="12" height="26"/>
+          <!-- bar11 up small (bounce) -->
+          <line class="candle-wick candle-up" x1="670" y1="145" x2="670" y2="170"/>
+          <rect class="candle-up" x="664" y="150" width="12" height="14"/>
+          <!-- bar12 current (red, forming) -->
+          <line class="candle-wick candle-down" x1="730" y1="148" x2="730" y2="172"/>
+          <rect class="candle-down" x="724" y="154" width="12" height="14"/>
+        </g>
+
+        <!-- ENTRY line (yellow dashed at 880.30 = y 160) -->
+        <line class="ann-ent" x1="40" y1="160" x2="780" y2="160"/>
+        <rect x="748" y="152" width="60" height="14" fill="#713f12" stroke="#eab308"/>
+        <text x="752" y="163" class="chart-anno-label-bold" fill="#facc15">ENTRY 880.30</text>
+
+        <!-- SL line (red dashed at 885.10 = y 100) -->
+        <line class="ann-sl" x1="40" y1="100" x2="780" y2="100"/>
+        <rect x="748" y="92" width="60" height="14" fill="#7f1d1d" stroke="#ef4444"/>
+        <text x="752" y="103" class="chart-anno-label-bold" fill="#fca5a5">SL 885.10</text>
+
+        <!-- PT line (green dashed at 870.00 = y 280) -->
+        <line class="ann-pt" x1="40" y1="280" x2="780" y2="280"/>
+        <rect x="748" y="272" width="60" height="14" fill="#14532d" stroke="#22c55e"/>
+        <text x="752" y="283" class="chart-anno-label-bold" fill="#86efac">PT 870.00</text>
+
+        <!-- Setup pattern box (CNN-highlighted exhaustion wick + rejection) -->
+        <rect class="ann-box" x="460" y="80" width="170" height="100"/>
+        <text x="466" y="76" class="chart-anno-label-bold" fill="#a855f7">CNN · exhaustion wick + VWAP reject</text>
+
+        <!-- Trigger pulse on bar 10 -->
+        <circle class="trigger-pulse" cx="610" cy="172" r="6"/>
+        <text x="622" y="176" class="chart-anno-label-bold" fill="#facc15">TRIGGER 14:22:15</text>
+        <line x1="610" y1="172" x2="610" y2="210" stroke="#eab308" stroke-width="0.5" stroke-dasharray="1,2"/>
+
+        <!-- Entry arrow on bar 12 (current) -->
+        <g transform="translate(730, 154)">
+          <polygon points="-8,-10 8,-10 0,0" fill="#eab308"/>
+          <text x="14" y="-2" class="chart-anno-label-bold" fill="#facc15">short 100 @ mkt</text>
+        </g>
+
+        <!-- current price tag right edge -->
+        <line x1="730" y1="161" x2="845" y2="161" stroke="#eab308" stroke-width="0.5" stroke-dasharray="2,2"/>
+        <rect x="820" y="153" width="44" height="16" fill="#18181b" stroke="#eab308"/>
+        <text x="823" y="165" class="chart-anno-label-bold" fill="#facc15">880.30</text>
+
+        <!-- Volume bars (bottom ribbon) -->
+        <g>
+          <rect x="64"  y="340" width="12" height="8"  fill="#52525b"/>
+          <rect x="124" y="335" width="12" height="13" fill="#52525b"/>
+          <rect x="184" y="332" width="12" height="16" fill="#52525b"/>
+          <rect x="244" y="338" width="12" height="10" fill="#52525b"/>
+          <rect x="304" y="325" width="12" height="23" fill="#22c55e"/>
+          <rect x="364" y="315" width="12" height="33" fill="#22c55e"/>
+          <rect x="424" y="330" width="12" height="18" fill="#22c55e"/>
+          <rect x="484" y="310" width="12" height="38" fill="#ef4444"/> <!-- vol climax -->
+          <rect x="544" y="322" width="12" height="26" fill="#ef4444"/>
+          <rect x="604" y="318" width="12" height="30" fill="#ef4444"/>
+          <rect x="664" y="336" width="12" height="12" fill="#22c55e"/>
+          <rect x="724" y="332" width="12" height="16" fill="#ef4444"/>
+        </g>
+        <text x="46" y="348" class="chart-anno-label" fill="#52525b">VOL</text>
+      </svg>
+    </div>
+
+    <!-- Below chart: gate + bracket + stream, compact -->
+    <div class="grid grid-cols-3 gap-px bg-zinc-900 flex-1 overflow-y-auto">
+      <div class="col-span-2 bg-zinc-950 p-3">
+        <div class="flex items-center justify-between mb-2"><span class="panel-title">13-Layer Gate</span><span class="mono font-bold up">78/100 · GO full size</span></div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px]">
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">1. Regime</span><div class="flex-1 bar"><div style="width:75%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+12</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">3. Consensus</span><div class="flex-1 bar"><div style="width:80%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+15</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">4. Live Pred</span><div class="flex-1 bar"><div style="width:72%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+12</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">6. Quality</span><div class="flex-1 bar"><div style="width:82%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+10</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">7. Learning</span><div class="flex-1 bar"><div style="width:60%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+8</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">9. TFT</span><div class="flex-1 bar"><div style="width:60%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+10</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">11. CNN-LSTM</span><div class="flex-1 bar"><div style="width:65%" class="h-full bg-green-500"></div></div><span class="mono up w-7 text-right">+10</span></div>
+          <div class="flex items-center gap-2"><span class="mono w-24 text-zinc-400">13. FinBERT</span><div class="flex-1 bar"><div style="width:50%" class="h-full bg-yellow-500"></div></div><span class="mono warn w-7 text-right">+3</span></div>
+        </div>
+      </div>
+      <div class="bg-zinc-950 p-3 border-l border-zinc-900">
+        <div class="panel-title mb-1.5">Bracket</div>
+        <div class="mono text-[11px] space-y-0.5">
+          <div>Entry <span class="warn">880.30</span></div>
+          <div>Stop <span class="down">885.10</span> <span class="why">(-$480)</span></div>
+          <div>Target <span class="up">870.00</span> <span class="why">(+$1,030)</span></div>
+          <div class="why mt-1.5">R:R 2.1 · ATR 4.8 · 0.5% risk</div>
+        </div>
+        <div class="panel-title mt-3 mb-1.5">Stream · this decision</div>
+        <div class="text-[10px] mono text-zinc-400 space-y-0.5">
+          <div><span class="text-violet-400">22:15</span> scan · rubber_band q78</div>
+          <div><span class="text-blue-400">22:18</span> resolver → SHORT_SCALP</div>
+          <div><span class="text-blue-400">22:19</span> gate 78 · GO full</div>
+          <div><span class="text-yellow-400">22:20</span> bracket queued</div>
+          <div><span class="warn">22:28</span> awaiting IB fill (8s)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Positions + Stream (23%) -->
+  <div class="col-span-3 bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex-1 overflow-hidden flex flex-col border-b border-zinc-800">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800"><div class="panel-title">Open (2)</div><div class="mono text-[10px] up">+$186 · +0.6R</div></div>
+      <div class="overflow-y-auto flex-1">
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between"><div><span class="mono font-bold">AMD</span> <span class="chip stage-manage ml-1">SCALP long</span></div><span class="mono text-xs up">+$112 · +0.4R</span></div>
+          <svg viewBox="0 0 180 28" class="w-full h-7 mt-1"><polyline points="0,22 15,20 30,23 45,18 60,15 75,12 90,14 105,10 120,9 135,10 150,8 165,7 180,6" fill="none" stroke="#22c55e" stroke-width="1.2"/><line x1="0" y1="18" x2="180" y2="18" stroke="#52525b" stroke-width="0.4" stroke-dasharray="2,2"/></svg>
+          <div class="why">CNN-LSTM 72% bull · TFT trails SL → $166.40 · PT $172</div>
+        </div>
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between"><div><span class="mono font-bold">TSLA</span> <span class="chip stage-manage ml-1">SHORT_REV</span></div><span class="mono text-xs up">+$74 · +0.2R</span></div>
+          <svg viewBox="0 0 180 28" class="w-full h-7 mt-1"><polyline points="0,6 15,8 30,7 45,10 60,12 75,9 90,14 105,16 120,18 135,17 150,21 165,23 180,24" fill="none" stroke="#ef4444" stroke-width="1.2"/><line x1="0" y1="12" x2="180" y2="12" stroke="#52525b" stroke-width="0.4" stroke-dasharray="2,2"/></svg>
+          <div class="why">halfback reversal · VAE BEAR_TRENDING · SL 245.40 · PT 238.10</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800"><div class="panel-title">Stream</div><div class="text-[9px] mono text-zinc-500">live</div></div>
+      <div class="overflow-y-auto flex-1 text-[10px] mono space-y-1 p-2">
+        <div class="text-zinc-400"><span class="text-violet-400">14:22:28</span> NVDA GO · awaiting IB fill</div>
+        <div class="text-zinc-400"><span class="text-green-400">14:22:14</span> AMD TFT trail → $166.40</div>
+        <div class="text-zinc-400"><span class="text-yellow-400">14:22:09</span> TSLA fill @ $242.18 · short 50</div>
+        <div class="text-zinc-400"><span class="text-slate-400">13:49:02</span> MSFT CLOSED · PT hit · +0.7R</div>
+        <div class="text-zinc-400"><span class="text-blue-400">13:58:03</span> SPY gate 41 · SKIP</div>
+        <div class="text-zinc-400"><span class="text-violet-400">14:21:30</span> META vol +340% · awaiting setup</div>
+        <div class="text-zinc-400"><span class="text-slate-400">09:20:58</span> Revalidation · 7 models PROMOTED</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fixed bottom-2 right-2 text-[9px] mono text-zinc-600">Chart = SVG mockup · in build: <b class="text-violet-400">TradingView lightweight-charts</b> · <a href="index.html" class="text-violet-400 hover:underline">← all options</a></div>
+</body>
+</html>
