@@ -687,7 +687,7 @@ class TradingBotService:
             # Core session
             "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
             # Mean reversion
-            "rubber_band", "vwap_bounce", "vwap_fade", "tidal_wave",
+            "rubber_band", "rubber_band_scalp", "vwap_bounce", "vwap_fade", "tidal_wave",
             # Consolidation
             "big_dog", "puppy_dog", "nine_ema_scalp", "abc_scalp", "9_ema_scalp",
             # Afternoon
@@ -696,7 +696,16 @@ class TradingBotService:
             "breaking_news", "volume_capitulation", "range_break", "breakout",
             # New strategies
             "squeeze", "relative_strength", "relative_strength_leader", "relative_strength_laggard",
-            "mean_reversion", "gap_fade", "chart_pattern"
+            "mean_reversion", "gap_fade", "chart_pattern",
+            # REVERSAL-family scanner bases (2026-04-24) — required for
+            # SHORT_REVERSAL (Sharpe 1.94, +7.6pp edge, promoted) to actually
+            # receive scanner alerts. Without these bases in the filter the
+            # alerts would be rejected at the enabled-setups gate before
+            # reaching predict_for_setup → the SHORT_REVERSAL model.
+            "reversal", "halfback_reversal", "halfback",
+            # Additional VWAP scanner bases (2026-04-24) — for SHORT_VWAP
+            # (Sharpe 1.76, promoted) beyond vwap_bounce/vwap_fade already covered
+            "vwap_reclaim", "vwap_rejection",
         ]
         self._scan_interval = 30  # seconds - faster scanning for autonomous trading
         self._watchlist: List[str] = []

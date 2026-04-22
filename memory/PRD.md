@@ -9,6 +9,30 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
+### Paper-Mode Enablement for the 3 Promoted Shorts (2026-04-24)
+**Change:** Added REVERSAL-family and VWAP-family scanner base names to `trading_bot_service._enabled_setups`:
+  - `reversal`, `halfback_reversal`, `halfback` — so scanner alerts for REVERSAL-style setups (e.g. `halfback_reversal_short`) pass the enabled-setups filter and reach `predict_for_setup` → `SHORT_REVERSAL` model (Sharpe 1.94, +7.6pp edge).
+  - `rubber_band_scalp` — was a gap; scanner emits `rubber_band_scalp_short` which strips to `rubber_band_scalp` (NOT `rubber_band`), which wasn't enabled.
+  - `vwap_reclaim`, `vwap_rejection` — additional scanner variants that route to `SHORT_VWAP` (Sharpe 1.76).
+  
+Comments inline document why each base was added — so the next person understands the filter chain.
+
+**User promotion commands (run on Spark after pull + restart):**
+```
+# Promote each of the 3 proven shorts to PAPER phase
+for STRAT in short_scalp short_vwap short_reversal; do
+  curl -s -X POST "http://localhost:8001/api/strategy-promotion/promote" \
+    -H "Content-Type: application/json" \
+    -d "{\"strategy_name\":\"$STRAT\",\"target_phase\":\"paper\",\"approved_by\":\"user\",\"force\":false}" \
+    | python3 -m json.tool
+done
+
+# Verify they're now in PAPER
+curl -s http://localhost:8001/api/strategy-promotion/phases | python3 -m json.tool | grep -iE "short_(scalp|vwap|reversal)|paper"
+```
+
+If the first promotion call fails with "not found" or "not registered", the strategy may need to be registered first — paste the error and we handle it.
+
 ### Startup Model-Load Consistency Diagnostic SHIPPED (2026-04-24)
 **Rationale:** The latent bug above (17 trained, 0 loaded) went undetected for weeks because nothing cross-checked `timeseries_models` vs `_setup_models`. This is the safety net.
 
