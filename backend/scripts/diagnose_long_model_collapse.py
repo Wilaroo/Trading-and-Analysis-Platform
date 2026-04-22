@@ -62,6 +62,14 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
+# Load .env like revalidate_all.py does so MONGO_URL / DB_NAME are picked up
+# automatically when run from the repo root.
+try:
+    from dotenv import load_dotenv  # noqa: E402
+    load_dotenv(BACKEND_ROOT / ".env")
+except Exception:
+    pass
+
 from services.ai_modules.setup_training_config import (  # noqa: E402
     SETUP_TRAINING_PROFILES,
     get_model_name,
