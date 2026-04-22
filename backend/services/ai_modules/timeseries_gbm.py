@@ -459,24 +459,84 @@ class TimeSeriesGBM:
             )
             
             should_promote = True
+            demotion_reason = None
             if current_active and "metrics" in current_active:
-                current_accuracy = current_active["metrics"].get("accuracy", 0)
+                current_metrics = current_active["metrics"] or {}
+                current_accuracy = current_metrics.get("accuracy", 0)
                 current_version = current_active.get("version", "unknown")
-                
-                if new_accuracy < current_accuracy:
-                    should_promote = False
+
+                # Class-collapse protection (2026-04-22): raw accuracy alone lets
+                # a model win by collapsing to the majority class (e.g.
+                # predict DOWN every bar → high accuracy in bearish windows,
+                # zero tradeable LONG signals). Guard with per-class UP recall
+                # AND a soft macro-F1 floor instead.
+                new_m = self._metrics.to_dict() if self._metrics else {}
+                new_recall_up = float(new_m.get("recall_up", 0.0))
+                new_recall_down = float(new_m.get("recall_down", 0.0))
+                new_f1_up = float(new_m.get("f1_up", 0.0))
+                new_f1_down = float(new_m.get("f1_down", 0.0))
+                new_macro_f1 = (new_f1_up + new_f1_down) / 2.0
+
+                cur_recall_up = float(current_metrics.get("recall_up", 0.0))
+                cur_f1_up = float(current_metrics.get("f1_up", 0.0))
+                cur_f1_down = float(current_metrics.get("f1_down", 0.0))
+                cur_macro_f1 = (cur_f1_up + cur_f1_down) / 2.0
+
+                MIN_UP_RECALL = 0.10       # at least 10% of true-UP bars predicted UP
+                MIN_DOWN_RECALL = 0.10     # and don't accept a model that ignores DOWN either
+                MACRO_F1_FLOOR = 0.92      # allow 8% macro-F1 slack vs active
+
+                # Class-collapse escape hatch: active model is itself collapsed
+                # (UP recall < 5%), so ANY model with better UP recall should
+                # replace it even if raw accuracy drops.
+                active_is_collapsed = cur_recall_up < 0.05
+                if active_is_collapsed:
+                    if new_recall_up > cur_recall_up and new_recall_down >= MIN_DOWN_RECALL:
+                        should_promote = True
+                        logger.info(
+                            f"Model protection: ACTIVE {current_version} is class-collapsed "
+                            f"(UP recall {cur_recall_up:.3f} < 0.05). NEW {self._version} has "
+                            f"UP recall {new_recall_up:.3f} — PROMOTING despite lower accuracy "
+                            f"({new_accuracy:.4f} vs {current_accuracy:.4f})."
+                        )
+                    else:
+                        should_promote = False
+                        demotion_reason = (
+                            f"active is collapsed but new UP recall {new_recall_up:.3f} "
+                            f"did not beat {cur_recall_up:.3f}"
+                        )
+                else:
+                    # Normal path: use macro-F1 w/ UP-recall floor
+                    if new_recall_up < MIN_UP_RECALL:
+                        should_promote = False
+                        demotion_reason = (
+                            f"new UP recall {new_recall_up:.3f} < floor {MIN_UP_RECALL}"
+                        )
+                    elif new_recall_down < MIN_DOWN_RECALL:
+                        should_promote = False
+                        demotion_reason = (
+                            f"new DOWN recall {new_recall_down:.3f} < floor {MIN_DOWN_RECALL}"
+                        )
+                    elif new_macro_f1 < cur_macro_f1 * MACRO_F1_FLOOR:
+                        should_promote = False
+                        demotion_reason = (
+                            f"new macro-F1 {new_macro_f1:.4f} < "
+                            f"{MACRO_F1_FLOOR:.2f}×active {cur_macro_f1:.4f}"
+                        )
+
+                if not should_promote:
                     logger.warning(
-                        f"Model protection: NEW {self._version} accuracy ({new_accuracy:.4f}) "
-                        f"< ACTIVE {current_version} accuracy ({current_accuracy:.4f}). "
-                        f"Keeping active model. New model archived for reference."
-                    )
-                elif new_accuracy == current_accuracy:
-                    logger.info(
-                        f"Model accuracy unchanged ({new_accuracy:.4f}). Updating active model."
+                        f"Model protection: NEW {self._version} NOT promoted — {demotion_reason}. "
+                        f"(accuracy {new_accuracy:.4f} vs active {current_accuracy:.4f}, "
+                        f"macro-F1 {new_macro_f1:.4f} vs {cur_macro_f1:.4f}, "
+                        f"UP recall {new_recall_up:.3f} vs {cur_recall_up:.3f}). "
+                        f"Archived for reference."
                     )
                 else:
                     logger.info(
-                        f"Model improved: {current_accuracy:.4f} -> {new_accuracy:.4f} (+{new_accuracy - current_accuracy:.4f}). Promoting."
+                        f"Model promoted: macro-F1 {cur_macro_f1:.4f} → {new_macro_f1:.4f} | "
+                        f"UP recall {cur_recall_up:.3f} → {new_recall_up:.3f} | "
+                        f"accuracy {current_accuracy:.4f} → {new_accuracy:.4f}"
                     )
             
             # Step 3: Promote to active if better (or first model)

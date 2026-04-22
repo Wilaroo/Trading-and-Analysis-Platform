@@ -25,7 +25,43 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 **Status:** NOT STARTED · P1 · deferred until post-Phase-13-v3 (need LONG side producing real data first so tilt math isn't lopsided by definition).
 
-### CRITICAL FIX — Generic direction_predictor class-balance (2026-04-22, Phase 13 v2 post-mortem)
+### CRITICAL FIX #2 — Model Protection gate was class-collapse-blind (2026-04-22, post first retrain)
+
+**Finding:** After shipping CRITICAL FIX #1, the Phase 1 retrain ran successfully and produced a class-balanced `direction_predictor_5min` v20260422_162431 with accuracy 43.5%, UP recall ~0.30, macro-F1 0.36. BUT the Model Protection gate rejected it because `0.4346 < 0.5351` (old model's accuracy). Problem: the old collapsed model "wins" accuracy precisely BY collapsing — predicting the DOWN majority class on every bar gives high aggregate accuracy in bearish training windows while yielding zero tradeable LONG signals. Classic Goodhart's law — we were measuring the wrong thing.
+
+**Fix (`services/ai_modules/timeseries_gbm.py` L461–L540, `_save_model`):**
+- Replaced `new.accuracy > old.accuracy` with a multi-metric gate driven by per-class recall and macro-F1.
+- **Escape hatch**: if active is class-collapsed (`recall_up < 0.05`), promote ANY new model whose UP recall beats active AND DOWN recall ≥ 10%. This unblocks the specific situation we're in right now.
+- **Normal path** (once active is healthy): require new UP recall ≥ 10% AND DOWN recall ≥ 10% AND new macro-F1 ≥ 0.92 × active macro-F1. The 8% macro-F1 slack allows for noise while preventing outright regression.
+- Logs much richer: both accuracy AND macro-F1 AND per-class recall for active vs new.
+
+**Regression tests — `tests/test_model_protection_class_collapse.py` (8 new, all passing):**
+- `test_promote_when_active_is_collapsed_and_new_improves_up_recall` — reproduces the EXACT Phase 13 v2 situation; asserts the fix now promotes.
+- Escape hatch must still reject if new's DOWN recall is broken.
+- Normal path rejects any model with UP recall < 10%, DOWN recall < 10%, or macro-F1 below the 92% floor.
+- Legacy active models without recall fields → treated as collapsed → new promotes.
+
+**Force-promote command (one-shot unblock for current archived model):**
+```bash
+# on Spark, outside Python:
+mongo tradecommand --eval '
+  const a = db.timeseries_models_archive.findOne(
+    {name:"direction_predictor_5min", version:"v20260422_162431"},
+    {_id:0}
+  );
+  if (!a) { print("archived model not found"); quit(1); }
+  a.updated_at = new Date();
+  a.promoted_at = new Date();
+  db.timeseries_models.updateOne({name:"direction_predictor_5min"}, {$set: a}, {upsert:true});
+  print("PROMOTED direction_predictor_5min v20260422_162431");
+'
+```
+
+Or future retrains will auto-promote once the protection fix is pulled + backend restarted.
+
+
+
+### CRITICAL FIX #1 — Generic direction_predictor class-balance (2026-04-22, Phase 13 v2 post-mortem)
 
 **Finding:** Phase 13 v2 revalidation showed 10/10 LONG setups with `trades=0` in Phase 1 (shorts promoted cleanly: SHORT_SCALP 1.52 Sharpe, SHORT_VWAP 1.76, SHORT_REVERSAL 1.94). Root cause found via code review: `revalidate_all.py` loads ONE model for AI filtering — `direction_predictor_5min` — and that model is trained by `TimeSeriesAIService.train_full_universe` in `services/ai_modules/timeseries_service.py`. That path builds `xgb.DMatrix(...)` without `weight=` and calls `xgb.train()` directly, **completely bypassing** `TimeSeriesGBM.train_from_features()` where the 2026-04-20 class-balance fix was applied. Net effect: the generic directional model never gets per-class sample weights, collapses to the bearish-majority class (DOWN/FLAT), argmax never resolves to UP, and every LONG setup Phase 1 backtest records `trades=0`.
 
