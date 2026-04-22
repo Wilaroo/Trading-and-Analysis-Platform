@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Option 1 v3 — Chart-Dominant Command Center</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  h1,h2,h3,.ui { font-family:'Inter'; }
+  .mono { font-family:'JetBrains Mono'; }
+  .panel-title { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:#71717a; }
+  .why { font-size:10px; color:#a1a1aa; line-height:1.45; }
+  .why-dim { font-size:10px; color:#71717a; line-height:1.4; }
+  .chip { display:inline-block; font-size:9px; font-family:'JetBrains Mono'; padding:1px 5px; border-radius:2px; border:1px solid; }
+  .stage-scan   { color:#a78bfa; border-color:#5b21b6; background:rgba(139,92,246,.08); }
+  .stage-eval   { color:#60a5fa; border-color:#1e3a8a; background:rgba(59,130,246,.08); }
+  .stage-order  { color:#facc15; border-color:#713f12; background:rgba(234,179,8,.08); }
+  .stage-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+  .stage-close  { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08); }
+  .stage-veto   { color:#f87171; border-color:#7f1d1d; background:rgba(239,68,68,.08); }
+  .bar { height:3px; background:#27272a; border-radius:1px; overflow:hidden; }
+  .up { color:#22c55e; } .down { color:#ef4444; } .warn { color:#eab308; } .dim { color:#52525b; }
+
+  .hud-block { transition:all .15s; cursor:pointer; }
+  .hud-block:hover { background:#27272a; border-color:#52525b; }
+
+  .mini-5stage { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; }
+  .mini-5stage span { height:3px; border-radius:1px; background:#27272a; }
+  .mini-5stage span.on-scan   { background:#8b5cf6; }
+  .mini-5stage span.on-eval   { background:#3b82f6; }
+  .mini-5stage span.on-order  { background:#eab308; }
+  .mini-5stage span.on-manage { background:#22c55e; }
+  .mini-5stage span.on-close  { background:#64748b; }
+
+  .scanner-card { border-bottom:1px solid #18181b; padding:8px 10px; transition:all .15s; cursor:pointer; }
+  .scanner-card:hover { background:#141416; }
+  .scanner-card.active { background:#1e1b4b; border-left:2px solid #8b5cf6; padding-left:8px; }
+
+  /* Chart annotations */
+  .chart-label { font-family:'JetBrains Mono'; font-size:9px; fill:#a1a1aa; }
+  .chart-label-bold { font-family:'JetBrains Mono'; font-size:10px; font-weight:700; }
+  .chart-label-sm { font-family:'JetBrains Mono'; font-size:8px; fill:#71717a; }
+  .ann-sl { stroke:#ef4444; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-pt { stroke:#22c55e; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-ent { stroke:#eab308; stroke-width:1; stroke-dasharray:4,3; }
+  .ann-vwap { stroke:#a1a1aa; stroke-width:1; stroke-dasharray:1,2; opacity:.7; }
+  .ann-pmh { stroke:#06b6d4; stroke-width:1; stroke-dasharray:5,2; opacity:.85; }
+  .ann-pml { stroke:#06b6d4; stroke-width:1; stroke-dasharray:5,2; opacity:.85; }
+  .ann-competing { stroke:#71717a; stroke-width:0.8; stroke-dasharray:1,3; opacity:.8; }
+  .ann-9ema { stroke:#60a5fa; stroke-width:1.2; fill:none; }
+  .ann-21ema { stroke:#f472b6; stroke-width:1.2; fill:none; }
+  .ann-predicted-range { fill:rgba(34,197,94,.08); stroke:rgba(34,197,94,.35); stroke-dasharray:2,2; }
+  .ann-box { stroke:#a855f7; stroke-width:1; stroke-dasharray:2,2; fill:rgba(168,85,247,.08); }
+  .candle-up   { fill:#22c55e; stroke:#22c55e; }
+  .candle-down { fill:#ef4444; stroke:#ef4444; }
+
+  /* Thought bubbles */
+  .bubble-body { fill:#18181b; stroke:#a855f7; stroke-width:1; }
+  .bubble-body.eval { stroke:#60a5fa; }
+  .bubble-body.trig { stroke:#eab308; }
+  .bubble-body.pos { stroke:#22c55e; }
+  .bubble-tail { fill:#18181b; stroke:#a855f7; stroke-width:1; }
+  .bubble-tail.eval { stroke:#60a5fa; }
+  .bubble-tail.trig { stroke:#eab308; }
+  .bubble-tail.pos { stroke:#22c55e; }
+  .bubble-text { font-family:'IBM Plex Sans'; font-size:9px; fill:#e4e4e7; }
+  .bubble-text-bold { font-family:'IBM Plex Sans'; font-size:10px; font-weight:700; fill:#f4f4f5; }
+
+  /* Momentum strength bar */
+  .mom-bar-bg { fill:#18181b; stroke:#27272a; }
+  .mom-seg-on { fill:#22c55e; }
+  .mom-seg-mid { fill:#eab308; }
+  .mom-seg-off { fill:#27272a; }
+
+  /* Stream card severity colors */
+  .stream-item { border-left:2px solid transparent; padding:6px 8px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; }
+  .stream-item:hover { background:#141416; }
+  .stream-item.sev-order   { border-left-color:#eab308; }
+  .stream-item.sev-fill    { border-left-color:#3b82f6; }
+  .stream-item.sev-win     { border-left-color:#22c55e; }
+  .stream-item.sev-loss    { border-left-color:#ef4444; }
+  .stream-item.sev-skip    { border-left-color:#71717a; }
+  .stream-item.sev-brain   { border-left-color:#a855f7; }
+
+  /* Briefing panel */
+  .briefing-card { padding:8px 10px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; }
+  .briefing-card:hover { background:#141416; }
+  .briefing-new { background:linear-gradient(90deg, rgba(234,179,8,.08) 0%, transparent 100%); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- TOP PIPELINE HUD — clickable, hover to expand -->
+<div class="border-b border-zinc-800 bg-zinc-950 px-3 py-2">
+  <div class="flex items-center gap-2">
+    <div class="text-[10px] mono text-zinc-500 pr-2 border-r border-zinc-800">SENTCOM</div>
+    <div class="flex items-center gap-1.5 flex-1">
+      <div class="hud-block flex-1 px-2 py-1 border border-violet-900/60 rounded-sm bg-violet-950/20">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[9px] uppercase tracking-widest text-violet-400">Scan</span>
+          <span class="mono text-lg font-bold">47</span>
+        </div>
+        <div class="text-[9px] text-zinc-500">5min · 12 symbols · click for detail</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-blue-900/60 rounded-sm bg-blue-950/20">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[9px] uppercase tracking-widest text-blue-400">Evaluate</span>
+          <span class="mono text-lg font-bold">8</span>
+        </div>
+        <div class="text-[9px] text-zinc-500">17% gate pass · avg 62</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-yellow-900/60 rounded-sm bg-yellow-950/20">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[9px] uppercase tracking-widest text-yellow-400">Order</span>
+          <span class="mono text-lg font-bold">3</span>
+        </div>
+        <div class="text-[9px] text-zinc-500">2 filled · 1 pending · 8s latency</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-green-900/60 rounded-sm bg-green-950/20">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[9px] uppercase tracking-widest text-green-400">Manage</span>
+          <span class="mono text-lg font-bold">2</span>
+          <span class="mono text-xs up">+0.6R</span>
+        </div>
+        <div class="text-[9px] text-zinc-500">NVDA · AMD · no stops breached</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-slate-700 rounded-sm bg-slate-900/20">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[9px] uppercase tracking-widest text-slate-400">Close today</span>
+          <span class="mono text-lg font-bold">4</span>
+          <span class="mono text-xs up">+1.8R</span>
+        </div>
+        <div class="text-[9px] text-zinc-500">WR 75% · $+412 · worst −0.3R</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 pl-3 border-l border-zinc-800">
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">P&amp;L</div><div class="mono font-bold up">+$412.60</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Equity</div><div class="mono font-bold">$48,921</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Latency</div><div class="mono font-bold up">8.1s</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Phase</div><div class="mono font-bold text-yellow-400">PAPER</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 3-COL BODY: 20/55/25 -->
+<div class="grid gap-px bg-zinc-900" style="height:calc(100vh - 64px); grid-template-columns: 20% 55% 25%;">
+
+  <!-- LEFT: Scanner with conversational reasoning -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="panel-title">Scanner · Live</div>
+      <div class="text-[9px] mono text-zinc-500">47 hits</div>
+    </div>
+
+    <div class="overflow-y-auto flex-1">
+      <!-- NVDA active, expanded (rich conversational why) -->
+      <div class="scanner-card active">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">NVDA</span>
+            <span class="chip stage-order">ORDER · 8s</span>
+          </div>
+          <span class="mono text-[10px] up">+2.4%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span></span><span></span></div>
+        <div class="why mt-2">
+          <span class="text-violet-400 font-semibold">Bot:</span> "I caught rubber_band_scalp_short at 14:22:15 — RSI hit 28 and price bounced straight into VWAP from below, classic exhaustion.
+          Regime is BEARISH which aligns with a short. Model consensus is 80% (5 of 5 agree), CNN-LSTM is seeing the same bull-trap pattern it learned from 2019-2023 data (72% confidence).
+          FinBERT found mildly bullish news on NVDA but only +3pts — not enough to veto.
+          <b class="text-zinc-200">I'm going in full size (100 shares), risking $480 to make $1,030. R:R 2.1, 0.5% of account.</b>"
+        </div>
+        <div class="flex items-center gap-2 mt-1.5 text-[10px] mono">
+          <span class="dim">gate</span><span class="font-bold up">78</span>
+          <span class="dim ml-2">P(win)</span><span class="font-bold up">68%</span>
+          <span class="dim ml-2">Sharpe</span><span class="font-bold">1.52</span>
+        </div>
+        <div class="why-dim mt-1.5">Entry 880.30 · SL 885.10 · PT 870.00 · ATR 4.8</div>
+      </div>
+
+      <!-- AMD holding -->
+      <div class="scanner-card">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">AMD</span>
+            <span class="chip stage-manage">OPEN</span>
+          </div>
+          <span class="mono text-[10px] up">+1.9%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1.5">
+          <span class="text-green-400 font-semibold">Bot:</span> "Holding AMD since 14:02. CNN-LSTM confidence just ticked up 67→72%, so I trailed the stop to $166.40. Bull flag still intact, 9/21 EMA stacked. Gunning for $172 PT."
+        </div>
+      </div>
+
+      <!-- TSLA short -->
+      <div class="scanner-card">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">TSLA</span>
+            <span class="chip stage-manage">SHORT</span>
+          </div>
+          <span class="mono text-[10px] down">-0.3%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1.5">
+          <span class="text-red-400 font-semibold">Bot:</span> "Shorted TSLA at 14:09 on a halfback_reversal — price failed to retake HOD twice, VAE regime flipped to BEAR_TRENDING. SHORT_REVERSAL is my best-edge model (Sharpe 1.94). Conviction rising."
+        </div>
+      </div>
+
+      <!-- MSFT closed -->
+      <div class="scanner-card">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">MSFT</span>
+            <span class="chip stage-close">CLOSED W</span>
+          </div>
+          <span class="mono text-[10px] up">+0.7R</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span class="on-close"></span></div>
+        <div class="why mt-1.5">
+          <span class="text-slate-400 font-semibold">Bot:</span> "PT hit on MSFT — booked +$142 (+0.7R). Stop was never threatened. Textbook vwap_bounce win."
+        </div>
+      </div>
+
+      <!-- SPY skip -->
+      <div class="scanner-card">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">SPY</span>
+            <span class="chip stage-veto">SKIP</span>
+          </div>
+          <span class="mono text-[10px] down">-0.2%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span></span><span></span><span></span></div>
+        <div class="why mt-1.5">
+          <span class="text-zinc-500 font-semibold">Bot:</span> "Gate only 41 on SPY vwap_bounce — regime is neutral, ensemble P(win) 52%. Skipping, no edge."
+        </div>
+      </div>
+
+      <!-- META watching -->
+      <div class="scanner-card">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="mono font-bold text-sm">META</span>
+            <span class="chip stage-scan">SCAN</span>
+          </div>
+          <span class="mono text-[10px] up">+1.2%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span></span><span></span><span></span><span></span></div>
+        <div class="why mt-1.5">
+          <span class="text-violet-400 font-semibold">Bot:</span> "META volume is +340% of ADV but no setup pattern has crystallized yet. Watching for breakout or failed-breakout trigger."
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: CHART DOMINANT -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- Compact header with ticker + inline bracket numbers + TF selector -->
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="flex items-center gap-3">
+        <span class="mono font-bold text-base">NVDA</span>
+        <span class="chip stage-order">ORDER · pending 8s</span>
+        <span class="mono text-[10px] up">$880.30 · +2.4%</span>
+        <div class="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[10px] mono">
+          <span class="dim">Entry</span><span class="warn font-bold">880.30</span>
+          <span class="dim ml-2">SL</span><span class="down font-bold">885.10</span>
+          <span class="dim ml-2">PT</span><span class="up font-bold">870.00</span>
+          <span class="dim ml-2">R:R</span><span class="font-bold">2.1</span>
+          <span class="dim ml-2">Size</span><span class="font-bold">100sh</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-1 text-[10px] mono">
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1m</span>
+        <span class="chip" style="border-color:#3b82f6;color:#60a5fa;background:rgba(59,130,246,.08)">5m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">15m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1h</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1d</span>
+      </div>
+    </div>
+
+    <!-- BIG CHART — takes most of center column -->
+    <div class="bg-zinc-950 flex-1 overflow-hidden">
+      <svg viewBox="0 0 1100 620" preserveAspectRatio="none" class="w-full h-full">
+        <defs>
+          <pattern id="grid3" width="55" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 55 0 L 0 0 0 40" fill="none" stroke="#18181b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="1100" height="620" fill="url(#grid3)"/>
+
+        <!-- price axis (right) -->
+        <g class="chart-label">
+          <text x="1055" y="50">890.00</text>
+          <text x="1055" y="130">886.00</text>
+          <text x="1055" y="210">882.00</text>
+          <text x="1055" y="290">878.00</text>
+          <text x="1055" y="370">874.00</text>
+          <text x="1055" y="450">870.00</text>
+          <text x="1055" y="530">866.00</text>
+        </g>
+        <!-- time axis -->
+        <g class="chart-label" opacity="0.55">
+          <text x="60"  y="600">09:30</text>
+          <text x="180" y="600">10:30</text>
+          <text x="320" y="600">11:30</text>
+          <text x="460" y="600">12:30</text>
+          <text x="600" y="600">13:30</text>
+          <text x="780" y="600">14:22 (now)</text>
+        </g>
+
+        <!-- Predicted-range band (translucent green — "bot thinks price likely stays 874-888 next 30m") -->
+        <rect class="ann-predicted-range" x="820" y="170" width="230" height="180"/>
+        <text x="828" y="182" class="chart-label-bold" fill="#22c55e">Bot's predicted range · next 30m · 874–888</text>
+
+        <!-- Pre-market HIGH + LOW lines (cyan dashed) -->
+        <line class="ann-pmh" x1="40" y1="90" x2="1050" y2="90"/>
+        <text x="46" y="86" class="chart-label-bold" fill="#22d3ee">PMH 888.40</text>
+        <line class="ann-pml" x1="40" y1="440" x2="1050" y2="440"/>
+        <text x="46" y="436" class="chart-label-bold" fill="#22d3ee">PML 871.10</text>
+
+        <!-- VWAP (grey dashed) -->
+        <path class="ann-vwap" d="M 40 300 L 180 295 L 320 290 L 460 282 L 600 270 L 740 250 L 880 225 L 1020 222"/>
+        <text x="46" y="296" class="chart-label" fill="#a1a1aa">VWAP 878.90</text>
+
+        <!-- 9 EMA (blue) + 21 EMA (pink) -->
+        <path class="ann-9ema"  d="M 40 310 L 120 302 L 200 296 L 280 282 L 360 268 L 440 250 L 520 232 L 600 218 L 680 208 L 760 202 L 840 218 L 920 240 L 1000 248"/>
+        <path class="ann-21ema" d="M 40 318 L 120 314 L 200 308 L 280 298 L 360 286 L 440 270 L 520 254 L 600 238 L 680 226 L 760 220 L 840 226 L 920 236 L 1000 244"/>
+
+        <!-- Competing setups — dotted grey lines with tiny labels (levels the bot also noticed) -->
+        <line class="ann-competing" x1="40" y1="170" x2="1050" y2="170"/>
+        <text x="46" y="166" class="chart-label-sm">Competing: breakdown_short trigger (884)</text>
+        <line class="ann-competing" x1="40" y1="370" x2="1050" y2="370"/>
+        <text x="46" y="366" class="chart-label-sm">Competing: vwap_reclaim_long trigger (874)</text>
+
+        <!-- CANDLES — tight spacing, 32 bars across -->
+        <g stroke-width="1">
+          <line class="candle-wick candle-down" x1="60"  y1="310" x2="60"  y2="340"/><rect class="candle-down" x="56"  y="320" width="8" height="14"/>
+          <line class="candle-wick candle-up"   x1="90"  y1="295" x2="90"  y2="328"/><rect class="candle-up"   x="86"  y="305" width="8" height="18"/>
+          <line class="candle-wick candle-up"   x1="120" y1="285" x2="120" y2="318"/><rect class="candle-up"   x="116" y="288" width="8" height="22"/>
+          <line class="candle-wick candle-down" x1="150" y1="275" x2="150" y2="310"/><rect class="candle-down" x="146" y="290" width="8" height="14"/>
+          <line class="candle-wick candle-up"   x1="180" y1="260" x2="180" y2="300"/><rect class="candle-up"   x="176" y="268" width="8" height="24"/>
+          <line class="candle-wick candle-up"   x1="210" y1="225" x2="210" y2="280"/><rect class="candle-up"   x="206" y="228" width="8" height="38"/>
+          <line class="candle-wick candle-up"   x1="240" y1="215" x2="240" y2="238"/><rect class="candle-up"   x="236" y="218" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="270" y1="208" x2="270" y2="230"/><rect class="candle-up"   x="266" y="210" width="8" height="16"/>
+          <line class="candle-wick candle-down" x1="300" y1="202" x2="300" y2="232"/><rect class="candle-down" x="296" y="212" width="8" height="14"/>
+          <line class="candle-wick candle-up"   x1="330" y1="198" x2="330" y2="220"/><rect class="candle-up"   x="326" y="200" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="360" y1="192" x2="360" y2="215"/><rect class="candle-up"   x="356" y="194" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="390" y1="185" x2="390" y2="208"/><rect class="candle-up"   x="386" y="188" width="8" height="16"/>
+          <line class="candle-wick candle-down" x1="420" y1="180" x2="420" y2="210"/><rect class="candle-down" x="416" y="190" width="8" height="14"/>
+          <line class="candle-wick candle-up"   x1="450" y1="172" x2="450" y2="200"/><rect class="candle-up"   x="446" y="176" width="8" height="20"/>
+          <line class="candle-wick candle-up"   x1="480" y1="165" x2="480" y2="188"/><rect class="candle-up"   x="476" y="168" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="510" y1="158" x2="510" y2="180"/><rect class="candle-up"   x="506" y="160" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="540" y1="150" x2="540" y2="172"/><rect class="candle-up"   x="536" y="152" width="8" height="16"/>
+          <line class="candle-wick candle-down" x1="570" y1="142" x2="570" y2="168"/><rect class="candle-down" x="566" y="152" width="8" height="12"/>
+          <line class="candle-wick candle-up"   x1="600" y1="138" x2="600" y2="162"/><rect class="candle-up"   x="596" y="140" width="8" height="18"/>
+          <line class="candle-wick candle-up"   x1="630" y1="132" x2="630" y2="158"/><rect class="candle-up"   x="626" y="134" width="8" height="18"/>
+          <line class="candle-wick candle-up"   x1="660" y1="125" x2="660" y2="150"/><rect class="candle-up"   x="656" y="128" width="8" height="16"/>
+          <line class="candle-wick candle-up"   x1="690" y1="118" x2="690" y2="142"/><rect class="candle-up"   x="686" y="120" width="8" height="16"/>
+          <line class="candle-wick candle-down" x1="720" y1="108" x2="720" y2="148"/><rect class="candle-down" x="716" y="118" width="8" height="20"/>
+          <!-- Exhaustion wick bar (CNN pattern — long upper wick) -->
+          <line class="candle-wick candle-down" x1="750" y1="80"  x2="750" y2="170"/><rect class="candle-down" x="746" y="126" width="8" height="22"/>
+          <line class="candle-wick candle-down" x1="780" y1="128" x2="780" y2="178"/><rect class="candle-down" x="776" y="142" width="8" height="22"/>
+          <line class="candle-wick candle-down" x1="810" y1="148" x2="810" y2="202"/><rect class="candle-down" x="806" y="162" width="8" height="28"/>
+          <line class="candle-wick candle-down" x1="840" y1="178" x2="840" y2="222"/><rect class="candle-down" x="836" y="188" width="8" height="24"/>
+          <line class="candle-wick candle-up"   x1="870" y1="202" x2="870" y2="228"/><rect class="candle-up"   x="866" y="208" width="8" height="14"/>
+          <line class="candle-wick candle-down" x1="900" y1="208" x2="900" y2="238"/><rect class="candle-down" x="896" y="216" width="8" height="16"/>
+          <!-- Current forming bar -->
+          <line class="candle-wick candle-down" x1="930" y1="218" x2="930" y2="242"/><rect class="candle-down" x="926" y="222" width="8" height="16"/>
+        </g>
+
+        <!-- CNN pattern box (the "shape" it saw) -->
+        <rect class="ann-box" x="720" y="60" width="150" height="140"/>
+        <text x="725" y="54" class="chart-label-bold" fill="#a855f7">CNN · exhaustion wick + VWAP reject pattern</text>
+
+        <!-- SL / ENTRY / PT lines -->
+        <line class="ann-sl"  x1="40" y1="130" x2="1050" y2="130"/>
+        <rect x="1002" y="122" width="50" height="14" fill="#7f1d1d" stroke="#ef4444"/>
+        <text x="1005" y="133" class="chart-label-bold" fill="#fca5a5">SL 885.10</text>
+        <line class="ann-ent" x1="40" y1="230" x2="1050" y2="230"/>
+        <rect x="1002" y="222" width="50" height="14" fill="#713f12" stroke="#eab308"/>
+        <text x="1005" y="233" class="chart-label-bold" fill="#facc15">E 880.30</text>
+        <line class="ann-pt"  x1="40" y1="450" x2="1050" y2="450"/>
+        <rect x="1002" y="442" width="50" height="14" fill="#14532d" stroke="#22c55e"/>
+        <text x="1005" y="453" class="chart-label-bold" fill="#86efac">PT 870.00</text>
+
+        <!-- MOMENTUM STRENGTH BAR — right edge -->
+        <g transform="translate(1075, 80)">
+          <rect class="mom-bar-bg" x="0" y="0" width="16" height="400" rx="2"/>
+          <!-- segments, bottom-up: green (strong bearish momentum for short) -->
+          <rect class="mom-seg-on"  x="2" y="314" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="286" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="258" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="230" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="202" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="174" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-on"  x="2" y="146" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-mid" x="2" y="118" width="12" height="24" rx="1"/>
+          <rect class="mom-seg-off" x="2" y="90"  width="12" height="24" rx="1"/>
+          <rect class="mom-seg-off" x="2" y="62"  width="12" height="24" rx="1"/>
+          <rect class="mom-seg-off" x="2" y="34"  width="12" height="24" rx="1"/>
+          <rect class="mom-seg-off" x="2" y="6"   width="12" height="24" rx="1"/>
+          <text x="25" y="10" class="chart-label-bold" fill="#22c55e" transform="rotate(90 25 10)">MOM 72%</text>
+        </g>
+
+        <!-- THOUGHT BUBBLES — arrow from chart point to bubble -->
+        <!-- Bubble 1: early-morning observation at bar ~210 -->
+        <g>
+          <path d="M 210 225 L 240 165" stroke="#3b82f6" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bubble-body eval" x="240" y="95" width="180" height="70" rx="4"/>
+          <polyline class="bubble-tail eval" points="240,160 234,172 260,160" fill="#18181b"/>
+          <text x="248" y="112" class="bubble-text-bold" fill="#60a5fa">09:45 · Scanner</text>
+          <text x="248" y="126" class="bubble-text">Flagged NVDA — vol +120%,</text>
+          <text x="248" y="138" class="bubble-text">quality 78. Waiting for a</text>
+          <text x="248" y="150" class="bubble-text">rubber-band or VWAP rejection</text>
+          <text x="248" y="162" class="bubble-text">trigger near PMH.</text>
+        </g>
+
+        <!-- Bubble 2: CNN pattern recognition at bar ~750 -->
+        <g>
+          <path d="M 750 100 L 560 60" stroke="#a855f7" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bubble-body" x="400" y="10" width="200" height="58" rx="4"/>
+          <polyline class="bubble-tail" points="595,65 608,58 600,48" fill="#18181b"/>
+          <text x="408" y="25" class="bubble-text-bold" fill="#a855f7">14:18 · CNN vision</text>
+          <text x="408" y="37" class="bubble-text">Exhaustion wick + vol climax.</text>
+          <text x="408" y="49" class="bubble-text">This looks like my training set's</text>
+          <text x="408" y="61" class="bubble-text">top-10 reversal setups. 72% conf.</text>
+        </g>
+
+        <!-- Bubble 3: trigger fired at bar ~810 -->
+        <g>
+          <circle cx="810" cy="195" r="7" fill="#eab308" style="filter:drop-shadow(0 0 6px rgba(234,179,8,.9))"/>
+          <path d="M 810 200 L 840 300" stroke="#eab308" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bubble-body trig" x="840" y="290" width="210" height="72" rx="4"/>
+          <polyline class="bubble-tail trig" points="840,305 828,314 852,318" fill="#18181b"/>
+          <text x="848" y="308" class="bubble-text-bold" fill="#facc15">14:22:15 · TRIGGER</text>
+          <text x="848" y="320" class="bubble-text">Rubber-band fired — 3rd failed</text>
+          <text x="848" y="332" class="bubble-text">attempt to retake VWAP. Gate 78</text>
+          <text x="848" y="344" class="bubble-text">(regime +12, consensus +15, CNN</text>
+          <text x="848" y="356" class="bubble-text">+10). Queuing 100sh short @ mkt.</text>
+        </g>
+
+        <!-- Bubble 4: current thought on forming bar -->
+        <g>
+          <path d="M 930 225 L 895 420" stroke="#22c55e" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bubble-body pos" x="690" y="420" width="230" height="58" rx="4"/>
+          <polyline class="bubble-tail pos" points="895,420 908,416 912,428" fill="#18181b"/>
+          <text x="698" y="435" class="bubble-text-bold" fill="#22c55e">14:22:28 · Current</text>
+          <text x="698" y="447" class="bubble-text">Price holding below VWAP. If we</text>
+          <text x="698" y="459" class="bubble-text">break 876 in next 5 bars, I'll trail</text>
+          <text x="698" y="471" class="bubble-text">stop to entry. Fill pending IB (~3s).</text>
+        </g>
+
+        <!-- volume ribbon at bottom -->
+        <g transform="translate(0, 560)">
+          <rect x="56"  y="24" width="8" height="8"  fill="#52525b"/>
+          <rect x="86"  y="20" width="8" height="12" fill="#52525b"/>
+          <rect x="116" y="16" width="8" height="16" fill="#52525b"/>
+          <rect x="146" y="22" width="8" height="10" fill="#52525b"/>
+          <rect x="176" y="12" width="8" height="20" fill="#22c55e"/>
+          <rect x="206" y="4"  width="8" height="28" fill="#22c55e"/>
+          <rect x="236" y="18" width="8" height="14" fill="#22c55e"/>
+          <rect x="266" y="20" width="8" height="12" fill="#22c55e"/>
+          <rect x="296" y="16" width="8" height="16" fill="#52525b"/>
+          <rect x="326" y="20" width="8" height="12" fill="#22c55e"/>
+          <rect x="356" y="20" width="8" height="12" fill="#22c55e"/>
+          <rect x="386" y="22" width="8" height="10" fill="#22c55e"/>
+          <rect x="416" y="18" width="8" height="14" fill="#ef4444"/>
+          <rect x="446" y="16" width="8" height="16" fill="#22c55e"/>
+          <rect x="476" y="18" width="8" height="14" fill="#22c55e"/>
+          <rect x="506" y="14" width="8" height="18" fill="#22c55e"/>
+          <rect x="536" y="10" width="8" height="22" fill="#22c55e"/>
+          <rect x="566" y="18" width="8" height="14" fill="#ef4444"/>
+          <rect x="596" y="14" width="8" height="18" fill="#22c55e"/>
+          <rect x="626" y="8"  width="8" height="24" fill="#22c55e"/>
+          <rect x="656" y="14" width="8" height="18" fill="#22c55e"/>
+          <rect x="686" y="6"  width="8" height="26" fill="#22c55e"/>
+          <rect x="716" y="10" width="8" height="22" fill="#ef4444"/>
+          <rect x="746" y="-4" width="8" height="36" fill="#ef4444"/><!-- climax -->
+          <rect x="776" y="0"  width="8" height="32" fill="#ef4444"/>
+          <rect x="806" y="4"  width="8" height="28" fill="#ef4444"/>
+          <rect x="836" y="8"  width="8" height="24" fill="#ef4444"/>
+          <rect x="866" y="16" width="8" height="16" fill="#22c55e"/>
+          <rect x="896" y="12" width="8" height="20" fill="#ef4444"/>
+          <rect x="926" y="14" width="8" height="18" fill="#ef4444"/>
+          <text x="40" y="20" class="chart-label" fill="#52525b">VOL</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- RIGHT: Briefings + Positions + Unified Stream -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- Briefings panel (auto-populates by schedule; modal pops on new; accessible after) -->
+    <div class="border-b border-zinc-800 flex flex-col" style="max-height:28vh;">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Briefings</div>
+        <div class="text-[9px] mono dim">auto · schedule in Market Intel</div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="briefing-card briefing-new">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2"><span class="mono font-bold text-xs text-amber-400">MID-DAY RECAP</span><span class="chip stage-manage">NEW</span></div>
+            <span class="mono text-[9px] dim">12:00 · 2h ago</span>
+          </div>
+          <div class="why mt-1">SPY held 510, tech pulling its weight. 2 paper trades filled (MSFT WIN, AAPL WIN). Plan A still live — looking for rubber-band shorts on extended names into close.</div>
+        </div>
+        <div class="briefing-card">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2"><span class="mono font-bold text-xs text-violet-400">MORNING PREP</span></div>
+            <span class="mono text-[9px] dim">09:28 · 5h ago</span>
+          </div>
+          <div class="why mt-1">Regime HIGH-VOL TREND · VIX 18.3 · CPI beat. NVDA upgrade, CRWD miss, BA downgrade. Plan A: SPY&gt;510 tech longs. Plan B: range reject halfback shorts.</div>
+        </div>
+        <div class="briefing-card">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2"><span class="mono font-bold text-xs text-cyan-400">PRE-OPEN SCAN</span></div>
+            <span class="mono text-[9px] dim">09:15 · 5h ago</span>
+          </div>
+          <div class="why mt-1">In-play: NVDA (unusual options), TSLA (sympathy EV), AMD (RS leader), META (vol surge). CRWD flagged for earnings gap short.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open positions -->
+    <div class="border-b border-zinc-800 flex flex-col" style="max-height:28vh;">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Open (2)</div>
+        <div class="mono text-[10px] up">+$186 · +0.6R</div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between">
+            <div><span class="mono font-bold">AMD</span> <span class="chip stage-manage ml-1">SCALP long</span></div>
+            <span class="mono text-xs up">+$112 · +0.4R</span>
+          </div>
+          <svg viewBox="0 0 180 24" class="w-full h-6 mt-1"><polyline points="0,18 15,16 30,19 45,14 60,11 75,9 90,10 105,7 120,6 135,7 150,5 165,4 180,3" fill="none" stroke="#22c55e" stroke-width="1.2"/></svg>
+          <div class="why-dim">TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull</div>
+        </div>
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between">
+            <div><span class="mono font-bold">TSLA</span> <span class="chip stage-manage ml-1">SHORT_REV</span></div>
+            <span class="mono text-xs up">+$74 · +0.2R</span>
+          </div>
+          <svg viewBox="0 0 180 24" class="w-full h-6 mt-1"><polyline points="0,4 15,6 30,5 45,8 60,10 75,7 90,12 105,14 120,16 135,15 150,19 165,21 180,22" fill="none" stroke="#ef4444" stroke-width="1.2"/></svg>
+          <div class="why-dim">SL 245.40 · PT 238.10 · VAE BEAR_TRENDING</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UNIFIED STREAM (merged this-decision + global) -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Unified Stream</div>
+        <div class="flex items-center gap-1 text-[9px] mono">
+          <span class="chip stage-manage">live</span>
+          <span class="dim">filter:</span>
+          <span class="chip stage-scan">scan</span>
+          <span class="chip stage-eval">eval</span>
+          <span class="chip stage-order">order</span>
+          <span class="chip stage-close">close</span>
+        </div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="stream-item sev-order">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-violet-400">14:22:28</span> <b class="text-zinc-200">NVDA</b></span>
+            <span class="warn">pending IB · 8s</span>
+          </div>
+          <div class="why-dim mt-0.5">Bracket queued · 100 short @ mkt · SL 885.10 / PT 870.00 · resolver → SHORT_SCALP</div>
+        </div>
+        <div class="stream-item sev-brain">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-violet-400">14:22:19</span> <b class="text-zinc-200">NVDA · gate</b></span>
+            <span class="up font-bold">78 GO</span>
+          </div>
+          <div class="why-dim mt-0.5">Regime BEARISH +12 · Consensus 80% +15 · TFT +10 · CNN-LSTM +10 · FinBERT +3 (mild conflict, not vetoing)</div>
+        </div>
+        <div class="stream-item sev-fill">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-green-400">14:22:14</span> <b class="text-zinc-200">AMD</b></span>
+            <span class="up">trail → $166.40</span>
+          </div>
+          <div class="why-dim mt-0.5">CNN-LSTM confidence 67→72%. Bull flag still intact. Moving stop up to protect 0.4R.</div>
+        </div>
+        <div class="stream-item sev-fill">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-yellow-400">14:22:09</span> <b class="text-zinc-200">TSLA</b></span>
+            <span class="up">FILLED · 50s @ 242.98</span>
+          </div>
+          <div class="why-dim mt-0.5">halfback_reversal_short · partial 2-leg · 2¢ slippage · OCA group sentcom-5b3a-20</div>
+        </div>
+        <div class="stream-item sev-skip">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-zinc-400">13:58:03</span> <b class="text-zinc-200">SPY · skip</b></span>
+            <span class="dim">gate 41</span>
+          </div>
+          <div class="why-dim mt-0.5">vwap_bounce_long rejected — below 60 GO threshold. Ensemble P(win) 52%, no edge. Correct no-trade.</div>
+        </div>
+        <div class="stream-item sev-win">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-slate-400">13:49:02</span> <b class="text-zinc-200">MSFT · CLOSED</b></span>
+            <span class="up font-bold">+0.7R</span>
+          </div>
+          <div class="why-dim mt-0.5">PT hit @ 420.55. Held 16min. Stop never threatened. Textbook vwap_bounce win.</div>
+        </div>
+        <div class="stream-item sev-loss">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-slate-400">11:40:58</span> <b class="text-zinc-200">BA · CLOSED</b></span>
+            <span class="down font-bold">−0.3R</span>
+          </div>
+          <div class="why-dim mt-0.5">SL hit @ 181.90. FinBERT -5 (supplier downgrade) was flagging risk at entry. Partial-size rule contained bleed.</div>
+        </div>
+        <div class="stream-item sev-brain">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-violet-400">09:20:58</span> <b class="text-zinc-200">SYSTEM</b></span>
+            <span class="up">7 promoted</span>
+          </div>
+          <div class="why-dim mt-0.5">Phase 13 revalidation complete. 3 SHORTS promoted to paper (SCALP 1.52 Sharpe · VWAP 1.76 · REVERSAL 1.94).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="fixed bottom-2 right-2 text-[9px] mono text-zinc-600">v3 · chart-dominant · thought bubbles · in build: <b class="text-violet-400">TradingView lightweight-charts</b> · <a href="index.html" class="text-violet-400 hover:underline">← all options</a></div>
+</body>
+</html>
