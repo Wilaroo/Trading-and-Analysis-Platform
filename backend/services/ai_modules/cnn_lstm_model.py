@@ -162,7 +162,8 @@ class CNNLSTMModel:
         return self._model
 
     def extract_sequence_features(self, bars: List[Dict], lookback: int = 50,
-                                   forecast_horizon: int = 5) -> tuple:
+                                   forecast_horizon: int = 5,
+                                   return_intervals: bool = False) -> tuple:
         """
         Extract sequential feature windows for CNN-LSTM training.
         
@@ -170,12 +171,13 @@ class CNNLSTMModel:
         captures the evolution of technical indicators over SEQUENCE_LENGTH steps.
         
         Returns:
-            (features, targets) where:
-                features: np.ndarray (n_samples, SEQUENCE_LENGTH, 46)
-                targets: np.ndarray (n_samples,) with values 0=down, 1=up
+            (features, targets) when return_intervals=False (default — legacy)
+            (features, targets, entry_indices, n_bars) when return_intervals=True
+                entry_indices: np.ndarray (n_samples,) — entry bar in local `closes` axis
+                n_bars:        int — total bars used for this symbol (needed by event_intervals)
         """
         if len(bars) < lookback + SEQUENCE_LENGTH + forecast_horizon:
-            return None, None
+            return (None, None, None, 0) if return_intervals else (None, None)
 
         closes = np.array([b["close"] for b in bars], dtype=np.float32)
         highs = np.array([b["high"] for b in bars], dtype=np.float32)
@@ -237,6 +239,7 @@ class CNNLSTMModel:
 
         sequences = []
         targets = []
+        entry_indices: List[int] = []
         n_feats = len(all_bar_features)
 
         for i in range(SEQUENCE_LENGTH, n_feats - forecast_horizon):
@@ -261,11 +264,17 @@ class CNNLSTMModel:
             )
             sequences.append(seq)
             targets.append(label_to_class_index(tb_label))  # -1/0/+1 → 0/1/2
+            entry_indices.append(int(current_close_idx))
 
         if not sequences:
-            return None, None
+            return (None, None, None, 0) if return_intervals else (None, None)
 
-        return np.array(sequences, dtype=np.float32), np.array(targets, dtype=np.int64)
+        seq_arr = np.array(sequences, dtype=np.float32)
+        tgt_arr = np.array(targets, dtype=np.int64)
+
+        if return_intervals:
+            return seq_arr, tgt_arr, np.array(entry_indices, dtype=np.int64), int(n)
+        return seq_arr, tgt_arr
 
     async def train(self, db=None, max_symbols: int = 200, epochs: int = 30, batch_size: int = 256) -> Dict[str, Any]:
         """Train CNN-LSTM on sequential bar data from MongoDB."""
@@ -294,7 +303,19 @@ class CNNLSTMModel:
 
         all_sequences = []
         all_targets = []
+        # Phase-1-for-DL: per-symbol event intervals (López de Prado uniqueness
+        # + purged split). Kept per-symbol because concurrency counts only make
+        # sense on a single symbol's bar axis. Concat later with a global offset.
+        per_symbol_intervals: List[np.ndarray] = []
+        per_symbol_n_bars: List[int] = []
+        global_intervals_chunks: List[np.ndarray] = []
+        _cumulative_bar_offset = 0
         symbols_used = 0
+
+        # Lazy import here (keeps top-of-file imports minimal)
+        from services.ai_modules.event_intervals import (
+            build_event_intervals_from_triple_barrier,
+        )
 
         for sym_idx, symbol in enumerate(symbols):
             if sym_idx % 50 == 0:
@@ -310,8 +331,26 @@ class CNNLSTMModel:
             if len(bars) < 100:
                 continue
 
-            seqs, tgts = self.extract_sequence_features(bars)
+            seqs, tgts, entry_idxs, n_bars_sym = self.extract_sequence_features(
+                bars, return_intervals=True,
+            )
             if seqs is not None and len(seqs) > 10:
+                # Build event intervals in that symbol's local `closes` axis
+                highs_arr = np.array([b["high"] for b in bars], dtype=np.float64)
+                lows_arr = np.array([b["low"] for b in bars], dtype=np.float64)
+                closes_arr = np.array([b["close"] for b in bars], dtype=np.float64)
+                local_intervals = build_event_intervals_from_triple_barrier(
+                    highs_arr, lows_arr, closes_arr,
+                    entry_indices=entry_idxs,
+                    pt_atr_mult=TB_PT_MULT, sl_atr_mult=TB_SL_MULT,
+                    max_bars=5, atr_period=TB_ATR_PERIOD,
+                )
+                per_symbol_intervals.append(local_intervals)
+                per_symbol_n_bars.append(int(n_bars_sym))
+                if len(local_intervals) > 0:
+                    global_intervals_chunks.append(local_intervals + _cumulative_bar_offset)
+                _cumulative_bar_offset += int(n_bars_sym) + 1000  # buffer > embargo
+
                 all_sequences.append(seqs)
                 all_targets.append(tgts)
                 symbols_used += 1
@@ -350,10 +389,47 @@ class CNNLSTMModel:
         self._scaler_std = (X_flat.std(axis=0) + 1e-8).astype(np.float32)
         X_norm = (X - self._scaler_mean) / self._scaler_std
 
-        # Split
-        split_idx = int(len(X_norm) * 0.8)
-        X_train, X_val = X_norm[:split_idx], X_norm[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        # ── Phase-1-for-DL helpers: class weights + sample uniqueness + purged split ──
+        from services.ai_modules.dl_training_utils import (
+            compute_balanced_class_weights,
+            compute_sample_weights_from_intervals,
+            purged_chronological_split,
+            dl_cpcv_folds_from_env,
+            run_cpcv_accuracy_stability,
+            build_dl_scorecard,
+        )
+
+        class_w_np = compute_balanced_class_weights(y, num_classes=3, clip_ratio=5.0)
+        sample_w_np = compute_sample_weights_from_intervals(
+            per_symbol_intervals, per_symbol_n_bars,
+        )
+        if len(sample_w_np) != len(y):
+            sample_w_np = np.ones(len(y), dtype=np.float32)
+        global_intervals = (
+            np.vstack(global_intervals_chunks).astype(np.int64)
+            if global_intervals_chunks else None
+        )
+        if global_intervals is not None and len(global_intervals) != len(y):
+            global_intervals = None
+
+        train_idx, val_idx = purged_chronological_split(
+            intervals=global_intervals,
+            n_samples=len(y),
+            split_frac=0.8,
+            embargo_bars=5,
+        )
+        if len(train_idx) == 0 or len(val_idx) == 0:
+            split_idx = int(len(X_norm) * 0.8)
+            train_idx = np.arange(split_idx, dtype=np.int64)
+            val_idx = np.arange(split_idx, len(X_norm), dtype=np.int64)
+        logger.info(
+            f"[CNN-LSTM] Purged split: train={len(train_idx)} val={len(val_idx)} "
+            f"class_weights={class_w_np.tolist()} sample_w_mean={float(sample_w_np.mean()):.3f}"
+        )
+
+        X_train, X_val = X_norm[train_idx], X_norm[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+        sample_w_train = sample_w_np[train_idx]
 
         self._build_model()
 
@@ -361,10 +437,15 @@ class CNNLSTMModel:
         y_train_t = torch.tensor(y_train, dtype=torch.long, device=self._device)
         X_val_t = torch.tensor(X_val, dtype=torch.float32, device=self._device)
         y_val_t = torch.tensor(y_val, dtype=torch.long, device=self._device)
+        sample_w_train_t = torch.tensor(sample_w_train, dtype=torch.float32, device=self._device)
+        class_weights_t = torch.tensor(class_w_np, dtype=torch.float32, device=self._device)
 
         optimizer = torch.optim.AdamW(self._model.parameters(), lr=5e-4, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-        criterion = nn.CrossEntropyLoss()
+        # Class-weighted CE with per-sample uniqueness. Auxiliary win-prob head
+        # is kept unweighted for class (it's a binary classifier) but still gets
+        # sample-weight scaling.
+        criterion = nn.CrossEntropyLoss(weight=class_weights_t, reduction='none')
 
         best_val_acc = 0
         best_state = None
@@ -376,17 +457,23 @@ class CNNLSTMModel:
             n_batches = 0
 
             for i in range(0, len(X_train_t), batch_size):
-                batch_x = X_train_t[perm[i:i + batch_size]]
-                batch_y = y_train_t[perm[i:i + batch_size]]
+                batch_idx = perm[i:i + batch_size]
+                batch_x = X_train_t[batch_idx]
+                batch_y = y_train_t[batch_idx]
+                batch_sw = sample_w_train_t[batch_idx]
 
                 direction, win_prob, attn = self._model(batch_x)
-                loss = criterion(direction, batch_y)
+                per_sample_loss = criterion(direction, batch_y)
+                loss = (per_sample_loss * batch_sw).mean()
 
                 # Add win probability auxiliary loss.
                 # Triple-barrier class 2 = "up" = profit target hit = win.
                 # Class 1 = flat (time exit) and 0 = down (stop hit) are not wins.
                 win_target = (batch_y == 2).float().unsqueeze(-1)
-                loss += 0.3 * nn.functional.binary_cross_entropy(win_prob, win_target)
+                aux_per_sample = nn.functional.binary_cross_entropy(
+                    win_prob, win_target, reduction='none'
+                ).squeeze(-1)
+                loss = loss + 0.3 * (aux_per_sample * batch_sw).mean()
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -401,10 +488,9 @@ class CNNLSTMModel:
             # Validate
             self._model.eval()
             with torch.no_grad():
-                val_dir, val_win, _ = self._model(X_val_t)
+                val_dir, _val_win, _ = self._model(X_val_t)
                 val_pred = torch.argmax(val_dir, dim=-1)
                 val_acc = (val_pred == y_val_t).float().mean().item()
-                val_win_prob = val_win.squeeze(-1)
 
             if epoch % 5 == 0:
                 logger.info(f"[CNN-LSTM] Epoch {epoch}/{epochs} — loss: {total_loss / n_batches:.4f}, val_acc: {val_acc:.4f}")
@@ -422,6 +508,86 @@ class CNNLSTMModel:
         self._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
         self._save_model()
+
+        # ── Optional CPCV stability pass (opt-in via TB_DL_CPCV_FOLDS env) ──
+        cpcv_stab: Dict[str, float] = {
+            "mean": 0.0, "std": 0.0, "negative_pct": 0.0, "n": 0, "scores": [],
+        }
+        cpcv_n = dl_cpcv_folds_from_env()
+        if cpcv_n >= 3 and global_intervals is not None:
+            logger.info(f"[CNN-LSTM] Running CPCV stability with n_splits={cpcv_n}")
+            cpcv_epochs = max(3, epochs // 5)
+
+            def _lightweight_train_eval(tr_idx: np.ndarray, te_idx: np.ndarray) -> float:
+                self._build_model()
+                opt2 = torch.optim.AdamW(self._model.parameters(), lr=5e-4, weight_decay=1e-4)
+                crit2 = nn.CrossEntropyLoss(weight=class_weights_t, reduction='none')
+                Xt = torch.tensor(X_norm[tr_idx], dtype=torch.float32, device=self._device)
+                yt = torch.tensor(y[tr_idx], dtype=torch.long, device=self._device)
+                swt = torch.tensor(sample_w_np[tr_idx], dtype=torch.float32, device=self._device)
+                Xv = torch.tensor(X_norm[te_idx], dtype=torch.float32, device=self._device)
+                yv = torch.tensor(y[te_idx], dtype=torch.long, device=self._device)
+                for _ in range(cpcv_epochs):
+                    self._model.train()
+                    p = torch.randperm(len(Xt))
+                    for j in range(0, len(Xt), batch_size):
+                        bi = p[j:j + batch_size]
+                        d, _w, _a = self._model(Xt[bi])
+                        lo = (crit2(d, yt[bi]) * swt[bi]).mean()
+                        opt2.zero_grad()
+                        lo.backward()
+                        opt2.step()
+                self._model.eval()
+                with torch.no_grad():
+                    vd, _, _ = self._model(Xv)
+                    pred = torch.argmax(vd, dim=-1)
+                    return float((pred == yv).float().mean().item())
+
+            try:
+                cpcv_stab = run_cpcv_accuracy_stability(
+                    _lightweight_train_eval,
+                    intervals=global_intervals,
+                    n_samples=len(y),
+                    n_splits=cpcv_n,
+                    n_test_splits=max(1, cpcv_n // 3),
+                    embargo_bars=5,
+                )
+                logger.info(
+                    f"[CNN-LSTM] CPCV stability: mean={cpcv_stab['mean']:.4f} "
+                    f"std={cpcv_stab['std']:.4f} n={cpcv_stab['n']}"
+                )
+            except Exception as e:
+                logger.warning(f"[CNN-LSTM] CPCV run failed (non-fatal): {e}")
+            finally:
+                if best_state:
+                    self._build_model()
+                    self._model.load_state_dict(best_state)
+
+        class_counts_dict = {
+            "down": int(class_counts[0]),
+            "flat": int(class_counts[1]),
+            "up": int(class_counts[2]),
+        }
+        scorecard = build_dl_scorecard(
+            model_name=self.MODEL_NAME,
+            version=self._version,
+            num_samples=len(X),
+            best_val_acc=float(best_val_acc),
+            majority_baseline=float(majority_pct),
+            class_counts=class_counts_dict,
+            cpcv_stability=cpcv_stab,
+            bar_size="1 day",
+            trade_side="both",
+            setup_type="GENERAL",
+        )
+        try:
+            if self._db is not None:
+                self._db[self.COLLECTION].update_one(
+                    {"name": self.MODEL_NAME},
+                    {"$set": {"scorecard": scorecard}},
+                )
+        except Exception as e:
+            logger.warning(f"[CNN-LSTM] Failed to persist scorecard (non-fatal): {e}")
 
         # Edge above majority-class baseline — detects "always predict up" collapse.
         edge_vs_baseline = best_val_acc - majority_pct
@@ -458,6 +624,15 @@ class CNNLSTMModel:
                 "sl_atr_mult": TB_SL_MULT,
                 "atr_period": TB_ATR_PERIOD,
             },
+            "class_weights": class_w_np.tolist(),
+            "sample_weight_mean": float(sample_w_np.mean()) if len(sample_w_np) else 1.0,
+            "purged_split": {
+                "embargo_bars": 5,
+                "train_samples": int(len(train_idx)),
+                "val_samples": int(len(val_idx)),
+            },
+            "cpcv_stability": cpcv_stab,
+            "scorecard": scorecard,
         }
 
     def predict(self, bars: List[Dict], symbol: str = "UNKNOWN") -> Dict[str, Any]:

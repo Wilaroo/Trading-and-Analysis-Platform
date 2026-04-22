@@ -307,7 +307,16 @@ class TFTModel:
         # Extract multi-timeframe features
         all_features = []
         all_targets = []
+        # Phase-1-for-DL: track event intervals per sample for López de Prado
+        # sample-uniqueness weights + purged train/val split. Kept in per-symbol
+        # chunks so the concurrency calc runs with the correct bar axis; then
+        # we concatenate with a global offset so cross-symbol samples never
+        # appear to overlap.
+        per_symbol_intervals: List[np.ndarray] = []
+        per_symbol_n_bars: List[int] = []
+        global_intervals_chunks: List[np.ndarray] = []
         symbols_used = 0
+        _cumulative_bar_offset = 0
 
         for sym_idx, symbol in enumerate(symbols):
             if sym_idx % 100 == 0:
@@ -350,11 +359,15 @@ class TFTModel:
             from services.ai_modules.triple_barrier_labeler import (
                 triple_barrier_label_single, atr as _atr, label_to_class_index,
             )
+            from services.ai_modules.event_intervals import (
+                build_event_intervals_from_triple_barrier,
+            )
             atr_series = _atr(daily_highs, daily_lows, daily_closes, period=14)
 
             # Build triple-barrier targets per usable feature row
             targets_raw = []
             keep_mask = []
+            kept_entry_indices: List[int] = []
             for i in range(usable):
                 current_idx = 20 + i
                 if current_idx >= len(atr_series):
@@ -374,6 +387,7 @@ class TFTModel:
                 )
                 targets_raw.append(label_to_class_index(tb))  # 0/1/2
                 keep_mask.append(True)
+                kept_entry_indices.append(int(current_idx))
 
             if sum(keep_mask) < 10:
                 continue
@@ -381,6 +395,24 @@ class TFTModel:
             keep_mask = np.array(keep_mask, dtype=bool)
             targets = np.array(targets_raw, dtype=np.int64)
             features_kept = features[:usable][keep_mask]
+
+            # Build event intervals for uniqueness + purging. Uses the same
+            # PT/SL/horizon as labeling so the (entry, exit) spans match.
+            local_intervals = build_event_intervals_from_triple_barrier(
+                daily_highs, daily_lows, daily_closes,
+                entry_indices=np.array(kept_entry_indices, dtype=np.int64),
+                pt_atr_mult=2.0, sl_atr_mult=1.0,
+                max_bars=5, atr_period=14,
+            )
+            per_symbol_intervals.append(local_intervals)
+            per_symbol_n_bars.append(int(len(daily_closes)))
+
+            # Global-offset intervals — disjoint bar axes across symbols so the
+            # purge step never confuses same-local-index samples from different
+            # symbols as overlapping.
+            if len(local_intervals) > 0:
+                global_intervals_chunks.append(local_intervals + _cumulative_bar_offset)
+            _cumulative_bar_offset += int(len(daily_closes)) + int(max_symbols)  # + buffer so adjacent offsets don't collide with embargo
 
             all_features.append(features_kept)
             all_targets.append(targets)
@@ -417,10 +449,50 @@ class TFTModel:
         self._scaler_std = (X.std(axis=0) + 1e-8).astype(np.float32)
         X_norm = (X - self._scaler_mean) / self._scaler_std
 
-        # Split
-        split_idx = int(len(X_norm) * 0.8)
-        X_train, X_val = X_norm[:split_idx], X_norm[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        # ── Phase-1-for-DL helpers: class weights + sample uniqueness + purged split ──
+        from services.ai_modules.dl_training_utils import (
+            compute_balanced_class_weights,
+            compute_sample_weights_from_intervals,
+            purged_chronological_split,
+            dl_cpcv_folds_from_env,
+            run_cpcv_accuracy_stability,
+            build_dl_scorecard,
+        )
+
+        class_w_np = compute_balanced_class_weights(y, num_classes=3, clip_ratio=5.0)
+        sample_w_np = compute_sample_weights_from_intervals(
+            per_symbol_intervals, per_symbol_n_bars,
+        )
+        if len(sample_w_np) != len(y):
+            # Defensive: if anything misaligned, fall back to uniform sample weights
+            sample_w_np = np.ones(len(y), dtype=np.float32)
+        global_intervals = (
+            np.vstack(global_intervals_chunks).astype(np.int64)
+            if global_intervals_chunks else None
+        )
+        if global_intervals is not None and len(global_intervals) != len(y):
+            global_intervals = None  # Safety: fall back to plain chronological split
+
+        # Purged chronological split (embargo=5 daily bars = one trading week)
+        train_idx, val_idx = purged_chronological_split(
+            intervals=global_intervals,
+            n_samples=len(y),
+            split_frac=0.8,
+            embargo_bars=5,
+        )
+        if len(train_idx) == 0 or len(val_idx) == 0:
+            # Shouldn't happen; fall back to simple chronological split
+            split_idx = int(len(X_norm) * 0.8)
+            train_idx = np.arange(split_idx, dtype=np.int64)
+            val_idx = np.arange(split_idx, len(X_norm), dtype=np.int64)
+        logger.info(
+            f"[TFT] Purged split: train={len(train_idx)} val={len(val_idx)} "
+            f"class_weights={class_w_np.tolist()} sample_w_mean={float(sample_w_np.mean()):.3f}"
+        )
+
+        X_train, X_val = X_norm[train_idx], X_norm[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+        sample_w_train = sample_w_np[train_idx]
 
         # Build model
         self._build_model()
@@ -430,11 +502,15 @@ class TFTModel:
         y_train_t = torch.tensor(y_train, dtype=torch.long, device=self._device)
         X_val_t = torch.tensor(X_val, dtype=torch.float32, device=self._device)
         y_val_t = torch.tensor(y_val, dtype=torch.long, device=self._device)
+        sample_w_train_t = torch.tensor(sample_w_train, dtype=torch.float32, device=self._device)
+        class_weights_t = torch.tensor(class_w_np, dtype=torch.float32, device=self._device)
 
         # Training
         optimizer = torch.optim.AdamW(self._model.parameters(), lr=1e-3, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-        criterion = nn.CrossEntropyLoss()
+        # Class-weighted CE + per-sample uniqueness weighting (reduction='none' so
+        # we can multiply by sample weights before averaging the batch loss).
+        criterion = nn.CrossEntropyLoss(weight=class_weights_t, reduction='none')
 
         best_val_acc = 0
         best_state = None
@@ -446,11 +522,15 @@ class TFTModel:
             n_batches = 0
 
             for i in range(0, len(X_train_t), batch_size):
-                batch_x = X_train_t[perm[i:i + batch_size]]
-                batch_y = y_train_t[perm[i:i + batch_size]]
+                batch_idx = perm[i:i + batch_size]
+                batch_x = X_train_t[batch_idx]
+                batch_y = y_train_t[batch_idx]
+                batch_sw = sample_w_train_t[batch_idx]
 
                 direction, confidence, tf_weights, attn_weights = self._model(batch_x)
-                loss = criterion(direction, batch_y)
+                per_sample_loss = criterion(direction, batch_y)
+                # Per-sample loss * sample weight, then mean → preserves batch-mean scale
+                loss = (per_sample_loss * batch_sw).mean()
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -494,6 +574,94 @@ class TFTModel:
 
         self._save_model()
 
+        # ── Optional CPCV stability pass (opt-in via TB_DL_CPCV_FOLDS env) ──
+        # Fires only when the user sets TB_DL_CPCV_FOLDS >= 3. Uses a cheap
+        # lightweight re-train (fewer epochs) per fold to measure how stable
+        # val_acc is across purged train/test combinations. Does NOT change
+        # the saved model. Zero overhead when disabled (default).
+        cpcv_stab: Dict[str, float] = {
+            "mean": 0.0, "std": 0.0, "negative_pct": 0.0, "n": 0, "scores": [],
+        }
+        cpcv_n = dl_cpcv_folds_from_env()
+        if cpcv_n >= 3 and global_intervals is not None:
+            logger.info(f"[TFT] Running CPCV stability with n_splits={cpcv_n} (cheap re-trains)")
+            cpcv_epochs = max(3, epochs // 5)
+
+            def _lightweight_train_eval(tr_idx: np.ndarray, te_idx: np.ndarray) -> float:
+                # Tiny re-train on subset, same architecture, reduced epochs.
+                # We build a fresh model per fold so folds are independent.
+                self._build_model()
+                opt2 = torch.optim.AdamW(self._model.parameters(), lr=1e-3, weight_decay=1e-4)
+                crit2 = nn.CrossEntropyLoss(weight=class_weights_t, reduction='none')
+                Xt = torch.tensor(X_norm[tr_idx], dtype=torch.float32, device=self._device)
+                yt = torch.tensor(y[tr_idx], dtype=torch.long, device=self._device)
+                swt = torch.tensor(sample_w_np[tr_idx], dtype=torch.float32, device=self._device)
+                Xv = torch.tensor(X_norm[te_idx], dtype=torch.float32, device=self._device)
+                yv = torch.tensor(y[te_idx], dtype=torch.long, device=self._device)
+                for _ in range(cpcv_epochs):
+                    self._model.train()
+                    p = torch.randperm(len(Xt))
+                    for j in range(0, len(Xt), batch_size):
+                        bi = p[j:j + batch_size]
+                        d, _c, _tw, _aw = self._model(Xt[bi])
+                        lo = (crit2(d, yt[bi]) * swt[bi]).mean()
+                        opt2.zero_grad()
+                        lo.backward()
+                        opt2.step()
+                self._model.eval()
+                with torch.no_grad():
+                    vd, _, _, _ = self._model(Xv)
+                    pred = torch.argmax(vd, dim=-1)
+                    return float((pred == yv).float().mean().item())
+
+            try:
+                cpcv_stab = run_cpcv_accuracy_stability(
+                    _lightweight_train_eval,
+                    intervals=global_intervals,
+                    n_samples=len(y),
+                    n_splits=cpcv_n,
+                    n_test_splits=max(1, cpcv_n // 3),
+                    embargo_bars=5,
+                )
+                logger.info(
+                    f"[TFT] CPCV stability: mean={cpcv_stab['mean']:.4f} "
+                    f"std={cpcv_stab['std']:.4f} n={cpcv_stab['n']}"
+                )
+            except Exception as e:
+                logger.warning(f"[TFT] CPCV run failed (non-fatal): {e}")
+            finally:
+                # Restore the best state we saved earlier (CPCV mutates self._model)
+                if best_state:
+                    self._build_model()
+                    self._model.load_state_dict(best_state)
+
+        # Build + persist the DL scorecard
+        class_counts_dict = {
+            "down": int(class_counts[0]),
+            "flat": int(class_counts[1]),
+            "up": int(class_counts[2]),
+        }
+        scorecard = build_dl_scorecard(
+            model_name=self.MODEL_NAME,
+            version=self._version,
+            num_samples=len(X),
+            best_val_acc=float(best_val_acc),
+            majority_baseline=float(majority_pct),
+            class_counts=class_counts_dict,
+            cpcv_stability=cpcv_stab,
+            bar_size="multi_tf",
+            trade_side="both",
+            setup_type="GENERAL",
+        )
+        try:
+            if self._db is not None:
+                self._db[self.COLLECTION].update_one(
+                    {"name": self.MODEL_NAME},
+                    {"$set": {"scorecard": scorecard}},
+                )
+        except Exception as e:
+            logger.warning(f"[TFT] Failed to persist scorecard (non-fatal): {e}")
+
         # Edge above majority-class baseline — the ONLY number that matters.
         # If edge ≤ ~1%, the model just learned "predict majority class" (no real signal).
         edge_vs_baseline = best_val_acc - majority_pct
@@ -532,6 +700,15 @@ class TFTModel:
                 "max_bars": 5,
                 "atr_period": 14,
             },
+            "class_weights": class_w_np.tolist(),
+            "sample_weight_mean": float(sample_w_np.mean()) if len(sample_w_np) else 1.0,
+            "purged_split": {
+                "embargo_bars": 5,
+                "train_samples": int(len(train_idx)),
+                "val_samples": int(len(val_idx)),
+            },
+            "cpcv_stability": cpcv_stab,
+            "scorecard": scorecard,
         }
 
     def predict(self, bars_by_tf: Dict[str, List[Dict]], symbol: str = "UNKNOWN") -> Dict[str, Any]:

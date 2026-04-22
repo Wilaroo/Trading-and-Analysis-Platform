@@ -9,7 +9,55 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-24 — Gate-log diagnostic)
+## Completed this fork (2026-04-24 — Gate-log diagnostic + DL Phase-1 closure)
+
+### P0 Task 2 — TFT + CNN-LSTM: Phase-1 infra closed SHIPPED
+Background: Phase 1 (sample-uniqueness weights, purged CPCV, scorecard, deflated Sharpe) was wired into XGBoost on 2026-04-20 but never plumbed into the DL training loops. Both models were training with plain `CrossEntropyLoss` on a chronological 80/20 split — the #1 likely cause of the <52% accuracy collapse and the `TFT signal IGNORED` / `CNN-LSTM signal IGNORED` log spam in the confidence gate.
+
+**New module — `services/ai_modules/dl_training_utils.py`** (pure-numpy + torch, imports are lazy so tests run without GPU wheels):
+  - `compute_balanced_class_weights(y, num_classes=3, clip_ratio=5.0)` — sklearn "balanced" inverse-frequency weights scaled so min=1, clipped at 5× so a tiny minority class doesn't explode gradients.
+  - `compute_sample_weights_from_intervals(per_symbol_intervals, per_symbol_n_bars)` — López de Prado `average_uniqueness` **per symbol** (concurrency only meaningful within one bar axis), concatenated and normalized to mean=1.
+  - `purged_chronological_split(intervals, n_samples, split_frac=0.8, embargo_bars=5)` — walk-forward split that drops train events whose [entry, exit] extends into the val-window plus embargo. Falls back to plain chronological when `intervals` is None → pipelines that skip interval tracking keep current behavior.
+  - `run_cpcv_accuracy_stability(train_eval_fn, intervals, n_samples, …)` — opt-in CPCV stability measurement via env var `TB_DL_CPCV_FOLDS` (default 0 = OFF, so current training runtime is unchanged). When enabled, runs lightweight re-trains across `C(n_splits, n_test_splits)` purged folds and returns mean / std / negative_pct / scores for the scorecard.
+  - `build_dl_scorecard(...)` — emits a scorecard dict compatible with the existing `timeseries_models.scorecard` persistence pattern: hit_rate=val_acc, ai_vs_setup_edge_pp, cpcv stability, grade A-F based on edge-vs-baseline. PnL fields stay 0 (DL classifiers don't produce PnL at train time).
+
+**TFT wire-in (`services/ai_modules/temporal_fusion_transformer.py`)**:
+  - Tracks `(entry_idx, exit_idx)` per sample per symbol via `build_event_intervals_from_triple_barrier` (same PT/SL/horizon as labeling, so spans match).
+  - Concatenates intervals with a per-symbol global offset (`_cumulative_bar_offset += n_bars + max_symbols`) so cross-symbol samples never appear to overlap.
+  - `nn.CrossEntropyLoss()` → `nn.CrossEntropyLoss(weight=class_weights_t, reduction='none')` + per-sample uniqueness multiply before the batch mean.
+  - Plain 80/20 split → `purged_chronological_split(embargo_bars=5)`.
+  - Optional CPCV stability pass (gated on `TB_DL_CPCV_FOLDS`) runs **after** main training; scorecard captures stability, then original best_state is restored.
+  - Scorecard persisted to Mongo `dl_models.scorecard` (non-fatal on failure). Returns `class_weights`, `sample_weight_mean`, `purged_split`, `cpcv_stability`, `scorecard` in the train() result dict.
+
+**CNN-LSTM wire-in (`services/ai_modules/cnn_lstm_model.py`)**: Same treatment.
+  - `extract_sequence_features()` gains a backward-compatible `return_intervals=False` kwarg; when True also returns `entry_indices` + `n_bars`.
+  - Auxiliary win-probability loss (class-2 binary target) is now also sample-weight scaled via `reduction='none'`.
+  - Same class-weighted CE, purged split, CPCV-optional, scorecard persistence.
+
+**Backward compat contract (explicit):**
+  - Prediction paths untouched — `predict()` signatures unchanged on both models.
+  - Saved checkpoints untouched — `_save_model` writes the same fields; scorecard is written via a follow-up `update_one`.
+  - Default training runtime unchanged — CPCV is OFF by default.
+  - When interval tracking fails (e.g. empty `global_intervals_chunks`), `purged_chronological_split` degrades to the plain chronological split, matching pre-change behavior.
+
+**Regression coverage — `backend/tests/test_dl_training_utils.py` (20 tests, all passing):**
+  - Class-weight math: inverse-frequency, clip at 5×, uniform input, missing-class clip, empty input.
+  - Sample weights: unique events = uniform 1.0, overlapping events downweighted (standalone beats overlapping), multi-symbol concat, empty input.
+  - Purged split: leaky train event purged, no-intervals → plain chronological, misaligned intervals → fallback, tiny dataset → empty.
+  - Scorecard: edge + grade A for +11pp, grade F for negative edge.
+  - CPCV env parsing: default 0, valid int, invalid string, negative clamped.
+  - `run_cpcv_accuracy_stability` integration with real `CombinatorialPurgedKFold`.
+
+**Full session suite: 29/29 passing** (9 gate-log + 20 DL utils).
+
+**Next step for user (on Spark):**
+1. Save to Github → `git pull` on Spark
+2. Restart backend (`pkill -f "python server.py" && cd backend && nohup /home/spark-1a60/venv/bin/python server.py > /tmp/backend.log 2>&1 &`)
+3. Kick off TFT + CNN-LSTM retrain via NIA (or worker job). Look for log lines like:
+   `[TFT] Purged split: train=... val=... class_weights=[1.0, 0.45, 2.1] sample_w_mean=1.000`
+4. Check `dl_models.<name>.scorecard.hit_rate` — should clear 0.52 so layers 9/10/11 stop being IGNORED.
+5. (Optional, heavier) `export TB_DL_CPCV_FOLDS=5` before retrain to get CPCV stability distribution in the scorecard.
+6. Re-run `analyze_gate_log.py --days 14` post-retrain to quantify Layer 9/10/11 revival.
 
 ### P0 Task 1 — `analyze_gate_log.py` SHIPPED
 Purpose: Phase 13 revalidation rejected every setup (0 trades passing the 13-layer gate). Before touching models (TFT/CNN-LSTM triple-barrier rebuild), we need **empirical** data on which of the 13 layers actually add edge vs. pure friction. This script answers that.
