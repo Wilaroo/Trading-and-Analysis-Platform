@@ -2713,9 +2713,13 @@ class TimeSeriesAIService:
         if base in available:
             return base
 
-        # Also try family substring for long-side (e.g. RUBBER_BAND_SCALP_LONG → SCALP)
-        for fam_key in ("SCALP", "VWAP", "REVERSAL", "BREAKOUT", "ORB",
-                        "RANGE", "MOMENTUM", "MEAN_REVERSION", "TREND"):
+        # Also try family substring for long-side (e.g. RUBBER_BAND_SCALP_LONG → SCALP).
+        # Order matters — more specific / compound keys first so that
+        # `SECOND_CHANCE_BREAKOUT` matches SECOND_CHANCE before BREAKOUT.
+        for fam_key in ("OPENING_DRIVE", "SECOND_CHANCE", "BIG_DOG",
+                        "MEAN_REVERSION", "TREND",
+                        "SCALP", "VWAP", "REVERSAL", "BREAKOUT", "ORB",
+                        "RANGE", "MOMENTUM"):
             if fam_key in base and fam_key in available:
                 return fam_key
 

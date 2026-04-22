@@ -229,6 +229,73 @@ SETUP_TRAINING_PROFILES = {
         },
     ],
 
+    # ===== SMB SETUP MODELS (Tier 1 — live scanner setups with no profile) =====
+    # Added 2026-04-22 after Phase 13 v2 resolver-trace revealed these 3 scanner
+    # names had no matching training profile (coverage gap of 25%). They are
+    # distinct SMB patterns — not family variants of SCALP/VWAP/REVERSAL — so
+    # routing alone can't fix coverage. Each needs its own model trained.
+    # Params modeled after SCALP/ORB/VWAP for intraday patterns; big_dog uses
+    # a slightly wider horizon as it's a full-day hold pattern.
+
+    "OPENING_DRIVE": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,                 # 1h post-open horizon
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "Opening-drive continuation 1h on 5-min bars (SMB)",
+        },
+        {
+            "bar_size": "1 min",
+            "forecast_horizon": 30,
+            "noise_threshold": 0.0008,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "Opening-drive continuation 30-min on 1-min bars (SMB)",
+        },
+    ],
+
+    "SECOND_CHANCE": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,                 # 1h — enough for the re-break
+            "noise_threshold": 0.0018,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "Second-chance breakout continuation on 5-min bars (SMB)",
+        },
+    ],
+
+    "BIG_DOG": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 24,                 # 2h — big-dog plays can grind
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.1,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "Big-dog RVOL trend continuation on 5-min bars (SMB)",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 3,                  # 3-day hold
+            "noise_threshold": 0.004,
+            "scale_pos_weight": 1.1,
+            "min_samples": 50,
+            "num_boost_round": 200,
+            "num_classes": 3,
+            "description": "Big-dog multi-day continuation on daily bars (SMB)",
+        },
+    ],
+
     # ===== SHORT SETUP MODELS =====
     # Inverse of long setups — features emphasize bearish signals,
     # targets predict downward moves. Forecast horizons slightly shorter
