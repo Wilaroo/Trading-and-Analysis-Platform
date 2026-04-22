@@ -345,9 +345,13 @@ class ContextQualityService:
         
         # 6. AI Model Alignment Score (10% weight)
         # Does the ML model agree with the proposed trade direction?
+        # MODE-C calibration (2026-04-23): 3-class setup-specific LONG models
+        # peak at 0.44-0.53 conf on triple-barrier data. An UP argmax at 0.50
+        # is a real edge — bucket agreement at >=0.50 into CONFIRMS, not leans.
         ai_score = 50  # Neutral default (no model data)
+        CONFIRMS_THRESHOLD = 0.50
         if ai_model_agrees is not None and ai_model_confidence is not None:
-            if ai_model_agrees and ai_model_confidence >= 0.6:
+            if ai_model_agrees and ai_model_confidence >= CONFIRMS_THRESHOLD:
                 ai_score = 90
                 result.factors.append(f"AI model CONFIRMS {direction} ({ai_model_confidence:.0%} conf) (++)")
             elif ai_model_agrees:
@@ -356,7 +360,7 @@ class ContextQualityService:
             elif ai_model_direction == "flat":
                 ai_score = 45
                 result.factors.append(f"AI model sees no edge (flat) (-)")
-            elif not ai_model_agrees and ai_model_confidence >= 0.6:
+            elif not ai_model_agrees and ai_model_confidence >= 0.60:
                 ai_score = 20
                 result.factors.append(f"AI model DISAGREES — predicts {ai_model_direction} ({ai_model_confidence:.0%} conf) (--)")
             else:

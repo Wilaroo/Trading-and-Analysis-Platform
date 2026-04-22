@@ -304,7 +304,13 @@ class ConfidenceGate:
                 (not trade_is_long and pred_direction == "down")
             )
             
-            if model_agrees and pred_confidence >= 0.6:
+            # MODE-C calibration (2026-04-23): 3-class setup-specific LONG models
+            # max out at 0.44–0.53 on triple-barrier data (FLAT class absorbs
+            # probability mass). A correctly directional UP argmax at 0.50 is
+            # a real edge — bucket it into CONFIRMS, not "leans". Preserves the
+            # old 0.6 for STRONG disagreements so floor penalties aren't noisy.
+            CONFIRMS_THRESHOLD = 0.50
+            if model_agrees and pred_confidence >= CONFIRMS_THRESHOLD:
                 pts = int(15 * accuracy_weight)
                 confidence_points += pts
                 reasoning.append(
@@ -324,13 +330,22 @@ class ConfidenceGate:
                     f"Live {pred_model} sees NO EDGE (flat, {pred_confidence:.0%} conf) (-2)"
                 )
             else:
-                # Model disagrees — floor protection: max -5
-                confidence_points -= 5
-                position_multiplier *= 0.85
-                reasoning.append(
-                    f"Live {pred_model} DISAGREES — predicts {pred_direction.upper()} "
-                    f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) (-5, size -15%)"
-                )
+                # Model disagrees — floor protection: max -5. Strong disagreement
+                # (conf ≥ 0.6) still the heavy penalty; weak disagreement (<0.6)
+                # gets a softer -3 so low-confidence noise doesn't over-veto.
+                if pred_confidence >= 0.60:
+                    confidence_points -= 5
+                    position_multiplier *= 0.85
+                    reasoning.append(
+                        f"Live {pred_model} DISAGREES STRONGLY — predicts {pred_direction.upper()} "
+                        f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) (-5, size -15%)"
+                    )
+                else:
+                    confidence_points -= 3
+                    reasoning.append(
+                        f"Live {pred_model} weakly disagrees — predicts {pred_direction.upper()} "
+                        f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) (-3)"
+                    )
 
         # --- 2c. CROSS-MODEL AGREEMENT (max +5 / floor -5) ---
         cross_model_agreement = None
