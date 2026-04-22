@@ -10,6 +10,24 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+## 2026-04-23 — CRITICAL FIX #4 — Pareto-improvement escape hatch (Spark retrain finding)
+
+**Finding:** The 5-min full-universe retrain (v20260422_181416) produced a model with `recall_up=0.597` (8.6× better than active 0.069) but `recall_down=0.000` (same collapse as the old model). The strict class-weight boost (UP class gained 2.99× weight because only 15.6% of samples) over-corrected and starved the DOWN class entirely. Protection gate correctly rejected it for failing the 0.10 DOWN floor — but this left LONG permanently blocked despite a clear strict improvement on UP.
+
+**Fix:** Added a Pareto-improvement escape hatch to `_save_model()`. When BOTH active and new models are below class floors, we still promote if:
+1. The new model is strictly no worse on every class (UP and DOWN), AND
+2. Strictly better on at least one class.
+
+This unblocks the genuinely improved candidate without promoting garbage (regression on any class still blocks).
+
+**Also fixed:** `force_promote_model.py` default `--archive` was `timeseries_models_archive` (plural, wrong); the actual collection is `timeseries_model_archive` (singular, matching `MODEL_ARCHIVE_COLLECTION` in `timeseries_gbm.py`).
+
+**Tests:** Added `test_promote_pareto_improvement_when_both_fail_floors` + `test_reject_regression_even_when_active_is_collapsed`. All 60 pytest regression tests pass.
+
+**Known next step — DOWN-side collapse:** Class-balanced weights with a 3× boost on UP (because of the 45/39/16 class split) cause DOWN to collapse. Proper fix is to switch to `balanced_sqrt` (√(N_max/N_class)) so the max boost is ~1.7× instead of 3×. Scheduled as a follow-up after Spark verifies the Pareto-promoted model unblocks LONG setups.
+
+
+
 ## 2026-04-23 — CRITICAL FIX #3 — MODE-C confidence threshold calibration (P1 Issue 2)
 
 **Finding:** 3-class setup-specific LONG models peak at 0.44–0.53 confidence on triple-barrier data because the FLAT class absorbs ~30–45% of probability mass. Under the old 0.60 CONFIRMS threshold, a correctly-directional UP argmax at 0.50 only earned +5 (leans) in ConfidenceGate Layer 2b and AI score 70 in TQS — not the full +15 / 90 CONFIRMS boost. Effect: MODE-C signals often fell below the 30-pt SKIP floor.

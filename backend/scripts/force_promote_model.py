@@ -40,7 +40,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", required=True, help="model name (e.g. direction_predictor_5min)")
     ap.add_argument("--version", required=True, help="archived version to promote (e.g. v20260422_162431)")
-    ap.add_argument("--archive", default="timeseries_models_archive")
+    ap.add_argument("--archive", default="timeseries_model_archive")
     ap.add_argument("--active", default="timeseries_models")
     args = ap.parse_args()
 

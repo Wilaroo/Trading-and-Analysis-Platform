@@ -504,6 +504,20 @@ class TimeSeriesGBM:
                         new_recall_up > cur_recall_up
                         or new_recall_down > cur_recall_down
                     )
+                    # Pareto-improvement escape hatch: even if neither model
+                    # passes both-class floors, promote when new strictly beats
+                    # active on one class AND is no worse on the other. This
+                    # unblocks cases like active=(0.07, 0.0) -> new=(0.60, 0.0)
+                    # where the model genuinely helps LONG trades without any
+                    # regression on SHORT.
+                    up_no_worse = new_recall_up >= cur_recall_up - 1e-9
+                    down_no_worse = new_recall_down >= cur_recall_down - 1e-9
+                    up_strictly_better = new_recall_up > cur_recall_up + 1e-6
+                    down_strictly_better = new_recall_down > cur_recall_down + 1e-6
+                    is_pareto_improvement = (
+                        up_no_worse and down_no_worse
+                        and (up_strictly_better or down_strictly_better)
+                    )
                     if new_passes_floors and improves_collapsed_class:
                         should_promote = True
                         logger.info(
@@ -512,6 +526,15 @@ class TimeSeriesGBM:
                             f"NEW {self._version} passes floors (UP {new_recall_up:.3f} / "
                             f"DOWN {new_recall_down:.3f}) — PROMOTING despite raw accuracy "
                             f"({new_accuracy:.4f} vs {current_accuracy:.4f})."
+                        )
+                    elif is_pareto_improvement:
+                        should_promote = True
+                        logger.info(
+                            f"Model protection: PARETO improvement — ACTIVE {current_version} "
+                            f"(UP {cur_recall_up:.3f}, DOWN {cur_recall_down:.3f}) vs NEW "
+                            f"{self._version} (UP {new_recall_up:.3f}, DOWN {new_recall_down:.3f}). "
+                            f"Strict per-class improvement, promoting despite missed floors "
+                            f"(accuracy {new_accuracy:.4f} vs {current_accuracy:.4f})."
                         )
                     elif not new_passes_floors:
                         should_promote = False

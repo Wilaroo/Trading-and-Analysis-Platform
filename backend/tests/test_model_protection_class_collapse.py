@@ -187,9 +187,34 @@ def test_promote_when_active_has_tiny_up_recall_and_zero_down_recall():
 
 
 def test_reject_when_active_collapsed_and_new_fails_floors():
-    """Active is class-collapsed but the new candidate also misses the floors.
-    We must not promote garbage just because active is garbage."""
-    new = _mk_metrics(0.50, 0.08, 0.50, 0.10, 0.48)
+    """Active is class-collapsed but the new candidate also misses the floors
+    AND doesn't improve either class. We must not promote something that's
+    neither a strict per-class improvement nor passes the floors."""
+    new = _mk_metrics(0.50, 0.03, 0.0, 0.05, 0.0)  # worse UP, tied DOWN
+    active = {"accuracy": 0.5350, "recall_up": 0.069, "recall_down": 0.0,
+              "f1_up": 0.12, "f1_down": 0.0}
+    gbm, mock_active = _mk_gbm(new, active)
+    assert gbm._save_model() == "archived"
+    assert not mock_active.update_one.called
+
+
+def test_promote_pareto_improvement_when_both_fail_floors():
+    """Pareto case: active is collapsed on DOWN, new is ALSO collapsed on DOWN,
+    but new strictly beats active on UP (no regression anywhere). Regression
+    for Spark v20260422_181416 where retrain gave UP 0.07→0.60 and DOWN
+    stayed at 0.0 — must be promoted even though DOWN floor isn't met."""
+    new = _mk_metrics(0.435, 0.60, 0.0, 0.45, 0.0)
+    active = {"accuracy": 0.5350, "recall_up": 0.069, "recall_down": 0.0,
+              "f1_up": 0.12, "f1_down": 0.0}
+    gbm, mock_active = _mk_gbm(new, active)
+    assert gbm._save_model() == "promoted"
+    assert mock_active.update_one.called
+
+
+def test_reject_regression_even_when_active_is_collapsed():
+    """Pareto hatch must NOT promote when new regresses on any class.
+    Active UP=0.069, new UP=0.05 → worse → reject even if DOWN improved."""
+    new = _mk_metrics(0.40, 0.05, 0.30, 0.08, 0.28)
     active = {"accuracy": 0.5350, "recall_up": 0.069, "recall_down": 0.0,
               "f1_up": 0.12, "f1_down": 0.0}
     gbm, mock_active = _mk_gbm(new, active)
