@@ -9,6 +9,54 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
+
+## 2026-04-23 — CRITICAL FIX #3 — MODE-C confidence threshold calibration (P1 Issue 2)
+
+**Finding:** 3-class setup-specific LONG models peak at 0.44–0.53 confidence on triple-barrier data because the FLAT class absorbs ~30–45% of probability mass. Under the old 0.60 CONFIRMS threshold, a correctly-directional UP argmax at 0.50 only earned +5 (leans) in ConfidenceGate Layer 2b and AI score 70 in TQS — not the full +15 / 90 CONFIRMS boost. Effect: MODE-C signals often fell below the 30-pt SKIP floor.
+
+**Fix:** Lowered CONFIRMS_THRESHOLD from 0.60 → 0.50 in:
+- `services/ai_modules/confidence_gate.py` (Layer 2b)
+- `services/tqs/context_quality.py` (AI Model Alignment, 10% weight)
+
+Strong-disagreement path kept at 0.60 so low-confidence noise (conf < 0.60) gets a softer penalty (-3 / ai_score 35) instead of the heavy -5 / 20.
+
+**Tests:** `tests/test_mode_c_confidence_threshold.py` — 11 regression tests covering the bucket boundaries (0.44 → leans, 0.50 → CONFIRMS, 0.53 → CONFIRMS, 0.55 disagree → WEAK, 0.65 disagree → STRONG). All 38 pytest regression tests pass.
+
+## 2026-04-23 — Model Protection gate hardening (follow-up to CRITICAL FIX #2)
+
+**Finding:** The escape hatch only triggered when `cur_recall_up < 0.05`. Spark's active `direction_predictor_5min` had `recall_up=0.069` (just above) and `recall_down=0.0` — a dual-class collapse that the hatch missed, meaning the next retrained model would have had to clear the strict macro-F1 floor to get promoted.
+
+**Fix:** Escape hatch now triggers when EITHER class recall is below its floor (`cur_recall_up < MIN_UP_RECALL` or `cur_recall_down < MIN_DOWN_RECALL`, both 0.10). Promotion then requires the new model to pass BOTH-class floors AND improve the collapsed class.
+
+**Shipped:** `backend/scripts/retrain_generic_direction.py` (standalone retrain driver, bypasses job queue). User executing the 5-min retrain on Spark as of 2026-04-23.
+
+## 2026-04-23 — Stage 1 SentCom.jsx refactor (safe extraction)
+
+**Problem:** `SentCom.jsx` was a 3,614-line monolith — hard to test, hard to reason about, slow Hot-reload, and blocked Stage 2 (the V5 Command Center rebuild).
+
+**Solution:** Moved pure relocations (zero logic change) into feature-sliced folders:
+```
+src/components/sentcom/
+├── utils/time.js                   formatRelativeTime, formatFullTime
+├── primitives/  (7 files, 410 lines total)
+│   TypingIndicator, HoverTimestamp, StreamMessage, Sparkline,
+│   generateSparklineData, GlassCard, PulsingDot
+├── hooks/       (12 files, 693 lines total)
+│   useAIInsights, useMarketSession, useSentComStatus/Stream/Positions/
+│   Setups/Context/Alerts, useChatHistory, useTradingBotControl,
+│   useIBConnectionStatus, useAIModules
+└── panels/      (15 files, 1,773 lines total)
+    CheckMyTradeForm, QuickActionsInline, StopFixPanel, RiskControlsPanel,
+    AIModulesPanel, AIInsightsDashboard, OrderPipeline, StatusHeader,
+    PositionsPanel, StreamPanel, ContextPanel, MarketIntelPanel,
+    AlertsPanel, SetupsPanel, ChatInput
+```
+
+**Result:** `SentCom.jsx` 3,614 → **874 lines (-76%)**. 34 sibling modules each 30–533 lines. Public API unchanged (`import SentCom from 'components/SentCom'` still works, default export preserved). ESLint clean, all 35 files parse, all relative imports resolve.
+
+**Next:** Stage 2 — layout + TradingView `lightweight-charts` integration (Option 1 V5 Command Center).
+
+
 ## Backlog — P1 / P2 ideas captured but not yet scheduled
 
 ### Regime-Aware Strategy Phase Auto-Throttle (captured 2026-04-22)
