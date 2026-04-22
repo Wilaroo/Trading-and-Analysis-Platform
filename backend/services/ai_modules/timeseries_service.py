@@ -1930,6 +1930,125 @@ class TimeSeriesAIService:
 
         if ts_loaded:
             logger.info(f"Loaded {ts_loaded} additional setup models from timeseries_models")
+
+        # Startup consistency diagnostic — catches "trained in DB, not loaded
+        # in memory" mismatches immediately. If this warning fires on boot,
+        # something in the load path is broken and shorts/longs aren't actually
+        # reaching predict_for_setup.
+        try:
+            diag = self.diagnose_model_load_consistency()
+            if diag["missing_count"] > 0:
+                logger.warning(
+                    f"Model load consistency: {diag['loaded_count']}/{diag['trained_in_db_count']} "
+                    f"trained models reachable. MISSING: {diag['missing_models']}"
+                )
+            else:
+                logger.info(
+                    f"Model load consistency OK: {diag['loaded_count']}/{diag['trained_in_db_count']} "
+                    "trained models loaded into memory."
+                )
+        except Exception as e:
+            logger.warning(f"Could not run model load consistency diagnostic: {e}")
+
+    def diagnose_model_load_consistency(self) -> Dict[str, Any]:
+        """
+        Cross-check `timeseries_models` (source of truth — what was trained and
+        persisted) against `_setup_models` (what's reachable from
+        predict_for_setup at runtime).
+
+        Returns a report structure with:
+          - trained_in_db: list of model_names found in timeseries_models
+          - loaded_in_memory: list of model_names that resolved into _setup_models
+          - missing_models: trained but not loaded (the latent-bug signal)
+          - extra_models: loaded but not in timeseries_models (corrupt cache / stale load)
+          - by_setup: per-(setup, bar) detail
+
+        This runs automatically at startup and is exposed via
+        /api/ai-training/model-load-diagnostic for on-demand inspection.
+        """
+        from services.ai_modules.setup_training_config import (
+            SETUP_TRAINING_PROFILES, get_model_name,
+        )
+        report: Dict[str, Any] = {
+            "trained_in_db": [],
+            "loaded_in_memory": [],
+            "missing_models": [],
+            "extra_models": [],
+            "by_setup": [],
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if self._db is None:
+            report["error"] = "db is None — no consistency check possible"
+            report["trained_in_db_count"] = 0
+            report["loaded_count"] = 0
+            report["missing_count"] = 0
+            return report
+
+        # What the DB says was trained
+        trained_names = set()
+        try:
+            for doc in self._db["timeseries_models"].find(
+                {"model_data": {"$exists": True}},
+                {"_id": 0, "name": 1},
+            ):
+                n = doc.get("name")
+                if n:
+                    trained_names.add(n)
+        except Exception as e:
+            report["error"] = f"timeseries_models scan failed: {e}"
+
+        # What the in-memory dict holds (compound keys + legacy keys)
+        loaded_model_names = set()
+        for key, gbm in self._setup_models.items():
+            if gbm is None or getattr(gbm, "_model", None) is None:
+                continue
+            name = getattr(gbm, "model_name", None)
+            if name:
+                loaded_model_names.add(name)
+
+        # Restrict to declared SETUP_TRAINING_PROFILES — we don't flag the
+        # general direction_predictor or oddball one-off models here.
+        profile_expected = set()
+        per_setup_rows = []
+        for setup_type, profiles in SETUP_TRAINING_PROFILES.items():
+            for profile in profiles:
+                bar = profile.get("bar_size")
+                if not bar:
+                    continue
+                model_name = get_model_name(setup_type, bar)
+                profile_expected.add(model_name)
+                is_trained = model_name in trained_names
+                is_loaded = model_name in loaded_model_names
+                per_setup_rows.append({
+                    "setup_type": setup_type,
+                    "bar_size": bar,
+                    "model_name": model_name,
+                    "trained_in_db": is_trained,
+                    "loaded_in_memory": is_loaded,
+                    "status": (
+                        "loaded" if is_loaded and is_trained
+                        else "missing_in_memory" if is_trained and not is_loaded
+                        else "not_trained"
+                    ),
+                })
+
+        trained_in_profiles = trained_names & profile_expected
+        missing = sorted(trained_in_profiles - loaded_model_names)
+        # "extra" = loaded but not expected from any profile (rare; possible
+        # with cross-profile legacy naming). Don't over-fire — only flag if
+        # it's a profile model we can't explain.
+        extra = sorted(loaded_model_names - trained_names)
+
+        report["trained_in_db"] = sorted(trained_in_profiles)
+        report["loaded_in_memory"] = sorted(loaded_model_names & profile_expected)
+        report["missing_models"] = missing
+        report["extra_models"] = extra
+        report["by_setup"] = per_setup_rows
+        report["trained_in_db_count"] = len(trained_in_profiles)
+        report["loaded_count"] = len(loaded_model_names & profile_expected)
+        report["missing_count"] = len(missing)
+        return report
     
     def get_setup_models_status(self) -> Dict[str, Any]:
         """Get status of all setup-specific models, organized by profile.

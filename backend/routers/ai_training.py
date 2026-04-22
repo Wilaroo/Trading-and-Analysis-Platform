@@ -590,6 +590,31 @@ def list_scorecards(setup_type: str = None, bar_size: str = None, min_grade: str
         return {"success": True, "count": len(out), "scorecards": out}
     except Exception as e:
         return {"success": False, "scorecards": [], "error": str(e)}
+@router.get("/model-load-diagnostic")
+def model_load_diagnostic():
+    """
+    Cross-check `timeseries_models` (trained/persisted) vs `_setup_models`
+    (reachable at runtime) and report any mismatch.
+
+    This is the safety net that would have caught the 2026-04-24 latent bug
+    (17 trained models in DB, 0 loaded in memory, every predict_for_setup
+    falling through to the general model) at the first startup after the
+    XGBoost migration instead of going unnoticed for weeks.
+
+    Returns:
+      trained_in_db_count / loaded_count / missing_count — the summary
+      missing_models — trained but not reachable (the red flag)
+      by_setup — per-(setup_type, bar_size) detail row
+    """
+    from services.ai_modules.timeseries_service import get_timeseries_ai
+    ts = get_timeseries_ai()
+    try:
+        report = ts.diagnose_model_load_consistency()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Diagnostic failed: {e}")
+    return {"success": True, "report": report}
+
+
 @router.get("/setup-resolver-trace")
 def setup_resolver_trace(setup: Optional[str] = None, batch: Optional[str] = None):
     """
