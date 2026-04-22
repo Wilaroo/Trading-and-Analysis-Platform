@@ -1108,7 +1108,36 @@ class TimeSeriesAIService:
             logger.info("[FULL UNIVERSE] Creating XGBoost DMatrix datasets...")
             sys.stdout.flush()
 
-            dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+            dtrain_weights = None
+            try:
+                # Class-balance fix (2026-04-22) — parity with
+                # TimeSeriesGBM.train_from_features(). Without this, the
+                # generic direction_predictor collapses to the bearish-majority
+                # class and every LONG setup shows trades=0 in Phase 1
+                # revalidation (Phase 13 v2 symptom).
+                from services.ai_modules.dl_training_utils import (
+                    compute_per_sample_class_weights,
+                    compute_balanced_class_weights,
+                )
+                sw = compute_per_sample_class_weights(
+                    y_train.astype(np.int64), num_classes=3, clip_ratio=5.0
+                )
+                if sw is not None and len(sw) == len(y_train):
+                    dtrain_weights = sw
+                    cw_vec = compute_balanced_class_weights(
+                        y_train.astype(np.int64), num_classes=3, clip_ratio=5.0
+                    )
+                    logger.info(
+                        f"[FULL UNIVERSE] class_balanced sample weights applied "
+                        f"(per-class weights={cw_vec.tolist()}, sample_w_mean=1.000)"
+                    )
+            except Exception as cb_err:  # non-fatal — train without class balance
+                logger.warning(f"[FULL UNIVERSE] class-balance skipped ({cb_err}); training uniform.")
+
+            dtrain = xgb.DMatrix(
+                X_train, label=y_train, feature_names=feature_names,
+                weight=dtrain_weights,
+            )
             dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
             # XGBoost GPU parameters — multiclass for 3-class triple-barrier targets.
