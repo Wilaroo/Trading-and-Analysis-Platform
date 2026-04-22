@@ -57,7 +57,7 @@ async def main():
                     help="max bars per symbol (0 = per-TF default)")
     args = ap.parse_args()
 
-    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import MongoClient
     from services.ai_modules.timeseries_service import TimeSeriesAIService
 
     mongo_url = os.environ.get("MONGO_URL")
@@ -66,7 +66,7 @@ async def main():
         logger.error("MONGO_URL not set")
         sys.exit(2)
 
-    client = AsyncIOMotorClient(mongo_url)
+    client = MongoClient(mongo_url)
     db = client[db_name]
     logger.info(f"Connected to MongoDB: {db_name}")
 
