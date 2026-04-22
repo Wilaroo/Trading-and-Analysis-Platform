@@ -33,10 +33,30 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sentcom", tags=["SentCom Chart"])
+
+
+# ─── Bar-size normalisation (frontend may send compact or verbose forms) ────
+
+_BAR_SIZE_ALIASES = {
+    "1min": "1 min", "1m": "1 min", "1 min": "1 min",
+    "5min": "5 mins", "5m": "5 mins", "5 mins": "5 mins", "5 min": "5 mins",
+    "15min": "15 mins", "15m": "15 mins", "15 mins": "15 mins", "15 min": "15 mins",
+    "30min": "30 mins", "30m": "30 mins", "30 mins": "30 mins",
+    "1h": "1 hour", "1hour": "1 hour", "1 hour": "1 hour",
+    "1d": "1 day", "1day": "1 day", "daily": "1 day", "1 day": "1 day",
+}
+
+
+def _normalise_bar_size(raw: str) -> Optional[str]:
+    if not raw:
+        return None
+    key = str(raw).strip().lower()
+    return _BAR_SIZE_ALIASES.get(key) or _BAR_SIZE_ALIASES.get(key.replace(" ", ""))
 
 _hybrid_data_service = None
 _db = None
@@ -468,4 +488,119 @@ async def get_chart_bars(
             "bb_lower": _as_series(times, bb_lower),
         },
         "markers": markers,
+    }
+
+
+
+# ─── Scorecard tile → targeted retrain ──────────────────────────────────────
+
+class ScorecardRetrainRequest(BaseModel):
+    """POST body for /api/sentcom/retrain-model.
+
+    `setup_type` = "__GENERIC__" → enqueues a `training` job (full-universe retrain
+    of the generic directional predictor for that bar_size).
+    Any other value → enqueues a `setup_training` job for that (setup, bar_size) pair.
+    """
+    setup_type: str = Field(..., min_length=1)
+    bar_size: str = Field(..., min_length=1)
+
+
+@router.post("/retrain-model")
+async def retrain_model_from_scorecard(request: ScorecardRetrainRequest) -> Dict[str, Any]:
+    """Enqueue a targeted retrain for a single scorecard tile.
+
+    Wired from `ModelHealthScorecard.jsx` — user clicks a MODE_C / MODE_B / MISSING
+    tile and the UI fires this endpoint. Returns a `job_id` the caller can poll via
+    `GET /api/jobs/{job_id}`.
+    """
+    # Lazy imports so this router stays import-cycle-free at module load.
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed on this node",
+        }
+
+    bar_size = _normalise_bar_size(request.bar_size)
+    if not bar_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unrecognised bar_size '{request.bar_size}'. "
+                   f"Supported: 1 min, 5 mins, 15 mins, 1 hour, 1 day.",
+        )
+
+    setup_raw = (request.setup_type or "").strip()
+    is_generic = setup_raw.upper() == "__GENERIC__"
+
+    try:
+        from services.job_queue_manager import job_queue_manager
+    except Exception as exc:  # pragma: no cover
+        logger.error("job_queue_manager unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="job queue unavailable")
+
+    if is_generic:
+        result = await job_queue_manager.create_job(
+            job_type="training",
+            params={
+                "bar_size": bar_size,
+                "full_universe": True,
+                "max_bars_per_symbol": 99999,
+                "symbol_batch_size": 500,
+            },
+            priority=6,
+            metadata={"description": f"Scorecard retrain: generic direction ({bar_size})"},
+        )
+        kind = "generic_direction"
+        target = f"direction_predictor {bar_size}"
+    else:
+        setup_upper = setup_raw.upper()
+        # Validate against declared profiles so a typo fails loudly.
+        try:
+            from services.ai_modules.setup_training_config import SETUP_TRAINING_PROFILES
+        except Exception as exc:  # pragma: no cover
+            logger.error("setup_training_config import failed: %s", exc)
+            raise HTTPException(status_code=503, detail="setup config unavailable")
+
+        if setup_upper not in SETUP_TRAINING_PROFILES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown setup_type '{setup_upper}'. "
+                       f"Valid: {sorted(SETUP_TRAINING_PROFILES.keys())}",
+            )
+
+        valid_bars = {p["bar_size"] for p in SETUP_TRAINING_PROFILES[setup_upper]}
+        if bar_size not in valid_bars:
+            raise HTTPException(
+                status_code=400,
+                detail=f"bar_size '{bar_size}' not declared for setup '{setup_upper}'. "
+                       f"Valid: {sorted(valid_bars)}",
+            )
+
+        result = await job_queue_manager.create_job(
+            job_type="setup_training",
+            params={
+                "setup_type": setup_upper,
+                "bar_size": bar_size,
+                "max_symbols": None,
+                "max_bars_per_symbol": None,
+            },
+            priority=7,
+            metadata={"description": f"Scorecard retrain: {setup_upper} {bar_size}"},
+        )
+        kind = "setup_specific"
+        target = f"{setup_upper} {bar_size}"
+
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "Failed to enqueue job")}
+
+    job = result["job"]
+    return {
+        "success": True,
+        "job_id": job["job_id"],
+        "kind": kind,
+        "target": target,
+        "setup_type": setup_raw.upper(),
+        "bar_size": bar_size,
+        "message": f"Retrain queued for {target}. Poll /api/jobs/{job['job_id']} for progress.",
     }

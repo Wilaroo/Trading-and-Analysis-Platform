@@ -10,6 +10,37 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+## 2026-04-24 — Stage 2f.1: Clickable scorecard tiles → one-click retrain
+
+**What it does:** ModelHealthScorecard tiles now open a detail panel with a
+**Retrain this model** button. One click enqueues a targeted retrain job via
+the existing `job_queue_manager` and the UI polls `/api/jobs/{job_id}` every
+5s until terminal, then auto-refreshes the scorecard so the tile flips mode
+(MODE_B → MODE_C → HEALTHY) live. Tiles with in-flight retrain jobs show a
+spinning indicator + "TRAIN…" label.
+
+**Shipped:**
+- Backend: `POST /api/sentcom/retrain-model` in `routers/sentcom_chart.py` —
+  routes `__GENERIC__` → full-universe `training` job, any other setup_type →
+  `setup_training` job. Validates setup_type against `SETUP_TRAINING_PROFILES`
+  and bar_size against the setup's declared profiles. Bar-size normaliser
+  accepts `5min`, `5m`, `5 mins`, etc.
+- Frontend: `ModelHealthScorecard.jsx` — detail-panel Retrain button +
+  inline job state (Queuing → Training N% → Retrain complete) + per-tile
+  retraining indicator + cleanup of pollers on unmount.
+- Tests: `tests/test_sentcom_retrain_endpoint.py` — 22 pytest regression
+  tests covering bar-size aliases, validation, generic/setup paths, queue
+  failure. All pass.
+- Live-verified: `POST /api/sentcom/retrain-model` with
+  `{"setup_type":"__GENERIC__","bar_size":"1d"}` returns a valid job_id and
+  the enqueued job is polled/cancellable via `/api/jobs/{job_id}`.
+
+**User can now:** click any MODE_C / MODE_B / MISSING tile, hit Retrain,
+watch it finish live — no more CLI retrain commands on Spark for one-off
+model fixes. Also solves the "4 missing SMB models" P2 issue in one click
+per model.
+
+
 ## 2026-04-23 — Stage 2f: Model Health Scorecard (self-auditing Command Center)
 
 **What it does:** A new `ModelHealthScorecard` panel above the `ChartPanel` shows a colour-coded grid of (setup × timeframe) tiles with MODE classification + click-to-reveal full metrics (accuracy / recall / f1 / promoted_at). Turns the Command Center into a self-auditing system — you can see at a glance which models are HEALTHY / in MODE C / collapsed / missing, without running the diagnostic script.
