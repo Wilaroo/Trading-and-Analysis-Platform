@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Option 1 — Pipeline HUD + Follow-Symbol</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  h1,h2,h3,.ui { font-family:'Inter'; }
+  .mono { font-family:'JetBrains Mono'; }
+  .panel { background:#18181b; border:1px solid #27272a; }
+  .panel-title { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:#71717a; }
+  .why { font-size:10px; color:#71717a; line-height:1.4; }
+  .chip { display:inline-block; font-size:9px; font-family:'JetBrains Mono'; padding:1px 5px; border-radius:2px; border:1px solid; }
+  .stage-scan { color:#a78bfa; border-color:#5b21b6; background:rgba(139,92,246,.08); }
+  .stage-eval { color:#60a5fa; border-color:#1e3a8a; background:rgba(59,130,246,.08); }
+  .stage-order { color:#facc15; border-color:#713f12; background:rgba(234,179,8,.08); }
+  .stage-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+  .stage-close { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08); }
+  .bar { height:3px; background:#27272a; border-radius:1px; overflow:hidden; }
+  .row-ticker:hover { background:#202024; cursor:pointer; }
+  .row-ticker.active { background:#1e1b4b; border-left:2px solid #8b5cf6; }
+  .up { color:#22c55e; } .down { color:#ef4444; } .warn { color:#eab308; }
+</style>
+</head>
+<body class="min-h-screen">
+<!-- ============ TOP PIPELINE HUD ============ -->
+<div class="border-b border-zinc-800 bg-zinc-950 px-3 py-2">
+  <div class="flex items-center gap-2">
+    <div class="text-[10px] mono text-zinc-500 pr-2 border-r border-zinc-800">SENTCOM</div>
+    <div class="flex items-center gap-1.5 flex-1">
+      <!-- stage blocks -->
+      <div class="flex-1 px-2 py-1 border border-violet-900/60 rounded-sm bg-violet-950/20">
+        <div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-violet-400">Scan</span><span class="mono text-lg font-bold">47</span></div>
+        <div class="text-[9px] text-zinc-500">5min window · 12 symbols</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-blue-900/60 rounded-sm bg-blue-950/20">
+        <div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-blue-400">Evaluate</span><span class="mono text-lg font-bold">8</span></div>
+        <div class="text-[9px] text-zinc-500">gate pass rate 17%</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-yellow-900/60 rounded-sm bg-yellow-950/20">
+        <div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-yellow-400">Order</span><span class="mono text-lg font-bold">3</span></div>
+        <div class="text-[9px] text-zinc-500">2 filled · 1 pending</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-green-900/60 rounded-sm bg-green-950/20">
+        <div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-green-400">Manage</span><span class="mono text-lg font-bold">2</span><span class="mono text-xs up">+0.6R</span></div>
+        <div class="text-[9px] text-zinc-500">NVDA · AMD</div>
+      </div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="flex-1 px-2 py-1 border border-slate-700 rounded-sm bg-slate-900/20">
+        <div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-slate-400">Close today</span><span class="mono text-lg font-bold">4</span><span class="mono text-xs up">+1.8R</span></div>
+        <div class="text-[9px] text-zinc-500">WR 75% · $+412</div>
+      </div>
+    </div>
+    <!-- health + P&L -->
+    <div class="flex items-center gap-3 pl-3 border-l border-zinc-800">
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">P&amp;L Today</div><div class="mono font-bold up">+$412.60</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Equity</div><div class="mono font-bold">$48,921</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Latency</div><div class="mono font-bold up">8.1s</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Models</div><div class="mono font-bold up">34/34</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Phase</div><div class="mono font-bold text-yellow-400">PAPER</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MAIN 3-COLUMN BODY ============ -->
+<div class="grid grid-cols-12 gap-px bg-zinc-900" style="height:calc(100vh - 64px);">
+
+  <!-- LEFT: Scanner (20%) -->
+  <div class="col-span-3 bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="panel-title">Scanner · Live</div>
+      <div class="text-[9px] mono text-zinc-500">47 hits · 5min</div>
+    </div>
+    <div class="overflow-y-auto flex-1">
+      <!-- ROW -->
+      <div class="row-ticker active px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">NVDA</span><span class="chip stage-eval">EVAL 78</span></div><span class="mono text-[10px] up">+2.4%</span></div>
+        <div class="why">rubber_band_scalp_short · RSI 28, bounce off VWAP<br>→ SHORT_SCALP model · P(win) 68%</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">AAPL</span><span class="chip stage-scan">SCAN</span></div><span class="mono text-[10px] down">-0.8%</span></div>
+        <div class="why">opening_drive · gap +1.2% holding<br>→ no model yet (Option A profile pending)</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">TSLA</span><span class="chip stage-order">ORDER</span></div><span class="mono text-[10px] up">+3.1%</span></div>
+        <div class="why">halfback_reversal_short · failed retest of HOD<br>→ SHORT_REVERSAL · bracket pending fill</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">AMD</span><span class="chip stage-manage">OPEN</span></div><span class="mono text-[10px] up">+1.9%</span></div>
+        <div class="why">Entered 14:02 · bull flag CNN-LSTM 72% conf<br>→ SCALP model · holding for $172 PT</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">MSFT</span><span class="chip stage-close">CLOSED</span></div><span class="mono text-[10px] up">+0.7R</span></div>
+        <div class="why">Closed 13:48 · PT hit · +$142 on 50 shares<br>→ SCALP · gate 62, exit via TP</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">META</span><span class="chip stage-scan">SCAN</span></div><span class="mono text-[10px] up">+1.2%</span></div>
+        <div class="why">volume surge +340% · setup pending pattern<br>→ no setup class matched yet</div>
+      </div>
+      <div class="row-ticker px-3 py-2 border-b border-zinc-900">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">SPY</span><span class="chip stage-eval">EVAL 41</span></div><span class="mono text-[10px] down">-0.2%</span></div>
+        <div class="why">vwap_bounce · borderline gate (regime neutral)<br>→ VWAP · P(win) 52% · likely SKIP</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: Focus Area (55%) -->
+  <div class="col-span-6 bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="flex items-center gap-3">
+        <div class="panel-title">Focus · NVDA · rubber_band_scalp_short</div>
+        <span class="chip stage-eval">EVALUATING</span>
+      </div>
+      <div class="text-[9px] mono text-zinc-500">Click another ticker to follow</div>
+    </div>
+    <div class="grid grid-cols-2 gap-px bg-zinc-900 flex-1 overflow-y-auto">
+
+      <!-- 13-layer gate -->
+      <div class="col-span-2 bg-zinc-950 p-3 border-b border-zinc-900">
+        <div class="flex items-center justify-between mb-2"><span class="panel-title">13-Layer Confidence Gate</span><span class="mono font-bold text-lg up">78 / 100</span></div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">1. Regime</span><div class="flex-1 bar"><div style="width:75%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+12</span><span class="why flex-1 pl-2">BEARISH aligns with short</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">3. Model Consensus</span><div class="flex-1 bar"><div style="width:80%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+15</span><span class="why flex-1 pl-2">80% of 5 models aligned</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">4. Live Pred</span><div class="flex-1 bar"><div style="width:72%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+12</span><span class="why flex-1 pl-2">SHORT_SCALP 72% conf down</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">6. Quality</span><div class="flex-1 bar"><div style="width:82%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+10</span><span class="why flex-1 pl-2">Quality 82 HIGH</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">7. Learning</span><div class="flex-1 bar"><div style="width:60%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+8</span><span class="why flex-1 pl-2">SCALP WR 53% last 100</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">9. TFT</span><div class="flex-1 bar"><div style="width:60%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+10</span><span class="why flex-1 pl-2">Multi-TF confirms (60% acc)</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">11. CNN-LSTM</span><div class="flex-1 bar"><div style="width:65%" class="h-full bg-green-500"></div></div><span class="mono text-[10px] up w-10 text-right">+10</span><span class="why flex-1 pl-2">Temporal pattern favorable</span></div>
+          <div class="flex items-center gap-2"><span class="text-[10px] mono w-32 text-zinc-400">13. FinBERT</span><div class="flex-1 bar"><div style="width:50%" class="h-full bg-yellow-500"></div></div><span class="mono text-[10px] warn w-10 text-right">+3</span><span class="why flex-1 pl-2">News mildly bullish (conflicts)</span></div>
+        </div>
+      </div>
+      <!-- plan / action -->
+      <div class="bg-zinc-950 p-3 border-b border-zinc-900">
+        <div class="panel-title mb-2">Decision</div>
+        <div class="text-lg font-bold up mb-1">GO · Full Size</div>
+        <div class="why">Gate 78 ≥ 60 GO threshold. FinBERT (+3) is the only friction layer — news sentiment mildly bullish but doesn't tip the balance.</div>
+      </div>
+      <div class="bg-zinc-950 p-3 border-b border-zinc-900">
+        <div class="panel-title mb-2">Bracket Plan</div>
+        <div class="mono text-[11px] space-y-0.5">
+          <div>Entry <span class="mono up">short 100 @ $880.30</span></div>
+          <div>Stop <span class="mono down">$885.10 (-$480)</span></div>
+          <div>Target <span class="mono up">$870.00 (+$1,030)</span></div>
+          <div class="why">R:R 2.1 · ATR 4.8 · size respects 0.5% risk rule</div>
+        </div>
+      </div>
+      <!-- bot stream narrow -->
+      <div class="col-span-2 bg-zinc-950 p-3">
+        <div class="panel-title mb-2">Bot's Stream · this decision</div>
+        <div class="space-y-1 text-[10px] mono text-zinc-400">
+          <div><span class="text-violet-400">14:22:15</span> NVDA rubber_band_scalp_short detected by MarketScanner (quality=78)</div>
+          <div><span class="text-blue-400">14:22:18</span> Gate evaluation started · base signal up → short → model lookup</div>
+          <div><span class="text-blue-400">14:22:18</span> resolver: rubber_band_scalp_short → SHORT_SCALP (short_family match)</div>
+          <div><span class="text-blue-400">14:22:19</span> Regime BEARISH aligns (+12) · Consensus STRONG 80% (+15)</div>
+          <div><span class="text-blue-400">14:22:19</span> TFT +10 · CNN-LSTM +10 · FinBERT +3 (mildly bullish news conflict)</div>
+          <div><span class="text-green-400">14:22:19</span> DECISION: GO full size · gate 78 ≥ 60</div>
+          <div><span class="text-yellow-400">14:22:20</span> Bracket queued: short 100 @ market / SL 885.10 / PT 870.00</div>
+          <div><span class="text-yellow-400">14:22:28</span> <span class="warn">awaiting IB fill (8s elapsed, typical)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Stream + Positions (25%) -->
+  <div class="col-span-3 bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- Open positions -->
+    <div class="flex-1 overflow-hidden flex flex-col border-b border-zinc-800">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Open Positions (2)</div>
+        <div class="mono text-[10px] up">+$186 · +0.6R</div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="px-3 py-2 border-b border-zinc-900 hover:bg-zinc-900/50">
+          <div class="flex items-baseline justify-between">
+            <div><span class="mono font-bold">AMD</span> <span class="chip stage-manage ml-1">SCALP long</span></div>
+            <span class="mono text-xs up">+$112 · +0.4R</span>
+          </div>
+          <div class="why mt-1">Holding: CNN-LSTM 72% bull flag continuation · TFT trails stop to $166.40 · 0.8R unrealized, PT $172 (3.1R from entry)</div>
+        </div>
+        <div class="px-3 py-2 border-b border-zinc-900 hover:bg-zinc-900/50">
+          <div class="flex items-baseline justify-between">
+            <div><span class="mono font-bold">TSLA</span> <span class="chip stage-manage ml-1">SHORT_REV</span></div>
+            <span class="mono text-xs up">+$74 · +0.2R</span>
+          </div>
+          <div class="why mt-1">Holding: failed HOD retest confirmed · VAE BEAR_TRENDING regime · down 0.3% since entry, looking for VWAP rejection continuation</div>
+        </div>
+      </div>
+    </div>
+    <!-- Bot stream -->
+    <div class="flex-1 overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Stream of Consciousness</div>
+        <div class="text-[9px] mono text-zinc-500">live</div>
+      </div>
+      <div class="overflow-y-auto flex-1 text-[10px] mono space-y-1 p-2">
+        <div class="text-zinc-400"><span class="text-violet-400">14:22:28</span> NVDA GO · awaiting IB fill</div>
+        <div class="text-zinc-400"><span class="text-green-400">14:22:14</span> AMD TP trail → $166.40 (CNN-LSTM conf ↑)</div>
+        <div class="text-zinc-400"><span class="text-yellow-400">14:22:09</span> TSLA fill confirmed @ $242.18 · short 50</div>
+        <div class="text-zinc-400"><span class="text-slate-400">14:21:55</span> MSFT CLOSED · PT hit $420.60 · +$142 / +0.7R</div>
+        <div class="text-zinc-400"><span class="text-blue-400">14:21:42</span> SPY gate 41 · SKIP (regime neutral, no edge)</div>
+        <div class="text-zinc-400"><span class="text-violet-400">14:21:30</span> META scan · volume +340% · awaiting setup class</div>
+        <div class="text-zinc-400"><span class="text-slate-400">14:20:58</span> Revalidation done · 7 models PROMOTED</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fixed bottom-2 right-2 text-[9px] mono text-zinc-600">Mockup · not production · <a href="index.html" class="text-violet-400 hover:underline">← all options</a></div>
+</body>
+</html>
