@@ -81,6 +81,8 @@ import { ChatInput } from './sentcom/panels/ChatInput';
 import { ChartPanel } from './sentcom/panels/ChartPanel';
 // Stage 2f: Per-setup model health scorecard
 import { ModelHealthScorecard } from './sentcom/panels/ModelHealthScorecard';
+// Stage 2d: V5 Command Center layout (opt-in via ?v5=1)
+import { SentComV5View } from './sentcom/SentComV5View';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -753,6 +755,34 @@ const SentCom = ({ compact = false, embedded = false }) => {
         {/* Chat Input */}
         <ChatInput onSend={handleChat} disabled={!status?.connected} />
       </div>
+    );
+  }
+
+  // Stage 2d V5 Command-Center layout — opt-in via ?v5=1 in the URL.
+  // Applies to every render mode (full page, embedded, compact) because V5
+  // is a full-viewport replacement; the normal wrapper layouts (e.g.
+  // NewDashboard's grid around embedded SentCom) don't compose with it.
+  const v5Enabled = typeof window !== 'undefined'
+    && (new URLSearchParams(window.location.search).get('v5') === '1');
+  if (v5Enabled) {
+    return (
+      <SentComV5View
+        status={status}
+        context={context}
+        positions={positions}
+        totalPnl={totalPnl}
+        positionsLoading={positionsLoading}
+        setupsLoading={setupsLoading}
+        contextLoading={contextLoading}
+        alertsLoading={alertsLoading}
+        setups={setups}
+        alerts={alerts}
+        messages={messages}
+        streamLoading={streamLoading}
+        handleChat={handleChat}
+        selectedPosition={selectedPosition}
+        setSelectedPosition={setSelectedPosition}
+      />
     );
   }
 
