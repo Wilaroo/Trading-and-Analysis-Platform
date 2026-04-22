@@ -1881,6 +1881,55 @@ class TimeSeriesAIService:
         
         if loaded:
             logger.info(f"Loaded {loaded} setup-specific models from database")
+
+        # Fallback: also scan `timeseries_models` for models that training wrote
+        # there directly (via TimeSeriesGBM._save_model → MODEL_COLLECTION). The
+        # legacy `setup_type_models` loop above only catches the old schema;
+        # anything trained by the current training_pipeline ends up in
+        # `timeseries_models`, keyed by model_name. Without this fallback, models
+        # like `short_scalp_1min_predictor` sit in the DB but `_setup_models`
+        # stays empty → every predict_for_setup call falls through to the
+        # general model. (Latent bug found 2026-04-24 when revalidator had 17
+        # trained models but `_setup_models` had 0 loaded at runtime.)
+        from services.ai_modules.setup_training_config import (
+            SETUP_TRAINING_PROFILES, get_model_name,
+        )
+        ts_col = self._db["timeseries_models"]
+        ts_loaded = 0
+        for setup_type, profiles in SETUP_TRAINING_PROFILES.items():
+            for profile in profiles:
+                bar_size = profile.get("bar_size")
+                if not bar_size:
+                    continue
+                cache_key = (setup_type, bar_size)
+                if cache_key in self._setup_models:
+                    continue  # Already loaded via legacy path
+                model_name = get_model_name(setup_type, bar_size)
+                doc = ts_col.find_one({"name": model_name, "model_data": {"$exists": True}})
+                if not doc:
+                    continue
+                try:
+                    gbm = TimeSeriesGBM(model_name=model_name)
+                    gbm.set_db(self._db)  # triggers _load_model() which handles xgboost_json_zlib
+                    if gbm._model is None:
+                        logger.warning(f"Failed to load {model_name} from timeseries_models (model=None after set_db)")
+                        continue
+                    self._setup_models[cache_key] = gbm
+                    # Legacy single-key compat so predict_for_setup() direct
+                    # dict lookups hit. Only first profile per setup claims the
+                    # bare-setup key (matches the existing _load loop behaviour).
+                    if setup_type not in self._setup_models:
+                        self._setup_models[setup_type] = gbm
+                    ts_loaded += 1
+                    logger.info(
+                        f"Loaded setup model from timeseries_models: "
+                        f"{setup_type}/{bar_size} (name={model_name}, v={gbm._version})"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not load {model_name} from timeseries_models: {e}")
+
+        if ts_loaded:
+            logger.info(f"Loaded {ts_loaded} additional setup models from timeseries_models")
     
     def get_setup_models_status(self) -> Dict[str, Any]:
         """Get status of all setup-specific models, organized by profile.
