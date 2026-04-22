@@ -1,95 +1,313 @@
 /**
  * V5 Briefings panel — morning prep / mid-day recap / power hour / close recap,
- * matching option-1-v5-command-center.html.
+ * matching option-1-v5-command-center.html but wired to real data.
  *
- * Only the "morning" briefing is currently sourced from real data (the
- * `context` hook). The others are rendered as scheduled placeholders — one
- * row each — so the UI matches the mockup structure without inventing fake
- * data.
+ * MORNING PREP is hydrated from `useMorningBriefing` (gameplan + DRC + scanner
+ * + bot endpoints). The other three rows cycle through "active" / "pending"
+ * / "passed" based on the current US market time.
+ *
+ * Click a briefing card → an inline expand shows the full detail below the
+ * card so the user never has to leave the V5 grid. The legacy modal still
+ * exists for deep dives but is no longer an auto-popup.
  */
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { useMorningBriefing } from './useMorningBriefing';
 
-const nowET = () => new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-
-const timeUntil = (hh, mm) => {
-  const now = new Date();
-  const target = new Date();
-  target.setHours(hh, mm, 0, 0);
-  let diff = target - now;
-  if (diff < 0) return 'passed';
-  const h = Math.floor(diff / 3_600_000);
-  const m = Math.floor((diff % 3_600_000) / 60_000);
-  return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
+const nowET = () => {
+  // Locale-based ET time (close enough for UI labels; not trade-critical)
+  return new Date().toLocaleTimeString('en-US', {
+    hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York',
+  });
 };
 
-const MorningPrep = ({ context }) => {
-  if (!context) return null;
-  const regime = context.regime || context.market_regime;
-  const vix = context.vix;
-  const news = context.news_flow || context.news || [];
+const minutesET = () => {
+  const [h, m] = nowET().split(':').map(Number);
+  return h * 60 + m;
+};
+
+const statusFor = (windowStart, windowEnd) => {
+  const n = minutesET();
+  if (n < windowStart) return 'pending';
+  if (n >= windowStart && n < windowEnd) return 'active';
+  return 'passed';
+};
+
+const formatTimeRange = (startHH, startMM) => {
+  const hh = String(startHH).padStart(2, '0');
+  const mm = String(startMM).padStart(2, '0');
+  return `${hh}:${mm} ET`;
+};
+
+
+/* ── Cards ────────────────────────────────────────────────────────────── */
+
+const MorningPrepCard = ({ data, loading, expanded, onToggle }) => {
+  const gp = data?.game_plan;
+  const drc = data?.drc;
+  const scanner = data?.scanner;
+  const bot = data?.bot;
+
+  // Window: 08:00 ET → 09:30 ET (pre-market prep)
+  const state = statusFor(8 * 60, 9.5 * 60);
+
+  const regime = gp?.regime || gp?.market_regime || scanner?.regime;
+  const bias = gp?.bias || gp?.market_bias;
+  const watch = gp?.watchlist || gp?.symbols || [];
+  const maxRisk = drc?.max_daily_risk ?? drc?.max_daily_r;
+  const drcHealth = drc?.status || drc?.health;
+  const scannerHits = scanner?.total_hits ?? scanner?.active_setups ?? 0;
+  const botStatus = bot?.running ? 'ACTIVE' : 'IDLE';
+  const botMode = bot?.mode || bot?.trading_phase;
+
+  const hasData = regime || bias || watch.length > 0 || maxRisk != null || drcHealth || scannerHits > 0;
+
   return (
-    <div className="v5-briefing-card v5-briefing-new">
+    <div
+      data-testid="v5-briefing-morning"
+      className={`v5-briefing-card ${state === 'active' ? 'v5-briefing-new' : ''} ${state === 'pending' ? 'v5-briefing-pending' : ''}`}
+      onClick={state === 'pending' ? undefined : onToggle}
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="v5-mono font-bold text-xs text-violet-400">MORNING PREP</span>
-          <span className="v5-chip v5-chip-manage">AUTO</span>
+          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{context.prep_time || '09:28'}</span>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
       </div>
       <div className="v5-why mt-1">
-        {regime && <span className="text-zinc-200 font-semibold">{regime}</span>}
-        {vix != null && <span> · VIX {Number(vix).toFixed(1)}</span>}
-        {news.length > 0 && (
-          <span>. {news.slice(0, 3).map((n) => n.headline || n.text || n).join(', ')}.</span>
-        )}
-        {!regime && !vix && news.length === 0 && (
-          <span className="text-zinc-500">Waiting for pre-market context signals...</span>
+        {loading && !hasData && <span className="text-zinc-500">Loading...</span>}
+        {!loading && !hasData && <span className="text-zinc-500">No game plan filed. Add one in your journal.</span>}
+        {hasData && (
+          <>
+            {regime && <span className="text-zinc-200 font-semibold">{regime}</span>}
+            {bias && <span>{regime ? ' · ' : ''}Bias {bias}</span>}
+            {maxRisk != null && <span> · risk cap <span className="text-zinc-200">${Math.round(maxRisk)}</span></span>}
+            {scannerHits > 0 && <span> · scanner {scannerHits} hits</span>}
+            <span> · bot <span className={bot?.running ? 'v5-up' : 'v5-down'}>{botStatus}</span>{botMode ? ` (${botMode})` : ''}</span>
+          </>
         )}
       </div>
+      {expanded && hasData && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+          {gp?.thesis && (
+            <div><span className="text-zinc-500">Thesis: </span>{gp.thesis}</div>
+          )}
+          {watch.length > 0 && (
+            <div>
+              <span className="text-zinc-500">Watchlist: </span>
+              {watch.slice(0, 8).map(w => typeof w === 'string' ? w : (w.symbol || w.ticker)).join(', ')}
+            </div>
+          )}
+          {drcHealth && (
+            <div>
+              <span className="text-zinc-500">DRC: </span>
+              <span className={drcHealth === 'green' || drcHealth === 'healthy' ? 'v5-up' : drcHealth === 'yellow' ? 'v5-warn' : 'v5-down'}>
+                {drcHealth.toUpperCase()}
+              </span>
+              {drc?.notes && <span> · {drc.notes}</span>}
+            </div>
+          )}
+          {scanner?.last_scan_at && (
+            <div><span className="text-zinc-500">Last scan: </span>{scanner.last_scan_at}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
-const MidDayRecap = ({ positions, totalPnl }) => {
-  const wins = (positions || []).filter(p => (p.r_multiple ?? p.pnl_r ?? 0) > 0).length;
-  const losses = (positions || []).filter(p => (p.r_multiple ?? p.pnl_r ?? 0) < 0).length;
-  const now = nowET();
+
+const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
+  const state = statusFor(11.5 * 60, 13 * 60);   // 11:30 → 13:00 ET
+
+  const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
+  const open = useMemo(() => (positions || []).filter(p => p?.status !== 'closed'), [positions]);
+  const wins = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
+  const losses = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
+
   return (
-    <div className="v5-briefing-card">
+    <div
+      data-testid="v5-briefing-midday"
+      className={`v5-briefing-card ${state === 'active' ? 'v5-briefing-new' : ''} ${state === 'pending' ? 'v5-briefing-pending' : ''}`}
+      onClick={state === 'pending' ? undefined : onToggle}
+    >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="v5-mono font-bold text-xs text-amber-400">MID-DAY RECAP</span>
-          {(wins + losses) > 0 && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{now}</span>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowET()}</span>
       </div>
       <div className="v5-why mt-1">
-        {(wins + losses) > 0
-          ? `${wins} wins · ${losses} losses · ${totalPnl >= 0 ? '+$' : '−$'}${Math.abs(totalPnl || 0).toFixed(0)} day P&L.`
-          : <span className="text-zinc-500">No fills yet today.</span>
-        }
+        {(closed.length === 0 && open.length === 0) ? (
+          <span className="text-zinc-500">No fills yet today.</span>
+        ) : (
+          <>
+            <span className={wins >= losses ? 'v5-up' : 'v5-down'}>{wins}W · {losses}L</span>
+            {open.length > 0 && <span> · {open.length} open</span>}
+            <span> · <span className={Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}>{Number(totalPnl) >= 0 ? '+$' : '−$'}{Math.abs(Number(totalPnl) || 0).toFixed(0)}</span> day P&L</span>
+          </>
+        )}
       </div>
+      {expanded && closed.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1">
+          {closed.slice(0, 5).map((p, i) => {
+            const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
+            return (
+              <div key={p.id || p._id || i} className="flex justify-between">
+                <span className="text-zinc-400">{p.symbol} · {p.setup_type || p.strategy || '—'}</span>
+                <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
 
-const PendingCard = ({ title, targetTime }) => (
-  <div className="v5-briefing-card v5-briefing-pending">
-    <div className="flex items-center justify-between">
-      <div className="v5-mono font-bold text-xs text-zinc-400">{title}</div>
-      <span className="v5-mono text-[9px]">{targetTime}</span>
+
+const PowerHourCard = ({ positions, totalPnl, expanded, onToggle }) => {
+  const state = statusFor(15 * 60, 15.75 * 60); // 15:00 → 15:45 ET
+
+  const open = (positions || []).filter(p => p?.status !== 'closed');
+  const atRiskCount = open.filter(p => (p.unrealized_pnl ?? p.pnl ?? 0) < 0).length;
+
+  return (
+    <div
+      data-testid="v5-briefing-powerhour"
+      className={`v5-briefing-card ${state === 'active' ? 'v5-briefing-new' : ''} ${state === 'pending' ? 'v5-briefing-pending' : ''}`}
+      onClick={state === 'pending' ? undefined : onToggle}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="v5-mono font-bold text-xs text-orange-400">POWER HOUR</span>
+          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
+        </div>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowET()}</span>
+      </div>
+      <div className="v5-why mt-1">
+        {open.length === 0 ? (
+          <span className="text-zinc-500">No open positions heading into close.</span>
+        ) : (
+          <>
+            <span>{open.length} open</span>
+            {atRiskCount > 0 && <span> · <span className="v5-warn">{atRiskCount} underwater</span></span>}
+            <span> · <span className={Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}>{Number(totalPnl) >= 0 ? '+$' : '−$'}{Math.abs(Number(totalPnl) || 0).toFixed(0)}</span></span>
+          </>
+        )}
+      </div>
+      {expanded && open.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1">
+          {open.map((p, i) => {
+            const pnl = Number(p.unrealized_pnl ?? p.pnl ?? 0);
+            return (
+              <div key={p.id || p._id || i} className="flex justify-between">
+                <span className="text-zinc-400">{p.symbol}</span>
+                <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
-    <div className="v5-why mt-1">pending · auto-generates at {title.includes('POWER') ? '15:00' : '16:00'}</div>
-  </div>
-);
+  );
+};
+
+
+const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
+  const state = statusFor(16 * 60, 16.5 * 60); // 16:00 → 16:30 ET
+
+  const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
+  const wins = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
+  const losses = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
+  const winRate = closed.length ? wins / closed.length : null;
+
+  return (
+    <div
+      data-testid="v5-briefing-close"
+      className={`v5-briefing-card ${state === 'active' ? 'v5-briefing-new' : ''} ${state === 'pending' ? 'v5-briefing-pending' : ''}`}
+      onClick={state === 'pending' ? undefined : onToggle}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="v5-mono font-bold text-xs text-slate-300">CLOSE RECAP</span>
+          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'passed' && <span className="v5-chip v5-chip-close">DONE</span>}
+        </div>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowET()}</span>
+      </div>
+      <div className="v5-why mt-1">
+        {closed.length === 0 ? (
+          <span className="text-zinc-500">{state === 'pending' ? 'recap will auto-generate at 16:00' : 'No trades to recap.'}</span>
+        ) : (
+          <>
+            <span>{wins}W · {losses}L</span>
+            {winRate != null && <span> · {(winRate * 100).toFixed(0)}% WR</span>}
+            <span> · <span className={Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}>{Number(totalPnl) >= 0 ? '+$' : '−$'}{Math.abs(Number(totalPnl) || 0).toFixed(0)}</span></span>
+          </>
+        )}
+      </div>
+      {expanded && closed.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 max-h-32 overflow-y-auto v5-scroll">
+          {closed.map((p, i) => {
+            const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
+            return (
+              <div key={p.id || p._id || i} className="flex justify-between">
+                <span className="text-zinc-400">{p.symbol} · {p.setup_type || '—'}</span>
+                <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 export const BriefingsV5 = ({ context, positions, totalPnl }) => {
+  const { loading, data } = useMorningBriefing({ refreshMs: 120_000 });
+  const [expandedKey, setExpandedKey] = useState('morning');
+  const toggle = (key) => setExpandedKey(curr => curr === key ? null : key);
+
+  // Use `context` as a secondary source if briefing endpoints are unavailable
+  const briefing = data || {
+    game_plan: context?.game_plan,
+    drc: context?.drc,
+    scanner: context?.scanner,
+    bot: context?.bot,
+  };
+
   return (
     <div data-testid="v5-briefings" className="flex flex-col">
-      <MorningPrep context={context} />
-      <MidDayRecap positions={positions} totalPnl={totalPnl} />
-      <PendingCard title="POWER HOUR" targetTime={timeUntil(15, 0)} />
-      <PendingCard title="CLOSE RECAP" targetTime={timeUntil(16, 0)} />
+      <MorningPrepCard
+        data={briefing}
+        loading={loading}
+        expanded={expandedKey === 'morning'}
+        onToggle={() => toggle('morning')}
+      />
+      <MidDayRecapCard
+        positions={positions}
+        totalPnl={totalPnl}
+        expanded={expandedKey === 'midday'}
+        onToggle={() => toggle('midday')}
+      />
+      <PowerHourCard
+        positions={positions}
+        totalPnl={totalPnl}
+        expanded={expandedKey === 'powerhour'}
+        onToggle={() => toggle('powerhour')}
+      />
+      <CloseRecapCard
+        positions={positions}
+        totalPnl={totalPnl}
+        expanded={expandedKey === 'close'}
+        onToggle={() => toggle('close')}
+      />
     </div>
   );
 };

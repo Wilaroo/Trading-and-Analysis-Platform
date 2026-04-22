@@ -36,17 +36,12 @@ const CommandCenterPage = ({
   // Check Ollama status
   const [ollamaStatus, setOllamaStatus] = useState('unknown');
   const [ollamaUsage, setOllamaUsage] = useState(null);
+  // Morning briefing modal — state kept so the floating button can still open
+  // it on demand, but we no longer auto-popup on first load of the day.
+  // Rationale (2026-04-22): the popup was stealing the screen every session,
+  // pre-empting the new V5 Command Center briefings panel that now surfaces
+  // the same info inline. The modal still exists as a deep-dive surface.
   const [showBriefing, setShowBriefing] = useState(false);
-  
-  // Auto-show morning briefing on first load (once per day)
-  useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const lastShown = sessionStorage.getItem('briefing_shown_date');
-    if (lastShown !== today) {
-      setShowBriefing(true);
-      sessionStorage.setItem('briefing_shown_date', today);
-    }
-  }, []);
   
   useEffect(() => {
     const checkOllama = async () => {
