@@ -9,7 +9,14 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-23 — bracket queue passthrough + confirm_trade semantics)
+## Completed this fork (2026-04-23 — bracket queue + confirm_trade + frontend health)
+
+### P1 — Frontend execution-health indicators SHIPPED
+- **`TradeExecutionHealthCard.jsx`** — compact badge in SentCom header (next to ServerHealthBadge). Polls `/api/trading-bot/execution-health?hours=24` every 60s. 4 states with distinct color + icon: HEALTHY (emerald, <5% failure) / WATCH (amber, 5-15%) / CRITICAL (red, ≥15%) / LOW-DATA (grey, <5 trades). Hover tooltip shows raw stats.
+- **`BotHealthBanner.jsx`** — full-width red banner that **only renders when alert_level is CRITICAL**. Silent otherwise. Shows top 3 failing setups + total R bled. Session-dismissable via ×. Integrated at top of SentCom embedded mode (above ambient effects).
+
+Both components use `memo`, 60s poll cadence, `data-testid` attributes, and follow existing `ServerHealthBadge` conventions. Lint clean.
+
 ### P1 — `confirm_trade` false-negative FIXED
 **Root cause:** `TradeExecution.confirm_trade` returned `trade.status == TradeStatus.OPEN` only, so trades correctly filtered by the strategy phase gate (`SIMULATED`, `PAPER`) or pre-trade guardrail (`VETOED`) reported as API failures. The router then raised 400 "Failed to execute trade" on legitimate pipeline outcomes — misleading when demoing trades or using the confirmation mode UI.
 

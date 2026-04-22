@@ -29,6 +29,8 @@ import ClickableTicker from './shared/ClickableTicker';
 import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import ServerHealthBadge from './ServerHealthBadge';
+import TradeExecutionHealthCard from './TradeExecutionHealthCard';
+import BotHealthBanner from './BotHealthBanner';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import ChatBubbleOverlay from './ChatBubbleOverlay';
@@ -3070,6 +3072,9 @@ const SentCom = ({ compact = false, embedded = false }) => {
     
     return (
       <div className="relative overflow-auto rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 backdrop-blur-xl" style={{ maxHeight: 'calc(100vh - 120px)' }} data-testid="sentcom-embedded">
+        {/* Bot Health Banner — renders only when execution-health is CRITICAL */}
+        <BotHealthBanner />
+
         {/* Ambient Background Effects */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl" />
