@@ -487,23 +487,46 @@ class TimeSeriesGBM:
                 MACRO_F1_FLOOR = 0.92      # allow 8% macro-F1 slack vs active
 
                 # Class-collapse escape hatch: active model is itself collapsed
-                # (UP recall < 5%), so ANY model with better UP recall should
-                # replace it even if raw accuracy drops.
-                active_is_collapsed = cur_recall_up < 0.05
+                # (either UP or DOWN recall below floor). Promote a new model
+                # that passes BOTH-class floors AND improves the collapsed
+                # class, even if raw accuracy drops.
+                cur_recall_down = float(current_metrics.get("recall_down", 0.0))
+                active_is_collapsed = (
+                    cur_recall_up < MIN_UP_RECALL
+                    or cur_recall_down < MIN_DOWN_RECALL
+                )
                 if active_is_collapsed:
-                    if new_recall_up > cur_recall_up and new_recall_down >= MIN_DOWN_RECALL:
+                    new_passes_floors = (
+                        new_recall_up >= MIN_UP_RECALL
+                        and new_recall_down >= MIN_DOWN_RECALL
+                    )
+                    improves_collapsed_class = (
+                        new_recall_up > cur_recall_up
+                        or new_recall_down > cur_recall_down
+                    )
+                    if new_passes_floors and improves_collapsed_class:
                         should_promote = True
                         logger.info(
                             f"Model protection: ACTIVE {current_version} is class-collapsed "
-                            f"(UP recall {cur_recall_up:.3f} < 0.05). NEW {self._version} has "
-                            f"UP recall {new_recall_up:.3f} — PROMOTING despite lower accuracy "
+                            f"(UP recall {cur_recall_up:.3f}, DOWN recall {cur_recall_down:.3f}). "
+                            f"NEW {self._version} passes floors (UP {new_recall_up:.3f} / "
+                            f"DOWN {new_recall_down:.3f}) — PROMOTING despite raw accuracy "
                             f"({new_accuracy:.4f} vs {current_accuracy:.4f})."
+                        )
+                    elif not new_passes_floors:
+                        should_promote = False
+                        demotion_reason = (
+                            f"active collapsed but new model also fails floors "
+                            f"(UP {new_recall_up:.3f}/floor {MIN_UP_RECALL}, "
+                            f"DOWN {new_recall_down:.3f}/floor {MIN_DOWN_RECALL})"
                         )
                     else:
                         should_promote = False
                         demotion_reason = (
-                            f"active is collapsed but new UP recall {new_recall_up:.3f} "
-                            f"did not beat {cur_recall_up:.3f}"
+                            f"active collapsed but new model does not improve "
+                            f"either class (UP {new_recall_up:.3f} vs "
+                            f"{cur_recall_up:.3f}, DOWN {new_recall_down:.3f} vs "
+                            f"{cur_recall_down:.3f})"
                         )
                 else:
                     # Normal path: use macro-F1 w/ UP-recall floor

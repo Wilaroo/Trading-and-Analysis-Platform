@@ -169,3 +169,29 @@ def test_new_metrics_missing_recall_fields_treated_as_zero_safely():
     # Legacy active defaults to recall_up=0 (treated as collapsed),
     # so escape hatch promotes the new model.
     assert gbm._save_model() == "promoted"
+
+
+def test_promote_when_active_has_tiny_up_recall_and_zero_down_recall():
+    """Regression for Spark scenario (2026-04-23): active direction_predictor_5min
+    had UP recall 0.069 (just above the OLD 0.05 hatch) and DOWN recall 0.0.
+    The old escape hatch (`cur_recall_up < 0.05`) missed this and would force
+    the retrained model through the strict macro-F1 floor. The new hatch
+    triggers on EITHER class below MIN_{UP,DOWN}_RECALL — covering this case.
+    """
+    new = _mk_metrics(0.50, 0.22, 0.35, 0.25, 0.33)
+    active = {"accuracy": 0.5350, "recall_up": 0.069, "recall_down": 0.0,
+              "f1_up": 0.12, "f1_down": 0.0}
+    gbm, mock_active = _mk_gbm(new, active)
+    assert gbm._save_model() == "promoted"
+    assert mock_active.update_one.called
+
+
+def test_reject_when_active_collapsed_and_new_fails_floors():
+    """Active is class-collapsed but the new candidate also misses the floors.
+    We must not promote garbage just because active is garbage."""
+    new = _mk_metrics(0.50, 0.08, 0.50, 0.10, 0.48)
+    active = {"accuracy": 0.5350, "recall_up": 0.069, "recall_down": 0.0,
+              "f1_up": 0.12, "f1_down": 0.0}
+    gbm, mock_active = _mk_gbm(new, active)
+    assert gbm._save_model() == "archived"
+    assert not mock_active.update_one.called
