@@ -10,7 +10,7 @@
  *   brain  → violet   (gate decision / AI thought)
  *   info   → slate    (fallback)
  */
-import React from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 const TIME_COLOR_BY_SEV = {
   order: 'text-yellow-400',
@@ -111,6 +111,32 @@ const StreamRow = ({ msg }) => {
 
 
 export const UnifiedStreamV5 = ({ messages, loading }) => {
+  // Stage 2d-C — filter chips matching the mockup. Multi-select: unlocked
+  // defaults to "all". Clicking a chip toggles it.
+  const [filters, setFilters] = useState(() => new Set());
+  const toggle = useCallback((k) => {
+    setFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!messages || filters.size === 0) return messages || [];
+    return messages.filter(m => filters.has(classifyMessage(m)));
+  }, [messages, filters]);
+
+  const filterOptions = [
+    { key: 'scan',  label: 'scan' },
+    { key: 'brain', label: 'eval' },   // brain = gate / ai decision
+    { key: 'order', label: 'order' },
+    { key: 'fill',  label: 'fill' },
+    { key: 'win',   label: 'win' },
+    { key: 'loss',  label: 'loss' },
+    { key: 'skip',  label: 'skip' },
+  ];
+
   if (loading && (!messages || messages.length === 0)) {
     return (
       <div className="px-3 py-6 text-center text-[11px] text-zinc-500">Loading stream…</div>
@@ -118,19 +144,45 @@ export const UnifiedStreamV5 = ({ messages, loading }) => {
   }
   if (!messages || messages.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-[11px] text-zinc-500">
-        <div className="v5-mono">No stream events yet.</div>
-        <div className="mt-1 v5-why-dim">Scanner · gate decisions · fills · closes will flow here in real time.</div>
+      <div className="flex flex-col">
+        <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
+        <div className="px-3 py-6 text-center text-[11px] text-zinc-500">
+          <div className="v5-mono">No stream events yet.</div>
+          <div className="mt-1 v5-why-dim">Scanner · gate decisions · fills · closes will flow here in real time.</div>
+        </div>
       </div>
     );
   }
   return (
     <div data-testid="v5-unified-stream" className="flex flex-col">
-      {messages.map((m, i) => (
+      <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
+      {filtered.map((m, i) => (
         <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} />
       ))}
+      {filtered.length === 0 && filters.size > 0 && (
+        <div className="px-3 py-4 text-center text-[11px] text-zinc-500 v5-why-dim">
+          No events match the selected filter{filters.size > 1 ? 's' : ''}.
+        </div>
+      )}
     </div>
   );
 };
+
+
+const StreamFilterBar = ({ filters, toggle, options }) => (
+  <div className="flex items-center gap-1 px-3 py-1.5 border-b border-zinc-900 bg-zinc-950/80 sticky top-0 z-10">
+    <span className="v5-mono text-[9px] v5-dim uppercase tracking-widest mr-1">filter:</span>
+    {options.map(o => (
+      <button
+        key={o.key}
+        data-testid={`v5-stream-filter-${o.label}`}
+        onClick={() => toggle(o.key)}
+        className={`v5-filter-chip ${filters.has(o.key) ? 'active' : ''}`}
+      >
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
 
 export default UnifiedStreamV5;

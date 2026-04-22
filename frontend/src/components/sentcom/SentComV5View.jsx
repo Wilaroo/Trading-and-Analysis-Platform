@@ -33,17 +33,62 @@ import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
   const pipeline = status?.order_pipeline || {};
   const openPositions = (positions || []).filter(p => p && p.status !== 'closed');
-  const todaysClosed = (messages || []).filter(m => {
+  const closedToday = (positions || []).filter(p => p?.status === 'closed');
+  const streamCloses = (messages || []).filter(m => {
     const kind = (m?.event || m?.kind || '').toLowerCase();
     return kind.includes('close') || kind.includes('win') || kind.includes('loss');
-  }).length;
+  });
+
+  // Aggregate eval quality
+  const withGate = (alerts || []).filter(a => a?.gate_score != null);
+  const gatePassCount = withGate.filter(a => a.gate_score >= 60).length;
+  const avgGate = withGate.length
+    ? Math.round(withGate.reduce((s, a) => s + Number(a.gate_score), 0) / withGate.length)
+    : null;
+  const gatePassPct = withGate.length
+    ? Math.round((gatePassCount / withGate.length) * 100)
+    : null;
+
+  // Aggregate management
+  const totalR = openPositions.reduce((s, p) => s + (Number(p.unrealized_r ?? p.pnl_r) || 0), 0);
+  const stopsBreached = openPositions.filter(p => p.stop_breached || p.stop_hit).length;
+  const openSymbols = openPositions.map(p => p.symbol).filter(Boolean).slice(0, 3).join(' · ');
+
+  // Aggregate close
+  const closedCount = closedToday.length || streamCloses.length;
+  const winsCount = closedToday.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
+  const lossesCount = closedToday.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
+  const closedR = closedToday.reduce((s, p) => s + (Number(p.r_multiple) || 0), 0);
+  const worstR = closedToday.length
+    ? Math.min(...closedToday.map(p => Number(p.r_multiple) || 0))
+    : null;
+  const winRate = closedCount ? Math.round((winsCount / closedCount) * 100) : null;
 
   return {
     scan: (setups?.length ?? 0),
+    scan_sub: status?.scanner_bar_size || status?.active_timeframe
+      ? `${status.scanner_bar_size || status.active_timeframe}${status?.scanner_universe_size ? ` · ${status.scanner_universe_size} symbols` : ''}`
+      : (setups?.length ? `${setups.length} setups` : '—'),
     eval: (alerts?.length ?? 0),
-    order: (pipeline.pending ?? 0) + (pipeline.executing ?? 0),
+    eval_sub: withGate.length
+      ? `${gatePassPct}% gate pass${avgGate != null ? ` · avg ${avgGate}` : ''}`
+      : (alerts?.length ? `${alerts.length} alerts` : 'no alerts'),
+    order: (pipeline.pending ?? 0) + (pipeline.executing ?? 0) + (pipeline.filled_today ?? 0),
+    order_sub: pipeline.pending != null || pipeline.filled_today != null
+      ? `${pipeline.filled_today ?? 0} filled · ${pipeline.pending ?? 0} pending${pipeline.last_ack_s != null ? ` · ${pipeline.last_ack_s}s` : ''}`
+      : '—',
     manage: openPositions.length,
-    close: todaysClosed,
+    manage_sub: openPositions.length > 0
+      ? `${openSymbols || ''}${stopsBreached > 0 ? ` · ${stopsBreached} stops hit` : ' · no stops breached'}`
+      : 'no positions',
+    manage_r: openPositions.length ? totalR : null,
+    close: closedCount,
+    close_sub: closedCount > 0
+      ? `WR ${winRate}%${closedR ? ` · $${closedR >= 0 ? '+' : '−'}${Math.abs(Math.round(closedR * 100))}` : ''}${worstR != null ? ` · worst ${worstR.toFixed(1)}R` : ''}`
+      : 'no closes today',
+    close_r: closedCount ? closedR : null,
+    wins: winsCount,
+    losses: lossesCount,
   };
 };
 
@@ -98,21 +143,23 @@ export const SentComV5View = ({
       {/* 1. Top-bar Pipeline HUD */}
       <PipelineHUDV5
         scanCount={counts.scan}
-        scanSub={`${setups?.length ?? 0} setups · ${status?.active_timeframe || '5m'}`}
+        scanSub={counts.scan_sub}
         evalCount={counts.eval}
-        evalSub={alerts?.length ? `${alerts.length} alerts today` : 'no alerts'}
+        evalSub={counts.eval_sub}
         orderCount={counts.order}
-        orderSub={status?.order_pipeline?.pending != null
-          ? `${status.order_pipeline.pending} pending · ${status.order_pipeline.executing ?? 0} exec`
-          : undefined}
+        orderSub={counts.order_sub}
         manageCount={counts.manage}
-        manageSub={positions?.length ? `${positions.length} open` : 'no positions'}
-        manageAccent={totalPnl ? {
-          color: totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400',
-          text: `${totalPnl >= 0 ? '+' : '−'}$${Math.abs(totalPnl).toFixed(0)}`,
+        manageSub={counts.manage_sub}
+        manageAccent={counts.manage_r != null ? {
+          color: counts.manage_r >= 0 ? 'text-emerald-400' : 'text-rose-400',
+          text: `${counts.manage_r >= 0 ? '+' : ''}${counts.manage_r.toFixed(1)}R`,
         } : undefined}
         closeCount={counts.close}
-        closeSub={status?.daily_win_rate != null ? `WR ${Math.round(status.daily_win_rate * 100)}%` : undefined}
+        closeSub={counts.close_sub}
+        closeAccent={counts.close_r != null ? {
+          color: counts.close_r >= 0 ? 'text-emerald-400' : 'text-rose-400',
+          text: `${counts.close_r >= 0 ? '+' : ''}${counts.close_r.toFixed(1)}R`,
+        } : undefined}
         totalPnl={totalPnl}
         equity={equity}
         latencySeconds={latencySeconds}
@@ -165,6 +212,7 @@ export const SentComV5View = ({
               symbol={effectiveSymbol}
               initialTimeframe="5m"
               height={600}
+              position={positions?.find(p => p.symbol === effectiveSymbol) || null}
             />
           </div>
         </section>
@@ -202,9 +250,7 @@ export const SentComV5View = ({
           <div className="flex-1 min-h-0 flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Unified Stream</div>
-              <div className="flex items-center gap-1 text-[9px] v5-mono v5-dim">
-                <span className="v5-chip v5-chip-manage">live</span>
-              </div>
+              <span className="v5-chip v5-chip-manage">live</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
               <UnifiedStreamV5 messages={messages} loading={streamLoading} />

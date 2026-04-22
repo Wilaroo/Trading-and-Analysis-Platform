@@ -33,13 +33,23 @@ const BOT_TEXT_COLOR = {
   veto: 'text-red-400',
 };
 
-const Mini5Stage = ({ stage }) => {
+const Mini5Stage = ({ stage, closedOutcome }) => {
   const idx = STAGE_ORDER.indexOf(stage);
+  const isVeto = stage === 'veto';
   return (
-    <div className="v5-mini-5stage mt-1.5">
-      {STAGE_ORDER.map((s, i) => (
-        <span key={s} className={i <= idx ? `on-${s}` : ''} />
-      ))}
+    <div className="v5-mini-5stage">
+      {STAGE_ORDER.map((s, i) => {
+        if (isVeto && (s === 'eval' || s === 'scan')) return <span key={s} className={`on-${s}`} />;
+        if (isVeto && i >= 2) return <span key={s} className="on-veto" />;
+        if (i <= idx) {
+          // On CLOSE, colour the final block red/green to encode win/loss
+          if (s === 'close' && closedOutcome) {
+            return <span key={s} className={closedOutcome === 'win' ? 'on-manage' : 'on-veto'} />;
+          }
+          return <span key={s} className={`on-${s}`} />;
+        }
+        return <span key={s} />;
+      })}
     </div>
   );
 };
@@ -146,10 +156,14 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
     const existing = bySymbol.get(sym);
     // Don't clobber an open position card with a closed message
     if (existing && existing.stage === 'manage') return;
+    const outcome = kind.includes('win') || Number(m.realized_pnl) > 0 || Number(m.r_multiple) > 0 ? 'win'
+                  : kind.includes('loss') || Number(m.realized_pnl) < 0 || Number(m.r_multiple) < 0 ? 'loss'
+                  : null;
     bySymbol.set(sym, {
       symbol: sym,
       stage: 'close',
-      stage_note: kind.includes('win') ? 'CLOSED W' : kind.includes('loss') ? 'CLOSED L' : 'CLOSED',
+      stage_note: outcome === 'win' ? 'W' : outcome === 'loss' ? 'L' : '',
+      closed_outcome: outcome,
       change_pct: null,
       bot_text: m.summary || m.text || m.message || 'Trade closed.',
       metrics: {
@@ -170,11 +184,33 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
 };
 
 
+const relativeAge = (ts) => {
+  if (!ts) return '';
+  try {
+    const diffS = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
+    if (diffS < 60) return `${diffS}s`;
+    if (diffS < 3600) return `${Math.floor(diffS / 60)}m`;
+    return `${Math.floor(diffS / 3600)}h`;
+  } catch { return ''; }
+};
+
+
 const ScannerCard = ({ card, active, onClick }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
   const botColor = BOT_TEXT_COLOR[card.stage] || 'text-zinc-400';
-  const hasMetrics = card.metrics && (card.metrics.gate != null || card.metrics.p_win != null || card.metrics.sharpe != null || card.metrics.r != null);
+  const hasMetrics = card.metrics && (
+    card.metrics.gate != null || card.metrics.p_win != null
+    || card.metrics.sharpe != null || card.metrics.r != null
+  );
   const change = formatPriceChange(card.change_pct);
+  const age = relativeAge(card.timestamp);
+
+  // Stage chip label — mockup shows: "ORDER · 8s", "OPEN", "CLOSED W", "SKIP", "SCAN"
+  let chipLabel;
+  if (card.stage === 'veto') chipLabel = 'SKIP';
+  else if (card.stage === 'manage') chipLabel = 'OPEN';
+  else if (card.stage === 'close') chipLabel = card.closed_outcome === 'win' ? 'CLOSED W' : card.closed_outcome === 'loss' ? 'CLOSED L' : 'CLOSED';
+  else chipLabel = card.stage.toUpperCase();
 
   return (
     <div
@@ -185,53 +221,64 @@ const ScannerCard = ({ card, active, onClick }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
           <span className="v5-mono font-bold text-sm text-zinc-100">{card.symbol}</span>
-          <span className={`v5-chip ${chipClass} uppercase`}>
-            {card.stage === 'veto' ? 'SKIP' : card.stage}{card.stage_note ? ` · ${card.stage_note}` : ''}
+          <span className={`v5-chip ${chipClass}`}>
+            {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>
         </div>
         {change && (
-          <span className={`v5-mono text-[10px] ${Number(card.change_pct) >= 0 ? 'v5-up' : 'v5-down'}`}>{change}</span>
+          <span className={`v5-mono text-[11px] font-bold ${Number(card.change_pct) >= 0 ? 'v5-up' : 'v5-down'}`}>
+            {card.stage === 'close' && card.metrics?.r != null
+              ? `${Number(card.metrics.r) >= 0 ? '+' : ''}${Number(card.metrics.r).toFixed(1)}R`
+              : change
+            }
+          </span>
         )}
       </div>
 
-      <Mini5Stage stage={card.stage === 'veto' ? 'eval' : card.stage} />
+      <Mini5Stage stage={card.stage} closedOutcome={card.closed_outcome} />
 
       {card.bot_text && (
         <div className="v5-why mt-2">
-          <span className={`${botColor} font-semibold`}>Bot:</span>{' '}
-          <span className="text-zinc-400">{card.bot_text}</span>
+          <span className={`${botColor} v5-bot-tag`}>Bot:</span>{' '}
+          <span className="text-zinc-200">"{card.bot_text}"</span>
         </div>
       )}
 
       {hasMetrics && (
-        <div className="flex items-center gap-2 mt-1.5 text-[10px] v5-mono">
+        <div className="flex items-center gap-3 mt-2 text-[10px] v5-mono">
           {card.metrics.gate != null && (
-            <>
+            <div className="flex items-center gap-1">
               <span className="v5-dim">gate</span>
-              <span className={`font-bold ${card.metrics.gate >= 60 ? 'v5-up' : card.metrics.gate >= 45 ? 'v5-warn' : 'v5-down'}`}>{Math.round(card.metrics.gate)}</span>
-            </>
+              <span className={`font-bold ${card.metrics.gate >= 60 ? 'v5-up' : card.metrics.gate >= 45 ? 'v5-warn' : 'v5-down'}`}>
+                {Math.round(card.metrics.gate)}
+              </span>
+            </div>
           )}
           {card.metrics.p_win != null && (
-            <>
-              <span className="v5-dim ml-1">P(win)</span>
-              <span className={`font-bold ${Number(card.metrics.p_win) >= 0.55 ? 'v5-up' : 'v5-down'}`}>{formatPct(card.metrics.p_win)}</span>
-            </>
+            <div className="flex items-center gap-1">
+              <span className="v5-dim">P(win)</span>
+              <span className={`font-bold ${Number(card.metrics.p_win) >= 0.55 ? 'v5-up' : 'v5-down'}`}>
+                {formatPct(card.metrics.p_win)}
+              </span>
+            </div>
           )}
           {card.metrics.sharpe != null && (
-            <>
-              <span className="v5-dim ml-1">Sharpe</span>
-              <span className="font-bold text-zinc-300">{formatNum(card.metrics.sharpe, 2)}</span>
-            </>
+            <div className="flex items-center gap-1">
+              <span className="v5-dim">Sharpe</span>
+              <span className="font-bold text-zinc-200">{formatNum(card.metrics.sharpe, 2)}</span>
+            </div>
           )}
-          {card.metrics.r != null && (
-            <>
-              <span className="v5-dim ml-1">R</span>
-              <span className={`font-bold ${Number(card.metrics.r) >= 0 ? 'v5-up' : 'v5-down'}`}>{formatNum(card.metrics.r, 2)}</span>
-            </>
+          {card.metrics.r != null && card.stage !== 'close' && (
+            <div className="flex items-center gap-1">
+              <span className="v5-dim">R</span>
+              <span className={`font-bold ${Number(card.metrics.r) >= 0 ? 'v5-up' : 'v5-down'}`}>
+                {formatNum(card.metrics.r, 2)}
+              </span>
+            </div>
           )}
           {card.metrics.pnl != null && Math.abs(card.metrics.pnl) > 0 && (
             <span className={`ml-auto font-bold ${Number(card.metrics.pnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
-              {Number(card.metrics.pnl) >= 0 ? '+' : ''}${Math.round(Number(card.metrics.pnl))}
+              {Number(card.metrics.pnl) >= 0 ? '+$' : '−$'}{Math.abs(Number(card.metrics.pnl)).toFixed(0)}
             </span>
           )}
         </div>

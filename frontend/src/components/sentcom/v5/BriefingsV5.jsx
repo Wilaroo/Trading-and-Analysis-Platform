@@ -70,7 +70,7 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="v5-mono font-bold text-xs text-violet-400">MORNING PREP</span>
-          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
         <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
@@ -135,7 +135,7 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="v5-mono font-bold text-xs text-amber-400">MID-DAY RECAP</span>
-          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
         <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowET()}</span>
@@ -184,7 +184,7 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="v5-mono font-bold text-xs text-orange-400">POWER HOUR</span>
-          {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
+          {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
         <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowET()}</span>

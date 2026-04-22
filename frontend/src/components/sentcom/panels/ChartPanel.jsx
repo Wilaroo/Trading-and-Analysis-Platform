@@ -50,6 +50,9 @@ export const ChartPanel = ({
   height = 480,
   autoRefreshMs = 30_000,
   className = '',
+  // Optional focused position — if supplied, Entry / SL / PT horizontal
+  // price lines are drawn on the chart (V5 Stage 2d-B).
+  position = null,
 }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -57,6 +60,7 @@ export const ChartPanel = ({
   const volumeSeriesRef = useRef(null);
   const indicatorSeriesRef = useRef({}); // { [key]: ISeriesApi<'Line'> }
   const markersPluginRef = useRef(null); // createSeriesMarkers() plugin api
+  const priceLinesRef = useRef([]); // IPriceLine[] — Stage 2d-B (entry/SL/PT overlays)
   const resizeObsRef = useRef(null);
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
@@ -308,6 +312,54 @@ export const ChartPanel = ({
       /* markers plugin api may not be ready on first render */
     }
   }, [markers]);
+
+  // Stage 2d-B — draw Entry / Stop-Loss / Profit-Target horizontal lines when
+  // a focused position is supplied. Clears previous lines on every change so
+  // we never leak stale levels.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return undefined;
+    // Tear down any previously drawn lines
+    for (const line of priceLinesRef.current) {
+      try { series.removePriceLine(line); } catch (_) { /* noop */ }
+    }
+    priceLinesRef.current = [];
+
+    if (!position) return undefined;
+    const dir = (position.direction || position.side || '').toLowerCase();
+    const specs = [];
+    if (position.entry_price != null) {
+      specs.push({ price: Number(position.entry_price), color: '#eab308', title: `E ${Number(position.entry_price).toFixed(2)}`, lineStyle: 1 });
+    }
+    if (position.stop_price != null) {
+      specs.push({ price: Number(position.stop_price), color: '#ef4444', title: `SL ${Number(position.stop_price).toFixed(2)}`, lineStyle: 2 });
+    }
+    if (position.target_price != null) {
+      specs.push({ price: Number(position.target_price), color: '#22c55e', title: `PT ${Number(position.target_price).toFixed(2)}`, lineStyle: 2 });
+    }
+
+    for (const spec of specs) {
+      if (!Number.isFinite(spec.price)) continue;
+      try {
+        const line = series.createPriceLine({
+          price: spec.price,
+          color: spec.color,
+          lineWidth: 1,
+          lineStyle: spec.lineStyle,
+          axisLabelVisible: true,
+          title: spec.title,
+        });
+        priceLinesRef.current.push(line);
+      } catch (_) { /* unsupported in this chart build */ }
+    }
+
+    return () => {
+      for (const line of priceLinesRef.current) {
+        try { series.removePriceLine(line); } catch (_) { /* noop */ }
+      }
+      priceLinesRef.current = [];
+    };
+  }, [position?.entry_price, position?.stop_price, position?.target_price, position?.direction, position?.side]);
 
   const toggleIndicator = useCallback((key) => {
     setVisibleIndicators(prev => ({ ...prev, [key]: !prev[key] }));

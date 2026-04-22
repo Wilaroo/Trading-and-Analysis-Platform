@@ -10,6 +10,10 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+## TODO (user note 2026-04-22)
+- 🟡 Revisit `MorningBriefingModal.jsx` to look like the user's "newer more in-depth briefing modal" (screenshot they shared). Current V5-restyled modal is a minimal summary; they want richer detail. Revisit after Stage 2d polish.
+
+
 ## 2026-04-24 — CRITICAL FIX #5 — `balanced_sqrt` class-weight scheme (DOWN-collapse pendulum)
 
 **Finding:** The 2026-04-23 force-promoted `direction_predictor_5min` v20260422_181416

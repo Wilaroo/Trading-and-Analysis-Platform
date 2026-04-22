@@ -24,14 +24,20 @@ const Stage = ({ stage, label, count, sub, accent }) => {
   return (
     <div
       data-testid={`v5-pipeline-stage-${stage}`}
-      className={`flex-1 px-2.5 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5`}
+      className={`flex-1 min-w-0 px-3 py-2 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block`}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className={`text-[9px] uppercase tracking-widest font-semibold ${c.text}`}>{label}</span>
-        <span className="font-mono text-lg font-bold text-zinc-100">{count ?? 0}</span>
-        {accent && <span className={`font-mono text-[10px] ${accent.color}`}>{accent.text}</span>}
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-[10px] uppercase tracking-[0.18em] font-bold ${c.text}`}>{label}</span>
+        <div className="flex items-baseline gap-1.5">
+          {accent && (
+            <span className={`v5-mono text-[10px] font-bold ${accent.color}`}>{accent.text}</span>
+          )}
+          <span className="v5-mono text-2xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
+        </div>
       </div>
-      {sub && <div className="text-[9px] text-zinc-500 truncate">{sub}</div>}
+      {sub && (
+        <div className="text-[10px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
+      )}
     </div>
   );
 };
