@@ -327,6 +327,36 @@ const SentCom = ({ compact = false, embedded = false }) => {
   }, [localMessages, messages]);
 
   // =========================================================================
+  // Stage 2d V5 Command-Center layout — PRIMARY default for all modes except
+  // `compact` (which stays legacy because V5 is a full-viewport surface).
+  // Global escape hatch: `?v4=1` in the URL reverts to the legacy embedded /
+  // full-page layouts below.
+  // =========================================================================
+  const _v5QueryOptOut = typeof window !== 'undefined'
+    && (new URLSearchParams(window.location.search).get('v4') === '1');
+  if (!_v5QueryOptOut && !compact) {
+    return (
+      <SentComV5View
+        status={status}
+        context={context}
+        positions={positions}
+        totalPnl={totalPnl}
+        positionsLoading={positionsLoading}
+        setupsLoading={setupsLoading}
+        contextLoading={contextLoading}
+        alertsLoading={alertsLoading}
+        setups={setups}
+        alerts={alerts}
+        messages={messages}
+        streamLoading={streamLoading}
+        handleChat={handleChat}
+        selectedPosition={selectedPosition}
+        setSelectedPosition={setSelectedPosition}
+      />
+    );
+  }
+
+  // =========================================================================
   // EMBEDDED MODE - For Command Center (full-featured but fits in dashboard)
   // With glassy mockup styling and unified Trading Bot controls
   // =========================================================================
@@ -758,35 +788,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
     );
   }
 
-  // Stage 2d V5 Command-Center layout — opt-in via ?v5=1 in the URL.
-  // Applies to every render mode (full page, embedded, compact) because V5
-  // is a full-viewport replacement; the normal wrapper layouts (e.g.
-  // NewDashboard's grid around embedded SentCom) don't compose with it.
-  const v5Enabled = typeof window !== 'undefined'
-    && (new URLSearchParams(window.location.search).get('v5') === '1');
-  if (v5Enabled) {
-    return (
-      <SentComV5View
-        status={status}
-        context={context}
-        positions={positions}
-        totalPnl={totalPnl}
-        positionsLoading={positionsLoading}
-        setupsLoading={setupsLoading}
-        contextLoading={contextLoading}
-        alertsLoading={alertsLoading}
-        setups={setups}
-        alerts={alerts}
-        messages={messages}
-        streamLoading={streamLoading}
-        handleChat={handleChat}
-        selectedPosition={selectedPosition}
-        setSelectedPosition={setSelectedPosition}
-      />
-    );
-  }
-
-  // Full page version
+  // Full page version (legacy — reached via ?v4=1 or compact=true)
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="max-w-7xl mx-auto p-6">

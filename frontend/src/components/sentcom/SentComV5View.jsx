@@ -1,53 +1,41 @@
 /**
- * SentComV5View — Stage 2d V5 Command-Center grid.
- *
- * Feature-flagged alternative layout for the full-page SentCom dashboard.
- * Activated with `?v5=1` in the URL. Falls back to the v4 layout otherwise.
- *
- * Layout contract (matches public/mockups/option-1-v5-command-center.html):
+ * SentComV5View — Stage 2d V5 Command-Center grid (primary layout).
  *
  *   +-----------------------------------------------------------+
  *   | PipelineHUDV5  (Scan → Eval → Order → Manage → Close)     |
  *   +--------+---------------------------------------+----------+
  *   | 20%    | 55%                                   | 25%      |
- *   |        |                                       |          |
- *   | Scanner| ChartPanel (focused symbol)           | Model    |
- *   | · Live |                                       | Health   |
- *   | setups |                                       +----------+
- *   | alerts |                                       | Positions|
+ *   | Scanner| ChartPanel + chart header             | Briefings|
+ *   | Cards  |                                       +----------+
+ *   |        |                                       | Open pos |
  *   |        |                                       +----------+
  *   |        |                                       | Stream + |
  *   |        |                                       | Chat     |
  *   +--------+---------------------------------------+----------+
  *
- * Non-goal: rebuild the mockup's scanner cards / chart bubbles from scratch.
- * We RE-USE the existing panels — this file is a pure composition layer, so
- * every hook, fetch, and underlying rendering path is untouched.
+ * All V5 components live in `./v5/`. Existing panels are left untouched so
+ * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 
-import { GlassCard } from '../primitives/GlassCard';
-import { ChartPanel } from './ChartPanel';
-import { ModelHealthScorecard } from './ModelHealthScorecard';
-import { PositionsPanel } from './PositionsPanel';
-import { StreamPanel } from './StreamPanel';
-import { ChatInput } from './ChatInput';
-import { SetupsPanel } from './SetupsPanel';
-import { AlertsPanel } from './AlertsPanel';
-import { ContextPanel } from './ContextPanel';
-import { PipelineHUDV5 } from './PipelineHUDV5';
+import { ChartPanel } from './panels/ChartPanel';
+import { ModelHealthScorecard } from './panels/ModelHealthScorecard';
+import { ChatInput } from './panels/ChatInput';
+import { PipelineHUDV5 } from './panels/PipelineHUDV5';
+
+import { useV5Styles } from './v5/useV5Styles';
+import { ScannerCardsV5 } from './v5/ScannerCardsV5';
+import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
+import { BriefingsV5 } from './v5/BriefingsV5';
+import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 
 
-/**
- * Derive pipeline-funnel counts from the hook state we already have.
- * Keeps domain logic localised so the view stays presentational.
- */
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
   const pipeline = status?.order_pipeline || {};
-  const openPositions = positions?.filter(p => p && (p.status !== 'closed')) || [];
+  const openPositions = (positions || []).filter(p => p && p.status !== 'closed');
   const todaysClosed = (messages || []).filter(m => {
-    const kind = (m?.kind || m?.event || '').toLowerCase();
-    return kind.includes('close') || kind.includes('filled') || kind.includes('win') || kind.includes('loss');
+    const kind = (m?.event || m?.kind || '').toLowerCase();
+    return kind.includes('close') || kind.includes('win') || kind.includes('loss');
   }).length;
 
   return {
@@ -61,7 +49,6 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) =
 
 
 export const SentComV5View = ({
-  // Status + context + positions + setups + alerts + messages
   status,
   context,
   positions,
@@ -74,26 +61,39 @@ export const SentComV5View = ({
   alerts,
   messages,
   streamLoading,
-  // Handlers
   handleChat,
-  setSelectedPosition,
   selectedPosition,
+  setSelectedPosition,
 }) => {
+  useV5Styles();
+
+  // Which scanner row is highlighted. Defaults to the first open position so
+  // the chart is always meaningful on load.
+  const [focusedSymbol, setFocusedSymbol] = useState(() =>
+    selectedPosition?.symbol || positions?.[0]?.symbol || null
+  );
+
+  // Keep focus in sync when the external selectedPosition changes from
+  // elsewhere in the app.
+  const effectiveSymbol = useMemo(() => {
+    return (
+      focusedSymbol
+      || selectedPosition?.symbol
+      || positions?.[0]?.symbol
+      || 'SPY'
+    );
+  }, [focusedSymbol, selectedPosition, positions]);
+
   const counts = derivePipelineCounts({ status, setups, positions, alerts, messages });
 
   const equity = status?.account_equity ?? status?.equity ?? context?.account_equity;
   const latencySeconds = status?.order_latency_seconds ?? status?.latency_seconds;
   const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
-  const focusedSymbol =
-    selectedPosition?.symbol
-    || positions?.[0]?.symbol
-    || 'SPY';
-
   return (
     <div
       data-testid="sentcom-v5-root"
-      className="fixed inset-0 z-40 bg-zinc-950 text-white flex flex-col overflow-hidden"
+      className="fixed inset-0 z-40 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
     >
       {/* 1. Top-bar Pipeline HUD */}
       <PipelineHUDV5
@@ -131,21 +131,19 @@ export const SentComV5View = ({
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-              Scanner · Live
-            </div>
-            <div className="text-[9px] font-mono text-zinc-500">
-              {(setups?.length ?? 0) + (alerts?.length ?? 0)} hits
+            <div className="v5-panel-title">Scanner · Live</div>
+            <div className="text-[9px] v5-mono text-zinc-500">
+              {(setups?.length ?? 0) + (alerts?.length ?? 0) + (positions?.length ?? 0)} hits
             </div>
           </div>
-          <div className="overflow-y-auto flex-1 p-2 space-y-2">
-            <SetupsPanel
+          <div className="overflow-y-auto flex-1 v5-scroll">
+            <ScannerCardsV5
               setups={setups}
-              loading={setupsLoading}
-            />
-            <AlertsPanel
               alerts={alerts}
-              loading={alertsLoading}
+              positions={positions}
+              messages={messages}
+              selectedSymbol={effectiveSymbol}
+              onSelectSymbol={setFocusedSymbol}
             />
           </div>
         </section>
@@ -155,43 +153,61 @@ export const SentComV5View = ({
           data-testid="sentcom-v5-center"
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
+          {/* Chart header strip — shows focused symbol + trade params */}
+          <V5ChartHeader
+            symbol={effectiveSymbol}
+            position={positions?.find(p => p.symbol === effectiveSymbol)}
+            focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
+          />
+
           <div className="flex-1 min-h-0 overflow-hidden">
             <ChartPanel
-              symbol={focusedSymbol}
+              symbol={effectiveSymbol}
               initialTimeframe="5m"
-              height={560}
+              height={600}
             />
-          </div>
-          {/* Context strip under the chart — regime + session meta */}
-          <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto">
-            <ContextPanel context={context} loading={contextLoading} />
           </div>
         </section>
 
-        {/* RIGHT — stacked: Model Health · Positions · Stream+Chat */}
+        {/* RIGHT — stacked: Briefings · Open Positions · Stream+Chat */}
         <aside
           data-testid="sentcom-v5-right"
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
-          {/* Model Health — compact, collapsed by default so it doesn't eat space */}
-          <div className="border-b border-zinc-800 max-h-[28vh] overflow-y-auto">
-            <ModelHealthScorecard className="rounded-none border-0" />
+          {/* Briefings (~28vh) */}
+          <div className="border-b border-zinc-800 flex flex-col" style={{ maxHeight: '28vh' }}>
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <div className="v5-panel-title">Briefings</div>
+              <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
+            </div>
+            <div className="overflow-y-auto flex-1 v5-scroll">
+              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} />
+            </div>
           </div>
 
-          {/* Open positions */}
-          <div className="border-b border-zinc-800 max-h-[28vh] overflow-y-auto">
-            <PositionsPanel
+          {/* Open positions (~24vh) */}
+          <div className="border-b border-zinc-800 flex flex-col" style={{ maxHeight: '24vh' }}>
+            <OpenPositionsV5
               positions={positions}
               totalPnl={totalPnl}
               loading={positionsLoading}
-              onSelectPosition={setSelectedPosition}
+              onSelectPosition={(p) => {
+                setSelectedPosition?.(p);
+                setFocusedSymbol(p.symbol);
+              }}
             />
           </div>
 
-          {/* Unified stream + chat input anchored at the bottom */}
+          {/* Stream + chat input anchored at the bottom */}
           <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <StreamPanel messages={messages} loading={streamLoading} />
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <div className="v5-panel-title">Unified Stream</div>
+              <div className="flex items-center gap-1 text-[9px] v5-mono v5-dim">
+                <span className="v5-chip v5-chip-manage">live</span>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
+              <UnifiedStreamV5 messages={messages} loading={streamLoading} />
             </div>
             <div className="border-t border-zinc-800">
               <ChatInput onSend={handleChat} disabled={!status?.connected} />
@@ -200,15 +216,52 @@ export const SentComV5View = ({
         </aside>
       </div>
 
-      {/* Corner watermark — makes the flag state unambiguous */}
+      {/* Model Health — still available, but in an unobtrusive drawer at the
+          bottom so it doesn't steal space from the main grid. */}
+      <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto v5-scroll bg-zinc-950">
+        <ModelHealthScorecard className="rounded-none border-0" />
+      </div>
+
+      {/* Corner watermark — lets users opt out to v4 */}
       <div
         data-testid="sentcom-v5-badge"
-        className="fixed bottom-1 right-2 text-[9px] font-mono text-zinc-600 pointer-events-none z-50"
+        className="fixed bottom-1 right-2 text-[9px] v5-mono text-zinc-600 pointer-events-none z-50"
       >
-        v5 layout · <a href={typeof window !== 'undefined' ? window.location.pathname : '/'} className="text-violet-400 hover:underline pointer-events-auto">exit</a>
+        v5 · <a
+          href={typeof window !== 'undefined' ? `${window.location.pathname}?v4=1` : '/'}
+          className="text-violet-400 hover:underline pointer-events-auto"
+        >switch to v4</a>
       </div>
     </div>
   );
 };
+
+
+/** Header strip above the chart showing symbol + entry/SL/PT if position is open. */
+const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition }) => {
+  const dir = (position?.direction || position?.side || '').toLowerCase();
+  return (
+    <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="v5-mono font-bold text-base text-zinc-100">{symbol}</span>
+        {focusedSymbolIsPosition && (
+          <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
+            {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}
+          </span>
+        )}
+        {position && (
+          <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[10px] v5-mono">
+            {position.entry_price != null && (<><span className="v5-dim">E</span><span className="v5-warn font-bold">{Number(position.entry_price).toFixed(2)}</span></>)}
+            {position.stop_price != null && (<><span className="v5-dim ml-1">SL</span><span className="v5-down font-bold">{Number(position.stop_price).toFixed(2)}</span></>)}
+            {position.target_price != null && (<><span className="v5-dim ml-1">PT</span><span className="v5-up font-bold">{Number(position.target_price).toFixed(2)}</span></>)}
+            {position.risk_reward != null && (<><span className="v5-dim ml-1">R:R</span><span className="font-bold text-zinc-200">{Number(position.risk_reward).toFixed(1)}</span></>)}
+            {position.quantity != null && <span className="v5-dim ml-1">{position.quantity}sh</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 
 export default SentComV5View;
