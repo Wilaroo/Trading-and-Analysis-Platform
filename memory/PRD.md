@@ -9,7 +9,31 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-23 — Layer 13 FinBERT + frontend + latency + confirm_trade)
+## Completed this fork (2026-04-24 — Gate-log diagnostic)
+
+### P0 Task 1 — `analyze_gate_log.py` SHIPPED
+Purpose: Phase 13 revalidation rejected every setup (0 trades passing the 13-layer gate). Before touching models (TFT/CNN-LSTM triple-barrier rebuild), we need **empirical** data on which of the 13 layers actually add edge vs. pure friction. This script answers that.
+
+- `/app/backend/scripts/analyze_gate_log.py` — reads `confidence_gate_log`, parses the free-form `reasoning` list to classify each line into one of the 13 layers via deterministic prefix regexes (contract with confidence_gate.py), extracts the signed score delta from the trailing `(+N…)` / `(-N…)` marker, and emits per-layer:
+  - `fire_rate`, `positive_rate`, `negative_rate`
+  - `mean_delta`, `median_delta`, `stdev_delta`
+  - When `outcome_tracked=True` rows exist: `win_rate_when_positive`, `edge_when_positive` (WR lift over baseline), same for negative. **This is the friction-vs-edge measurement.**
+  - A heuristic verdict per layer: `EDGE` / `FRICTION` / `NEUTRAL` / `LOW DATA` / `DORMANT` / `PENDING OUTCOMES`.
+  - Writes `/tmp/gate_log_stats.md` (human) + `/tmp/gate_log_stats.json` (machine) and prints to stdout.
+- CLI flags: `--days`, `--symbol`, `--setup`, `--direction`, `--outcome-only`, `--limit`.
+- **Tests**: `/app/backend/tests/test_analyze_gate_log.py` — 9 tests: prefix classification for all 12 active layers + decision-line exclusion, delta extraction (positive/negative/trailing-clause/neutral), per-doc layer aggregation, decision-count + fire-rate math, outcome-conditional edge math (baseline + conditional WR), friction heuristic on a synthetic losing layer. All 9 pass in 0.10s.
+- Zero changes to the gate itself — pure read-side analysis, safe to run while live and while Phase 13 revalidation is still in flight.
+
+**Next step (user on Spark):**
+```
+cd ~/Trading-and-Analysis-Platform && git pull
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python backend/scripts/analyze_gate_log.py --days 30
+# or, narrowed to outcome-tracked only:
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python backend/scripts/analyze_gate_log.py --days 90 --outcome-only
+```
+Share the `/tmp/gate_log_stats.md` output — that's the input to Task 2 (DL model rebuild scope).
+
+## Completed prior fork (2026-04-23 — Layer 13 FinBERT + frontend + latency + confirm_trade)
 
 ### P1 — FinBERT Layer 13 wired into ConfidenceGate SHIPPED
 - **Discovery**: `FinBERTSentiment` class was already built (`ai_modules/finbert_sentiment.py`) with a docstring explicitly reading *"Confidence Gate (INACTIVE): Ready to wire as Layer 12 when user enables it."* All 5,328 articles in MongoDB `news_sentiment` already pre-scored (scorer loop is running). Infrastructure was 95% there.
