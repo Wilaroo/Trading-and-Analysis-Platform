@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Briefing Modal — Power Hour</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  .mono { font-family:'JetBrains Mono'; }
+  .up{color:#22c55e}.down{color:#ef4444}.warn{color:#eab308}.dim{color:#52525b}
+  .chip{display:inline-block;font-size:10px;font-family:'JetBrains Mono';padding:2px 7px;border-radius:2px;border:1px solid}
+  .chip-green{color:#22c55e;border-color:#14532d;background:rgba(34,197,94,.10)}
+  .chip-amber{color:#f59e0b;border-color:#713f12;background:rgba(234,179,8,.10)}
+  .chip-violet{color:#a78bfa;border-color:#5b21b6;background:rgba(139,92,246,.10)}
+  .why{font-size:12px;color:#d4d4d8;line-height:1.55}
+  .why-dim{font-size:11px;color:#a1a1aa;line-height:1.5}
+
+  /* Backdrop */
+  .backdrop { position:fixed; inset:0; background:rgba(3,3,5,.85); backdrop-filter:blur(8px); }
+
+  /* Modal shell */
+  .modal { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+           width:min(820px, 92vw); max-height:86vh; overflow-y:auto;
+           background:#0a0a0c; border:1px solid #27272a; border-radius:6px;
+           box-shadow:0 30px 80px rgba(234,179,8,.12), 0 0 0 1px rgba(234,179,8,.2); }
+  .pulse-ring { animation: pulse 2s ease-out infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(234,179,8,.4)} 50%{box-shadow:0 0 0 8px rgba(234,179,8,0)} }
+
+  .section-title{font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#a1a1aa;margin-bottom:6px}
+
+  .if-row { display:grid; grid-template-columns: 60px 1fr; gap:8px; padding:8px 12px; background:#101013; border-radius:4px; margin-bottom:6px; border-left:3px solid; }
+  .if-row.a { border-left-color:#22c55e; }
+  .if-row.b { border-left-color:#eab308; }
+  .if-row.c { border-left-color:#ef4444; }
+  .if-row .tag{ font-family:'JetBrains Mono'; font-size:10px; font-weight:700; padding-top:3px; }
+  .if-row.a .tag{ color:#22c55e; }
+  .if-row.b .tag{ color:#eab308; }
+  .if-row.c .tag{ color:#ef4444; }
+</style>
+</head>
+<body>
+
+<!-- Background: grey-out the existing SentCom view -->
+<div style="background:#09090b; height:100vh; overflow:hidden; opacity:.35; filter:blur(2px)">
+  <div style="padding:12px">
+    <div style="display:flex; gap:12px; opacity:.7">
+      <div style="flex:1; height:60px; background:#27272a; border-radius:4px"></div>
+      <div style="flex:1; height:60px; background:#27272a; border-radius:4px"></div>
+      <div style="flex:1; height:60px; background:#27272a; border-radius:4px"></div>
+    </div>
+    <div style="display:grid; grid-template-columns:20% 55% 25%; gap:2px; margin-top:12px; height:800px">
+      <div style="background:#18181b"></div>
+      <div style="background:#18181b"></div>
+      <div style="background:#18181b"></div>
+    </div>
+  </div>
+</div>
+
+<div class="backdrop"></div>
+
+<div class="modal pulse-ring">
+  <!-- Header -->
+  <div class="px-5 py-4 border-b border-zinc-800 flex items-start gap-3">
+    <div class="shrink-0 mt-0.5">
+      <div class="w-9 h-9 rounded-full bg-amber-500/10 border border-amber-500 flex items-center justify-center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+      </div>
+    </div>
+    <div class="flex-1">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="chip chip-amber">POWER HOUR</span>
+        <span class="chip chip-violet">NEW BRIEFING</span>
+        <span class="text-[11px] mono dim">15:00 · just now</span>
+      </div>
+      <h2 class="text-lg font-bold text-zinc-100">Power Hour briefing — NVDA + AMD at risk, TSLA still setup-aligned</h2>
+      <div class="why-dim mt-1">Auto-generated from live positions + market context. Dismiss to keep it in the Briefings panel for later.</div>
+    </div>
+    <div class="shrink-0 flex items-center gap-2">
+      <button class="text-xs mono dim hover:text-zinc-200 px-2 py-1 border border-zinc-800 rounded">pin</button>
+      <button class="text-xs mono dim hover:text-zinc-200 px-2 py-1 border border-zinc-800 rounded">share</button>
+      <button class="w-7 h-7 rounded hover:bg-zinc-800 flex items-center justify-center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="p-5 space-y-5">
+
+    <!-- What's happened so far -->
+    <div>
+      <div class="section-title">What's happened so far today</div>
+      <div class="why">
+        <span class="text-violet-400 font-semibold">Bot:</span>
+        We've taken 5 trades, 4 winners and 1 loser — net +1.8R, +$412 on $48k equity. The winning trades all leaned into the HIGH-VOL TREND regime I called this morning. The single loss (BA) was FinBERT-flagged at entry and partial-sized accordingly, so it contained to −0.3R as designed.
+      </div>
+      <div class="grid grid-cols-5 gap-2 mt-3 text-[10px] mono">
+        <div class="border border-zinc-800 p-2 rounded"><div class="dim">Fills</div><div class="text-base font-bold">5</div><div class="up">4W · 1L</div></div>
+        <div class="border border-zinc-800 p-2 rounded"><div class="dim">Net R</div><div class="text-base font-bold up">+1.8R</div><div class="dim">avg +0.36R</div></div>
+        <div class="border border-zinc-800 p-2 rounded"><div class="dim">$PnL</div><div class="text-base font-bold up">+$412</div><div class="dim">+0.84% acct</div></div>
+        <div class="border border-zinc-800 p-2 rounded"><div class="dim">WR</div><div class="text-base font-bold">80%</div><div class="dim">above 65% bar</div></div>
+        <div class="border border-zinc-800 p-2 rounded"><div class="dim">Worst</div><div class="text-base font-bold down">-0.3R</div><div class="dim">BA · stop honored</div></div>
+      </div>
+    </div>
+
+    <!-- What I'm seeing right now -->
+    <div>
+      <div class="section-title">What I'm seeing right now</div>
+      <div class="why">
+        <span class="text-violet-400 font-semibold">Bot:</span>
+        <b class="text-zinc-200">NVDA is 8 seconds into a short entry</b> at 880.30, gate 78. The exhaustion-wick pattern at PMH matched my top-10 historical reversal samples (71% WR, −1.1% mean 30m return). <b class="text-zinc-200">AMD is up 0.4R with CNN-LSTM conviction still rising</b> — trail moved to 166.40. <b class="text-zinc-200">TSLA short is +0.2R</b>, VAE regime stays BEAR_TRENDING. <br/>
+        Market breadth is softening into this last hour: SPY is +0.4% but RSP is flat, and the VIX is creeping 18.3 → 18.9. That usually foreshadows a range-reject, which would accelerate my shorts.
+      </div>
+    </div>
+
+    <!-- Game plan If/Then -->
+    <div>
+      <div class="section-title">Game plan for the next 60 minutes</div>
+
+      <div class="if-row a">
+        <div class="tag">PLAN A</div>
+        <div>
+          <div class="why"><b class="text-green-400">IF</b> SPY holds above 510 AND VIX stays &lt; 19,<br/>
+          <b class="text-green-400">THEN</b> I let NVDA + TSLA shorts run to PT, and I'll also arm <span class="mono">second_chance_long</span> on names RS &gt; 1.2 (AAPL, GOOGL candidates).</div>
+          <div class="why-dim mt-1">Expected outcome: 1–2 more paper trades, target +0.8R day close, predicted equity $49,250.</div>
+        </div>
+      </div>
+
+      <div class="if-row b">
+        <div class="tag">PLAN B</div>
+        <div>
+          <div class="why"><b class="text-yellow-400">IF</b> SPY breaks 510 support AND VIX &gt; 19,<br/>
+          <b class="text-yellow-400">THEN</b> I add halfback_reversal_short on extended names (CRWD still flagged, NFLX watching). Tighten AMD trail to entry.</div>
+          <div class="why-dim mt-1">Expected outcome: 2-3 shorts armed, but size at 0.4% per trade (regime-risk elevated). Target +1.5R close.</div>
+        </div>
+      </div>
+
+      <div class="if-row c">
+        <div class="tag">PLAN C</div>
+        <div>
+          <div class="why"><b class="text-red-400">IF</b> SPY rips &gt; 512 AND RS leaders expand,<br/>
+          <b class="text-red-400">THEN</b> I <u>close NVDA short early</u> (my rubber-band thesis would be invalidated) and flip to opening_drive_long sizing up on NVDA/AMD. I won't fight a breakout.</div>
+          <div class="why-dim mt-1">Expected outcome: lock +1.0R on TSLA early, net +1.2R day close (lower than A but protects capital).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Predictions -->
+    <div>
+      <div class="section-title">My predictions for the rest of the day</div>
+      <div class="grid grid-cols-3 gap-3">
+        <div class="border border-zinc-800 p-3 rounded">
+          <div class="text-[10px] mono dim uppercase tracking-widest">Most likely outcome</div>
+          <div class="text-sm text-zinc-200 mt-1 font-semibold">Plan A · mild grind-up into close</div>
+          <div class="text-[10px] mono up mt-1">Probability 48%</div>
+          <div class="why-dim mt-2">SPY holds 510. NVDA short hits PT at 870. AMD runs to 170 (partial PT). Day closes +2.4R.</div>
+        </div>
+        <div class="border border-zinc-800 p-3 rounded">
+          <div class="text-[10px] mono dim uppercase tracking-widest">2nd likely</div>
+          <div class="text-sm text-zinc-200 mt-1 font-semibold">Plan B · VIX expansion</div>
+          <div class="text-[10px] mono warn mt-1">Probability 32%</div>
+          <div class="why-dim mt-2">SPY breaks 510. Shorts rip fast. Close +3.0R but drawdown on AMD. 60% risk management, 40% gain.</div>
+        </div>
+        <div class="border border-zinc-800 p-3 rounded">
+          <div class="text-[10px] mono dim uppercase tracking-widest">Tail risk</div>
+          <div class="text-sm text-zinc-200 mt-1 font-semibold">Plan C · squeeze reversal</div>
+          <div class="text-[10px] mono down mt-1">Probability 20%</div>
+          <div class="why-dim mt-2">SPY rips 512, short-squeeze. I close NVDA early. Flip long. Day closes +1.0R (lower but preserved).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center justify-between pt-3 border-t border-zinc-800">
+      <div class="flex items-center gap-2">
+        <button class="text-xs mono text-violet-400 hover:text-violet-300 px-3 py-1.5 border border-violet-900 rounded">ask Sentcom a follow-up →</button>
+        <button class="text-xs mono dim hover:text-zinc-200 px-3 py-1.5 border border-zinc-800 rounded">pin to dashboard</button>
+        <button class="text-xs mono dim hover:text-zinc-200 px-3 py-1.5 border border-zinc-800 rounded">copy link</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="text-xs mono dim hover:text-zinc-200 px-3 py-1.5 border border-zinc-800 rounded">view chart</button>
+        <button class="text-xs mono bg-amber-500/10 border border-amber-500 text-amber-400 hover:bg-amber-500/20 px-4 py-1.5 rounded">got it · dismiss</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fixed bottom-2 right-2 text-[9px] mono text-zinc-600">modal pops when scheduled briefing time fires · dismissible · persists to Briefings panel · <a href="index.html" class="text-violet-400 hover:underline">← all options</a></div>
+
+</body>
+</html>
