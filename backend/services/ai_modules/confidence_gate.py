@@ -18,6 +18,7 @@ Scoring Architecture (ADDITIVE — base 0, earn confirmation points):
     Layer 10: VAE Regime Detection (max +8 / floor -5)   [Phase 5 DL]
     Layer 11: CNN-LSTM Temporal (max +10 / floor -5)     [Phase 5 DL]
     Layer 12: Ensemble Meta-Labeler P(win) (max +15 + bet-sizing)  [Phase 8 — hard skip if <50%]
+    Layer 13: FinBERT News Sentiment (max +10 / floor -5)  [Phase 5c — aligned with direction]
 
 Decision Thresholds:
     >= 55 pts  → GO (full size)
@@ -64,6 +65,7 @@ class ConfidenceGate:
         self._regime_cache = None
         self._ai_regime_cache = None
         self._calibrated_thresholds = None  # Loaded from gate_calibration collection
+        self._finbert_scorer = None  # Lazy-init on first Layer 13 call
         self._stats = {
             "total_evaluated": 0,
             "go_count": 0,
@@ -598,6 +600,75 @@ class ConfidenceGate:
             miss_reason = ensemble_meta.get("reason_if_missing", "unknown")
             reasoning.append(f"Ensemble meta-labeler unavailable: {miss_reason}")
             logger.info(f"Ensemble meta-labeler miss for {symbol}/{setup_type}: {miss_reason}")
+
+        # --- Layer 13: FINBERT NEWS SENTIMENT (max +10 / floor -5) ---
+        # Queries pre-scored news_sentiment collection (populated by
+        # FinBERTSentiment.score_unscored_articles batch job). Aligned sentiment
+        # with trade direction earns points; opposing sentiment penalizes.
+        # Graceful no-op when < min_articles or scorer unavailable.
+        try:
+            if self._finbert_scorer is None and self._db is not None:
+                from services.ai_modules.finbert_sentiment import FinBERTSentiment
+                self._finbert_scorer = FinBERTSentiment(db=self._db)
+
+            if self._finbert_scorer is not None:
+                sent = self._finbert_scorer.get_symbol_sentiment(
+                    symbol, lookback_days=2, min_articles=3
+                )
+                if sent.get("has_sentiment"):
+                    raw_score = float(sent.get("score", 0.0))
+                    n_articles = int(sent.get("article_count", 0))
+                    sconf = float(sent.get("confidence", 0.0))
+
+                    # Align sentiment with trade direction (long = positive is good, short = negative is good)
+                    is_long = (direction or "long").lower() == "long"
+                    aligned_score = raw_score if is_long else -raw_score
+
+                    # Scale by agreement confidence to discount mixed signals
+                    effective = aligned_score * max(0.5, sconf)
+
+                    if effective >= 0.5:
+                        confidence_points += 10
+                        reasoning.append(
+                            f"FinBERT sentiment: {sent['sentiment']} (score={raw_score:+.2f}, "
+                            f"{n_articles} articles, conf={sconf:.0%}) aligned STRONG (+10)"
+                        )
+                    elif effective >= 0.25:
+                        confidence_points += 6
+                        reasoning.append(
+                            f"FinBERT sentiment: {sent['sentiment']} (score={raw_score:+.2f}, "
+                            f"{n_articles} articles) aligned (+6)"
+                        )
+                    elif effective >= 0.10:
+                        confidence_points += 3
+                        reasoning.append(
+                            f"FinBERT sentiment: {sent['sentiment']} (score={raw_score:+.2f}, "
+                            f"{n_articles} articles) mild alignment (+3)"
+                        )
+                    elif effective <= -0.5:
+                        confidence_points -= 5  # Floor: max -5 for sentiment
+                        reasoning.append(
+                            f"FinBERT sentiment: {sent['sentiment']} (score={raw_score:+.2f}, "
+                            f"{n_articles} articles, conf={sconf:.0%}) OPPOSES trade (-5)"
+                        )
+                    elif effective <= -0.25:
+                        confidence_points -= 3
+                        reasoning.append(
+                            f"FinBERT sentiment: {sent['sentiment']} (score={raw_score:+.2f}, "
+                            f"{n_articles} articles) opposes trade (-3)"
+                        )
+                    else:
+                        # Neutral or low-confidence — no contribution
+                        reasoning.append(
+                            f"FinBERT sentiment: neutral/weak (score={raw_score:+.2f}, "
+                            f"{n_articles} articles)"
+                        )
+                else:
+                    ac = sent.get("article_count", 0)
+                    reasoning.append(f"FinBERT sentiment: no data ({ac} articles < min 3)")
+        except Exception as e:
+            # Never let FinBERT fail the gate — log and skip
+            logger.warning(f"Layer 13 FinBERT skipped for {symbol}: {e}")
 
         # --- 6. DETERMINE DECISION (Mode-aware thresholds) ---
         # Additive scoring: base 0, earn points from confirmation

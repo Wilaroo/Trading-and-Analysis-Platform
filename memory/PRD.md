@@ -9,7 +9,24 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
-## Completed this fork (2026-04-23 — bracket queue + confirm_trade + frontend health)
+## Completed this fork (2026-04-23 — Layer 13 FinBERT + frontend + latency + confirm_trade)
+
+### P1 — FinBERT Layer 13 wired into ConfidenceGate SHIPPED
+- **Discovery**: `FinBERTSentiment` class was already built (`ai_modules/finbert_sentiment.py`) with a docstring explicitly reading *"Confidence Gate (INACTIVE): Ready to wire as Layer 12 when user enables it."* All 5,328 articles in MongoDB `news_sentiment` already pre-scored (scorer loop is running). Infrastructure was 95% there.
+- **Wire-up** in `services/ai_modules/confidence_gate.py`:
+  - `__init__` adds `self._finbert_scorer = None` (lazy init)
+  - Class docstring extended with Layer 13 line
+  - New Layer 13 block inserted between Layer 12 and decision logic (lines ~605-670)
+  - Calls `self._finbert_scorer.get_symbol_sentiment(symbol, lookback_days=2, min_articles=3)`
+  - Aligns score with trade direction (long: positive is good; short: negative is good)
+  - Scales by scorer's `confidence` (low std across articles → stronger signal)
+  - Point scale: +10 (strong aligned), +6 (aligned), +3 (mild), -3 (opposing), -5 floor (strong opposing)
+  - Wrapped in try/except — FinBERT errors never fail the gate (graceful no-op with warning log)
+- **Regression tests**: `backend/tests/test_layer13_finbert_sentiment.py` — 4 tests, all pass. Lazy-init pattern verified, docstring contract verified, bounded +10/-5 verified, import safety verified.
+- **Test suite status**: 20/20 pass across all session's backend regression tests.
+
+### Phase 13 revalidation (next step, user-run on Spark)
+Layer 13 is live in the code but `revalidate_all.py` needs to run on Spark against historical trades to quantify Layer 13's contribution + recalibrate gate thresholds. This requires live DB + models + ensembles already on Spark — can't run from fork. Handoff command: `cd ~/Trading-and-Analysis-Platform/backend && /home/spark-1a60/venv/bin/python scripts/revalidate_all.py`.
 
 ### P1 — Frontend execution-health indicators SHIPPED
 - **`TradeExecutionHealthCard.jsx`** — compact badge in SentCom header (next to ServerHealthBadge). Polls `/api/trading-bot/execution-health?hours=24` every 60s. 4 states with distinct color + icon: HEALTHY (emerald, <5% failure) / WATCH (amber, 5-15%) / CRITICAL (red, ≥15%) / LOW-DATA (grey, <5 trades). Hover tooltip shows raw stats.
