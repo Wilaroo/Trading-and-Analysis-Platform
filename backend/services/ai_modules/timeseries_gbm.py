@@ -994,14 +994,20 @@ class TimeSeriesGBM:
         # Computes inverse-frequency per-sample weights (clip 5×) and multiplies
         # into existing sample_weights. Mean-normalized afterwards so the
         # effective loss scale is unchanged.
+        #
+        # 2026-04-24: scheme is now configurable via TB_CLASS_WEIGHT_MODE
+        # (default `balanced_sqrt`) after the pure sklearn `balanced` scheme
+        # collapsed the DOWN class on the 5-min generic predictor retrain.
         cb_note = ""
         if apply_class_balance and num_classes >= 2:
             from services.ai_modules.dl_training_utils import (
                 compute_per_sample_class_weights,
                 compute_balanced_class_weights,
+                get_class_weight_scheme,
             )
+            cb_scheme = get_class_weight_scheme()
             class_w_per_sample = compute_per_sample_class_weights(
-                y, num_classes=num_classes, clip_ratio=5.0,
+                y, num_classes=num_classes, clip_ratio=5.0, scheme=cb_scheme,
             )
             if sample_weights is None:
                 merged = class_w_per_sample
@@ -1011,8 +1017,10 @@ class TimeSeriesGBM:
                 if m > 0:
                     merged = merged / m
             sample_weights = merged.astype(np.float32)
-            class_w_vec = compute_balanced_class_weights(y, num_classes=num_classes)
-            cb_note = f", class_balanced (per-class weights={class_w_vec.tolist()})"
+            class_w_vec = compute_balanced_class_weights(
+                y, num_classes=num_classes, scheme=cb_scheme,
+            )
+            cb_note = f", class_balanced (scheme={cb_scheme}, per-class weights={class_w_vec.tolist()})"
 
         logger.info(
             f"Training from pre-extracted features: {len(X)} samples, "

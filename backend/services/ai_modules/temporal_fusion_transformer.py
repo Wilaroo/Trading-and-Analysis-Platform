@@ -457,9 +457,12 @@ class TFTModel:
             dl_cpcv_folds_from_env,
             run_cpcv_accuracy_stability,
             build_dl_scorecard,
+            get_class_weight_scheme,
         )
 
-        class_w_np = compute_balanced_class_weights(y, num_classes=3, clip_ratio=5.0)
+        class_w_np = compute_balanced_class_weights(
+            y, num_classes=3, clip_ratio=5.0, scheme=get_class_weight_scheme(),
+        )
         sample_w_np = compute_sample_weights_from_intervals(
             per_symbol_intervals, per_symbol_n_bars,
         )

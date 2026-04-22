@@ -45,28 +45,51 @@ def compute_balanced_class_weights(
     y: np.ndarray,
     num_classes: int = 3,
     clip_ratio: float = 5.0,
+    scheme: str = "balanced",
 ) -> np.ndarray:
     """
-    Inverse-frequency class weights, sklearn "balanced" style:
+    Per-class weights with two schemes:
 
+    scheme="balanced" (default, sklearn-style inverse frequency):
         w[c] = N / (num_classes * count[c])
 
-    Then scaled so min(w) == 1 and clipped to clip_ratio to prevent one
-    tiny-minority class from dominating gradients. Missing classes get
-    w = clip_ratio (max weight) so the model is told they're rare when
-    some do appear mid-epoch (rare but possible via batching).
+        Math pressure on a tiny minority class is large — for the Phase 13
+        split 45% FLAT / 39% DOWN / 16% UP this boosts UP by ~2.8×, which
+        was strong enough to completely STARVE the DOWN class (Spark
+        retrain 2026-04-23 produced recall_up=0.597 but recall_down=0.000).
 
-    Returns a float32 numpy array shape (num_classes,). Caller converts to torch.
+    scheme="balanced_sqrt" (dampened, used for 3-class triple-barrier where
+    all classes are meaningful):
+        w[c] = sqrt(N_max / count[c])
+
+        Max boost drops from ~2.8× to ~1.7× on the same split, so the
+        minority UP gets a real learning signal without fully cannibalising
+        gradient pressure on DOWN. Chosen explicitly to avoid the pendulum
+        swing the linear-inverse scheme produced on 2026-04-23.
+
+    Both schemes are scaled so min(w) == 1 and clipped to `clip_ratio`.
+    Missing classes get w = clip_ratio (max weight) so the model is told
+    they're rare when some do appear mid-epoch.
+
+    Returns a float32 numpy array shape (num_classes,).
     """
     y = np.asarray(y, dtype=np.int64)
     if len(y) == 0:
         return np.ones(num_classes, dtype=np.float32)
 
     counts = np.bincount(y, minlength=num_classes).astype(np.float64)
-    total = counts.sum()
     weights = np.full(num_classes, clip_ratio, dtype=np.float64)
     mask = counts > 0
-    weights[mask] = total / (num_classes * counts[mask])
+
+    if scheme == "balanced_sqrt":
+        # sqrt(N_max / count[c]) — dampened inverse-frequency
+        n_max = float(counts.max()) if mask.any() else 1.0
+        weights[mask] = np.sqrt(n_max / counts[mask])
+    elif scheme == "balanced":
+        total = counts.sum()
+        weights[mask] = total / (num_classes * counts[mask])
+    else:
+        raise ValueError(f"Unknown class-weight scheme: {scheme!r}")
 
     # Scale so min==1 so the absolute loss magnitude is comparable to the
     # unweighted case. Then clip the ratio of max/min.
@@ -81,14 +104,16 @@ def compute_per_sample_class_weights(
     y: np.ndarray,
     num_classes: int = 3,
     clip_ratio: float = 5.0,
+    scheme: str = "balanced",
 ) -> np.ndarray:
     """
     Per-sample weight vector for class-balancing with frameworks that consume
     `sample_weight` (XGBoost DMatrix, sklearn, lightgbm — anywhere class_weight
     isn't directly supported).
 
-    Each sample gets its class's balanced weight. The output is normalized so
-    mean(w) == 1, which preserves the absolute loss scale.
+    `scheme` is passed through to `compute_balanced_class_weights`. The
+    output is normalized so mean(w) == 1, which preserves the absolute loss
+    scale.
 
     Returns float32 array of length len(y). Missing classes in y are silently
     ignored for the output (they have no samples to weight).
@@ -96,7 +121,9 @@ def compute_per_sample_class_weights(
     y = np.asarray(y, dtype=np.int64)
     if len(y) == 0:
         return np.array([], dtype=np.float32)
-    class_w = compute_balanced_class_weights(y, num_classes=num_classes, clip_ratio=clip_ratio)
+    class_w = compute_balanced_class_weights(
+        y, num_classes=num_classes, clip_ratio=clip_ratio, scheme=scheme,
+    )
     # Clamp indices into range — defensive against stray labels
     idx = np.clip(y, 0, num_classes - 1)
     per_sample = class_w[idx].astype(np.float32)
@@ -104,6 +131,27 @@ def compute_per_sample_class_weights(
     if m > 0:
         per_sample = per_sample / m
     return per_sample.astype(np.float32)
+
+
+def get_class_weight_scheme() -> str:
+    """Resolve the active class-weight scheme from `TB_CLASS_WEIGHT_MODE`.
+
+    Default is `balanced_sqrt` — the dampened inverse-frequency weighting
+    that was introduced on 2026-04-24 after the pure `balanced` scheme
+    caused the DOWN class to collapse on the 5-min generic predictor
+    (recall_up=0.597 but recall_down=0.000 on Spark retrain v20260422_181416).
+
+    Allowed values: "balanced", "balanced_sqrt". Unknown values fall back
+    to `balanced_sqrt` with a warning so a typo can't silently regress the
+    fix.
+    """
+    raw = os.environ.get("TB_CLASS_WEIGHT_MODE", "balanced_sqrt").strip().lower()
+    if raw in ("balanced", "balanced_sqrt"):
+        return raw
+    logger.warning(
+        "Unknown TB_CLASS_WEIGHT_MODE=%r; falling back to 'balanced_sqrt'.", raw
+    )
+    return "balanced_sqrt"
 
 
 # ── Sample uniqueness weights ───────────────────────────────────────────

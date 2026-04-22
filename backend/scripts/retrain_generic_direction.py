@@ -15,6 +15,12 @@ Flags:
   --batch     Symbol batch size (default 500)
   --max-bars  Max bars per symbol. 0 = use TIMEFRAME_SETTINGS default (recommended).
 
+Class-weight scheme (2026-04-24):
+  The default is now `balanced_sqrt` (dampened inverse-frequency) to prevent
+  the DOWN-class collapse that the pure sklearn `balanced` scheme produced on
+  the 2026-04-23 retrain (recall_up=0.597 / recall_down=0.000). Override via
+  `TB_CLASS_WEIGHT_MODE=balanced` to revert to the old scheme if needed.
+
 Expected: ~30–90 min on Spark for "5 mins". Verify promoted model metrics
 afterwards with:
   db.timeseries_models.find_one({"name":"direction_predictor_5min"},

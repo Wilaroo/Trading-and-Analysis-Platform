@@ -1115,21 +1115,31 @@ class TimeSeriesAIService:
                 # generic direction_predictor collapses to the bearish-majority
                 # class and every LONG setup shows trades=0 in Phase 1
                 # revalidation (Phase 13 v2 symptom).
+                #
+                # 2026-04-24 update: the pure sklearn-balanced scheme over-
+                # corrected the other way (recall_up=0.597, recall_down=0.000
+                # on Spark v20260422_181416). We now default to `balanced_sqrt`
+                # via `TB_CLASS_WEIGHT_MODE`; see get_class_weight_scheme().
                 from services.ai_modules.dl_training_utils import (
                     compute_per_sample_class_weights,
                     compute_balanced_class_weights,
+                    get_class_weight_scheme,
                 )
+                scheme = get_class_weight_scheme()
                 sw = compute_per_sample_class_weights(
-                    y_train.astype(np.int64), num_classes=3, clip_ratio=5.0
+                    y_train.astype(np.int64), num_classes=3, clip_ratio=5.0,
+                    scheme=scheme,
                 )
                 if sw is not None and len(sw) == len(y_train):
                     dtrain_weights = sw
                     cw_vec = compute_balanced_class_weights(
-                        y_train.astype(np.int64), num_classes=3, clip_ratio=5.0
+                        y_train.astype(np.int64), num_classes=3, clip_ratio=5.0,
+                        scheme=scheme,
                     )
                     logger.info(
                         f"[FULL UNIVERSE] class_balanced sample weights applied "
-                        f"(per-class weights={cw_vec.tolist()}, sample_w_mean=1.000)"
+                        f"(scheme={scheme}, per-class weights={cw_vec.tolist()}, "
+                        f"sample_w_mean=1.000)"
                     )
             except Exception as cb_err:  # non-fatal — train without class balance
                 logger.warning(f"[FULL UNIVERSE] class-balance skipped ({cb_err}); training uniform.")

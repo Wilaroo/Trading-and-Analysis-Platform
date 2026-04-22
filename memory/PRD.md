@@ -10,6 +10,76 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+## 2026-04-24 — CRITICAL FIX #5 — `balanced_sqrt` class-weight scheme (DOWN-collapse pendulum)
+
+**Finding:** The 2026-04-23 force-promoted `direction_predictor_5min` v20260422_181416
+went HEALTHY on the generic tile (recall_up=0.597, up from 0.069) but
+`recall_down=0.000` — the pure sklearn `balanced` scheme had boosted UP by
+~2.8× on the 45/39/16 split, completely starving DOWN. The subsequent
+Phase-13 revalidation (20:04Z Spark log) then rejected **20/20** models:
+setup-specific tiles collapsed the OTHER way (SCALP/1min predicting 95.9%
+DOWN, MEAN_REVERSION 93.4% DOWN, TREND_CONTINUATION 94.3% DOWN) and the
+AI-edge vs raw-setup was negative on most (RANGE −4.5pp, REVERSAL −4.4pp,
+VWAP −5.4pp, TREND −7.5pp).
+
+**Fix:** Added a `scheme` kwarg to `compute_balanced_class_weights` /
+`compute_per_sample_class_weights` with two options:
+- `"balanced"` — legacy sklearn inverse-frequency (kept for backward compat)
+- `"balanced_sqrt"` — **new default**, `w[c] = sqrt(N_max / count[c])`,
+  normalized to min=1, clipped at 5×. On the 45/39/16 Phase-13 split the
+  max/min ratio drops from ~2.8× → ~1.68× — minority UP still gets a real
+  gradient signal but DOWN isn't starved.
+
+Resolved at call time via `get_class_weight_scheme()` which reads env var
+`TB_CLASS_WEIGHT_MODE` (default `balanced_sqrt`). Wired into every caller:
+- `timeseries_service.py::train_full_universe` (generic direction_predictor)
+- `timeseries_gbm.py::train_from_features` (setup-specific XGBoost models)
+- `temporal_fusion_transformer.py::train` (TFT)
+- `cnn_lstm_model.py::train` (CNN-LSTM)
+
+**Tests — `tests/test_balanced_sqrt_class_weights.py` (13 tests, all pass):**
+- Phase-13 skew sqrt formula produces `[1.074, 1.0, 1.677]`
+- Sqrt max/min ratio **< 1.8× and strictly smaller than `balanced`'s** (hard guard against regression)
+- Majority class weight == 1.0 (no boost)
+- `scheme="balanced"` output bit-identical to pre-fix legacy behaviour
+- Default scheme kwarg remains `balanced` on the helpers (backward compat for existing callers)
+- `get_class_weight_scheme()` default = `balanced_sqrt` (lock-in)
+- Case-insensitive env var; garbage falls back to `balanced_sqrt` (not to `balanced`) so a typo can't re-introduce the collapse
+- End-to-end: no class's mean per-sample weight drops below 0.85 on the Phase-13 skew
+
+**Full sweep: 127/127 pass** across dl_utils + xgb_balance + full_universe_class_balance + balanced_sqrt + protection_class_collapse + sentcom_retrain + sentcom_chart + mode_c_threshold + setup_resolver.
+
+**User next steps on Spark after pull + restart:**
+```bash
+# 1. Retrain generic 5-min direction predictor with the new scheme
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python \
+    backend/scripts/retrain_generic_direction.py --bar-size "5 mins" 2>&1 \
+    | tee /tmp/retrain_generic_5min_$(date +%s).log
+
+# Look for this line:
+#   [FULL UNIVERSE] class_balanced sample weights applied
+#   (scheme=balanced_sqrt, per-class weights=[1.07, 1.00, 1.68], ...)
+
+# 2. Restart backend to reload new model
+pkill -f "python server.py" && cd backend && \
+    nohup /home/spark-1a60/venv/bin/python server.py > /tmp/backend.log 2>&1 &
+
+# 3. Collapse diagnostic — expect HEALTHY (not MODE_C) on generic
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python \
+    backend/scripts/diagnose_long_model_collapse.py
+head -20 /tmp/long_model_collapse_report.md
+
+# 4. (Optional) Once generic is healthy, use the NEW scorecard retrain button
+#    to retrain each collapsed setup model one click at a time — the MODE_C
+#    tiles are already in the UI.
+```
+
+Expected outcome on generic 5-min: `recall_up` stays in the 0.15–0.35 range,
+`recall_down` climbs to ≥ 0.10, `macro_f1` improves. Setup models retrained
+under the new scheme should show meaningfully non-collapsed UP/DOWN balance
+in the next diagnostic.
+
+
 ## 2026-04-24 — Stage 2f.1: Clickable scorecard tiles → one-click retrain
 
 **What it does:** ModelHealthScorecard tiles now open a detail panel with a
