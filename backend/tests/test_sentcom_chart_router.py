@@ -174,3 +174,42 @@ def test_session_key_differs_across_utc_midnight():
     a = int(datetime(2026, 4, 23, 23, 30, tzinfo=timezone.utc).timestamp())
     b = int((datetime(2026, 4, 23, 23, 30, tzinfo=timezone.utc) + timedelta(hours=1)).timestamp())
     assert _session_key(a) != _session_key(b)
+
+
+# ─── _classify_model_mode (scorecard) ───────────────────────────────────────
+
+from routers.sentcom_chart import _classify_model_mode  # noqa: E402
+
+
+def test_classify_missing_when_no_metrics():
+    assert _classify_model_mode(None) == "MISSING"
+    assert _classify_model_mode({}) == "MISSING"
+
+
+def test_classify_healthy_when_both_floors_met():
+    m = {"recall_up": 0.15, "recall_down": 0.20}
+    assert _classify_model_mode(m) == "HEALTHY"
+
+
+def test_classify_mode_b_when_both_collapsed():
+    # Both < 0.05 — the useless-model case (old active direction_predictor_5min
+    # pre-promotion: recall_up=0.069 was just above 0.05, so reproduce the
+    # fully-collapsed state).
+    m = {"recall_up": 0.01, "recall_down": 0.0}
+    assert _classify_model_mode(m) == "MODE_B"
+
+
+def test_classify_mode_c_when_one_side_usable():
+    # v20260422_181416 post-promote: UP fixed, DOWN still at 0.
+    m = {"recall_up": 0.597, "recall_down": 0.0}
+    assert _classify_model_mode(m) == "MODE_C"
+
+
+def test_classify_mode_c_when_up_just_above_collapse_but_below_floor():
+    m = {"recall_up": 0.07, "recall_down": 0.0}
+    assert _classify_model_mode(m) == "MODE_C"
+
+
+def test_classify_handles_garbage_metrics_as_missing():
+    m = {"recall_up": "not a number"}
+    assert _classify_model_mode(m) == "MISSING"

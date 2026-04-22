@@ -79,6 +79,8 @@ import { SetupsPanel } from './sentcom/panels/SetupsPanel';
 import { ChatInput } from './sentcom/panels/ChatInput';
 // Stage 2a: TradingView `lightweight-charts` Command Center chart
 import { ChartPanel } from './sentcom/panels/ChartPanel';
+// Stage 2f: Per-setup model health scorecard
+import { ModelHealthScorecard } from './sentcom/panels/ModelHealthScorecard';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -767,7 +769,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
 
         {/* Stage 2a: Command Center Chart (candles + volume, auto-refresh).
             Defaults to SPY + 5m; Stage 2c will wire it to the focused position. */}
-        <div className="mb-6">
+        <div className="mb-6 space-y-4">
+          <ModelHealthScorecard />
           <ChartPanel
             symbol={selectedPosition?.symbol || 'SPY'}
             initialTimeframe="5m"

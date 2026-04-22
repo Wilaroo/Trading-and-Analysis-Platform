@@ -10,6 +10,18 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+## 2026-04-23 — Stage 2f: Model Health Scorecard (self-auditing Command Center)
+
+**What it does:** A new `ModelHealthScorecard` panel above the `ChartPanel` shows a colour-coded grid of (setup × timeframe) tiles with MODE classification + click-to-reveal full metrics (accuracy / recall / f1 / promoted_at). Turns the Command Center into a self-auditing system — you can see at a glance which models are HEALTHY / in MODE C / collapsed / missing, without running the diagnostic script.
+
+**Shipped:**
+- Backend: `GET /api/sentcom/model-health` → returns all generic + setup-specific models from `SETUP_TRAINING_PROFILES`, classified via `_classify_model_mode` (HEALTHY / MODE_C / MODE_B / MISSING) based on stored recall_up / recall_down metrics. Floors mirror the protection gate (0.10 / 0.05). Header-level counts per mode ("2 HEALTHY · 18 MODE C · 1 MODE B · 4 MISSING").
+- Frontend: `components/sentcom/panels/ModelHealthScorecard.jsx` — compact tile grid, poll every 60s, expandable/collapsible, click-to-drill-down, `data-testid` on every element.
+- Tests: 6 new pytest classifier regression tests (26/26 in this file pass).
+
+**Wired in:** Shown above the ChartPanel in full-page SentCom. Zero-risk drop-in.
+
+
 ## 2026-04-23 — CRITICAL FIX #4 — Pareto-improvement escape hatch (Spark retrain finding)
 
 **Finding:** The 5-min full-universe retrain (v20260422_181416) produced a model with `recall_up=0.597` (8.6× better than active 0.069) but `recall_down=0.000` (same collapse as the old model). The strict class-weight boost (UP class gained 2.99× weight because only 15.6% of samples) over-corrected and starved the DOWN class entirely. Protection gate correctly rejected it for failing the 0.10 DOWN floor — but this left LONG permanently blocked despite a clear strict improvement on UP.

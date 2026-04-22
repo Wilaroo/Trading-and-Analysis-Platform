@@ -246,6 +246,126 @@ def _fetch_trade_markers(
 _SUPPORTED_TFS = {"1min", "5min", "15min", "1hour", "1day"}
 
 
+# ─── Model health classification (per-setup scorecard) ──────────────────────
+
+# Floors are kept in sync with MIN_UP_RECALL / MIN_DOWN_RECALL in
+# services/ai_modules/timeseries_gbm.py — any change there must mirror here.
+_HEALTH_FLOOR_UP = 0.10
+_HEALTH_FLOOR_DOWN = 0.10
+_HEALTH_COLLAPSE = 0.05
+
+
+def _classify_model_mode(metrics: Optional[Dict[str, Any]]) -> str:
+    """Coarse health mode from stored training metrics.
+
+    MISSING    — no model doc / empty metrics
+    MODE_B     — both classes collapsed (recall < 0.05 for UP and DOWN): useless
+    MODE_C     — one class usable (argmax works) but the other is collapsed
+    HEALTHY    — both classes ≥ 0.10 recall (matches the protection-gate floor)
+    """
+    if not metrics:
+        return "MISSING"
+    try:
+        up = float(metrics.get("recall_up", 0.0) or 0.0)
+        dn = float(metrics.get("recall_down", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return "MISSING"
+    if up >= _HEALTH_FLOOR_UP and dn >= _HEALTH_FLOOR_DOWN:
+        return "HEALTHY"
+    if up < _HEALTH_COLLAPSE and dn < _HEALTH_COLLAPSE:
+        return "MODE_B"
+    return "MODE_C"
+
+
+# Generic direction_predictor_{bar_slug} models are trained separately
+# from the setup-specific ones. We want both rows in the scorecard.
+_GENERIC_DIRECTION_TIMEFRAMES = [
+    ("1 min",   "direction_predictor_1min"),
+    ("5 mins",  "direction_predictor_5min"),
+    ("15 mins", "direction_predictor_15min"),
+    ("1 hour",  "direction_predictor_1hour"),
+    ("1 day",   "direction_predictor_daily"),
+]
+
+
+@router.get("/model-health")
+async def get_model_health() -> Dict[str, Any]:
+    """Return a compact health card for every (setup_type, bar_size) model
+    declared in `SETUP_TRAINING_PROFILES` + the generic directional models.
+    The frontend ChartPanel renders this as a colour-coded badge grid.
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+
+    # Import here to keep the router import-cycle-free at module load.
+    from services.ai_modules.setup_training_config import (
+        SETUP_TRAINING_PROFILES,
+        get_model_name,
+    )
+
+    coll = _db["timeseries_models"]
+
+    # Prefetch every relevant model doc in one query (by name IN [...]).
+    expected_names: List[str] = [m for _, m in _GENERIC_DIRECTION_TIMEFRAMES]
+    for setup_type, profiles in SETUP_TRAINING_PROFILES.items():
+        for p in profiles:
+            expected_names.append(get_model_name(setup_type, p["bar_size"]))
+
+    by_name: Dict[str, Dict[str, Any]] = {}
+    try:
+        for doc in coll.find(
+            {"name": {"$in": expected_names}},
+            {
+                "_id": 0, "name": 1, "version": 1, "saved_at": 1,
+                "metrics.accuracy": 1,
+                "metrics.recall_up": 1, "metrics.recall_down": 1,
+                "metrics.f1_up": 1, "metrics.f1_down": 1,
+                "metrics.macro_f1": 1,
+            },
+        ):
+            by_name[doc["name"]] = doc
+    except Exception as exc:  # pragma: no cover
+        logger.warning("model-health fetch failed: %s", exc)
+
+    def _row(setup_type: str, bar_size: str, model_name: str) -> Dict[str, Any]:
+        doc = by_name.get(model_name)
+        metrics = (doc or {}).get("metrics") or {}
+        return {
+            "setup_type": setup_type,
+            "bar_size": bar_size,
+            "model_name": model_name,
+            "version": (doc or {}).get("version"),
+            "promoted_at": (doc or {}).get("saved_at"),
+            "mode": _classify_model_mode(metrics),
+            "metrics": {
+                "accuracy": metrics.get("accuracy"),
+                "recall_up": metrics.get("recall_up"),
+                "recall_down": metrics.get("recall_down"),
+                "f1_up": metrics.get("f1_up"),
+                "f1_down": metrics.get("f1_down"),
+                "macro_f1": metrics.get("macro_f1"),
+            },
+        }
+
+    rows: List[Dict[str, Any]] = []
+    for bar_size, model_name in _GENERIC_DIRECTION_TIMEFRAMES:
+        rows.append(_row("__GENERIC__", bar_size, model_name))
+    for setup_type, profiles in SETUP_TRAINING_PROFILES.items():
+        for p in profiles:
+            rows.append(_row(setup_type, p["bar_size"], get_model_name(setup_type, p["bar_size"])))
+
+    counts = {"HEALTHY": 0, "MODE_C": 0, "MODE_B": 0, "MISSING": 0}
+    for r in rows:
+        counts[r["mode"]] = counts.get(r["mode"], 0) + 1
+
+    return {
+        "success": True,
+        "total": len(rows),
+        "counts": counts,
+        "models": rows,
+    }
+
+
 @router.get("/chart")
 async def get_chart_bars(
     symbol: str = Query(..., min_length=1, max_length=10),
