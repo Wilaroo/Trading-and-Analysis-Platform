@@ -1412,6 +1412,9 @@ app.include_router(config_router)
 app.include_router(market_regime_router)
 app.include_router(sentcom_router)
 app.include_router(sentcom_chart_router)
+# Safety guardrails — kill-switch, exposure caps, emergency flatten-all
+from routers.safety_router import router as safety_router  # noqa: E402
+app.include_router(safety_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

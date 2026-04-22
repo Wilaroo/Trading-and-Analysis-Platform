@@ -78,6 +78,7 @@ export const PipelineHUDV5 = ({
   equity,
   latencySeconds,
   phase = '—',
+  rightExtra = null,
 }) => {
   const pnlColor = (Number(totalPnl) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400';
   const phaseColor =
@@ -108,6 +109,7 @@ export const PipelineHUDV5 = ({
         </div>
 
         <div className="flex items-center gap-3 pl-3 border-l border-zinc-800 shrink-0">
+          {rightExtra}
           <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
           <Metric label="Equity"  value={formatEquity(equity)} />
           <Metric

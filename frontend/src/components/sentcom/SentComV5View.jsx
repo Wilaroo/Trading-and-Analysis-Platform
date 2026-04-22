@@ -28,6 +28,7 @@ import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
+import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip } from './v5/SafetyV5';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -111,6 +112,7 @@ export const SentComV5View = ({
   setSelectedPosition,
 }) => {
   useV5Styles();
+  const safety = useSafety();
 
   // Which scanner row is highlighted. Defaults to the first open position so
   // the chart is always meaningful on load.
@@ -140,6 +142,9 @@ export const SentComV5View = ({
       data-testid="sentcom-v5-root"
       className="fixed inset-0 z-40 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
     >
+      {/* Safety kill-switch banner — z-60, above everything when tripped */}
+      <SafetyBannerV5 safety={safety} />
+
       {/* 1. Top-bar Pipeline HUD */}
       <PipelineHUDV5
         scanCount={counts.scan}
@@ -164,6 +169,7 @@ export const SentComV5View = ({
         equity={equity}
         latencySeconds={latencySeconds}
         phase={phase}
+        rightExtra={<SafetyHudChip safety={safety} />}
       />
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
@@ -267,6 +273,9 @@ export const SentComV5View = ({
       <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto v5-scroll bg-zinc-950">
         <ModelHealthScorecard className="rounded-none border-0" />
       </div>
+
+      {/* Emergency flatten-all button — bottom-left corner, z-55 */}
+      <FlattenAllButtonV5 safety={safety} />
 
       {/* Corner watermark — lets users opt out to v4 */}
       <div

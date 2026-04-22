@@ -1651,7 +1651,73 @@ class TradingBotService:
     # ==================== TRADE EXECUTION ====================
     
     async def _execute_trade(self, trade: BotTrade):
-        """Execute a trade — delegated to TradeExecution module."""
+        """Execute a trade — delegated to TradeExecution module, gated by the
+        central safety guardrails (daily-loss / stale-quote / exposure caps).
+
+        Safety check runs LAST before execution so it sees the final notional
+        size chosen by the opportunity evaluator. Any failure → trade is
+        skipped (not cancelled) and the reason is stream-logged so the UI's
+        Unified Stream shows why the bot refused to take it.
+        """
+        try:
+            from services.safety_guardrails import get_safety_guardrails
+            guard = get_safety_guardrails()
+
+            # Build the snapshot the guardrail needs.
+            open_positions_snapshot: List[Dict[str, Any]] = []
+            for t in self._open_trades.values():
+                try:
+                    open_positions_snapshot.append({
+                        "symbol": getattr(t, "symbol", None),
+                        "side": str(getattr(t, "direction", "")).lower(),
+                        "notional_usd": float(getattr(t, "entry_price", 0) or 0) * float(getattr(t, "quantity", 0) or 0),
+                    })
+                except Exception:
+                    continue
+
+            notional = float(trade.entry_price or 0) * float(trade.quantity or 0)
+            equity = float(self.risk_params.starting_capital or 100_000)
+            last_quote_age = None
+            try:
+                from services.ib_push_data_store import get_last_quote_age_seconds
+                last_quote_age = get_last_quote_age_seconds(trade.symbol)
+            except Exception:
+                pass  # quote-age helper is optional / absent in some deploys
+
+            result = guard.check_can_enter(
+                symbol=trade.symbol,
+                side=str(trade.direction).lower(),
+                notional_usd=notional,
+                account_equity=equity,
+                daily_realized_pnl=float(self._daily_stats.realized_pnl or 0),
+                daily_unrealized_pnl=float(self._daily_stats.unrealized_pnl or 0),
+                open_positions=open_positions_snapshot,
+                last_quote_age_seconds=last_quote_age,
+            )
+            if not result.allowed:
+                logger.warning(
+                    "[SAFETY] Trade blocked for %s (%s): %s",
+                    trade.symbol, result.check, result.reason,
+                )
+                # Surface to the SentCom stream so operators see it in V5 UI
+                try:
+                    from services.sentcom_service import emit_stream_event
+                    await emit_stream_event({
+                        "kind": "skip",
+                        "event": "safety_block",
+                        "symbol": trade.symbol,
+                        "text": f"Safety block ({result.check}): {result.reason}",
+                    })
+                except Exception:
+                    pass
+                return  # skip this trade — no cancel needed, it was never placed
+        except Exception as e:
+            # Fail-OPEN on guardrail import / plumbing error would be unsafe;
+            # fail-CLOSED (skip the trade) so a buggy safety layer can't
+            # accidentally allow uncontrolled exposure.
+            logger.error("[SAFETY] Guardrail check crashed; blocking trade: %s", e)
+            return
+
         await self._trade_execution.execute_trade(trade, self)
     
     async def confirm_trade(self, trade_id: str) -> bool:
