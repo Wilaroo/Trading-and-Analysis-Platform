@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Option 2 — Unified Lifecycle Matrix</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  h1,h2,h3,.ui { font-family:'Inter'; }
+  .mono { font-family:'JetBrains Mono'; }
+  .panel-title { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:#71717a; }
+  .why { font-size:10px; color:#71717a; line-height:1.35; }
+  .chip { display:inline-block; font-size:9px; font-family:'JetBrains Mono'; padding:1px 5px; border-radius:2px; border:1px solid; }
+  .stage-scan   { color:#a78bfa; border-color:#5b21b6; background:rgba(139,92,246,.08); }
+  .stage-eval   { color:#60a5fa; border-color:#1e3a8a; background:rgba(59,130,246,.08); }
+  .stage-order  { color:#facc15; border-color:#713f12; background:rgba(234,179,8,.08); }
+  .stage-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+  .stage-close  { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08); }
+  .stage-veto   { color:#f87171; border-color:#7f1d1d; background:rgba(239,68,68,.08); }
+  .bar { height:3px; background:#27272a; border-radius:1px; overflow:hidden; }
+  .seg { display:inline-block; width:7px; height:10px; margin-right:1px; border-radius:1px; }
+  .seg-on-g  { background:#22c55e; }
+  .seg-on-y  { background:#eab308; }
+  .seg-on-r  { background:#ef4444; }
+  .seg-off   { background:#27272a; }
+  .up   { color:#22c55e; }
+  .down { color:#ef4444; }
+  .warn { color:#eab308; }
+  .dim  { color:#52525b; }
+  .row-matrix { border-bottom:1px solid #18181b; }
+  .row-matrix:hover { background:#141416; }
+  .col-sep { border-left:1px solid #1f1f22; }
+  .stage-head { background:#0f0f11; border-bottom:1px solid #27272a; border-top:1px solid #27272a; }
+  .sparkline { stroke:#52525b; stroke-width:1; fill:none; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ============ TOP STRIP ============ -->
+<div class="border-b border-zinc-800 bg-zinc-950 px-3 py-2 flex items-center gap-4">
+  <div class="flex items-center gap-2">
+    <div class="text-[10px] mono text-zinc-500 pr-2 border-r border-zinc-800">SENTCOM · MATRIX</div>
+    <span class="chip stage-order">PAPER</span>
+    <span class="text-[10px] mono text-zinc-500">09:58 · pre-mkt</span>
+  </div>
+
+  <div class="flex items-center gap-4 text-[10px] mono ml-2">
+    <div><span class="dim">PnL</span> <span class="up font-bold">+$412.60</span></div>
+    <div><span class="dim">Equity</span> <span class="font-bold">$48,921</span></div>
+    <div><span class="dim">Open</span> <span class="font-bold">2</span></div>
+    <div><span class="dim">Today</span> <span class="font-bold">4W · 1L</span> <span class="up">+1.8R</span></div>
+    <div><span class="dim">Active tickers</span> <span class="font-bold">23</span></div>
+    <div><span class="dim">Gate pass</span> <span class="font-bold">17%</span></div>
+  </div>
+
+  <div class="ml-auto flex items-center gap-3 text-[10px] mono">
+    <div><span class="dim">Latency</span> <span class="up font-bold">8.1s</span></div>
+    <div><span class="dim">Models</span> <span class="up font-bold">34/34</span></div>
+    <div><span class="dim">IB</span> <span class="up font-bold">●</span></div>
+    <div><span class="dim">Pusher</span> <span class="up font-bold">●</span> 2s</div>
+  </div>
+</div>
+
+<!-- ============ MORNING BRIEFING BAR (collapsed) ============ -->
+<div class="bg-zinc-950 border-b border-zinc-900 px-3 py-1.5 flex items-center gap-4 text-[10px]">
+  <span class="panel-title">Morning Briefing</span>
+  <span class="mono dim">Regime</span><span class="mono font-bold text-amber-400">HIGH-VOL TREND</span>
+  <span class="mono dim">SPY</span><span class="mono up">+0.4%</span>
+  <span class="mono dim">VIX</span><span class="mono warn">18.3</span>
+  <span class="mono dim">Plan A</span><span class="text-green-400">if SPY&gt;510 → tech scalp longs</span>
+  <span class="mono dim">Plan B</span><span class="text-amber-400">if SPY rejects → inverse ETF shorts</span>
+  <span class="ml-auto text-[10px] mono dim">4 catalysts · 3 earnings · 2 FDA · <a class="text-violet-400 hover:underline cursor-pointer">expand</a></span>
+</div>
+
+<!-- ============ MATRIX HEADER ROW ============ -->
+<div class="grid stage-head text-[9px] font-bold uppercase tracking-widest" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+  <div class="px-2 py-1.5 text-zinc-500">Symbol</div>
+  <div class="px-2 py-1.5 col-sep text-violet-400">1 · Scan</div>
+  <div class="px-2 py-1.5 col-sep text-blue-400">2 · Evaluate (13-layer gate)</div>
+  <div class="px-2 py-1.5 col-sep text-yellow-400">3 · Order</div>
+  <div class="px-2 py-1.5 col-sep text-green-400">4 · Manage / PnL</div>
+  <div class="px-2 py-1.5 col-sep text-slate-400">5 · Close / Autopsy</div>
+  <div class="px-2 py-1.5 col-sep text-zinc-500">Verdict</div>
+</div>
+
+<!-- ============ MATRIX BODY ============ -->
+<div class="bg-zinc-950">
+
+  <!-- ROW 1 — NVDA, in-flight short -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">NVDA</span>
+        <span class="mono text-[10px] up">+2.4%</span>
+      </div>
+      <div class="why">880.30 · ATR 4.8 · vol+120%</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">rubber_band_scalp_short</div>
+      <div class="why">RSI 28 · bounced VWAP · quality 78</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold up">78</span>
+        <span>
+          <i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i>
+        </span>
+      </div>
+      <div class="why">model SHORT_SCALP · P(win) 68% · FinBERT +3 mild conflict</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">short 100 @ 880.30 <span class="warn">PENDING</span></div>
+      <div class="why">bracket · SL 885.10 · PT 870.00 · 8s elapsed</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-order">ORDER</span>
+      <div class="why mt-0.5">R:R 2.1 · 0.5% risk</div>
+    </div>
+  </div>
+
+  <!-- ROW 2 — AMD open, managing -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">AMD</span>
+        <span class="mono text-[10px] up">+1.9%</span>
+      </div>
+      <div class="why">168.40 · holding HOD · vol+70%</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">bull_flag_scalp_long</div>
+      <div class="why">9EMA/21EMA stacked · 3-bar flag</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold up">72</span>
+        <span>
+          <i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i>
+        </span>
+      </div>
+      <div class="why">CNN-LSTM 72% bull · TFT 60% up</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">FILLED</span> 100 @ 167.02</div>
+      <div class="why">14:02 · slippage +2¢</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">+$112 · +0.4R</span></div>
+      <div class="why">TFT trails SL → 166.40 · PT 172 · 0.8R unreal</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-manage">OPEN</span>
+      <div class="why mt-0.5">hold thesis intact</div>
+    </div>
+  </div>
+
+  <!-- ROW 3 — TSLA open short_reversal -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">TSLA</span>
+        <span class="mono text-[10px] down">-0.3%</span>
+      </div>
+      <div class="why">242.18 · failed HOD retest</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">halfback_reversal_short</div>
+      <div class="why">VWAP rejection · regime BEAR</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold up">74</span>
+        <span>
+          <i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i>
+        </span>
+      </div>
+      <div class="why">SHORT_REVERSAL P(win) 71% · Sharpe 1.94</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">FILLED</span> 50s @ 242.98</div>
+      <div class="why">14:09 · partial 2-leg · avg filled</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">+$74 · +0.2R</span></div>
+      <div class="why">VAE regime = BEAR_TRENDING · SL 245.40 · PT 238.10</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-manage">OPEN</span>
+      <div class="why mt-0.5">conviction rising</div>
+    </div>
+  </div>
+
+  <!-- ROW 4 — MSFT closed winner -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">MSFT</span>
+        <span class="mono text-[10px] up">+1.1%</span>
+      </div>
+      <div class="why">420.60 · back to pre-mkt high</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">vwap_bounce_long</div>
+      <div class="why">9:32 bounce off VWAP · quality 62</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold up">62</span>
+        <span>
+          <i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i>
+        </span>
+      </div>
+      <div class="why">VWAP model · P(win) 56% · borderline GO</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">FILLED</span> 50 @ 418.05</div>
+      <div class="why">9:33 · bracket atomic</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">PT HIT</span> exit @ 420.55</div>
+      <div class="why">held 16min · trailed stop never hit</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px] up">+$142 · +0.7R</div>
+      <div class="why">stop honored · slippage 0 · verdict WIN</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-close">CLOSED · W</span>
+    </div>
+  </div>
+
+  <!-- ROW 5 — SPY vetoed -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">SPY</span>
+        <span class="mono text-[10px] down">-0.2%</span>
+      </div>
+      <div class="why">509.42 · regime neutral</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">vwap_bounce_long</div>
+      <div class="why">bounce off VWAP · quality 41</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold warn">41</span>
+        <span>
+          <i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-on-r"></i>
+        </span>
+      </div>
+      <div class="why">below 60 GO · ensemble P(win) 52% → skip</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-veto">SKIP</span>
+      <div class="why mt-0.5">no edge · 0 risk</div>
+    </div>
+  </div>
+
+  <!-- ROW 6 — AAPL scan-only, no profile -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">AAPL</span>
+        <span class="mono text-[10px] down">-0.8%</span>
+      </div>
+      <div class="why">178.20 · gap +1.2% holding</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">opening_drive_long</div>
+      <div class="why">pre-mkt high re-test · quality 71</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px] warn">MODEL MISSING</div>
+      <div class="why">opening_drive profile just added · retrain pending</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-scan">SCAN</span>
+      <div class="why mt-0.5">awaits model</div>
+    </div>
+  </div>
+
+  <!-- ROW 7 — META scanning -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">META</span>
+        <span class="mono text-[10px] up">+1.2%</span>
+      </div>
+      <div class="why">486.15 · vol +340%</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">volume_surge</div>
+      <div class="why">anomaly detected · no setup class yet</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-scan">SCAN</span>
+    </div>
+  </div>
+
+  <!-- ROW 8 — CRWD evaluated and rejected -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">CRWD</span>
+        <span class="mono text-[10px] down">-2.1%</span>
+      </div>
+      <div class="why">316.90 · earnings miss -7%</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">gap_and_go_short</div>
+      <div class="why">gap-down continuation · quality 64</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold down">34</span>
+        <span>
+          <i class="seg seg-on-r"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-r"></i><i class="seg seg-off"></i><i class="seg seg-on-r"></i><i class="seg seg-off"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-off"></i><i class="seg seg-on-r"></i>
+        </span>
+      </div>
+      <div class="why">GAP_AND_GO model acc 48% · rejected by gate</div>
+    </div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep dim text-[10px]">—</div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-veto">VETO</span>
+      <div class="why mt-0.5">dead model · retrain</div>
+    </div>
+  </div>
+
+  <!-- ROW 9 — BA closed loser -->
+  <div class="grid row-matrix" style="grid-template-columns: 130px 200px 260px 200px 220px 220px 140px;">
+    <div class="px-2 py-2">
+      <div class="flex items-center gap-1.5">
+        <span class="mono font-bold text-sm">BA</span>
+        <span class="mono text-[10px] down">-0.6%</span>
+      </div>
+      <div class="why">182.40 · chop</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]">second_chance_long</div>
+      <div class="why">breakout re-try · quality 68</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="flex items-center gap-2">
+        <span class="mono font-bold warn">64</span>
+        <span>
+          <i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-on-g"></i><i class="seg seg-on-g"></i><i class="seg seg-on-y"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-g"></i><i class="seg seg-off"></i><i class="seg seg-on-r"></i>
+        </span>
+      </div>
+      <div class="why">FinBERT -5 · supplier downgrade conflicts</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="up">FILLED</span> 30 @ 183.10</div>
+      <div class="why">11:18 · partial-size (gate 64)</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px]"><span class="down">SL HIT</span> exit @ 181.90</div>
+      <div class="why">held 22min · stop honored at IB</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <div class="mono text-[11px] down">-$36 · -0.3R</div>
+      <div class="why">FinBERT was right · verdict LOSS (expected)</div>
+    </div>
+    <div class="px-2 py-2 col-sep">
+      <span class="chip stage-close">CLOSED · L</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ FOOTER STREAM ============ -->
+<div class="fixed bottom-0 left-0 right-0 border-t border-zinc-800 bg-zinc-950 px-3 py-1 text-[10px] mono text-zinc-400 flex items-center gap-3 overflow-hidden">
+  <span class="panel-title">Stream</span>
+  <span><span class="text-violet-400">14:22:28</span> NVDA GO · awaiting IB fill (8s)</span>
+  <span class="dim">·</span>
+  <span><span class="text-green-400">14:22:14</span> AMD TFT trail → 166.40 (CNN-LSTM conf ↑)</span>
+  <span class="dim">·</span>
+  <span><span class="text-slate-400">13:49:02</span> MSFT PT hit +0.7R</span>
+  <span class="ml-auto"><a href="index.html" class="text-violet-400 hover:underline">← all options</a></span>
+</div>
+
+</body>
+</html>
