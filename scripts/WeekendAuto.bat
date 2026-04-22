@@ -20,7 +20,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://bot-thoughts-live.preview.emergentagent.com
+set CLOUD_URL=https://pipeline-v5.preview.emergentagent.com
 
 :: =====================================================
 :: STEP 1: RUN STARTTRADING.BAT (but don't wait for health loop)
