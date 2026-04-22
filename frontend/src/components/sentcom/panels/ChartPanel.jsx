@@ -1,0 +1,435 @@
+/**
+ * ChartPanel — Stage 2a of the V5 Command Center rebuild.
+ *
+ * Minimal shipping version:
+ *   - Candles + volume via TradingView `lightweight-charts` v5 (Apache-2.0).
+ *   - Timeframe toggle (1m / 5m / 15m / 1h / 1d).
+ *   - HTTP fetch of historical bars via /api/hybrid-data/bars/{symbol}.
+ *   - Lightweight auto-refresh every N seconds (no WebSocket yet — 2b adds it).
+ *   - Zero indicator math yet — 2b wires VWAP / EMA / BB as additional series.
+ */
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+import { RefreshCw, TrendingUp, Eye, EyeOff } from 'lucide-react';
+import { safeGet } from '../../../utils/api';
+
+// Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
+const TIMEFRAMES = [
+  { label: '1m',  value: '1min',  daysBack: 1 },
+  { label: '5m',  value: '5min',  daysBack: 5 },
+  { label: '15m', value: '15min', daysBack: 10 },
+  { label: '1h',  value: '1hour', daysBack: 30 },
+  { label: '1d',  value: '1day',  daysBack: 365 },
+];
+
+// Indicator overlays. `key` matches the backend `indicators` response map.
+// `pane` 0 = main price pane (sub-panes reserved for Stage 2e RSI/MACD).
+const INDICATOR_SPECS = [
+  { key: 'vwap',      label: 'VWAP',   color: '#fbbf24', width: 2, dash: false, pane: 0 },
+  { key: 'ema_20',    label: 'EMA 20', color: '#06b6d4', width: 1, dash: false, pane: 0 },
+  { key: 'ema_50',    label: 'EMA 50', color: '#a855f7', width: 1, dash: false, pane: 0 },
+  { key: 'ema_200',   label: 'EMA 200',color: '#f43f5e', width: 1, dash: false, pane: 0 },
+  { key: 'bb_upper',  label: 'BB↑',    color: 'rgba(139, 92, 246, 0.45)', width: 1, dash: true,  pane: 0 },
+  { key: 'bb_middle', label: 'BB·',    color: 'rgba(139, 92, 246, 0.30)', width: 1, dash: true,  pane: 0 },
+  { key: 'bb_lower',  label: 'BB↓',    color: 'rgba(139, 92, 246, 0.45)', width: 1, dash: true,  pane: 0 },
+];
+
+// Parse any timestamp shape returned by hybrid_data_service into the
+// UTCTimestamp (seconds-since-epoch) that lightweight-charts v5 expects.
+const toUtcTimestamp = (ts) => {
+  if (ts == null) return null;
+  if (typeof ts === 'number') return ts > 1e12 ? Math.floor(ts / 1000) : ts;
+  const d = new Date(ts);
+  const n = d.getTime();
+  return Number.isNaN(n) ? null : Math.floor(n / 1000);
+};
+
+export const ChartPanel = ({
+  symbol = 'SPY',
+  initialTimeframe = '5m',
+  height = 480,
+  autoRefreshMs = 30_000,
+  className = '',
+}) => {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const volumeSeriesRef = useRef(null);
+  const indicatorSeriesRef = useRef({}); // { [key]: ISeriesApi<'Line'> }
+  const markersPluginRef = useRef(null); // createSeriesMarkers() plugin api
+  const resizeObsRef = useRef(null);
+
+  const [timeframe, setTimeframe] = useState(initialTimeframe);
+  const [bars, setBars] = useState([]);
+  const [indicators, setIndicators] = useState({});
+  const [markers, setMarkers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  // Which overlays are visible. Default: VWAP + BB on, all EMAs off (less clutter).
+  const [visibleIndicators, setVisibleIndicators] = useState({
+    vwap: true,
+    ema_20: false,
+    ema_50: false,
+    ema_200: false,
+    bb_upper: true,
+    bb_middle: true,
+    bb_lower: true,
+  });
+
+  const active = useMemo(
+    () => TIMEFRAMES.find(t => t.label === timeframe) ?? TIMEFRAMES[1],
+    [timeframe]
+  );
+
+  // Initialise chart once
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: 'solid', color: 'transparent' },
+        textColor: '#a1a1aa',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(39, 39, 42, 0.6)' },
+        horzLines: { color: 'rgba(39, 39, 42, 0.6)' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(82, 82, 91, 0.4)',
+        scaleMargins: { top: 0.08, bottom: 0.25 },
+      },
+      timeScale: {
+        borderColor: 'rgba(82, 82, 91, 0.4)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      crosshair: {
+        mode: 1,
+        vertLine:  { color: '#06b6d4', width: 1, style: 3, labelBackgroundColor: '#0e7490' },
+        horzLine:  { color: '#06b6d4', width: 1, style: 3, labelBackgroundColor: '#0e7490' },
+      },
+      autoSize: false,
+      width: containerRef.current.clientWidth,
+      height,
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderUpColor: '#10b981',
+      borderDownColor: '#f43f5e',
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e',
+    });
+
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+      color: 'rgba(6, 182, 212, 0.35)',
+    });
+    // Bottom 18% of the pane is reserved for volume
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
+    });
+
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    // Create one LineSeries per indicator overlay up front. Visibility is
+    // toggled later via `applyOptions({ visible })` rather than add/remove,
+    // so series order + colours stay stable.
+    indicatorSeriesRef.current = {};
+    for (const spec of INDICATOR_SPECS) {
+      const s = chart.addSeries(LineSeries, {
+        color: spec.color,
+        lineWidth: spec.width,
+        lineStyle: spec.dash ? 2 : 0, // 0 = solid, 2 = dashed
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        visible: true, // overridden by effect below
+      });
+      indicatorSeriesRef.current[spec.key] = s;
+    }
+
+    // Trade markers plugin — attached to the candle series so arrows render
+    // on price bars. Stage 2c adds executed entry/exit markers; later stages
+    // will extend this with setup-trigger pins.
+    try {
+      markersPluginRef.current = createSeriesMarkers(candleSeries, []);
+    } catch (err) {
+      // Older lightweight-charts versions exposed markers via
+      // series.setMarkers(). We fall back silently if createSeriesMarkers
+      // isn't available in this build.
+      markersPluginRef.current = null;
+    }
+
+    // Resize with container
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width } = entry.contentRect;
+        chart.applyOptions({ width });
+      }
+    });
+    ro.observe(containerRef.current);
+    resizeObsRef.current = ro;
+
+    return () => {
+      try { ro.disconnect(); } catch (_) { /* ignore */ }
+      try { chart.remove(); } catch (_) { /* ignore */ }
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+    };
+  }, [height]);
+
+  // Fetch bars for current symbol + timeframe
+  const fetchBars = useCallback(async () => {
+    if (!symbol) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await safeGet(
+        `/api/sentcom/chart?symbol=${encodeURIComponent(symbol)}` +
+        `&timeframe=${encodeURIComponent(active.value)}&days=${active.daysBack}`
+      );
+      if (!resp) {
+        setError('Bar fetch failed');
+        return;
+      }
+      if (resp.success === false) {
+        setError(resp.error || 'Backend returned no bars');
+        setBars([]);
+        setIndicators({});
+        setMarkers([]);
+        return;
+      }
+      const fetchedBars = Array.isArray(resp.bars) ? resp.bars : [];
+      setBars(fetchedBars);
+      setIndicators(resp.indicators && typeof resp.indicators === 'object' ? resp.indicators : {});
+      setMarkers(Array.isArray(resp.markers) ? resp.markers : []);
+      setLastUpdated(Date.now());
+    } catch (err) {
+      setError(err?.message || 'Failed to fetch bars');
+    } finally {
+      setLoading(false);
+    }
+  }, [symbol, active]);
+
+  // Refetch whenever symbol / timeframe changes
+  useEffect(() => { fetchBars(); }, [fetchBars]);
+
+  // Auto-refresh (lightweight — 2b will replace with a WS subscription)
+  useEffect(() => {
+    if (!autoRefreshMs) return undefined;
+    const id = setInterval(fetchBars, autoRefreshMs);
+    return () => clearInterval(id);
+  }, [fetchBars, autoRefreshMs]);
+
+  // Push data into the series whenever bars change
+  useEffect(() => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    if (!bars.length) {
+      candleSeriesRef.current.setData([]);
+      volumeSeriesRef.current.setData([]);
+      return;
+    }
+    // Bars must be sorted ascending by time for lightweight-charts
+    const rows = bars
+      .map(b => ({
+        time: toUtcTimestamp(b.timestamp ?? b.date ?? b.time),
+        open: Number(b.open),
+        high: Number(b.high),
+        low:  Number(b.low),
+        close: Number(b.close),
+        volume: Number(b.volume ?? 0),
+      }))
+      .filter(r => r.time != null && Number.isFinite(r.open))
+      .sort((a, b) => a.time - b.time);
+
+    const candleData = rows.map(({ time, open, high, low, close }) => (
+      { time, open, high, low, close }
+    ));
+    const volumeData = rows.map(({ time, open, close, volume }) => ({
+      time,
+      value: volume,
+      color: close >= open
+        ? 'rgba(16, 185, 129, 0.35)'
+        : 'rgba(244, 63, 94, 0.35)',
+    }));
+
+    candleSeriesRef.current.setData(candleData);
+    volumeSeriesRef.current.setData(volumeData);
+    // Fit the newly loaded range on first load; leave panning intact afterwards.
+    try { chartRef.current?.timeScale().fitContent(); } catch (_) { /* noop */ }
+  }, [bars]);
+
+  // Push indicator series data whenever `indicators` changes.
+  useEffect(() => {
+    for (const spec of INDICATOR_SPECS) {
+      const series = indicatorSeriesRef.current[spec.key];
+      if (!series) continue;
+      const points = Array.isArray(indicators[spec.key]) ? indicators[spec.key] : [];
+      series.setData(
+        points
+          .map(p => ({ time: Number(p.time), value: Number(p.value) }))
+          .filter(p => Number.isFinite(p.time) && Number.isFinite(p.value))
+      );
+    }
+  }, [indicators]);
+
+  // Apply visibility whenever the toggle state changes (cheap, no re-setData).
+  useEffect(() => {
+    for (const spec of INDICATOR_SPECS) {
+      const series = indicatorSeriesRef.current[spec.key];
+      if (!series) continue;
+      try {
+        series.applyOptions({ visible: !!visibleIndicators[spec.key] });
+      } catch (_) {
+        /* series may have been removed during unmount */
+      }
+    }
+  }, [visibleIndicators]);
+
+  // Push executed-trade markers onto the candle series.
+  useEffect(() => {
+    const plugin = markersPluginRef.current;
+    if (!plugin) return;
+    try {
+      plugin.setMarkers(
+        markers
+          .map(m => ({ ...m, time: Number(m.time) }))
+          .filter(m => Number.isFinite(m.time))
+      );
+    } catch (_) {
+      /* markers plugin api may not be ready on first render */
+    }
+  }, [markers]);
+
+  const toggleIndicator = useCallback((key) => {
+    setVisibleIndicators(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  return (
+    <div
+      data-testid="sentcom-chart-panel"
+      className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-950/90 via-zinc-950/80 to-zinc-900/80 backdrop-blur-xl ${className}`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 gap-4 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <TrendingUp className="w-4 h-4 text-cyan-400" />
+          <span
+            data-testid="chart-symbol"
+            className="text-sm font-semibold text-zinc-100 tracking-tight"
+          >
+            {symbol}
+          </span>
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            {active.label} bars
+          </span>
+          {lastUpdated && !loading && (
+            <span className="text-[10px] text-zinc-600 truncate">
+              · updated {new Date(lastUpdated).toLocaleTimeString('en-US', { hour12: false })}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Indicator toggles */}
+          <div className="flex items-center gap-1" data-testid="chart-indicator-toggles">
+            {INDICATOR_SPECS.map((spec) => {
+              const on = !!visibleIndicators[spec.key];
+              return (
+                <button
+                  key={spec.key}
+                  data-testid={`chart-indicator-${spec.key}`}
+                  onClick={() => toggleIndicator(spec.key)}
+                  title={`Toggle ${spec.label}`}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                    on
+                      ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: spec.color, opacity: on ? 1 : 0.4 }}
+                  />
+                  <span>{spec.label}</span>
+                  {on
+                    ? <Eye className="w-3 h-3 opacity-60" />
+                    : <EyeOff className="w-3 h-3 opacity-40" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Timeframe + refresh */}
+          <div className="flex items-center gap-1">
+            {TIMEFRAMES.map((t) => (
+              <button
+                key={t.label}
+                data-testid={`chart-timeframe-${t.label}`}
+                onClick={() => setTimeframe(t.label)}
+                className={`px-2.5 py-0.5 text-[11px] rounded-md transition-colors ${
+                  t.label === timeframe
+                    ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/30'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              data-testid="chart-refresh"
+              onClick={fetchBars}
+              className="ml-2 p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              aria-label="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Chart container */}
+      <div
+        data-testid="chart-container"
+        ref={containerRef}
+        style={{ height, width: '100%' }}
+      />
+
+      {/* Overlays: loading / empty / error states */}
+      {loading && !bars.length && (
+        <div
+          data-testid="chart-loading"
+          className="absolute inset-0 flex items-center justify-center bg-black/20"
+        >
+          <span className="text-xs text-zinc-400">Loading bars...</span>
+        </div>
+      )}
+      {!loading && !bars.length && !error && (
+        <div
+          data-testid="chart-empty"
+          className="absolute inset-x-0 top-12 flex items-center justify-center text-xs text-zinc-500"
+        >
+          No bars available for {symbol} on {active.label}.
+        </div>
+      )}
+      {error && (
+        <div
+          data-testid="chart-error"
+          className="absolute inset-x-0 top-12 flex items-center justify-center text-xs text-rose-400"
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ChartPanel;

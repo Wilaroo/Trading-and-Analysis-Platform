@@ -54,6 +54,26 @@ src/components/sentcom/
 
 **Result:** `SentCom.jsx` 3,614 → **874 lines (-76%)**. 34 sibling modules each 30–533 lines. Public API unchanged (`import SentCom from 'components/SentCom'` still works, default export preserved). ESLint clean, all 35 files parse, all relative imports resolve.
 
+## 2026-04-23 — Stage 2a/2b/2c: V5 Command Center chart (shipped)
+
+**Library choice:** `lightweight-charts@5.1.0` (Apache-2.0). Explicitly *not* the TradingView consumer chart (which has a 3-indicator cap) — this is TradingView's open-source rendering engine. Unlimited overlay series, ~45 KB gzipped, used by Coinbase Advanced and Binance mobile.
+
+**Shipped:**
+- `frontend/src/components/sentcom/panels/ChartPanel.jsx` — candles + volume + crosshair + auto-refresh + 5-tf toggle (1m/5m/15m/1h/1d), dropped as a new full-width block between StatusHeader and the 3-col grid in SentCom.
+- `backend/routers/sentcom_chart.py` — `GET /api/sentcom/chart?symbol=...&timeframe=...&days=...` returning bars + indicator arrays + executed-trade markers.
+- Indicator math (pure Python, no pandas dep): VWAP (session-anchored for intraday), EMA 20/50/200, Bollinger Bands 20/2σ. Frontend has 7 toggleable overlay chips in the chart header.
+- Trade markers: backend queries `bot_trades` within chart window, emits entry + exit arrow markers on candles with R-multiple tooltips (green win / red loss).
+- Tests: `backend/tests/test_sentcom_chart_router.py` — 20 regression tests locking `_ema`, `_rolling_mean_std`, `_vwap`, `_to_utc_seconds`, `_session_key`. All 58 Python tests pass.
+
+**Deferred to Stage 2d/2e:**
+- Full V5 layout rebuild (3-col 20/55/25 grid, chart central, stream below).
+- Setup-trigger pins (no clean timestamped-setups data source yet).
+- Support/resistance horizontal lines (needs scanner integration).
+- RSI / MACD sub-panels.
+- Session shading (pre-market / RTH / AH background rectangles).
+- WebSocket streaming of new bars (currently HTTP auto-refresh every 30s).
+
+
 **Next:** Stage 2 — layout + TradingView `lightweight-charts` integration (Option 1 V5 Command Center).
 
 

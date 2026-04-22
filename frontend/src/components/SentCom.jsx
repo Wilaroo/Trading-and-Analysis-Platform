@@ -77,6 +77,8 @@ import { MarketIntelPanel } from './sentcom/panels/MarketIntelPanel';
 import { AlertsPanel } from './sentcom/panels/AlertsPanel';
 import { SetupsPanel } from './sentcom/panels/SetupsPanel';
 import { ChatInput } from './sentcom/panels/ChatInput';
+// Stage 2a: TradingView `lightweight-charts` Command Center chart
+import { ChartPanel } from './sentcom/panels/ChartPanel';
 
 // ============================================================================
 // MAIN COMPONENT
@@ -761,6 +763,16 @@ const SentCom = ({ compact = false, embedded = false }) => {
           <GlassCard gradient glow className="p-0">
             <StatusHeader status={status} context={context} />
           </GlassCard>
+        </div>
+
+        {/* Stage 2a: Command Center Chart (candles + volume, auto-refresh).
+            Defaults to SPY + 5m; Stage 2c will wire it to the focused position. */}
+        <div className="mb-6">
+          <ChartPanel
+            symbol={selectedPosition?.symbol || 'SPY'}
+            initialTimeframe="5m"
+            height={420}
+          />
         </div>
 
         {/* Main Grid */}

@@ -53,6 +53,10 @@ from routers.trading_bot import router as trading_bot_router, init_trading_bot_r
 from routers.config import router as config_router
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
 from routers.sentcom import router as sentcom_router
+from routers.sentcom_chart import (
+    router as sentcom_chart_router,
+    init_sentcom_chart_router,
+)
 from routers.dynamic_risk_router import router as dynamic_risk_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
 from routers.scripts import router as scripts_router
@@ -866,6 +870,10 @@ def _init_all_services():
         init_hybrid_data_router(hybrid_data_service)
         register_service('hybrid_data_service', hybrid_data_service)
 
+        # Stage 2b: SentCom Chart router (reuses hybrid_data_service for bars).
+        # db is passed so the chart endpoint can overlay executed-trade markers.
+        init_sentcom_chart_router(hybrid_data_service, db=db)
+
         # Wire hybrid data service to advanced backtest engine
         advanced_backtest_engine.set_hybrid_data_service(hybrid_data_service)
 
@@ -1403,6 +1411,7 @@ app.include_router(trading_bot_router)
 app.include_router(config_router)
 app.include_router(market_regime_router)
 app.include_router(sentcom_router)
+app.include_router(sentcom_chart_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)
