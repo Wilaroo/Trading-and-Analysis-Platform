@@ -14,6 +14,66 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - 🟡 Revisit `MorningBriefingModal.jsx` to look like the user's "newer more in-depth briefing modal" (screenshot they shared). Current V5-restyled modal is a minimal summary; they want richer detail. Revisit after Stage 2d polish.
 
 
+## 2026-04-22 (22:40Z) — CRITICAL FIX #6 — `recall_down` / `f1_down` were NEVER computed
+
+**Finding (from 22:19Z Spark retrain log):** The `balanced_sqrt` weighting
+was correctly applied (`per-class weights=[1.0, 1.08, 1.73]`), training
+completed at 52.73% accuracy, but the protection gate still reported
+`DOWN 0.000/floor 0.1` and blocked promotion. Same "DOWN collapsed" reason
+as every prior retrain.
+
+**Root cause:** `train_full_universe` and `train_from_features` both
+compute UP metrics via sklearn, plus `precision_down` via manual TP/FP
+counts — but **never compute `recall_down` or `f1_down`**. They were
+shipped as dataclass defaults (0.0) on every single model, including the
+currently-active one. Protection gate then reads `new_recall_down=0.0`
+and rejects. Every weight-scheme adjustment, every retrain, every diagnostic
+for the past several weeks has been chasing a phantom — the DOWN class
+may actually have been healthy the whole time.
+
+**Fix:**
+- `timeseries_service.py::train_full_universe` — now uses sklearn
+  `precision_score / recall_score / f1_score` on the DOWN class (idx 0),
+  logs full DOWN triple + prediction distribution, and passes all three
+  into `ModelMetrics(precision_down=..., recall_down=..., f1_down=...)`.
+- `timeseries_gbm.py::train_from_features` — same fix for setup-specific
+  models: computes `recall_down` / `f1_down` from TP/FP/FN counts, passes
+  into `ModelMetrics`. Same prediction-distribution diagnostic logged.
+
+**Tests (`test_recall_down_metric_fix.py`, 4 new):** 40/40 pass in the
+related scope.
+- Perfect DOWN predictor → `recall_down == 1.0` (proves metric is live)
+- Never-predict-DOWN model → `recall_down == 0.0` (proves metric is real,
+  not just a returning default)
+- Partial DOWN recall → correctly in (0, 1)
+- ModelMetrics schema lock
+
+**User next step on Spark:** the bug means the *current* active model
+`v20260422_181416` likely DOES have valid DOWN behaviour that was simply
+never measured. Pull + restart and re-evaluate the active model:
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull
+pkill -f "python server.py" && cd backend && \
+    nohup /home/spark-1a60/venv/bin/python server.py > /tmp/backend.log 2>&1 &
+
+# Kick a fresh retrain — now that metrics are real, protection gate will
+# make meaningful promotion decisions
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python \
+    backend/scripts/retrain_generic_direction.py --bar-size "5 mins" 2>&1 \
+    | tee /tmp/retrain_correct_metrics_$(date +%s).log
+
+# Look for the new log line proving DOWN metrics are computed:
+#   [FULL UNIVERSE] UP    — P X.XX% · R X.XX% · F1 X.XX%
+#   [FULL UNIVERSE] DOWN  — P X.XX% · R X.XX% · F1 X.XX%
+#   [FULL UNIVERSE] Prediction dist: DOWN=XX.X% FLAT=XX.X% UP=XX.X%
+```
+
+Expected this time: **actual non-zero DOWN recall numbers**, and a model
+promotion decision based on real data. Almost certainly the previous
+"collapse" was imaginary and the 43.5% active model is actually fine.
+
+
 ## 2026-04-24 — CRITICAL FIX #5 — `balanced_sqrt` class-weight scheme (DOWN-collapse pendulum)
 
 **Finding:** The 2026-04-23 force-promoted `direction_predictor_5min` v20260422_181416

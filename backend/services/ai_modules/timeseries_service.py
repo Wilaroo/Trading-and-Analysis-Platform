@@ -1186,32 +1186,56 @@ class TimeSeriesAIService:
 
             accuracy = float(np.mean(y_pred == y_val))
 
-            # UP-class metrics (class idx 2) — keep existing metric schema
             from sklearn.metrics import precision_score, recall_score, f1_score
+
+            # UP-class metrics (class idx 2)
             y_val_up = (y_val == 2).astype(int)
             y_pred_up = (y_pred == 2).astype(int)
             precision_up = float(precision_score(y_val_up, y_pred_up, zero_division=0))
-            recall_up = float(recall_score(y_val_up, y_pred_up, zero_division=0))
-            f1_up = float(f1_score(y_val_up, y_pred_up, zero_division=0))
-            
+            recall_up    = float(recall_score   (y_val_up, y_pred_up, zero_division=0))
+            f1_up        = float(f1_score       (y_val_up, y_pred_up, zero_division=0))
+
+            # DOWN-class metrics (class idx 0) — CRITICAL FIX 2026-04-22:
+            # Previously never computed; unset dataclass defaults (0.0) were
+            # being read by the model-protection gate and causing every
+            # candidate to be rejected as "DOWN-collapsed" even when it was
+            # predicting DOWN correctly. The bug masqueraded as a class-
+            # weighting problem for weeks — both v20260421 and v20260422
+            # generic retrains were blocked by this uninitialised metric.
+            y_val_down = (y_val == 0).astype(int)
+            y_pred_down = (y_pred == 0).astype(int)
+            precision_down = float(precision_score(y_val_down, y_pred_down, zero_division=0))
+            recall_down    = float(recall_score   (y_val_down, y_pred_down, zero_division=0))
+            f1_down        = float(f1_score       (y_val_down, y_pred_down, zero_division=0))
+
+            # Observed class distribution in predictions — useful diagnostic
+            # when DOWN recall looks suspicious.
+            pred_dist = np.bincount(y_pred, minlength=3)
+            pred_pct = pred_dist / max(1, len(y_pred))
+
             logger.info("")
             logger.info("[FULL UNIVERSE] ✓ Training complete!")
             logger.info(f"[FULL UNIVERSE] Accuracy: {accuracy*100:.2f}%")
-            logger.info(f"[FULL UNIVERSE] Precision: {precision_up*100:.2f}%, Recall: {recall_up*100:.2f}%, F1: {f1_up*100:.2f}%")
+            logger.info(f"[FULL UNIVERSE] UP    — P {precision_up*100:.2f}% · R {recall_up*100:.2f}% · F1 {f1_up*100:.2f}%")
+            logger.info(f"[FULL UNIVERSE] DOWN  — P {precision_down*100:.2f}% · R {recall_down*100:.2f}% · F1 {f1_down*100:.2f}%")
+            logger.info(f"[FULL UNIVERSE] Prediction dist: DOWN={pred_pct[0]*100:.1f}% FLAT={pred_pct[1]*100:.1f}% UP={pred_pct[2]*100:.1f}%")
             sys.stdout.flush()
-            
+
             # Save model — mark as 3-class triple-barrier so metadata persists correctly.
             model._model = trained_model
             model._num_classes = 3
             model._feature_names = list(feature_names)
             model._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-            
+
             from .timeseries_gbm import ModelMetrics
             model._metrics = ModelMetrics(
                 accuracy=accuracy,
                 precision_up=precision_up,
                 recall_up=recall_up,
                 f1_up=f1_up,
+                precision_down=precision_down,
+                recall_down=recall_down,
+                f1_down=f1_down,
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
                 last_trained=datetime.now(timezone.utc).isoformat()

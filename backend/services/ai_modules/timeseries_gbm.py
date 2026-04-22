@@ -1089,12 +1089,19 @@ class TimeSeriesGBM:
             recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
             f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
 
-            # Per-class metrics for DOWN (class 0)
+            # Per-class metrics for DOWN (class 0) — CRITICAL FIX 2026-04-22:
+            # recall_down / f1_down were never computed before, so
+            # ModelMetrics shipped with default 0.0 for both. Model protection
+            # gate then mis-rejected every candidate as "DOWN-collapsed"
+            # regardless of actual behaviour. Same bug existed in
+            # train_full_universe; fixed there simultaneously.
             down_class = 0
             tp_dn = np.sum((y_pred == down_class) & (y_val == down_class))
             fp_dn = np.sum((y_pred == down_class) & (y_val != down_class))
             fn_dn = np.sum((y_pred != down_class) & (y_val == down_class))
             precision_down = tp_dn / (tp_dn + fp_dn) if (tp_dn + fp_dn) > 0 else 0
+            recall_down = tp_dn / (tp_dn + fn_dn) if (tp_dn + fn_dn) > 0 else 0
+            f1_down = 2 * precision_down * recall_down / (precision_down + recall_down) if (precision_down + recall_down) > 0 else 0
 
             # FLAT accuracy — how well does it identify no-trade zones
             flat_class = 1
@@ -1102,10 +1109,15 @@ class TimeSeriesGBM:
             flat_total = np.sum(y_val == flat_class)
             flat_recall = flat_correct / flat_total if flat_total > 0 else 0
 
+            # Observed prediction distribution — diagnostic for collapse modes
+            pred_dist = np.bincount(y_pred, minlength=3).astype(float) / max(1, len(y_pred))
+
             logger.info(
                 f"3-class eval: accuracy={accuracy:.3f}, "
-                f"UP prec={precision_up:.3f} recall={recall_up:.3f}, "
-                f"DOWN prec={precision_down:.3f}, FLAT recall={flat_recall:.3f}"
+                f"UP P={precision_up:.3f} R={recall_up:.3f} F1={f1_up:.3f}, "
+                f"DOWN P={precision_down:.3f} R={recall_down:.3f} F1={f1_down:.3f}, "
+                f"FLAT R={flat_recall:.3f} · "
+                f"pred_dist={{DOWN:{pred_dist[0]:.2f} FLAT:{pred_dist[1]:.2f} UP:{pred_dist[2]:.2f}}}"
             )
         else:
             # Binary: y_pred_raw shape = (n_samples,)
@@ -1123,11 +1135,19 @@ class TimeSeriesGBM:
         sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10]
         top_features = [f[0] for f in sorted_features if f[0] in feature_names]
 
+        # DOWN metrics may not be defined in binary (num_classes=2) mode — guard.
+        _pd = locals().get('precision_down', 0.0)
+        _rd = locals().get('recall_down', 0.0)
+        _f1d = locals().get('f1_down', 0.0)
+
         self._metrics = ModelMetrics(
             accuracy=float(accuracy),
             precision_up=float(precision_up),
             recall_up=float(recall_up),
             f1_up=float(f1_up),
+            precision_down=float(_pd),
+            recall_down=float(_rd),
+            f1_down=float(_f1d),
             training_samples=len(X_train),
             validation_samples=len(X_val),
             top_features=top_features,
