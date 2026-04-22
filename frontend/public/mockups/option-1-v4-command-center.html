@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Option 1 v4 — Command Center (zoom + MTF + VPVR + timeline)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { font-family:'IBM Plex Sans',system-ui; background:#09090b; color:#f4f4f5; overflow-x:hidden; }
+  h1,h2,h3,.ui { font-family:'Inter'; }
+  .mono { font-family:'JetBrains Mono'; }
+  .panel-title { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:#71717a; }
+  .why { font-size:10px; color:#a1a1aa; line-height:1.45; }
+  .why-dim { font-size:10px; color:#71717a; line-height:1.4; }
+  .chip { display:inline-block; font-size:9px; font-family:'JetBrains Mono'; padding:1px 5px; border-radius:2px; border:1px solid; }
+  .stage-scan   { color:#a78bfa; border-color:#5b21b6; background:rgba(139,92,246,.08); }
+  .stage-eval   { color:#60a5fa; border-color:#1e3a8a; background:rgba(59,130,246,.08); }
+  .stage-order  { color:#facc15; border-color:#713f12; background:rgba(234,179,8,.08); }
+  .stage-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+  .stage-close  { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08); }
+  .stage-veto   { color:#f87171; border-color:#7f1d1d; background:rgba(239,68,68,.08); }
+  .up { color:#22c55e; } .down { color:#ef4444; } .warn { color:#eab308; } .dim { color:#52525b; }
+  .hud-block { transition:all .15s; cursor:pointer; }
+  .hud-block:hover { background:#27272a; border-color:#52525b; }
+  .mini-5stage { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; }
+  .mini-5stage span { height:3px; border-radius:1px; background:#27272a; }
+  .mini-5stage span.on-scan{background:#8b5cf6}.mini-5stage span.on-eval{background:#3b82f6}
+  .mini-5stage span.on-order{background:#eab308}.mini-5stage span.on-manage{background:#22c55e}
+  .mini-5stage span.on-close{background:#64748b}
+  .scanner-card { border-bottom:1px solid #18181b; padding:8px 10px; transition:all .15s; cursor:pointer; }
+  .scanner-card:hover { background:#141416; }
+  .scanner-card.active { background:#1e1b4b; border-left:2px solid #8b5cf6; padding-left:8px; }
+
+  /* Chart */
+  .lbl { font-family:'JetBrains Mono'; font-size:9px; fill:#a1a1aa; }
+  .lbl-b { font-family:'JetBrains Mono'; font-size:10px; font-weight:700; }
+  .lbl-sm { font-family:'JetBrains Mono'; font-size:8px; fill:#71717a; }
+  .lbl-xs { font-family:'JetBrains Mono'; font-size:7px; fill:#71717a; }
+  .ann-sl { stroke:#ef4444; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-pt { stroke:#22c55e; stroke-width:1; stroke-dasharray:3,2; }
+  .ann-ent { stroke:#eab308; stroke-width:1; stroke-dasharray:4,3; }
+  .ann-vwap { stroke:#a1a1aa; stroke-width:1; stroke-dasharray:1,2; opacity:.7; }
+  .ann-avwap { stroke:#f59e0b; stroke-width:1; stroke-dasharray:2,3; opacity:.85; }
+  .ann-pmh { stroke:#06b6d4; stroke-width:1; stroke-dasharray:5,2; opacity:.85; }
+  .ann-pml { stroke:#06b6d4; stroke-width:1; stroke-dasharray:5,2; opacity:.85; }
+  .ann-pdh { stroke:#f97316; stroke-width:1; stroke-dasharray:6,3; opacity:.75; }
+  .ann-pdl { stroke:#f97316; stroke-width:1; stroke-dasharray:6,3; opacity:.75; }
+  .ann-pdc { stroke:#eab308; stroke-width:0.8; stroke-dasharray:2,4; opacity:.6; }
+  .ann-sh { stroke:#a3a3a3; stroke-width:0.6; stroke-dasharray:1,2; opacity:.7; }
+  .ann-sl-day { stroke:#a3a3a3; stroke-width:0.6; stroke-dasharray:1,2; opacity:.7; }
+  .ann-competing { stroke:#71717a; stroke-width:0.8; stroke-dasharray:1,3; opacity:.75; }
+  .ann-9ema { stroke:#60a5fa; stroke-width:1.2; fill:none; }
+  .ann-21ema { stroke:#f472b6; stroke-width:1.2; fill:none; }
+  .ann-predicted-range { fill:rgba(34,197,94,.08); stroke:rgba(34,197,94,.35); stroke-dasharray:2,2; }
+  .ann-box { stroke:#a855f7; stroke-width:1; stroke-dasharray:2,2; fill:rgba(168,85,247,.08); }
+  .candle-up   { fill:#22c55e; stroke:#22c55e; }
+  .candle-down { fill:#ef4444; stroke:#ef4444; }
+  .vpvr-bar   { fill:rgba(148,163,184,.55); }
+  .vpvr-bar-hvn { fill:rgba(234,179,8,.75); } /* high-volume node */
+  .vpvr-bar-poc { fill:rgba(234,88,12,.85); } /* point of control */
+  .pivot-hh { fill:#22c55e; }
+  .pivot-lh { fill:#ef4444; }
+
+  /* Thought bubbles (variable sized) */
+  .bb { fill:#18181b; stroke-width:1; }
+  .bb.violet { stroke:#a855f7; } .bb.blue { stroke:#60a5fa; }
+  .bb.yellow { stroke:#eab308; } .bb.green { stroke:#22c55e; }
+  .bb.red { stroke:#ef4444; }
+  .bb-text { font-family:'IBM Plex Sans'; font-size:9px; fill:#e4e4e7; }
+  .bb-text-b { font-family:'IBM Plex Sans'; font-size:10px; font-weight:700; fill:#f4f4f5; }
+  .bb-text-sm { font-family:'IBM Plex Sans'; font-size:8px; fill:#a1a1aa; }
+
+  /* Timeline strip */
+  .tl-dot { cursor:pointer; }
+  .tl-dot:hover { filter:drop-shadow(0 0 4px currentColor); }
+
+  /* MTF badge */
+  .mtf-pill { font-family:'JetBrains Mono'; font-size:7px; fill:#0f0f11; font-weight:700; }
+
+  /* Momentum / buy-sell pressure meter */
+  .mtf-cell { stroke:#27272a; stroke-width:0.5; }
+
+  /* Stream */
+  .stream-item { border-left:2px solid transparent; padding:6px 8px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; }
+  .stream-item:hover { background:#141416; }
+  .stream-item.sev-order{border-left-color:#eab308}.stream-item.sev-fill{border-left-color:#3b82f6}
+  .stream-item.sev-win{border-left-color:#22c55e}.stream-item.sev-loss{border-left-color:#ef4444}
+  .stream-item.sev-skip{border-left-color:#71717a}.stream-item.sev-brain{border-left-color:#a855f7}
+
+  /* Briefings */
+  .briefing-card { padding:8px 10px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; }
+  .briefing-card:hover { background:#141416; }
+  .briefing-new { background:linear-gradient(90deg, rgba(234,179,8,.08) 0%, transparent 100%); }
+  .briefing-pending { opacity:.4; cursor:default; }
+  .briefing-pending:hover { background:transparent; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- PIPELINE HUD -->
+<div class="border-b border-zinc-800 bg-zinc-950 px-3 py-2">
+  <div class="flex items-center gap-2">
+    <div class="text-[10px] mono text-zinc-500 pr-2 border-r border-zinc-800">SENTCOM</div>
+    <div class="flex items-center gap-1.5 flex-1">
+      <div class="hud-block flex-1 px-2 py-1 border border-violet-900/60 rounded-sm bg-violet-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-violet-400">Scan</span><span class="mono text-lg font-bold">47</span></div><div class="text-[9px] text-zinc-500">5min · 12 symbols</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-blue-900/60 rounded-sm bg-blue-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-blue-400">Evaluate</span><span class="mono text-lg font-bold">8</span></div><div class="text-[9px] text-zinc-500">17% gate pass · avg 62</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-yellow-900/60 rounded-sm bg-yellow-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-yellow-400">Order</span><span class="mono text-lg font-bold">3</span></div><div class="text-[9px] text-zinc-500">2 filled · 1 pending · 8s</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-green-900/60 rounded-sm bg-green-950/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-green-400">Manage</span><span class="mono text-lg font-bold">2</span><span class="mono text-xs up">+0.6R</span></div><div class="text-[9px] text-zinc-500">NVDA · AMD · no stops breached</div></div>
+      <div class="text-zinc-700 mono">→</div>
+      <div class="hud-block flex-1 px-2 py-1 border border-slate-700 rounded-sm bg-slate-900/20"><div class="flex items-baseline justify-between"><span class="text-[9px] uppercase tracking-widest text-slate-400">Close today</span><span class="mono text-lg font-bold">4</span><span class="mono text-xs up">+1.8R</span></div><div class="text-[9px] text-zinc-500">WR 75% · $+412 · worst −0.3R</div></div>
+    </div>
+    <div class="flex items-center gap-3 pl-3 border-l border-zinc-800">
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">P&amp;L</div><div class="mono font-bold up">+$412.60</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Equity</div><div class="mono font-bold">$48,921</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Latency</div><div class="mono font-bold up">8.1s</div></div>
+      <div class="text-right"><div class="text-[9px] uppercase tracking-widest text-zinc-500">Phase</div><div class="mono font-bold text-yellow-400">PAPER</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- BODY -->
+<div class="grid gap-px bg-zinc-900" style="height:calc(100vh - 64px); grid-template-columns: 20% 55% 25%;">
+
+  <!-- LEFT: Scanner -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="panel-title">Scanner · Live</div><div class="text-[9px] mono text-zinc-500">47 hits</div>
+    </div>
+    <div class="overflow-y-auto flex-1">
+      <div class="scanner-card active">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2"><span class="mono font-bold text-sm">NVDA</span><span class="chip stage-order">ORDER · 8s</span></div>
+          <span class="mono text-[10px] up">+2.4%</span>
+        </div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span></span><span></span></div>
+        <div class="why mt-2">
+          <span class="text-violet-400 font-semibold">Bot:</span> "I caught rubber_band_scalp_short at 14:22:15 — RSI hit 28 and price bounced straight into VWAP from below, classic exhaustion. Regime is BEARISH which aligns.
+          Model consensus is 80% (5 of 5 agree), CNN-LSTM sees the same bull-trap it learned from 2019-2023 (72% conf). FinBERT found mildly bullish news but only +3pts — not enough to veto.
+          <b class="text-zinc-200">Going full size (100sh), risking $480 to make $1,030. R:R 2.1.</b>"
+          <span class="text-violet-400 hover:underline cursor-pointer">ask Sentcom →</span>
+        </div>
+        <div class="flex items-center gap-2 mt-1.5 text-[10px] mono">
+          <span class="dim">gate</span><span class="font-bold up">78</span>
+          <span class="dim ml-2">P(win)</span><span class="font-bold up">68%</span>
+          <span class="dim ml-2">Sharpe</span><span class="font-bold">1.52</span>
+        </div>
+      </div>
+      <div class="scanner-card">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">AMD</span><span class="chip stage-manage">OPEN</span></div><span class="mono text-[10px] up">+1.9%</span></div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1.5"><span class="text-green-400 font-semibold">Bot:</span> "Holding AMD since 14:02. CNN-LSTM ticked 67→72%, so I trailed stop to $166.40. Bull flag intact, 9/21 EMA stacked. Gunning for $172 PT."</div>
+      </div>
+      <div class="scanner-card">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">TSLA</span><span class="chip stage-manage">SHORT</span></div><span class="mono text-[10px] down">-0.3%</span></div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span></span></div>
+        <div class="why mt-1.5"><span class="text-red-400 font-semibold">Bot:</span> "Shorted TSLA at 14:09 on halfback_reversal — price failed to retake HOD twice, VAE flipped BEAR_TRENDING. SHORT_REVERSAL is my best-edge model (Sharpe 1.94)."</div>
+      </div>
+      <div class="scanner-card">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">MSFT</span><span class="chip stage-close">CLOSED W</span></div><span class="mono text-[10px] up">+0.7R</span></div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span class="on-order"></span><span class="on-manage"></span><span class="on-close"></span></div>
+        <div class="why mt-1.5"><span class="text-slate-400 font-semibold">Bot:</span> "PT hit on MSFT — booked +$142 (+0.7R). Stop never threatened. Textbook vwap_bounce win."</div>
+      </div>
+      <div class="scanner-card">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">SPY</span><span class="chip stage-veto">SKIP</span></div><span class="mono text-[10px] down">-0.2%</span></div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span class="on-eval"></span><span></span><span></span><span></span></div>
+        <div class="why mt-1.5"><span class="text-zinc-500 font-semibold">Bot:</span> "Gate only 41 on SPY vwap_bounce — regime neutral, ensemble P(win) 52%. No edge, skipping."</div>
+      </div>
+      <div class="scanner-card">
+        <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="mono font-bold text-sm">META</span><span class="chip stage-scan">SCAN</span></div><span class="mono text-[10px] up">+1.2%</span></div>
+        <div class="mini-5stage mt-1.5"><span class="on-scan"></span><span></span><span></span><span></span><span></span></div>
+        <div class="why mt-1.5"><span class="text-violet-400 font-semibold">Bot:</span> "META volume +340% of ADV but no setup crystallized yet. Watching for breakout or failed-breakout trigger."</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: CHART + TIMELINE + VOLUME -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- header with MTF tabs + bracket inline -->
+    <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+      <div class="flex items-center gap-3">
+        <span class="mono font-bold text-base">NVDA</span>
+        <span class="chip stage-order">ORDER · 8s</span>
+        <span class="mono text-[10px] up">$880.30 · +2.4%</span>
+        <div class="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[10px] mono">
+          <span class="dim">Entry</span><span class="warn font-bold">880.30</span>
+          <span class="dim ml-1">SL</span><span class="down font-bold">885.10</span>
+          <span class="dim ml-1">PT</span><span class="up font-bold">870.00</span>
+          <span class="dim ml-1">R:R</span><span class="font-bold">2.1</span>
+          <span class="dim ml-1">100sh</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-1 text-[10px] mono">
+        <span class="dim">TF:</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1m</span>
+        <span class="chip" style="border-color:#3b82f6;color:#60a5fa;background:rgba(59,130,246,.08)">5m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">15m</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1h</span>
+        <span class="chip" style="border-color:#27272a;color:#a1a1aa">1d</span>
+        <span class="dim ml-2">· scroll=zoom · drag=pan · shift+drag=measure</span>
+      </div>
+    </div>
+
+    <!-- CHART — maximize candle density, VPVR on right, mom meter below -->
+    <div class="bg-zinc-950 flex-1 overflow-hidden relative">
+      <svg viewBox="0 0 1100 560" preserveAspectRatio="none" class="w-full" style="height:calc(100% - 76px)">
+        <defs><pattern id="g4" width="50" height="40" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 40" fill="none" stroke="#18181b" stroke-width="0.5"/></pattern></defs>
+        <rect width="1100" height="560" fill="url(#g4)"/>
+
+        <!-- Relative Strength mini-line (top, dedicated strip) — NVDA vs SPY -->
+        <g transform="translate(0, 0)">
+          <rect x="40" y="2" width="950" height="26" fill="#0f0f11" stroke="#18181b"/>
+          <text x="46" y="14" class="lbl-sm">RS vs SPY (5m)</text>
+          <polyline points="100,20 150,18 200,19 250,16 300,15 350,13 400,12 450,10 500,8 550,9 600,7 650,6 700,4 750,5 800,6 850,8 900,10 950,9" fill="none" stroke="#22c55e" stroke-width="1"/>
+          <text x="955" y="14" class="lbl-b" fill="#22c55e">RS 1.34 ↑</text>
+          <line x1="40" y1="15" x2="990" y2="15" stroke="#27272a" stroke-width="0.5" stroke-dasharray="1,2"/>
+          <text x="992" y="19" class="lbl-xs">NVDA leading</text>
+        </g>
+
+        <!-- price axis -->
+        <g class="lbl">
+          <text x="995" y="56">890.00</text>
+          <text x="995" y="118">886.00</text>
+          <text x="995" y="180">882.00</text>
+          <text x="995" y="242">878.00</text>
+          <text x="995" y="304">874.00</text>
+          <text x="995" y="366">870.00</text>
+          <text x="995" y="428">866.00</text>
+          <text x="995" y="490">862.00</text>
+        </g>
+
+        <!-- time axis -->
+        <g class="lbl" opacity="0.55">
+          <text x="55"  y="540">09:30</text><text x="175" y="540">10:00</text><text x="290" y="540">10:30</text>
+          <text x="405" y="540">11:00</text><text x="520" y="540">11:30</text><text x="635" y="540">12:30</text>
+          <text x="750" y="540">13:30</text><text x="870" y="540">14:22 (now)</text>
+        </g>
+
+        <!-- Predicted-range band (future) -->
+        <rect class="ann-predicted-range" x="830" y="242" width="160" height="160"/>
+        <text x="836" y="254" class="lbl-b" fill="#22c55e">Predicted range · next 30m · 874–888</text>
+
+        <!-- PDH / PDL / PDC (orange dotted) with MTF badges -->
+        <line class="ann-pdh" x1="40" y1="70" x2="990" y2="70"/>
+        <rect x="42" y="60" width="68" height="12" fill="#431407" stroke="#f97316"/>
+        <text x="46" y="69" class="lbl-b" fill="#fdba74">PDH 889.50</text>
+        <rect x="114" y="60" width="46" height="12" fill="#0f0f11" stroke="#eab308"/>
+        <text x="117" y="69" class="mtf-pill" fill="#facc15">1h+15m+5m</text>
+        <text x="164" y="69" class="lbl-sm">MTF align 🔥</text>
+
+        <line class="ann-pdc" x1="40" y1="146" x2="990" y2="146"/>
+        <text x="46" y="144" class="lbl-sm" fill="#eab308">PDC 884.20</text>
+
+        <!-- PMH / PML (cyan dashed) -->
+        <line class="ann-pmh" x1="40" y1="100" x2="990" y2="100"/>
+        <text x="46" y="98" class="lbl-b" fill="#22d3ee">PMH 888.40</text>
+        <line class="ann-pml" x1="40" y1="356" x2="990" y2="356"/>
+        <text x="46" y="354" class="lbl-b" fill="#22d3ee">PML 871.10</text>
+
+        <line class="ann-pdl" x1="40" y1="482" x2="990" y2="482"/>
+        <text x="46" y="480" class="lbl-sm" fill="#fdba74">PDL 863.80</text>
+
+        <!-- Session HIGH / LOW -->
+        <line class="ann-sh" x1="40" y1="78" x2="990" y2="78"/>
+        <text x="900" y="76" class="lbl-sm">Session H 888.90</text>
+        <line class="ann-sl-day" x1="40" y1="440" x2="990" y2="440"/>
+        <text x="900" y="438" class="lbl-sm">Session L 867.20</text>
+
+        <!-- VWAP + AVWAP from open + EMAs -->
+        <path class="ann-vwap" d="M 40 250 L 160 248 L 280 245 L 400 238 L 520 228 L 640 212 L 760 194 L 880 180 L 960 186" fill="none"/>
+        <text x="46" y="246" class="lbl" fill="#a1a1aa">VWAP 878.90</text>
+        <path class="ann-avwap" d="M 40 260 L 160 255 L 280 250 L 400 240 L 520 226 L 640 208 L 760 188 L 880 174 L 960 180" fill="none"/>
+        <text x="46" y="266" class="lbl-sm" fill="#f59e0b">AVWAP (open) 878.20</text>
+        <path class="ann-9ema"  d="M 40 262 L 100 258 L 160 254 L 220 246 L 280 238 L 340 228 L 400 220 L 460 208 L 520 198 L 580 190 L 640 178 L 700 168 L 760 164 L 820 186 L 880 200 L 940 210"/>
+        <path class="ann-21ema" d="M 40 270 L 100 268 L 160 264 L 220 258 L 280 248 L 340 240 L 400 232 L 460 222 L 520 210 L 580 200 L 640 190 L 700 182 L 760 186 L 820 196 L 880 206 L 940 214"/>
+
+        <!-- Competing setup levels -->
+        <line class="ann-competing" x1="40" y1="128" x2="990" y2="128"/>
+        <text x="46" y="126" class="lbl-xs">competing: breakdown_short trigger 884</text>
+        <line class="ann-competing" x1="40" y1="304" x2="990" y2="304"/>
+        <text x="46" y="302" class="lbl-xs">competing: vwap_reclaim_long trigger 874</text>
+
+        <!-- CNN pattern box -->
+        <rect class="ann-box" x="700" y="130" width="120" height="100"/>
+        <text x="705" y="124" class="lbl-b" fill="#a855f7">CNN · exhaustion wick + VWAP reject</text>
+
+        <!-- SL / ENTRY / PT -->
+        <line class="ann-sl"  x1="40" y1="140" x2="990" y2="140"/>
+        <rect x="946" y="132" width="44" height="12" fill="#7f1d1d" stroke="#ef4444"/><text x="949" y="141" class="lbl-b" fill="#fca5a5">SL 885.10</text>
+        <line class="ann-ent" x1="40" y1="220" x2="990" y2="220"/>
+        <rect x="946" y="212" width="44" height="12" fill="#713f12" stroke="#eab308"/><text x="949" y="221" class="lbl-b" fill="#facc15">E 880.30</text>
+        <line class="ann-pt"  x1="40" y1="366" x2="990" y2="366"/>
+        <rect x="946" y="358" width="44" height="12" fill="#14532d" stroke="#22c55e"/><text x="949" y="367" class="lbl-b" fill="#86efac">PT 870</text>
+
+        <!-- TIGHT CANDLES — ~65 bars, each 4px wide, 2px gap -->
+        <g stroke-width="0.8">
+          <line class="candle-wick candle-down" x1="60" y1="250" x2="60" y2="272"/><rect class="candle-down" x="58" y="258" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="66" y1="244" x2="66" y2="262"/><rect class="candle-up" x="64" y="248" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="72" y1="240" x2="72" y2="256"/><rect class="candle-up" x="70" y="242" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="78" y1="238" x2="78" y2="254"/><rect class="candle-down" x="76" y="244" width="4" height="8"/>
+          <line class="candle-wick candle-up" x1="84" y1="234" x2="84" y2="250"/><rect class="candle-up" x="82" y="238" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="90" y1="230" x2="90" y2="246"/><rect class="candle-up" x="88" y="232" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="96" y1="226" x2="96" y2="242"/><rect class="candle-up" x="94" y="228" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="102" y1="222" x2="102" y2="238"/><rect class="candle-down" x="100" y="230" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="108" y1="218" x2="108" y2="234"/><rect class="candle-up" x="106" y="220" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="114" y1="214" x2="114" y2="230"/><rect class="candle-up" x="112" y="216" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="120" y1="210" x2="120" y2="226"/><rect class="candle-down" x="118" y="218" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="126" y1="206" x2="126" y2="222"/><rect class="candle-up" x="124" y="208" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="132" y1="202" x2="132" y2="218"/><rect class="candle-up" x="130" y="204" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="138" y1="198" x2="138" y2="216"/><rect class="candle-down" x="136" y="208" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="144" y1="196" x2="144" y2="210"/><rect class="candle-up" x="142" y="198" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="150" y1="194" x2="150" y2="208"/><rect class="candle-up" x="148" y="196" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="156" y1="190" x2="156" y2="206"/><rect class="candle-down" x="154" y="198" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="162" y1="188" x2="162" y2="202"/><rect class="candle-up" x="160" y="190" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="168" y1="184" x2="168" y2="200"/><rect class="candle-up" x="166" y="186" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="174" y1="182" x2="174" y2="196"/><rect class="candle-down" x="172" y="188" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="180" y1="178" x2="180" y2="192"/><rect class="candle-up" x="178" y="180" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="186" y1="176" x2="186" y2="190"/><rect class="candle-up" x="184" y="178" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="192" y1="172" x2="192" y2="188"/><rect class="candle-down" x="190" y="178" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="198" y1="170" x2="198" y2="184"/><rect class="candle-up" x="196" y="172" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="204" y1="166" x2="204" y2="180"/><rect class="candle-up" x="202" y="168" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="210" y1="164" x2="210" y2="180"/><rect class="candle-down" x="208" y="170" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="216" y1="160" x2="216" y2="176"/><rect class="candle-up" x="214" y="162" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="222" y1="156" x2="222" y2="172"/><rect class="candle-up" x="220" y="158" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="228" y1="152" x2="228" y2="168"/><rect class="candle-up" x="226" y="154" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="234" y1="148" x2="234" y2="164"/><rect class="candle-down" x="232" y="156" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="240" y1="144" x2="240" y2="160"/><rect class="candle-up" x="238" y="146" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="246" y1="140" x2="246" y2="154"/><rect class="candle-up" x="244" y="142" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="252" y1="136" x2="252" y2="152"/><rect class="candle-down" x="250" y="144" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="258" y1="132" x2="258" y2="148"/><rect class="candle-up" x="256" y="134" width="4" height="12"/>
+          <line class="candle-wick candle-up" x1="264" y1="130" x2="264" y2="144"/><rect class="candle-up" x="262" y="132" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="270" y1="128" x2="270" y2="142"/><rect class="candle-up" x="268" y="130" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="276" y1="124" x2="276" y2="140"/><rect class="candle-down" x="274" y="132" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="282" y1="122" x2="282" y2="136"/><rect class="candle-up" x="280" y="124" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="288" y1="120" x2="288" y2="134"/><rect class="candle-up" x="286" y="122" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="294" y1="118" x2="294" y2="134"/><rect class="candle-down" x="292" y="124" width="4" height="6"/>
+          <line class="candle-wick candle-up" x1="300" y1="116" x2="300" y2="130"/><rect class="candle-up" x="298" y="118" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="306" y1="112" x2="306" y2="126"/><rect class="candle-up" x="304" y="114" width="4" height="10"/>
+          <line class="candle-wick candle-up" x1="312" y1="110" x2="312" y2="124"/><rect class="candle-up" x="310" y="112" width="4" height="10"/>
+          <!-- Exhaustion wick near PMH -->
+          <line class="candle-wick candle-down" x1="720" y1="78" x2="720" y2="180"/><rect class="candle-down" x="718" y="148" width="4" height="18"/>
+          <line class="candle-wick candle-down" x1="726" y1="150" x2="726" y2="188"/><rect class="candle-down" x="724" y="162" width="4" height="18"/>
+          <line class="candle-wick candle-down" x1="732" y1="162" x2="732" y2="198"/><rect class="candle-down" x="730" y="174" width="4" height="16"/>
+          <line class="candle-wick candle-down" x1="738" y1="176" x2="738" y2="212"/><rect class="candle-down" x="736" y="186" width="4" height="16"/>
+          <line class="candle-wick candle-up" x1="744" y1="196" x2="744" y2="214"/><rect class="candle-up" x="742" y="200" width="4" height="12"/>
+          <line class="candle-wick candle-down" x1="750" y1="198" x2="750" y2="220"/><rect class="candle-down" x="748" y="206" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="756" y1="206" x2="756" y2="228"/><rect class="candle-down" x="754" y="214" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="762" y1="212" x2="762" y2="234"/><rect class="candle-down" x="760" y="220" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="768" y1="216" x2="768" y2="236"/><rect class="candle-down" x="766" y="222" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="774" y1="220" x2="774" y2="240"/><rect class="candle-down" x="772" y="224" width="4" height="10"/>
+          <line class="candle-wick candle-down" x1="780" y1="222" x2="780" y2="240"/><rect class="candle-down" x="778" y="228" width="4" height="8"/>
+          <line class="candle-wick candle-down" x1="786" y1="222" x2="786" y2="238"/><rect class="candle-down" x="784" y="226" width="4" height="8"/>
+        </g>
+
+        <!-- Swing pivot dots (structure) -->
+        <g>
+          <circle class="pivot-hh" cx="312" cy="108" r="2.5"/><text x="316" y="106" class="lbl-xs">HH</text>
+          <circle class="pivot-hh" cx="500" cy="138" r="2.5"/><text x="504" y="136" class="lbl-xs">HL</text>
+          <circle class="pivot-lh" cx="720" cy="76" r="3"/><text x="724" y="74" class="lbl-xs" fill="#fca5a5">LH (reject)</text>
+        </g>
+
+        <!-- THOUGHT BUBBLES · variable sized (small / medium / LARGE) -->
+        <!-- Small early scanner note -->
+        <g>
+          <path d="M 168 184 L 220 92" stroke="#a855f7" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bb violet" x="220" y="42" width="150" height="52" rx="4"/>
+          <text x="227" y="56" class="bb-text-b" fill="#a78bfa">09:45 · Scanner</text>
+          <text x="227" y="68" class="bb-text">NVDA flagged — vol +120%,</text>
+          <text x="227" y="80" class="bb-text">quality 78. Waiting for a</text>
+          <text x="227" y="92" class="bb-text">trigger near PMH / PDH zone.</text>
+        </g>
+
+        <!-- Medium mid-morning thesis -->
+        <g>
+          <path d="M 400 232 L 440 336" stroke="#60a5fa" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bb blue" x="440" y="320" width="190" height="72" rx="4"/>
+          <text x="446" y="334" class="bb-text-b" fill="#60a5fa">11:15 · Macro check</text>
+          <text x="446" y="346" class="bb-text">SPY holding 510 tight, VIX 18.3.</text>
+          <text x="446" y="358" class="bb-text">Plan A still alive — bias favors</text>
+          <text x="446" y="370" class="bb-text">longs BUT NVDA itself is extended</text>
+          <text x="446" y="382" class="bb-text">RS=1.34. Hunting rubber-band</text>
+          <text x="446" y="392" class="bb-text-sm">shorts specifically.</text>
+        </g>
+
+        <!-- LARGE CNN pattern bubble — detailed reasoning -->
+        <g>
+          <path d="M 720 100 L 520 28" stroke="#a855f7" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bb violet" x="260" y="28" width="260" height="92" rx="4"/>
+          <text x="268" y="42" class="bb-text-b" fill="#a78bfa">14:18 · CNN vision + thesis</text>
+          <text x="268" y="54" class="bb-text">Exhaustion wick + vol climax at PMH.</text>
+          <text x="268" y="66" class="bb-text">Matches top-10 reversal training samples</text>
+          <text x="268" y="78" class="bb-text">from NVDA 2019-Q3 (where post-reject</text>
+          <text x="268" y="90" class="bb-text">mean 30m return was −1.1% w/ 71% WR).</text>
+          <text x="268" y="102" class="bb-text-sm">conf 72% · TFT aligns 68% · FinBERT +3 conflict</text>
+          <text x="268" y="114" class="bb-text-sm">but not vetoing. Confluence at breakdown_short line.</text>
+        </g>
+
+        <!-- Trigger bubble — medium -->
+        <g>
+          <circle cx="770" cy="228" r="6" fill="#eab308" style="filter:drop-shadow(0 0 6px rgba(234,179,8,.9))"/>
+          <path d="M 770 232 L 810 440" stroke="#eab308" stroke-width="1" stroke-dasharray="3,2" fill="none"/>
+          <rect class="bb yellow" x="810" y="430" width="180" height="80" rx="4"/>
+          <text x="818" y="444" class="bb-text-b" fill="#facc15">14:22:15 · TRIGGER · Gate 78</text>
+          <text x="818" y="456" class="bb-text">Rubber-band fired — 3rd failed</text>
+          <text x="818" y="468" class="bb-text">VWAP retake. Regime +12 · Consensus</text>
+          <text x="818" y="480" class="bb-text">+15 · CNN +10 · TFT +10 · FinBERT +3.</text>
+          <text x="818" y="492" class="bb-text">Queuing 100sh short @ mkt.</text>
+          <text x="818" y="504" class="bb-text-sm">bracket OCA · SL 885.10 / PT 870.</text>
+        </g>
+
+        <!-- VPVR on right edge (volume profile) -->
+        <g transform="translate(995, 40)">
+          <rect x="0" y="0" width="60" height="480" fill="#0b0b0d" stroke="#18181b"/>
+          <text x="4" y="-4" class="lbl-sm" fill="#a1a1aa">VPVR</text>
+          <!-- price bins from top to bottom: 890 → 862, ~8 bins of 60px each -->
+          <rect class="vpvr-bar"     x="30" y="28"  width="28" height="18"/>
+          <rect class="vpvr-bar"     x="20" y="50"  width="38" height="18"/>
+          <rect class="vpvr-bar-hvn" x="8"  y="72"  width="50" height="18"/>
+          <rect class="vpvr-bar"     x="22" y="96"  width="36" height="18"/>
+          <rect class="vpvr-bar"     x="32" y="120" width="26" height="18"/>
+          <rect class="vpvr-bar"     x="40" y="144" width="18" height="18"/>
+          <rect class="vpvr-bar"     x="34" y="168" width="24" height="18"/>
+          <rect class="vpvr-bar-hvn" x="10" y="190" width="48" height="20"/>
+          <rect class="vpvr-bar-poc" x="2"  y="214" width="56" height="22"/>
+          <rect class="vpvr-bar"     x="24" y="240" width="34" height="18"/>
+          <rect class="vpvr-bar"     x="30" y="264" width="28" height="18"/>
+          <rect class="vpvr-bar"     x="26" y="288" width="32" height="18"/>
+          <rect class="vpvr-bar-hvn" x="14" y="310" width="44" height="20"/>
+          <rect class="vpvr-bar"     x="34" y="334" width="24" height="18"/>
+          <rect class="vpvr-bar"     x="38" y="358" width="20" height="18"/>
+          <rect class="vpvr-bar"     x="42" y="382" width="16" height="18"/>
+          <rect class="vpvr-bar"     x="40" y="406" width="18" height="18"/>
+          <rect class="vpvr-bar"     x="46" y="430" width="12" height="18"/>
+          <rect class="vpvr-bar"     x="50" y="454" width="8"  height="18"/>
+          <!-- POC label -->
+          <text x="-2" y="228" class="lbl-sm" fill="#f97316" text-anchor="end" transform="translate(70,0)">POC 878</text>
+        </g>
+
+      </svg>
+
+      <!-- CLICKABLE TIMELINE STRIP — bubble timestamps -->
+      <div class="border-t border-zinc-900 bg-zinc-950 px-3 py-1.5" style="height:30px">
+        <div class="relative h-full">
+          <div class="absolute left-0 right-12 top-1/2 h-px bg-zinc-800"></div>
+          <!-- dots proportional to time 9:30 → now -->
+          <div class="absolute" style="left:10%; top:50%; transform:translate(-50%,-50%)">
+            <svg class="tl-dot" width="12" height="12" style="color:#a78bfa"><circle cx="6" cy="6" r="4" fill="#a78bfa"/></svg>
+            <div class="text-[8px] mono absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-violet-400">09:45</div>
+          </div>
+          <div class="absolute" style="left:35%; top:50%; transform:translate(-50%,-50%)">
+            <svg class="tl-dot" width="12" height="12" style="color:#60a5fa"><circle cx="6" cy="6" r="4" fill="#60a5fa"/></svg>
+            <div class="text-[8px] mono absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-blue-400">11:15</div>
+          </div>
+          <div class="absolute" style="left:68%; top:50%; transform:translate(-50%,-50%)">
+            <svg class="tl-dot" width="14" height="14" style="color:#a78bfa"><circle cx="7" cy="7" r="5" fill="#a78bfa"/></svg>
+            <div class="text-[8px] mono absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-violet-400">14:18 · CNN</div>
+          </div>
+          <div class="absolute" style="left:78%; top:50%; transform:translate(-50%,-50%)">
+            <svg class="tl-dot" width="14" height="14" style="color:#eab308"><circle cx="7" cy="7" r="5" fill="#eab308"/></svg>
+            <div class="text-[8px] mono absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-yellow-400">14:22:15 · TRIGGER</div>
+          </div>
+          <div class="absolute" style="left:86%; top:50%; transform:translate(-50%,-50%)">
+            <svg class="tl-dot" width="12" height="12" style="color:#22c55e"><circle cx="6" cy="6" r="4" fill="#22c55e"/></svg>
+            <div class="text-[8px] mono absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-green-400">14:22:28</div>
+          </div>
+          <div class="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] mono dim">· click to jump ·</div>
+        </div>
+      </div>
+
+      <!-- Bottom strip: volume + buy/sell pressure meter (relabeled) -->
+      <div class="grid grid-cols-4 bg-zinc-950 border-t border-zinc-900" style="height:46px">
+        <div class="col-span-3 px-2 py-1 border-r border-zinc-900">
+          <div class="flex items-center gap-2 mb-0.5"><span class="lbl-sm" style="color:#52525b">VOLUME</span><span class="text-[8px] mono dim">surge at 14:20 · climax bar</span></div>
+          <svg viewBox="0 0 900 24" preserveAspectRatio="none" class="w-full" style="height:22px">
+            <g>
+              <rect x="40" y="10" width="4" height="14" fill="#52525b"/><rect x="46" y="12" width="4" height="12" fill="#52525b"/>
+              <rect x="52" y="8" width="4" height="16" fill="#52525b"/><rect x="58" y="14" width="4" height="10" fill="#52525b"/>
+              <rect x="64" y="4" width="4" height="20" fill="#22c55e"/><rect x="70" y="0" width="4" height="24" fill="#22c55e"/>
+              <rect x="76" y="10" width="4" height="14" fill="#22c55e"/><rect x="82" y="8" width="4" height="16" fill="#22c55e"/>
+              <rect x="88" y="12" width="4" height="12" fill="#22c55e"/><rect x="94" y="10" width="4" height="14" fill="#22c55e"/>
+              <rect x="100" y="8" width="4" height="16" fill="#22c55e"/><rect x="106" y="14" width="4" height="10" fill="#22c55e"/>
+              <rect x="500" y="8" width="4" height="16" fill="#22c55e"/><rect x="506" y="6" width="4" height="18" fill="#22c55e"/>
+              <rect x="512" y="10" width="4" height="14" fill="#22c55e"/><rect x="518" y="12" width="4" height="12" fill="#22c55e"/>
+              <rect x="678" y="-6" width="4" height="30" fill="#ef4444"/>
+              <rect x="684" y="-2" width="4" height="26" fill="#ef4444"/>
+              <rect x="690" y="2" width="4" height="22" fill="#ef4444"/>
+              <rect x="696" y="4" width="4" height="20" fill="#ef4444"/>
+              <rect x="702" y="8" width="4" height="16" fill="#ef4444"/>
+              <rect x="708" y="12" width="4" height="12" fill="#ef4444"/>
+              <rect x="714" y="14" width="4" height="10" fill="#22c55e"/>
+              <rect x="720" y="10" width="4" height="14" fill="#ef4444"/>
+              <rect x="726" y="12" width="4" height="12" fill="#ef4444"/>
+            </g>
+          </svg>
+        </div>
+        <div class="px-2 py-1">
+          <div class="flex items-center justify-between mb-0.5"><span class="lbl-sm" style="color:#52525b">BUY/SELL PRESSURE · 5m</span><span class="mono text-[9px] up">72% sell</span></div>
+          <div class="h-3 bg-zinc-900 rounded-full overflow-hidden relative">
+            <div class="absolute inset-y-0 left-0 bg-gradient-to-r from-red-600 to-red-400" style="width:72%"></div>
+            <div class="absolute inset-y-0 right-0 bg-gradient-to-l from-green-600 to-green-400" style="width:28%"></div>
+            <div class="absolute inset-y-0 left-1/2 w-px bg-zinc-700"></div>
+          </div>
+          <div class="flex justify-between text-[8px] mono dim mt-0.5"><span>SELL</span><span>BUY</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Briefings + Positions + Unified Stream -->
+  <div class="bg-zinc-950 flex flex-col overflow-hidden">
+    <!-- Briefings — only populated slots shown brightly, pending are dimmed -->
+    <div class="border-b border-zinc-800 flex flex-col" style="max-height:32vh">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Briefings</div>
+        <div class="text-[9px] mono dim">auto · configure in Market Intel</div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="briefing-card briefing-new">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2"><span class="mono font-bold text-xs text-amber-400">MID-DAY RECAP</span><span class="chip stage-manage">NEW</span></div>
+            <span class="mono text-[9px] dim">12:00</span>
+          </div>
+          <div class="why mt-1">SPY held 510, tech pulling its weight. 2 fills (MSFT WIN, AAPL WIN). Plan A live — hunting rubber-band shorts on extended names into close.</div>
+          <div class="why-dim mt-1 text-[9px]">If SPY breaks 508 in PM → Plan B switch (halfback shorts). If 512 break → add long inventory via opening_drive_long.</div>
+        </div>
+        <div class="briefing-card">
+          <div class="flex items-center justify-between"><div class="mono font-bold text-xs text-violet-400">MORNING PREP</div><span class="mono text-[9px] dim">09:28</span></div>
+          <div class="why mt-1">Regime HIGH-VOL TREND · VIX 18.3 · CPI beat. NVDA upgrade, CRWD miss, BA downgrade.</div>
+        </div>
+        <div class="briefing-card">
+          <div class="flex items-center justify-between"><div class="mono font-bold text-xs text-cyan-400">PRE-OPEN SCAN</div><span class="mono text-[9px] dim">09:15</span></div>
+          <div class="why mt-1">In-play: NVDA (unusual options), TSLA (sympathy EV), AMD (RS leader), META (vol surge). CRWD earnings gap short flagged.</div>
+        </div>
+        <!-- Pending slots visible but greyed out so user knows they're coming -->
+        <div class="briefing-card briefing-pending">
+          <div class="flex items-center justify-between"><div class="mono font-bold text-xs">POWER HOUR</div><span class="mono text-[9px]">in 1h 38m</span></div>
+          <div class="why mt-1">pending · auto-generates at 15:00</div>
+        </div>
+        <div class="briefing-card briefing-pending">
+          <div class="flex items-center justify-between"><div class="mono font-bold text-xs">CLOSE RECAP</div><span class="mono text-[9px]">in 2h 38m</span></div>
+          <div class="why mt-1">pending · auto-generates at 16:00</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open positions (compact) -->
+    <div class="border-b border-zinc-800 flex flex-col" style="max-height:24vh">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Open (2)</div><div class="mono text-[10px] up">+$186 · +0.6R</div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between"><div><span class="mono font-bold">AMD</span> <span class="chip stage-manage ml-1">SCALP long</span></div><span class="mono text-xs up">+$112 · +0.4R</span></div>
+          <svg viewBox="0 0 180 24" class="w-full h-6 mt-1"><polyline points="0,18 15,16 30,19 45,14 60,11 75,9 90,10 105,7 120,6 135,7 150,5 165,4 180,3" fill="none" stroke="#22c55e" stroke-width="1.2"/></svg>
+          <div class="why-dim">TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull</div>
+        </div>
+        <div class="px-3 py-2 border-b border-zinc-900">
+          <div class="flex items-baseline justify-between"><div><span class="mono font-bold">TSLA</span> <span class="chip stage-manage ml-1">SHORT_REV</span></div><span class="mono text-xs up">+$74 · +0.2R</span></div>
+          <svg viewBox="0 0 180 24" class="w-full h-6 mt-1"><polyline points="0,4 15,6 30,5 45,8 60,10 75,7 90,12 105,14 120,16 135,15 150,19 165,21 180,22" fill="none" stroke="#ef4444" stroke-width="1.2"/></svg>
+          <div class="why-dim">SL 245.40 · PT 238.10 · VAE BEAR_TRENDING</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unified Stream — verbose conversational -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <div class="panel-title">Unified Stream</div>
+        <div class="flex items-center gap-1 text-[9px] mono">
+          <span class="chip stage-manage">live</span>
+          <span class="dim">filter:</span>
+          <span class="chip stage-scan">scan</span>
+          <span class="chip stage-eval">eval</span>
+          <span class="chip stage-order">order</span>
+          <span class="chip stage-close">close</span>
+        </div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <div class="stream-item sev-order">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-violet-400">14:22:28</span> <b class="text-zinc-200">NVDA · bracket queued</b></span>
+            <span class="warn">pending IB · 8s</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-yellow-400 font-semibold">Bot:</span> "Sent the bracket. 100sh short at market, SL 885.10, PT 870.00. OCA group sentcom-5b3a-20. IB ACK'd in 1.2s, waiting on fill — typical 5-12s at this liquidity. Will update when filled."</div>
+        </div>
+        <div class="stream-item sev-brain">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-violet-400">14:22:19</span> <b class="text-zinc-200">NVDA · gate decision</b></span>
+            <span class="up font-bold">78 GO</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-violet-400 font-semibold">Bot:</span> "Gate scored 78/100 on NVDA rubber-band. Regime +12 (BEARISH confirmed), Consensus +15 (5/5 models agree SHORT), TFT +10, CNN-LSTM +10, FinBERT only +3 — mild bullish news, but not enough to veto. Full-size GO. R:R 2.1 approved."</div>
+        </div>
+        <div class="stream-item sev-fill">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-green-400">14:22:14</span> <b class="text-zinc-200">AMD · stop trailed</b></span>
+            <span class="up">→ $166.40</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-green-400 font-semibold">Bot:</span> "Pulled AMD stop up to $166.40 (was $165.80). Justification: CNN-LSTM confidence rose 67% → 72% over the last 5 bars, and the 9EMA/21EMA are stacked tight. Protecting 0.4R, still leaving 3.1R of runway to $172 PT."</div>
+        </div>
+        <div class="stream-item sev-fill">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-yellow-400">14:22:09</span> <b class="text-zinc-200">TSLA · FILLED</b></span>
+            <span class="up">50s @ 242.98</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-red-400 font-semibold">Bot:</span> "TSLA filled — 50 short @ 242.98 (2¢ slippage, 2-leg partial). halfback_reversal_short, my best-edge model at Sharpe 1.94. VAE regime = BEAR_TRENDING which aligns. Stop 245.40, target 238.10."</div>
+        </div>
+        <div class="stream-item sev-skip">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-zinc-400">13:58:03</span> <b class="text-zinc-200">SPY · SKIP</b></span>
+            <span class="dim">gate 41</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-zinc-500 font-semibold">Bot:</span> "Didn't take SPY. vwap_bounce_long setup was there but the gate only scored 41/100 — well below my 60 GO threshold. Ensemble P(win) 52%, regime neutral. Correct no-trade decision."</div>
+        </div>
+        <div class="stream-item sev-win">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-slate-400">13:49:02</span> <b class="text-zinc-200">MSFT · CLOSED · PT hit</b></span>
+            <span class="up font-bold">+$142 · +0.7R</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-green-400 font-semibold">Bot:</span> "MSFT hit PT at $420.55, exited 50sh for +$142 (+0.7R). Held 16min. Stop never threatened. Borderline gate (62) at entry with partial-size rule — correct behavior, banked the easier win."</div>
+        </div>
+        <div class="stream-item sev-loss">
+          <div class="flex items-center justify-between text-[10px] mono">
+            <span><span class="text-slate-400">11:40:58</span> <b class="text-zinc-200">BA · CLOSED · SL hit</b></span>
+            <span class="down font-bold">−$36 · −0.3R</span>
+          </div>
+          <div class="why mt-0.5"><span class="text-red-400 font-semibold">Bot:</span> "BA stopped out at $181.90. Honest on the post-mortem: FinBERT had flagged -5 at entry (supplier downgrade news), but gate passed at 64. Partial-size rule contained bleed to -0.3R. FinBERT was right — expected loss in my distribution."</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="fixed bottom-1 right-2 text-[9px] mono text-zinc-600">v4 · zoom · VPVR · PDH/PDL/PDC · MTF badges · AVWAP · RS · buy/sell pressure · variable bubbles · click-timeline · <a href="index.html" class="text-violet-400 hover:underline">← all options</a></div>
+</body>
+</html>
