@@ -16,7 +16,7 @@
  * All V5 components live in `./v5/`. Existing panels are left untouched so
  * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
 import { ModelHealthScorecard } from './panels/ModelHealthScorecard';
@@ -32,6 +32,7 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
+import { useTickerModal } from '../../hooks/useTickerModal';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -140,6 +141,19 @@ export const SentComV5View = ({
   const latencySeconds = status?.order_latency_seconds ?? status?.latency_seconds;
   const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
+  // Single entry point for every ticker-symbol click anywhere inside V5:
+  //   1. focus the symbol on the center chart (preserves the old UX)
+  //   2. open the EnhancedTickerModal for deep analysis
+  // The modal's own data cache (3 min, per-symbol) keeps subsequent opens
+  // of the same ticker near-instant, so spamming this is cheap.
+  const { openTickerModal } = useTickerModal();
+  const handleOpenTicker = useCallback((symbol) => {
+    if (!symbol) return;
+    const sym = String(symbol).toUpperCase();
+    setFocusedSymbol(sym);
+    openTickerModal(sym);
+  }, [openTickerModal]);
+
   return (
     <div
       data-testid="sentcom-v5-root"
@@ -211,7 +225,7 @@ export const SentComV5View = ({
               positions={positions}
               messages={messages}
               selectedSymbol={effectiveSymbol}
-              onSelectSymbol={setFocusedSymbol}
+              onSelectSymbol={handleOpenTicker}
             />
           </div>
         </section>
@@ -250,7 +264,7 @@ export const SentComV5View = ({
               <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
             </div>
             <div className="overflow-y-auto flex-1 v5-scroll">
-              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} />
+              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} />
             </div>
           </div>
 
@@ -262,7 +276,7 @@ export const SentComV5View = ({
               loading={positionsLoading}
               onSelectPosition={(p) => {
                 setSelectedPosition?.(p);
-                setFocusedSymbol(p.symbol);
+                handleOpenTicker(p.symbol);
               }}
             />
           </div>
@@ -274,7 +288,7 @@ export const SentComV5View = ({
               <span className="v5-chip v5-chip-manage">live</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
-              <UnifiedStreamV5 messages={messages} loading={streamLoading} />
+              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
             </div>
             <div className="border-t border-zinc-800">
               <ChatInput onSend={handleChat} disabled={!status?.connected} />

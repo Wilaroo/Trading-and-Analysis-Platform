@@ -89,12 +89,13 @@ const formatRight = (msg, sev) => {
 };
 
 
-const StreamRow = ({ msg }) => {
+const StreamRow = ({ msg, onSymbolClick }) => {
   const sev = classifyMessage(msg);
   const time = formatTimestamp(msg.timestamp || msg.created_at || msg.time);
   const headline = formatHeadline(msg);
   const right = formatRight(msg, sev);
   const body = msg.summary || msg.text || msg.message || msg.content || msg.note || '';
+  const sym = msg.symbol || msg.ticker;
 
   return (
     <div className={`v5-stream-item sev-${sev}`} data-testid={`v5-stream-item-${sev}`}>
@@ -102,7 +103,23 @@ const StreamRow = ({ msg }) => {
         <span className="min-w-0 truncate">
           {time && <span className={TIME_COLOR_BY_SEV[sev]}>{time}</span>}
           {' '}
-          <b className="text-zinc-200">{headline}</b>
+          {sym && onSymbolClick ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSymbolClick(sym); }}
+              className="text-zinc-100 font-bold hover:text-cyan-300 hover:underline transition-colors uppercase"
+              data-testid={`stream-symbol-${sym}`}
+              title={`Open ${sym} analysis`}
+            >
+              {sym}
+            </button>
+          ) : null}
+          {sym ? <span className="text-zinc-500"> · </span> : null}
+          <b className="text-zinc-200">
+            {/* If we already rendered the symbol as a button, strip it from
+                the headline to avoid duplication. */}
+            {sym ? headline.replace(new RegExp(`^${sym}\\s*·\\s*`, 'i'), '') : headline}
+          </b>
         </span>
         {right && <span className={`shrink-0 v5-mono ${right.color || ''}`}>{right.text}</span>}
       </div>
@@ -117,7 +134,7 @@ const StreamRow = ({ msg }) => {
 };
 
 
-export const UnifiedStreamV5 = ({ messages, loading }) => {
+export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
   // Stage 2d-C — filter chips matching the mockup. Multi-select: unlocked
   // defaults to "all". Clicking a chip toggles it.
   const [filters, setFilters] = useState(() => new Set());
@@ -164,7 +181,7 @@ export const UnifiedStreamV5 = ({ messages, loading }) => {
     <div data-testid="v5-unified-stream" className="flex flex-col">
       <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
       {filtered.map((m, i) => (
-        <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} />
+        <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} />
       ))}
       {filtered.length === 0 && filters.size > 0 && (
         <div className="px-3 py-4 text-center text-[11px] text-zinc-500 v5-why-dim">
