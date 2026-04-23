@@ -126,6 +126,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
     const dir = (p.direction || p.side || '').toLowerCase();
     const pnlR = p.pnl_r ?? p.r_multiple ?? p.unrealized_r;
     const pnlUsd = p.unrealized_pnl ?? p.pnl ?? p.pnl_usd;
+    // Backend may return `target_prices` (array, one per scale-out) OR
+    // `target_price` (legacy scalar). Pick the first usable value.
+    const pt = p.target_price ?? (Array.isArray(p.target_prices) ? p.target_prices[0] : null);
     bySymbol.set(sym, {
       symbol: sym,
       stage: 'manage',
@@ -135,7 +138,7 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
         p.bot_note ||
         `Holding ${sym}${p.entry_price ? ` @ ${formatNum(p.entry_price, 2)}` : ''}` +
         `${p.stop_price ? ` · SL ${formatNum(p.stop_price, 2)}` : ''}` +
-        `${p.target_price ? ` · PT ${formatNum(p.target_price, 2)}` : ''}.`,
+        `${pt ? ` · PT ${formatNum(pt, 2)}` : ''}.`,
       metrics: {
         gate: p.gate_score,
         p_win: p.p_win,

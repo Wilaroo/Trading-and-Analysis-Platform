@@ -61,7 +61,14 @@ const PositionRow = ({ position, onClick }) => {
       )}
       <div className="v5-why-dim mt-1 truncate">
         {position.stop_price != null && <span>SL {Number(position.stop_price).toFixed(2)}</span>}
-        {position.target_price != null && <span> · PT {Number(position.target_price).toFixed(2)}</span>}
+        {(() => {
+          // Backend bot positions provide a `target_prices` array (one per
+          // scale-out level). Legacy / IB-only rows may provide a scalar
+          // `target_price`. Render the first target in either case.
+          const pt = position.target_price
+            ?? (Array.isArray(position.target_prices) ? position.target_prices[0] : null);
+          return pt != null ? <span> · PT {Number(pt).toFixed(2)}</span> : null;
+        })()}
         {position.entry_price != null && <span> · E {Number(position.entry_price).toFixed(2)}</span>}
         {position.p_win != null && <span> · P(win) {Math.round(Number(position.p_win) * 100)}%</span>}
       </div>

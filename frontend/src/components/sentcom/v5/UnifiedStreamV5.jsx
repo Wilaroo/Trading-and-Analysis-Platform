@@ -33,8 +33,11 @@ const BOT_TAG_COLOR_BY_SEV = {
 };
 
 const classifyMessage = (msg) => {
-  const kind = (msg.event || msg.kind || msg.type || msg.severity || '').toLowerCase();
-  const text = (msg.text || msg.message || msg.summary || '').toLowerCase();
+  // `action_type` is the specific signal ("skip_low_gate", "order_filled")
+  // while `type` tends to be a wrapper ("thought"). Prefer the specific one
+  // so severity classification matches what the backend actually decided.
+  const kind = (msg.action_type || msg.event || msg.kind || msg.type || msg.severity || '').toLowerCase();
+  const text = (msg.text || msg.message || msg.summary || msg.content || '').toLowerCase();
   if (kind.includes('order') || kind.includes('queued') || kind.includes('bracket')) return 'order';
   if (kind.includes('fill') || kind.includes('trail') || kind.includes('stop_moved')) return 'fill';
   if (kind.includes('win') || (kind.includes('close') && (text.includes('pt') || text.includes('+$') || text.includes('+r')))) return 'win';
@@ -58,9 +61,13 @@ const formatTimestamp = (iso) => {
 
 const formatHeadline = (msg) => {
   const sym = msg.symbol || msg.ticker;
-  const event = msg.event || msg.kind || msg.type || '';
+  // Prefer the more-specific `action_type` (e.g. "scanning", "order_filled",
+  // "skip_low_gate") over the generic `type` wrapper (e.g. "thought"), so
+  // the stream headline actually says something useful.
+  const event = msg.action_type || msg.event || msg.kind || msg.type || '';
   if (sym && event) return `${sym} · ${event.replace(/_/g, ' ').toLowerCase()}`;
-  return msg.headline || msg.title || event || 'event';
+  if (event) return event.replace(/_/g, ' ').toLowerCase();
+  return msg.headline || msg.title || 'event';
 };
 
 const formatRight = (msg, sev) => {
@@ -87,7 +94,7 @@ const StreamRow = ({ msg }) => {
   const time = formatTimestamp(msg.timestamp || msg.created_at || msg.time);
   const headline = formatHeadline(msg);
   const right = formatRight(msg, sev);
-  const body = msg.summary || msg.text || msg.message || msg.note || '';
+  const body = msg.summary || msg.text || msg.message || msg.content || msg.note || '';
 
   return (
     <div className={`v5-stream-item sev-${sev}`} data-testid={`v5-stream-item-${sev}`}>

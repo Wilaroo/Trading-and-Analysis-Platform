@@ -337,9 +337,19 @@ export const ChartPanel = ({
     if (position.stop_price != null) {
       specs.push({ price: Number(position.stop_price), color: '#ef4444', title: `SL ${Number(position.stop_price).toFixed(2)}`, lineStyle: 2 });
     }
-    if (position.target_price != null) {
-      specs.push({ price: Number(position.target_price), color: '#22c55e', title: `PT ${Number(position.target_price).toFixed(2)}`, lineStyle: 2 });
-    }
+    // Support both singular `target_price` (legacy) and `target_prices` array
+    // (bot trades with scale-out levels). Paint each as its own PT line.
+    const targets = Array.isArray(position.target_prices)
+      ? position.target_prices.filter(t => t != null)
+      : (position.target_price != null ? [position.target_price] : []);
+    targets.forEach((tp, i) => {
+      specs.push({
+        price: Number(tp),
+        color: '#22c55e',
+        title: targets.length > 1 ? `PT${i + 1} ${Number(tp).toFixed(2)}` : `PT ${Number(tp).toFixed(2)}`,
+        lineStyle: 2,
+      });
+    });
 
     for (const spec of specs) {
       if (!Number.isFinite(spec.price)) continue;
@@ -362,7 +372,7 @@ export const ChartPanel = ({
       }
       priceLinesRef.current = [];
     };
-  }, [position?.entry_price, position?.stop_price, position?.target_price, position?.direction, position?.side]);
+  }, [position?.entry_price, position?.stop_price, position?.target_price, position?.target_prices, position?.direction, position?.side]);
 
   // Stage 2e — fetch PDH / PDL / PDC / PMH / PML for the current symbol
   // and paint them as horizontal support/resistance price lines.

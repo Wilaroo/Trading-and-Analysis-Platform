@@ -148,13 +148,32 @@ export const useSentComStream = () => {
     try {
       const [streamData, chatData] = await Promise.all([
         safeGet('/api/sentcom/stream?limit=50'),
-        safeGet('/api/sentcom/chats?limit=20')
+        // NOTE: endpoint is `/chat/history` (not `/chats`) and it returns
+        // `messages` (flat role-based entries) not `chats`. Prior code was
+        // hitting a 404 and silently failing, so chat replies never merged
+        // into the stream view.
+        safeGet('/api/sentcom/chat/history?limit=20')
       ]);
 
       if (streamData === null || chatData === null) return;
 
       const streamMessages = (streamData.success && streamData.messages) || [];
-      const chatMessages = (chatData.success && chatData.chats) || [];
+      // Fold the role-based chat history into a list of {query, response}
+      // pairs so the existing merge code below keeps working.
+      const historyMsgs = (chatData.success && chatData.messages) || [];
+      const chatMessages = [];
+      for (let i = 0; i < historyMsgs.length; i++) {
+        const m = historyMsgs[i];
+        if (m.role !== 'user') continue;
+        const next = historyMsgs[i + 1];
+        if (!next || next.role !== 'assistant') continue;
+        chatMessages.push({
+          id: `${m.timestamp}-${next.timestamp}`,
+          query: m.content,
+          response: { content: next.content },
+          timestamp: next.timestamp,
+        });
+      }
 
       const currentIds = streamMessages.map(m => m.id).join(',');
       const currentChatCount = chatMessages.length;
@@ -381,11 +400,13 @@ export const useChatHistory = () => {
 
   const fetchChats = useCallback(async () => {
     try {
-      const data = await safeGet('/api/sentcom/chats?limit=50');
+      // Endpoint is `/chat/history` and returns `messages` (role-based flat
+      // entries), not the non-existent `/chats` → `chats`.
+      const data = await safeGet('/api/sentcom/chat/history?limit=50');
       if (data === null) return;
-      
+
       if (data.success) {
-        setChats(data.chats || []);
+        setChats(data.messages || []);
       }
     } catch (err) {
       console.error('Error fetching chat history:', err);

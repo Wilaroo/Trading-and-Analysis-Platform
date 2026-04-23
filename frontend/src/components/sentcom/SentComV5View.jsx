@@ -77,9 +77,9 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) =
     eval_sub: withGate.length
       ? `${gatePassPct}% gate pass${avgGate != null ? ` · avg ${avgGate}` : ''}`
       : (alerts?.length ? `${alerts.length} alerts` : 'no alerts'),
-    order: (pipeline.pending ?? 0) + (pipeline.executing ?? 0) + (pipeline.filled_today ?? 0),
-    order_sub: pipeline.pending != null || pipeline.filled_today != null
-      ? `${pipeline.filled_today ?? 0} filled · ${pipeline.pending ?? 0} pending${pipeline.last_ack_s != null ? ` · ${pipeline.last_ack_s}s` : ''}`
+    order: (pipeline.pending ?? 0) + (pipeline.executing ?? 0) + (pipeline.filled ?? pipeline.filled_today ?? 0),
+    order_sub: (pipeline.pending != null || pipeline.filled != null || pipeline.filled_today != null)
+      ? `${pipeline.filled ?? pipeline.filled_today ?? 0} filled · ${pipeline.pending ?? 0} pending${pipeline.last_ack_s != null ? ` · ${pipeline.last_ack_s}s ack` : ''}`
       : '—',
     manage: openPositions.length,
     manage_sub: openPositions.length > 0
@@ -320,9 +320,16 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition }) => {
           <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[10px] v5-mono">
             {position.entry_price != null && (<><span className="v5-dim">E</span><span className="v5-warn font-bold">{Number(position.entry_price).toFixed(2)}</span></>)}
             {position.stop_price != null && (<><span className="v5-dim ml-1">SL</span><span className="v5-down font-bold">{Number(position.stop_price).toFixed(2)}</span></>)}
-            {position.target_price != null && (<><span className="v5-dim ml-1">PT</span><span className="v5-up font-bold">{Number(position.target_price).toFixed(2)}</span></>)}
+            {(() => {
+              const pt = position.target_price ?? (Array.isArray(position.target_prices) ? position.target_prices[0] : null);
+              return pt != null ? (<><span className="v5-dim ml-1">PT</span><span className="v5-up font-bold">{Number(pt).toFixed(2)}</span></>) : null;
+            })()}
             {position.risk_reward != null && (<><span className="v5-dim ml-1">R:R</span><span className="font-bold text-zinc-200">{Number(position.risk_reward).toFixed(1)}</span></>)}
-            {position.quantity != null && <span className="v5-dim ml-1">{position.quantity}sh</span>}
+            {(() => {
+              // Backend bot/IB positions provide `shares`; some legacy rows provide `quantity`.
+              const q = position.shares ?? position.quantity;
+              return q != null ? <span className="v5-dim ml-1">{q}sh</span> : null;
+            })()}
           </div>
         )}
       </div>
