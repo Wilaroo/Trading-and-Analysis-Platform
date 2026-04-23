@@ -14,6 +14,48 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - 🟡 Revisit `MorningBriefingModal.jsx` to look like the user's "newer more in-depth briefing modal" (screenshot they shared). Current V5-restyled modal is a minimal summary; they want richer detail. Revisit after Stage 2d polish.
 
 
+## 2026-04-23 — P0 FIX: Directional stops in revalidation backtests
+
+**Issue:** `advanced_backtest_engine.py::_simulate_strategy_with_gate` had
+5 directional bugs where SHORT strategies used LONG logic for
+stop/target triggers, MFE/MAE tracking, and PnL sign — causing
+revalidation backtests to overstate SHORT performance and deploy
+broken models.
+
+**Fix:** `search_replace` already made the code direction-aware in
+`_simulate_strategy_with_gate`. Audit confirmed the sibling methods
+`_simulate_strategy` and `_simulate_strategy_with_ai` were already
+correct. Added 9 regression tests (`test_backtest_direction_stops.py`)
+covering LONG + SHORT stop/target hits across all three sim methods.
+All 9 pass.
+
+## 2026-04-23 — P1 FIX: "Awaiting quotes" gate in trading bot risk math
+
+**Issue (two bugs):**
+1. `trading_bot_service._execute_trade` read `self._daily_stats.realized_pnl`
+   and `.unrealized_pnl`, but `DailyStats` dataclass has neither field —
+   this AttributeError'd, was caught by the outer `except Exception`
+   (fail-closed), and **silently blocked every single trade** when
+   safety guardrails were wired in.
+2. Even with fields present, broker-loaded positions before IB's first
+   quote arrives have `current_price = 0`, producing e.g.
+   `(0 - 1200) * 1000 = -$1.2M` phantom unrealized loss → instant
+   kill-switch trip on every startup.
+
+**Fix:**
+- New helper `TradingBotService._compute_live_unrealized_pnl()` returns
+  `(total_usd, awaiting_quotes: bool)`. If any open trade has
+  `current_price <= 0` or `fill_price <= 0`, `awaiting_quotes=True` and
+  the PnL is suppressed to 0.
+- `_execute_trade` now passes the real sum (or 0 while awaiting quotes)
+  into `safety_guardrails.check_can_enter`, plus reads the correct
+  `daily_stats.net_pnl` field for realized P&L.
+- Added 7 regression tests (`test_awaiting_quotes_gate.py`). All pass.
+- Lock test asserts `DailyStats` still lacks those fields so we never
+  re-introduce the AttributeError pattern.
+
+
+
 ## 2026-04-22 (22:40Z) — CRITICAL FIX #6 — `recall_down` / `f1_down` were NEVER computed
 
 **Finding (from 22:19Z Spark retrain log):** The `balanced_sqrt` weighting

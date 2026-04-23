@@ -1422,6 +1422,32 @@ class TradingBotService:
                 print(f"❌ [TradingBot] Scan loop error: {e}")
             
             await asyncio.sleep(self._scan_interval)
+    def _compute_live_unrealized_pnl(self) -> tuple:
+        """Sum unrealized P&L across all open trades, gated on quote freshness.
+
+        Returns (total_unrealized_usd, awaiting_quotes). When any open trade
+        hasn't received its first IB quote yet (`current_price` is 0 or
+        `fill_price` is 0/None), `awaiting_quotes=True` and the returned PnL
+        is 0 — the caller MUST NOT feed garbage unrealized numbers into the
+        safety guardrails or the kill-switch will latch on startup. See
+        `_execute_trade` for the consumer.
+        """
+        total = 0.0
+        awaiting = False
+        for t in self._open_trades.values():
+            try:
+                fill = float(getattr(t, "fill_price", 0) or 0)
+                cur = float(getattr(t, "current_price", 0) or 0)
+                if fill <= 0 or cur <= 0:
+                    awaiting = True
+                    continue
+                total += float(getattr(t, "unrealized_pnl", 0) or 0)
+            except Exception:
+                awaiting = True
+                continue
+        return (0.0 if awaiting else total), awaiting
+
+
     
     async def _update_account_from_ib(self):
         """Update account value from IB pushed data"""
@@ -1684,13 +1710,27 @@ class TradingBotService:
             except Exception:
                 pass  # quote-age helper is optional / absent in some deploys
 
+            # Awaiting-quotes gate (P1 2026-04-22): if any open trade hasn't
+            # received its first IB quote yet, `current_price` is 0 and the
+            # unrealized PnL math produces garbage (e.g., -$1.2M phantom loss
+            # on a just-loaded broker position). Treating that as real daily
+            # P&L would instantly trip the kill-switch on startup. Skip the
+            # live-unrealized input entirely until all positions have quotes.
+            live_unrealized, awaiting_quotes = self._compute_live_unrealized_pnl()
+            if awaiting_quotes:
+                logger.info(
+                    "[SAFETY] Awaiting-quotes gate active — excluding live "
+                    "unrealized PnL from kill-switch math (positions without "
+                    "first quote present)."
+                )
+
             result = guard.check_can_enter(
                 symbol=trade.symbol,
                 side=str(trade.direction).lower(),
                 notional_usd=notional,
                 account_equity=equity,
-                daily_realized_pnl=float(self._daily_stats.realized_pnl or 0),
-                daily_unrealized_pnl=float(self._daily_stats.unrealized_pnl or 0),
+                daily_realized_pnl=float(getattr(self._daily_stats, "net_pnl", 0) or 0),
+                daily_unrealized_pnl=0.0 if awaiting_quotes else live_unrealized,
                 open_positions=open_positions_snapshot,
                 last_quote_age_seconds=last_quote_age,
             )
