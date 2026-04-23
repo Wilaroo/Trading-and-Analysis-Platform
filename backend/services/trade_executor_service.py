@@ -68,19 +68,18 @@ class TradeExecutorService:
             return False
     
     def _init_alpaca(self):
-        """Initialize Alpaca trading client"""
-        if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-            raise ValueError("Alpaca API credentials not configured")
-        
-        from alpaca.trading.client import TradingClient
-        
-        self._alpaca_client = TradingClient(
-            api_key=ALPACA_API_KEY,
-            secret_key=ALPACA_SECRET_KEY,
-            paper=True  # Always use paper for safety
+        """Initialize Alpaca trading client.
+
+        DEPRECATED: Alpaca has been removed from the trading path. If mode is
+        set to PAPER (Alpaca), we raise loudly so the user notices instead of
+        silently routing orders to a different broker. Use ExecutorMode.LIVE
+        (IB Gateway paper/live account) instead.
+        """
+        raise RuntimeError(
+            "Alpaca execution path is disabled. Use ExecutorMode.LIVE (IB) — "
+            "IB Gateway supports both paper and live trading via the configured "
+            "account (e.g. DUN615665 for paper)."
         )
-        
-        logger.info("Alpaca trading client initialized (paper mode)")
     
     def _init_ib(self):
         """

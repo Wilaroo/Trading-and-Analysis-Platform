@@ -259,35 +259,23 @@ class HistoricalSimulationEngine:
             logger.info(f"Using {len(self._all_us_symbols)} default liquid symbols")
     
     async def _get_alpaca_assets(self) -> List[Dict]:
-        """Get all assets from Alpaca API"""
+        """DEPRECATED: now returns the IB universe.
+
+        Kept as a method name so existing call sites keep working; Alpaca has
+        been fully removed from the live-data path. Returns the distinct
+        symbol list from `ib_historical_data` in Alpaca-asset shape for BC.
+        """
         try:
-            # Direct API call
-            import httpx
-            import os
-            
-            api_key = os.environ.get('ALPACA_API_KEY')
-            api_secret = os.environ.get('ALPACA_SECRET_KEY')
-            
-            if not api_key or not api_secret:
-                logger.warning("Alpaca API keys not found")
-                return []
-                
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(
-                    "https://paper-api.alpaca.markets/v2/assets",
-                    headers={
-                        "APCA-API-KEY-ID": api_key,
-                        "APCA-API-SECRET-KEY": api_secret
-                    },
-                    params={"status": "active", "asset_class": "us_equity"}
-                )
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.warning(f"Alpaca assets API returned {response.status_code}")
+            from services.ib_data_provider import get_live_data_service
+            live = get_live_data_service()
+            symbols = await live.get_all_assets()
+            return [
+                {"symbol": s, "name": s, "class": "us_equity", "status": "active", "tradable": True}
+                for s in symbols
+            ]
         except Exception as e:
-            logger.error(f"Error fetching Alpaca assets: {e}")
-        return []
+            logger.error(f"Error fetching IB universe for simulator: {e}")
+            return []
     
     def _get_default_symbols(self) -> List[str]:
         """Default liquid US symbols when API unavailable"""
@@ -629,56 +617,40 @@ class HistoricalSimulationEngine:
         start: datetime, 
         end: datetime
     ) -> List[Dict]:
-        """Fetch bars from Alpaca API"""
+        """DEPRECATED name — now reads bars from ib_historical_data.
+
+        Kept as a method name so existing call sites keep working. Alpaca is
+        fully removed from the live-data path. Delegates to IBDataProvider,
+        which reads the 178M-row `ib_historical_data` collection.
+        """
         try:
-            import httpx
-            import os
-            
-            api_key = os.environ.get('ALPACA_API_KEY')
-            api_secret = os.environ.get('ALPACA_SECRET_KEY')
-            
-            if not api_key or not api_secret:
-                return []
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"https://data.alpaca.markets/v2/stocks/{symbol}/bars",
-                    headers={
-                        "APCA-API-KEY-ID": api_key,
-                        "APCA-API-SECRET-KEY": api_secret
-                    },
-                    params={
-                        "timeframe": "1Day",
-                        "start": start.strftime("%Y-%m-%d"),
-                        "end": end.strftime("%Y-%m-%d"),
-                        "limit": 1000
-                    },
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    bars = data.get("bars", [])
-                    return [
-                        {
-                            "timestamp": bar["t"],
-                            "open": bar["o"],
-                            "high": bar["h"],
-                            "low": bar["l"],
-                            "close": bar["c"],
-                            "volume": bar["v"],
-                            "vwap": bar.get("vw", bar["c"])
-                        }
-                        for bar in bars
-                    ]
-                elif response.status_code == 429:
-                    # Rate limited - wait and retry
-                    await asyncio.sleep(1)
-                    return []
-                    
+            from services.ib_data_provider import get_live_data_service
+            live = get_live_data_service()
+            span_days = max(1, int((end - start).total_seconds() / 86400))
+            limit = min(span_days + 5, 10000)
+            bars = await live.get_bars(symbol=symbol, timeframe="1Day", limit=limit)
+            # Filter to requested window
+            out = []
+            for b in bars:
+                try:
+                    ts = datetime.fromisoformat(str(b["timestamp"]).replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=start.tzinfo)
+                    if start <= ts <= end:
+                        out.append({
+                            "timestamp": b["timestamp"],
+                            "open": b["open"],
+                            "high": b["high"],
+                            "low": b["low"],
+                            "close": b["close"],
+                            "volume": b["volume"],
+                            "vwap": b.get("vwap") or b["close"],
+                        })
+                except Exception:
+                    continue
+            return out
         except Exception as e:
-            logger.warning(f"Alpaca fetch error for {symbol}: {e}")
-        
+            logger.warning(f"IB bar fetch error for {symbol}: {e}")
         return []
     
     def _passes_first_gate(self, bars: List[Dict], config: SimulationConfig) -> bool:

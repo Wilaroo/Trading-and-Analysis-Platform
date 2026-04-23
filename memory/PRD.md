@@ -11,6 +11,34 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 2026-04-23 — Alpaca fully nuked · loud failure mode · freshness chips
+
+**The problem:** Alpaca kept creeping back into the codebase across 63 files / 739 lines even after multiple manual cleanups. The scanner's `predictive_scanner.py` and `opportunity_evaluator.py` were still routing quotes through Alpaca, creating two disagreeing price feeds and silently masking IB outages.
+
+**Shipped:**
+- **`services/ib_data_provider.py`** — single source of truth for live + historical market data. Public interface matches legacy `AlpacaService` exactly so all 63 existing callers keep working without edits. Internally reads:
+  - Live quotes / positions / account → `routers.ib._pushed_ib_data` (IB pusher)
+  - Historical bars → `ib_historical_data` MongoDB collection
+  - Most actives / universe → pushed quotes volume + `ib_historical_data` aggregation
+- **`services/alpaca_service.py`** — now a thin deprecation shim. `AlpacaService` still exists for BC but delegates every method via `__getattr__` to `IBDataProvider`. Logs one-shot deprecation warning on first use. Never imports the Alpaca SDK, never reads `ALPACA_API_KEY`.
+- **`services/trade_executor_service.py`** — `_init_alpaca()` now raises `RuntimeError` instead of booting an Alpaca client. `ExecutorMode.PAPER` is effectively dead (use IB paper account via `ExecutorMode.LIVE`).
+- **`market_scanner_service._fetch_symbol_universe`**, **`slow_learning/historical_data_service._fetch_bars_from_alpaca`**, **`simulation_engine._get_alpaca_assets` / `._fetch_alpaca_bars`** — all three rewired to `IBDataProvider` (still use their legacy method names for BC).
+- **`/api/ib/pusher-health`** — added `pusher_dead` boolean + `in_market_hours` + `dead_threshold_s: 30`. During RTH, >=30s without a push = pusher_dead=true. This is the one signal the bot/scanner/UI all key off.
+- **Loud failure mode (frontend):**
+  - `hooks/usePusherHealth.js` — single shared poller (8s) that fans out to every consumer (no N+1 polling)
+  - `PusherDeadBanner.jsx` — full-width red alert at the top of V5 when pusher_dead=true during market hours. Loud, pulsing, impossible to miss.
+  - `LiveDataChip.jsx` — reusable tiny "LIVE · 2s" / "SLOW · 3m" / "DEAD" badge
+  - Wired into: V5 chart header, V5 Open Positions header, V5 Scanner · Live header
+- **Regression guard:** `tests/test_no_alpaca_regressions.py` — pytest that fails if any new file imports the Alpaca SDK or references `alpaca.markets`. Only the shim + executor shim + the test itself are allowlisted. Runs in <200ms.
+
+**How to verify on DGX:**
+- `python3 -c "from services.ib_data_provider import get_live_data_service; print(get_live_data_service().get_status())"` → should show `service: ib_data_provider, pusher_fresh: True`
+- `curl http://localhost:8001/api/ib/pusher-health` → should now include `pusher_dead`, `in_market_hours`, `dead_threshold_s` fields
+- Unplug / kill the Windows pusher → V5 should flash the red PUSHER DEAD banner within ~8s; scanner and bot stop producing decisions (no live quotes = no gate score)
+- `pytest tests/test_no_alpaca_regressions.py -v` → should PASS. If anyone ever re-adds `from alpaca.*` in a non-allowlisted file, this test fails in CI.
+
+
+
 ## 🗂️ Backlog — UX Power-User Layer (not started, user approved for later)
 
 ### [BL-01] Keyboard Shortcuts + Symbol Command Palette

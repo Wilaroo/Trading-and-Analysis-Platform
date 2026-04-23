@@ -32,6 +32,8 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
+import { PusherDeadBanner } from './v5/PusherDeadBanner';
+import { LiveDataChip } from './v5/LiveDataChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
 
 
@@ -162,6 +164,12 @@ export const SentComV5View = ({
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
 
+      {/* Pusher DEAD banner — loud failure mode when IB pusher stops feeding
+          during market hours. Everything downstream (scanner, bot, chart)
+          is already returning empty/stale in that state; this banner makes
+          it impossible to miss. Silent when fresh / after-hours. */}
+      <PusherDeadBanner />
+
       {/* Awaiting-quotes pill — z-58, shown while the bot is waiting for IB quotes */}
       <AwaitingQuotesPillV5 safety={safety} />
 
@@ -213,7 +221,10 @@ export const SentComV5View = ({
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-            <div className="v5-panel-title">Scanner · Live</div>
+            <div className="flex items-center gap-2">
+              <div className="v5-panel-title">Scanner · Live</div>
+              <LiveDataChip compact />
+            </div>
             <div className="text-[9px] v5-mono text-zinc-500">
               {(setups?.length ?? 0) + (alerts?.length ?? 0) + (positions?.length ?? 0)} hits
             </div>
@@ -338,6 +349,7 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
         ) : (
           <span className="v5-mono font-bold text-base text-zinc-100">{symbol}</span>
         )}
+        <LiveDataChip />
         {focusedSymbolIsPosition && (
           <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
             {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}

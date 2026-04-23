@@ -163,62 +163,37 @@ class HistoricalDataService:
         start_dt: datetime,
         end_dt: datetime
     ) -> List[Dict]:
-        """Fetch bars from Alpaca API"""
+        """Fetch bars from the IB-backed data provider.
+
+        DEPRECATED NAME kept for BC. Alpaca has been fully removed from the
+        live-data path — this now reads `ib_historical_data` via
+        IBDataProvider. The upstream collector populates that collection.
+        """
         try:
-            from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-            from alpaca.data.historical.stock import StockHistoricalDataClient
-            import os
-            
-            # Map timeframe
-            tf_map = {
-                "1Min": TimeFrame.Minute,
-                "5Min": TimeFrame(5, TimeFrameUnit.Minute),
-                "15Min": TimeFrame(15, TimeFrameUnit.Minute),
-                "1Hour": TimeFrame.Hour,
-                "1Day": TimeFrame.Day,
-            }
-            
-            tf = tf_map.get(timeframe, TimeFrame.Day)
-            
-            # Create client
-            client = StockHistoricalDataClient(
-                api_key=os.environ.get("ALPACA_API_KEY", ""),
-                secret_key=os.environ.get("ALPACA_SECRET_KEY", "")
-            )
-            
-            request = StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=tf,
-                start=start_dt,
-                end=end_dt,
-                feed="iex"
-            )
-            
-            bars = client.get_stock_bars(request)
-            
-            result = []
-            bars_data = bars.data if hasattr(bars, 'data') else bars
-            
-            if symbol in bars_data:
-                for bar in bars_data[symbol]:
-                    result.append({
-                        "symbol": symbol,
-                        "timeframe": timeframe,
-                        "timestamp": bar.timestamp.isoformat(),
-                        "open": float(bar.open),
-                        "high": float(bar.high),
-                        "low": float(bar.low),
-                        "close": float(bar.close),
-                        "volume": int(bar.volume),
-                        "vwap": float(bar.vwap) if bar.vwap else None,
-                        "trade_count": int(bar.trade_count) if bar.trade_count else None
-                    })
-                    
-            return result
-            
+            from services.ib_data_provider import get_live_data_service
+            live = get_live_data_service()
+            # IBDataProvider.get_bars returns newest-first slice bounded by limit.
+            # Derive a reasonable limit from the requested date range.
+            span_days = max(1, int((end_dt - start_dt).total_seconds() / 86400))
+            limit_map = {"1Min": span_days * 390, "5Min": span_days * 78,
+                         "15Min": span_days * 26, "30Min": span_days * 13,
+                         "1Hour": span_days * 7, "1Day": span_days + 5}
+            limit = min(limit_map.get(timeframe, 1000), 10000)
+            bars = await live.get_bars(symbol=symbol, timeframe=timeframe, limit=limit)
+            # Filter to requested window (IBDataProvider returns oldest→newest).
+            filtered = []
+            for b in bars:
+                try:
+                    ts = datetime.fromisoformat(str(b["timestamp"]).replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=start_dt.tzinfo)
+                    if start_dt <= ts <= end_dt:
+                        filtered.append({**b, "symbol": symbol, "timeframe": timeframe})
+                except Exception:
+                    continue
+            return filtered
         except Exception as e:
-            logger.error(f"Alpaca fetch error: {e}")
+            logger.error(f"IB historical fetch error: {e}")
             return []
             
     async def _store_bars(

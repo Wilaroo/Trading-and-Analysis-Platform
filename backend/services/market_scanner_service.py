@@ -308,47 +308,35 @@ class MarketScannerService:
         return symbols
     
     async def _fetch_symbol_universe(self) -> List[Dict]:
-        """Fetch US stock universe from Alpaca"""
+        """Fetch US stock universe from the IB historical data we already collect.
+
+        Previously this called Alpaca's `get_all_assets`. Alpaca is fully
+        removed from the live-data path — the universe now comes from the
+        `ib_historical_data` collection (via IBDataProvider), which is the
+        same source of truth used by training and the scanner.
+        """
         try:
-            from alpaca.trading.client import TradingClient
-            from alpaca.trading.requests import GetAssetsRequest
-            from alpaca.trading.enums import AssetClass, AssetStatus
-            
-            api_key = os.environ.get("ALPACA_API_KEY", "")
-            secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
-            
-            if not api_key or not secret_key:
-                logger.warning("Alpaca keys not configured, using default symbol list")
+            from services.ib_data_provider import get_live_data_service
+            live = get_live_data_service()
+            symbol_strings = await live.get_all_assets()
+            if not symbol_strings:
+                logger.warning("IB universe empty, using default symbol list")
                 return self._get_default_symbols()
-            
-            client = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-            
-            # Get all tradeable US stocks
-            request = GetAssetsRequest(
-                asset_class=AssetClass.US_EQUITY,
-                status=AssetStatus.ACTIVE
-            )
-            
-            assets = client.get_all_assets(request)
-            
-            symbols = []
-            for asset in assets:
-                if asset.tradable:
-                    # Convert to plain dict to avoid serialization issues
-                    symbols.append({
-                        "symbol": str(asset.symbol),
-                        "name": str(asset.name) if asset.name else str(asset.symbol),
-                        "exchange": str(asset.exchange.value) if asset.exchange else "",
-                        "tradable": bool(asset.tradable),
-                        "shortable": bool(asset.shortable) if asset.shortable else False,
-                        "easy_to_borrow": bool(asset.easy_to_borrow) if asset.easy_to_borrow else False,
-                    })
-            
-            logger.info(f"Fetched {len(symbols)} tradeable US symbols from Alpaca")
+            symbols = [
+                {
+                    "symbol": str(s),
+                    "name": str(s),
+                    "exchange": "IB",
+                    "tradable": True,
+                    "shortable": False,
+                    "easy_to_borrow": False,
+                }
+                for s in symbol_strings
+            ]
+            logger.info(f"Fetched {len(symbols)} symbols from ib_historical_data")
             return symbols
-            
         except Exception as e:
-            logger.error(f"Error fetching symbol universe: {e}")
+            logger.error(f"Error fetching symbol universe from IB: {e}")
             return self._get_default_symbols()
     
     def _get_default_symbols(self) -> List[Dict]:

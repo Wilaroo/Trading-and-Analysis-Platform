@@ -5773,10 +5773,37 @@ async def get_pusher_health():
             or None
         )
 
+        # Hard "dead" threshold for bot/scanner auto-pause. During market
+        # hours anything >= 30s without an update means we should STOP
+        # trading decisions rather than act on stale data.
+        PUSHER_DEAD_S = 30
+
+        def _is_market_hours() -> bool:
+            """Simple US equities RTH check (M-F 09:30-16:00 ET, no holidays)."""
+            try:
+                import pytz
+                et = pytz.timezone("America/New_York")
+                n = datetime.now(et)
+                if n.weekday() >= 5:  # Sat/Sun
+                    return False
+                mins = n.hour * 60 + n.minute
+                return 9 * 60 + 30 <= mins < 16 * 60
+            except Exception:
+                return True  # fail-safe: assume market hours → require freshness
+
+        in_market_hours = _is_market_hours()
+        pusher_dead = (
+            age_seconds is None
+            or (age_seconds >= PUSHER_DEAD_S and in_market_hours)
+        )
+
         return {
             "success": True,
             "health": health,
             "connected": health in ("green", "amber"),
+            "pusher_dead": pusher_dead,
+            "dead_threshold_s": PUSHER_DEAD_S,
+            "in_market_hours": in_market_hours,
             "last_update": last_update_iso,
             "age_seconds": age_seconds,
             "subscribed_account": subscribed_account,

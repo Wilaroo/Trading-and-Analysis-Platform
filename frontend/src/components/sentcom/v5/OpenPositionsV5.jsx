@@ -4,6 +4,7 @@
  * sparkline, and thin "why" line showing SL/PT + model confidence.
  */
 import React from 'react';
+import { LiveDataChip } from './LiveDataChip';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -88,7 +89,10 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
   return (
     <div data-testid="v5-open-positions" className="flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <div className="v5-panel-title">Open ({open.length})</div>
+        <div className="flex items-center gap-2">
+          <div className="v5-panel-title">Open ({open.length})</div>
+          <LiveDataChip compact />
+        </div>
         <div className={`v5-mono text-[10px] ${Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
           {totalPnl != null ? formatUsd(totalPnl) : ''}
         </div>
