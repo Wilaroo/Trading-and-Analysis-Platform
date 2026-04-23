@@ -11,6 +11,73 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 2026-04-23 — Training pipeline structural fixes (same session)
+
+Two real architectural bugs surfaced by the test_mode diagnostic run. Both
+invalidate any model trained before this date regardless of sample size —
+full retrain required.
+
+### Bug 1: Phase 8 ensembles hardcoded to `"1 day"` anchor
+`training_pipeline.py` line 2860 set `anchor_bs = "1 day"` for ALL 10
+ensemble meta-labelers. Intraday-only setups (SCALP, ORB, GAP_AND_GO, VWAP)
+don't have `_1day_predictor` sub-models — you don't run ORB on daily bars.
+Result: 4/10 ensembles silently failed every run with "no setup sub-model
+<name>_1day_predictor — meta-labeler needs it."
+
+**Fix:**
+  - `ensemble_model.py`: removed `"1 day"` from `sub_timeframes` of ORB,
+    GAP_AND_GO, VWAP (kept for BREAKOUT/MEAN_REVERSION/etc. which legitimately
+    have daily variants). Added explanatory comment about the anchor logic.
+  - `training_pipeline.py` (Phase 8): per-ensemble anchor selection — probes
+    each configured `sub_timeframes` in order and picks the first one that
+    has a trained sub-model. Falls back to the first configured tf if none
+    match. All 10 ensembles now train.
+
+### Bug 2: Phase 4 exit timing trained all 10 models on `"1 day"` bars
+`training_pipeline.py` line 2000 set `bs = "1 day"` for ALL 10 exit models.
+SCALP/ORB/GAP_AND_GO/VWAP are intraday trades but were training their exit
+timing on daily bars with `max_horizon = 12-24` — meaning the model was
+learning "when to exit a scalp" from 12-DAY lookaheads. Data-task mismatch.
+This is WHY `exit_timing_range` / `exit_timing_meanrev` landed at 37%
+accuracy — the models were structurally wrong, not just undertrained.
+
+**Fix:**
+  - `exit_timing_model.py`: added `bar_size` field to every entry in
+    `EXIT_MODEL_CONFIGS`. Intraday setups → `"5 mins"`, swing → `"1 day"`.
+  - `training_pipeline.py` (Phase 4): refactored to group configs by
+    `bar_size`, then run the full feature-extraction + training loop once
+    per group. 5-min intraday exits and 1-day swing exits train on
+    appropriately-scoped data. Worker is bar-size-agnostic (operates on
+    bar counts, not time).
+
+### Verified safe after investigation
+Audited every phase for similar hardcoding:
+  - P3 Volatility, P5 Sector-Relative, P5.5 Gap Fill, P7 Regime-Conditional:
+    all iterate configured bar_sizes. Silent-zero behaviour was entirely
+    test_mode sample starvation (≤50 samples vs ≥100 required).
+  - FinBERT news collector uses `"1 day"` for symbol selection (correct —
+    it's just picking tickers to pull news for, not modeling on them).
+  - Validation phase `("5 mins", 0)` fallback is sensible for unknowns.
+
+### Expected impact on next full-quality run
+  • P4 Exit Timing intraday models: 37-40% → 52-58% (structural fix, not
+    just "more data")
+  • P8 Ensemble: 6/10 → 10/10 trained (all four orphans unblocked)
+  • Old models trained on the broken configs are OBSOLETE — do not rely on
+    accuracy numbers from any run before 2026-04-23 post-fix.
+
+### Action items for tomorrow morning
+  1. Confirm current test_mode run completed (errors: 0, P9 CNN done).
+  2. Save to GitHub → run .bat on DGX to pull today's fixes.
+  3. Restart backend so new code loads.
+  4. Launch full-quality run: `{"force_retrain": true}` (NO test_mode).
+  5. Monitor for ~44h. All 155 models should train with no silent skips.
+  6. When it finishes, spot-check a few accuracies in mongo (P4 intraday
+     exits, P8 ensembles for SCALP/ORB/GAP/VWAP specifically — those are
+     the ones the fix unblocks).
+
+
+
 ## 2026-04-23 — Training run diagnostic · `test_mode=true` is destructive
 
 Ran two training runs today after the Alpaca nuke + pipeline hardening:
