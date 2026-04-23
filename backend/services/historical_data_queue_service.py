@@ -626,8 +626,16 @@ class HistoricalDataQueueService:
         
         by_bar_size = []
         for r in results:
-            bar_size = r["_id"]
-            statuses = {s["status"]: s["count"] for s in r["statuses"]}
+            bar_size = r.get("_id")
+            # Defensive: queue may contain legacy docs without a `bar_size`
+            # field; they group to _id=None. Skip them so downstream sort /
+            # ETA calc never see a None/missing bar_size (previously this
+            # produced the `KeyError: 'bar_size'` that the UI showed as a
+            # bare toast on every /queue-progress-detailed poll).
+            if not bar_size:
+                continue
+            statuses_list = r.get("statuses") or []
+            statuses = {s["status"]: s["count"] for s in statuses_list if s.get("status")}
             
             pending = statuses.get("pending", 0)
             claimed = statuses.get("claimed", 0)
@@ -662,8 +670,9 @@ class HistoricalDataQueueService:
                 "symbols_per_minute": symbols_per_minute
             })
         
-        # Sort so active collections appear first
-        by_bar_size.sort(key=lambda x: (not x["is_active"], x["bar_size"]))
+        # Sort so active collections appear first; string key for bar_size
+        # avoids TypeError if any slipped through as non-str.
+        by_bar_size.sort(key=lambda x: (not x.get("is_active", False), str(x.get("bar_size") or "")))
         
         return {
             "by_bar_size": by_bar_size,
