@@ -21,7 +21,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://ai-quant-core.preview.emergentagent.com
+set CLOUD_URL=https://ib-collector-hub.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%nightly_auto.log
 
 :: Log start time

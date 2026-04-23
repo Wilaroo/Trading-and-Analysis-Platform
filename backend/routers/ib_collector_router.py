@@ -739,6 +739,52 @@ async def rebuild_adv_from_ib():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/smart-backfill")
+async def smart_backfill(dry_run: bool = False, tier_filter: Optional[str] = None,
+                         freshness_days: int = 2):
+    """
+    One-click tier-aware, gap-aware, chained backfill.
+
+    Behaviour:
+      1. Reads symbol_adv_cache (rebuild it first via /rebuild-adv-from-ib).
+      2. Filters to symbols that qualify under dollar-volume tiers.
+      3. For every (symbol, bar_size) pair required by the symbol's tier:
+         - Looks up the newest bar's date in ib_historical_data.
+         - If the newest bar is within `freshness_days` of today → skip.
+         - Otherwise queues one or more chained requests walking back in
+           time, respecting IB's max per-request duration for each bar_size.
+      4. Deduplicates against currently pending/claimed queue items.
+
+    Args:
+        dry_run: when true, returns the plan without queueing anything.
+        tier_filter: 'intraday' / 'swing' / 'investment' to limit scope.
+        freshness_days: treat a (symbol, bar_size) as already fresh if its
+                        newest bar is within this many calendar days of now.
+
+    Returns:
+        {
+            "success": bool,
+            "dry_run": bool,
+            "tier_counts": {tier: symbols_considered},
+            "queued": int,
+            "skipped_fresh": int,
+            "skipped_already_queued": int,
+            "by_bar_size": {bar_size: count},
+        }
+    """
+    try:
+        collector = get_ib_collector()
+        result = await collector.smart_backfill(
+            dry_run=dry_run,
+            tier_filter=tier_filter,
+            freshness_days=freshness_days,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in smart_backfill: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/failure-analysis")
 def get_failure_analysis():
     """

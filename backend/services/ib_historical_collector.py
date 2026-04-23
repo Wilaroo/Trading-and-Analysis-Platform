@@ -2383,6 +2383,182 @@ class IBHistoricalCollector:
 
 _ib_collector: Optional[IBHistoricalCollector] = None
 
+    # ------------------------------------------------------------------
+    # SMART BACKFILL — tier-aware + gap-aware + chained lookback
+    # ------------------------------------------------------------------
+    TIMEFRAMES_BY_TIER = {
+        "intraday":   ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
+        "swing":      ["5 mins", "30 mins", "1 hour", "1 day"],
+        "investment": ["1 hour", "1 day", "1 week"],
+    }
+    # Conservative IB single-request max durations per bar_size (calendar days)
+    MAX_DAYS_PER_REQUEST = {
+        "1 min":   5,
+        "5 mins":  30,
+        "15 mins": 90,
+        "30 mins": 90,
+        "1 hour":  365,
+        "1 day":   730,
+        "1 week":  1825,
+    }
+    DURATION_STRING = {
+        "1 min":   "5 D",
+        "5 mins":  "1 M",
+        "15 mins": "3 M",
+        "30 mins": "3 M",
+        "1 hour":  "1 Y",
+        "1 day":   "2 Y",
+        "1 week":  "5 Y",
+    }
+
+    def _smart_backfill_sync(self, dry_run: bool, tier_filter: Optional[str],
+                             freshness_days: int) -> Dict[str, Any]:
+        """Blocking implementation — must be wrapped in asyncio.to_thread."""
+        from datetime import datetime, timedelta, timezone
+        import uuid
+        from collections import Counter
+
+        if self._db is None or self._data_col is None:
+            return {"success": False, "error": "database not initialized"}
+
+        adv = self._db["symbol_adv_cache"]
+        queue = self._db["historical_data_requests"]
+
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat()
+
+        # 1) Classify qualified symbols by dollar-volume tier (fallback to
+        # stored `tier` field if the doc has it, from rebuild_adv_from_ib).
+        min_dv = self.DOLLAR_VOL_THRESHOLDS["investment"]
+        qualified: Dict[str, List[str]] = {"intraday": [], "swing": [], "investment": []}
+        for doc in adv.find({"avg_dollar_volume": {"$gte": min_dv}},
+                            {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1}):
+            sym = doc.get("symbol")
+            if not sym:
+                continue
+            tier = doc.get("tier")
+            if tier not in self.TIMEFRAMES_BY_TIER:
+                dv = doc.get("avg_dollar_volume", 0) or 0
+                if   dv >= self.DOLLAR_VOL_THRESHOLDS["intraday"]:   tier = "intraday"
+                elif dv >= self.DOLLAR_VOL_THRESHOLDS["swing"]:      tier = "swing"
+                elif dv >= self.DOLLAR_VOL_THRESHOLDS["investment"]: tier = "investment"
+                else:
+                    continue
+            if tier_filter and tier != tier_filter:
+                continue
+            qualified[tier].append(sym)
+
+        tier_counts = {t: len(syms) for t, syms in qualified.items()}
+
+        # 2) Plan each (symbol, bar_size): measure gap, chain if needed.
+        to_queue: List[tuple] = []
+        skipped_fresh = 0
+        skipped_already_queued = 0
+
+        for tier, syms in qualified.items():
+            for sym in syms:
+                for bs in self.TIMEFRAMES_BY_TIER[tier]:
+                    # Dedupe against pending/claimed requests already there.
+                    if queue.find_one({"symbol": sym, "bar_size": bs,
+                                        "status": {"$in": ["pending", "claimed"]}},
+                                       {"_id": 1}):
+                        skipped_already_queued += 1
+                        continue
+                    # Find the newest existing bar.
+                    last_doc = self._data_col.find_one(
+                        {"symbol": sym, "bar_size": bs},
+                        {"_id": 0, "date": 1},
+                        sort=[("date", -1)],
+                    )
+                    if last_doc and last_doc.get("date"):
+                        try:
+                            s = last_doc["date"].split("T")[0] if "T" in last_doc["date"] else last_doc["date"]
+                            last_dt = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            days_behind = (now_dt.date() - last_dt.date()).days
+                        except Exception:
+                            days_behind = None
+                    else:
+                        days_behind = None  # no data → full lookback
+
+                    if days_behind is None:
+                        # No prior data — one request at max duration.
+                        to_queue.append((sym, bs, self.DURATION_STRING[bs], tier, ""))
+                        continue
+                    if days_behind <= freshness_days:
+                        skipped_fresh += 1
+                        continue
+                    # Chain requests walking back in time from "now".
+                    remaining = days_behind
+                    max_per = self.MAX_DAYS_PER_REQUEST[bs]
+                    end_anchor = now_dt
+                    first_chunk = True
+                    while remaining > 0:
+                        take = min(remaining, max_per)
+                        dur = f"{take} D"
+                        # First chunk uses end_date="" (latest). Later chunks
+                        # anchor to the walked-back date.
+                        if first_chunk:
+                            end_str = ""
+                            first_chunk = False
+                        else:
+                            end_str = end_anchor.strftime("%Y%m%d-%H:%M:%S")
+                        to_queue.append((sym, bs, dur, tier, end_str))
+                        end_anchor = end_anchor - timedelta(days=take)
+                        remaining -= take
+
+        by_bar_size = Counter(t[1] for t in to_queue)
+
+        if dry_run:
+            return {
+                "success": True,
+                "dry_run": True,
+                "tier_counts": tier_counts,
+                "would_queue": len(to_queue),
+                "skipped_fresh": skipped_fresh,
+                "skipped_already_queued": skipped_already_queued,
+                "by_bar_size": dict(by_bar_size),
+            }
+
+        # 3) Queue it.
+        queued = 0
+        if to_queue:
+            docs = []
+            for sym, bs, dur, tier, end in to_queue:
+                docs.append({
+                    "request_id": f"hist_{uuid.uuid4().hex[:12]}",
+                    "symbol": sym, "duration": dur, "bar_size": bs,
+                    "end_date": end, "callback_id": None,
+                    "status": "pending", "data": None, "error": None,
+                    "created_at": now_iso, "claimed_at": None, "completed_at": None,
+                    "tier": tier,
+                })
+            # Bulk insert in chunks of 2000.
+            for i in range(0, len(docs), 2000):
+                queue.insert_many(docs[i:i + 2000], ordered=False)
+            queued = len(docs)
+
+        return {
+            "success": True,
+            "dry_run": False,
+            "tier_counts": tier_counts,
+            "queued": queued,
+            "skipped_fresh": skipped_fresh,
+            "skipped_already_queued": skipped_already_queued,
+            "by_bar_size": dict(by_bar_size),
+        }
+
+    async def smart_backfill(self, dry_run: bool = False,
+                             tier_filter: Optional[str] = None,
+                             freshness_days: int = 2) -> Dict[str, Any]:
+        """Async wrapper — heavy loops run in a thread so the event loop stays free."""
+        import asyncio
+        return await asyncio.to_thread(
+            self._smart_backfill_sync, dry_run, tier_filter, freshness_days
+        )
+
+
+
+
 
 def get_ib_collector() -> IBHistoricalCollector:
     """Get the singleton instance"""
