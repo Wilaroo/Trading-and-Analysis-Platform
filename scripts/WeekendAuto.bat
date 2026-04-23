@@ -20,7 +20,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://ib-collector-hub.preview.emergentagent.com
+set CLOUD_URL=https://symbol-click-flow.preview.emergentagent.com
 
 :: =====================================================
 :: STEP 1: RUN STARTTRADING.BAT (but don't wait for health loop)

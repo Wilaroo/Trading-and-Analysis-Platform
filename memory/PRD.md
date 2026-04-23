@@ -11,6 +11,24 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 2026-02-11 — V5 Command Center: full symbol clickability + cache audit
+
+**Shipped:**
+- **Every ticker symbol in V5 is now clickable → opens `EnhancedTickerModal`**:
+  - `UnifiedStreamV5` stream rows (already done)
+  - `ScannerCardsV5` (whole card + highlighted symbol with hover state)
+  - `OpenPositionsV5` (whole row + highlighted symbol)
+  - `BriefingsV5` — **NEW**: watchlist tickers in Morning Prep, closed-position rows in Mid-Day Recap + Close Recap, open positions in Power Hour, all now clickable (inline `ClickableSymbol` helper with `e.stopPropagation()` so the parent briefing card still expands).
+  - `V5ChartHeader` — the focused symbol above the chart is now clickable too (consistency: user can always click a symbol anywhere to pop the deep modal).
+- **Data-testids added** for every clickable symbol (`stream-symbol-*`, `scanner-card-symbol-*`, `open-position-symbol-*`, `briefing-symbol-*`, `chart-header-symbol-*`).
+- **Smart caching audit**: confirmed `EnhancedTickerModal` already uses a per-symbol 3-min TTL in-memory cache covering analysis, historical bars, quality score, news, and learning insights. On re-open within 3 min, display is instant (no loading spinner). Request abort controller cancels stale in-flight fetches when user switches tickers rapidly. No changes needed.
+
+**How to test (manual on DGX Spark):**
+- Open V5 Command Center (SentCom). Click any ticker in: a scanner card, a stream row, an open position row, a watchlist entry in Morning Prep (expand the card first), a closed-row in Mid-Day / Close Recap, the big symbol above the chart. All should open `EnhancedTickerModal` with chart + analysis.
+- Click the same ticker a second time within 3 min → should open instantly with no spinner (cache hit).
+
+
+
 ## 2026-02-10 — Training pipeline readiness surface + preflight guard
 
 **Shipped:**

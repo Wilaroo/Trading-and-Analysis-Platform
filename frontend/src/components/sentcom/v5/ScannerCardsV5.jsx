@@ -223,7 +223,12 @@ const ScannerCard = ({ card, active, onClick }) => {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="v5-mono font-bold text-sm text-zinc-100">{card.symbol}</span>
+          <span
+            className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors"
+            data-testid={`scanner-card-symbol-${card.symbol}`}
+          >
+            {card.symbol}
+          </span>
           <span className={`v5-chip ${chipClass}`}>
             {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>

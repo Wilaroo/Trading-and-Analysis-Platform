@@ -17,7 +17,7 @@ import requests
 import os
 
 # Base URL from environment (using the public-facing URL)
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ib-collector-hub.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://symbol-click-flow.preview.emergentagent.com').rstrip('/')
 
 
 class TestIntelligentStopSetupRules:

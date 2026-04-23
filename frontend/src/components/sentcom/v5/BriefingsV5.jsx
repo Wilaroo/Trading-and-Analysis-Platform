@@ -41,7 +41,26 @@ const formatTimeRange = (startHH, startMM) => {
 
 /* ── Cards ────────────────────────────────────────────────────────────── */
 
-const MorningPrepCard = ({ data, loading, expanded, onToggle }) => {
+/** Inline clickable ticker symbol — used inside briefing detail rows. */
+const ClickableSymbol = ({ symbol, onSymbolClick, className = '' }) => {
+  if (!symbol) return null;
+  const sym = String(symbol).toUpperCase();
+  if (!onSymbolClick) return <span className={className}>{sym}</span>;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onSymbolClick(sym); }}
+      className={`hover:text-cyan-300 hover:underline transition-colors cursor-pointer ${className}`}
+      data-testid={`briefing-symbol-${sym}`}
+      title={`Open ${sym} analysis`}
+    >
+      {sym}
+    </button>
+  );
+};
+
+
+const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick }) => {
   const gp = data?.game_plan;
   const drc = data?.drc;
   const scanner = data?.scanner;
@@ -96,7 +115,16 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle }) => {
           {watch.length > 0 && (
             <div>
               <span className="text-zinc-500">Watchlist: </span>
-              {watch.slice(0, 8).map(w => typeof w === 'string' ? w : (w.symbol || w.ticker)).join(', ')}
+              {watch.slice(0, 8).map((w, i) => {
+                const sym = typeof w === 'string' ? w : (w?.symbol || w?.ticker);
+                if (!sym) return null;
+                return (
+                  <React.Fragment key={sym + i}>
+                    {i > 0 && <span className="text-zinc-600">, </span>}
+                    <ClickableSymbol symbol={sym} onSymbolClick={onSymbolClick} className="text-zinc-300 font-semibold" />
+                  </React.Fragment>
+                );
+              })}
             </div>
           )}
           {drcHealth && (
@@ -118,7 +146,7 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle }) => {
 };
 
 
-const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
+const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
   const state = statusFor(11.5 * 60, 13 * 60);   // 11:30 → 13:00 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
@@ -157,7 +185,10 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
             const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
             return (
               <div key={p.id || p._id || i} className="flex justify-between">
-                <span className="text-zinc-400">{p.symbol} · {p.setup_type || p.strategy || '—'}</span>
+                <span className="text-zinc-400">
+                  <ClickableSymbol symbol={p.symbol} onSymbolClick={onSymbolClick} className="text-zinc-300" />
+                  {' · '}{p.setup_type || p.strategy || '—'}
+                </span>
                 <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
               </div>
             );
@@ -169,7 +200,7 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
 };
 
 
-const PowerHourCard = ({ positions, totalPnl, expanded, onToggle }) => {
+const PowerHourCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
   const state = statusFor(15 * 60, 15.75 * 60); // 15:00 → 15:45 ET
 
   const open = (positions || []).filter(p => p?.status !== 'closed');
@@ -206,7 +237,9 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle }) => {
             const pnl = Number(p.unrealized_pnl ?? p.pnl ?? 0);
             return (
               <div key={p.id || p._id || i} className="flex justify-between">
-                <span className="text-zinc-400">{p.symbol}</span>
+                <span className="text-zinc-400">
+                  <ClickableSymbol symbol={p.symbol} onSymbolClick={onSymbolClick} className="text-zinc-300" />
+                </span>
                 <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
               </div>
             );
@@ -218,7 +251,7 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle }) => {
 };
 
 
-const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
+const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
   const state = statusFor(16 * 60, 16.5 * 60); // 16:00 → 16:30 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
@@ -257,7 +290,10 @@ const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
             const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
             return (
               <div key={p.id || p._id || i} className="flex justify-between">
-                <span className="text-zinc-400">{p.symbol} · {p.setup_type || '—'}</span>
+                <span className="text-zinc-400">
+                  <ClickableSymbol symbol={p.symbol} onSymbolClick={onSymbolClick} className="text-zinc-300" />
+                  {' · '}{p.setup_type || '—'}
+                </span>
                 <span className={pnl >= 0 ? 'v5-up' : 'v5-down'}>{pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(0)}</span>
               </div>
             );
@@ -269,7 +305,7 @@ const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle }) => {
 };
 
 
-export const BriefingsV5 = ({ context, positions, totalPnl }) => {
+export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick }) => {
   const { loading, data } = useMorningBriefing({ refreshMs: 120_000 });
   const [expandedKey, setExpandedKey] = useState('morning');
   const toggle = (key) => setExpandedKey(curr => curr === key ? null : key);
@@ -289,24 +325,28 @@ export const BriefingsV5 = ({ context, positions, totalPnl }) => {
         loading={loading}
         expanded={expandedKey === 'morning'}
         onToggle={() => toggle('morning')}
+        onSymbolClick={onSymbolClick}
       />
       <MidDayRecapCard
         positions={positions}
         totalPnl={totalPnl}
         expanded={expandedKey === 'midday'}
         onToggle={() => toggle('midday')}
+        onSymbolClick={onSymbolClick}
       />
       <PowerHourCard
         positions={positions}
         totalPnl={totalPnl}
         expanded={expandedKey === 'powerhour'}
         onToggle={() => toggle('powerhour')}
+        onSymbolClick={onSymbolClick}
       />
       <CloseRecapCard
         positions={positions}
         totalPnl={totalPnl}
         expanded={expandedKey === 'close'}
         onToggle={() => toggle('close')}
+        onSymbolClick={onSymbolClick}
       />
     </div>
   );

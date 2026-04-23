@@ -42,7 +42,12 @@ const PositionRow = ({ position, onClick }) => {
     >
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="v5-mono font-bold text-sm text-zinc-100">{position.symbol}</span>
+          <span
+            className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors"
+            data-testid={`open-position-symbol-${position.symbol}`}
+          >
+            {position.symbol}
+          </span>
           <span className={`v5-chip ${chipClass}`}>{side}{setup ? ` ${setup}` : ''}</span>
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>

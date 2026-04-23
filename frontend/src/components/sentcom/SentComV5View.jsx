@@ -240,6 +240,7 @@ export const SentComV5View = ({
             symbol={effectiveSymbol}
             position={positions?.find(p => p.symbol === effectiveSymbol)}
             focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
+            onSymbolClick={handleOpenTicker}
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -319,12 +320,24 @@ export const SentComV5View = ({
 
 
 /** Header strip above the chart showing symbol + entry/SL/PT if position is open. */
-const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition }) => {
+const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClick }) => {
   const dir = (position?.direction || position?.side || '').toLowerCase();
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-3 min-w-0">
-        <span className="v5-mono font-bold text-base text-zinc-100">{symbol}</span>
+        {onSymbolClick ? (
+          <button
+            type="button"
+            onClick={() => onSymbolClick(symbol)}
+            className="v5-mono font-bold text-base text-zinc-100 hover:text-cyan-300 hover:underline transition-colors"
+            data-testid={`chart-header-symbol-${symbol}`}
+            title={`Open ${symbol} deep analysis`}
+          >
+            {symbol}
+          </button>
+        ) : (
+          <span className="v5-mono font-bold text-base text-zinc-100">{symbol}</span>
+        )}
         {focusedSymbolIsPosition && (
           <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
             {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}
