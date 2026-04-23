@@ -471,7 +471,7 @@ async def incremental_update(
             return {"success": False, "error": "Database not initialized"}
         
         from services.historical_data_queue_service import get_historical_data_queue_service
-        queue_service = get_historical_data_queue_service(db)
+        queue_service = get_historical_data_queue_service()
         
         # Analyze what incremental data is needed
         analysis = collector.calculate_incremental_needs()
