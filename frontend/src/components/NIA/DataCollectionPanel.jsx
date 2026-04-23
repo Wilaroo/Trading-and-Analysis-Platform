@@ -146,6 +146,39 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
     }
   }, [onRefresh]);
 
+  // "Update Latest" — refreshes stale data by looking at each symbol's newest
+  // bar and only queueing what's missing between then and now. Correct tool
+  // when you already have data but the most recent days are absent (e.g. data
+  // was fresh last month but nothing collected since).
+  const handleIncrementalUpdate = useCallback(async () => {
+    setCollecting(true);
+    toast.info('Analyzing freshness for all symbols...');
+    try {
+      const params = new URLSearchParams({ max_days_lookback: '45' });
+      const res = await api.post(`/api/ib-collector/incremental-update?${params}`, null, { timeout: 600000 });
+      if (res.data?.success) {
+        const queued = res.data.total_requests ?? res.data.queued ?? 0;
+        if (queued === 0) {
+          toast.success('All symbols are fresh through today — nothing to update.');
+        } else {
+          toast.success(`Queued ${queued} incremental requests to fill recent gaps`);
+          setPriorityCollection(true);
+        }
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(res.data?.error || 'Failed to queue incremental update');
+      }
+    } catch (err) {
+      if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
+        toast.info('Freshness analysis is still running in the background.');
+      } else {
+        toast.error('Error queuing incremental update: ' + (err?.response?.data?.detail || err.message));
+      }
+    } finally {
+      setCollecting(false);
+    }
+  }, [onRefresh]);
+
   const handleCancel = useCallback(async () => {
     setCancelling(true);
     try {
@@ -179,8 +212,23 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
               : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20'
             }`}
           data-testid="collect-data-btn"
+          title="Scans every (symbol, timeframe) and queues any combo with ZERO data. Best for first-time setup."
         >
           {collecting ? <><Loader className="w-4 h-4 animate-spin" /> Starting...</> : <><Play className="w-4 h-4" /> Collect Data</>}
+        </button>
+
+        <button
+          onClick={handleIncrementalUpdate}
+          disabled={collecting || hasActiveCollections}
+          className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2
+            ${collecting || hasActiveCollections
+              ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+              : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20'
+            }`}
+          data-testid="update-latest-btn"
+          title="Checks the newest bar per symbol and queues only the missing recent days (last 45d). Use when data is stale, not missing."
+        >
+          <RefreshCw className="w-4 h-4" /> Update Latest
         </button>
 
         {isRunning && (

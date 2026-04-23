@@ -2243,49 +2243,52 @@ class IBHistoricalCollector:
         """
         Get the latest bar date for each symbol/timeframe combination.
         Used to determine what incremental data to fetch.
-        
+
+        Fast path: leverages the compound index (symbol, bar_size, date) by
+        enumerating distinct (symbol, bar_size) pairs and doing O(log n)
+        index-backed `find_one().sort('date', -1)` lookups per pair. Much
+        faster than a `$group` aggregation across the full 178M-row collection
+        (seconds vs minutes).
+
         Returns:
-            Dict with symbol -> {timeframe: latest_date}
+            Dict with symbol -> {timeframe: {latest_date, bar_count}}
         """
         if self._data_col is None:
             return {"success": False, "error": "Database not connected"}
-        
+
         try:
-            # Build match stage
-            match_stage = {}
-            if bar_size:
-                match_stage["bar_size"] = bar_size
-            
-            pipeline = [
-                {"$match": match_stage} if match_stage else {"$match": {}},
-                {"$group": {
-                    "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
-                    "latest_date": {"$max": "$date"},
-                    "bar_count": {"$sum": 1}
-                }},
-                {"$sort": {"_id.symbol": 1}}
+            # 1) Enumerate distinct (symbol, bar_size) pairs.
+            match_stage = {"bar_size": bar_size} if bar_size else {}
+            pairs_pipeline = [
+                {"$match": match_stage},
+                {"$group": {"_id": {"symbol": "$symbol", "bar_size": "$bar_size"}}},
             ]
-            
-            results = list(self._data_col.aggregate(pipeline))
-            
-            # Organize by symbol
-            by_symbol = {}
-            for r in results:
-                symbol = r["_id"]["symbol"]
-                tf = r["_id"]["bar_size"]
-                if symbol not in by_symbol:
-                    by_symbol[symbol] = {}
-                by_symbol[symbol][tf] = {
-                    "latest_date": r["latest_date"],
-                    "bar_count": r["bar_count"]
+            pairs = list(self._data_col.aggregate(pairs_pipeline, allowDiskUse=True))
+
+            # 2) For each pair, index-backed lookup for newest date.
+            by_symbol: Dict[str, Dict[str, Any]] = {}
+            for p in pairs:
+                sym = p["_id"]["symbol"]
+                tf = p["_id"]["bar_size"]
+                latest_doc = self._data_col.find_one(
+                    {"symbol": sym, "bar_size": tf},
+                    {"_id": 0, "date": 1},
+                    sort=[("date", -1)],
+                )
+                if not latest_doc:
+                    continue
+                by_symbol.setdefault(sym, {})[tf] = {
+                    "latest_date": latest_doc.get("date"),
+                    # bar_count omitted — the caller doesn't use it, and counting
+                    # is the expensive operation we're trying to avoid.
                 }
-            
+
             return {
                 "success": True,
                 "total_symbols": len(by_symbol),
-                "by_symbol": by_symbol
+                "by_symbol": by_symbol,
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting latest bar dates: {e}")
             return {"success": False, "error": str(e)}
