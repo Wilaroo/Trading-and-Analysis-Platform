@@ -309,13 +309,21 @@ class ConfidenceGate:
             # probability mass). A correctly directional UP argmax at 0.50 is
             # a real edge — bucket it into CONFIRMS, not "leans". Preserves the
             # old 0.6 for STRONG disagreements so floor penalties aren't noisy.
-            CONFIRMS_THRESHOLD = 0.50
+            #
+            # Per-model calibration (P1 2026-04-23 follow-up): each model now
+            # carries calibrated_up_threshold / calibrated_down_threshold in
+            # its ModelMetrics (derived from top-20% of training predictions,
+            # bounded [0.45, 0.60]). Use it when available so each model
+            # operates at its own natural probability range.
+            from services.ai_modules.threshold_calibration import get_effective_threshold
+            model_metrics = live_prediction.get("model_metrics") or {}
+            CONFIRMS_THRESHOLD = get_effective_threshold(model_metrics, direction)
             if model_agrees and pred_confidence >= CONFIRMS_THRESHOLD:
                 pts = int(15 * accuracy_weight)
                 confidence_points += pts
                 reasoning.append(
                     f"Live {pred_model} CONFIRMS {direction.upper()} "
-                    f"({pred_direction}, {pred_confidence:.0%} conf, weight {accuracy_weight:.1f}) (+{pts})"
+                    f"({pred_direction}, {pred_confidence:.0%} conf ≥ {CONFIRMS_THRESHOLD:.2f}, weight {accuracy_weight:.1f}) (+{pts})"
                 )
             elif model_agrees:
                 pts = int(5 * accuracy_weight)
@@ -1153,6 +1161,10 @@ class ConfidenceGate:
             result["prob_down"] = prediction.get("probability_down", 0.5)
             result["model_used"] = prediction.get("model_used", "unknown")
             result["model_type"] = prediction.get("model_type", "unknown")
+            # Pass through model metrics (incl. calibrated_up_threshold /
+            # calibrated_down_threshold) so the CONFIRMS check can use per-
+            # model thresholds instead of a global 0.50.
+            result["model_metrics"] = prediction.get("model_metrics") or {}
             
             if prediction.get("regime_adjustment"):
                 result["regime_adjustment"] = prediction["regime_adjustment"]

@@ -189,7 +189,27 @@ def _sample_predictions(model: TimeSeriesGBM, bars: list[dict], symbol: str) -> 
     return out
 
 
-def _tally(samples: list[dict]) -> dict:
+def _extract_up_threshold(metadata: dict) -> float:
+    """Read the model's calibrated UP threshold from stored metrics.
+
+    Falls back to the global UP_PROB_THRESHOLD (0.55) for legacy models
+    that predate the calibration fields. Bounded to [0.45, 0.60] to stay
+    inside the configured safety band.
+    """
+    metrics = (metadata or {}).get("metrics") or {}
+    v = metrics.get("calibrated_up_threshold")
+    if v is None:
+        return UP_PROB_THRESHOLD
+    try:
+        vf = float(v)
+    except (TypeError, ValueError):
+        return UP_PROB_THRESHOLD
+    if vf <= 0:
+        return UP_PROB_THRESHOLD
+    return max(0.45, min(0.60, vf))
+
+
+def _tally(samples: list[dict], up_threshold: float = UP_PROB_THRESHOLD) -> dict:
     """Aggregate directional + probability stats from prediction samples."""
     if not samples:
         return {"n": 0, "error": "no samples"}
@@ -207,8 +227,9 @@ def _tally(samples: list[dict]) -> dict:
         "p_up_p95":       round(float(np.percentile(p_up, 95)), 4),
         "p_up_max":       round(float(p_up.max()), 4),
         "p_down_mean":    round(float(p_down.mean()), 4),
+        "effective_up_threshold": round(float(up_threshold), 4),
         "pct_up_above_threshold": round(
-            100 * float(np.mean(p_up >= UP_PROB_THRESHOLD)), 1
+            100 * float(np.mean(p_up >= up_threshold)), 1
         ),
     }
 
@@ -246,10 +267,11 @@ def _classify(metadata: dict, tally: dict) -> tuple[str, str]:
             "level and MODE B at the behavioural level.",
         )
     if pct_up_thr < 5.0:
+        eff_thr = tally.get("effective_up_threshold", UP_PROB_THRESHOLD)
         return (
             "MODE C · Argmax UP but below threshold",
             f"UP argmax {pct_up}% of bars, but only {pct_up_thr}% cross the "
-            f"{UP_PROB_THRESHOLD} confidence threshold. Decision gate filters "
+            f"{eff_thr} confidence threshold. Decision gate filters "
             "them out. Fix: calibrate threshold per model or lower to 0.50.",
         )
     return (
@@ -316,12 +338,25 @@ async def main():
         logger.info(f"--- {setup_label} / {bar_size}  → {model_name}")
         meta = _get_model_metadata(sync_db, model_name)
         if not meta["found"]:
-            logger.info("  ⚠ not in timeseries_models")
-            all_results.append({
-                "setup": setup_label, "bar_size": bar_size, "model": model_name,
-                "metadata": meta, "tally": {"n": 0}, "mode": "MODEL MISSING",
-                "explanation": "Model not in DB.",
-            })
+            # Known SMB setups that intentionally fall back to the generic
+            # direction_predictor_5min until explicitly trained.
+            FALLBACK_SETUPS = {"OPENING_DRIVE", "SECOND_CHANCE", "BIG_DOG"}
+            if setup_label in FALLBACK_SETUPS:
+                logger.info("  ⓘ not in timeseries_models — falls back to generic predictor")
+                all_results.append({
+                    "setup": setup_label, "bar_size": bar_size, "model": model_name,
+                    "metadata": meta, "tally": {"n": 0},
+                    "mode": "FALLBACK TO GENERIC",
+                    "explanation": "No setup-specific model — live bot uses "
+                                   "direction_predictor_5min via predict_for_setup fallback.",
+                })
+            else:
+                logger.info("  ⚠ not in timeseries_models")
+                all_results.append({
+                    "setup": setup_label, "bar_size": bar_size, "model": model_name,
+                    "metadata": meta, "tally": {"n": 0}, "mode": "MODEL MISSING",
+                    "explanation": "Model not in DB.",
+                })
             continue
 
         try:
@@ -353,7 +388,7 @@ async def main():
                 continue
             all_samples.extend(_sample_predictions(model, bars, sym))
 
-        tally = _tally(all_samples)
+        tally = _tally(all_samples, up_threshold=_extract_up_threshold(meta))
         mode, explanation = _classify(meta, tally)
         logger.info(
             f"  n={tally.get('n', 0)} up={tally.get('pct_up','-')}%  "

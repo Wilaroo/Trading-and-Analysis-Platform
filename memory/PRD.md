@@ -29,8 +29,58 @@ correct. Added 9 regression tests (`test_backtest_direction_stops.py`)
 covering LONG + SHORT stop/target hits across all three sim methods.
 All 9 pass.
 
-## 2026-04-23 — P1 #1: Order-queue dead-letter reconciler
+## 2026-04-23 — MODE-C collapse: Per-model threshold calibration + label-distribution validator (A + D + C)
 
+Spark diagnostic after the `recall_down` fix revealed the generic model
+has `p_up_p95 = 0.424` — the 0.55 legacy gate was filtering out 99.6% of
+UP predictions. 3-class triple-barrier models can't reach 0.55 because
+probability mass splits across DOWN/FLAT/UP.
+
+**A — Per-model auto-calibrated thresholds**
+- New `services/ai_modules/threshold_calibration.py` with
+  `calibrate_thresholds_from_probs()` (p80 of validation probs,
+  bounded [0.45, 0.60]) and a `get_effective_threshold()` consumer helper.
+- `ModelMetrics` extended with `calibrated_up_threshold` and
+  `calibrated_down_threshold` fields (default 0.50 for legacy rows).
+- Both training paths (`train_full_universe` + `train_from_features`)
+  compute calibration from `y_pred_proba` and persist it.
+- `predict_for_setup` and the generic fallback now surface
+  `model_metrics` in the response dict so consumers see the thresholds.
+- `confidence_gate.py` now reads the per-model threshold via
+  `get_effective_threshold()` instead of the hard-coded 0.50 — each model
+  gates CONFIRMS at its own natural probability range.
+- 25 pytest cases (`test_threshold_calibration.py`) — all pass.
+- Diagnostic script now prints the effective per-model threshold in the
+  report and uses it in the MODE-C classifier.
+
+**D — Graceful fallback for missing SMB models**
+- `predict_for_setup` already falls back to the generic model, but now
+  emits a one-time-per-process INFO log naming the setup that's using
+  the fallback (no silent surprise).
+- `diagnose_long_model_collapse.py` distinguishes genuinely missing
+  models from expected SMB fallbacks (OPENING_DRIVE, SECOND_CHANCE,
+  BIG_DOG) with a `FALLBACK TO GENERIC` row.
+
+**C — Label-distribution health check (fail-loud signal)**
+- New `validate_label_distribution()` in
+  `services/ai_modules/triple_barrier_labeler.py`. Flags:
+    * any class < 10% (rare class)
+    * FLAT > 55% (barriers too wide → FLAT absorbs signal)
+    * any class > 70% (majority-class collapse)
+- Wired into both training paths — emits WARNING logs with
+  recommendations (sweep PT/SL, tighten max_bars, etc.) when the
+  distribution is unhealthy. Non-blocking; training proceeds.
+- 11 pytest cases (`test_label_distribution_validator.py`) — all pass.
+- **Non-destructive**: did NOT change labeller defaults (pt=2, sl=1) —
+  doing so would silently alter all training outputs. Instead the
+  validator surfaces the problem loudly so the user can run
+  `run_triple_barrier_sweep.py` per setup.
+
+**Spark next step:** rerun `backend/scripts/diagnose_long_model_collapse.py`
+after the next training cycle to confirm per-model thresholds are now
+being applied (report will show `effective_up_threshold` column).
+
+## 2026-04-23 — P1 #1: Order-queue dead-letter reconciler
 Handles silent broker rejects and Windows pusher crashes — orders stuck
 in pre-fill states (PENDING/CLAIMED/EXECUTING) now transition to the new
 `TIMEOUT` status automatically.

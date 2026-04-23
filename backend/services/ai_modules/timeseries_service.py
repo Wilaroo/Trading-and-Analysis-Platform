@@ -1092,6 +1092,22 @@ class TimeSeriesAIService:
                 f"FLAT={n_flat:,} ({n_flat/total*100:.1f}%), "
                 f"UP={n_up:,} ({n_up/total*100:.1f}%)"
             )
+
+            # Health check (P1 2026-04-23): label skew diagnostic — flags
+            # cases where training data will hamstring inference (FLAT eats
+            # the signal, or one class dominates). Maps trainer-indexed
+            # labels (0/1/2) back to raw triple-barrier labels (-1/0/+1).
+            from .triple_barrier_labeler import validate_label_distribution
+            raw_labels = np.where(y == 0, -1, np.where(y == 2, 1, 0))
+            health = validate_label_distribution(raw_labels)
+            if health["status"] != "healthy":
+                logger.warning(
+                    f"[FULL UNIVERSE] ⚠ Label distribution {health['status'].upper()}:"
+                )
+                for issue in health["issues"]:
+                    logger.warning(f"    - {issue}")
+                for rec in health["recommendations"]:
+                    logger.warning(f"    → {rec}")
             sys.stdout.flush()
 
             # Train/validation split
@@ -1228,6 +1244,19 @@ class TimeSeriesAIService:
             model._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
             from .timeseries_gbm import ModelMetrics
+            from .threshold_calibration import calibrate_thresholds_from_probs
+
+            # Per-model threshold calibration (P1 2026-04-23) — derive from
+            # the top-20% of validation predictions so the confidence gate
+            # uses this model's natural probability range instead of 0.55.
+            cal_up, cal_down = calibrate_thresholds_from_probs(
+                y_pred_proba, num_classes=3,
+            )
+            logger.info(
+                f"[FULL UNIVERSE] Calibrated thresholds: up={cal_up:.3f}, "
+                f"down={cal_down:.3f} (p80 of val probs, bounded to [0.45, 0.60])"
+            )
+
             model._metrics = ModelMetrics(
                 accuracy=accuracy,
                 precision_up=precision_up,
@@ -1236,6 +1265,8 @@ class TimeSeriesAIService:
                 precision_down=precision_down,
                 recall_down=recall_down,
                 f1_down=f1_down,
+                calibrated_up_threshold=float(cal_up),
+                calibrated_down_threshold=float(cal_down),
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
                 last_trained=datetime.now(timezone.utc).isoformat()
@@ -2800,6 +2831,13 @@ class TimeSeriesAIService:
         
         Layer 2: After raw prediction, adjusts confidence based on current
         market regime alignment with the setup's preferences.
+
+        NOTE (P1 2026-04-23): 4 SMB setups (OPENING_DRIVE 5m+1m,
+        SECOND_CHANCE, BIG_DOG) have no setup-specific model in
+        timeseries_models — they transparently fall back to the generic
+        direction_predictor_5min below. A single debug log is emitted on
+        the first fallback per process so operators know which setups
+        are using the generic model vs their own.
         """
         import numpy as np
         effective_type = self._resolve_setup_model_key(setup_type, self._setup_models.keys())
@@ -2988,6 +3026,12 @@ class TimeSeriesAIService:
                         "model_used": f"{effective_type.lower()}_predictor",
                         "model_type": "setup_specific",
                         "num_classes": 3 if prob_flat > 0 else 2,
+                        # Expose calibrated thresholds so the confidence gate
+                        # can score CONFIRMS at each model's natural level.
+                        "model_metrics": (
+                            model._metrics.to_dict()
+                            if getattr(model, "_metrics", None) else {}
+                        ),
                     }
                     
                     # Include regime context in result
@@ -3000,12 +3044,29 @@ class TimeSeriesAIService:
         
         # Fall back to general model
         if self._model and self._model._model is not None:
+            # Emit a ONE-TIME info log per process so operators can see which
+            # setups are using the generic fallback vs their own model.
+            if not hasattr(self, "_fallback_logged"):
+                self._fallback_logged = set()
+            if effective_type not in self._fallback_logged:
+                self._fallback_logged.add(effective_type)
+                logger.info(
+                    f"[MODEL FALLBACK] '{setup_type}' → '{effective_type}' has no "
+                    f"setup-specific model in timeseries_models; using generic "
+                    f"direction_predictor_5min until trained."
+                )
             try:
                 prediction = self._model.predict(bars, symbol=symbol)
                 if prediction:
                     result = prediction.to_dict() if hasattr(prediction, 'to_dict') else prediction
                     result["model_used"] = "general"
                     result["model_type"] = "general"
+                    # Expose the calibrated thresholds so the gate scores
+                    # CONFIRMS at the generic model's natural level (P1 2026-04-23).
+                    result["model_metrics"] = (
+                        self._model._metrics.to_dict()
+                        if getattr(self._model, "_metrics", None) else {}
+                    )
                     return result
             except Exception as e:
                 logger.warning(f"General model prediction failed: {e}")

@@ -182,18 +182,28 @@ class ModelMetrics:
     recall_down: float = 0.0
     f1_up: float = 0.0
     f1_down: float = 0.0
-    
+
+    # Per-model calibrated confidence thresholds (2026-04-23).
+    # Defaults to neutral 0.50 until a training run calibrates them.
+    # With 3-class triple-barrier models, probability mass splits across
+    # DOWN/FLAT/UP so the peak per-class probability rarely exceeds 0.55,
+    # making the legacy 0.55 global gate filter out almost all signals.
+    # These are computed from the validation-set prediction distribution
+    # (see services/ai_modules/threshold_calibration.py).
+    calibrated_up_threshold: float = 0.50
+    calibrated_down_threshold: float = 0.50
+
     # Sample info
     training_samples: int = 0
     validation_samples: int = 0
-    
+
     # Feature importance
     top_features: List[str] = field(default_factory=list)
-    
+
     # Metadata
     last_trained: str = ""
     last_evaluated: str = ""
-    
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -1036,6 +1046,21 @@ class TimeSeriesGBM:
         dist_parts = [f"{class_labels.get(int(c), c)}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)]
         logger.info(f"Class distribution: {', '.join(dist_parts)}")
 
+        # Health check (P1 2026-04-23): flag skewed label distributions
+        # loudly so the operator can sweep triple-barrier PT/SL per setup.
+        if num_classes >= 3:
+            from .triple_barrier_labeler import validate_label_distribution
+            raw_labels = np.where(y == 0, -1, np.where(y == 2, 1, 0))
+            health = validate_label_distribution(raw_labels)
+            if health["status"] != "healthy":
+                logger.warning(
+                    f"[{self.model_name}] ⚠ Label distribution {health['status'].upper()}:"
+                )
+                for issue in health["issues"]:
+                    logger.warning(f"    - {issue}")
+                for rec in health["recommendations"]:
+                    logger.warning(f"    → {rec}")
+
         # Configure params for multiclass if needed
         train_params = dict(self.params)
         if num_classes >= 3:
@@ -1140,6 +1165,20 @@ class TimeSeriesGBM:
         _rd = locals().get('recall_down', 0.0)
         _f1d = locals().get('f1_down', 0.0)
 
+        # Per-model threshold calibration (P1 2026-04-23): derive UP/DOWN
+        # gating thresholds from the top-20% of validation predictions so
+        # the confidence gate uses each model's natural probability range
+        # instead of a fixed 0.55 that's too strict for 3-class schemes.
+        from services.ai_modules.threshold_calibration import calibrate_thresholds_from_probs
+        _cal_up, _cal_down = calibrate_thresholds_from_probs(
+            y_pred_raw, num_classes=num_classes,
+        )
+        logger.info(
+            f"[CALIBRATION] {self.model_name}: up_threshold={_cal_up:.3f}, "
+            f"down_threshold={_cal_down:.3f} (p80 of validation probs, "
+            f"bounded to [0.45, 0.60])"
+        )
+
         self._metrics = ModelMetrics(
             accuracy=float(accuracy),
             precision_up=float(precision_up),
@@ -1148,6 +1187,8 @@ class TimeSeriesGBM:
             precision_down=float(_pd),
             recall_down=float(_rd),
             f1_down=float(_f1d),
+            calibrated_up_threshold=float(_cal_up),
+            calibrated_down_threshold=float(_cal_down),
             training_samples=len(X_train),
             validation_samples=len(X_val),
             top_features=top_features,

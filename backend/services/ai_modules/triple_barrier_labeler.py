@@ -159,3 +159,85 @@ def label_distribution(labels: np.ndarray) -> dict:
         "up": float(np.sum(labels == 1)) / total,
         "total": total,
     }
+
+
+def validate_label_distribution(
+    labels: np.ndarray,
+    *,
+    min_class_pct: float = 0.10,
+    flat_max_pct: float = 0.55,
+    dominant_max_pct: float = 0.70,
+) -> dict:
+    """Health check that flags pathological class distributions.
+
+    Returns a dict with:
+        status:        "healthy" | "warning" | "critical"
+        distribution:  {down, flat, up, total}
+        issues:        list of human-readable problem descriptions
+        recommendations: list of actionable fixes (sweep, retrain, etc.)
+
+    Thresholds (tunable):
+        min_class_pct     = 0.10  — any class below this is too rare
+                                    for the model to learn it reliably
+        flat_max_pct      = 0.55  — FLAT class eating >55% means
+                                    barriers are too wide / horizon too
+                                    long, training degenerates into
+                                    "predict FLAT always"
+        dominant_max_pct  = 0.70  — any class >70% → majority-class
+                                    collapse, model has no edge
+
+    Invoked by the trainer after labelling; a warning log is emitted
+    when status != "healthy" so the operator knows to sweep PT/SL.
+    """
+    dist = label_distribution(labels)
+    total = dist["total"]
+    issues: list = []
+    recs: list = []
+
+    if total == 0:
+        return {
+            "status": "critical",
+            "distribution": dist,
+            "issues": ["no labels — upstream data missing"],
+            "recommendations": ["check entry_indices and input bars before labelling"],
+        }
+
+    for cls_name in ("down", "flat", "up"):
+        pct = dist[cls_name]
+        if pct < min_class_pct:
+            issues.append(
+                f"{cls_name.upper()} class only {pct*100:.1f}% of samples "
+                f"(< {min_class_pct*100:.0f}%) — model can't learn this class"
+            )
+
+    if dist["flat"] > flat_max_pct:
+        issues.append(
+            f"FLAT class {dist['flat']*100:.1f}% > {flat_max_pct*100:.0f}% — "
+            "barriers too wide or max_bars too long; FLAT absorbs most signal"
+        )
+        recs.append(
+            "Lower max_bars or tighten PT/SL. Run the triple-barrier config "
+            "sweep (run_triple_barrier_sweep.py) per setup."
+        )
+
+    max_class = max(("down", "flat", "up"), key=lambda c: dist[c])
+    if dist[max_class] > dominant_max_pct:
+        issues.append(
+            f"{max_class.upper()} class dominates at {dist[max_class]*100:.1f}% "
+            f"(> {dominant_max_pct*100:.0f}%) — majority-class collapse likely"
+        )
+        recs.append(
+            "Apply class-balance weighting (balanced_sqrt already active) + "
+            "consider symmetric PT=SL to remove reward asymmetry bias."
+        )
+
+    status = "healthy"
+    if issues:
+        status = "critical" if dist[max_class] > dominant_max_pct else "warning"
+
+    return {
+        "status": status,
+        "distribution": dist,
+        "issues": issues,
+        "recommendations": recs or (["distribution looks healthy"] if status == "healthy" else []),
+    }
