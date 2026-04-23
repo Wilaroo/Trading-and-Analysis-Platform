@@ -435,6 +435,33 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
   // the queue-progress overall.failed count so the user still sees SOMETHING
   // even before the failed-items endpoint has been hit.
   const total = (data?.total_failed ?? fallbackCount) || 0;
+  const [retrying, setRetrying] = useState(null);  // null | 'all' | error-key
+
+  const retryGroup = useCallback(async (errorKey) => {
+    if (retrying) return;
+    setRetrying(errorKey || 'all');
+    try {
+      const params = new URLSearchParams({ max_retries: '10000' });
+      if (errorKey) params.set('error_contains', errorKey);
+      const res = await api.post(`/api/ib-collector/retry-failed?${params}`);
+      if (res.data?.success) {
+        const n = res.data.retried || 0;
+        if (n > 0) {
+          toast.success(`Re-queued ${n.toLocaleString()} request${n === 1 ? '' : 's'} for retry`);
+        } else {
+          toast.info('Nothing matched — they may have already been retried or cleared.');
+        }
+        onRefresh?.();
+      } else {
+        toast.error(res.data?.error || 'Retry failed');
+      }
+    } catch (err) {
+      toast.error('Retry errored: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setRetrying(null);
+    }
+  }, [retrying, onRefresh]);
+
   if (total === 0 && !expanded) return null;
 
   const groups = data?.by_error_type || {};
@@ -463,10 +490,23 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                 {total.toLocaleString()}
               </span>
             </div>
-            <div className="text-[10px] text-zinc-500">Permanent failures — grouped by error</div>
+            <div className="text-[10px] text-zinc-500">Permanent failures — grouped by error · retry with one click</div>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {expanded && total > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); retryGroup(null); }}
+              disabled={retrying !== null}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-200 text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="failed-requests-retry-all"
+              title="Re-queue every failed request for retry"
+            >
+              {retrying === 'all' ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              Retry all
+            </button>
+          )}
           {expanded && (
             <button
               type="button"
@@ -508,16 +548,26 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                 <div
                   key={err}
                   className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2"
-                  data-testid={`failed-error-group`}
+                  data-testid="failed-error-group"
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] text-rose-300 font-mono break-all pr-2">{err}</span>
-                    <span className="text-[10px] font-mono text-zinc-400 shrink-0">
-                      {info.count.toLocaleString()} ·{' '}
-                      <span className="text-zinc-500">
-                        {info.bar_sizes?.join(', ') || '?'}
-                      </span>
-                    </span>
+                  <div className="flex items-start justify-between gap-3 mb-1">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-rose-300 font-mono break-all">{err}</div>
+                      <div className="text-[9px] text-zinc-500 font-mono mt-0.5">
+                        {info.count.toLocaleString()} failures · {info.bar_sizes?.join(', ') || '?'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => retryGroup(err)}
+                      disabled={retrying !== null}
+                      className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 text-[10px] font-semibold text-zinc-300 hover:text-rose-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      data-testid="failed-group-retry-btn"
+                      title={`Retry ${info.count.toLocaleString()} requests matching this error`}
+                    >
+                      {retrying === err ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      Retry {info.count.toLocaleString()}
+                    </button>
                   </div>
                   <div className="text-[10px] text-zinc-500 leading-snug break-words">
                     {info.symbols.slice(0, 25).join(', ')}

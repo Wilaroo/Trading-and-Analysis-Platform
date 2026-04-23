@@ -891,46 +891,64 @@ def get_failure_analysis():
 @router.post("/retry-failed")
 async def retry_failed_requests(
     max_retries: int = 100,
-    status_filter: Optional[str] = None
+    status_filter: Optional[str] = None,
+    error_contains: Optional[str] = None,
+    bar_size: Optional[str] = None,
 ):
     """
     Re-queue failed requests for retry.
-    
-    This resets failed requests back to 'pending' status so they can be
+
+    Resets failed requests back to 'pending' status so they can be
     processed again by the IB Data Pusher.
-    
+
     - **max_retries**: Maximum number of failed requests to retry (default 100)
-    - **status_filter**: Only retry specific failure types (timeout, rate_limited, error)
-    
+    - **status_filter**: Only retry specific `result_status` values (timeout, rate_limited, error, no_data)
+    - **error_contains**: Retry only failures whose `failure_reason`/`result_status`/`error` contains
+      this substring (case-sensitive regex-escaped). Used by the NIA "Retry all in this group" button.
+    - **bar_size**: Scope retry to a specific bar_size (e.g., "1 min").
+
     Returns:
     - Count of requests reset for retry
     """
     try:
         from services.historical_data_queue_service import get_historical_data_queue_service
+        import re
         service = get_historical_data_queue_service()
-        
+
         # Build query for failed requests
         query = {"status": "failed"}
-        
+
         if status_filter:
             query["result_status"] = status_filter
-        
+        if bar_size:
+            query["bar_size"] = bar_size
+        if error_contains:
+            # Match against any of the three error-describing fields. Escape
+            # the user-supplied string so error messages with regex metachars
+            # (e.g., parentheses, dots) don't blow up the query.
+            pattern = re.escape(error_contains)
+            query["$or"] = [
+                {"failure_reason": {"$regex": pattern}},
+                {"result_status": {"$regex": pattern}},
+                {"error": {"$regex": pattern}},
+            ]
+
         # Find failed requests
         failed_requests = list(service.collection.find(
             query,
             {"request_id": 1, "symbol": 1, "bar_size": 1, "result_status": 1}
         ).limit(max_retries))
-        
+
         if not failed_requests:
             return {
                 "success": True,
                 "message": "No failed requests to retry",
                 "retried": 0
             }
-        
+
         # Reset them to pending
         request_ids = [r["request_id"] for r in failed_requests]
-        
+
         from datetime import datetime, timezone
         result = service.collection.update_many(
             {"request_id": {"$in": request_ids}},
@@ -942,18 +960,18 @@ async def retry_failed_requests(
                 "retried_from": "manual_retry"
             }}
         )
-        
+
         # Resume monitoring to process them
         collector = get_ib_collector()
         await collector.resume_monitoring()
-        
+
         return {
             "success": True,
             "message": f"Reset {result.modified_count} failed requests for retry",
             "retried": result.modified_count,
             "sample": [{"symbol": r["symbol"], "bar_size": r.get("bar_size")} for r in failed_requests[:5]]
         }
-        
+
     except Exception as e:
         logger.error(f"Error retrying failed requests: {e}")
         raise HTTPException(status_code=500, detail=str(e))
