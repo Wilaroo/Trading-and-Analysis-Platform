@@ -2856,13 +2856,13 @@ async def run_training_pipeline(
             if not sub_models:
                 logger.warning("No sub-models available — skipping ensemble training")
             else:
-                # Use daily bars as anchor timeframe for ensemble training
-                anchor_bs = "1 day"
-                anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
-
-                symbols = await get_cached_symbols(db, anchor_bs, 100)
-                max_sym = max_symbols_override or min(1500, BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 2500))
-                symbols = symbols[:max_sym]
+                # Per-ensemble anchor timeframe derived from each config's
+                # `sub_timeframes`. Intraday setups (SCALP, ORB, GAP_AND_GO,
+                # VWAP) don't have `_1day` variants, so they must anchor on
+                # their first configured sub-timeframe (typically "5 mins").
+                # Previously this was hardcoded to "1 day" and silently
+                # failed 4 of the 10 ensembles every run.
+                DEFAULT_ANCHOR = "1 day"
 
                 for setup_type, ens_config in ENSEMBLE_MODEL_CONFIGS.items():
                     model_name = ens_config["model_name"]
@@ -2880,8 +2880,30 @@ async def run_training_pipeline(
                             status.add_completed(model_name, resumed["accuracy"])
                             continue
 
+                    # Pick anchor: first bar_size in this ensemble's config
+                    # that actually has a trained setup sub-model. Falls back
+                    # to the first configured bar_size if none are trained.
+                    configured_tfs = ens_config.get("sub_timeframes") or [DEFAULT_ANCHOR]
+                    anchor_bs = None
+                    for tf in configured_tfs:
+                        candidate_name = _get_ens_model_name(setup_type, tf)
+                        probe = TimeSeriesGBM(model_name=candidate_name, forecast_horizon=1)
+                        probe.set_db(db)
+                        if probe._model is not None:
+                            anchor_bs = tf
+                            break
+                    if anchor_bs is None:
+                        anchor_bs = configured_tfs[0]  # best-effort fallback
+
+                    anchor_fh = BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("forecast_horizon", 5)
+                    symbols = await get_cached_symbols(db, anchor_bs, 100)
+                    max_sym = max_symbols_override or min(
+                        1500, BAR_SIZE_CONFIGS.get(anchor_bs, {}).get("max_symbols", 2500)
+                    )
+                    symbols = symbols[:max_sym]
+
                     try:
-                        # Load setup-specific model if daily variant exists
+                        # Load setup-specific model for this ensemble's anchor.
                         # CRITICAL: ensemble_<setup> is a META-LABELER — it requires a working
                         # setup sub-model to filter "is this a trade entry?" and provide a
                         # direction. Without it, the ensemble has no edge to grade.
@@ -2894,7 +2916,7 @@ async def run_training_pipeline(
                                 sm.set_db(db)
                                 if sm._model is not None:
                                     setup_model = sm
-                                    logger.info(f"Loaded setup sub-model: {sname}")
+                                    logger.info(f"Loaded setup sub-model: {sname} (anchor={anchor_bs})")
                                 break
 
                         # Skip entirely if no setup sub-model — training on universe-wide

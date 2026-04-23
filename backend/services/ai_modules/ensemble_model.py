@@ -179,16 +179,21 @@ def extract_ensemble_features(
 
 
 # Ensemble model configs
+# `sub_timeframes` lists the bar_sizes that HAVE trained setup sub-models.
+# The training pipeline anchors on the first entry that actually has a
+# trained sub-model; setups that only make sense intraday (SCALP, ORB,
+# GAP_AND_GO, VWAP) deliberately exclude "1 day" because daily bars don't
+# produce the intraday signal these setups depend on.
 ENSEMBLE_MODEL_CONFIGS = {
     # One per setup type — routes to the appropriate sub-models
     "SCALP":              {"model_name": "ensemble_scalp", "sub_timeframes": ["5 mins", "1 min"]},
-    "ORB":                {"model_name": "ensemble_orb", "sub_timeframes": ["1 day", "5 mins"]},
-    "GAP_AND_GO":         {"model_name": "ensemble_gap", "sub_timeframes": ["1 day", "5 mins"]},
+    "ORB":                {"model_name": "ensemble_orb", "sub_timeframes": ["5 mins"]},
+    "GAP_AND_GO":         {"model_name": "ensemble_gap", "sub_timeframes": ["5 mins"]},
     "BREAKOUT":           {"model_name": "ensemble_breakout", "sub_timeframes": ["1 day", "1 hour", "5 mins"]},
     "MEAN_REVERSION":     {"model_name": "ensemble_meanrev", "sub_timeframes": ["1 day", "1 hour", "5 mins"]},
     "MOMENTUM":           {"model_name": "ensemble_momentum", "sub_timeframes": ["1 day", "1 hour"]},
     "TREND_CONTINUATION": {"model_name": "ensemble_trend", "sub_timeframes": ["1 day", "1 hour", "5 mins"]},
     "REVERSAL":           {"model_name": "ensemble_reversal", "sub_timeframes": ["1 day", "1 hour", "5 mins"]},
     "RANGE":              {"model_name": "ensemble_range", "sub_timeframes": ["1 day", "1 hour", "5 mins"]},
-    "VWAP":               {"model_name": "ensemble_vwap", "sub_timeframes": ["1 day", "5 mins"]},
+    "VWAP":               {"model_name": "ensemble_vwap", "sub_timeframes": ["5 mins"]},
 }
