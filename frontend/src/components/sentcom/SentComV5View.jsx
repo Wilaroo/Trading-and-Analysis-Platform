@@ -140,7 +140,7 @@ export const SentComV5View = ({
   return (
     <div
       data-testid="sentcom-v5-root"
-      className="fixed inset-0 z-40 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
+      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />

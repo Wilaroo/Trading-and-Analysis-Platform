@@ -152,7 +152,7 @@ export const FlattenAllButtonV5 = ({ safety }) => {
         onClick={() => setOpen(true)}
         data-testid="v5-flatten-all-btn"
         title="Emergency flatten — cancel all pending + close all positions"
-        className="fixed bottom-3 left-3 z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[10px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm"
+        className="fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[10px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm"
       >
         <Power className="w-3 h-3" />
         Flatten all
