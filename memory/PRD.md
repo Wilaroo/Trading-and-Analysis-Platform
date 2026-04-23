@@ -11,6 +11,66 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 2026-04-23 — Training run diagnostic · `test_mode=true` is destructive
+
+Ran two training runs today after the Alpaca nuke + pipeline hardening:
+  • Run 1: `{"test_mode": true}` (no force_retrain) — stopped after 7 min.
+    Confirmed that the resume-if-recent guard was skipping everything
+    trained in the prior 24h. Models showed `acc: -` (cached).
+  • Run 2: `{"force_retrain": true, "test_mode": true}` — ran to ~110 min
+    of ~190 min ETA before analysis. Mongo revealed:
+
+**Findings from Run 2:**
+  - P1 Generic Directional: 52-58% accuracy on 13M-63M samples ✅ REAL EDGE
+  - P2 Setup Long: 40-45% accuracy on ~50 samples ❌ UNDERTRAINED
+  - P2.5 Short: 40-51% accuracy on ~50 samples ❌ UNDERTRAINED
+  - P4 Exit: 37-54% accuracy ❌ UNDERTRAINED
+  - P3 Volatility: 0/7 models trained — all "Insufficient vol training data: 50"
+  - P5 Sector-Relative: 0/3 models trained — all "0 samples"
+  - P7 Regime-Conditional: 0/28 models trained — all "only 50 samples (need 100)"
+  - P8 Ensemble: 6/10 trained; 4 orphan configs reference non-existent
+    `_1day` setup variants (scalp_1day_predictor, orb_1day_predictor,
+    gap_and_go_1day_predictor, vwap_1day_predictor)
+
+**Root cause:** `test_mode=true` caps per-model training samples at ~50.
+Phases 3/5/7 require ≥100 samples, so they silently skip every bar-size and
+mark DONE with zero models. Phases 2/4 train but don't converge past random
+initialization on 50 samples. Only P1 survives because its streaming
+pipeline feeds millions of samples regardless of test_mode.
+
+**Action plan:**
+  1. Let current run finish (~1.8h remaining at diagnosis time) for P9 CNN
+     data point.
+  2. Kick full-quality run: `{"force_retrain": true}` with NO test_mode.
+     Expect ~44h overnight. Should produce real edge across all phases.
+  3. Fix 4 orphan ensemble configs (`_1day` variants that don't exist) —
+     either delete those ensembles or rewire to `_5min` dependencies.
+  4. Keep bot paused until full run completes (currently paused anyway
+     because IB pusher is dead / `pusher_dead: true` banner active).
+
+**Status reporting bug noticed:**
+  The training status script reports `phase.status = "done"` as long as the
+  phase loop completed, even if zero models were actually persisted. Future
+  enhancement: compare `models_trained_this_run` to `expected_models` and
+  flag phases where the ratio is 0%. P1's `acc: -` was also a reporting
+  bug — accuracies ARE saved in mongo (52-58%), just not surfaced by the
+  status aggregator.
+
+## 2026-04-23 — V5 bug fixes (same session)
+
+  - `P(win) 5900%` / `conf 5900%` formatting fix: `formatPct()` now detects
+    whether input is fraction (0.59) or pre-scaled pct (59). Fixed in
+    `ScannerCardsV5.jsx` and `OpenPositionsV5.jsx` + `>=0.55` threshold
+    comparison normalised.
+  - `EnhancedTickerModal` infinite loading spinner fix: added 10s/12s hard
+    timeouts around `/api/ib/analysis` and `/api/ib/historical` requests.
+    When IB Gateway hangs (no response, no error), the Promise.race converts
+    to a rejection and triggers the existing `.catch()` handler — modal
+    shows "Chart data timed out (IB / mongo busy)." instead of eternal
+    spinner.
+
+
+
 ## 2026-04-23 — Alpaca fully nuked · loud failure mode · freshness chips
 
 **The problem:** Alpaca kept creeping back into the codebase across 63 files / 739 lines even after multiple manual cleanups. The scanner's `predictive_scanner.py` and `opportunity_evaluator.py` were still routing quotes through Alpaca, creating two disagreeing price feeds and silently masking IB outages.
