@@ -76,7 +76,12 @@ const PositionRow = ({ position, onClick }) => {
           return pt != null ? <span> · PT {Number(pt).toFixed(2)}</span> : null;
         })()}
         {position.entry_price != null && <span> · E {Number(position.entry_price).toFixed(2)}</span>}
-        {position.p_win != null && <span> · P(win) {Math.round(Number(position.p_win) * 100)}%</span>}
+        {position.p_win != null && (() => {
+          // Handle both fraction (0.59) and pre-scaled percentage (59) forms
+          const n = Number(position.p_win);
+          const pct = Math.abs(n) > 1 ? n : n * 100;
+          return <span> · P(win) {Math.round(pct)}%</span>;
+        })()}
       </div>
     </div>
   );

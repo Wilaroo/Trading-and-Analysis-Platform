@@ -54,7 +54,15 @@ const Mini5Stage = ({ stage, closedOutcome }) => {
   );
 };
 
-const formatPct = (v) => (v == null || Number.isNaN(Number(v))) ? '—' : `${(Number(v) * 100).toFixed(0)}%`;
+// Accepts either a fraction (0.59 → "59%") or an already-scaled percentage
+// (59 → "59%"). Backend mixes the two depending on field, so treat any
+// value > 1 as already a percentage to prevent the 5900% bug.
+const formatPct = (v) => {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  const pct = Math.abs(n) > 1 ? n : n * 100;
+  return `${pct.toFixed(0)}%`;
+};
 const formatNum = (v, d = 2) => (v == null || Number.isNaN(Number(v))) ? '—' : Number(v).toFixed(d);
 const formatPriceChange = (v) => {
   if (v == null || Number.isNaN(Number(v))) return '';
@@ -262,14 +270,19 @@ const ScannerCard = ({ card, active, onClick }) => {
               </span>
             </div>
           )}
-          {card.metrics.p_win != null && (
-            <div className="flex items-center gap-1">
-              <span className="v5-dim">P(win)</span>
-              <span className={`font-bold ${Number(card.metrics.p_win) >= 0.55 ? 'v5-up' : 'v5-down'}`}>
-                {formatPct(card.metrics.p_win)}
-              </span>
-            </div>
-          )}
+          {card.metrics.p_win != null && (() => {
+            const n = Number(card.metrics.p_win);
+            // Normalise to 0-1 fraction for the threshold comparison
+            const frac = Math.abs(n) > 1 ? n / 100 : n;
+            return (
+              <div className="flex items-center gap-1">
+                <span className="v5-dim">P(win)</span>
+                <span className={`font-bold ${frac >= 0.55 ? 'v5-up' : 'v5-down'}`}>
+                  {formatPct(card.metrics.p_win)}
+                </span>
+              </div>
+            );
+          })()}
           {card.metrics.sharpe != null && (
             <div className="flex items-center gap-1">
               <span className="v5-dim">Sharpe</span>

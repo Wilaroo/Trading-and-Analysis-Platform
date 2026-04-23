@@ -639,12 +639,34 @@ const EnhancedTickerModal = ({
       
       const tfConfig = TIMEFRAMES.find(t => t.id === selectedTimeframe) || TIMEFRAMES[1];
       
+      // Hard timeout so a hanging request (e.g. IB Gateway dead, mongo busy)
+      // converts to a rejection instead of leaving the modal stuck on a spinner.
+      const withTimeout = (p, ms, label) => Promise.race([
+        p,
+        new Promise((_, reject) => setTimeout(
+          () => reject(Object.assign(new Error(`${label} timed out`), { __timeout: true })),
+          ms
+        )),
+      ]);
+
       try {
         const opts = { signal: controller.signal };
         const [analysisRes, histRes] = await Promise.all([
-          api.get(`/api/ib/analysis/${ticker.symbol}`, opts).catch(() => ({ data: null })),
-          api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`, opts).catch((err) => {
+          withTimeout(
+            api.get(`/api/ib/analysis/${ticker.symbol}`, opts),
+            10000,
+            'analysis',
+          ).catch(() => ({ data: null })),
+          withTimeout(
+            api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`, opts),
+            12000,
+            'historical',
+          ).catch((err) => {
             if (err.name === 'CanceledError' || err.name === 'AbortError') throw err;
+            if (err.__timeout) {
+              setChartError('Chart data timed out (IB / mongo busy). Retry or pick a smaller range.');
+              return { data: { bars: [] } };
+            }
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
               setChartError('IB Gateway is busy. Using cached data.');
