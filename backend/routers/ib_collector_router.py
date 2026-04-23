@@ -1387,62 +1387,80 @@ def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
 
 
 @router.get("/failed-items")
-def get_failed_items(
+async def get_failed_items(
     bar_size: str = None,
     limit: int = 500
 ):
     """
     Get list of failed items with their error details.
-    
-    - **bar_size**: Optional - filter by bar_size
+
+    - **bar_size**: Optional — filter by bar_size
     - **limit**: Max items to return (default 500)
+
+    Reads from `historical_data_requests` (the actual queue collection —
+    previous code had a typo pointing at the non-existent `historical_data_queue`).
+    Runs in a thread so big failure sets don't block the event loop.
     """
+    import asyncio as _aio
     try:
         from server import db
-        
-        query = {"status": "failed"}
-        if bar_size:
-            query["bar_size"] = bar_size
-        
-        cursor = db.historical_data_queue.find(
-            query,
-            {"symbol": 1, "bar_size": 1, "failure_reason": 1, "error": 1, "updated_at": 1}
-        ).limit(limit)
-        
-        items = []
-        error_groups = {}
-        
-        for item in cursor:
-            symbol = item.get("symbol", "?")
-            bs = item.get("bar_size", "?")
-            error = item.get("failure_reason", item.get("error", "unknown"))
-            
-            items.append({
-                "symbol": symbol,
-                "bar_size": bs,
-                "error": error
-            })
-            
-            # Group by error type
-            error_key = error[:50] if error else "unknown"
-            if error_key not in error_groups:
-                error_groups[error_key] = {"symbols": [], "count": 0}
-            error_groups[error_key]["symbols"].append(symbol)
-            error_groups[error_key]["count"] += 1
-        
-        # Dedupe symbols in each group
-        for key in error_groups:
-            error_groups[key]["symbols"] = sorted(set(error_groups[key]["symbols"]))
-        
-        return {
-            "success": True,
-            "total_failed": len(items),
-            "by_error_type": error_groups,
-            "items": items
-        }
+
+        def _fetch():
+            query = {"status": "failed"}
+            if bar_size:
+                query["bar_size"] = bar_size
+
+            cursor = db.historical_data_requests.find(
+                query,
+                {"_id": 0, "symbol": 1, "bar_size": 1, "failure_reason": 1,
+                 "error": 1, "result_status": 1, "updated_at": 1, "completed_at": 1}
+            ).limit(limit)
+
+            items = []
+            error_groups = {}
+
+            for item in cursor:
+                symbol = item.get("symbol", "?")
+                bs = item.get("bar_size", "?")
+                # Prefer detailed result_status (timeout/rate_limited/error/no_data)
+                # then failure_reason, then raw error string.
+                error = (
+                    item.get("failure_reason")
+                    or item.get("result_status")
+                    or item.get("error")
+                    or "unknown"
+                )
+                items.append({
+                    "symbol": symbol,
+                    "bar_size": bs,
+                    "error": error,
+                    "when": item.get("completed_at") or item.get("updated_at"),
+                })
+
+                error_key = (error[:60] if isinstance(error, str) else "unknown").strip() or "unknown"
+                if error_key not in error_groups:
+                    error_groups[error_key] = {"symbols": [], "count": 0, "bar_sizes": set()}
+                error_groups[error_key]["symbols"].append(symbol)
+                error_groups[error_key]["bar_sizes"].add(bs)
+                error_groups[error_key]["count"] += 1
+
+            for key in error_groups:
+                error_groups[key]["symbols"] = sorted(set(error_groups[key]["symbols"]))
+                error_groups[key]["bar_sizes"] = sorted(error_groups[key]["bar_sizes"])
+
+            return {
+                "success": True,
+                "total_failed": len(items),
+                "by_error_type": error_groups,
+                "items": items,
+            }
+
+        return await _aio.to_thread(_fetch)
     except Exception as e:
         logger.error(f"Error getting failed items: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 async def resume_barsize_collection(
     bar_size: str,
     retry_failed: bool = True,

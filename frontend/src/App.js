@@ -134,6 +134,24 @@ function App() {
   const [ibConnected, setIbConnected] = useState(false);
   const [ibConnectionChecked, setIbConnectionChecked] = useState(false);
 
+  // Cross-app navigation: V5's DeadLetterBadge dispatches `v5-open-failed-items`
+  // to ask us to surface the Failed Requests panel. We switch to the NIA tab
+  // and re-emit a `nia-scroll-to-failed` event after a short delay so the NIA
+  // panel has time to mount before it tries to scroll/expand.
+  useEffect(() => {
+    const handler = () => {
+      setActiveTab('nia');
+      localStorage.setItem('tradecommand_activeTab', 'nia');
+      setTimeout(() => {
+        try {
+          window.dispatchEvent(new CustomEvent('nia-scroll-to-failed'));
+        } catch { /* noop */ }
+      }, 250);
+    };
+    window.addEventListener('v5-open-failed-items', handler);
+    return () => window.removeEventListener('v5-open-failed-items', handler);
+  }, []);
+
   // ============= WebSocket-pushed state (replaces polling) =============
   const [wsBotStatus, setWsBotStatus] = useState(null);
   const [wsBotTrades, setWsBotTrades] = useState([]);

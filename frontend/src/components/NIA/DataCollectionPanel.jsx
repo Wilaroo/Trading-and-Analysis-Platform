@@ -123,9 +123,23 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const [pendingRequests, setPendingRequests] = useState(0);
   const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
   const [lastBackfill, setLastBackfill] = useState(null);
+  const [failedItems, setFailedItems] = useState(null);      // { total_failed, by_error_type, items }
+  const [failedExpanded, setFailedExpanded] = useState(false);
+  const [loadingFailed, setLoadingFailed] = useState(false);
+  const failedSectionRef = useRef(null);
   const lastDataRef = useRef(null);
 
   const { dataCollection: wsDataCollection } = useWsData();
+
+  const refreshFailedItems = useCallback(async () => {
+    setLoadingFailed(true);
+    try {
+      const res = await api.get('/api/ib-collector/failed-items?limit=500');
+      if (res.data?.success) setFailedItems(res.data);
+    } catch { /* non-critical */ } finally {
+      setLoadingFailed(false);
+    }
+  }, []);
 
   const refreshLastBackfill = useCallback(async () => {
     try {
@@ -133,6 +147,26 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
       if (res.data?.success) setLastBackfill(res.data.last_run || null);
     } catch { /* non-critical */ }
   }, []);
+
+  // Listen for triage requests from the V5 DeadLetterBadge. When the user
+  // clicks the DLQ pill in the SentCom HUD, App.js switches to this tab and
+  // dispatches `nia-scroll-to-failed`; we expand the Failed Requests section,
+  // fetch the latest list, scroll it into view, and flash focus.
+  useEffect(() => {
+    const handler = () => {
+      setExpanded(true);
+      setFailedExpanded(true);
+      refreshFailedItems();
+      setTimeout(() => {
+        const el = failedSectionRef.current;
+        if (el?.scrollIntoView) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 150);
+    };
+    window.addEventListener('nia-scroll-to-failed', handler);
+    return () => window.removeEventListener('nia-scroll-to-failed', handler);
+  }, [refreshFailedItems]);
 
   useEffect(() => {
     let isMounted = true;
@@ -330,6 +364,21 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
         </div>
       )}
 
+      {/* Failed Requests — collapsible triage surface reachable from the V5 DLQ badge */}
+      <FailedRequestsSection
+        forwardRef={failedSectionRef}
+        expanded={failedExpanded}
+        onToggle={() => {
+          const next = !failedExpanded;
+          setFailedExpanded(next);
+          if (next && !failedItems) refreshFailedItems();
+        }}
+        onRefresh={refreshFailedItems}
+        loading={loadingFailed}
+        data={failedItems}
+        fallbackCount={detailedProgress?.overall?.failed || 0}
+      />
+
       {/* No data state */}
       {!loadingCoverage && totalSymbols === 0 && (
         <div className="text-center py-6 text-zinc-500 text-sm">
@@ -379,6 +428,114 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
     </div>
   );
 });
+
+/* ===== Failed Requests — triage surface for the V5 DLQ badge ===== */
+const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh, loading, data, fallbackCount }) => {
+  // Total to show in the header: prefer the loaded data count, fall back to
+  // the queue-progress overall.failed count so the user still sees SOMETHING
+  // even before the failed-items endpoint has been hit.
+  const total = (data?.total_failed ?? fallbackCount) || 0;
+  if (total === 0 && !expanded) return null;
+
+  const groups = data?.by_error_type || {};
+  const groupEntries = Object.entries(groups).sort((a, b) => (b[1].count || 0) - (a[1].count || 0));
+
+  return (
+    <div
+      ref={forwardRef}
+      className="rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-500/[0.05] to-transparent overflow-hidden"
+      data-testid="failed-requests-section"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/5 transition-colors"
+        data-testid="failed-requests-toggle"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/25 flex items-center justify-center">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+          </div>
+          <div className="text-left">
+            <div className="text-xs font-bold text-white flex items-center gap-2">
+              Failed Requests
+              <span className="text-[10px] font-mono font-semibold text-rose-300" data-testid="failed-requests-count">
+                {total.toLocaleString()}
+              </span>
+            </div>
+            <div className="text-[10px] text-zinc-500">Permanent failures — grouped by error</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {expanded && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
+              className="p-1 rounded hover:bg-white/10 text-zinc-500 hover:text-zinc-300 transition-colors"
+              data-testid="failed-requests-refresh"
+              title="Refresh failed items"
+            >
+              <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+          {expanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border-t border-rose-500/15"
+          >
+            <div className="px-4 py-3 space-y-2">
+              {loading && (
+                <div className="flex items-center gap-2 text-xs text-zinc-500">
+                  <Loader className="w-3 h-3 animate-spin" /> Loading failed items…
+                </div>
+              )}
+              {!loading && groupEntries.length === 0 && (
+                <div className="text-xs text-zinc-500 italic">
+                  {total > 0
+                    ? `Queue shows ${total.toLocaleString()} failed but no detail rows loaded yet — click refresh.`
+                    : 'No failed requests. Everything that could be fetched, was.'}
+                </div>
+              )}
+              {!loading && groupEntries.map(([err, info]) => (
+                <div
+                  key={err}
+                  className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2"
+                  data-testid={`failed-error-group`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-rose-300 font-mono break-all pr-2">{err}</span>
+                    <span className="text-[10px] font-mono text-zinc-400 shrink-0">
+                      {info.count.toLocaleString()} ·{' '}
+                      <span className="text-zinc-500">
+                        {info.bar_sizes?.join(', ') || '?'}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-zinc-500 leading-snug break-words">
+                    {info.symbols.slice(0, 25).join(', ')}
+                    {info.symbols.length > 25 && (
+                      <span className="text-zinc-600 italic"> … +{info.symbols.length - 25} more</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+});
+FailedRequestsSection.displayName = 'FailedRequestsSection';
+
 
 /* ===== Collection Progress Bar ===== */
 const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, priorityCollection }) => {
