@@ -898,6 +898,27 @@ def get_pushed_quotes() -> dict:
     return _pushed_ib_data.get("quotes", {})
 
 
+def get_pushed_account_id() -> Optional[str]:
+    """Return the account id currently reported by the IB pusher, or None.
+
+    Mirrors the extraction logic in `get_account_summary` (walks the nested
+    `_pushed_ib_data["account"]` dict and returns the first `val.get("account")`).
+    Used by the safety `account_guard` surface so it reads from the same source
+    that `/api/ib/account/summary` reads from, instead of the
+    `get_connection_status()` payload (which does not carry `account_id`).
+    """
+    global _pushed_ib_data
+    account = _pushed_ib_data.get("account") or {}
+    if not isinstance(account, dict):
+        return None
+    for _key, val in account.items():
+        if isinstance(val, dict):
+            acct = val.get("account")
+            if acct:
+                return str(acct)
+    return None
+
+
 def is_pusher_connected() -> bool:
     """Check if IB data pusher is connected (called by other services)."""
     global _pushed_ib_data

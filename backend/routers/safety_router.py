@@ -93,13 +93,22 @@ async def safety_status() -> Dict[str, Any]:
     try:
         from services.account_guard import summarize_for_ui
         current = None
+        # Mirror the exact extraction used by /api/ib/account/summary so the
+        # guard reads the pusher's live account id (see routers/ib.py:735-739).
         try:
-            from services.ib_service import get_ib_service
-            ib = get_ib_service()
-            status_obj = ib.get_status() if ib else None
-            current = (status_obj or {}).get("account_id")
+            from routers.ib import get_pushed_account_id
+            current = get_pushed_account_id()
         except Exception:
             current = None
+        # Fallback: direct-connected IB service (when pusher is offline).
+        if not current:
+            try:
+                from services.ib_service import get_ib_service
+                ib = get_ib_service()
+                status_obj = ib.get_status() if ib else None
+                current = (status_obj or {}).get("account_id")
+            except Exception:
+                pass
         resp["account_guard"] = summarize_for_ui(current)
     except Exception as e:
         logger.debug("safety.status account_guard error: %s", e)

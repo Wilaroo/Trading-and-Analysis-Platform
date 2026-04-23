@@ -1293,3 +1293,13 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - Can't test this codebase in the Emergent container (no IB, no pusher, no GPU). All verification is curl/python on the user's Spark. Testing agents unavailable for integration flows.
 - Code changes reach Spark via "Save to Github" → `git pull` on both Windows and Spark.
 - Backend restart: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &` (Spark uses `.venv`, not supervisor)
+
+## 2026-02-01 — Account Guard `current_account_id: null` Fix (P0)
+- **Root cause**: `safety_router.py` was reading `ib.get_status().get("account_id")` — that field is never populated in `IBService.get_connection_status()`. The working path is in `routers/ib.py:get_account_summary` (lines 735-739), which walks the nested `_pushed_ib_data["account"]` dict.
+- **Fix**:
+  1. Added `get_pushed_account_id()` helper in `backend/routers/ib.py` that mirrors the extraction at lines 735-739.
+  2. Updated `backend/routers/safety_router.py` `/api/safety/status` to call `get_pushed_account_id()` first, falling back to `ib_service.get_status()` only when pusher is offline.
+  3. Added `backend/tests/test_pushed_account_id.py` — 6 new regression tests covering empty/malformed/live/paper pusher states and the end-to-end `summarize_for_ui` wiring.
+- **Verification**: All 141 session-related tests pass. Live `/api/safety/status` against a mocked pusher payload now returns `current_account_id: "esw100000"` (was `null`).
+- **User action required for Issue 2 (chart blank)**: Pusher must backfill `historical_bars`. Trigger via: `POST /api/ib-collector/execute-backfill` once pusher is connected to paper account.
+
