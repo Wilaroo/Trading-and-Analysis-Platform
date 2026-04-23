@@ -540,7 +540,7 @@ async def incremental_update(
         }
         
     except Exception as e:
-        logger.error(f"Error in incremental update: {e}")
+        logger.error(f"Error in incremental update: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
