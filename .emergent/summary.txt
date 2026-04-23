@@ -2,145 +2,141 @@
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform running on a DGX Spark (Linux) and Windows PC. The LONG-side pipeline is completely unblocked E2E: the 5-min generic direction model was successfully retrained and force-promoted, reaching a healthy  of 0.597. Setup-specific LONG models that output 0.44–0.53 confidence (MODE C) now properly trigger CONFIRMS tier logic because the alignment threshold was lowered from 0.60 to 0.50. The massive  component has been successfully and safely extracted into a modular structure (, , ). The new UI integrates TradingView's open-source  with a new backend endpoint fetching VWAP/EMA and trade markers. A Model Health Scorecard is actively wired into the UI.
+**what currently exists?**: A full-stack AI trading platform running on a DGX Spark (Linux) and Windows PC. The LONG and SHORT side pipelines are now completely unblocked E2E. A massive bug was identified and fixed where  was never actually being calculated, causing the system to falsely reject all SHORT models. With this fixed, the generic directional model promoted successfully with real DOWN metrics. The V5 Command Center UI has been fully implemented and made default, featuring an extreme-density layout with a top pipeline HUD, scanner cards, chart SVG annotations, and a unified stream. A P0 Safety guardrail system (kill-switch, daily loss limits, stale quote detection, flatten-all emergency button) has been implemented and wired end-to-end.
 
 **Last working item**:
-    - Last item agent was working: Making the  tiles clickable so that when a user clicks a MODE C or MISSING setup model, it automatically triggers the backend to enqueue a targeted retrain job for that specific  pair. Agent was just investigating backend training entry points () in  to wire this up.
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by python -c / bash (Hardware constraint: Code runs on physical DGX Spark, user must execute or verify)
+    - Last item agent was working: Fixing the simulated exit ignores stops bug (P1) in the revalidation engine (). The agent just executed a  to fix five separate direction bugs in  where SHORT setups were incorrectly evaluated using LONG logic for stops, profit targets, and max favorable excursion.
+    - Status: TESTING PENDING
+    - Agent Testing Done: N (Just applied the fix)
+    - Which testing method agent to use? manual testing by pytest / bash
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: DOWN-side Model Collapse () on 5-min Generic Predictor (P0)
-     - Attempted fixes: The recent  weight implementation fixed the LONG side (UP) but severely over-boosted it, completely starving the DOWN class during the full universe retrain. 
-     - Next debug checklist: Modify the class weighting logic in  /  (likely using a dampened  or manual clamping) to prevent the minority class from entirely collapsing the opposing class, then provide user with a script command to retrain again.
-     - Why fix this issue and what will be achieved with the fix? SHORT setups are completely blocked right now because the generic model cannot predict DOWN.
-     - Status: NOT STARTED
-     - Is recurring issue? Y (Pendulum swing from previous collapse)
+  Issue 1: Simulated exit ignores stops / Directional simulation logic (P0)
+     - Attempted fixes: Applied a comprehensive search/replace in  within  to properly handle  for stop triggers, max favorable excursion, and PnL calculation.
+     - Next debug checklist: Run pytest for the backtest engine to ensure no regressions. Check if  or other simulation methods in  suffer from the exact same directional hardcoding bug and fix them if they do.
+     - Why fix this issue and what will be achieved with the fix? Revalidation backtests currently overstate performance because stops don't trigger properly mid-bar, leading to deployment of bad models.
+     - Status: TESTING PENDING
+     - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
-  Issue 2: 4 SMB models missing from DB (P2)
-     - Attempted fixes: Identified during diagnostics. , ,  are declared in config but missing.
-     - Next debug checklist: Run targeted  training for 5 mins + 1 min. (Will be easily solvable via the UI once the Last Working Item is finished).
-     - Why fix this issue and what will be achieved with the fix? Ensures all configured setups have baseline models.
+  Issue 2: P&L accuracy awaiting quotes gate in the bot's risk math (P1)
+     - Attempted fixes: None yet.
+     - Next debug checklist: Check  to ensure internal risk math doesn't trigger on anomalous -.2M cost basis calculations before IB quotes arrive upon startup.
+     - Why fix this issue and what will be achieved with the fix? Prevents the bot from instantly tripping the newly implemented P0 kill-switch on startup due to fake massive negative PnL.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
-  Issue 3: Simulated exit ignores stops (P2)
-     - Attempted fixes: None. Simulated fills compute at end-of-bar rather than using stop-triggered exits.
-     - Next debug checklist: Check simulation phase fills computation and enforce stop-loss logic.
-     - Why fix this issue and what will be achieved with the fix? Prevents execution health metrics from being polluted with fake failed stops.
+  Issue 3: Order-queue dead-letter timeout (P1)
+     - Attempted fixes: None yet.
+     - Next debug checklist: Implement a reconciliation cron or timeout logic for orders stuck in  > N seconds without a fill event from the broker.
+     - Why fix this issue and what will be achieved with the fix? Handles silent broker rejections or pusher crashes.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Clickable Model Health Scorecard Retrains (P1)
-     - Where to resume:  and the respective backend SentCom router to call .
-     - What will be achieved with this? Allows the user to retrain sick models directly from the UI scorecard rather than running CLI scripts manually.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? both
-     - Blocked on something: None
-
-  Task 2: Stage 2d SentCom Layout Rebuild (V5 Layout) (P2)
+  Task 1: Stage 2d - Briefing Modal Polish (P2)
      - Where to resume: 
-     - What will be achieved with this? Implement the exact grid layout from  (e.g., hidden behind a  prop/flag) now that all panels and charts are modularized.
+     - What will be achieved with this? User noted the modal looks good but wants it to match the more in-depth briefing mockup screenshot with richer details.
      - Status: NOT STARTED
      - Should Test frontend/backend/both after fix? frontend
-     - Blocked on something: Task 1
+     - Blocked on something: None
 
-**Upcoming and Future Tasks**
+**Upcoming and Future Tasks**:
     Upcoming Tasks:
-    - 🔴 (P1) Implement  math for dynamic portfolio allocator (Logged in PRD backlog post-Phase-13-v3).
-    - 🔴 (P1) Phase 2D: Wire HRP/NCO Portfolio Allocator into  (position sizing respects portfolio correlation).
+    - 🔴 (P1) Implement  math for dynamic portfolio allocator (Auto-tilt long/short sizing based on rolling 30-day per-side Sharpe).
+    - 🔴 (P1) Wire HRP/NCO Portfolio Allocator into  (position sizing respects portfolio correlation).
     
     Future Tasks:
-    - 🟡 (P2) Stage 2e: Add Support/Resistance levels and Setup Pins to the  lightweight-charts instance.
-    - 🟡 (P2) Dead-model cleanup script: Delete <52% training_acc models so next revalidation isn't wasting compute.
+    - 🟡 (P2) Trade audit log: Record model version, gate score, setup, P(win) at entry for post-mortems.
+    - 🟡 (P2) Auto-revalidation schedule: Run  automatically every Sunday.
+    - 🟡 (P2) Model drift detection: Flag when live market regime diverges significantly from training distribution.
+    - 🟡 (P2) Stage 2e: Add Support/Resistance levels (PDH/PDL/PML) and Setup Pins to the .
     - 🟡 (P2) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
 
-**Completed work in this session**
-- Created  and successfully guided user to retrain and promote , achieving 0.597 UP recall (LONG side officially unblocked!) (DONE)
-- Lowered  consensus threshold from 0.60 to 0.50 in  to allow setup models to fire CONFIRMS (DONE)
-- Added Pareto-improvement escape hatch to Model Protection Gate to allow promotion if one class improves significantly without regression on the other (DONE)
-- Successfully and safely extracted 3,614-line  into 35+ smaller feature-sliced files (, , ) (DONE)
-- Integrated  and built  (DONE)
-- Created  endpoint for returning chart bars, VWAP/EMA indicators, and trade markers (DONE)
-- Scaffolded  and built  endpoint to classify setups into HEALTHY/MODE C/MODE B (DONE)
+**Completed work in this session**:
+- Clickable scorecard retrains: Wired frontend tiles to  (DONE)
+- **CRITICAL BUG FIX**: Discovered , , and  were never computed in , causing all short models to be rejected. Fixed metric calculation, unblocking the entire SHORT pipeline. (DONE)
+- Applied  class-weight dampening scheme to training pipelines. (DONE)
+- Stage 2d V5 Command Center Layout: Fully built and made default. Features Pipeline HUD, chunky scanner cards with bot narratives, Chart SVG annotations for Entry/SL/PT, and stream filter chips. (DONE)
+- Morning Briefing Modal: Rebuilt to V5 aesthetic and removed the annoying auto-popup. (DONE)
+- P0 Safety Stack: Built central  (kill-switch, daily loss limits, stale quotes, exposure caps), integrated with , and added V5 frontend banner & emergency Flatten All button. (DONE)
 
-**Earlier issues found/mentioned but not fixed**
-   - Issue 1: Simulated exit ignores stops (Logged in Pending Issues).
+**Earlier issues found/mentioned but not fixed**:
+   - Issue 1: 4 SMB models missing from DB (, , ). (User can now easily fix this themselves via the newly built clickable UI tiles).
 
-**Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: The generic model class-balance pendulum swung too far. Previous job had 0.0 UP recall. Fixed class weighting caused it to swing to 0.0 DOWN recall. 
-  - Recurrence count: 1
-  - Status: IN PROGRESS
+**Known issue recurrence from previous fork**:
+  - Issue recurrence in previous fork: The generic model class-balance pendulum swung too far. 
+  - Recurrence count: 2
+  - Status: RESOLVED (Was actually a missing metric calculation bug, now fully fixed and verified by user).
 
-**Code Architecture**
+**Code Architecture**:
 DGX Spark (Linux) runs Backend (FastAPI on :8001), Chat Server (:8002), MongoDB, Frontend (React on :3000). 
-Frontend  dashboard modularized into .
+Frontend  dashboard modularized into  (now utilizing  subdirectories heavily).
  is used for high-performance canvas rendering.
 
-**Key Technical Concepts**
+**Key Technical Concepts**:
 XGBoost, Deep Learning (TFT, CNN-LSTM), FastAPI, React, Pytest, MongoDB,  (Apache 2.0).
 
-**key DB schema**
-  -  DB -> , ,  (Note: singular ), .
+**key DB schema**:
+  -  DB -> , , , .
 
-**changes in tech stack**
-  - Added  as an npm dependency for frontend charting.
+**changes in tech stack**:
+  - None
 
-**All files of reference**
+**All files of reference**:
+  -  (Currently modifying)
+  -  (Modified)
+  -  (Modified)
+  -  (New)
+  -  (New)
+  -  (New layout root)
+  -  (All new V5 UI components)
+  -  (Modified entry point)
+
+**Areas that need refactoring**:
+None.
+
+**key api endpoints**:
   - 
   - 
   - 
-  -  (New)
-  -  (Refactored)
-  -  (New)
-  -  (New)
+  - 
 
-**Areas that need refactoring**
-None.  was successfully broken down in this session.
+**Critical Info for New Agent**:
+- **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux) managed by the user. You **cannot** natively test the E2E ML training pipeline or use the testing subagent for ML code. Rely entirely on Pytest and providing the user bash/python commands to execute on Spark.
+- The massive DOWN Collapse bug was finally resolved. It was a missing calculation, not a weighting issue. Shorts are live and working.
+- **V5 Layout is now the default**. Do not use the  flag anymore. All new UI work should be done in the  directory.
 
-**key api endpoints**
-  -  (Serves lightweight-charts data)
-  -  (Serves the new scorecard)
+**documents and test reports created in this job**:
+  -  (Updated)
 
-**Critical Info for New Agent**
-- **HARDWARE WARNING:** Code runs on a physical DGX Spark (Linux) managed by the user. You **cannot** natively test the E2E ML training pipeline or use the testing subagent for ML code. Rely entirely on Pytest and providing the user bash/python commands to execute on Spark (e.g. ).
-- **Archive DB naming quirk:** The archive collection is  (singular model), not . Keep this in mind when querying mongo directly.
--  has no native indicator functions; EMA, VWAP, and trade markers are pre-calculated by the backend and passed to the frontend as line/marker series. 
-- The user is extremely responsive and helpful. If you implement a fix requiring ML training, just write the script and ask the user to run it and report the logs back.
+**Last 10 User Messages and any pending HUMAN messages**:
+ - *User*: yes lets do it (Referring to tackling the P1 simulated exit ignores stops bug).
+ - *Agent*: Started investigating  and found 5 directional bugs in  where shorts were incorrectly evaluated. Applied search/replace.
+ - *Pending HUMAN message*: None. The agent should immediately verify the applied  fix in  by running pytest, and check for similar directional logic bugs in other methods like .
 
-**documents and test reports created in this job**
-  -  (Updated with Phase 13 E2E E-density layout requirements & fixes)
+**Project Health Check**:
+Very Healthy. The critical ML blocker that plagued previous sessions was found and fixed. The UI has been massively upgraded to the V5 mockup design, and critical safety guardrails have been implemented.
 
-**Last 10 User Messages and any pending HUMAN messages**
- - *Agent*: Finished Stage 2f Model Health Scorecard scaffold. Endpoint classifies models correctly based on recall floors. Finished task. Recommended making the tiles clickable to trigger automatic retrain.
- - *User*: ok add that enhancement
- - *Pending HUMAN message*: None. The agent should immediately proceed to wire up the frontend  for the scorecard tiles to a backend endpoint that calls .
-
-**Project Health Check:**
-Healthy. E2E pipeline for LONG setups is fully unblocked and works. The massive React refactor was successful with zero regressions. Focus is now on the remaining class-balance tweak for SHORTs and finishing UI conveniences.
-
-**3rd Party Integrations**
+**3rd Party Integrations**:
   - Interactive Brokers (Data & Execution)
   - Ollama (Local )
   - Finnhub (News)
   - FinBERT (Sentiment)
 
-**Testing status**
-  - Testing agent used after significant changes: NO (Due to physical hardware constraints, only Pytest was used locally)
+**Testing status**:
+  - Testing agent used after significant changes: NO (Due to physical hardware constraints, only Pytest was used locally, along with screenshot tool for UI).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , .
-  - Known regressions: Generic 5-min direction model lost  accuracy after  was fixed.
+  - Test files created: , , , .
+  - Known regressions: None.
 
 **Credentials to test flow:** N/A
 
-**What agent forgot to execute**
-The agent was asked to make the scorecard tiles clickable to trigger a targeted retrain but the conversation context ended while analyzing the endpoints. Proceed with this task immediately.</analysis>
+**What agent forgot to execute**:
+The agent just applied the code fix for the simulated exit ignores stops bug but hasn't run tests to verify the fix or checked other simulation methods in the same file. Proceed with testing this fix immediately.</analysis>

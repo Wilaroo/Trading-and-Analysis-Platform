@@ -1369,107 +1369,145 @@ class AdvancedBacktestEngine:
         Position size is adjusted by the gate's position_multiplier.
         
         This is the most realistic backtest mode — matches live trading behavior.
+
+        Direction-aware as of 2026-04-22 (P1 fix for "simulated exit ignores
+        stops on SHORT setups"). Previously long-only: SHORT setups got stops
+        computed BELOW entry (impossible to hit), targets ABOVE entry (also
+        impossible), and P&L math was unsigned — so every SHORT revalidation
+        either time-exited at break-even or mis-reported P&L. Now branches
+        on `strategy.setup_type.startswith("short_")` at entry + exit + P&L.
         """
         trades: List[BacktestTrade] = []
         equity_curve: List[Dict] = []
-        
+
         capital = starting_capital
         in_position = False
         current_trade: BacktestTrade = None
         gate = self._confidence_gate
-        
+
         gate_stats = {"evaluated": 0, "go": 0, "reduce": 0, "skip": 0}
-        
+
+        # ── Direction resolved ONCE per strategy — mirrors _simulate_strategy_with_ai
+        is_short = strategy.setup_type.lower().startswith("short_")
+        trade_direction = "short" if is_short else "long"
+
         for i, bar in enumerate(bars):
             current_price = bar.get("close", bar.get("c", 0))
             timestamp = bar.get("timestamp", "")
             high = bar.get("high", bar.get("h", current_price))
             low = bar.get("low", bar.get("l", current_price))
-            
-            # Track equity
+
+            # Track equity — direction-aware unrealized P&L
             equity = capital
             if in_position and current_trade:
-                unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
+                if is_short:
+                    unrealized_pnl = (current_trade.entry_price - current_price) * current_trade.shares
+                else:
+                    unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
                 equity = capital + unrealized_pnl
-                
+
                 if unrealized_pnl > current_trade.max_favorable_excursion:
                     current_trade.max_favorable_excursion = unrealized_pnl
                 if unrealized_pnl < current_trade.max_adverse_excursion:
                     current_trade.max_adverse_excursion = unrealized_pnl
-            
+
             equity_curve.append({"timestamp": timestamp, "equity": equity, "price": current_price})
-            
+
             if in_position and current_trade:
                 current_trade.bars_held += 1
-                
-                # Exit logic
+
+                # Exit logic — direction-aware (bug fix 2026-04-22)
                 exit_price = None
                 exit_reason = ""
-                
-                if low <= current_trade.stop_price:
-                    exit_price = current_trade.stop_price
-                    exit_reason = "stop"
-                elif high >= current_trade.target_price:
-                    exit_price = current_trade.target_price
-                    exit_reason = "target"
-                elif current_trade.bars_held >= strategy.max_bars_to_hold:
+
+                if is_short:
+                    # SHORT: stop ABOVE entry (hit when high rises), target BELOW (hit when low falls)
+                    if high >= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif low <= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
+                else:
+                    # LONG: stop BELOW entry (hit when low falls), target ABOVE (hit when high rises)
+                    if low <= current_trade.stop_price:
+                        exit_price = current_trade.stop_price
+                        exit_reason = "stop"
+                    elif high >= current_trade.target_price:
+                        exit_price = current_trade.target_price
+                        exit_reason = "target"
+
+                # Time / end-of-data exits apply to both directions
+                if exit_price is None and current_trade.bars_held >= strategy.max_bars_to_hold:
                     exit_price = current_price
                     exit_reason = "time"
-                elif i == len(bars) - 1:
+                elif exit_price is None and i == len(bars) - 1:
                     exit_price = current_price
                     exit_reason = "end_of_data"
-                
+
                 if exit_price:
                     current_trade.exit_price = exit_price
                     current_trade.exit_date = timestamp[:10]
                     current_trade.exit_time = timestamp[11:19] if len(timestamp) > 10 else ""
                     current_trade.exit_reason = exit_reason
-                    current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
-                    current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
-                    
-                    risk = current_trade.entry_price - current_trade.stop_price
-                    if risk > 0:
-                        current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
-                    
+
+                    # P&L direction-aware
+                    if is_short:
+                        current_trade.pnl = (current_trade.entry_price - exit_price) * current_trade.shares
+                        current_trade.pnl_percent = (1 - exit_price / current_trade.entry_price) * 100 if current_trade.entry_price > 0 else 0
+                        risk_per_share = current_trade.stop_price - current_trade.entry_price
+                    else:
+                        current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
+                        current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100 if current_trade.entry_price > 0 else 0
+                        risk_per_share = current_trade.entry_price - current_trade.stop_price
+
+                    if risk_per_share > 0:
+                        current_trade.r_multiple = current_trade.pnl / (risk_per_share * current_trade.shares)
+
                     trades.append(current_trade)
                     capital += current_trade.pnl
                     in_position = False
                     current_trade = None
-            
+
             else:
                 # Check setup signal first
                 setup_signal = self._check_entry_signal(bar, strategy, bars[:i+1])
                 if setup_signal and i >= lookback_bars:
-                    # Run the full confidence gate
+                    # Run the full confidence gate — pass the real strategy direction
                     gate_stats["evaluated"] += 1
                     try:
+                        # Compute stop/target up-front so we can feed them to the gate
+                        if is_short:
+                            stop_price = current_price * (1 + strategy.stop_pct / 100)
+                            target_price = current_price * (1 - strategy.target_pct / 100)
+                        else:
+                            stop_price = current_price * (1 - strategy.stop_pct / 100)
+                            target_price = current_price * (1 + strategy.target_pct / 100)
+
                         gate_result = await gate.evaluate(
                             symbol=symbol,
                             setup_type=strategy.setup_type,
-                            direction="long",
+                            direction=trade_direction,
                             quality_score=70,  # Default quality for backtest
                             entry_price=current_price,
-                            stop_price=current_price * (1 - strategy.stop_pct / 100),
+                            stop_price=stop_price,
                         )
-                        
+
                         decision = gate_result.get("decision", "SKIP")
                         position_multiplier = gate_result.get("position_multiplier", 1.0)
-                        
-                        if decision == "GO":
-                            gate_stats["go"] += 1
+
+                        if decision in ("GO", "REDUCE"):
+                            gate_stats["go" if decision == "GO" else "reduce"] += 1
                             position_value = capital * (strategy.position_size_pct / 100) * position_multiplier
                             shares = int(position_value / current_price)
-                            
+
                             if shares > 0:
-                                stop_price = current_price * (1 - strategy.stop_pct / 100)
-                                target_price = current_price * (1 + strategy.target_pct / 100)
-                                
                                 current_trade = BacktestTrade(
                                     id=f"t_{uuid.uuid4().hex[:8]}",
                                     symbol=symbol,
                                     strategy_name=strategy.name,
                                     setup_type=strategy.setup_type,
-                                    direction="long",
+                                    direction=trade_direction,
                                     entry_date=timestamp[:10],
                                     entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
                                     entry_price=current_price,
@@ -1479,40 +1517,14 @@ class AdvancedBacktestEngine:
                                     bars_held=0
                                 )
                                 in_position = True
-                        
-                        elif decision == "REDUCE":
-                            gate_stats["reduce"] += 1
-                            # REDUCE: enter but with smaller size (gate already set multiplier)
-                            position_value = capital * (strategy.position_size_pct / 100) * position_multiplier
-                            shares = int(position_value / current_price)
-                            
-                            if shares > 0:
-                                stop_price = current_price * (1 - strategy.stop_pct / 100)
-                                target_price = current_price * (1 + strategy.target_pct / 100)
-                                
-                                current_trade = BacktestTrade(
-                                    id=f"t_{uuid.uuid4().hex[:8]}",
-                                    symbol=symbol,
-                                    strategy_name=strategy.name,
-                                    setup_type=strategy.setup_type,
-                                    direction="long",
-                                    entry_date=timestamp[:10],
-                                    entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
-                                    entry_price=current_price,
-                                    shares=shares,
-                                    stop_price=stop_price,
-                                    target_price=target_price,
-                                    bars_held=0
-                                )
-                                in_position = True
-                        
+
                         else:
                             gate_stats["skip"] += 1
-                    
+
                     except Exception as e:
                         logger.debug(f"Gate evaluation error for {symbol}: {e}")
                         gate_stats["skip"] += 1
-        
+
         return trades, equity_curve, gate_stats
     
     def _compute_mode_metrics(self, trades: List[BacktestTrade], starting_capital: float) -> Dict:
