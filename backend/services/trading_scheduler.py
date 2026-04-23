@@ -229,7 +229,24 @@ class TradingScheduler:
                 name='Confidence Gate Calibration',
                 replace_existing=True
             )
-            
+
+            # 8. Weekly Auto-Revalidation - Sunday 10:00 PM ET
+            # Honest promote/reject check on every trained model, run
+            # overnight when markets are closed. Results land in
+            # `model_validations` collection for the V5 dashboard to pick up.
+            self._scheduler.add_job(
+                _wrap_async(self._run_weekly_revalidation),
+                CronTrigger(
+                    day_of_week='sun',
+                    hour=22,
+                    minute=0,
+                    timezone='US/Eastern'
+                ),
+                id='weekly_revalidation',
+                name='Weekly Model Revalidation',
+                replace_existing=True
+            )
+
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -656,6 +673,84 @@ class TradingScheduler:
             self._log_task_result(result)
 
             
+    async def _run_weekly_revalidation(self):
+        """Weekly honest model re-validation (Sunday 10 PM ET).
+
+        Runs the same validator used by the one-off
+        `backend/scripts/revalidate_all.py` against every trained model
+        in `timeseries_models`, writing verdicts to `model_validations`.
+        A subprocess is used so the long-running validation (~90 min)
+        doesn't block the scheduler thread or serialize heavy imports
+        inside the main server process.
+        """
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="weekly_revalidation",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled weekly revalidation...")
+            # Skip during active training so we don't compete for GPU.
+            try:
+                from services.focus_mode_manager import focus_mode_manager
+                if focus_mode_manager.get_mode() == "training":
+                    result.success = True
+                    result.result_summary = "Skipped: focus mode is 'training'"
+                    logger.info("Weekly revalidation skipped — training in progress")
+                    return
+            except Exception:
+                pass
+
+            import subprocess
+            import sys as _sys
+            from pathlib import Path
+            script = Path(__file__).resolve().parent.parent.parent / "backend" / "scripts" / "revalidate_all.py"
+            if not script.exists():
+                result.result_summary = f"Script not found: {script}"
+                logger.error(result.result_summary)
+                return
+
+            proc = await asyncio.create_subprocess_exec(
+                _sys.executable, str(script),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                # 2-hour hard cap
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=7200)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                result.result_summary = "Revalidation timed out after 2 hours"
+                logger.error(result.result_summary)
+                return
+
+            if proc.returncode == 0:
+                result.success = True
+                # Summary is the last non-empty line of stdout
+                tail_lines = [ln for ln in (stdout.decode(errors="ignore").splitlines()) if ln.strip()]
+                result.result_summary = tail_lines[-1][:300] if tail_lines else "Completed"
+                logger.info(f"Weekly revalidation: {result.result_summary}")
+            else:
+                err_tail = (stderr.decode(errors="ignore") or "")[-400:]
+                result.result_summary = f"rc={proc.returncode} {err_tail}"
+                logger.error(f"Weekly revalidation failed: {result.result_summary}")
+
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Revalidation failed: {e}"
+            logger.error(f"Weekly revalidation failed: {e}")
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
+
     def _log_task_result(self, result: ScheduledTaskResult):
         """Log task result to database"""
         if self._task_log_col is not None:
@@ -676,6 +771,8 @@ class TradingScheduler:
             await self._run_shadow_update()
         elif task_type == ScheduledTaskType.LEARNING_SYNC.value:
             await self._run_learning_sync()
+        elif task_type == "weekly_revalidation":
+            await self._run_weekly_revalidation()
         elif task_type == ScheduledTaskType.IB_COLLECTION_RESUME.value:
             await self._run_ib_collection_resume()
         else:

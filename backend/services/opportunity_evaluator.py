@@ -466,6 +466,29 @@ class OpportunityEvaluator:
                     logger.warning(f"AI evaluation failed (proceeding anyway): {e}")
 
             print(f"   ✅ Returning trade object {trade.id}")
+
+            # ==================== TRADE AUDIT LOG (P2 2026-04-23) ====================
+            # Best-effort snapshot of the full decision trail for post-mortem
+            # forensics. Never blocks trade flow.
+            try:
+                from services.trade_audit_service import record_audit_entry
+                record_audit_entry(
+                    getattr(bot, "_db", None),
+                    trade,
+                    gate_result=confidence_gate_result,
+                    model_prediction=ai_prediction if "ai_prediction" in locals() else None,
+                    regime=str(current_regime) if current_regime else None,
+                    multipliers={
+                        "smart_filter": smart_multiplier if "smart_multiplier" in locals() else None,
+                        "confidence_gate": confidence_multiplier,
+                        "regime": regime_multiplier if "regime_multiplier" in locals() else None,
+                        "strategy_tilt": tilt_mult if "tilt_mult" in locals() else None,
+                        "hrp_allocator": hrp_mult if "hrp_mult" in locals() else None,
+                    },
+                )
+            except Exception as _audit_err:
+                logger.debug(f"[TradeAudit] skipped: {_audit_err}")
+
             return trade
 
         except Exception as e:

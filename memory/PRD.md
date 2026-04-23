@@ -29,6 +29,59 @@ correct. Added 9 regression tests (`test_backtest_direction_stops.py`)
 covering LONG + SHORT stop/target hits across all three sim methods.
 All 9 pass.
 
+## 2026-04-23 — Next-tier deliverables (audit log, drift, revalidation cron, briefing v2, chart S/R)
+
+**Auto-revalidation — Sunday 10 PM ET**
+- New job `weekly_revalidation` in `trading_scheduler.py` spawns
+  `scripts/revalidate_all.py` as a subprocess with a 2-hour hard cap.
+  Skips itself if the bot is in `training` focus mode. Summary lands in
+  `scheduled_task_log`; also triggerable via the existing `run_task_now`.
+
+**Trade audit log**
+- `services/trade_audit_service.py` with `build_audit_record()` (pure),
+  `record_audit_entry()` (best-effort Mongo write), and `query_audit()`
+  (filter by symbol/setup/model_version/date).
+- Captures: entry geometry, gate decision + reasons, model attribution
+  (including calibrated UP/DOWN thresholds at decision time), every
+  sizing multiplier applied (smart_filter / confidence / regime /
+  tilt / HRP), and the regime.
+- Wired into `opportunity_evaluator.py` right before the trade return.
+- Endpoint: `GET /api/sentcom/audit` — feeds the V5 audit view.
+- 12 pytest cases, all pass.
+
+**Model drift detection — PSI + KS**
+- `services/model_drift_service.py` with self-contained PSI and two-
+  sample KS math (no scipy dep). Classifies healthy/warning/critical
+  via industry-standard thresholds (PSI ≥ 0.10 warn, ≥ 0.25 critical;
+  KS ≥ 0.12 warn, ≥ 0.20 critical).
+- Compares last-24h live prediction distribution against the preceding
+  30-day baseline per `model_version` (source: `confidence_gate_log`).
+- `check_drift_for_model` + `check_drift_all_models` helpers;
+  snapshots persist to `model_drift_log`.
+- Endpoint: `GET /api/sentcom/drift` — backs the V5 "Model health"
+  section below.
+- 20 pytest cases, all pass.
+
+**Stage 2d — Richer Morning Briefing Modal**
+- `useMorningBriefing` hook now also hits `/api/safety/status` and
+  `/api/sentcom/drift` in the same `Promise.allSettled` fan-out.
+- New sections in `MorningBriefingModal.jsx`:
+    * **Safety & telemetry** — kill-switch state, awaiting-quotes pill,
+      daily loss cap, max positions (4-tile grid)
+    * **Model health** — per-model PSI/KS/Δmean rows with colour-coded
+      DRIFT-CRIT / DRIFT-WARN / STABLE chips
+- Keeps the V5 dark-mono aesthetic, `data-testid` on every row.
+
+**Stage 2e — PDH/PDL/PMH/PML on ChartPanel**
+- `services/chart_levels_service.py` — fast level computation
+  (< 50 ms) from daily bars in `historical_bars`.
+- Endpoint: `GET /api/sentcom/chart/levels?symbol=X` returns
+  `{pdh, pdl, pdc, pmh, pml}` (nullable when data is missing).
+- `ChartPanel.jsx` fetches on symbol change, paints horizontal
+  `IPriceLine`s with distinct colours + dotted/solid styles. Toggle
+  button in the indicator toolbar (`data-testid=chart-sr-toggle`).
+- 11 pytest cases for the level math, all pass.
+
 ## 2026-04-23 — MODE-C collapse: Per-model threshold calibration + label-distribution validator (A + D + C)
 
 Spark diagnostic after the `recall_down` fix revealed the generic model

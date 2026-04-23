@@ -61,6 +61,9 @@ export const ChartPanel = ({
   const indicatorSeriesRef = useRef({}); // { [key]: ISeriesApi<'Line'> }
   const markersPluginRef = useRef(null); // createSeriesMarkers() plugin api
   const priceLinesRef = useRef([]); // IPriceLine[] — Stage 2d-B (entry/SL/PT overlays)
+  const srLinesRef = useRef([]);    // Stage 2e — PDH/PDL/PML support/resistance lines
+  const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
+  const [showSrLevels, setShowSrLevels] = useState(true);
   const resizeObsRef = useRef(null);
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
@@ -361,6 +364,70 @@ export const ChartPanel = ({
     };
   }, [position?.entry_price, position?.stop_price, position?.target_price, position?.direction, position?.side]);
 
+  // Stage 2e — fetch PDH / PDL / PDC / PMH / PML for the current symbol
+  // and paint them as horizontal support/resistance price lines.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchLevels = async () => {
+      if (!symbol) return;
+      try {
+        const { data } = await safeGet(
+          `/api/sentcom/chart/levels?symbol=${encodeURIComponent(symbol)}`,
+          { timeout: 5000 },
+        );
+        if (!cancelled) {
+          setSrLevels(data?.levels || null);
+        }
+      } catch (_) {
+        if (!cancelled) setSrLevels(null);
+      }
+    };
+    fetchLevels();
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return undefined;
+    // Clear any previous SR lines
+    for (const line of srLinesRef.current) {
+      try { series.removePriceLine(line); } catch (_) { /* noop */ }
+    }
+    srLinesRef.current = [];
+    if (!srLevels || !showSrLevels) return undefined;
+
+    const specs = [
+      { key: 'pdh', label: 'PDH', color: 'rgba(239, 68, 68, 0.65)',  style: 3 }, // dotted red
+      { key: 'pdl', label: 'PDL', color: 'rgba(34, 197, 94, 0.65)',  style: 3 }, // dotted green
+      { key: 'pdc', label: 'PDC', color: 'rgba(148, 163, 184, 0.55)', style: 1 }, // solid slate
+      { key: 'pmh', label: 'PMH', color: 'rgba(249, 115, 22, 0.55)', style: 3 }, // dotted orange
+      { key: 'pml', label: 'PML', color: 'rgba(59, 130, 246, 0.55)', style: 3 }, // dotted blue
+    ];
+
+    for (const spec of specs) {
+      const price = srLevels[spec.key];
+      if (price == null || !Number.isFinite(Number(price))) continue;
+      try {
+        const line = series.createPriceLine({
+          price: Number(price),
+          color: spec.color,
+          lineWidth: 1,
+          lineStyle: spec.style,
+          axisLabelVisible: true,
+          title: `${spec.label} ${Number(price).toFixed(2)}`,
+        });
+        srLinesRef.current.push(line);
+      } catch (_) { /* noop */ }
+    }
+
+    return () => {
+      for (const line of srLinesRef.current) {
+        try { series.removePriceLine(line); } catch (_) { /* noop */ }
+      }
+      srLinesRef.current = [];
+    };
+  }, [srLevels, showSrLevels]);
+
   const toggleIndicator = useCallback((key) => {
     setVisibleIndicators(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -418,6 +485,26 @@ export const ChartPanel = ({
                 </button>
               );
             })}
+            {/* Stage 2e — PDH/PDL/PML support/resistance toggle */}
+            <button
+              data-testid="chart-sr-toggle"
+              onClick={() => setShowSrLevels((v) => !v)}
+              title="Toggle PDH / PDL / PMH / PML support-resistance lines"
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+                showSrLevels
+                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: '#f59e0b', opacity: showSrLevels ? 1 : 0.4 }}
+              />
+              <span>S/R</span>
+              {showSrLevels
+                ? <Eye className="w-3 h-3 opacity-60" />
+                : <EyeOff className="w-3 h-3 opacity-40" />}
+            </button>
           </div>
 
           {/* Timeframe + refresh */}

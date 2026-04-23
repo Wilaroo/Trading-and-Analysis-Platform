@@ -480,3 +480,57 @@ async def assess_risk(request: RiskAssessmentRequest):
             "multiplier": 1.0,
             "explanation": "Assessment failed"
         }
+
+
+
+@router.get("/drift")
+async def get_model_drift(model_version: Optional[str] = None):
+    """Model drift snapshot using PSI + KS on live prediction distributions.
+
+    When `model_version` is omitted, returns drift for every model seen
+    in the confidence_gate_log within the baseline window.
+    """
+    try:
+        from services.model_drift_service import (
+            check_drift_for_model, check_drift_all_models,
+        )
+        service = _get_service()
+        db = getattr(getattr(service, "_trading_bot", None), "_db", None)
+        if model_version:
+            return {"success": True, "results": [check_drift_for_model(db, model_version)]}
+        return {"success": True, "results": check_drift_all_models(db)}
+    except Exception as e:
+        logger.error(f"Error running drift check: {e}")
+        return {"success": False, "error": str(e), "results": []}
+
+
+@router.get("/audit")
+async def get_trade_audit(
+    symbol: Optional[str] = None,
+    setup_type: Optional[str] = None,
+    model_version: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+):
+    """Post-mortem audit log of every trade decision.
+
+    Each record captures entry geometry, gate decision + reasons, model
+    attribution (with calibrated thresholds at decision time), applied
+    sizing multipliers, and regime. Backs the V5 audit view.
+    """
+    try:
+        from services.trade_audit_service import query_audit
+        service = _get_service()
+        db = getattr(getattr(service, "_trading_bot", None), "_db", None)
+        records = query_audit(
+            db,
+            symbol=symbol,
+            setup_type=setup_type,
+            model_version=model_version,
+            since=since,
+            limit=limit,
+        )
+        return {"success": True, "count": len(records), "records": records}
+    except Exception as e:
+        logger.error(f"Error fetching trade audit: {e}")
+        return {"success": False, "error": str(e), "records": []}

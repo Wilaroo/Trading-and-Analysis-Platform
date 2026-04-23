@@ -308,6 +308,28 @@ _GENERIC_DIRECTION_TIMEFRAMES = [
 ]
 
 
+@router.get("/chart/levels")
+async def get_chart_levels_endpoint(
+    symbol: str = Query(..., min_length=1, max_length=12),
+    lookback_days: int = Query(default=45, ge=7, le=180),
+):
+    """Thin S/R overlay for the chart: PDH / PDL / PDC / PMH / PML.
+
+    Computed fast from `historical_bars` (daily bars). Used by the
+    V5 ChartPanel to draw horizontal support/resistance price lines.
+    Returns a dict with nullable values — missing levels simply don't
+    render on the chart.
+    """
+    try:
+        from services.chart_levels_service import get_chart_levels
+        levels = get_chart_levels(_db, symbol, lookback_days=lookback_days)
+        return {"success": True, "symbol": symbol.upper(), "levels": levels}
+    except Exception as e:
+        logger.error(f"chart levels failed for {symbol}: {e}")
+        return {"success": False, "error": str(e), "levels": {}}
+
+
+
 @router.get("/model-health")
 async def get_model_health() -> Dict[str, Any]:
     """Return a compact health card for every (setup_type, bar_size) model

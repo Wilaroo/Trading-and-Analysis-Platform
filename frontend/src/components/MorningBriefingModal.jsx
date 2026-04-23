@@ -44,6 +44,8 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   const bot = data?.bot;
   const positions = data?.positions || [];
   const summary = data?.summary;
+  const safety = data?.safety;
+  const drift = data?.drift || [];
 
   const { open, closed, totalUnrealizedPnl, totalRealizedPnl } = useMemo(() => {
     const open = positions.filter(p => (p.quantity || p.shares || 0) !== 0 && p.status !== 'closed');
@@ -255,6 +257,117 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                   })}
                   {open.length > 8 && (
                     <div className="text-[10px] v5-dim pt-1">+ {open.length - 8} more…</div>
+                  )}
+                </div>
+              </Section>
+            )}
+
+            {/* SAFETY & TELEMETRY (2026-04-23) */}
+            {safety && (
+              <Section
+                title="Safety & telemetry"
+                accent="text-amber-400"
+                testid="briefing-section-safety"
+                right={
+                  safety?.state?.kill_switch_tripped ? (
+                    <span className="v5-chip v5-chip-veto">KILL-SWITCH</span>
+                  ) : safety?.live?.awaiting_quotes ? (
+                    <span className="v5-chip v5-chip-order">AWAITING QUOTES</span>
+                  ) : (
+                    <span className="v5-chip v5-chip-manage">OK</span>
+                  )
+                }
+              >
+                <div className="grid grid-cols-2 gap-px bg-zinc-900 -mx-4 -my-3">
+                  <div className="bg-zinc-950 px-3 py-2">
+                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Kill switch</div>
+                    <div className={`v5-mono text-xs font-bold ${safety?.state?.kill_switch_tripped ? 'v5-down' : 'v5-up'}`}>
+                      {safety?.state?.kill_switch_tripped ? 'TRIPPED' : 'ARMED'}
+                    </div>
+                    {safety?.state?.kill_switch_reason && (
+                      <div className="text-[9px] text-zinc-400 truncate">{safety.state.kill_switch_reason}</div>
+                    )}
+                  </div>
+                  <div className="bg-zinc-950 px-3 py-2">
+                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Open positions</div>
+                    <div className="v5-mono text-xs font-bold text-zinc-200">
+                      {safety?.live?.open_positions_count ?? 0}
+                    </div>
+                    {safety?.live?.awaiting_quotes && (
+                      <div className="text-[9px] text-amber-400 truncate" data-testid="briefing-awaiting-quotes">
+                        awaiting: {(safety.live.positions_missing_quotes || []).slice(0, 3).join(', ') || '—'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-zinc-950 px-3 py-2">
+                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Daily loss cap</div>
+                    <div className="v5-mono text-xs font-bold text-zinc-200">
+                      ${Math.round(safety?.config?.max_daily_loss_usd ?? 0)}
+                    </div>
+                  </div>
+                  <div className="bg-zinc-950 px-3 py-2">
+                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Max positions</div>
+                    <div className="v5-mono text-xs font-bold text-zinc-200">
+                      {safety?.config?.max_positions ?? '—'}
+                    </div>
+                  </div>
+                </div>
+              </Section>
+            )}
+
+            {/* MODEL HEALTH — per-model drift + calibration (2026-04-23) */}
+            {drift && drift.length > 0 && (
+              <Section
+                title={`Model health (${drift.length})`}
+                accent="text-fuchsia-400"
+                testid="briefing-section-model-health"
+                right={
+                  <span
+                    className={`v5-chip ${
+                      drift.some((d) => d.status === 'critical')
+                        ? 'v5-chip-veto'
+                        : drift.some((d) => d.status === 'warning')
+                        ? 'v5-chip-order'
+                        : 'v5-chip-manage'
+                    }`}
+                  >
+                    {
+                      (drift.some((d) => d.status === 'critical') && 'DRIFT CRIT') ||
+                      (drift.some((d) => d.status === 'warning') && 'DRIFT WARN') ||
+                      'STABLE'
+                    }
+                  </span>
+                }
+              >
+                <div className="space-y-1">
+                  {drift.slice(0, 6).map((d) => {
+                    const statusChip =
+                      d.status === 'critical' ? 'v5-chip-veto'
+                      : d.status === 'warning' ? 'v5-chip-order'
+                      : d.status === 'insufficient_data' ? 'v5-chip-eval'
+                      : 'v5-chip-manage';
+                    return (
+                      <div
+                        key={d.model_version}
+                        className="flex items-center justify-between gap-3 py-1 border-b border-zinc-900 last:border-b-0"
+                        data-testid={`briefing-drift-row-${d.model_version}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="v5-mono text-[11px] text-zinc-100 truncate">{d.model_version}</span>
+                          <span className={`v5-chip ${statusChip}`}>{(d.status || '').toUpperCase()}</span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="v5-mono text-[10px] v5-dim">PSI {d.psi != null ? d.psi.toFixed(2) : '—'}</span>
+                          <span className="v5-mono text-[10px] v5-dim">KS {d.ks != null ? d.ks.toFixed(2) : '—'}</span>
+                          <span className={`v5-mono text-[10px] ${d.mean_shift >= 0 ? 'v5-up' : 'v5-down'}`}>
+                            Δμ {d.mean_shift != null ? (d.mean_shift >= 0 ? '+' : '') + d.mean_shift.toFixed(2) : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {drift.length > 6 && (
+                    <div className="text-[10px] v5-dim pt-1">+ {drift.length - 6} more…</div>
                   )}
                 </div>
               </Section>
