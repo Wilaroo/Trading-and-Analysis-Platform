@@ -2244,44 +2244,48 @@ class IBHistoricalCollector:
         Get the latest bar date for each symbol/timeframe combination.
         Used to determine what incremental data to fetch.
 
-        Fast path: leverages the compound index (symbol, bar_size, date) by
-        enumerating distinct (symbol, bar_size) pairs and doing O(log n)
-        index-backed `find_one().sort('date', -1)` lookups per pair. Much
-        faster than a `$group` aggregation across the full 178M-row collection
-        (seconds vs minutes).
+        Fast path: leverages the compound index (symbol, bar_size, date) via
+        MongoDB's DISTINCT_SCAN — enumerates distinct symbols and per-symbol
+        bar_sizes using index-only operations, then does O(log n) index-backed
+        `find_one().sort('date', -1)` lookups per pair. Completes in seconds
+        even on the 178M-row ib_historical_data collection (previously this
+        method ran a $group aggregation that scanned every document and took
+        multi-minute wall-time, blocking the FastAPI event loop).
 
         Returns:
-            Dict with symbol -> {timeframe: {latest_date, bar_count}}
+            Dict with symbol -> {timeframe: {latest_date}}
         """
         if self._data_col is None:
             return {"success": False, "error": "Database not connected"}
 
         try:
-            # 1) Enumerate distinct (symbol, bar_size) pairs.
-            match_stage = {"bar_size": bar_size} if bar_size else {}
-            pairs_pipeline = [
-                {"$match": match_stage},
-                {"$group": {"_id": {"symbol": "$symbol", "bar_size": "$bar_size"}}},
-            ]
-            pairs = list(self._data_col.aggregate(pairs_pipeline, allowDiskUse=True))
+            # 1) Distinct symbols — DISTINCT_SCAN on the compound index.
+            if bar_size:
+                symbols = self._data_col.distinct("symbol", {"bar_size": bar_size})
+            else:
+                symbols = self._data_col.distinct("symbol")
 
-            # 2) For each pair, index-backed lookup for newest date.
             by_symbol: Dict[str, Dict[str, Any]] = {}
-            for p in pairs:
-                sym = p["_id"]["symbol"]
-                tf = p["_id"]["bar_size"]
-                latest_doc = self._data_col.find_one(
-                    {"symbol": sym, "bar_size": tf},
-                    {"_id": 0, "date": 1},
-                    sort=[("date", -1)],
-                )
-                if not latest_doc:
-                    continue
-                by_symbol.setdefault(sym, {})[tf] = {
-                    "latest_date": latest_doc.get("date"),
-                    # bar_count omitted — the caller doesn't use it, and counting
-                    # is the expensive operation we're trying to avoid.
-                }
+            for sym in symbols:
+                # 2) For each symbol, distinct bar_sizes — also DISTINCT_SCAN.
+                if bar_size:
+                    sizes = [bar_size]
+                else:
+                    sizes = self._data_col.distinct("bar_size", {"symbol": sym})
+
+                for tf in sizes:
+                    # 3) Index-backed newest-bar lookup — O(log n), uses the
+                    # compound (symbol, bar_size, date) index directly.
+                    latest_doc = self._data_col.find_one(
+                        {"symbol": sym, "bar_size": tf},
+                        {"_id": 0, "date": 1},
+                        sort=[("date", -1)],
+                    )
+                    if not latest_doc:
+                        continue
+                    by_symbol.setdefault(sym, {})[tf] = {
+                        "latest_date": latest_doc.get("date"),
+                    }
 
             return {
                 "success": True,
