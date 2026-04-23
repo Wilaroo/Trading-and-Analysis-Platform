@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Wifi, WifiOff, RefreshCw, Check, AlertCircle, ExternalLink, Terminal, Cpu } from 'lucide-react';
+import { Settings, Wifi, WifiOff, RefreshCw, Check, AlertCircle, ExternalLink, Terminal, Cpu, Volume2, VolumeX, Bell } from 'lucide-react';
 import api from '../utils/api';
 
-export default function SettingsPage() {
+export default function SettingsPage({ audioEnabled, setAudioEnabled, alertThreshold, setAlertThreshold }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -122,6 +122,69 @@ export default function SettingsPage() {
         }`}>
           {message.type === 'success' ? <Check className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <span>{message.text}</span>
+        </div>
+      )}
+
+      {/* Price Alerts — audio toggle + threshold. Moved here from the floating
+          bottom-right cluster so it no longer overlaps the SentCom V5 chat bubble.
+          State lives in App.js and is passed down as props. */}
+      {typeof setAudioEnabled === 'function' && (
+        <div className="glass-panel p-6 space-y-4" data-testid="alerts-settings-card">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <Bell className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Price Alerts</h2>
+              <p className="text-xs text-zinc-500">Audio chime when a ticker moves past your threshold vs. today's open.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between p-4 rounded-lg bg-zinc-900/60 border border-zinc-800">
+            <div>
+              <div className="text-sm text-white font-medium">Audio alerts</div>
+              <div className="text-xs text-zinc-500">
+                {audioEnabled ? 'On — you\'ll hear a sound on every alert' : 'Off — alerts still appear as toasts'}
+              </div>
+            </div>
+            <button
+              onClick={() => setAudioEnabled(!audioEnabled)}
+              data-testid="toggle-audio-alerts"
+              className={`p-3 rounded-lg transition-all border ${
+                audioEnabled
+                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/25'
+                  : 'bg-zinc-800 text-zinc-500 border-zinc-700 hover:text-zinc-300'
+              }`}
+              title={audioEnabled ? 'Disable audio alerts' : 'Enable audio alerts'}
+            >
+              {audioEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            </button>
+          </div>
+
+          <div className="p-4 rounded-lg bg-zinc-900/60 border border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white font-medium">Alert threshold</span>
+              <span className="text-sm font-mono text-cyan-300">±{alertThreshold}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="10"
+              step="0.5"
+              value={alertThreshold}
+              onChange={(e) => setAlertThreshold(parseFloat(e.target.value))}
+              className="w-full accent-cyan-500"
+              data-testid="alert-threshold-slider"
+            />
+            <div className="flex justify-between text-xs text-zinc-500">
+              <span>0.5%</span>
+              <span>5%</span>
+              <span>10%</span>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Alerts fire when a watchlist ticker moves ≥ {alertThreshold}% from today's open.
+            </p>
+          </div>
         </div>
       )}
 

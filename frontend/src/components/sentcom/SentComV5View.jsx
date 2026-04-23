@@ -174,6 +174,7 @@ export const SentComV5View = ({
         phase={phase}
         rightExtra={
           <div className="flex items-center gap-2">
+            <FlattenAllButtonV5 safety={safety} inline />
             <AccountGuardChipV5 safety={safety} />
             <SafetyHudChip safety={safety} />
           </div>
@@ -281,9 +282,6 @@ export const SentComV5View = ({
       <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto v5-scroll bg-zinc-950">
         <ModelHealthScorecard className="rounded-none border-0" />
       </div>
-
-      {/* Emergency flatten-all button — bottom-left corner, z-55 */}
-      <FlattenAllButtonV5 safety={safety} />
 
       {/* Corner watermark — lets users opt out to v4 */}
       <div

@@ -117,7 +117,7 @@ export const SafetyBannerV5 = ({ safety }) => {
 /*  Flatten-all button — bottom-right, confirm modal                        */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-export const FlattenAllButtonV5 = ({ safety }) => {
+export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -146,15 +146,23 @@ export const FlattenAllButtonV5 = ({ safety }) => {
     typedRef.current = '';
   };
 
+  // Two layouts:
+  //   • inline=true  → compact button meant to sit inside an existing header
+  //     (no fixed positioning, matches the v5-chip scale).
+  //   • inline=false → legacy floating button in the bottom-left corner.
+  const btnClass = inline
+    ? "flex items-center gap-1 px-2 py-0.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/60 border border-rose-500/60 text-rose-100 v5-mono text-[9px] font-bold uppercase tracking-widest transition-all"
+    : "fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[10px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm";
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         data-testid="v5-flatten-all-btn"
         title="Emergency flatten — cancel all pending + close all positions"
-        className="fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[10px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm"
+        className={btnClass}
       >
-        <Power className="w-3 h-3" />
+        <Power className={inline ? "w-2.5 h-2.5" : "w-3 h-3"} />
         Flatten all
       </button>
 

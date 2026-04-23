@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Volume2, VolumeX, Settings } from 'lucide-react';
+import { Volume2, VolumeX } from 'lucide-react';
 import { Toaster } from 'sonner';
 
 // Import refactored components
-import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
+import { Sidebar, TickerTape, PriceAlertNotification } from './components';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -128,7 +128,7 @@ function App() {
   const [dashboardData, setDashboardData] = useState({ stats: {}, overview: {}, alerts: [], watchlist: [] });
   const [loading, setLoading] = useState(true);
   const [streamingQuotes, setStreamingQuotes] = useState({});
-  const [showAlertSettings, setShowAlertSettings] = useState(false);
+  // showAlertSettings moved to SettingsPage; state no longer needed here.
   
   // Global IB Connection State - shared across all pages
   const [ibConnected, setIbConnected] = useState(false);
@@ -401,7 +401,7 @@ function App() {
       case 'chart': return <ErrorBoundary name="Charts"><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <ErrorBoundary name="Trade Journal"><TradeJournalPage /></ErrorBoundary>;
       case 'glossary': return <ErrorBoundary name="Glossary"><GlossaryPage /></ErrorBoundary>;
-      case 'settings': return <ErrorBoundary name="Settings"><SettingsPage /></ErrorBoundary>;
+      case 'settings': return <ErrorBoundary name="Settings"><SettingsPage audioEnabled={audioEnabled} setAudioEnabled={setAudioEnabled} alertThreshold={alertThreshold} setAlertThreshold={setAlertThreshold} /></ErrorBoundary>;
       default: return null;
     }
   };
@@ -470,52 +470,7 @@ function App() {
         audioEnabled={audioEnabled}
         setAudioEnabled={setAudioEnabled}
       />
-      
-      {/* Alert Settings Panel */}
-      <AnimatePresence>
-        {showAlertSettings && (
-          <AlertSettingsPanel
-            audioEnabled={audioEnabled}
-            setAudioEnabled={setAudioEnabled}
-            alertThreshold={alertThreshold}
-            setAlertThreshold={setAlertThreshold}
-            isOpen={showAlertSettings}
-            onClose={() => setShowAlertSettings(false)}
-          />
-        )}
-      </AnimatePresence>
-      
-      {/* Audio Control Button */}
-      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
-        <button
-          onClick={() => setShowAlertSettings(!showAlertSettings)}
-          data-testid="alert-settings-btn"
-          className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-700 transition-all"
-          title="Alert Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setAudioEnabled(!audioEnabled)}
-          data-testid="toggle-audio-alerts"
-          className={`p-3 rounded-full transition-all ${
-            audioEnabled 
-              ? 'bg-primary/20 text-primary border border-primary/30' 
-              : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
-          }`}
-          title={audioEnabled ? 'Disable audio alerts' : 'Enable audio alerts'}
-        >
-          {audioEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-        </button>
-      </div>
-      
-      {/* Alert Threshold Indicator */}
-      {audioEnabled && (
-        <div className="fixed bottom-4 right-28 z-50 glass-panel px-3 py-2 text-xs text-zinc-400 font-mono">
-          Alert: ±{alertThreshold}%
-        </div>
-      )}
-      
+
       {/* Training Mode Indicator - shows when AI training is active */}
       <TrainingModeIndicator />
       
