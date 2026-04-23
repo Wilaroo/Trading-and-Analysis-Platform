@@ -1696,10 +1696,23 @@ class TradingBotService:
             # IB_ACCOUNT_ACTIVE env var.
             try:
                 from services.account_guard import check_account_match
-                from services.ib_service import get_ib_service
-                _ib = get_ib_service()
-                _status = _ib.get_status() if _ib else {}
-                _current_acct = (_status or {}).get("account_id")
+                # Prefer the pusher-reported account id (this is the same
+                # source /api/ib/account/summary uses). Fall back to the
+                # direct-connected IBService status only if pusher is offline.
+                _current_acct = None
+                try:
+                    from routers.ib import get_pushed_account_id
+                    _current_acct = get_pushed_account_id()
+                except Exception:
+                    _current_acct = None
+                if not _current_acct:
+                    try:
+                        from services.ib_service import get_ib_service
+                        _ib = get_ib_service()
+                        _status = _ib.get_status() if _ib else {}
+                        _current_acct = (_status or {}).get("account_id")
+                    except Exception:
+                        _current_acct = None
                 _ok, _reason = check_account_match(_current_acct)
                 if not _ok:
                     logger.critical(f"[ACCOUNT GUARD] {_reason} — tripping kill-switch")
