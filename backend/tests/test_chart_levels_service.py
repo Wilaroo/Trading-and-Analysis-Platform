@@ -156,6 +156,57 @@ def test_get_chart_levels_roundtrip_via_fake_db():
     assert r["pdc"] == 100
 
 
+def test_get_chart_levels_queries_ib_historical_data_collection():
+    """Regression lock: must read from `ib_historical_data` (not the legacy
+    `historical_bars` collection, which is empty on production deployments).
+    The query shape must use `date` (YYYY-MM-DD string), `bar_size: '1 day'`,
+    and an uppercased symbol — matching how hybrid_data_service writes bars.
+    """
+    recorded = {"collection": None, "query": None, "sort_key": None}
+
+    class _Cur:
+        def __init__(self, docs): self._docs = docs
+        def sort(self, key, *_):
+            recorded["sort_key"] = key
+            return self
+        def __iter__(self): return iter(self._docs)
+
+    class _Col:
+        def find(self, q, proj=None):
+            recorded["query"] = q
+            # Return realistic ib_historical_data docs (with `date` field).
+            today = datetime.now(timezone.utc)
+            return _Cur([
+                {"date": (today - timedelta(days=3)).strftime("%Y-%m-%d"),
+                 "high": 99, "low": 94, "close": 96, "open": 95},
+                {"date": (today - timedelta(days=1)).strftime("%Y-%m-%d"),
+                 "high": 102, "low": 97, "close": 100, "open": 98},
+                {"date": today.strftime("%Y-%m-%d"),
+                 "high": 104, "low": 99, "close": 101, "open": 100},
+            ])
+
+    class _DB:
+        def __getitem__(self, name):
+            recorded["collection"] = name
+            return _Col()
+
+    r = get_chart_levels(_DB(), "aapl")  # lowercase — should get uppercased
+
+    assert recorded["collection"] == "ib_historical_data", \
+        f"must query ib_historical_data, got {recorded['collection']!r}"
+    assert recorded["query"]["symbol"] == "AAPL", "symbol must be uppercased"
+    assert recorded["query"]["bar_size"] == "1 day"
+    # Date filter must be YYYY-MM-DD (10 chars), not an ISO timestamp.
+    assert "date" in recorded["query"]
+    cutoff = recorded["query"]["date"]["$gte"]
+    assert len(cutoff) == 10 and cutoff[4] == "-" and cutoff[7] == "-"
+    assert recorded["sort_key"] == "date"
+    # And the downstream math still works end-to-end on ib_historical_data docs.
+    assert r["pdh"] == 102
+    assert r["pdl"] == 97
+    assert r["pdc"] == 100
+
+
 def test_high_level_dict_shape_stable():
     """Contract: every response must have these 5 keys."""
     r = compute_chart_levels([])

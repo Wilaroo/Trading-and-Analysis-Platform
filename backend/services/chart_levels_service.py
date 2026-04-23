@@ -13,9 +13,10 @@ Returns:
 
 Source
 ------
-Reads daily bars from the `historical_bars` collection (populated by
-hybrid_data_service). Falls back to an empty payload when data is
-missing — the chart simply won't draw the line.
+Reads daily bars from the `ib_historical_data` collection (177M+ rows,
+populated by IB Historical Collector + hybrid_data_service cache path).
+Falls back to an empty payload when data is missing — the chart simply
+won't draw the line.
 """
 from __future__ import annotations
 
@@ -127,13 +128,18 @@ def get_chart_levels(db, symbol: str, lookback_days: int = 45) -> Dict[str, Any]
     if db is None or not symbol:
         return compute_chart_levels([])
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
-        # Primary source: hybrid_data_service writes to `historical_bars`
-        cursor = db["historical_bars"].find(
-            {"symbol": symbol.upper(), "bar_size": "1 day", "timestamp": {"$gte": cutoff}},
-            {"_id": 0, "timestamp": 1, "high": 1, "low": 1, "close": 1, "open": 1, "volume": 1},
-        ).sort("timestamp", 1)
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        # Daily bars in ib_historical_data are stored with `date` as an
+        # ISO `YYYY-MM-DD` string (see services/hybrid_data_service.py:286).
+        cursor = db["ib_historical_data"].find(
+            {"symbol": symbol.upper(), "bar_size": "1 day", "date": {"$gte": cutoff_date}},
+            {"_id": 0, "date": 1, "high": 1, "low": 1, "close": 1, "open": 1, "volume": 1},
+        ).sort("date", 1)
         bars = list(cursor)
+        # Downstream helpers expect a `timestamp` alias — normalize.
+        for bar in bars:
+            if "date" in bar and "timestamp" not in bar:
+                bar["timestamp"] = bar["date"]
     except Exception as e:
         logger.debug(f"[ChartLevels] fetch failed for {symbol}: {e}")
         bars = []
