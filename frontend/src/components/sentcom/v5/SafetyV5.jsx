@@ -284,6 +284,59 @@ export const SafetyHudChip = ({ safety }) => {
 
 
 /* ──────────────────────────────────────────────────────────────────────── */
+/*  Account guard chip — PAPER · paperesw100000 (green) or MISMATCH (red).  */
+/*  Keeps live/paper accounts configured side-by-side but only ever lets    */
+/*  one trade at a time. Backed by /api/safety/status → account_guard.      */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+export const AccountGuardChipV5 = ({ safety }) => {
+  const g = safety?.data?.account_guard;
+  if (!g) return null;
+
+  const mode = (g.active_mode || 'paper').toUpperCase();
+  const current = g.current_account_id;
+  const expected = g.expected_account_id;
+
+  if (!g.match) {
+    const title =
+      g.reason ||
+      `expected ${expected || '(unset)'} · got ${current || '(none)'}`;
+    return (
+      <span
+        data-testid="v5-account-guard-chip"
+        className="v5-chip v5-chip-veto"
+        title={title}
+      >
+        ⚠ ACCOUNT MISMATCH · {current || '—'}
+      </span>
+    );
+  }
+
+  if (g.reason === 'unconfigured') {
+    return (
+      <span
+        data-testid="v5-account-guard-chip"
+        className="v5-chip"
+        title="Set IB_ACCOUNT_LIVE / IB_ACCOUNT_PAPER / IB_ACCOUNT_ACTIVE in backend/.env to enable the account guard."
+      >
+        ACCT · unconfigured
+      </span>
+    );
+  }
+
+  return (
+    <span
+      data-testid="v5-account-guard-chip"
+      className={`v5-chip ${mode === 'LIVE' ? 'v5-chip-veto' : 'v5-chip-manage'}`}
+      title={`Active mode: ${mode}\nCurrent account: ${current || '—'}\nExpected: ${expected}`}
+    >
+      {mode} · {current || expected}
+    </span>
+  );
+};
+
+
+/* ──────────────────────────────────────────────────────────────────────── */
 /*  Awaiting-quotes pill — amber, shown while any open position is waiting  */
 /*  for its first IB quote. Confirms the kill-switch bypass is active so    */
 /*  operators can see WHY the bot is holding fire on startup (instead of    */

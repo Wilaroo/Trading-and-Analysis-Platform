@@ -28,7 +28,7 @@ import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
-import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5 } from './v5/SafetyV5';
+import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -172,7 +172,12 @@ export const SentComV5View = ({
         equity={equity}
         latencySeconds={latencySeconds}
         phase={phase}
-        rightExtra={<SafetyHudChip safety={safety} />}
+        rightExtra={
+          <div className="flex items-center gap-2">
+            <AccountGuardChipV5 safety={safety} />
+            <SafetyHudChip safety={safety} />
+          </div>
+        }
       />
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}

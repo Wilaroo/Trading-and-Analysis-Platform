@@ -89,6 +89,22 @@ async def safety_status() -> Dict[str, Any]:
             "positions_missing_quotes": [],
         }
 
+    # Account guard — surface paper/live config + match status to UI.
+    try:
+        from services.account_guard import summarize_for_ui
+        current = None
+        try:
+            from services.ib_service import get_ib_service
+            ib = get_ib_service()
+            status_obj = ib.get_status() if ib else None
+            current = (status_obj or {}).get("account_id")
+        except Exception:
+            current = None
+        resp["account_guard"] = summarize_for_ui(current)
+    except Exception as e:
+        logger.debug("safety.status account_guard error: %s", e)
+        resp["account_guard"] = {"match": True, "reason": "unavailable"}
+
     return resp
 
 

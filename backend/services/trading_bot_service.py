@@ -1689,6 +1689,29 @@ class TradingBotService:
             from services.safety_guardrails import get_safety_guardrails
             guard = get_safety_guardrails()
 
+            # ACCOUNT GUARD — block (and auto-trip) if the pusher's current
+            # account doesn't match the authorized one (paper vs live). This
+            # preserves the workflow of keeping a LIVE account configured
+            # alongside PAPER while only authorizing one at a time via the
+            # IB_ACCOUNT_ACTIVE env var.
+            try:
+                from services.account_guard import check_account_match
+                from services.ib_service import get_ib_service
+                _ib = get_ib_service()
+                _status = _ib.get_status() if _ib else {}
+                _current_acct = (_status or {}).get("account_id")
+                _ok, _reason = check_account_match(_current_acct)
+                if not _ok:
+                    logger.critical(f"[ACCOUNT GUARD] {_reason} — tripping kill-switch")
+                    try:
+                        guard.trip_kill_switch(reason=f"Account guard: {_reason}")
+                    except Exception:
+                        pass
+                    return {"success": False, "action": "SKIP",
+                            "reason": f"Account guard blocked: {_reason}"}
+            except Exception as _ag_err:
+                logger.debug(f"[AccountGuard] check skipped: {_ag_err}")
+
             # Build the snapshot the guardrail needs.
             open_positions_snapshot: List[Dict[str, Any]] = []
             for t in self._open_trades.values():
