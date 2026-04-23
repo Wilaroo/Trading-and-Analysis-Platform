@@ -49,8 +49,47 @@ class KillSwitchTripRequest(BaseModel):
 
 @router.get("/status")
 async def safety_status() -> Dict[str, Any]:
-    """Full safety surface: current config + state + last 20 check decisions."""
-    return {"success": True, **get_safety_guardrails().status()}
+    """Full safety surface: current config + state + last 20 check decisions.
+
+    Also includes a `live` block computed on-demand from the trading bot so
+    the V5 UI can show an "Awaiting IB Quotes" pill while any open position
+    is still waiting for its first quote (and the live unrealized-PnL math
+    is therefore suppressed from the kill-switch).
+    """
+    resp: Dict[str, Any] = {"success": True, **get_safety_guardrails().status()}
+
+    # Live awaiting-quotes signal — best-effort, never fails the endpoint.
+    try:
+        from services.trading_bot_service import get_trading_bot
+        bot = get_trading_bot()
+        awaiting_quotes = False
+        missing: List[str] = []
+        open_count = 0
+        if bot and hasattr(bot, "_open_trades"):
+            open_trades = list(bot._open_trades.values())
+            open_count = len(open_trades)
+            for t in open_trades:
+                fill = float(getattr(t, "fill_price", 0) or 0)
+                cur = float(getattr(t, "current_price", 0) or 0)
+                if fill <= 0 or cur <= 0:
+                    awaiting_quotes = True
+                    sym = getattr(t, "symbol", None)
+                    if sym and sym not in missing:
+                        missing.append(sym)
+        resp["live"] = {
+            "open_positions_count": open_count,
+            "awaiting_quotes": awaiting_quotes,
+            "positions_missing_quotes": missing,
+        }
+    except Exception as e:
+        logger.debug("safety.status live-block error: %s", e)
+        resp["live"] = {
+            "open_positions_count": 0,
+            "awaiting_quotes": False,
+            "positions_missing_quotes": [],
+        }
+
+    return resp
 
 
 @router.put("/config")

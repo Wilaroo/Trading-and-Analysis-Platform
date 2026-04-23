@@ -28,7 +28,7 @@ import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
-import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip } from './v5/SafetyV5';
+import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5 } from './v5/SafetyV5';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -144,6 +144,9 @@ export const SentComV5View = ({
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
+
+      {/* Awaiting-quotes pill — z-58, shown while the bot is waiting for IB quotes */}
+      <AwaitingQuotesPillV5 safety={safety} />
 
       {/* 1. Top-bar Pipeline HUD */}
       <PipelineHUDV5

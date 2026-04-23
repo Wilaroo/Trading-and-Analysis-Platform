@@ -10,7 +10,7 @@
  * mount once in SentComV5View and forget.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertOctagon, ShieldAlert, X, Loader2, Power } from 'lucide-react';
+import { AlertOctagon, ShieldAlert, X, Loader2, Power, Clock } from 'lucide-react';
 import api from '../../../utils/api';
 
 
@@ -279,5 +279,45 @@ export const SafetyHudChip = ({ safety }) => {
     >
       Safety {label}
     </span>
+  );
+};
+
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/*  Awaiting-quotes pill — amber, shown while any open position is waiting  */
+/*  for its first IB quote. Confirms the kill-switch bypass is active so    */
+/*  operators can see WHY the bot is holding fire on startup (instead of    */
+/*  thinking the bot is hung).                                              */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+export const AwaitingQuotesPillV5 = ({ safety }) => {
+  const live = safety?.data?.live;
+  if (!live?.awaiting_quotes) return null;
+
+  const missing = live.positions_missing_quotes || [];
+  const count = missing.length;
+  const title = count > 0
+    ? `Awaiting first IB quote for: ${missing.join(', ')}. Live unrealized P&L is suppressed from the kill-switch until quotes arrive.`
+    : 'Awaiting first IB quote on open positions. Live unrealized P&L is suppressed from the kill-switch until quotes arrive.';
+
+  return (
+    <div
+      data-testid="v5-awaiting-quotes-pill"
+      title={title}
+      className="fixed top-2 left-1/2 -translate-x-1/2 z-[58] flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/50 backdrop-blur-md shadow-lg shadow-amber-900/20"
+    >
+      <Clock className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+      <span className="v5-mono text-[10.5px] font-bold uppercase tracking-widest text-amber-200">
+        Awaiting IB quotes
+      </span>
+      {count > 0 && (
+        <span
+          className="v5-mono text-[10px] text-amber-100/80 px-1.5 py-0.5 rounded-sm bg-amber-500/20 border border-amber-400/30"
+          data-testid="v5-awaiting-quotes-symbols"
+        >
+          {count === 1 ? missing[0] : `${count} positions`}
+        </span>
+      )}
+    </div>
   );
 };

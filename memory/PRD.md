@@ -54,6 +54,25 @@ All 9 pass.
 - Lock test asserts `DailyStats` still lacks those fields so we never
   re-introduce the AttributeError pattern.
 
+## 2026-04-23 — UX: "Awaiting IB Quotes" pill in V5 Safety overlay
+
+Operators now get visual confirmation that the bot is in awaiting-quotes
+mode (instead of mistaking the quiet startup for a hung bot).
+
+- `/api/safety/status` now returns a `live` block: `open_positions_count`,
+  `awaiting_quotes` (bool), `positions_missing_quotes` (list of symbols).
+  Computed on-demand from the trading bot's `_open_trades`; failure is
+  silent (fallback to zero/false — never breaks the endpoint).
+- New component `AwaitingQuotesPillV5` in `sentcom/v5/SafetyV5.jsx` —
+  an amber pill top-center (`data-testid=v5-awaiting-quotes-pill`) that
+  renders only while `live.awaiting_quotes === true`. Shows the missing
+  symbol if only one, or a count otherwise. Tooltip explains why the
+  kill-switch math is being bypassed.
+- Mounted in `SentComV5View.jsx` next to the existing `SafetyBannerV5`.
+- Pytest `test_safety_status_awaiting_quotes.py` locks the endpoint
+  contract (live-block shape + types).
+
+
 
 
 ## 2026-04-22 (22:40Z) — CRITICAL FIX #6 — `recall_down` / `f1_down` were NEVER computed
