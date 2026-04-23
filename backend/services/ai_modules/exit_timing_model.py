@@ -193,14 +193,21 @@ def compute_exit_target(
 
 # Configurable per setup type
 EXIT_MODEL_CONFIGS = {
-    "SCALP":              {"max_horizon": 12, "model_name": "exit_timing_scalp"},
-    "ORB":                {"max_horizon": 24, "model_name": "exit_timing_orb"},
-    "GAP_AND_GO":         {"max_horizon": 24, "model_name": "exit_timing_gap"},
-    "VWAP":               {"max_horizon": 24, "model_name": "exit_timing_vwap"},
-    "BREAKOUT":           {"max_horizon": 30, "model_name": "exit_timing_breakout"},
-    "RANGE":              {"max_horizon": 20, "model_name": "exit_timing_range"},
-    "MEAN_REVERSION":     {"max_horizon": 20, "model_name": "exit_timing_meanrev"},
-    "REVERSAL":           {"max_horizon": 30, "model_name": "exit_timing_reversal"},
-    "TREND_CONTINUATION": {"max_horizon": 30, "model_name": "exit_timing_trend"},
-    "MOMENTUM":           {"max_horizon": 30, "model_name": "exit_timing_momentum"},
+    # Intraday exits — trained on 5-min bars so the MFE/MAE horizon matches
+    # the actual trade duration. Previously these were all trained on "1 day"
+    # bars which meant scalp exit timing was learning from 12-day lookaheads
+    # instead of 12-bar × 5-min = 1-hour lookaheads. Intraday exits landed
+    # at 37-40% accuracy (worse than random) on the 2026-04-23 run because
+    # of this mismatch.
+    "SCALP":              {"max_horizon": 12, "bar_size": "5 mins", "model_name": "exit_timing_scalp"},
+    "ORB":                {"max_horizon": 24, "bar_size": "5 mins", "model_name": "exit_timing_orb"},
+    "GAP_AND_GO":         {"max_horizon": 24, "bar_size": "5 mins", "model_name": "exit_timing_gap"},
+    "VWAP":               {"max_horizon": 24, "bar_size": "5 mins", "model_name": "exit_timing_vwap"},
+    # Swing exits — daily bars for multi-day holding periods.
+    "BREAKOUT":           {"max_horizon": 30, "bar_size": "1 day",  "model_name": "exit_timing_breakout"},
+    "RANGE":              {"max_horizon": 20, "bar_size": "1 day",  "model_name": "exit_timing_range"},
+    "MEAN_REVERSION":     {"max_horizon": 20, "bar_size": "1 day",  "model_name": "exit_timing_meanrev"},
+    "REVERSAL":           {"max_horizon": 30, "bar_size": "1 day",  "model_name": "exit_timing_reversal"},
+    "TREND_CONTINUATION": {"max_horizon": 30, "bar_size": "1 day",  "model_name": "exit_timing_trend"},
+    "MOMENTUM":           {"max_horizon": 30, "bar_size": "1 day",  "model_name": "exit_timing_momentum"},
 }

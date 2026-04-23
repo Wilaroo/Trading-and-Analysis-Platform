@@ -1996,21 +1996,40 @@ async def run_training_pipeline(
             base_names = feature_engineer.get_feature_names()
             n_workers = MAX_EXTRACT_WORKERS
 
-            # All exit models use "1 day" bars — load once
-            bs = "1 day"
-            bs_config = BAR_SIZE_CONFIGS.get(bs, {})
-            symbols = await get_cached_symbols(db, bs, 100)
-            max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
-            symbols = symbols[:max_sym]
+            # Group exit configs by bar_size. Intraday setups (SCALP, ORB,
+            # GAP_AND_GO, VWAP) train on 5-min bars; swing setups train on
+            # daily bars. Previously everything was trained on "1 day" which
+            # silently destroyed intraday exit-timing accuracy.
+            exit_configs_by_bs: Dict[str, List] = {}
+            for st, cfg in EXIT_MODEL_CONFIGS.items():
+                exit_bs = cfg.get("bar_size", "1 day")
+                exit_configs_by_bs.setdefault(exit_bs, []).append((st, cfg))
+
             combined_names = base_names + [f"exit_{n}" for n in EXIT_FEATURE_NAMES]
 
-            if symbols:
-                exit_configs = [(st, cfg["max_horizon"]) for st, cfg in EXIT_MODEL_CONFIGS.items()]
+            for bs, bs_exit_configs in exit_configs_by_bs.items():
+                bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                symbols = await get_cached_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
+                symbols = symbols[:max_sym]
+
+                logger.info(
+                    f"[Phase 4] Training {len(bs_exit_configs)} exit models on {bs} bars "
+                    f"({[st for st, _ in bs_exit_configs]})"
+                )
+
+                if not symbols:
+                    for st, cfg in bs_exit_configs:
+                        logger.warning(f"No symbols for {cfg['model_name']} on {bs}")
+                        results["models_failed"].append({"name": cfg["model_name"], "reason": f"No symbols for {bs}"})
+                    continue
+
+                exit_configs = [(st, cfg["max_horizon"]) for st, cfg in bs_exit_configs]
                 max_horizon = max(h for _, h in exit_configs)
                 min_required = 70 + max_horizon
 
                 model_accum = {}
-                for st, cfg in EXIT_MODEL_CONFIGS.items():
+                for st, cfg in bs_exit_configs:
                     model_accum[st] = {"X": [], "y": [], "model_name": cfg["model_name"], "max_horizon": cfg["max_horizon"]}
                     status.update(current_model=cfg["model_name"])
 
@@ -2093,7 +2112,7 @@ async def run_training_pipeline(
                         del data["X"], data["y"]
 
                         if len(X) < MIN_TRAINING_SAMPLES:
-                            logger.warning(f"Insufficient exit training data for {st_key}: {len(X)}")
+                            logger.warning(f"Insufficient exit training data for {st_key} on {bs}: {len(X)}")
                             continue
 
                         # Bucket into classes: QUICK (1-5), MEDIUM (6-15), EXTENDED (16+)
@@ -2103,7 +2122,7 @@ async def run_training_pipeline(
                         y_classes[y_raw > 15] = 2
 
                         logger.info(
-                            f"Training {model_name}: {len(X):,} samples, "
+                            f"Training {model_name} on {bs}: {len(X):,} samples, "
                             f"Quick={np.sum(y_classes==0)}, Med={np.sum(y_classes==1)}, Ext={np.sum(y_classes==2)}"
                         )
 
