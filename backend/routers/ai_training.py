@@ -50,6 +50,7 @@ class TrainingRequest(BaseModel):
     force_retrain: bool = False  # If True, retrain all models ignoring resume cache
     resume_max_age_hours: float = 24.0  # Skip models trained within N hours
     test_mode: bool = False  # Quick test: cap symbols to 50, bars to 5000
+    skip_preflight: bool = False  # Escape hatch: bypass shape-drift check (not recommended)
 
 
 async def _monitor_training_process(task: _TrainingProcess):
@@ -144,6 +145,39 @@ async def start_training(request: TrainingRequest):
     try:
         from services.focus_mode_manager import focus_mode_manager
         from server import db as mongo_db
+
+        # ── Pre-flight shape validation ──────────────────────────────────
+        # Runs the ~5s synthetic-bar validator to catch feature-shape drift
+        # BEFORE we spawn a multi-hour subprocess. This is the bug class
+        # that killed the 2026-04-21 run 12 min into Phase 1 with a
+        # "expected 57, got 52" mismatch. Bypass only via skip_preflight.
+        if not request.skip_preflight:
+            try:
+                from services.ai_modules.preflight_validator import preflight_validate_shapes
+                pf_phases = request.phases if request.phases else [
+                    "setup", "short", "volatility", "exit", "risk",
+                    "sector", "gap_fill", "regime", "ensemble",
+                ]
+                pf_report = await asyncio.to_thread(
+                    preflight_validate_shapes, pf_phases, request.bar_sizes
+                )
+                if not pf_report.get("ok", False):
+                    logger.error(
+                        f"[TRAINING] Preflight FAILED — refusing to spawn training subprocess. "
+                        f"{len(pf_report.get('failures', []))} mismatches."
+                    )
+                    return {
+                        "success": False,
+                        "error": "Pre-flight shape validation failed. Fix the feature/name mismatches before retrying — running would crash mid-training.",
+                        "status": "preflight_failed",
+                        "preflight": pf_report,
+                    }
+                logger.info(
+                    f"[TRAINING] Preflight passed ({pf_report.get('duration_s')}s, "
+                    f"phases={pf_report.get('checked_phases')})"
+                )
+            except Exception as pf_err:
+                logger.warning(f"[TRAINING] Preflight check errored (non-fatal, proceeding): {pf_err}")
 
         # Activate TRAINING focus mode — pauses non-essential services
         try:
@@ -477,47 +511,155 @@ def list_trained_models():
 
 
 @router.get("/data-readiness")
-def check_data_readiness():
+async def check_data_readiness():
     """
     Check how much training data is available per bar size.
-    Sync handler — runs in thread pool, doesn't block event loop.
+
+    Uses DISTINCT_SCAN + estimated_document_count() instead of a full
+    $group over the 178M-row `ib_historical_data` collection. Previously
+    this was a sync `def` running a `$group` aggregation that blocked
+    the FastAPI event loop and timed out the UI. Now returns in seconds.
+
+    Also cross-references `BAR_SIZE_CONFIGS` from training_pipeline so each
+    bar size gets a clear "ready/insufficient" verdict based on the
+    training pipeline's own thresholds.
     """
     try:
         from server import db as mongo_db
         if mongo_db is None:
             raise HTTPException(status_code=503, detail="Database not connected")
 
-        pipeline = [
-            {"$group": {
-                "_id": "$bar_size",
-                "total_bars": {"$sum": 1},
-                "unique_symbols": {"$addToSet": "$symbol"},
-            }},
-            {"$project": {
-                "_id": 0,
-                "bar_size": "$_id",
-                "total_bars": 1,
-                "symbol_count": {"$size": "$unique_symbols"},
-            }},
-            {"$sort": {"total_bars": -1}},
-        ]
+        # Cache: readiness doesn't change on a minute-to-minute basis.
+        cache_key = "data_readiness"
+        now = _time.time()
+        cached = _endpoint_cache.get(cache_key)
+        if cached and now - cached["at"] < _CACHE_TTL:
+            return cached["data"]
 
-        results = list(mongo_db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+        def _compute():
+            from services.ai_modules.training_pipeline import BAR_SIZE_CONFIGS
 
-        total_bars = sum(r["total_bars"] for r in results)
+            data_col = mongo_db["ib_historical_data"]
+            total_bars = data_col.estimated_document_count()
 
+            results = []
+            total_ready_syms = 0
+            for bar_size, cfg in BAR_SIZE_CONFIGS.items():
+                min_bars = cfg.get("min_bars_per_symbol", 100)
+                try:
+                    syms = data_col.distinct(
+                        "symbol", {"bar_size": bar_size}, maxTimeMS=15000
+                    )
+                except Exception as e:
+                    logger.warning(f"[data-readiness] distinct failed for {bar_size}: {e}")
+                    syms = []
+
+                # We purposefully don't re-count bars per symbol here (that's
+                # what the training pipeline does against `symbol_adv_cache`
+                # in `get_available_symbols`). This endpoint just answers
+                # "is there ANY data for this bar_size?" — fast & cheap.
+                symbol_count = len(syms)
+                target_symbols = cfg.get("max_symbols", 0)
+                ready = symbol_count >= min(100, max(1, target_symbols // 10))
+                if ready:
+                    total_ready_syms += symbol_count
+
+                results.append({
+                    "bar_size": bar_size,
+                    "symbol_count": symbol_count,
+                    "min_bars_per_symbol": min_bars,
+                    "target_symbols": target_symbols,
+                    "ready": ready,
+                })
+
+            ready_count = sum(1 for r in results if r["ready"])
+            all_ready = ready_count == len(results)
+            any_ready = ready_count > 0
+
+            return {
+                "success": True,
+                "total_bars": total_bars,
+                "by_bar_size": sorted(results, key=lambda r: -r["symbol_count"]),
+                "bar_sizes_ready": ready_count,
+                "bar_sizes_total": len(results),
+                "all_bar_sizes_ready": all_ready,
+                "recommendation": (
+                    "Ready for full training" if all_ready
+                    else "Ready for partial training" if any_ready
+                    else "Insufficient data — run Collect Data first"
+                ),
+            }
+
+        data = await asyncio.to_thread(_compute)
+        _endpoint_cache[cache_key] = {"at": now, "data": data}
+        return data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[data-readiness] error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/preflight")
+async def run_preflight(
+    phases: Optional[str] = None,
+    bar_sizes: Optional[str] = None,
+):
+    """
+    Run the pre-flight shape validator against all training phases.
+
+    This is the <5-second check that catches shape-drift bugs (like the
+    2026-04-21 Phase-2 crash where a 1-line name-list mismatch would
+    kill a 44-hour run 12 minutes in). Uses synthetic OHLCV bars so it
+    has NO database dependency and runs safely even during heavy data
+    collection.
+
+    Query params:
+        phases: comma-separated (e.g., "setup,short,volatility,exit,risk,sector,gap_fill,regime,ensemble").
+                Defaults to ALL phases.
+        bar_sizes: comma-separated (e.g., "1 min,5 mins,1 day"). Defaults to the
+                   full set used by the risk phase.
+
+    Returns:
+        {
+          "success": true, "ok": bool, "checked_phases": [...],
+          "failures": [...], "duration_s": float, "flags": {...},
+          "ran_at": "..."
+        }
+    """
+    import asyncio as _aio
+    phases_list = [p.strip() for p in phases.split(",") if p.strip()] if phases else [
+        "setup", "short", "volatility", "exit", "risk",
+        "sector", "gap_fill", "regime", "ensemble",
+    ]
+    bar_sizes_list = [b.strip() for b in bar_sizes.split(",") if b.strip()] if bar_sizes else None
+
+    def _run():
+        from services.ai_modules.preflight_validator import preflight_validate_shapes
+        return preflight_validate_shapes(phases_list, bar_sizes_list)
+
+    try:
+        report = await _aio.to_thread(_run)
         return {
             "success": True,
-            "total_bars": total_bars,
-            "by_bar_size": results,
-            "recommendation": (
-                "Ready for training" if total_bars > 1_000_000
-                else "Collecting more data recommended"
-            ),
+            "ok": bool(report.get("ok", False)),
+            "checked_phases": report.get("checked_phases", []),
+            "failures": report.get("failures", []),
+            "duration_s": report.get("duration_s"),
+            "flags": report.get("flags", {}),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
         }
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"[preflight] error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "ok": False,
+            "error": str(e),
+            "checked_phases": [],
+            "failures": [],
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
 
 
 

@@ -356,6 +356,139 @@ const CategoryRow = memo(({ categoryKey, category }) => {
   );
 });
 
+const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTestMode, runningPreflight, starting, isTraining }) => {
+  const barSizes = readiness?.by_bar_size || [];
+  const readyCount = readiness?.bar_sizes_ready ?? 0;
+  const totalCount = readiness?.bar_sizes_total ?? barSizes.length;
+  const dataOK = readiness?.all_bar_sizes_ready;
+  const dataAnyOK = readyCount > 0;
+
+  const preflightOK = preflight?.ok === true;
+  const preflightFailed = preflight && preflight.ok === false;
+  const preflightChecked = Array.isArray(preflight?.checked_phases) ? preflight.checked_phases.length : 0;
+
+  // Overall readiness: data present + preflight passed (or not yet run)
+  const overallReady = dataAnyOK && (preflightOK || !preflight);
+  const blocked = preflightFailed;
+
+  return (
+    <div
+      className="mb-4 p-3 rounded-lg border border-white/5 bg-gradient-to-br from-zinc-900/60 to-black/40"
+      data-testid="training-readiness-card"
+    >
+      <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-cyan-400" />
+          <span className="text-xs font-semibold text-white uppercase tracking-wider">Training Readiness</span>
+          {blocked ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20" data-testid="readiness-verdict">Blocked</span>
+          ) : overallReady ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" data-testid="readiness-verdict">Ready</span>
+          ) : dataAnyOK ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20" data-testid="readiness-verdict">Partial</span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/20" data-testid="readiness-verdict">Awaiting data</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRunPreflight}
+            disabled={runningPreflight}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="run-preflight-btn"
+            title="Synthetic-bar shape validator (~2s). Catches feature-list drift before launching a multi-hour run."
+          >
+            {runningPreflight ? <Loader2Spinner /> : <CheckCircle2 className="w-3 h-3" />}
+            Pre-flight
+          </button>
+          <button
+            onClick={onTestMode}
+            disabled={starting || isTraining || blocked}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-[11px] text-violet-300 hover:text-violet-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="test-mode-start-btn"
+            title="Run a small-universe quick training to validate the pipeline end-to-end before the full overnight run."
+          >
+            <Zap className="w-3 h-3" />
+            Test mode
+          </button>
+        </div>
+      </div>
+
+      {/* Data sufficiency grid */}
+      <div className="grid grid-cols-7 gap-1 mb-2" data-testid="readiness-bar-grid">
+        {barSizes.length > 0 ? barSizes.map((bs) => (
+          <div
+            key={bs.bar_size}
+            className={`flex flex-col items-center justify-center px-1 py-1.5 rounded border ${
+              bs.ready
+                ? 'border-emerald-500/20 bg-emerald-500/[0.04]'
+                : 'border-zinc-700/40 bg-white/[0.01]'
+            }`}
+            title={`${bs.bar_size} — ${bs.symbol_count} symbols (target ${bs.target_symbols}, min ${bs.min_bars_per_symbol} bars each)`}
+            data-testid={`readiness-bar-${bs.bar_size.replace(/\s+/g, '-')}`}
+          >
+            <span className={`text-[9px] font-mono ${bs.ready ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              {bs.bar_size}
+            </span>
+            <span className={`text-[11px] font-mono font-semibold ${bs.ready ? 'text-emerald-300' : 'text-zinc-600'}`}>
+              {bs.symbol_count}
+            </span>
+          </div>
+        )) : (
+          <div className="col-span-7 text-center py-2 text-[11px] text-zinc-500">Loading readiness…</div>
+        )}
+      </div>
+
+      {/* Status line + preflight detail */}
+      <div className="flex items-center justify-between text-[11px] flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <span className="text-zinc-400">
+            Data: <span className={dataOK ? 'text-emerald-400' : dataAnyOK ? 'text-amber-400' : 'text-zinc-500'}>{readyCount}/{totalCount}</span> bar sizes
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span className="text-zinc-400">
+            Pre-flight:{' '}
+            {!preflight ? (
+              <span className="text-zinc-500">not run</span>
+            ) : preflightOK ? (
+              <span className="text-emerald-400">✓ {preflightChecked} phases clean ({preflight.duration_s}s)</span>
+            ) : (
+              <span className="text-red-400">✗ {preflight.failures?.length || 0} mismatches</span>
+            )}
+          </span>
+        </div>
+        {readiness?.recommendation && (
+          <span className="text-[10px] text-zinc-500 italic">{readiness.recommendation}</span>
+        )}
+      </div>
+
+      {/* Failure details when pre-flight fails */}
+      {preflightFailed && preflight.failures?.length > 0 && (
+        <div className="mt-2 p-2 rounded border border-red-500/20 bg-red-500/[0.04]" data-testid="preflight-failure-details">
+          <div className="text-[10px] font-semibold text-red-400 uppercase mb-1">Shape mismatches — fix before training:</div>
+          <ul className="space-y-0.5 max-h-24 overflow-auto">
+            {preflight.failures.slice(0, 6).map((f, i) => (
+              <li key={i} className="text-[10px] text-red-300 font-mono">
+                • {f.phase || f.worker || 'phase'}: expected {f.expected_cols ?? f.expected}, got {f.actual_cols ?? f.actual}
+                {f.note ? ` — ${f.note}` : ''}
+              </li>
+            ))}
+            {preflight.failures.length > 6 && (
+              <li className="text-[10px] text-red-500/70 italic">… and {preflight.failures.length - 6} more</li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+});
+TrainingReadinessCard.displayName = 'TrainingReadinessCard';
+
+// Tiny inline spinner that avoids pulling another icon into the bundle
+const Loader2Spinner = () => (
+  <div className="w-3 h-3 rounded-full border-[1.5px] border-zinc-500 border-t-transparent animate-spin" />
+);
+
 const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
   const [inventory, setInventory] = useState(null);
   const [pipelineStatus, setPipelineStatus] = useState(null);
@@ -363,6 +496,9 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
   const [gpuInfo, setGpuInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [dataReadiness, setDataReadiness] = useState(null);
+  const [preflight, setPreflight] = useState(null);
+  const [runningPreflight, setRunningPreflight] = useState(false);
   const optimisticUntilRef = useRef(0); // timestamp until which we ignore "idle" WS updates
 
   useEffect(() => {
@@ -387,11 +523,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [inventoryRes, statusRes, cnnRes, gpuRes] = await Promise.allSettled([
+      const [inventoryRes, statusRes, cnnRes, gpuRes, readinessRes] = await Promise.allSettled([
         api.get('/api/ai-training/model-inventory'),
         api.get('/api/ai-training/status'),
         api.get('/api/ai-training/cnn/models'),
         api.get('/api/ai-training/gpu-status'),
+        api.get('/api/ai-training/data-readiness'),
       ]);
       
       // Debug logging
@@ -413,6 +550,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
       }
       if (cnnRes.status === 'fulfilled' && cnnRes.value.data?.success) setCnnModels(cnnRes.value.data.models || []);
       if (gpuRes.status === 'fulfilled' && gpuRes.value.data?.success) setGpuInfo(gpuRes.value.data.gpu);
+      if (readinessRes.status === 'fulfilled' && readinessRes.value.data?.success) setDataReadiness(readinessRes.value.data);
     } catch (err) {
       console.error('Training panel fetch error:', err);
     } finally {
@@ -534,6 +672,63 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
     }, 15000);
   }, [sendWsMessage]);
 
+  // Run the pre-flight shape validator on demand. This is the <5s synthetic-bar
+  // check that catches the feature/name-list drift bug that killed the
+  // 2026-04-21 run 12 minutes into Phase 1. Runs entirely on synthetic bars
+  // so it has zero DB dependency (safe to call during heavy data collection).
+  const handleRunPreflight = useCallback(async () => {
+    setRunningPreflight(true);
+    try {
+      const res = await api.get('/api/ai-training/preflight');
+      if (res.data?.success) {
+        setPreflight(res.data);
+        if (res.data.ok) {
+          toast.success(`Pre-flight PASSED (${res.data.duration_s}s, ${res.data.checked_phases?.length || 0} phases)`);
+        } else {
+          toast.error(`Pre-flight FAILED — ${res.data.failures?.length || 0} shape mismatches. Fix before training.`);
+        }
+      } else {
+        toast.error('Pre-flight errored: ' + (res.data?.error || 'unknown'));
+      }
+    } catch (err) {
+      toast.error('Pre-flight request failed: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setRunningPreflight(false);
+    }
+  }, []);
+
+  // Test-mode training: cap to tiny universe and short-circuit expensive phases,
+  // validating the pipeline end-to-end against the current data before committing
+  // to the full overnight run. Uses the same /start endpoint with test_mode=true.
+  const handleTestModeStart = useCallback(async () => {
+    if (!window.confirm('Run a quick test-mode training (small universe, ~minutes)? This validates the pipeline end-to-end before the full run.')) return;
+    setStarting(true);
+    try {
+      const res = await api.post('/api/ai-training/start', {
+        test_mode: true,
+        force_retrain: false,
+      }, { timeout: 30000 });
+      if (res.data?.success) {
+        toast.success('Test-mode training started');
+        optimisticUntilRef.current = Date.now() + 15000;
+        setPipelineStatus(prev => ({
+          ...prev,
+          task_status: 'running',
+          pipeline_status: { ...(prev?.pipeline_status || {}), phase: 'starting' },
+        }));
+      } else if (res.data?.status === 'preflight_failed') {
+        setPreflight({ success: true, ok: false, failures: res.data.preflight?.failures || [], checked_phases: res.data.preflight?.checked_phases || [] });
+        toast.error('Pre-flight FAILED — see the readiness card for details');
+      } else {
+        toast.error(res.data?.error || 'Test-mode start failed');
+      }
+    } catch (err) {
+      toast.error('Test-mode start errored: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setStarting(false);
+    }
+  }, []);
+
   // Split categories into Trade Signal Generators vs Support Models
   const signalCategories = [];
   const supportCategories = [];
@@ -576,6 +771,17 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
       {(isTraining || pipelineStatus?.pipeline_status?.phase_history) && (
         <PhaseTracker pipelineStatus={pipelineStatus} isTraining={isTraining} />
       )}
+
+      {/* Training Readiness — data sufficiency + pre-flight verdict + test-mode shortcut */}
+      <TrainingReadinessCard
+        readiness={dataReadiness}
+        preflight={preflight}
+        onRunPreflight={handleRunPreflight}
+        onTestMode={handleTestModeStart}
+        runningPreflight={runningPreflight}
+        starting={starting}
+        isTraining={isTraining}
+      />
 
       {/* GPU + Overall Progress */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">

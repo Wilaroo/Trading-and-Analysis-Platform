@@ -11,6 +11,38 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 2026-02-10 — Training pipeline readiness surface + preflight guard
+
+**Shipped:**
+- **`GET /api/ai-training/data-readiness`** rewritten: was a sync `$group`
+  over 178M `ib_historical_data` rows (timed out UI indefinitely) → now
+  `async` + `to_thread` + DISTINCT_SCAN per bar_size with
+  `estimated_document_count()`. Returns in ~50ms. Cross-references each
+  bar size against `BAR_SIZE_CONFIGS.min_bars_per_symbol` and
+  `max_symbols` for a `ready` verdict. 60s endpoint cache.
+- **`GET /api/ai-training/preflight`** — new endpoint. Wraps
+  `preflight_validator.preflight_validate_shapes()` (synthetic bars, zero
+  DB dependency, ~2s) so the UI can surface shape-drift verdicts on
+  demand. Defaults to all 9 phases; `?phases=` and `?bar_sizes=` narrow.
+- **Preflight guard in `POST /api/ai-training/start`**: spawn is aborted
+  with `status: "preflight_failed"` and the full mismatch list if the
+  synthetic-bar validator doesn't pass. Bypass via `skip_preflight: true`
+  (not recommended). This is the exact guard that would have saved the
+  2026-04-21 44h run from dying 12 min in.
+- **NIA `TrainingReadinessCard`** rendered in `TrainingPipelinePanel.jsx`:
+  7-cell bar-size grid (symbol count per bar, green if ≥10% of target
+  universe), pre-flight verdict line, "Ready / Partial / Blocked / Awaiting
+  data" pill, `Pre-flight` button (on-demand check), `Test mode` button
+  (kicks `/start` with `test_mode=true`). When preflight fails, the card
+  lists the first 6 mismatches inline so you can fix them before retrying.
+
+**Explicit non-changes** (collection must keep running untouched):
+- `ib_collector_router.py`, `ib_historical_collector.py`, pusher-facing
+  endpoints, queue service, backtest engine — NOT modified. Verified
+  `/api/ib-collector/smart-backfill/last` and `/queue-progress-detailed`
+  still sub-5ms after backend hot reload.
+
+
 ## 2026-02-10 — Smart Backfill: one-click tier/gap-aware chained backfill + no-timeouts hardening
 
 **Shipped (P0 — smart backfill):**
