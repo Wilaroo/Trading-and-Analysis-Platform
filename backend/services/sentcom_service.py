@@ -74,6 +74,12 @@ class SentComStatus:
     executing_orders: int = 0
     filled_orders: int = 0
     last_activity: Optional[str] = None
+    # V5 HUD enrichment — populated by get_status() below. All optional so
+    # older consumers that ignore these keys keep working.
+    trading_phase: Optional[str] = None          # "MARKET OPEN" | "PRE MARKET" | ...
+    account_equity: Optional[float] = None       # net liq (USD)
+    scanner_bar_size: Optional[str] = None       # e.g. "multi" or "1 min · 5 mins"
+    scanner_universe_size: Optional[int] = None  # watchlist count
     
     def to_dict(self) -> Dict:
         return {
@@ -87,6 +93,10 @@ class SentComStatus:
                 "executing": self.executing_orders,
                 "filled": self.filled_orders
             },
+            "trading_phase": self.trading_phase,
+            "account_equity": self.account_equity,
+            "scanner_bar_size": self.scanner_bar_size,
+            "scanner_universe_size": self.scanner_universe_size,
             "last_activity": self.last_activity
         }
 
@@ -372,7 +382,78 @@ class SentComService:
                 regime = regime_data.get("regime", "UNKNOWN")
             except:
                 regime = "UNKNOWN"
-        
+
+        # trading_phase — derived directly using US Eastern time. Same logic
+        # as `/api/market-context/session/status` router, inlined here so we
+        # don't depend on the router module being importable during startup.
+        trading_phase: Optional[str] = None
+        try:
+            import pytz
+            et = pytz.timezone("US/Eastern")
+            now_et = datetime.now(et)
+            is_weekend = now_et.weekday() >= 5
+            pre_open = now_et.replace(hour=4, minute=0, second=0, microsecond=0)
+            rth_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+            rth_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+            after_end = now_et.replace(hour=20, minute=0, second=0, microsecond=0)
+            if is_weekend:
+                trading_phase = "WEEKEND"
+            elif now_et < pre_open:
+                trading_phase = "OVERNIGHT"
+            elif now_et < rth_open:
+                trading_phase = "PRE-MARKET"
+            elif now_et < rth_close:
+                trading_phase = "MARKET OPEN"
+            elif now_et < after_end:
+                trading_phase = "AFTER-HOURS"
+            else:
+                trading_phase = "CLOSED"
+        except Exception as e:
+            logger.debug(f"trading_phase derivation failed: {e}")
+
+        # account_equity — prefer pushed IB net_liq (real-time), fall back
+        # to starting_capital + daily net_pnl so the HUD shows *something*
+        # even before the first quote pump completes after a reconnect.
+        account_equity: Optional[float] = None
+        try:
+            from routers.ib import _pushed_ib_data
+            acct = _pushed_ib_data.get("account") or {}
+            nl = acct.get("net_liquidation") or acct.get("NetLiquidation") or acct.get("equity")
+            if nl is not None:
+                account_equity = float(nl)
+        except Exception:
+            pass
+        if account_equity is None and trading_bot:
+            try:
+                bot_status = trading_bot.get_status()
+                rp = bot_status.get("risk_params") or {}
+                ds = bot_status.get("daily_stats") or {}
+                sc = rp.get("starting_capital")
+                np = ds.get("net_pnl")
+                if sc is not None:
+                    account_equity = float(sc) + float(np or 0.0)
+            except Exception:
+                pass
+
+        # scanner_bar_size / scanner_universe_size — read from enhanced scanner
+        scanner_bar_size: Optional[str] = None
+        scanner_universe_size: Optional[int] = None
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                # `_watchlist` is the live universe set — stable attribute used
+                # by the scanner's own get_status() for `watchlist_size`.
+                wl = getattr(scanner, "_watchlist", None)
+                if isinstance(wl, (list, set, tuple, dict)):
+                    scanner_universe_size = len(wl)
+                # Enhanced scanner runs across every enabled setup's native
+                # timeframe — not a single bar_size. Label as "multi" so the
+                # HUD renders something meaningful instead of "—".
+                scanner_bar_size = "multi"
+        except Exception as e:
+            logger.debug(f"scanner enrichment failed: {e}")
+
         return SentComStatus(
             connected=connected,
             state=state,
@@ -382,7 +463,11 @@ class SentComService:
             pending_orders=pending,
             executing_orders=executing,
             filled_orders=filled,
-            last_activity=datetime.now(timezone.utc).isoformat()
+            last_activity=datetime.now(timezone.utc).isoformat(),
+            trading_phase=trading_phase,
+            account_equity=account_equity,
+            scanner_bar_size=scanner_bar_size,
+            scanner_universe_size=scanner_universe_size,
         )
     
     async def get_unified_stream(self, limit: int = 20) -> List[SentComMessage]:
