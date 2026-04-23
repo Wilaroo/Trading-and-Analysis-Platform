@@ -2376,13 +2376,6 @@ class IBHistoricalCollector:
             logger.error(f"Error calculating incremental needs: {e}")
             return {"success": False, "error": str(e)}
 
-
-# ============================================================================
-# SINGLETON PATTERN
-# ============================================================================
-
-_ib_collector: Optional[IBHistoricalCollector] = None
-
     # ------------------------------------------------------------------
     # SMART BACKFILL — tier-aware + gap-aware + chained lookback
     # ------------------------------------------------------------------
@@ -2555,6 +2548,14 @@ _ib_collector: Optional[IBHistoricalCollector] = None
         return await asyncio.to_thread(
             self._smart_backfill_sync, dry_run, tier_filter, freshness_days
         )
+
+
+# ============================================================================
+# SINGLETON PATTERN
+# ============================================================================
+
+_ib_collector: Optional[IBHistoricalCollector] = None
+
 
 
 

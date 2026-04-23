@@ -10,6 +10,52 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
 
 
+
+## 2026-02-10 — Smart Backfill: one-click tier/gap-aware chained backfill
+
+**Shipped (P0):**
+- Fixed a blocking `IndentationError` in `ib_historical_collector.py` where
+  the previous fork had placed `TIMEFRAMES_BY_TIER`, `MAX_DAYS_PER_REQUEST`,
+  `DURATION_STRING`, `_smart_backfill_sync`, and `smart_backfill` OUTSIDE
+  the `IBHistoricalCollector` class. Module now imports cleanly.
+- `POST /api/ib-collector/smart-backfill` is now live. Given the existing
+  `dollar_volume`-tiered ADV cache, it plans (and queues) exactly what's
+  missing per (symbol, bar_size):
+    · skip if newest bar is within `freshness_days` (default 2)
+    · otherwise chain requests walking backward in `MAX_DAYS_PER_REQUEST[bs]`-
+      sized steps up to IB's max per-bar-size lookback
+    · dedupes against pending/claimed queue rows
+    · full compute runs in `asyncio.to_thread` so FastAPI stays responsive
+- NIA DataCollectionPanel: "Collect Data" button now calls smart-backfill
+  (replaces the old `fill-gaps` flow). Redundant "Update Latest" button
+  removed — super-button covers both fresh-detection and gap-detection.
+- Toast now surfaces `queued / skipped_fresh / skipped_already_queued`
+  plus tier breakdown.
+
+**Shipped (P1):**
+- `GET /api/ib-collector/data-coverage` no longer times out on the 178M-row
+  `ib_historical_data` collection. Replaced the `$group`-over-everything
+  aggregations with `distinct("symbol", {"bar_size": tf})` (DISTINCT_SCAN
+  on the compound index) and compute tier coverage as a set intersection
+  in Python. Heavy work offloaded to `asyncio.to_thread`, cache bumped
+  to 10 min.
+- `total_bars` / earliest/latest dates at the global level are now
+  returned as `null` by design — they required full-collection scans.
+  Use `/stats` or `/queue-progress` for raw totals when needed.
+
+**Tests:**
+- `backend/tests/test_smart_backfill.py` (6 tests, all green) using
+  mongomock — covers class-layout regression, empty DB, fresh-skip,
+  queue-dedupe, and tier-gated planning.
+
+**Followups:**
+- User should run `git pull` on DGX Spark and restart the backend.
+- If user wants date ranges back on `/data-coverage`, add a cron that
+  writes per-bar-size summaries to a small `ib_historical_stats`
+  collection and read from there.
+
+
+
 ## TODO (user note 2026-04-22)
 - 🟡 Revisit `MorningBriefingModal.jsx` to look like the user's "newer more in-depth briefing modal" (screenshot they shared). Current V5-restyled modal is a minimal summary; they want richer detail. Revisit after Stage 2d polish.
 

@@ -117,62 +117,41 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const queueActive = collectionMode?.queue?.pending > 0;
   const isRunning = hasActiveCollections || queueActive;
 
+  // "Collect Data" — single super-button that runs smart_backfill:
+  //   • Reads symbol_adv_cache (dollar-volume tiers)
+  //   • For every (symbol, bar_size) required by the tier:
+  //       - skip if newest bar is within freshness_days
+  //       - otherwise chain requests walking back in time to max IB lookback
+  //   • Dedupes against currently pending/claimed queue items
+  // Replaces the old fill-gaps + incremental-update dual-button pattern.
   const handleCollectData = useCallback(async () => {
     setCollecting(true);
-    toast.info('Scanning for data gaps... This may take a few minutes with large datasets.');
+    toast.info('Scanning tier-aware gaps & chaining lookbacks... this can take a minute.');
     try {
-      const params = new URLSearchParams({ use_max_lookback: 'true', enable_priority: 'true' });
-      const res = await api.post(`/api/ib-collector/fill-gaps?${params}`, null, { timeout: 600000 });
+      const params = new URLSearchParams({ dry_run: 'false', freshness_days: '2' });
+      const res = await api.post(`/api/ib-collector/smart-backfill?${params}`, null, { timeout: 600000 });
       if (res.data?.success) {
-        if (res.data.gaps_found === 0) {
-          toast.success('No gaps found! Data coverage is complete.');
-        } else {
-          toast.success(`Collecting ${res.data.gaps_found} gaps across ${res.data.total_unique_symbols} symbols`);
-          if (res.data.priority_collection) setPriorityCollection(true);
-        }
-        if (onRefresh) onRefresh();
-      } else {
-        toast.error(res.data?.error || 'Failed to start collection');
-      }
-    } catch (err) {
-      // Don't show error for timeouts — the backend continues processing
-      if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
-        toast.info('Gap scan is still running in the background. Collectors will start when ready.');
-      } else {
-        toast.error('Error starting collection: ' + (err?.response?.data?.detail || err.message));
-      }
-    } finally {
-      setCollecting(false);
-    }
-  }, [onRefresh]);
-
-  // "Update Latest" — refreshes stale data by looking at each symbol's newest
-  // bar and only queueing what's missing between then and now. Correct tool
-  // when you already have data but the most recent days are absent (e.g. data
-  // was fresh last month but nothing collected since).
-  const handleIncrementalUpdate = useCallback(async () => {
-    setCollecting(true);
-    toast.info('Analyzing freshness for all symbols...');
-    try {
-      const params = new URLSearchParams({ max_days_lookback: '45' });
-      const res = await api.post(`/api/ib-collector/incremental-update?${params}`, null, { timeout: 600000 });
-      if (res.data?.success) {
-        const queued = res.data.total_requests ?? res.data.queued ?? 0;
+        const queued = res.data.queued ?? 0;
+        const skippedFresh = res.data.skipped_fresh ?? 0;
+        const skippedQueued = res.data.skipped_already_queued ?? 0;
         if (queued === 0) {
-          toast.success('All symbols are fresh through today — nothing to update.');
+          toast.success(`Everything is fresh — ${skippedFresh} combos already up-to-date, ${skippedQueued} already queued.`);
         } else {
-          toast.success(`Queued ${queued} incremental requests to fill recent gaps`);
+          const tierSum = res.data.tier_counts
+            ? Object.entries(res.data.tier_counts).filter(([, v]) => v > 0).map(([k, v]) => `${v} ${k}`).join(' · ')
+            : '';
+          toast.success(`Queued ${queued} chained requests · ${tierSum} · skipped ${skippedFresh} fresh / ${skippedQueued} already queued`);
           setPriorityCollection(true);
         }
         if (onRefresh) onRefresh();
       } else {
-        toast.error(res.data?.error || 'Failed to queue incremental update');
+        toast.error(res.data?.error || 'Smart backfill failed');
       }
     } catch (err) {
       if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
-        toast.info('Freshness analysis is still running in the background.');
+        toast.info('Smart backfill is still running in the background. Collectors will pick up work as it queues.');
       } else {
-        toast.error('Error queuing incremental update: ' + (err?.response?.data?.detail || err.message));
+        toast.error('Error running smart backfill: ' + (err?.response?.data?.detail || err.message));
       }
     } finally {
       setCollecting(false);
@@ -212,23 +191,9 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
               : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20'
             }`}
           data-testid="collect-data-btn"
-          title="Scans every (symbol, timeframe) and queues any combo with ZERO data. Best for first-time setup."
+          title="Smart Backfill: tier-aware, gap-aware, chained lookback. Queues only what's missing or stale, walking back to IB's max lookback per bar size."
         >
           {collecting ? <><Loader className="w-4 h-4 animate-spin" /> Starting...</> : <><Play className="w-4 h-4" /> Collect Data</>}
-        </button>
-
-        <button
-          onClick={handleIncrementalUpdate}
-          disabled={collecting || hasActiveCollections}
-          className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2
-            ${collecting || hasActiveCollections
-              ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400 shadow-lg shadow-emerald-500/20'
-            }`}
-          data-testid="update-latest-btn"
-          title="Checks the newest bar per symbol and queues only the missing recent days (last 45d). Use when data is stale, not missing."
-        >
-          <RefreshCw className="w-4 h-4" /> Update Latest
         </button>
 
         {isRunning && (
