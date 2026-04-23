@@ -11,6 +11,22 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
+## 🗂️ Backlog — UX Power-User Layer (not started, user approved for later)
+
+### [BL-01] Keyboard Shortcuts + Symbol Command Palette
+- **`⌘K` / `Ctrl+K`** → opens centered fuzzy-match symbol picker. Tiers: (1) open positions, (2) today's setups/alerts, (3) watchlist, (4) recent stream symbols, (5) full 264K universe from `ib_historical_data` (lazy, cached in localStorage daily).
+- **`/`** → focus the V5 chat input.
+- **`Esc`** → close active modal/palette. **`?`** → shortcut cheatsheet overlay.
+- New files: `CommandPaletteV5.jsx`, `useKeyboardShortcuts.js`. New backend (optional): `GET /api/ib-collector/symbol-universe` (distinct symbols).
+- Reuses existing `handleOpenTicker` + 3-min modal cache. ~1 hour effort.
+
+### [BL-02] Hover Tooltips Everywhere
+- Add explanatory hover tooltips to virtually every data point and UI feature in V5 (and across the app): HUD metrics, scorecard values, gate scores, R multiples, DRC states, pipeline stage chips, chart header abbreviations (E/SL/PT/R:R), briefing timings, scanner metric abbreviations (RVol, Sharpe, P(win)), etc.
+- Goal: user never has to guess what a number means. Teach the platform through discovery.
+- Suggested approach: shadcn `Tooltip` component, centralized `/utils/fieldDefinitions.js` as single source of truth (label + short explanation + optional formula), reusable `<FieldTooltip field="gate_score">…</FieldTooltip>` wrapper.
+
+
+
 ## 2026-02-11 — V5 Command Center: full symbol clickability + cache audit
 
 **Shipped:**
