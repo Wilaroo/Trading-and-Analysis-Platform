@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://ai-quant-hardening.preview.emergentagent.com"
+        api_url = "https://ai-quant-core.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",
