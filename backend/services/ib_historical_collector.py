@@ -227,7 +227,8 @@ class IBHistoricalCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_threshold)
         
         try:
-            # Find distinct symbols that have data collected after the cutoff
+            # Bounded aggregation: maxTimeMS ensures we fail fast rather than
+            # block the FastAPI event loop indefinitely on a slow cluster.
             pipeline = [
                 {
                     "$match": {
@@ -241,10 +242,12 @@ class IBHistoricalCollector:
                     }
                 }
             ]
-            
-            result = list(self._data_col.aggregate(pipeline))
+
+            result = list(self._data_col.aggregate(
+                pipeline, allowDiskUse=True, maxTimeMS=30000
+            ))
             symbols_with_data = {doc["_id"] for doc in result}
-            
+
             logger.info(f"Found {len(symbols_with_data)} symbols with recent {bar_size} data (last {days_threshold} days)")
             return symbols_with_data
             
@@ -2112,43 +2115,49 @@ class IBHistoricalCollector:
         
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get statistics about collected data.
-        Uses estimated_document_count() for total bars (reads collection metadata, nearly instant).
+
+        Optimized for very large collections:
+        - Total bars: estimated_document_count() (reads collection metadata, instant).
+        - Unique symbol count: DISTINCT_SCAN on the compound index (fast).
+        - Per-bar-size symbol count: one DISTINCT_SCAN per bar size (fast).
+        Avoids full-collection $group aggregations that scan every document
+        and time out on 178M+ row collections.
         """
         if self._data_col is None:
             return {"success": False, "error": "Database not connected"}
-            
+
         try:
             # Fast total count from collection metadata (instant, no scan)
             total_bars = self._data_col.estimated_document_count()
-            
-            # Quick bar_size breakdown using a lighter aggregation with allowDiskUse
-            bar_stats = []
+
+            # Unique symbol count from index (fast DISTINCT_SCAN)
             try:
-                pipeline = [
-                    {"$group": {
-                        "_id": "$bar_size",
-                        "count": {"$sum": 1}
-                    }}
-                ]
-                bar_stats = list(self._data_col.aggregate(pipeline, allowDiskUse=True, maxTimeMS=8000))
-            except Exception:
-                pass  # Fall back to just total count
-            
-            # Unique symbol count from index (fast)
-            try:
-                unique_count = len(self._data_col.distinct("symbol", maxTimeMS=5000))
+                unique_count = len(self._data_col.distinct("symbol", maxTimeMS=10000))
             except Exception:
                 unique_count = 0
-            
+
+            # Per-bar-size: DISTINCT_SCAN on the compound (symbol, bar_size, date)
+            # index for each known bar size. One short index scan each.
+            bar_stats = {}
+            for bs in self.BAR_CONFIGS.keys():
+                try:
+                    syms = self._data_col.distinct(
+                        "symbol", {"bar_size": bs}, maxTimeMS=10000
+                    )
+                    if syms:
+                        bar_stats[bs] = {"symbols": len(syms)}
+                except Exception as e:
+                    logger.debug(f"distinct failed for {bs}: {e}")
+
             return {
                 "success": True,
                 "stats": {
                     "unique_symbols": unique_count,
-                    "by_bar_size": {s["_id"]: {"bars": s["count"]} for s in bar_stats},
+                    "by_bar_size": bar_stats,
                     "total_bars": total_bars,
                 }
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting collection stats: {e}")
             return {"success": False, "error": str(e)}
@@ -2538,16 +2547,49 @@ class IBHistoricalCollector:
             "skipped_fresh": skipped_fresh,
             "skipped_already_queued": skipped_already_queued,
             "by_bar_size": dict(by_bar_size),
+            "ran_at": now_iso,
         }
 
     async def smart_backfill(self, dry_run: bool = False,
                              tier_filter: Optional[str] = None,
                              freshness_days: int = 2) -> Dict[str, Any]:
-        """Async wrapper — heavy loops run in a thread so the event loop stays free."""
+        """Async wrapper — heavy loops run in a thread so the event loop stays free.
+        Persists non-dry-run results to `ib_smart_backfill_history` so the UI can
+        show the last run's summary without re-running the whole plan."""
         import asyncio
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             self._smart_backfill_sync, dry_run, tier_filter, freshness_days
         )
+        # Persist non-dry-run outcomes for the "Last Backfill" UI card.
+        if not dry_run and result.get("success") and self._db is not None:
+            try:
+                hist = self._db["ib_smart_backfill_history"]
+                hist.insert_one({
+                    "ran_at": result.get("ran_at"),
+                    "tier_filter": tier_filter,
+                    "freshness_days": freshness_days,
+                    "tier_counts": result.get("tier_counts"),
+                    "queued": result.get("queued", 0),
+                    "skipped_fresh": result.get("skipped_fresh", 0),
+                    "skipped_already_queued": result.get("skipped_already_queued", 0),
+                    "by_bar_size": result.get("by_bar_size", {}),
+                })
+                hist.create_index([("ran_at", -1)])
+            except Exception as e:
+                logger.warning(f"Could not persist smart_backfill history: {e}")
+        return result
+
+    def get_last_smart_backfill(self) -> Dict[str, Any]:
+        """Return the most recent smart_backfill run summary (for UI card)."""
+        if self._db is None:
+            return {"success": False, "error": "database not initialized"}
+        try:
+            doc = self._db["ib_smart_backfill_history"].find_one(
+                {}, {"_id": 0}, sort=[("ran_at", -1)]
+            )
+            return {"success": True, "last_run": doc}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 # ============================================================================

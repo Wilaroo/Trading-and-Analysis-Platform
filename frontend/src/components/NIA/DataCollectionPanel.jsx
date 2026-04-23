@@ -40,6 +40,78 @@ const formatDate = (d) => {
   } catch { return d?.slice(0, 10) || '--'; }
 };
 
+const formatRelative = (iso) => {
+  if (!iso) return 'never';
+  try {
+    const then = new Date(iso).getTime();
+    const diffSec = Math.floor((Date.now() - then) / 1000);
+    if (diffSec < 45) return 'just now';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    const d = Math.floor(diffSec / 86400);
+    return `${d}d ago`;
+  } catch { return '—'; }
+};
+
+const LastBackfillCard = memo(({ run, onRerun, busy }) => {
+  if (!run) {
+    return (
+      <div
+        className="flex items-center gap-3 text-xs text-zinc-500 px-3 py-2 rounded-lg border border-white/5 bg-white/[0.02]"
+        data-testid="last-backfill-card-empty"
+      >
+        <Clock className="w-3.5 h-3.5" />
+        <span>No backfill runs yet. Click <span className="text-cyan-400">Collect Data</span> to kick one off.</span>
+      </div>
+    );
+  }
+  const queued = run.queued || 0;
+  const fresh = run.skipped_fresh || 0;
+  const dupes = run.skipped_already_queued || 0;
+  const tierParts = run.tier_counts
+    ? Object.entries(run.tier_counts).filter(([, v]) => v > 0).map(([k, v]) => `${v} ${k}`)
+    : [];
+  return (
+    <div
+      className="flex items-center gap-3 flex-wrap text-xs px-3 py-2 rounded-lg border border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.04] to-transparent"
+      data-testid="last-backfill-card"
+    >
+      <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+      <span className="text-zinc-400">Last backfill</span>
+      <span className="text-zinc-200 font-medium" data-testid="last-backfill-when">{formatRelative(run.ran_at)}</span>
+      <span className="text-zinc-700">·</span>
+      <span className="text-cyan-300 font-semibold" data-testid="last-backfill-queued">{queued.toLocaleString()}</span>
+      <span className="text-zinc-500">queued</span>
+      <span className="text-zinc-700">·</span>
+      <span className="text-emerald-400 font-medium">{fresh.toLocaleString()}</span>
+      <span className="text-zinc-500">fresh</span>
+      {dupes > 0 && (
+        <>
+          <span className="text-zinc-700">·</span>
+          <span className="text-amber-400 font-medium">{dupes.toLocaleString()}</span>
+          <span className="text-zinc-500">dupes</span>
+        </>
+      )}
+      {tierParts.length > 0 && (
+        <>
+          <span className="text-zinc-700">·</span>
+          <span className="text-zinc-400">{tierParts.join(' · ')}</span>
+        </>
+      )}
+      <button
+        onClick={onRerun}
+        disabled={busy}
+        className="ml-auto px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[11px] font-medium border border-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        data-testid="last-backfill-rerun-btn"
+        title="Re-run smart backfill now"
+      >
+        Run again
+      </button>
+    </div>
+  );
+});
+LastBackfillCard.displayName = 'LastBackfillCard';
+
 const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const [expanded, setExpanded] = useState(true);
   const [collecting, setCollecting] = useState(false);
@@ -50,19 +122,28 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const [priorityCollection, setPriorityCollection] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
   const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
+  const [lastBackfill, setLastBackfill] = useState(null);
   const lastDataRef = useRef(null);
 
   const { dataCollection: wsDataCollection } = useWsData();
+
+  const refreshLastBackfill = useCallback(async () => {
+    try {
+      const res = await api.get('/api/ib-collector/smart-backfill/last');
+      if (res.data?.success) setLastBackfill(res.data.last_run || null);
+    } catch { /* non-critical */ }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
       if (!isMounted) return;
       try {
-        const [progressRes, coverageRes, collectionModeRes] = await Promise.allSettled([
+        const [progressRes, coverageRes, collectionModeRes, lastRunRes] = await Promise.allSettled([
           api.get('/api/ib-collector/queue-progress-detailed'),
           api.get('/api/ib-collector/data-coverage'),
-          api.get('/api/ib/collection-mode/status')
+          api.get('/api/ib/collection-mode/status'),
+          api.get('/api/ib-collector/smart-backfill/last')
         ]);
         if (!isMounted) return;
 
@@ -79,6 +160,9 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
         }
         if (collectionModeRes.status === 'fulfilled') {
           setCollectionMode(collectionModeRes.value.data);
+        }
+        if (lastRunRes.status === 'fulfilled' && lastRunRes.value.data?.success) {
+          setLastBackfill(lastRunRes.value.data.last_run || null);
         }
         try {
           const priorityRes = await api.get('/api/ib/priority-collection/status');
@@ -143,6 +227,7 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
           toast.success(`Queued ${queued} chained requests · ${tierSum} · skipped ${skippedFresh} fresh / ${skippedQueued} already queued`);
           setPriorityCollection(true);
         }
+        refreshLastBackfill();
         if (onRefresh) onRefresh();
       } else {
         toast.error(res.data?.error || 'Smart backfill failed');
@@ -156,7 +241,7 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
     } finally {
       setCollecting(false);
     }
-  }, [onRefresh]);
+  }, [onRefresh, refreshLastBackfill]);
 
   const handleCancel = useCallback(async () => {
     setCancelling(true);
@@ -222,6 +307,9 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
           </button>
         </div>
       </div>
+
+      {/* Last Backfill summary — shows what the most recent smart-backfill run did */}
+      <LastBackfillCard run={lastBackfill} onRerun={handleCollectData} busy={collecting || hasActiveCollections} />
 
       {/* Collection Progress (when active) */}
       {isRunning && queue && (

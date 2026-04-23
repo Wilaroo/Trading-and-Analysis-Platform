@@ -36,41 +36,40 @@ def _restore_live_mode():
 
 
 @router.get("/data-status")
-def get_data_status(
+async def get_data_status(
     bar_size: str = "1 day",
     days_threshold: int = 7
 ):
     """
     Check what historical data already exists.
-    
+
     Returns count of symbols with recent data vs total expected symbols.
     Use this to understand what will be skipped during collection.
-    
+    Runs in a thread so the event loop stays free even on the 178M-row table.
+
     - **bar_size**: Bar size to check (default "1 day")
     - **days_threshold**: Consider data "recent" if collected within this many days
     """
+    import asyncio
     try:
         collector = get_ib_collector()
-        
-        # Get symbols with recent data
-        symbols_with_data = collector.get_symbols_with_recent_data(bar_size, days_threshold)
-        
-        # Get total expected symbols (default list)
-        default_symbols = collector.get_default_symbols()
-        
-        # Calculate overlap
-        overlap = len(set(s.upper() for s in default_symbols) & symbols_with_data)
-        
-        return {
-            "success": True,
-            "bar_size": bar_size,
-            "days_threshold": days_threshold,
-            "symbols_with_recent_data": len(symbols_with_data),
-            "default_symbols_count": len(default_symbols),
-            "would_be_skipped": overlap,
-            "would_collect": len(default_symbols) - overlap,
-            "message": f"{overlap} of {len(default_symbols)} default symbols already have recent {bar_size} data"
-        }
+
+        def _compute():
+            symbols_with_data = collector.get_symbols_with_recent_data(bar_size, days_threshold)
+            default_symbols = collector.get_default_symbols()
+            overlap = len(set(s.upper() for s in default_symbols) & symbols_with_data)
+            return {
+                "success": True,
+                "bar_size": bar_size,
+                "days_threshold": days_threshold,
+                "symbols_with_recent_data": len(symbols_with_data),
+                "default_symbols_count": len(default_symbols),
+                "would_be_skipped": overlap,
+                "would_collect": len(default_symbols) - overlap,
+                "message": f"{overlap} of {len(default_symbols)} default symbols already have recent {bar_size} data"
+            }
+
+        return await asyncio.to_thread(_compute)
     except Exception as e:
         logger.error(f"Error getting data status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -515,118 +514,120 @@ async def incremental_update(
 
 
 @router.get("/incremental-analysis")
-def get_incremental_analysis():
+async def get_incremental_analysis():
     """
     Preview what incremental data would be fetched.
-    
+
     Use this to see what the incremental-update endpoint would collect
-    without actually starting a collection.
+    without actually starting a collection. Runs in a thread so the event
+    loop stays free even when scanning millions of historical rows.
     """
+    import asyncio
     try:
         collector = get_ib_collector()
-        return collector.calculate_incremental_needs()
+        return await asyncio.to_thread(collector.calculate_incremental_needs)
     except Exception as e:
         logger.error(f"Error in incremental analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/gap-analysis")
-def get_gap_analysis(tier_filter: Optional[str] = None):
+async def get_gap_analysis(tier_filter: Optional[str] = None):
     """
     Preview what gaps exist without starting a collection.
-    
-    Use this to see what the fill-gaps endpoint would collect.
-    
+
+    Uses DISTINCT_SCAN (index-backed distinct) instead of a full-collection
+    $group, so it stays fast even on the 178M-row historical collection.
+    Runs in a thread pool so the event loop is never blocked.
+
     - **tier_filter**: Limit to specific tier ("intraday", "swing", "investment", or None for all)
     """
+    import asyncio
     try:
         collector = get_ib_collector()
         db = collector._db
-        
         if db is None:
             return {"success": False, "error": "Database not initialized"}
-        
-        adv_col = db["symbol_adv_cache"]  # Fixed: match get_adv_cache_stats()
-        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME
-        
-        # Define tiers
-        tiers = {
-            "intraday": {
-                "min_adv": 500_000,
-                "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
-                "description": "500K+ shares/day"
-            },
-            "swing": {
-                "min_adv": 100_000,
-                "max_adv": 500_000,
-                "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"],
-                "description": "100K-500K shares/day"
-            },
-            "investment": {
-                "min_adv": 50_000,
-                "max_adv": 100_000,
-                "timeframes": ["1 hour", "1 day", "1 week"],
-                "description": "50K-100K shares/day"
+
+        def _analyze():
+            adv_col = db["symbol_adv_cache"]
+            data_col = db["ib_historical_data"]
+
+            tiers = {
+                "intraday": {
+                    "min_adv": 500_000,
+                    "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
+                    "description": "500K+ shares/day"
+                },
+                "swing": {
+                    "min_adv": 100_000,
+                    "max_adv": 500_000,
+                    "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"],
+                    "description": "100K-500K shares/day"
+                },
+                "investment": {
+                    "min_adv": 50_000,
+                    "max_adv": 100_000,
+                    "timeframes": ["1 hour", "1 day", "1 week"],
+                    "description": "50K-100K shares/day"
+                }
             }
-        }
-        
-        if tier_filter and tier_filter in tiers:
-            tiers = {tier_filter: tiers[tier_filter]}
-        
-        gap_analysis = []
-        total_missing = 0
-        
-        for tier_name, tier_config in tiers.items():
-            adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
-            if "max_adv" in tier_config:
-                adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
-            
-            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1})]
-            tier_total = len(tier_symbols)
-            
-            if tier_total == 0:
-                continue
-            
-            tier_gaps = {
-                "tier": tier_name,
-                "description": tier_config["description"],
-                "total_symbols": tier_total,
-                "timeframes": []
+            selected = {tier_filter: tiers[tier_filter]} if tier_filter and tier_filter in tiers else tiers
+
+            # Cache per-bar-size symbol sets — one DISTINCT_SCAN per timeframe.
+            symbols_by_tf = {}
+            needed_tfs = {tf for cfg in selected.values() for tf in cfg["timeframes"]}
+            for tf in needed_tfs:
+                try:
+                    symbols_by_tf[tf] = set(data_col.distinct("symbol", {"bar_size": tf}))
+                except Exception as e:
+                    logger.warning(f"distinct failed for {tf}: {e}")
+                    symbols_by_tf[tf] = set()
+
+            gap_analysis = []
+            total_missing = 0
+            for tier_name, tier_config in selected.items():
+                adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
+                if "max_adv" in tier_config:
+                    adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
+                tier_symbols = {
+                    doc["symbol"]
+                    for doc in adv_col.find(adv_query, {"symbol": 1, "_id": 0})
+                    if doc.get("symbol")
+                }
+                tier_total = len(tier_symbols)
+                if tier_total == 0:
+                    continue
+
+                tier_gaps = {
+                    "tier": tier_name,
+                    "description": tier_config["description"],
+                    "total_symbols": tier_total,
+                    "timeframes": []
+                }
+                for tf in tier_config["timeframes"]:
+                    with_data = symbols_by_tf.get(tf, set()) & tier_symbols
+                    missing = tier_total - len(with_data)
+                    coverage_pct = (len(with_data) / tier_total * 100) if tier_total > 0 else 0
+                    tier_gaps["timeframes"].append({
+                        "timeframe": tf,
+                        "has_data": len(with_data),
+                        "missing": missing,
+                        "coverage_pct": round(coverage_pct, 1),
+                        "needs_fill": missing > 0
+                    })
+                    total_missing += missing
+                gap_analysis.append(tier_gaps)
+
+            return {
+                "success": True,
+                "total_gaps": total_missing,
+                "needs_fill": total_missing > 0,
+                "estimated_time_minutes": total_missing * 2,
+                "analysis": gap_analysis
             }
-            
-            for tf in tier_config["timeframes"]:
-                # Use aggregation pipeline instead of distinct() - much faster on 177M+ rows
-                pipeline = [
-                    {"$match": {"bar_size": tf, "symbol": {"$in": tier_symbols}}},
-                    {"$group": {"_id": "$symbol"}}
-                ]
-                symbols_with_data = set(
-                    doc["_id"] for doc in data_col.aggregate(pipeline, allowDiskUse=True)
-                )
-                
-                missing_count = tier_total - len(symbols_with_data)
-                coverage_pct = (len(symbols_with_data) / tier_total * 100) if tier_total > 0 else 0
-                
-                tier_gaps["timeframes"].append({
-                    "timeframe": tf,
-                    "has_data": len(symbols_with_data),
-                    "missing": missing_count,
-                    "coverage_pct": round(coverage_pct, 1),
-                    "needs_fill": missing_count > 0
-                })
-                
-                total_missing += missing_count
-            
-            gap_analysis.append(tier_gaps)
-        
-        return {
-            "success": True,
-            "total_gaps": total_missing,
-            "needs_fill": total_missing > 0,
-            "estimated_time_minutes": total_missing * 2,  # ~2 seconds per request
-            "analysis": gap_analysis
-        }
-        
+
+        return await asyncio.to_thread(_analyze)
     except Exception as e:
         logger.error(f"Error analyzing gaps: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -752,6 +753,37 @@ async def smart_backfill(dry_run: bool = False, tier_filter: Optional[str] = Non
         return result
     except Exception as e:
         logger.error(f"Error in smart_backfill: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/smart-backfill/last")
+async def get_last_smart_backfill():
+    """
+    Return the most recent smart_backfill run summary (for the "Last Backfill"
+    UI card). Reads from `ib_smart_backfill_history` which is written on every
+    non-dry-run call to /smart-backfill.
+
+    Response:
+        {
+          "success": true,
+          "last_run": {
+            "ran_at": "2026-02-10T15:23:44+00:00",
+            "tier_filter": null,
+            "freshness_days": 2,
+            "tier_counts": {...},
+            "queued": 142,
+            "skipped_fresh": 873,
+            "skipped_already_queued": 0,
+            "by_bar_size": {...}
+          } | null
+        }
+    """
+    import asyncio
+    try:
+        collector = get_ib_collector()
+        return await asyncio.to_thread(collector.get_last_smart_backfill)
+    except Exception as e:
+        logger.error(f"Error fetching last smart_backfill: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1174,12 +1206,14 @@ def get_status(job_id: Optional[str] = None):
 
 
 @router.get("/stats")
-def get_stats():
-    """Get statistics about all collected historical data."""
+async def get_stats():
+    """Get statistics about all collected historical data.
+    Wrapped in asyncio.to_thread because aggregations over 178M+ rows can
+    block the FastAPI event loop even with maxTimeMS bounds."""
+    import asyncio
     try:
         collector = get_ib_collector()
-        result = collector.get_collection_stats()
-        return result
+        return await asyncio.to_thread(collector.get_collection_stats)
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1227,41 +1261,35 @@ def get_queue_progress(job_id: Optional[str] = None):
 _queue_progress_cache = {"data": None, "expires": 0}
 
 @router.get("/queue-progress-detailed")
-def get_queue_progress_detailed():
+async def get_queue_progress_detailed():
     """
     Get detailed queue progress broken down by bar_size.
-    Cached for 30 seconds to avoid 3+ collectors hammering Atlas with aggregations.
+    Cached for 30 seconds + heavy aggregation runs in a thread so multiple
+    pollers can't stall the event loop even on a slow cluster.
     """
+    import asyncio
     import time as _time
     global _queue_progress_cache
-    
+
     now = _time.time()
     if _queue_progress_cache["data"] and now < _queue_progress_cache["expires"]:
         return _queue_progress_cache["data"]
-    
+
     try:
         from services.historical_data_queue_service import get_historical_data_queue_service
         queue_service = get_historical_data_queue_service()
-        
-        detailed = queue_service.get_queue_stats_by_bar_size()
-        overall = queue_service.get_overall_queue_stats()
-        
-        result = {
-            "success": True,
-            "overall": overall,
-            **detailed
-        }
-        
-        # Cache for 30 seconds
+
+        def _fetch():
+            detailed = queue_service.get_queue_stats_by_bar_size()
+            overall = queue_service.get_overall_queue_stats()
+            return {"success": True, "overall": overall, **detailed}
+
+        result = await asyncio.to_thread(_fetch)
         _queue_progress_cache = {"data": result, "expires": now + 30}
-        
         return result
     except Exception as e:
         logger.error(f"Error getting detailed queue progress: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 @router.post("/cancel-by-barsize")

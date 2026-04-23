@@ -136,5 +136,46 @@ def test_smart_backfill_dedupes_against_queue():
     assert res["skipped_already_queued"] == len(c.TIMEFRAMES_BY_TIER["intraday"])
 
 
+def test_smart_backfill_persists_last_run_history():
+    """Non-dry-run calls must write a summary into ib_smart_backfill_history
+    so the NIA "Last Backfill" card has something to display."""
+    c, db = _collector_with_empty_db()
+    db["symbol_adv_cache"].insert_one({
+        "symbol": "HIST",
+        "avg_volume": 10_000_000,
+        "avg_dollar_volume": 1_000_000_000,
+        "tier": "intraday",
+    })
+
+    # Before first run: nothing.
+    assert c.get_last_smart_backfill() == {"success": True, "last_run": None}
+
+    res = asyncio.run(c.smart_backfill(dry_run=False, tier_filter="intraday"))
+    assert res["success"] is True
+    assert res.get("queued", 0) >= 1
+    assert res.get("ran_at")
+
+    last = c.get_last_smart_backfill()
+    assert last["success"] is True
+    run = last["last_run"]
+    assert run is not None
+    assert run["tier_filter"] == "intraday"
+    assert run["queued"] == res["queued"]
+    assert run["by_bar_size"] == res["by_bar_size"]
+
+
+def test_dry_run_does_not_persist_history():
+    """Dry-runs must not pollute the history collection."""
+    c, db = _collector_with_empty_db()
+    db["symbol_adv_cache"].insert_one({
+        "symbol": "DRY",
+        "avg_volume": 10_000_000,
+        "avg_dollar_volume": 1_000_000_000,
+        "tier": "intraday",
+    })
+    asyncio.run(c.smart_backfill(dry_run=True))
+    assert c.get_last_smart_backfill() == {"success": True, "last_run": None}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

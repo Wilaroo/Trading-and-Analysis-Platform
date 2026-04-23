@@ -11,42 +11,56 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 
-## 2026-02-10 — Smart Backfill: one-click tier/gap-aware chained backfill
+## 2026-02-10 — Smart Backfill: one-click tier/gap-aware chained backfill + no-timeouts hardening
 
-**Shipped (P0):**
+**Shipped (P0 — smart backfill):**
 - Fixed a blocking `IndentationError` in `ib_historical_collector.py` where
   the previous fork had placed `TIMEFRAMES_BY_TIER`, `MAX_DAYS_PER_REQUEST`,
   `DURATION_STRING`, `_smart_backfill_sync`, and `smart_backfill` OUTSIDE
   the `IBHistoricalCollector` class. Module now imports cleanly.
-- `POST /api/ib-collector/smart-backfill` is now live. Given the existing
+- `POST /api/ib-collector/smart-backfill` is live. Given the existing
   `dollar_volume`-tiered ADV cache, it plans (and queues) exactly what's
-  missing per (symbol, bar_size):
-    · skip if newest bar is within `freshness_days` (default 2)
-    · otherwise chain requests walking backward in `MAX_DAYS_PER_REQUEST[bs]`-
-      sized steps up to IB's max per-bar-size lookback
-    · dedupes against pending/claimed queue rows
-    · full compute runs in `asyncio.to_thread` so FastAPI stays responsive
-- NIA DataCollectionPanel: "Collect Data" button now calls smart-backfill
-  (replaces the old `fill-gaps` flow). Redundant "Update Latest" button
-  removed — super-button covers both fresh-detection and gap-detection.
-- Toast now surfaces `queued / skipped_fresh / skipped_already_queued`
-  plus tier breakdown.
+  missing per (symbol, bar_size): skip if newest bar is within
+  `freshness_days` (default 2); otherwise chain requests walking backward in
+  `MAX_DAYS_PER_REQUEST[bs]`-sized steps up to IB's max per-bar-size lookback.
+  Dedupes against pending/claimed queue rows. Full compute runs in
+  `asyncio.to_thread` so FastAPI stays responsive.
+- NIA DataCollectionPanel: "Collect Data" button now calls smart-backfill.
+  Redundant "Update Latest" removed — super-button covers both fresh-
+  detection and gap-detection.
+- Every non-dry-run smart_backfill writes a summary to
+  `ib_smart_backfill_history`; `GET /api/ib-collector/smart-backfill/last`
+  exposes it.
+- NIA "Last Backfill" card rendered in the collection panel: shows relative
+  timestamp, queued / fresh / dupe counts, tier breakdown, and a
+  "Run again" button that re-triggers smart-backfill.
 
-**Shipped (P1):**
-- `GET /api/ib-collector/data-coverage` no longer times out on the 178M-row
-  `ib_historical_data` collection. Replaced the `$group`-over-everything
-  aggregations with `distinct("symbol", {"bar_size": tf})` (DISTINCT_SCAN
-  on the compound index) and compute tier coverage as a set intersection
-  in Python. Heavy work offloaded to `asyncio.to_thread`, cache bumped
-  to 10 min.
-- `total_bars` / earliest/latest dates at the global level are now
-  returned as `null` by design — they required full-collection scans.
-  Use `/stats` or `/queue-progress` for raw totals when needed.
+**Shipped (P1 — no timeouts across data collection):**
+All data-collection endpoints that touch the 178M-row `ib_historical_data`
+or scan large cursors are now (a) `async def`, (b) run their heavy work in
+`asyncio.to_thread`, and (c) have bounded MongoDB ops:
+- `GET /data-coverage` — replaced `$group`-over-everything with
+  `distinct("symbol", {"bar_size": tf})` (DISTINCT_SCAN) + set
+  intersection for tier coverage. Cache bumped to 10 min.
+- `GET /gap-analysis` — same DISTINCT_SCAN rewrite.
+- `GET /incremental-analysis` — now async + `to_thread`.
+- `GET /stats` — `get_collection_stats()` rewritten to use
+  `estimated_document_count()` + per-bar-size DISTINCT_SCAN
+  (`maxTimeMS=10000`) instead of a full `$group`.
+- `GET /queue-progress-detailed` — heavy aggregations moved to thread,
+  30s cache retained.
+- `GET /data-status` — now async + `to_thread`.
+- `get_symbols_with_recent_data()` — `$group` now bounded by
+  `maxTimeMS=30000` so it fails fast rather than stalling the loop.
+
+Empirical: all 7 endpoints respond in < 50 ms against an empty test DB;
+heavy endpoints remain bounded by `maxTimeMS` or DISTINCT_SCAN on prod-scale
+data.
 
 **Tests:**
-- `backend/tests/test_smart_backfill.py` (6 tests, all green) using
-  mongomock — covers class-layout regression, empty DB, fresh-skip,
-  queue-dedupe, and tier-gated planning.
+- `backend/tests/test_smart_backfill.py` — 8 tests, all green. Covers
+  class-layout regression, empty DB, fresh-skip, queue-dedupe, tier-gated
+  planning, history persistence, dry-run non-persistence.
 
 **Followups:**
 - User should run `git pull` on DGX Spark and restart the backend.
