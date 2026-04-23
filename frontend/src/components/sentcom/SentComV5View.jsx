@@ -31,6 +31,7 @@ import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
+import { ConnectivityCheck } from './v5/ConnectivityCheck';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -176,6 +177,7 @@ export const SentComV5View = ({
         phase={phase}
         rightExtra={
           <div className="flex items-center gap-2">
+            <ConnectivityCheck />
             <PusherHealthChip />
             <DeadLetterBadge />
             <FlattenAllButtonV5 safety={safety} inline />
