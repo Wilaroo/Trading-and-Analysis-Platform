@@ -1298,8 +1298,22 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - **Root cause**: `safety_router.py` was reading `ib.get_status().get("account_id")` — that field is never populated in `IBService.get_connection_status()`. The working path is in `routers/ib.py:get_account_summary` (lines 735-739), which walks the nested `_pushed_ib_data["account"]` dict.
 - **Fix**:
   1. Added `get_pushed_account_id()` helper in `backend/routers/ib.py` that mirrors the extraction at lines 735-739.
-  2. Updated `backend/routers/safety_router.py` `/api/safety/status` to call `get_pushed_account_id()` first, falling back to `ib_service.get_status()` only when pusher is offline.
-  3. Added `backend/tests/test_pushed_account_id.py` — 6 new regression tests covering empty/malformed/live/paper pusher states and the end-to-end `summarize_for_ui` wiring.
-- **Verification**: All 141 session-related tests pass. Live `/api/safety/status` against a mocked pusher payload now returns `current_account_id: "esw100000"` (was `null`).
-- **User action required for Issue 2 (chart blank)**: Pusher must backfill `historical_bars`. Trigger via: `POST /api/ib-collector/execute-backfill` once pusher is connected to paper account.
+  2. Updated `backend/routers/safety_router.py` + `services/trading_bot_service.py` to call `get_pushed_account_id()` first, falling back to `ib_service.get_status()` only when pusher is offline.
+  3. Added `backend/tests/test_pushed_account_id.py` — 6 regression tests covering empty/malformed/live/paper pusher states and the end-to-end `summarize_for_ui` wiring.
+
+## 2026-02-01 — Account Guard Multi-Alias Support (P0 follow-up)
+- **Root cause 2**: IB reports the account NUMBER (e.g. `DUN615665` for paper, `U4680762` for live) in `AccountValue.account`, but the user's env vars were configured with the LOGIN USERNAME (`paperesw100000`, `esw100000`). Both identifiers refer to the same account but are different strings — caused false "account drift" mismatch.
+- **Fix**:
+  1. `services/account_guard.py` now parses `IB_ACCOUNT_PAPER` and `IB_ACCOUNT_LIVE` as comma/pipe/whitespace-separated alias lists. Match succeeds if pusher-reported id is in the alias set.
+  2. Drift reasons now classify whether the reported account belongs to the other mode ("belongs to live mode") — surfaces the most dangerous drift explicitly.
+  3. UI payload exposes `expected_aliases`, `live_aliases`, `paper_aliases` arrays so V5 chip can show all configured identifiers.
+  4. `tests/test_account_guard.py` rewritten — 20 tests covering alias parsing, match-on-either, alias-classification drift, UI payload shape.
+- **User env update** (Spark):
+  ```
+  IB_ACCOUNT_PAPER=paperesw100000,DUN615665
+  IB_ACCOUNT_LIVE=esw100000,U4680762
+  IB_ACCOUNT_ACTIVE=paper
+  ```
+- **Verification**: 26/26 account_guard + pushed_account_id tests pass on Spark. Live `/api/safety/status` returns `match: true, reason: "ok (paper: matched 'dun615665')"`.
+- **User action required for Issue 2 (chart blank)**: Pusher must backfill `historical_bars`. Trigger via `POST /api/ib-collector/execute-backfill` — now safe to run since guard is green.
 
