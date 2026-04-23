@@ -295,42 +295,105 @@ export const AccountGuardChipV5 = ({ safety }) => {
 
   const mode = (g.active_mode || 'paper').toUpperCase();
   const current = g.current_account_id;
+  const currentNorm = (current || '').trim().toLowerCase();
   const expected = g.expected_account_id;
+  const expectedAliases = g.expected_aliases || (expected ? [expected] : []);
+  const liveAliases = g.live_aliases || (g.live_account_id ? [g.live_account_id] : []);
+  const paperAliases = g.paper_aliases || (g.paper_account_id ? [g.paper_account_id] : []);
+  const standbyAliases = mode === 'LIVE' ? paperAliases : liveAliases;
+  const standbyLabel = mode === 'LIVE' ? 'PAPER standby' : 'LIVE standby';
+
+  const renderAliases = (aliases, isExpectedSet) => {
+    if (!aliases?.length) return <span className="v5-dim">—</span>;
+    return aliases.map((a) => {
+      const hit = isExpectedSet && currentNorm && a.toLowerCase() === currentNorm;
+      return (
+        <span key={a} className={`alias${hit ? ' active' : ''}`}>
+          {a}{hit ? ' ✓' : ''}
+        </span>
+      );
+    });
+  };
+
+  const renderPanel = (extraHint = null) => (
+    <div className="v5-hover-panel" role="tooltip">
+      <div className="row">
+        <span className="k">Mode</span>
+        <span className="v">{mode}</span>
+      </div>
+      <div className="row">
+        <span className="k">Current</span>
+        <span className={`v ${g.match ? 'match' : 'miss'}`}>
+          {current || '(none reported)'}
+        </span>
+      </div>
+      <hr />
+      <div className="row">
+        <span className="k">Expected</span>
+        <span className="v">{renderAliases(expectedAliases, true)}</span>
+      </div>
+      <div className="row">
+        <span className="k">{standbyLabel}</span>
+        <span className="v">{renderAliases(standbyAliases, false)}</span>
+      </div>
+      {g.reason && (
+        <>
+          <hr />
+          <div className="reason">{g.reason}</div>
+        </>
+      )}
+      {extraHint && <div className="hint">{extraHint}</div>}
+    </div>
+  );
 
   if (!g.match) {
-    const title =
-      g.reason ||
-      `expected ${expected || '(unset)'} · got ${current || '(none)'}`;
     return (
-      <span
-        data-testid="v5-account-guard-chip"
-        className="v5-chip v5-chip-veto"
-        title={title}
-      >
-        ⚠ ACCOUNT MISMATCH · {current || '—'}
+      <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
+        <span
+          data-testid="v5-account-guard-chip"
+          className="v5-chip v5-chip-veto"
+        >
+          ⚠ ACCOUNT MISMATCH · {current || '—'}
+        </span>
+        {renderPanel('Kill-switch will auto-trip on next scan cycle.')}
       </span>
     );
   }
 
   if (g.reason === 'unconfigured') {
     return (
-      <span
-        data-testid="v5-account-guard-chip"
-        className="v5-chip"
-        title="Set IB_ACCOUNT_LIVE / IB_ACCOUNT_PAPER / IB_ACCOUNT_ACTIVE in backend/.env to enable the account guard."
-      >
-        ACCT · unconfigured
+      <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
+        <span
+          data-testid="v5-account-guard-chip"
+          className="v5-chip"
+        >
+          ACCT · unconfigured
+        </span>
+        <div className="v5-hover-panel" role="tooltip">
+          <div className="row">
+            <span className="k">Status</span>
+            <span className="v">Guard is opt-in</span>
+          </div>
+          <hr />
+          <div className="hint">
+            Set <code>IB_ACCOUNT_LIVE</code>, <code>IB_ACCOUNT_PAPER</code>,
+            and <code>IB_ACCOUNT_ACTIVE</code> in <code>backend/.env</code> to
+            enable. Each var accepts comma-separated aliases (login + IB account number).
+          </div>
+        </div>
       </span>
     );
   }
 
   return (
-    <span
-      data-testid="v5-account-guard-chip"
-      className={`v5-chip ${mode === 'LIVE' ? 'v5-chip-veto' : 'v5-chip-manage'}`}
-      title={`Active mode: ${mode}\nCurrent account: ${current || '—'}\nExpected: ${expected}`}
-    >
-      {mode} · {current || expected}
+    <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
+      <span
+        data-testid="v5-account-guard-chip"
+        className={`v5-chip ${mode === 'LIVE' ? 'v5-chip-veto' : 'v5-chip-manage'}`}
+      >
+        {mode} · {current || expected}
+      </span>
+      {renderPanel()}
     </span>
   );
 };

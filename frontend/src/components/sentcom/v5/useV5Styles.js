@@ -84,6 +84,33 @@ const CSS = `
 .v5-scroll::-webkit-scrollbar { width:4px; height:4px; }
 .v5-scroll::-webkit-scrollbar-thumb { background:#27272a; border-radius:2px; }
 .v5-scroll::-webkit-scrollbar-track { background:transparent; }
+
+/* Hover popover (used by AccountGuardChipV5 and others). Pure CSS, no JS. */
+.v5-hover-wrap { position:relative; display:inline-block; }
+.v5-hover-wrap > .v5-hover-panel {
+  position:absolute; top:calc(100% + 6px); right:0; z-index:80;
+  min-width:240px; max-width:340px;
+  background:#0a0a0a; border:1px solid #27272a; border-radius:4px;
+  padding:10px 12px; box-shadow:0 10px 30px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.02);
+  font-family:'JetBrains Mono', ui-monospace, monospace;
+  font-size:10px; line-height:1.5; color:#d4d4d8;
+  opacity:0; pointer-events:none; transform:translateY(-4px);
+  transition:opacity .12s ease, transform .12s ease;
+}
+.v5-hover-wrap:hover > .v5-hover-panel,
+.v5-hover-wrap:focus-within > .v5-hover-panel {
+  opacity:1; pointer-events:auto; transform:translateY(0);
+}
+.v5-hover-panel .row { display:flex; gap:8px; padding:3px 0; align-items:flex-start; }
+.v5-hover-panel .k { color:#71717a; min-width:76px; font-size:9px; text-transform:uppercase; letter-spacing:.1em; padding-top:1px; }
+.v5-hover-panel .v { color:#e4e4e7; flex:1; word-break:break-all; }
+.v5-hover-panel .v.match { color:#22c55e; }
+.v5-hover-panel .v.miss  { color:#f87171; }
+.v5-hover-panel .v .alias { display:inline-block; padding:1px 5px; margin:1px 3px 1px 0; border-radius:2px; background:#18181b; border:1px solid #27272a; font-size:9.5px; }
+.v5-hover-panel .v .alias.active { background:rgba(34,197,94,.12); border-color:#14532d; color:#86efac; }
+.v5-hover-panel hr { border:none; border-top:1px solid #18181b; margin:6px 0; }
+.v5-hover-panel .reason { color:#a1a1aa; font-style:italic; font-size:9.5px; }
+.v5-hover-panel .hint { color:#71717a; font-size:9px; margin-top:6px; }
 `;
 
 const STYLE_ID = 'v5-command-center-styles';
