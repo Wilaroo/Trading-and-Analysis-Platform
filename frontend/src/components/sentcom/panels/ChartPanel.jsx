@@ -371,12 +371,12 @@ export const ChartPanel = ({
     const fetchLevels = async () => {
       if (!symbol) return;
       try {
-        const { data } = await safeGet(
+        const resp = await safeGet(
           `/api/sentcom/chart/levels?symbol=${encodeURIComponent(symbol)}`,
           { timeout: 5000 },
         );
         if (!cancelled) {
-          setSrLevels(data?.levels || null);
+          setSrLevels(resp?.levels || null);
         }
       } catch (_) {
         if (!cancelled) setSrLevels(null);
@@ -406,15 +406,17 @@ export const ChartPanel = ({
 
     for (const spec of specs) {
       const price = srLevels[spec.key];
-      if (price == null || !Number.isFinite(Number(price))) continue;
+      if (price == null) continue;  // guard against null BEFORE Number() which turns null → 0
+      const num = Number(price);
+      if (!Number.isFinite(num) || num <= 0) continue;
       try {
         const line = series.createPriceLine({
-          price: Number(price),
+          price: num,
           color: spec.color,
           lineWidth: 1,
           lineStyle: spec.style,
           axisLabelVisible: true,
-          title: `${spec.label} ${Number(price).toFixed(2)}`,
+          title: `${spec.label} ${num.toFixed(2)}`,
         });
         srLinesRef.current.push(line);
       } catch (_) { /* noop */ }
