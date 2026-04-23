@@ -5697,6 +5697,110 @@ def get_historical_data_queue_stats():
         return {"pending": 0, "completed": 0, "failed": 0, "total": 0, "progress_pct": 0}
 
 
+@router.get("/pusher-health")
+async def get_pusher_health():
+    """
+    Read-only pusher health snapshot for the UI `PusherHealthChip`.
+
+    Answers "is the Windows IB pusher alive and feeding me quotes RIGHT NOW?"
+    at a glance, so we don't have to tail logs. Pulls from:
+      • `_pushed_ib_data` (in-proc dict updated on every /push-data POST)
+      • `ib_live_snapshot` collection (survives backend restarts)
+      • `_collection_mode_status` (in-proc; tracks pusher collection loop)
+
+    Staleness thresholds are intentionally generous because the pusher
+    batches pushes every ~1s during live mode and much less frequently
+    during collection mode.
+    """
+    import asyncio
+
+    def _snapshot():
+        global _pushed_ib_data, _collection_mode_status
+
+        now = datetime.now(timezone.utc)
+        last_update_str = _pushed_ib_data.get("last_update")
+        last_update_iso = last_update_str
+
+        # If in-proc memory was reset (e.g., backend restart), fall back to
+        # the persisted snapshot so we don't lie and say "disconnected".
+        if not last_update_iso:
+            try:
+                from database import get_db
+                _db = get_db()
+                snap = _db["ib_live_snapshot"].find_one(
+                    {"_id": "current"}, {"_id": 0, "last_update": 1, "connected": 1}
+                )
+                if snap and snap.get("last_update"):
+                    last_update_iso = snap["last_update"]
+            except Exception:
+                pass
+
+        age_seconds = None
+        if last_update_iso:
+            try:
+                dt = datetime.fromisoformat(last_update_iso.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_seconds = int((now - dt).total_seconds())
+            except Exception:
+                pass
+
+        # Health traffic-light:
+        #   green  — last update within 10s (live)
+        #   amber  — within 5 min (collection-mode / quiet market)
+        #   red    — stale > 5 min
+        #   unknown — never saw a push
+        if age_seconds is None:
+            health = "unknown"
+        elif age_seconds <= 10:
+            health = "green"
+        elif age_seconds <= 300:
+            health = "amber"
+        else:
+            health = "red"
+
+        quotes = _pushed_ib_data.get("quotes", {}) or {}
+        account = _pushed_ib_data.get("account", {}) or {}
+        positions = _pushed_ib_data.get("positions", []) or []
+        level2 = _pushed_ib_data.get("level2", {}) or {}
+
+        # Subscribed account — prefer the pushed account ID over the in-proc
+        # guard value. The guard service already normalizes this for us.
+        subscribed_account = (
+            account.get("account_id")
+            or account.get("accountName")
+            or account.get("account")
+            or None
+        )
+
+        return {
+            "success": True,
+            "health": health,
+            "connected": health in ("green", "amber"),
+            "last_update": last_update_iso,
+            "age_seconds": age_seconds,
+            "subscribed_account": subscribed_account,
+            "counts": {
+                "quotes": len(quotes),
+                "positions": len(positions),
+                "level2_symbols": len(level2),
+            },
+            "collection_mode": {
+                "active": bool(_collection_mode_status.get("active")),
+                "completed": _collection_mode_status.get("completed", 0),
+                "failed": _collection_mode_status.get("failed", 0),
+                "rate_per_hour": _collection_mode_status.get("rate_per_hour", 0),
+                "elapsed_minutes": _collection_mode_status.get("elapsed_minutes", 0),
+                "last_progress_update": _collection_mode_status.get("last_update"),
+            },
+            "checked_at": now.isoformat(),
+        }
+
+    return await asyncio.to_thread(_snapshot)
+
+
+
+
 
 # ===================== PRIORITY COLLECTION (SIMPLIFIED SYSTEM) =====================
 
