@@ -1390,6 +1390,47 @@ def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float 
     raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
 
 
+@router.post("/orders/reconcile")
+def reconcile_dead_letter_orders(
+    pending_timeout_sec: int = 120,
+    claimed_timeout_sec: int = 120,
+    executing_timeout_sec: int = 300,
+):
+    """Dead-letter orders stuck in pre-fill states beyond their timeouts.
+
+    Handles silent broker rejects and Windows pusher crashes — any order
+    that has been PENDING, CLAIMED, or EXECUTING longer than the per-status
+    cutoff is transitioned to `TIMEOUT` status. Safe to invoke repeatedly.
+    Also automatically called by the background reconciler task every 30s.
+    """
+    try:
+        service = get_order_queue_service()
+        summary = service.reconcile_dead_letters(
+            pending_timeout_sec=pending_timeout_sec,
+            claimed_timeout_sec=claimed_timeout_sec,
+            executing_timeout_sec=executing_timeout_sec,
+        )
+        # Surface to the V5 Unified Stream so operators see the timeout.
+        if summary["timed_out"] > 0:
+            try:
+                import asyncio as _asyncio
+                from services.sentcom_service import emit_stream_event
+                for o in summary["orders"][:5]:  # cap stream noise
+                    _asyncio.create_task(emit_stream_event({
+                        "kind": "skip",
+                        "event": "order_dead_letter",
+                        "symbol": o.get("symbol"),
+                        "text": f"Order dead-letter ({o.get('prior_status')} {o.get('age_sec')}s): "
+                                f"{o.get('reason')}",
+                    }))
+            except Exception:
+                pass
+        return {"success": True, **summary}
+    except Exception as e:
+        logger.error(f"Error reconciling order queue: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/orders/queue/status")
 def get_order_queue_status():
     """Get the current status of the order queue"""

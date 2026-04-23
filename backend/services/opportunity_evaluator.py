@@ -233,6 +233,48 @@ class OpportunityEvaluator:
                 gate_conf = confidence_gate_result.get("confidence_score", 0) if confidence_gate_result else 0
                 print(f"   🧠 [CONFIDENCE GATE] Reduced size: {original_shares} -> {shares} shares ({confidence_multiplier*100:.0f}%, {gate_conf}% conf)")
 
+            # ==================== STRATEGY TILT (long/short Sharpe bias) ====================
+            # Re-weights size by rolling 30-day per-side Sharpe so cold streaks
+            # on one side shrink while the hot side grows. Bounded [0.5x, 1.5x];
+            # neutral when either side has fewer than 10 closed trades.
+            try:
+                from services.strategy_tilt import get_strategy_tilt_cached, get_side_tilt_multiplier
+                tilt = get_strategy_tilt_cached(getattr(bot, "_db", None))
+                tilt_mult = get_side_tilt_multiplier(
+                    direction.value if hasattr(direction, "value") else str(direction),
+                    tilt,
+                )
+                if abs(tilt_mult - 1.0) > 1e-3:
+                    original_shares = shares
+                    shares = max(1, int(shares * tilt_mult))
+                    risk_amount = risk_amount * tilt_mult
+                    print(f"   ⚖️ [STRATEGY TILT] {original_shares} -> {shares} shares "
+                          f"(x{tilt_mult:.2f}, long_Sh={tilt.get('sharpe_long', 0):.2f}, "
+                          f"short_Sh={tilt.get('sharpe_short', 0):.2f})")
+            except Exception as _tilt_err:
+                logger.debug(f"[StrategyTilt] skipped: {_tilt_err}")
+
+            # ==================== HRP PORTFOLIO ALLOCATOR ====================
+            # Down-weight candidates that are correlated with existing open
+            # positions. Neutral (1.0) when fewer than 2 peers or when the
+            # returns fetcher isn't registered — never breaks sizing.
+            try:
+                from services.portfolio_allocator_service import get_hrp_multiplier
+                open_symbols = [t.symbol for t in bot._open_trades.values()
+                                if getattr(t, "symbol", None)]
+                pending_symbols = [t.symbol for t in bot._pending_trades.values()
+                                   if getattr(t, "symbol", None) and t.symbol != symbol]
+                peer_symbols = list(dict.fromkeys(open_symbols + pending_symbols + [symbol]))
+                hrp_mult = get_hrp_multiplier(symbol, peer_symbols)
+                if abs(hrp_mult - 1.0) > 1e-3:
+                    original_shares = shares
+                    shares = max(1, int(shares * hrp_mult))
+                    risk_amount = risk_amount * hrp_mult
+                    print(f"   🌐 [HRP ALLOCATOR] {original_shares} -> {shares} shares "
+                          f"(x{hrp_mult:.2f}, peers={len(peer_symbols)})")
+            except Exception as _hrp_err:
+                logger.debug(f"[HRPAllocator] skipped: {_hrp_err}")
+
             if shares <= 0:
                 print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
                 return None

@@ -3753,7 +3753,45 @@ async def startup_event():
     # Start learning loop scheduler (auto-analysis at 4:15 PM ET)
     asyncio.create_task(perf_service.start_scheduler())
     print("Learning loop scheduler started")
-    
+
+    # Order-queue dead-letter reconciler (P1 2026-04-23) — scans every 30s
+    # for orders stuck in PENDING/CLAIMED/EXECUTING and times them out so
+    # silent broker rejects / pusher crashes don't leave orphan rows.
+    async def _order_dead_letter_loop():
+        import asyncio as _asyncio
+        await _asyncio.sleep(15)  # stagger from other startup tasks
+        from services.order_queue_service import get_order_queue_service
+        while True:
+            try:
+                svc = get_order_queue_service()
+                if not svc._initialized:
+                    svc.initialize()
+                summary = await _asyncio.to_thread(
+                    svc.reconcile_dead_letters,
+                    pending_timeout_sec=120,
+                    claimed_timeout_sec=120,
+                    executing_timeout_sec=300,
+                )
+                if summary.get("timed_out", 0) > 0:
+                    print(f"[OrderQueue] Reconciler dead-lettered {summary['timed_out']} order(s): {summary['by_status']}")
+                    # Stream the first few so the V5 UI surfaces them.
+                    try:
+                        from services.sentcom_service import emit_stream_event
+                        for o in summary["orders"][:5]:
+                            await emit_stream_event({
+                                "kind": "skip",
+                                "event": "order_dead_letter",
+                                "symbol": o.get("symbol"),
+                                "text": f"Order dead-letter ({o.get('prior_status')} {o.get('age_sec')}s): "
+                                        f"{o.get('reason')}",
+                            })
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"[OrderQueue] Reconciler loop error: {e}")
+            await _asyncio.sleep(30)
+    asyncio.create_task(_order_dead_letter_loop())
+    print("Order-queue dead-letter reconciler started (30s cadence)")
     # Start market intel scheduler (auto-generates reports at scheduled times)
     asyncio.create_task(market_intel_service.start_scheduler())
     print("Market intel scheduler started")

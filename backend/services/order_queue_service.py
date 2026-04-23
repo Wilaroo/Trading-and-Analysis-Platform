@@ -349,6 +349,109 @@ class OrderQueueService:
         
         return result.modified_count
     
+    def reconcile_dead_letters(
+        self,
+        *,
+        pending_timeout_sec: int = 120,
+        claimed_timeout_sec: int = 120,
+        executing_timeout_sec: int = 300,
+    ) -> Dict[str, Any]:
+        """Dead-letter the order queue.
+
+        Any order that has been stuck in a pre-fill state longer than its
+        per-status timeout is transitioned to `TIMEOUT` with a structured
+        reason. This handles:
+
+          * PENDING too long       → pusher offline / Windows PC unreachable
+          * CLAIMED too long       → pusher grabbed but crashed mid-submit
+          * EXECUTING too long     → silent broker reject or ACK-never-arrived
+
+        Returns a summary:
+            {
+              "timed_out": int,
+              "by_status": {"pending": n, "claimed": n, "executing": n},
+              "orders": [ {order_id, symbol, prior_status, age_sec, reason}, ... ],
+              "ran_at": "2026-04-23T..."
+            }
+        """
+        if not self._initialized:
+            self.initialize()
+
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+
+        # Windows: (status, timestamp-field-to-compare, cutoff_iso, reason_template)
+        windows = [
+            ("pending", "queued_at",   pending_timeout_sec,
+             "no pusher pickup within {sec}s — broker/pusher offline"),
+            ("claimed", "claimed_at",  claimed_timeout_sec,
+             "pusher claimed but never executed within {sec}s — pusher crash"),
+            ("executing", "executed_at", executing_timeout_sec,
+             "broker ACK/fill never arrived within {sec}s — silent reject"),
+        ]
+
+        timed_out_docs: List[Dict[str, Any]] = []
+        by_status: Dict[str, int] = {}
+
+        for status, ts_field, timeout_sec, reason_fmt in windows:
+            cutoff_iso = (now - timedelta(seconds=timeout_sec)).isoformat()
+            # Fetch candidates FIRST so we can log which orders were dead-lettered.
+            candidates = list(self._collection.find(
+                {
+                    "status": status,
+                    ts_field: {"$ne": None, "$lt": cutoff_iso},
+                },
+                {"_id": 0, "order_id": 1, "symbol": 1, "trade_id": 1,
+                 ts_field: 1, "queued_at": 1},
+            ))
+            if not candidates:
+                by_status[status] = 0
+                continue
+
+            reason = reason_fmt.format(sec=timeout_sec)
+            ids = [c["order_id"] for c in candidates]
+            res = self._collection.update_many(
+                {"order_id": {"$in": ids}, "status": status},
+                {"$set": {
+                    "status": OrderStatus.TIMEOUT.value,
+                    "executed_at": now_iso,
+                    "timed_out_at": now_iso,
+                    "error": f"dead-letter: {reason}",
+                }},
+            )
+            modified = int(getattr(res, "modified_count", 0) or 0)
+            by_status[status] = modified
+
+            for c in candidates:
+                ts = c.get(ts_field) or c.get("queued_at")
+                try:
+                    age_sec = int((now - datetime.fromisoformat(ts)).total_seconds()) if ts else None
+                except Exception:
+                    age_sec = None
+                timed_out_docs.append({
+                    "order_id": c.get("order_id"),
+                    "symbol": c.get("symbol"),
+                    "trade_id": c.get("trade_id"),
+                    "prior_status": status,
+                    "age_sec": age_sec,
+                    "reason": reason,
+                })
+
+            if modified:
+                logger.warning(
+                    "[OrderQueue] Dead-lettered %d %s order(s) (timeout=%ss): %s",
+                    modified, status, timeout_sec,
+                    ",".join(ids[:10]) + ("…" if len(ids) > 10 else ""),
+                )
+
+        return {
+            "timed_out": sum(by_status.values()),
+            "by_status": by_status,
+            "orders": timed_out_docs,
+            "ran_at": now_iso,
+        }
+
     def cleanup_old_orders(self, days: int = 7):
         """Remove completed orders older than specified days"""
         if not self._initialized:

@@ -29,6 +29,57 @@ correct. Added 9 regression tests (`test_backtest_direction_stops.py`)
 covering LONG + SHORT stop/target hits across all three sim methods.
 All 9 pass.
 
+## 2026-04-23 — P1 #1: Order-queue dead-letter reconciler
+
+Handles silent broker rejects and Windows pusher crashes — orders stuck
+in pre-fill states (PENDING/CLAIMED/EXECUTING) now transition to the new
+`TIMEOUT` status automatically.
+
+- New method `OrderQueueService.reconcile_dead_letters()` with distinct
+  per-status timeouts (defaults: pending=120s, claimed=120s, executing=300s).
+  Returns a structured summary with prior status + age for each order.
+- Background loop in `server.py` runs every 30s (`_order_dead_letter_loop`)
+  and emits stream events per timeout so V5's Unified Stream shows them.
+- Public API: `POST /api/ib/orders/reconcile` (manual trigger with
+  overridable timeouts).
+- 7 pytest cases (`test_order_dead_letter_reconciler.py`) — all pass.
+  Covers each status, round-trip through the live endpoint, and confirms
+  FILLED/REJECTED/CANCELLED orders are never touched.
+
+## 2026-04-23 — P1 #2: Strategy Tilt (long/short Sharpe bias)
+
+Dynamic long/short sizing multiplier computed from rolling 30-day per-side
+Sharpe of R-multiples — cold-streak sides shrink, hot sides grow. Bounded
+`[0.5x, 1.5x]`, neutral below 10 trades per side.
+
+- Pure module `services/strategy_tilt.py` with:
+  - `compute_strategy_tilt(trades, ...)` — testable pure function
+  - `get_strategy_tilt_cached(db)` — 5-min memoised accessor that reads
+    `bot_trades` Mongo collection
+  - `get_side_tilt_multiplier(direction, tilt)` — the callsite helper
+- Wired into `opportunity_evaluator.py` after the confidence-gate block
+  as a multiplicative sizing adjustment. Prints a `[STRATEGY TILT]` line
+  so the bot log shows the Sharpe values + applied multiplier.
+- 16 pytest cases (`test_strategy_tilt.py`) — all pass. Covers math,
+  bounds, lookback filtering, pnl/risk fallback, cache behavior.
+
+## 2026-04-23 — P1 #3: HRP/NCO Portfolio Allocator wired into sizing
+
+- New `services/portfolio_allocator_service.py` — clean wrapper around
+  `hrp_weights_from_returns` with a pluggable `set_returns_fetcher(fn)`
+  so it's fully decoupled (and testable). Computes per-symbol
+  multipliers = `hrp_weight / equal_weight`, bounded to `[0.4, 1.4]`.
+- Integration point in `opportunity_evaluator.py` after the Strategy
+  Tilt block — peer universe = open positions + pending trades + the
+  current candidate. Highly-correlated stacks (e.g. AAPL+META long) get
+  down-weighted so the bot doesn't silently doubles-up tech-long risk.
+- Safe defaults: returns fetcher isn't registered yet in production
+  (needs live daily-bars cache from historical_data_service). While the
+  fetcher is None, the allocator is neutral (1.0) — never breaks sizing.
+- 13 pytest cases (`test_portfolio_allocator_service.py`) — all pass.
+  Covers correlated clustering, bounds, fetcher exceptions, alignment.
+
+
 ## 2026-04-23 — P1 FIX: "Awaiting quotes" gate in trading bot risk math
 
 **Issue (two bugs):**
