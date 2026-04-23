@@ -180,6 +180,13 @@ pipeline feeds millions of samples regardless of test_mode.
 - Goal: user never has to guess what a number means. Teach the platform through discovery.
 - Suggested approach: shadcn `Tooltip` component, centralized `/utils/fieldDefinitions.js` as single source of truth (label + short explanation + optional formula), reusable `<FieldTooltip field="gate_score">…</FieldTooltip>` wrapper.
 
+### [BL-03] Training Integrity Card on V5 HUD
+- Small card showing per-phase health of the last training run: `models_trained_this_run / expected_models` as a color-coded bar, red when 0% of a phase completed, yellow when partial, green when 100%.
+- Would have caught 2026-04-23's silent-zero P3/P5/P7 phases in seconds instead of the hours of mongo detective work we did today.
+- Source: `/api/ai-training/status.pipeline_status.phase_history[].models_trained` vs configured `expected_models`. Data already exists; just needs a card.
+- Bonus: add a "Last Full Retrain" timestamp + 3 avg accuracy bands (`< 50%` red, `50-55%` yellow, `> 55%` green) so the user always knows at a glance whether the models are trustworthy.
+- ~30 min effort.
+
 
 
 ## 2026-02-11 — V5 Command Center: full symbol clickability + cache audit
