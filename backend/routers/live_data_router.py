@@ -152,3 +152,66 @@ async def sweep_subscriptions() -> Dict[str, Any]:
     mgr = get_live_subscription_manager()
     expired = await asyncio.to_thread(mgr.sweep_expired)
     return {"expired_count": len(expired), "expired": expired}
+
+
+# ========================================================================
+# Phase 3 — Snapshot primitive (scanner / briefing / AI-chat consumer)
+# ========================================================================
+
+@router.get("/symbol-snapshot/{symbol}")
+async def symbol_snapshot(
+    symbol: str,
+    bar_size: str = Query("5 mins"),
+    active_view: bool = Query(False),
+) -> Dict[str, Any]:
+    """One-liner freshest price for a symbol. Returns success=False on any
+    failure — never 5xx. Safe to poll from UI / chat / scanner."""
+    from services.live_symbol_snapshot import get_latest_snapshot
+    return await get_latest_snapshot(symbol, bar_size, active_view=active_view)
+
+
+@router.post("/symbol-snapshots")
+async def symbol_snapshots_bulk(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Batch snapshot — body `{symbols: [...], bar_size: "5 mins"}`.
+    Bounded to 20 symbols per call."""
+    from services.live_symbol_snapshot import get_snapshots_bulk
+    syms = payload.get("symbols") or []
+    bs = payload.get("bar_size", "5 mins")
+    if not isinstance(syms, list):
+        return {"success": False, "error": "symbols must be a list", "snapshots": []}
+    results = await get_snapshots_bulk(syms, bs)
+    return {
+        "success": True,
+        "snapshots": results,
+        "count": len(results),
+    }
+
+
+@router.get("/briefing-snapshot")
+async def briefing_snapshot(
+    symbols: str = Query("SPY,QQQ,IWM,DIA,VIX"),
+    bar_size: str = Query("5 mins"),
+) -> Dict[str, Any]:
+    """Aggregate snapshot for briefings (pre-market / mid-day / power-hour /
+    close). Accepts comma-separated symbols. Returns ranked by absolute
+    change_pct (biggest movers first) so the briefing UI can highlight the
+    top shifts immediately."""
+    from services.live_symbol_snapshot import get_snapshots_bulk
+    from services.live_bar_cache import classify_market_state
+    syms = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()]
+    snaps = await get_snapshots_bulk(syms, bar_size)
+    # Rank by |change_pct|, failed snapshots go last
+    ranked = sorted(
+        snaps,
+        key=lambda s: (
+            0 if s.get("success") else 1,
+            -(abs(s.get("change_pct") or 0)),
+        ),
+    )
+    return {
+        "success": True,
+        "count": len(ranked),
+        "market_state": classify_market_state(),
+        "bar_size": bar_size,
+        "snapshots": ranked,
+    }

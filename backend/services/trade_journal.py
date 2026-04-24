@@ -118,6 +118,36 @@ class TradeJournalService:
         else:
             outcome = "lost"
         
+        # Phase 3 — capture immutable close-price snapshot.
+        # Records the source + bar-ts + market state at close-time so later
+        # audits / drift analyses know exactly which data point the trade
+        # closed against. Written ONCE; subsequent updates to this trade
+        # must not touch `close_price_snapshot`.
+        close_snapshot: Dict[str, Any] = {
+            "exit_price": float(exit_price),
+            "captured_at": now.isoformat(),
+            "source": "user_supplied",
+            "bar_ts": None,
+            "market_state": None,
+            "bar_size": None,
+        }
+        try:
+            symbol_for_snap = trade.get("symbol")
+            if symbol_for_snap:
+                from services.live_symbol_snapshot import get_latest_snapshot
+                snap = await get_latest_snapshot(symbol_for_snap, "5 mins")
+                if snap and snap.get("success"):
+                    close_snapshot.update({
+                        "source": f"live:{snap.get('source')}",
+                        "bar_ts": snap.get("latest_bar_time"),
+                        "market_state": snap.get("market_state"),
+                        "bar_size": snap.get("bar_size"),
+                        "snapshot_price": snap.get("latest_price"),
+                        "snapshot_change_pct": snap.get("change_pct"),
+                    })
+        except Exception as _snap_exc:  # never let snapshot failure abort close
+            close_snapshot["snapshot_error"] = str(_snap_exc)[:200]
+
         # Update trade
         update_data = {
             "status": "closed",
@@ -128,7 +158,8 @@ class TradeJournalService:
             "holding_days": holding_days,
             "exit_notes": notes,
             "outcome": outcome,
-            "updated_at": now.isoformat()
+            "updated_at": now.isoformat(),
+            "close_price_snapshot": close_snapshot,
         }
         
         self.trades_col.update_one(

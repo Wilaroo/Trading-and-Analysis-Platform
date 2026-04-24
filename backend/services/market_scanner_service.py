@@ -581,6 +581,36 @@ class MarketScannerService:
                     continue
                 
                 bars = result.bars
+
+                # Phase 3 — top-up with latest-session bars for intraday
+                # scans. fetch_latest_session_bars routes through the
+                # Windows pusher RPC (30s TTL cache during RTH), so the
+                # scanner gets the freshest slice without a second IB hop.
+                # Silently no-ops if pusher RPC is unreachable or if the
+                # merge yields no new bars (dedup by timestamp).
+                if filters.trade_style == TradeStyle.INTRADAY:
+                    try:
+                        tf_cfg = self._hybrid_data_service.TIMEFRAMES.get(timeframe, {})
+                        live_bar_size = tf_cfg.get("ib_bar_size")
+                        if live_bar_size:
+                            live_res = await self._hybrid_data_service.fetch_latest_session_bars(
+                                symbol, live_bar_size, active_view=False, use_rth=False
+                            )
+                            live_bars = (live_res or {}).get("bars") or []
+                            if live_bars:
+                                # Dedup by ISO-ish date/timestamp string; keep
+                                # the freshest occurrence (last wins).
+                                merged: Dict[str, Dict[str, Any]] = {}
+                                for b in bars + live_bars:
+                                    k = str(b.get("date") or b.get("timestamp") or "")
+                                    if k:
+                                        merged[k] = b
+                                bars = sorted(
+                                    merged.values(),
+                                    key=lambda r: str(r.get("date") or r.get("timestamp") or ""),
+                                )
+                    except Exception as _live_exc:
+                        logger.debug("scanner live-bars top-up skipped for %s: %s", symbol, _live_exc)
                 
                 # Apply price filter
                 last_price = bars[-1].get("close", 0)
