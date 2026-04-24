@@ -991,6 +991,79 @@ def get_failure_analysis():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/symbol-request-history")
+async def symbol_request_history(
+    symbol: str,
+    limit: int = 20,
+):
+    """Per-symbol forensic view of the `historical_data_requests` queue.
+
+    Answers: "I queued SPY yesterday but bars still aren't appearing — what
+    happened to my requests?" Returns a status-breakdown (per bar_size) plus
+    the most recent N requests with their error/result_status fields.
+
+    Avoids needing pymongo access from the user's shell.
+    """
+    import asyncio
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            return {"success": False, "error": "database not initialized"}
+
+        sym = symbol.upper()
+
+        def _query():
+            q = db["historical_data_requests"]
+            total = q.count_documents({"symbol": sym})
+
+            # Status × bar_size breakdown
+            breakdown = list(q.aggregate([
+                {"$match": {"symbol": sym}},
+                {"$group": {
+                    "_id": {"bar_size": "$bar_size", "status": "$status",
+                            "result_status": {"$ifNull": ["$result_status", None]}},
+                    "count": {"$sum": 1},
+                }},
+                {"$sort": {"_id.bar_size": 1, "_id.status": 1}},
+            ]))
+            breakdown_flat = [
+                {
+                    "bar_size": row["_id"].get("bar_size"),
+                    "status": row["_id"].get("status"),
+                    "result_status": row["_id"].get("result_status"),
+                    "count": row["count"],
+                }
+                for row in breakdown
+            ]
+
+            # N most recent requests with error/result detail
+            recent = list(
+                q.find(
+                    {"symbol": sym},
+                    {
+                        "_id": 0, "bar_size": 1, "duration": 1, "end_date": 1,
+                        "status": 1, "result_status": 1, "error": 1,
+                        "created_at": 1, "claimed_at": 1, "completed_at": 1,
+                        "bars_written": 1,
+                    },
+                ).sort("created_at", -1).limit(int(limit))
+            )
+
+            return {
+                "success": True,
+                "symbol": sym,
+                "total_requests": total,
+                "breakdown": breakdown_flat,
+                "recent_requests": recent,
+            }
+
+        return await asyncio.to_thread(_query)
+    except Exception as e:
+        logger.error(f"symbol-request-history failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/retry-failed")
 async def retry_failed_requests(
     max_retries: int = 100,
