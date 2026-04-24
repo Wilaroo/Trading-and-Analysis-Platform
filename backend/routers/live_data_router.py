@@ -24,6 +24,7 @@ from services.live_bar_cache import (
     get_live_bar_cache,
     ttl_for_state,
 )
+from services.live_subscription_manager import get_live_subscription_manager
 
 router = APIRouter(prefix="/api/live", tags=["live-data"])
 
@@ -109,3 +110,45 @@ async def ttl_plan() -> Dict[str, Any]:
         },
         "ttl_active_view": ttl_for_state(state, active_view=True),
     }
+
+
+# ========================================================================
+# Phase 2 — Live subscription layer (ref-counted watchlist → pusher RPC)
+# ========================================================================
+
+@router.post("/subscribe/{symbol}")
+async def subscribe_symbol(symbol: str) -> Dict[str, Any]:
+    """Increment ref-count for `symbol`. Pusher RPC is called only on the
+    0→1 transition. Safe to call from multiple UI surfaces for the same
+    symbol — each unmount unsubscribe will decrement, pusher only stops
+    pushing when the last consumer leaves."""
+    mgr = get_live_subscription_manager()
+    return await asyncio.to_thread(mgr.subscribe, symbol)
+
+
+@router.post("/unsubscribe/{symbol}")
+async def unsubscribe_symbol(symbol: str) -> Dict[str, Any]:
+    mgr = get_live_subscription_manager()
+    return await asyncio.to_thread(mgr.unsubscribe, symbol)
+
+
+@router.post("/heartbeat/{symbol}")
+async def heartbeat_symbol(symbol: str) -> Dict[str, Any]:
+    """Renew the 5-min heartbeat so the sweep doesn't auto-expire this sub.
+    Frontend hook calls this every 2 min while a symbol is on screen."""
+    mgr = get_live_subscription_manager()
+    return mgr.heartbeat(symbol)
+
+
+@router.get("/subscriptions")
+async def list_subscriptions() -> Dict[str, Any]:
+    mgr = get_live_subscription_manager()
+    return mgr.list_subscriptions()
+
+
+@router.post("/subscriptions/sweep")
+async def sweep_subscriptions() -> Dict[str, Any]:
+    """Operator endpoint — manually trigger the stale-sub sweep."""
+    mgr = get_live_subscription_manager()
+    expired = await asyncio.to_thread(mgr.sweep_expired)
+    return {"expired_count": len(expired), "expired": expired}

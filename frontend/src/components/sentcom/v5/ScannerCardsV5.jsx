@@ -13,6 +13,7 @@
  * produce and folds them into a single ranked list.
  */
 import React, { useMemo } from 'react';
+import { useLiveSubscriptions } from '../../../hooks/useLiveSubscription';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
 const STAGE_CLASS = {
@@ -320,6 +321,16 @@ export const ScannerCardsV5 = ({
     () => buildCards({ setups, alerts, positions, messages }),
     [setups, alerts, positions, messages]
   );
+
+  // Phase 2: auto-promote the top-10 scanner symbols to tick-level live
+  // subs. As the ranked list shifts, the diff-based useLiveSubscriptions
+  // hook adds new symbols and drops ones that fell out of the top-10.
+  // Backend ref-counts handle overlap with ChartPanel / modal subs.
+  const topSymbols = useMemo(
+    () => cards.slice(0, 10).map((c) => c.symbol).filter(Boolean),
+    [cards]
+  );
+  useLiveSubscriptions(topSymbols, { max: 10 });
 
   if (cards.length === 0) {
     return (

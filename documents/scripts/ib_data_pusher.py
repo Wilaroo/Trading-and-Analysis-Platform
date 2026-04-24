@@ -2667,6 +2667,9 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
     class QuoteRequest(BaseModel):
         symbol: str
 
+    class SymbolsRequest(BaseModel):
+        symbols: list
+
     def _get_ib_loop():
         """Return the asyncio loop ib_insync is bound to."""
         try:
@@ -2764,6 +2767,81 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         # close price instead.
         return {"success": False, "symbol": symbol, "error": "symbol_not_subscribed"}
 
+    # ---- Phase 2: dynamic subscription RPC -------------------------------
+
+    @app.post("/rpc/subscribe")
+    def rpc_subscribe(req: SymbolsRequest):
+        """Add symbols to the dynamic watchlist. Idempotent — symbols already
+        subscribed are a no-op. Each symbol that goes live enters the push
+        loop's quotes_buffer and starts flowing through the 10s push cycle."""
+        if not pusher.ib.isConnected():
+            raise HTTPException(status_code=503, detail="IB Gateway not connected")
+        syms_in = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        if not syms_in:
+            return {"success": True, "added": [], "already_subscribed": [], "failed": []}
+
+        already = [s for s in syms_in if s in pusher.subscribed_contracts]
+        new_syms = [s for s in syms_in if s not in pusher.subscribed_contracts]
+
+        failed: list = []
+        try:
+            if new_syms:
+                # subscribe_market_data handles SMART routing, fundamentals
+                # ticks, and qualifyContracts. Any per-symbol failures are
+                # logged but do not stop the rest.
+                pusher.subscribe_market_data(new_syms, include_fundamentals=False)
+        except Exception as exc:
+            logger.warning("[RPC] /rpc/subscribe error: %s", exc)
+            failed = list(new_syms)
+            new_syms = []
+
+        return {
+            "success": True,
+            "added": new_syms,
+            "already_subscribed": already,
+            "failed": failed,
+            "total_subscribed": len(pusher.subscribed_contracts),
+        }
+
+    @app.post("/rpc/unsubscribe")
+    def rpc_unsubscribe(req: SymbolsRequest):
+        """Remove symbols from the watchlist. Calls cancelMktData on each.
+        Idempotent — unknown symbols are a no-op."""
+        syms_in = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        removed: list = []
+        not_found: list = []
+        for sym in syms_in:
+            contract = pusher.subscribed_contracts.get(sym)
+            if contract is None:
+                not_found.append(sym)
+                continue
+            try:
+                pusher.ib.cancelMktData(contract)
+            except Exception as exc:
+                logger.debug("[RPC] cancelMktData %s error: %s", sym, exc)
+            pusher.subscribed_contracts.pop(sym, None)
+            pusher.quotes_buffer.pop(sym, None)
+            pusher.fundamentals_buffer.pop(sym, None)
+            removed.append(sym)
+
+        return {
+            "success": True,
+            "removed": removed,
+            "not_found": not_found,
+            "total_subscribed": len(pusher.subscribed_contracts),
+        }
+
+    @app.get("/rpc/subscriptions")
+    def rpc_subscriptions():
+        """Report the current subscription set (symbols + count)."""
+        return {
+            "success": True,
+            "symbols": sorted(pusher.subscribed_contracts.keys()),
+            "total": len(pusher.subscribed_contracts),
+            "quotes_populated": len(pusher.quotes_buffer),
+            "timestamp": datetime.now().isoformat(),
+        }
+
     def _run_uvicorn():
         try:
             uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
@@ -2774,7 +2852,8 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
     t.start()
     logger.info("=" * 55)
     logger.info(f"  [RPC] Server listening on http://{host}:{port}")
-    logger.info(f"  [RPC] Endpoints: /rpc/health, /rpc/latest-bars, /rpc/quote-snapshot")
+    logger.info(f"  [RPC] Endpoints: /rpc/health, /rpc/latest-bars, /rpc/quote-snapshot,")
+    logger.info(f"  [RPC]            /rpc/subscribe, /rpc/unsubscribe, /rpc/subscriptions")
     logger.info("=" * 55)
     return True
 

@@ -43,6 +43,7 @@ import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils'
 import QuickActionsMenu from './QuickActionsMenu';
 import SmartStopSelector from './SmartStopSelector';
 import { useWsData } from '../contexts/WebSocketDataContext';
+import { useLiveSubscription } from '../hooks/useLiveSubscription';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -538,6 +539,10 @@ const EnhancedTickerModal = ({
   const [selectedStopData, setSelectedStopData] = useState(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState('5m');
   const [loadingNews, setLoadingNews] = useState(false);
+
+  // Phase 2: live sub for the symbol currently displayed in the modal.
+  // Backend ref-counts so ChartPanel + modal both seeing AAPL coexist.
+  useLiveSubscription(ticker?.symbol || null);
   const [deferredLoaded, setDeferredLoaded] = useState(false);
   
   const chartContainerRef = useRef(null);

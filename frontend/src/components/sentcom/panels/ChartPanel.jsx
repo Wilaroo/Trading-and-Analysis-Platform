@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { RefreshCw, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { safeGet } from '../../../utils/api';
+import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
 const TIMEFRAMES = [
@@ -91,6 +92,11 @@ export const ChartPanel = ({
     () => TIMEFRAMES.find(t => t.label === timeframe) ?? TIMEFRAMES[1],
     [timeframe]
   );
+
+  // Phase 2: auto-subscribe the focused chart symbol to tick-level pusher
+  // feed. Backend ref-counts, so this coexists with Scanner + Modal subs
+  // for the same symbol. Cleanup on unmount / symbol change.
+  useLiveSubscription(symbol);
 
   // Initialise chart once
   useEffect(() => {
