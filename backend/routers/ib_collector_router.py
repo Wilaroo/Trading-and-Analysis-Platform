@@ -6,7 +6,8 @@ API endpoints for managing historical data collection from IB Gateway.
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Optional, List
+from typing import Optional, List, Dict
+from datetime import datetime, timezone
 import logging
 
 from services.ib_historical_collector import get_ib_collector, IBHistoricalCollector
@@ -308,45 +309,78 @@ async def fill_gaps(
         def _scan_gaps():
             gaps_found = []
             symbols_to_collect = {}
-            
+
+            # Same staleness thresholds as /gap-analysis so "Fill Gaps" and
+            # the analyzer stay in sync. Without this, the analyzer could
+            # report a gap and fill-gaps would do nothing — or (pre-fix) both
+            # would agree "no gaps" on symbols that are actually weeks stale.
+            STALE_DAYS = {
+                "1 min": 3, "5 mins": 3, "15 mins": 5, "30 mins": 5,
+                "1 hour": 7, "1 day": 3, "1 week": 14,
+            }
+            now_utc = datetime.now(timezone.utc)
+
+            def _is_stale(max_date_str, tf):
+                if not max_date_str:
+                    return True
+                try:
+                    s = max_date_str.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    age_days = (now_utc - dt).total_seconds() / 86400.0
+                    return age_days > STALE_DAYS.get(tf, 7)
+                except Exception:
+                    return True
+
             for tier_name, tier_config in tiers.items():
                 adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
                 if "max_adv" in tier_config:
                     adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
-                
+
                 cursor = adv_col.find(adv_query, {"symbol": 1})
                 if max_symbols:
                     cursor = cursor.limit(max_symbols)
                 tier_symbols = [doc["symbol"] for doc in cursor]
-                
+
                 if not tier_symbols:
                     continue
-                
-                tier_symbol_set = set(tier_symbols)
+
                 symbols_to_collect[tier_name] = {}
-                
+
                 for tf in tier_config["timeframes"]:
-                    # Use aggregation pipeline instead of distinct() - much faster on 177M+ rows
+                    # Single pipeline that returns max_date per symbol —
+                    # catches both "no bars at all" AND "bars exist but
+                    # latest is too old to be useful".
                     pipeline = [
                         {"$match": {"bar_size": tf, "symbol": {"$in": tier_symbols}}},
-                        {"$group": {"_id": "$symbol"}}
+                        {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
                     ]
-                    symbols_with_data = set(
-                        doc["_id"] for doc in data_col.aggregate(pipeline, allowDiskUse=True)
-                    )
-                    
-                    missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
-                    
-                    if missing_symbols:
-                        symbols_to_queue = missing_symbols[:max_symbols] if max_symbols else missing_symbols
+                    max_date_map = {
+                        doc["_id"]: doc.get("max_date")
+                        for doc in data_col.aggregate(pipeline, allowDiskUse=True)
+                    }
+
+                    missing_symbols = [s for s in tier_symbols if s not in max_date_map]
+                    stale_symbols = [
+                        s for s in tier_symbols
+                        if s in max_date_map and _is_stale(max_date_map[s], tf)
+                    ]
+
+                    # Combine both buckets — fill-gaps needs to refresh both.
+                    needs_fill = missing_symbols + stale_symbols
+
+                    if needs_fill:
+                        symbols_to_queue = needs_fill[:max_symbols] if max_symbols else needs_fill
                         symbols_to_collect[tier_name][tf] = symbols_to_queue
                         gaps_found.append({
                             "tier": tier_name,
                             "timeframe": tf,
                             "missing_count": len(missing_symbols),
+                            "stale_count": len(stale_symbols),
                             "will_collect": len(symbols_to_queue)
                         })
-            
+
             return gaps_found, symbols_to_collect
         
         gaps_found, symbols_to_collect = await asyncio.to_thread(_scan_gaps)
@@ -574,18 +608,64 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
             }
             selected = {tier_filter: tiers[tier_filter]} if tier_filter and tier_filter in tiers else tiers
 
-            # Cache per-bar-size symbol sets — one DISTINCT_SCAN per timeframe.
-            symbols_by_tf = {}
+            # Staleness thresholds per bar_size. If a symbol's latest bar is
+            # older than this, the tail range counts as a gap even if the
+            # symbol has historical rows. BEFORE this fix, "has any row" was
+            # treated as "has data", which is why e.g. SPY (last bar 2026-03-16)
+            # was never flagged for fill. This is the bug that silently froze
+            # the training universe at March 16.
+            STALE_DAYS = {
+                "1 min": 3,      # minute bars should be within the last trading session
+                "5 mins": 3,
+                "15 mins": 5,
+                "30 mins": 5,
+                "1 hour": 7,
+                "1 day": 3,      # daily bars should be within the last 3 trading days
+                "1 week": 14,
+            }
+
+            # For each needed timeframe, compute {symbol → max_date} via a
+            # single index-backed aggregation. `$max` on the ISO-string `date`
+            # field is a lex sort, which is fine as long as TZ suffix is
+            # consistent (all strings for a given symbol+bar_size per the
+            # chart-diagnostic evidence).
+            max_date_by_tf: Dict[str, Dict[str, str]] = {}
             needed_tfs = {tf for cfg in selected.values() for tf in cfg["timeframes"]}
             for tf in needed_tfs:
                 try:
-                    symbols_by_tf[tf] = set(data_col.distinct("symbol", {"bar_size": tf}))
+                    rows = data_col.aggregate(
+                        [
+                            {"$match": {"bar_size": tf}},
+                            {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
+                        ],
+                        allowDiskUse=True,
+                    )
+                    max_date_by_tf[tf] = {r["_id"]: r.get("max_date") for r in rows if r.get("_id")}
                 except Exception as e:
-                    logger.warning(f"distinct failed for {tf}: {e}")
-                    symbols_by_tf[tf] = set()
+                    logger.warning(f"max-date aggregate failed for {tf}: {e}")
+                    max_date_by_tf[tf] = {}
+
+            now_utc = datetime.now(timezone.utc)
+
+            def _is_stale(max_date_str: Optional[str], tf: str) -> bool:
+                """True if max_date is missing or older than the tf-specific threshold."""
+                if not max_date_str:
+                    return True
+                try:
+                    # Handle ISO strings with +HH:MM, -HH:MM, or Z suffixes.
+                    s = max_date_str.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    age_days = (now_utc - dt).total_seconds() / 86400.0
+                    return age_days > STALE_DAYS.get(tf, 7)
+                except Exception:
+                    # Unknown format → treat as stale so it gets refreshed.
+                    return True
 
             gap_analysis = []
             total_missing = 0
+            total_stale = 0
             for tier_name, tier_config in selected.items():
                 adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
                 if "max_adv" in tier_config:
@@ -606,25 +686,48 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
                     "timeframes": []
                 }
                 for tf in tier_config["timeframes"]:
-                    with_data = symbols_by_tf.get(tf, set()) & tier_symbols
-                    missing = tier_total - len(with_data)
-                    coverage_pct = (len(with_data) / tier_total * 100) if tier_total > 0 else 0
+                    tf_max_dates = max_date_by_tf.get(tf, {})
+
+                    missing_symbols = [s for s in tier_symbols if s not in tf_max_dates]
+                    stale_symbols = [
+                        s for s in tier_symbols
+                        if s in tf_max_dates and _is_stale(tf_max_dates[s], tf)
+                    ]
+                    fresh_count = tier_total - len(missing_symbols) - len(stale_symbols)
+                    coverage_pct = (fresh_count / tier_total * 100) if tier_total > 0 else 0.0
+
                     tier_gaps["timeframes"].append({
                         "timeframe": tf,
-                        "has_data": len(with_data),
-                        "missing": missing,
+                        "has_data_fresh": fresh_count,
+                        "has_data_stale": len(stale_symbols),
+                        "missing": len(missing_symbols),
+                        "stale_threshold_days": STALE_DAYS.get(tf, 7),
                         "coverage_pct": round(coverage_pct, 1),
-                        "needs_fill": missing > 0
+                        "needs_fill": (len(missing_symbols) + len(stale_symbols)) > 0,
+                        # Top-5 sample of each bucket so the UI can surface WHY
+                        "sample_missing": missing_symbols[:5],
+                        "sample_stale": [
+                            {"symbol": s, "latest": tf_max_dates[s]} for s in stale_symbols[:5]
+                        ],
                     })
-                    total_missing += missing
+                    total_missing += len(missing_symbols)
+                    total_stale += len(stale_symbols)
                 gap_analysis.append(tier_gaps)
 
             return {
                 "success": True,
-                "total_gaps": total_missing,
-                "needs_fill": total_missing > 0,
-                "estimated_time_minutes": total_missing * 2,
-                "analysis": gap_analysis
+                "total_gaps": total_missing + total_stale,
+                "total_missing_symbols": total_missing,
+                "total_stale_symbols": total_stale,
+                "needs_fill": (total_missing + total_stale) > 0,
+                "estimated_time_minutes": (total_missing + total_stale) * 2,
+                "analysis": gap_analysis,
+                "staleness_note": (
+                    "A symbol with historical bars but whose latest bar is older "
+                    "than the bar_size-specific threshold is counted as a gap. "
+                    "This catches the 'SPY has 32k bars but newest is 2026-03-16' "
+                    "case that the old coverage-by-existence check missed."
+                ),
             }
 
         return await asyncio.to_thread(_analyze)

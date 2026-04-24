@@ -1,5 +1,64 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Gap-analysis / Fill-Gaps staleness bug (the reason training is frozen at March 16)
+
+**Smoking-gun root cause found for the stale-universe issue.** User ran today's
+"Fill Gaps" on the NIA page; the diagnostic showed SPY still stuck at
+2026-03-16 (38 days old) while obscure symbols like NBIE/MSCI/CRAI got fresh
+2026-04-23 bars. Traced to `routers/ib_collector_router.py`:
+
+  - `/api/ib-collector/gap-analysis` counted a symbol as `has_data` if it had
+    ANY historical bar, regardless of how old. SPY with 32,396 bars all older
+    than 2026-03-16 came back as `coverage_pct: 100, needs_fill: false`.
+  - `/api/ib-collector/fill-gaps` used the same existence-only logic, so
+    pressing "Fill Gaps" never queued SPY, QQQ, DIA, IWM, ADBE, NEE, etc. for
+    refresh. The collector only touched symbols that had literally zero rows.
+  - Net effect: the entire core training universe silently froze whenever
+    the collector last ran. Last full run was ~March 16 → every "backfill"
+    since then has been a no-op for the critical symbols.
+
+**Fix (`ib_collector_router.py`):**
+
+  - Both `/gap-analysis` and `/fill-gaps` now run an index-backed
+    `$group → $max(date)` aggregation per `(bar_size, symbol)` and classify
+    each symbol as `missing` (no rows), `stale` (latest bar older than the
+    threshold), or `fresh`.
+  - Staleness thresholds are bar_size-specific: `1 min`/`5 mins`=3d,
+    `15 mins`/`30 mins`=5d, `1 hour`=7d, `1 day`=3d, `1 week`=14d.
+  - `_is_stale` parses ISO strings with `Z`/`+HH:MM`/`-HH:MM` suffixes
+    (three formats live in production data) and fails-safe to "stale" on
+    unknown formats so unparseable entries always get refreshed.
+  - Response payload now exposes `total_missing_symbols`,
+    `total_stale_symbols`, `has_data_fresh`, `has_data_stale`,
+    `sample_stale[]` so the UI can distinguish "no data" from "old data".
+
+**Regression tests (`tests/test_gap_analysis_staleness.py`):**
+
+  - 6 new pytest contracts locking the fix: $max aggregation, staleness
+    thresholds for every bar_size, missing/stale split in response,
+    fill-gaps queues both buckets, _is_stale TZ-suffix handling, both
+    endpoints share the same STALE_DAYS map. 13/13 tests green.
+
+**After pull, user should:**
+
+  1. `curl /api/ib-collector/gap-analysis?tier_filter=intraday` — will now
+     show the true stale-tail count (expect thousands, not zero).
+  2. `POST /api/ib-collector/fill-gaps?tier_filter=intraday&enable_priority=true`
+     — queues every stale symbol for refresh, including SPY/QQQ/DIA/IWM.
+  3. Monitor `chart-diagnostic-universe?timeframe=5min&limit=20` — should
+     show max_collected_at moving forward for core ETFs.
+  4. Only after backfill lands should the "post-fix verification" retrain
+     be kicked off; otherwise it'll use the same March 16 cutoff universe.
+
+**ACCOUNT MISMATCH (from earlier):** turned out to be a startup race —
+curl (c) for `/api/safety/status` was run before the pusher had sent
+account data. Once `_pushed_ib_data["account"]` is populated (as curl (e)
+proved), the existing `get_pushed_account_id()` helper returns the right
+value and the guard's case-insensitive match accepts the paper alias.
+No code fix needed; re-running the curl shows `match: true`.
+
+---
+
 ## 2026-04-24 — Chart staleness detection + fallback + frontend banners
 
 Follow-up after user inspection: `/api/sentcom/chart-diagnostic?symbol=SPY`
