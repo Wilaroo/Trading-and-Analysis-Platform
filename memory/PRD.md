@@ -1,5 +1,41 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Chart staleness detection + fallback + frontend banners
+
+Follow-up after user inspection: `/api/sentcom/chart-diagnostic?symbol=SPY`
+revealed `latest_date: "2026-03-16"` — 5+ weeks of missing SPY 5m bars.
+Pusher was LIVE (live quotes) but the IB historical collector hadn't run,
+so the chart window [today-5d, today] returned zero rows and the old code
+fell through to the misleading "IB disconnected" error.
+
+**Backend (`hybrid_data_service.py`):**
+  - `DataFetchResult` gained four freshness flags: `stale`, `stale_reason`,
+    `latest_available_date`, `partial`, `coverage`.
+  - `_get_from_cache` now has a stale-data fallback: if the requested window
+    is empty but the collection has older bars for the (symbol, bar_size),
+    return the most recent N bars with `stale: true` + `latest_available_date`
+    instead of returning `success=False`. Density of N mirrors the requested
+    window (`_estimate_fallback_bar_count` helper).
+
+**Backend (`routers/sentcom_chart.py`):**
+  - `/api/sentcom/chart` now propagates `stale`, `stale_reason`,
+    `latest_available_date`, `partial`, `coverage` to the UI.
+
+**Frontend (`ChartPanel.jsx`):**
+  - Added a pill-style "STALE CACHE · latest YYYY-MM-DD" banner at the top
+    of the chart when backend reports stale data.
+  - Added a "PARTIAL · NN% coverage" banner when coverage is partial.
+  - `data-testid="chart-stale-banner"` + `chart-partial-banner`.
+
+**Known ops issue surfaced (USER ACTION REQUIRED):**
+  - IB historical collector has not written fresh bars for SPY since
+    2026-03-16. Retraining now would use the same stale universe as the
+    last 186M-sample run — no new market data since mid-March. User must
+    kick off a backfill before the "post-fix verification" retrain or
+    accept that the retrain only validates the code fixes, not fresh data.
+
+---
+
 ## 2026-04-24 — Command Center chart diagnostics + misleading "IB disconnected" fix
 
 User reported the V5 Command Center showing *"Unable to fetch data. IB

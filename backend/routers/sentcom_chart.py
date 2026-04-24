@@ -500,6 +500,12 @@ async def get_chart_bars(
         "timeframe": tf,
         "bar_count": len(normalised),
         "bars": normalised,
+        # Freshness flags — frontend can show "STALE" banner / "PARTIAL" badge.
+        "stale": bool(getattr(result, "stale", False)),
+        "stale_reason": getattr(result, "stale_reason", None),
+        "latest_available_date": getattr(result, "latest_available_date", None),
+        "partial": bool(getattr(result, "partial", False)),
+        "coverage": getattr(result, "coverage", None),
         "indicators": {
             "vwap": _as_series(times, vwap),
             "ema_20": _as_series(times, ema_20),

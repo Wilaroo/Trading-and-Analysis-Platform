@@ -73,6 +73,9 @@ export const ChartPanel = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Freshness flags from backend — surface when the chart is rendering stale
+  // cache or partial coverage so the user doesn't mistake old bars for live.
+  const [staleInfo, setStaleInfo] = useState(null);  // { stale, reason, latest, partial, coverage }
   // Which overlays are visible. Default: VWAP + BB on, all EMAs off (less clutter).
   const [visibleIndicators, setVisibleIndicators] = useState({
     vwap: true,
@@ -218,6 +221,13 @@ export const ChartPanel = ({
       setBars(fetchedBars);
       setIndicators(resp.indicators && typeof resp.indicators === 'object' ? resp.indicators : {});
       setMarkers(Array.isArray(resp.markers) ? resp.markers : []);
+      setStaleInfo({
+        stale: !!resp.stale,
+        reason: resp.stale_reason || null,
+        latest: resp.latest_available_date || null,
+        partial: !!resp.partial,
+        coverage: typeof resp.coverage === 'number' ? resp.coverage : null,
+      });
       setLastUpdated(Date.now());
     } catch (err) {
       setError(err?.message || 'Failed to fetch bars');
@@ -577,6 +587,30 @@ export const ChartPanel = ({
           className="absolute inset-x-0 top-12 flex items-center justify-center text-xs text-rose-400"
         >
           {error}
+        </div>
+      )}
+      {!error && staleInfo?.stale && bars.length > 0 && (
+        <div
+          data-testid="chart-stale-banner"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/50 bg-amber-500/10 text-[10px] uppercase tracking-wider text-amber-300"
+          title={`Historical collector hasn't written fresh bars. Reason: ${staleInfo.reason || 'unknown'}`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          STALE CACHE
+          {staleInfo.latest && (
+            <span className="text-amber-200/80 normal-case tracking-normal">
+              · latest {String(staleInfo.latest).slice(0, 10)}
+            </span>
+          )}
+        </div>
+      )}
+      {!error && !staleInfo?.stale && staleInfo?.partial && bars.length > 0 && (
+        <div
+          data-testid="chart-partial-banner"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-sky-500/50 bg-sky-500/10 text-[10px] uppercase tracking-wider text-sky-300"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+          PARTIAL · {Math.round((staleInfo.coverage || 0) * 100)}% coverage
         </div>
       )}
     </div>

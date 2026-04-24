@@ -25,6 +25,19 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _estimate_fallback_bar_count(timeframe: str, start_dt: datetime, end_dt: datetime) -> int:
+    """How many bars should we grab for a stale-data fallback?
+    Mirrors the coverage math in `_get_from_cache` so the fallback chart has
+    roughly the same density the user asked for."""
+    days = max((end_dt - start_dt).days, 1)
+    if timeframe == "1day":
+        return max(int(days * 0.7), 30)
+    if timeframe == "1hour":
+        return max(int(days * 6.5), 40)
+    # default intraday (1min/5min/15min/30min): assume 78 5-min bars/day
+    return max(int(days * 78), 200)
+
+
 @dataclass
 class RateLimiter:
     """Token bucket rate limiter"""
@@ -75,6 +88,13 @@ class DataFetchResult:
     bar_count: int = 0
     from_cache: bool = False
     error: str = None
+    # Freshness / quality flags — let the UI show "partial" or "stale" warnings
+    # instead of silently pretending the data is live.
+    stale: bool = False
+    stale_reason: Optional[str] = None
+    latest_available_date: Optional[str] = None
+    partial: bool = False
+    coverage: Optional[float] = None
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -233,7 +253,12 @@ class HybridDataService:
                     source="cache",
                     bars=cached["bars"],
                     bar_count=cached["bar_count"],
-                    from_cache=True
+                    from_cache=True,
+                    stale=cached.get("stale", False),
+                    stale_reason=cached.get("stale_reason"),
+                    latest_available_date=cached.get("latest_available_date"),
+                    partial=cached.get("partial", False),
+                    coverage=cached.get("coverage"),
                 )
         
         # Step 2: Try IB if connected (or if preferred)
@@ -298,12 +323,48 @@ class HybridDataService:
             }
             
             bars = list(self._bars_collection.find(query, {"_id": 0}).sort("date", 1))
-            
+
             # Normalize field names for compatibility
             for bar in bars:
                 if "date" in bar and "timestamp" not in bar:
                     bar["timestamp"] = bar["date"]
-            
+
+            # STALENESS FALLBACK: if the requested window is empty but the
+            # collection has bars for this (symbol, bar_size) from an older
+            # period, return the most recent slice instead of falling through
+            # to the "no cached data" error path. The user would rather see
+            # a stale chart with a warning than a blank panel — especially
+            # important when the IB historical collector has stopped writing
+            # fresh bars but live pusher quotes keep the app "feeling" live.
+            if not bars:
+                fallback_count = _estimate_fallback_bar_count(timeframe, start_dt, end_dt)
+                stale_bars = list(
+                    self._bars_collection
+                        .find({"symbol": symbol, "bar_size": bar_size}, {"_id": 0})
+                        .sort("date", -1)
+                        .limit(fallback_count)
+                )
+                if stale_bars:
+                    stale_bars.reverse()  # chronological order for chart
+                    for bar in stale_bars:
+                        if "date" in bar and "timestamp" not in bar:
+                            bar["timestamp"] = bar["date"]
+                    latest_date = stale_bars[-1].get("date")
+                    logger.warning(
+                        f"[hybrid_data] No {symbol} {timeframe} bars in requested "
+                        f"window [{start_dt.date()} → {end_dt.date()}]. "
+                        f"Returning last {len(stale_bars)} bars (latest={latest_date}) "
+                        f"as STALE fallback — historical collector has not run recently."
+                    )
+                    return {
+                        "success": True,
+                        "bars": stale_bars,
+                        "bar_count": len(stale_bars),
+                        "stale": True,
+                        "stale_reason": "no_bars_in_requested_window",
+                        "latest_available_date": latest_date,
+                    }
+
             # Check how much data we have vs what's expected
             if bars:
                 days = (end_dt - start_dt).days
