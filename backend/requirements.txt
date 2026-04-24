@@ -189,3 +189,5 @@ xgboost==3.2.0
 yarl==1.22.0
 yfinance==0.2.33
 zipp==3.23.0
+feedparser==6.0.12
+sgmllib3k==1.0.0

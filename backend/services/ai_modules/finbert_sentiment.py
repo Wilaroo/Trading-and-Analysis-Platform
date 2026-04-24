@@ -246,6 +246,144 @@ class FinnhubNewsCollector:
             "newest_article": newest.get("datetime") if newest else None,
         }
 
+class YahooRSSNewsCollector:
+    """
+    Collects financial news from Yahoo Finance's free RSS feeds and writes
+    them into the same `news_articles` collection as the Finnhub collector.
+
+    Why Yahoo RSS:
+        - No API key, no auth, no rate-limit quotas (unlike Finnhub's 60/min)
+        - Covers mainstream press releases, analyst notes, earnings coverage
+        - Complements Finnhub coverage — different editorial mix
+        - 20-30 most recent headlines per ticker (latest ~7 days of news)
+
+    Writes into the SAME collection as Finnhub so FinBERT scoring treats both
+    sources uniformly. Deduplication is by article URL (Yahoo doesn't expose
+    a stable article ID the way Finnhub does).
+    """
+
+    NEWS_COLLECTION = "news_articles"
+    RSS_URL_TEMPLATE = "https://finance.yahoo.com/rss/headline?s={symbol}"
+    # Be a polite client — Yahoo sometimes throttles obvious bot UAs.
+    _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; SentComBot/1.0)"}
+
+    def __init__(self, db=None):
+        self._db = db
+
+    def _ensure_indexes(self):
+        if self._db is None:
+            return
+        col = self._db[self.NEWS_COLLECTION]
+        # Yahoo articles are keyed by URL since there's no finnhub_id
+        col.create_index([("url", 1)], unique=True, sparse=True)
+        col.create_index([("symbol", 1), ("datetime_ts", -1)])
+        col.create_index([("scored", 1)])
+
+    async def collect_news(
+        self,
+        symbols: List[str],
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """Collect RSS headlines for each symbol. Returns summary dict."""
+        try:
+            import feedparser
+        except ImportError:
+            logger.error("feedparser not installed; cannot collect Yahoo RSS")
+            return {"success": False, "error": "feedparser not installed"}
+
+        self._ensure_indexes()
+        total_articles = 0
+        total_new = 0
+        total_dupes = 0
+        errors = []
+
+        for idx, symbol in enumerate(symbols):
+            try:
+                url = self.RSS_URL_TEMPLATE.format(symbol=symbol.upper())
+                # feedparser blocks on network — run in thread
+                loop = asyncio.get_event_loop()
+                feed = await loop.run_in_executor(
+                    None,
+                    lambda u=url: feedparser.parse(u, request_headers=self._HEADERS),
+                )
+
+                entries = getattr(feed, "entries", []) or []
+                if not entries:
+                    continue
+
+                new_count = 0
+                for entry in entries:
+                    link = getattr(entry, "link", "") or ""
+                    if not link:
+                        continue
+
+                    # Dedup against existing articles (from Yahoo OR Finnhub)
+                    if self._db[self.NEWS_COLLECTION].find_one({"url": link}, {"_id": 1}):
+                        total_dupes += 1
+                        continue
+
+                    # Yahoo RSS gives `published_parsed` as a time.struct_time
+                    pub = getattr(entry, "published_parsed", None)
+                    if pub:
+                        try:
+                            article_dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                        except Exception:
+                            article_dt = datetime.now(timezone.utc)
+                    else:
+                        article_dt = datetime.now(timezone.utc)
+
+                    doc = {
+                        "source_feed": "yahoo_rss",
+                        "symbol": symbol.upper(),
+                        "headline": getattr(entry, "title", "") or "",
+                        "summary": getattr(entry, "summary", "") or "",
+                        "source": "yahoo",
+                        "url": link,
+                        "datetime": article_dt.isoformat(),
+                        "datetime_ts": article_dt.timestamp(),
+                        "collected_at": datetime.now(timezone.utc).isoformat(),
+                        "scored": False,
+                    }
+                    try:
+                        self._db[self.NEWS_COLLECTION].insert_one(doc)
+                        new_count += 1
+                        total_new += 1
+                    except Exception as e:
+                        # Race or dupe from another concurrent insert — safe to skip
+                        if "duplicate key" not in str(e).lower():
+                            logger.debug(f"Yahoo insert skipped for {symbol}: {e}")
+
+                total_articles += len(entries)
+                if progress_callback:
+                    try:
+                        progress_callback(symbol, new_count)
+                    except Exception:
+                        pass
+
+                # Tiny courtesy pause every 50 symbols — avoids Yahoo throttling
+                if (idx + 1) % 50 == 0:
+                    await asyncio.sleep(1)
+
+            except Exception as e:
+                errors.append({"symbol": symbol, "error": str(e)})
+                logger.warning(f"[YAHOO-RSS] Failed for {symbol}: {e}")
+
+        logger.info(
+            f"[YAHOO-RSS] Collection complete: {total_new} new, "
+            f"{total_dupes} duplicate, {len(errors)} errors from {len(symbols)} symbols"
+        )
+        return {
+            "success": True,
+            "source": "yahoo_rss",
+            "total_seen": total_articles,
+            "new_articles": total_new,
+            "duplicates": total_dupes,
+            "errors": len(errors),
+            "symbols_processed": len(symbols),
+        }
+
+
+
 
 class FinBERTSentiment:
     """
