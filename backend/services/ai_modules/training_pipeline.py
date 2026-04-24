@@ -811,10 +811,12 @@ class TrainingPipelineStatus:
                 pass
         self._persist()
 
-    def add_completed(self, model_name: str, accuracy: float):
+    def add_completed(self, model_name: str, accuracy: float, metric_type: str = "accuracy"):
         self._status["completed_models"].append({
             "name": model_name,
             "accuracy": accuracy,
+            "metric_type": metric_type,  # "accuracy" for classifiers, "regime_diversity_entropy" for VAE,
+                                         # "distribution_entropy_normalized" for FinBERT, etc.
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
         self._status["models_completed"] = len(self._status["completed_models"])
@@ -822,8 +824,12 @@ class TrainingPipelineStatus:
         ph = self._status["phase_history"].get(self._current_phase)
         if ph:
             ph["models_trained"] += 1
-            ph["total_accuracy"] += accuracy
-            ph["avg_accuracy"] = ph["total_accuracy"] / ph["models_trained"]
+            # Only classifier accuracies are meaningfully aggregated.
+            # VAE/FinBERT use domain-specific quality metrics — don't pollute avg_accuracy.
+            if metric_type == "accuracy":
+                ph["total_accuracy"] += accuracy
+                ph["avg_accuracy"] = ph["total_accuracy"] / max(1, ph.get("models_trained_accuracy_counted", 0) + 1)
+                ph["models_trained_accuracy_counted"] = ph.get("models_trained_accuracy_counted", 0) + 1
 
         self._persist()
 
@@ -1410,8 +1416,11 @@ async def run_training_pipeline(
                     )
 
                     if result.get("success"):
-                        acc = result.get("metrics", {}).get("accuracy", 0)
-                        samples = result.get("training_samples", 0)
+                        # train_full_universe returns accuracy at the TOP LEVEL,
+                        # not under .metrics — reading result["metrics"]["accuracy"]
+                        # silently returned 0 for all 7 direction_predictor models.
+                        acc = result.get("accuracy", result.get("metrics", {}).get("accuracy", 0))
+                        samples = result.get("training_samples", result.get("samples", 0))
                         results["models_trained"].append({
                             "name": model_name,
                             "accuracy": acc,
@@ -1943,7 +1952,11 @@ async def run_training_pipeline(
                         gc.collect()
 
                     if len(all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient vol training data for {bs}: {len(all_X)}")
+                        total_rows = sum(len(x) for x in all_X) if all_X else 0
+                        reason = f"Insufficient data: {total_rows} samples < MIN_TRAINING_SAMPLES={MIN_TRAINING_SAMPLES}"
+                        logger.warning(f"[Phase 3] {model_name} skipped — {reason}")
+                        results["models_failed"].append({"name": model_name, "reason": reason})
+                        status.add_error(model_name, reason)
                         continue
 
                     # Memory safety check before vstack
@@ -1977,6 +1990,14 @@ async def run_training_pipeline(
                         })
                         results["total_samples"] += metrics.training_samples
                         status.add_completed(model_name, metrics.accuracy)
+                    else:
+                        reason = (
+                            f"Training produced no usable metrics "
+                            f"(accuracy={getattr(metrics, 'accuracy', None)})"
+                        )
+                        logger.warning(f"[Phase 3] {model_name} rejected — {reason}")
+                        results["models_failed"].append({"name": model_name, "reason": reason})
+                        status.add_error(model_name, reason)
 
                 except Exception as e:
                     logger.error(f"Failed to train {model_name}: {e}")
@@ -2204,6 +2225,20 @@ async def run_training_pipeline(
                                 "volumes": np.array([b.get("volume", 0) for b in etf_bars], dtype=np.float32),
                             }
 
+                    # Guard: if none of the sector ETFs have enough bars, every
+                    # symbol downstream will `continue` and produce 0 samples.
+                    # Record this explicitly instead of silently failing.
+                    if not sector_etf_bars:
+                        reason = (
+                            f"No sector ETF bars available at {bs} (need ≥50 bars each "
+                            f"for {len(sector_mapper.get_all_sector_etfs())} ETFs). "
+                            f"Check ib_historical_data for XLK/XLF/XLE/etc."
+                        )
+                        logger.warning(f"[Phase 5] {model_name} skipped — {reason}")
+                        results["models_failed"].append({"name": model_name, "reason": reason})
+                        status.add_error(model_name, reason)
+                        continue
+
                     combined_names = base_names + [f"secrel_{n}" for n in SECTOR_REL_FEATURE_NAMES]
                     n_sec = len(SECTOR_REL_FEATURE_NAMES)
                     
@@ -2290,7 +2325,15 @@ async def run_training_pipeline(
                         gc.collect()
 
                     if len(all_X) < 1 or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient sector-relative data for {bs}: {sum(len(x) for x in all_X) if all_X else 0}")
+                        total_rows = sum(len(x) for x in all_X) if all_X else 0
+                        reason = (
+                            f"Insufficient sector-relative samples at {bs}: "
+                            f"{total_rows} < MIN_TRAINING_SAMPLES={MIN_TRAINING_SAMPLES} "
+                            f"(symbols without sector ETF match silently skip)."
+                        )
+                        logger.warning(f"[Phase 5] {model_name} skipped — {reason}")
+                        results["models_failed"].append({"name": model_name, "reason": reason})
+                        status.add_error(model_name, reason)
                         continue
 
                     # Memory safety check before vstack
@@ -2314,6 +2357,14 @@ async def run_training_pipeline(
                         results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
                         results["total_samples"] += metrics.training_samples
                         status.add_completed(model_name, metrics.accuracy)
+                    else:
+                        reason = (
+                            f"Training produced no usable metrics "
+                            f"(accuracy={getattr(metrics, 'accuracy', None)})"
+                        )
+                        logger.warning(f"[Phase 5] {model_name} rejected — {reason}")
+                        results["models_failed"].append({"name": model_name, "reason": reason})
+                        status.add_error(model_name, reason)
 
                 except Exception as e:
                     logger.error(f"Failed to train {model_name}: {e}")
@@ -2652,7 +2703,14 @@ async def run_training_pipeline(
             _, spy_data = await _get_shared_regime_data()
 
             if not spy_data or spy_data.get("closes") is None or len(spy_data.get("closes", [])) < 30:
-                logger.warning("Insufficient SPY data for regime classification — skipping Phase 7")
+                reason = (
+                    f"Insufficient SPY data for regime classification "
+                    f"(closes={len(spy_data.get('closes', [])) if spy_data else 0}, need ≥30). "
+                    f"Skipping all 28 regime-conditional models."
+                )
+                logger.warning(f"[Phase 7] {reason}")
+                results["models_failed"].append({"name": "regime_conditional_all", "reason": reason})
+                status.add_error("regime_conditional_all", reason)
             else:
                 # Train regime-conditional variants of Generic Directional models
                 for bs in bar_sizes:
@@ -3397,13 +3455,14 @@ async def run_training_pipeline(
                         results["models_trained"].append({
                             "name": model_name,
                             "accuracy": acc,
+                            "quality_score": acc,  # canonical "how good is this model" field
                             "majority_baseline": majority_baseline,
                             "edge_above_baseline": edge,
                             "metric_type": metric_type,
                             "type": "dl",
                             "promotable": (edge is None or edge > 0.01),  # VAE (metric_type != accuracy) is auto-OK
                         })
-                        status.add_completed(model_name, acc)
+                        status.add_completed(model_name, acc, metric_type=metric_type)
                         logger.info(f"[DL] {model_name} trained successfully (metric_type={metric_type})")
                     else:
                         error = dl_result.get("error", "Unknown DL training error")
@@ -3503,12 +3562,15 @@ async def run_training_pipeline(
                 results["models_trained"].append({
                     "name": "finbert_sentiment",
                     "accuracy": quality_score,
+                    "quality_score": quality_score,  # canonical field, same as DL models
+                    "metric_type": "distribution_entropy_normalized",  # match DL naming
                     "type": "finbert",
                     "articles_scored": scored,
                     "distribution": distribution,
-                    "quality_metric": "distribution_entropy_normalized",
+                    "quality_metric": "distribution_entropy_normalized",  # kept for back-compat
                 })
-                status.add_completed("finbert_sentiment", quality_score)
+                status.add_completed("finbert_sentiment", quality_score,
+                                    metric_type="distribution_entropy_normalized")
 
             except Exception as e:
                 logger.error(f"[FINBERT] Phase failed: {e}", exc_info=True)
@@ -3616,7 +3678,24 @@ async def run_training_pipeline(
                     logger.info(f"[VALIDATE] Phase 13: Validating {setup_type}/{bar_size} (training acc: {accuracy:.1%})")
 
                     try:
-                        training_result = {"metrics": {"accuracy": accuracy}}
+                        # Reconstruct the actual trained model name so the validator
+                        # can mirror the scorecard onto timeseries_models.scorecard
+                        # (without model_name the mirror is skipped → /scorecards returns 0).
+                        resolved_model_name = get_model_name(setup_type, bar_size)
+                        resolved_version = ""
+                        try:
+                            _mdoc = db["timeseries_models"].find_one(
+                                {"name": resolved_model_name}, {"_id": 0, "version": 1}
+                            )
+                            resolved_version = (_mdoc or {}).get("version", "") or ""
+                        except Exception:
+                            resolved_version = ""
+
+                        training_result = {
+                            "metrics": {"accuracy": accuracy},
+                            "model_name": resolved_model_name,
+                            "version": resolved_version,
+                        }
 
                         val_result = await validate_trained_model(
                             db=db,

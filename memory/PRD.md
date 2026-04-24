@@ -1,5 +1,61 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Post-training observability + scorecard mirror fixes
+
+Surgical edits to `training_pipeline.py` and regression contracts under
+`tests/test_training_pipeline_contracts.py` so the next full-quality
+training run is actually interpretable. All changes verified by
+`pytest tests/test_training_pipeline_contracts.py -v` (7/7 passing).
+
+**Bugs fixed (root cause → patch):**
+
+  1. **Phase 1 `direction_predictor_*` accuracy always 0** —
+     `train_full_universe` returns `accuracy` at top level, but Phase 1 was
+     reading `result["metrics"]["accuracy"]`. One-line fix: prefer top-level
+     `accuracy` / `training_samples`, fall back to the nested shape for
+     back-compat.
+
+  2. **`GET /api/ai-training/scorecards` always returns `count: 0`** —
+     Phase 13 was passing `training_result = {"metrics": {...}}` with no
+     `model_name`, so `post_training_validator._build_record`'s mirror
+     (`timeseries_models.update_one({"name": training_result["model_name"]},
+     {"$set": {"scorecard": ...}})`) silently skipped every iteration.
+     Phase 13 now resolves `model_name` via
+     `get_model_name(setup_type, bar_size)` + looks up `version` from
+     `timeseries_models` and stuffs both into `training_result`.
+
+  3. **Phase 3 volatility + Phase 5 sector-relative + Phase 7 regime-
+     conditional silent skips** — when data was insufficient, all three
+     phases did a bare `continue` (Phase 3/5) or a `logger.warning` + fall-
+     through (Phase 7) producing 0 models with no entry in
+     `results["models_failed"]`. You couldn't tell why they were empty.
+     Each skip now records an explicit failure with a human-readable reason
+     (`Insufficient data: N < MIN_TRAINING_SAMPLES=M`, `No sector ETF bars
+     available at <bs>`, `Insufficient SPY data for regime classification`).
+
+  4. **VAE + FinBERT metrics mis-labeled as "accuracy"** — `vae_regime_detector`
+     reported 99.96% and `finbert_sentiment` 97.76% as `accuracy`, but they
+     are really `regime_diversity_entropy` and `distribution_entropy_normalized`.
+     - Added canonical `quality_score` sibling field alongside `accuracy`
+       on both DL and FinBERT `models_trained` entries.
+     - Unified `metric_type` on the FinBERT entry (was `quality_metric`),
+       while keeping the old key for back-compat.
+     - `TrainingPipelineStatus.add_completed(..., metric_type=...)` now
+       accepts a metric_type kwarg; non-`accuracy` completions no longer
+       pollute `phase_history[*].avg_accuracy`.
+
+**Files touched:**
+  - `/app/backend/services/ai_modules/training_pipeline.py`
+  - `/app/backend/tests/test_training_pipeline_contracts.py` (new)
+
+**What this enables:** after the next overnight run on the DGX, the user
+can run `curl /api/ai-training/scorecards` and get real DSR/Sharpe/
+win-rate per trained setup, the 7 generic direction predictors will have
+truthful accuracy numbers, and every silent-skip will be visible in
+`last_result.models_failed` with the real reason.
+
+---
+
 ## 2026-04-24 — Standalone FinBERT sentiment pipeline wired into server
 
 Decoupled pre-market news scoring from the 44h training pipeline. Router
