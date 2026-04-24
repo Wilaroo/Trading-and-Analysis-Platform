@@ -1,5 +1,31 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Auto-hide Overnight Sentiment during RTH
+
+Small UX upgrade on top of the P2-A Morning Briefing work.
+
+The Overnight Sentiment section is fundamentally a **pre-trade news**
+surface — yesterday close vs premarket swings prepare you for the open.
+Once RTH is live (09:30–16:00 ET) that information is stale and just
+takes vertical space away from the game plan and system status.
+
+### Change
+In `MorningBriefingModal.jsx`, wrapped the Overnight Sentiment
+`<Section>` in a `{live.marketState !== 'rth' && …}` gate. The section
+renders normally when `market_state` is `extended` / `overnight` /
+`weekend`, and disappears during RTH so the briefing modal shrinks to
+its more decision-useful subset.
+
+Top Movers row stays visible in all states — that's real-time price
+action, relevant whenever the market is live.
+
+### Verified
+- Pytest contract added (`test_overnight_sentiment_auto_hidden_during_rth`).
+- Screenshot confirmed in preview env: `market_state: RTH` →
+  Top Movers visible, Overnight Sentiment hidden, Today's Game Plan
+  bumped directly below Top Movers. 27/27 P2-A tests green.
+
+
 ## 2026-04-26 — Monday-morning catchup (weekend news widening)
 
 Extended `overnight_sentiment_service.compute_windows` to walk the

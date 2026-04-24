@@ -217,7 +217,11 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               )}
             </Section>
 
-            {/* P2-A: Overnight sentiment swings (yesterday close vs premarket) */}
+            {/* P2-A: Overnight sentiment swings (yesterday close vs premarket)
+                Auto-hidden during RTH (09:30–16:00 ET) — the section is about
+                pre-trade news prep, not intra-day reactions. Re-appears in
+                extended / overnight / weekend market states. */}
+            {live.marketState !== 'rth' && (
             <Section
               title="Overnight sentiment swings"
               accent="text-amber-400"
@@ -283,6 +287,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                 </div>
               )}
             </Section>
+            )}
 
             {/* GAMEPLAN */}
             <Section

@@ -276,6 +276,21 @@ def test_hook_captures_yesterday_close_fields():
     assert "yesterdayCloseStart" in HOOK_SRC
 
 
+def test_overnight_sentiment_auto_hidden_during_rth():
+    """During RTH (09:30–16:00 ET) the overnight-sentiment section is
+    pre-trade noise, not intraday info. Modal must gate its render on
+    market_state !== 'rth'."""
+    assert "live.marketState !== 'rth'" in MODAL_SRC, (
+        "Overnight sentiment section must be gated on market_state !== 'rth'"
+    )
+    # The gate must wrap the <Section testid='briefing-section-overnight-sentiment' ...>
+    idx_gate = MODAL_SRC.find("live.marketState !== 'rth'")
+    idx_sect = MODAL_SRC.find('testid="briefing-section-overnight-sentiment"')
+    assert 0 < idx_gate < idx_sect, (
+        "RTH gate must precede the overnight-sentiment Section tag"
+    )
+
+
 # ====================== NIA DataCacheProvider warning fix ================
 
 NIA_SRC = Path("/app/frontend/src/components/NIA/index.jsx").read_text(encoding="utf-8")
