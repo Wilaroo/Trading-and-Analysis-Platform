@@ -25,6 +25,7 @@ import { PipelineHUDV5 } from './panels/PipelineHUDV5';
 
 import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
+import { TopMoversTile } from './v5/TopMoversTile';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
@@ -208,6 +209,9 @@ export const SentComV5View = ({
           </div>
         }
       />
+
+      {/* Phase 3 TopMoversTile — reads /api/live/briefing-snapshot. */}
+      <TopMoversTile onSelectSymbol={handleOpenTicker} />
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
       <div

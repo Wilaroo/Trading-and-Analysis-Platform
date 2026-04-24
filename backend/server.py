@@ -354,9 +354,21 @@ def _init_all_services():
     # Initialize End-of-Day Generation Service (scheduler starts in startup event)
     eod_service = get_eod_service(db)
 
-    # Initialize Alpaca service early and wire it to stock_service
-    alpaca_service = init_alpaca_service()
-    stock_service.set_alpaca_service(alpaca_service)  # DEPRECATED: Alpaca removed from trading path
+    # Phase 4 — Alpaca retirement. Gated by ENABLE_ALPACA_FALLBACK env var
+    # (default "false"). When disabled we skip all Alpaca service init and
+    # wire None into the consumers; they already have IB-pusher / Mongo
+    # fallback paths from the 2026-04-23 Alpaca nuke. When enabled (legacy),
+    # the shim still delegates to IBDataProvider internally so it doesn't
+    # reopen the Alpaca SDK connection — this flag is purely an off-switch.
+    _alpaca_enabled_env = os.environ.get("ENABLE_ALPACA_FALLBACK", "false").strip().lower()
+    _alpaca_enabled = _alpaca_enabled_env in {"1", "true", "yes", "on"}
+    if _alpaca_enabled:
+        alpaca_service = init_alpaca_service()
+        stock_service.set_alpaca_service(alpaca_service)  # DEPRECATED: Alpaca removed from trading path
+        print("Alpaca fallback ENABLED (legacy — flip ENABLE_ALPACA_FALLBACK=false to retire)")
+    else:
+        alpaca_service = None
+        print("Alpaca fallback DISABLED (IB-only). Phase 4 retirement active.")
     stock_service.set_db(db)  # Wire MongoDB for IB data queries
     market_context_service.set_db(db)  # Wire MongoDB for IB historical data
 

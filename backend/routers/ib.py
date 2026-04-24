@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import asyncio
+import os
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 from services.data_cache import get_data_cache
@@ -3210,7 +3211,10 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"IB quote error: {e}")
     
-    # 4. Alpaca (if configured)
+    # 4. Legacy stock_service fallback (Alpaca shim — only active when
+    # ENABLE_ALPACA_FALLBACK=true). When the flag is off _stock_service is
+    # still wired but has no Alpaca backend; the shim delegates to
+    # IBDataProvider, so the label here is accurate as "ib_shim".
     if not quote_fetched and _stock_service:
         try:
             quote = await _stock_service.get_quote(symbol)
@@ -3219,10 +3223,15 @@ async def get_comprehensive_analysis(symbol: str):
                 base_price = quote.get("price", base_price)
                 quote_fetched = True
                 analysis["data_freshness"] = "live"
-                analysis["data_source"] = "Alpaca"
+                _flag = os.environ.get("ENABLE_ALPACA_FALLBACK", "false").strip().lower()
+                analysis["data_source"] = (
+                    "Alpaca (legacy shim)"
+                    if _flag in {"1", "true", "yes", "on"}
+                    else "IB shim (via stock_service)"
+                )
                 analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
-            print(f"Alpaca quote error: {e}")
+            print(f"stock_service quote error: {e}")
     
     # 5. MongoDB last known price (STALE — from historical bars)
     if not quote_fetched:

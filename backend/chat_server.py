@@ -536,6 +536,60 @@ def _get_portfolio_context() -> dict:
     except Exception:
         pass
 
+    # 10.5. Live symbol snapshots (Phase 3 live-data pipeline)
+    # One-liner freshest-price + %change for held positions and key indices.
+    # Sourced from /api/live/symbol-snapshot (Windows pusher RPC + TTL cache).
+    # When pusher RPC is down the endpoint gracefully returns success=false —
+    # we silently skip those rows so the assistant doesn't hallucinate data.
+    try:
+        import requests as _live_req
+        _live_snapshot_targets: list = []
+        _snapshot_doc = db["ib_live_snapshot"].find_one(
+            {"_id": "current"}, {"_id": 0, "positions": 1}
+        )
+        _held = [
+            p.get("symbol")
+            for p in (_snapshot_doc or {}).get("positions", [])
+            if p.get("symbol")
+        ]
+        for _s in _held:
+            if _s and _s not in _live_snapshot_targets:
+                _live_snapshot_targets.append(_s)
+        for _idx in ("SPY", "QQQ", "IWM", "VIX"):
+            if _idx not in _live_snapshot_targets:
+                _live_snapshot_targets.append(_idx)
+        _snap_lines = []
+        for _sym in _live_snapshot_targets[:10]:
+            try:
+                _r = _live_req.get(
+                    f"http://127.0.0.1:8001/api/live/symbol-snapshot/{_sym}",
+                    timeout=2,
+                )
+                if _r.status_code == 200:
+                    _d = _r.json()
+                    if _d.get("success"):
+                        _price = _d.get("latest_price")
+                        _chg = _d.get("change_pct")
+                        _bar_ts = _d.get("latest_bar_time") or "unknown"
+                        _state = _d.get("market_state") or "?"
+                        _src = _d.get("source") or "?"
+                        if _price is not None and _chg is not None:
+                            _sign = "+" if _chg >= 0 else ""
+                            _snap_lines.append(
+                                f"  {_sym} ${_price:.2f} {_sign}{_chg:.2f}% "
+                                f"(bar {_bar_ts}, {_state}, {_src})"
+                            )
+            except Exception:
+                pass
+        if _snap_lines:
+            parts.append(
+                "Live Snapshots (Phase 3 live-data — IB pusher RPC, freshest "
+                "available prices for held + indices):\n"
+                + "\n".join(_snap_lines)
+            )
+    except Exception:
+        pass
+
     # 11. Technical indicators for held positions (RSI, VWAP, EMAs, squeeze, etc.)
     try:
         import requests
