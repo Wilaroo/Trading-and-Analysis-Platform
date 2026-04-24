@@ -461,6 +461,20 @@ async def get_chart_bars(
             continue
     normalised.sort(key=lambda r: r["time"])
 
+    # De-duplicate by `time` — chunked backfills occasionally emit two rows
+    # with the same second-resolution timestamp at session boundaries
+    # (last bar of chunk N == first bar of chunk N+1). Two identical times
+    # crash lightweight-charts on the frontend AND corrupt the EMA/BB
+    # windows here. Keep the *last* occurrence: the backfill walks
+    # backward, so later writes overwrite earlier ones with freshest data.
+    deduped: List[Dict[str, Any]] = []
+    for r in normalised:
+        if deduped and deduped[-1]["time"] == r["time"]:
+            deduped[-1] = r
+        else:
+            deduped.append(r)
+    normalised = deduped
+
     if not normalised:
         return {
             "success": False,
