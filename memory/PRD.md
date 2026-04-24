@@ -1,5 +1,71 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Phase 3 Live Data Foundation wired into remaining surfaces
+
+Fifth shipped phase of the live-data architecture. The primitives built in
+Phase 1 (`fetch_latest_session_bars` + `live_bar_cache`) and Phase 2
+(ref-counted subscriptions) are now plumbed into the consumer surfaces.
+
+### What shipped
+
+- **`services/live_symbol_snapshot.py`** (new) — one-liner freshest-price
+  service. `get_latest_snapshot(symbol, bar_size, *, active_view)` returns
+  a stable-shape dict `{success, latest_price, latest_bar_time, prev_close,
+  change_abs, change_pct, bar_size, bar_count, market_state, source,
+  fetched_at, error}`. Never raises. `get_snapshots_bulk(symbols, bar_size)`
+  caps at 20 symbols to prevent cache-stampede DoS.
+
+- **New endpoints** (`routers/live_data_router.py`):
+    * `GET  /api/live/symbol-snapshot/{symbol}`  — single-symbol snapshot
+    * `POST /api/live/symbol-snapshots`          — bulk snapshot, body `{symbols, bar_size}`
+    * `GET  /api/live/briefing-snapshot?symbols=` — ranked by `abs(change_pct)`,
+      failed snapshots pushed to the bottom. Default watchlist:
+      `SPY,QQQ,IWM,DIA,VIX`. Consumable by any briefing (morning / mid-day
+      / power-hour / close).
+
+- **Scanner intraday top-up** (`services/market_scanner_service.py`):
+  after the historical `get_bars` call, for `TradeStyle.INTRADAY` scans
+  we merge the latest-session bars via `fetch_latest_session_bars` (dedup
+  by timestamp, sort ascending). Silent no-op when pusher RPC is down —
+  scanner keeps working on historical data alone.
+
+- **Trade Journal immutable close snapshot** (`services/trade_journal.py`):
+  `close_trade` now persists `close_price_snapshot` on the trade document
+  — `{exit_price, captured_at, source, bar_ts, market_state, bar_size,
+  snapshot_price, snapshot_change_pct}`. Written ONCE at close; future
+  audits / drift analyses know exactly which data slice the trade
+  settled against. Snapshot failures are caught and recorded via
+  `snapshot_error` but never abort the close itself.
+
+### Deferred
+- **AI Chat context injection** (per Phase 3 plan): `chat_server.py` runs
+  as a separate proxy on port 8002; modifying its context builder was out
+  of scope for this session. The `/api/live/symbol-snapshot/{symbol}`
+  endpoint is now the hook point — the chat server can start consuming
+  it whenever the user wants to touch that surface.
+
+### Testing
+- **12 new pytest contracts** (`backend/tests/test_live_data_phase3.py`) —
+  snapshot shape stability, `change_pct` math, bulk 20-symbol cap, scanner
+  top-up invariants (intraday-only guard, dedup+sort), trade-journal
+  immutable-snapshot contract, graceful-degrade never-5xx invariant.
+  Full suite locally: 47/47 green (12 Phase 3 + 35 Phase 1+2 regression).
+- **`testing_agent_v3_fork` iteration_132**: 23/23 HTTP smoke tests pass
+  against the live backend. Zero bugs. Zero action items.
+
+### What this unblocks
+- **Phase 4** (retire Alpaca): nothing else depends on the Alpaca shim
+  now. Flip `ENABLE_ALPACA_FALLBACK=false`, soak 24h, then rip.
+- **`DataFreshnessBadge → Command Palette Inspector`** (P3): the
+  `/api/live/symbol-snapshot` + `/api/live/subscriptions` endpoints are
+  the two data sources the Inspector needs.
+- **Morning Briefing rich UI** (user TODO 2026-04-22): the new
+  `/api/live/briefing-snapshot` feeds the "top movers" row the richer
+  modal was supposed to have.
+- **AI Chat live context**: chat_server.py can consume
+  `/api/live/symbol-snapshot` whenever next touched.
+
+
 ## 2026-04-26 — Phase 2 Live Subscription Layer SHIPPED
 
 Tick-level dynamic watchlist end-to-end. Frontend components (ChartPanel,
