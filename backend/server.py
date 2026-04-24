@@ -876,6 +876,16 @@ def _init_all_services():
         init_hybrid_data_router(hybrid_data_service)
         register_service('hybrid_data_service', hybrid_data_service)
 
+        # Phase 1: Live-bar cache (Mongo TTL-backed) for pusher RPC path.
+        # Creates the `live_bar_cache` collection + TTL index. Safe no-op
+        # if ENABLE_LIVE_BAR_RPC=false — cache just goes unused.
+        try:
+            from services.live_bar_cache import init_live_bar_cache
+            init_live_bar_cache(db)
+            print("live_bar_cache initialised (phase-1 live data architecture)")
+        except Exception as _lbc_exc:
+            logger.warning("live_bar_cache init skipped: %s", _lbc_exc)
+
         # Stage 2b: SentCom Chart router (reuses hybrid_data_service for bars).
         # db is passed so the chart endpoint can overlay executed-trade markers.
         init_sentcom_chart_router(hybrid_data_service, db=db)
@@ -1418,6 +1428,13 @@ app.include_router(config_router)
 app.include_router(market_regime_router)
 app.include_router(sentcom_router)
 app.include_router(sentcom_chart_router)
+
+# Phase 1 — Live Data Architecture: pusher RPC + live-bar cache visibility
+try:
+    from routers.live_data_router import router as live_data_router
+    app.include_router(live_data_router)
+except Exception as _ldr_exc:
+    logger.warning("live_data_router failed to register: %s", _ldr_exc)
 # Safety guardrails — kill-switch, exposure caps, emergency flatten-all
 from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)

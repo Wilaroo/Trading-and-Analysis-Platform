@@ -18,6 +18,7 @@ Features:
 """
 
 import argparse
+import os
 import time
 import logging
 import requests
@@ -361,16 +362,25 @@ class IBHistoricalCollector:
             # of the same (symbol, bar_size) don't pay the 15s identical-
             # request tax. See IBPacingManager._key docstring.
             raw_end_date = request.get("end_date", "") or ""
-            # ---- 2026-04-25 walkback fix ---------------------------------
-            # IB's reqHistoricalData wants endDateTime as "YYYYMMDD HH:MM:SS"
-            # (space between date and time). The backend planner used to
-            # emit a hyphen ("20260423-16:00:00") which IB rejects. Normalise
-            # here so legacy queue rows work without a DB migration.
-            # Also accept a trailing " UTC" / " US/Eastern" timezone.
+            # ---- 2026-04-25 walkback fix + 2026-04-26 IB 2174 format --
+            # IB's reqHistoricalData accepts either:
+            #   space form:  "YYYYMMDD HH:MM:SS[ UTC]"      (legacy, works today)
+            #   hyphen form: "YYYYMMDD-HH:MM:SS[ UTC]"      (newer, preferred;
+            #                                                silences Warning 2174)
+            # The backend planner emits one format (driven by env
+            # IB_ENDDATE_FORMAT). This collector normalizes to whichever form
+            # the collector is configured for so legacy queue rows still work
+            # across a rolling env change — no DB migration needed.
+            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "space").strip().lower()
             end_date = raw_end_date.strip()
-            if end_date:
-                # Split hyphen form: "YYYYMMDD-HH:MM:SS[ TZ]" -> "YYYYMMDD HH:MM:SS[ TZ]"
-                if len(end_date) >= 9 and end_date[8] == "-":
+            if end_date and len(end_date) >= 9:
+                # Current separator between date and time is at index 8
+                sep = end_date[8]
+                if _fmt == "hyphen" and sep == " ":
+                    # Flip space -> hyphen (preferred form)
+                    end_date = end_date[:8] + "-" + end_date[9:]
+                elif _fmt != "hyphen" and sep == "-":
+                    # Flip hyphen -> space (legacy form)
                     end_date = end_date[:8] + " " + end_date[9:]
             if not self.pacing.can_make_request(symbol, bar_size, duration, end_date):
                 wait = self.pacing.wait_time(symbol, bar_size, duration, end_date)

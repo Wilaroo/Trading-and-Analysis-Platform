@@ -1,0 +1,111 @@
+"""
+Live Data Router — Phase 1 endpoints for pusher RPC visibility.
+
+Exposes:
+    GET  /api/live/pusher-rpc-health   - status of DGX -> pusher RPC channel
+    GET  /api/live/latest-bars         - on-demand latest-session bars
+    GET  /api/live/quote-snapshot      - on-demand IB quote snapshot
+    POST /api/live/cache-invalidate    - purge a symbol from live_bar_cache
+
+Meant for operators + frontend DataFreshnessInspector (future P3).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+
+from services.hybrid_data_service import get_hybrid_data_service
+from services.ib_pusher_rpc import get_pusher_rpc_client
+from services.live_bar_cache import (
+    classify_market_state,
+    get_live_bar_cache,
+    ttl_for_state,
+)
+
+router = APIRouter(prefix="/api/live", tags=["live-data"])
+
+
+@router.get("/pusher-rpc-health")
+async def pusher_rpc_health() -> Dict[str, Any]:
+    """
+    Probe the Windows pusher RPC endpoint and return its health plus the
+    DGX-side configuration (env flag, URL, failure counter).
+    """
+    client = get_pusher_rpc_client()
+    client_status = client.status()
+
+    remote_health = None
+    if client.is_configured():
+        remote_health = await asyncio.to_thread(client.health)
+
+    return {
+        "client": client_status,
+        "remote": remote_health,
+        "reachable": remote_health is not None,
+        "market_state": classify_market_state(),
+    }
+
+
+@router.get("/latest-bars")
+async def latest_bars(
+    symbol: str = Query(..., min_length=1, max_length=12),
+    bar_size: str = Query("5 mins"),
+    active_view: bool = Query(False),
+    use_rth: bool = Query(False),
+) -> Dict[str, Any]:
+    service = get_hybrid_data_service()
+    if service is None:
+        raise HTTPException(status_code=503, detail="hybrid_data_service not initialised")
+    res = await service.fetch_latest_session_bars(
+        symbol,
+        bar_size,
+        active_view=active_view,
+        use_rth=use_rth,
+    )
+    return res
+
+
+@router.get("/quote-snapshot")
+async def quote_snapshot(
+    symbol: str = Query(..., min_length=1, max_length=12),
+) -> Dict[str, Any]:
+    client = get_pusher_rpc_client()
+    if not client.is_configured():
+        return {"success": False, "error": "pusher_rpc_disabled_or_unconfigured"}
+    quote = await asyncio.to_thread(client.quote_snapshot, symbol)
+    return {"success": quote is not None, "symbol": symbol.upper(), "quote": quote}
+
+
+@router.post("/cache-invalidate")
+async def cache_invalidate(
+    symbol: str = Query(..., min_length=1, max_length=12),
+    bar_size: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    cache = get_live_bar_cache()
+    if cache is None or cache._col is None:  # noqa: SLF001 - internal
+        return {"success": False, "deleted": 0, "error": "cache_not_initialised"}
+    q: Dict[str, Any] = {"symbol": symbol.upper()}
+    if bar_size:
+        q["bar_size"] = bar_size
+    try:
+        n = cache._col.delete_many(q).deleted_count  # noqa: SLF001
+        return {"success": True, "deleted": int(n), "query": q}
+    except Exception as exc:
+        return {"success": False, "deleted": 0, "error": str(exc)}
+
+
+@router.get("/ttl-plan")
+async def ttl_plan() -> Dict[str, Any]:
+    """Show the TTL plan per market state — useful for operator debugging."""
+    state = classify_market_state()
+    return {
+        "market_state": state,
+        "ttl_by_state": {
+            s: ttl_for_state(s, active_view=False) for s in
+            ("rth", "extended", "overnight", "weekend")
+        },
+        "ttl_active_view": ttl_for_state(state, active_view=True),
+    }

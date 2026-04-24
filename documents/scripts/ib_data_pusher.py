@@ -1056,6 +1056,16 @@ class IBDataPusher:
         logger.info(f"  Symbols: {symbols}")
         logger.info(f"  Level 2: {'Enabled' if enable_level2 and self.level2_enabled else 'Disabled'}")
         logger.info(f"  Cloudflare Evasion: ENABLED (browser headers + retry logic)")
+
+        # Phase 1: Live-data RPC server (optional — silently skipped if
+        # fastapi/uvicorn not installed). Exposes /rpc/latest-bars so DGX
+        # backend can pull fresh bars on-demand (extended hours, weekends).
+        rpc_host = os.environ.get("IB_PUSHER_RPC_HOST", "0.0.0.0")
+        try:
+            rpc_port = int(os.environ.get("IB_PUSHER_RPC_PORT", "8765"))
+        except ValueError:
+            rpc_port = 8765
+        start_rpc_server(self, rpc_host, rpc_port)
         
         # Subscribe to market data
         logger.info("Subscribing to market data...")
@@ -1243,6 +1253,16 @@ class IBDataPusher:
         current_mode = "trading"  # Start in trading mode
         mode_check_interval = 30  # Check cloud for mode changes every 30 seconds
         last_mode_check = 0
+
+        # Phase 1: Live-data RPC server — start once here so /rpc endpoints
+        # are available regardless of current mode. Silently skipped when
+        # fastapi/uvicorn are not installed on Windows.
+        rpc_host = os.environ.get("IB_PUSHER_RPC_HOST", "0.0.0.0")
+        try:
+            rpc_port = int(os.environ.get("IB_PUSHER_RPC_PORT", "8765"))
+        except ValueError:
+            rpc_port = 8765
+        start_rpc_server(self, rpc_host, rpc_port)
         
         # Subscribe to market data initially (for trading mode)
         logger.info("Subscribing to market data...")
@@ -2596,6 +2616,167 @@ class IBDataPusher:
         except Exception as e:
             # Don't let cloud errors stop collection
             logger.warning(f"[HistoricalData] Cloud report error for {symbol}: {e} - continuing")
+
+
+# ============================================================================
+# Phase 1 — Live Data Architecture: On-demand RPC server
+# ============================================================================
+#
+# Spins up a FastAPI server in a background thread alongside the push loop.
+# The DGX backend calls these endpoints (via services/ib_pusher_rpc.py) to
+# fetch the freshest IB data on-demand — latest-session bars, quote snapshots,
+# health — without needing to open its own IB connection (DGX cannot reach
+# 127.0.0.1:4002 on Windows).
+#
+# The endpoints dispatch coroutines to the ib_insync asyncio event loop via
+# `asyncio.run_coroutine_threadsafe`, which is the ONLY safe way to call
+# IB methods from another thread (ib_insync is asyncio-bound, not thread-safe).
+#
+# Requires fastapi + uvicorn on the Windows machine:
+#   pip install fastapi uvicorn
+# If missing, the RPC server is skipped and the pusher keeps working in
+# push-only mode (backward compatible).
+# ============================================================================
+
+def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
+    """
+    Start the RPC FastAPI server in a background daemon thread. Returns
+    True if launched, False if the server could not be started (missing
+    dependencies, port conflict, etc.). Never raises.
+    """
+    try:
+        from fastapi import FastAPI, HTTPException
+        from pydantic import BaseModel
+        import uvicorn
+        import threading as _threading
+        from ib_insync import util as _ibu, Stock as _Stock
+    except Exception as exc:
+        logger.warning("[RPC] dependencies missing (fastapi/uvicorn/ib_insync): %s", exc)
+        logger.warning("[RPC] run `pip install fastapi uvicorn` on Windows to enable RPC mode")
+        return False
+
+    app = FastAPI(title="IB Pusher RPC", version="1.0.0")
+
+    class LatestBarsRequest(BaseModel):
+        symbol: str
+        bar_size: str = "5 mins"
+        duration: str = "1 D"
+        use_rth: bool = False
+        what_to_show: str = "TRADES"
+
+    class QuoteRequest(BaseModel):
+        symbol: str
+
+    def _get_ib_loop():
+        """Return the asyncio loop ib_insync is bound to."""
+        try:
+            return _ibu.getLoop()
+        except Exception:
+            return None
+
+    def _run_on_ib_loop(coro, timeout: float):
+        """Dispatch a coroutine to the IB event loop from a different thread."""
+        loop = _get_ib_loop()
+        if loop is None:
+            raise RuntimeError("IB event loop not available")
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        return fut.result(timeout=timeout)
+
+    @app.get("/rpc/health")
+    def rpc_health():
+        push_age = None
+        if pusher.last_push_time:
+            push_age = round(time.time() - pusher.last_push_time, 2)
+        return {
+            "ok": True,
+            "ib_connected": bool(pusher.ib.isConnected()),
+            "client_id": pusher.client_id,
+            "last_push_age_s": push_age,
+            "quotes_tracked": len(pusher.quotes_buffer),
+            "positions_tracked": len(pusher.positions_data),
+            "rpc_host": host,
+            "rpc_port": port,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    @app.post("/rpc/latest-bars")
+    def rpc_latest_bars(req: LatestBarsRequest):
+        if not pusher.ib.isConnected():
+            raise HTTPException(status_code=503, detail="IB Gateway not connected")
+        symbol = req.symbol.upper().strip()
+        if not symbol:
+            raise HTTPException(status_code=400, detail="symbol required")
+        try:
+            contract = _Stock(symbol, "SMART", "USD")
+
+            async def _fetch():
+                await pusher.ib.qualifyContractsAsync(contract)
+                bars = await pusher.ib.reqHistoricalDataAsync(
+                    contract,
+                    endDateTime="",               # latest slice
+                    durationStr=req.duration,
+                    barSizeSetting=req.bar_size,
+                    whatToShow=req.what_to_show,
+                    useRTH=req.use_rth,
+                    formatDate=1,
+                )
+                return bars
+
+            bars = _run_on_ib_loop(_fetch(), timeout=18.0)
+            out = []
+            for b in bars or []:
+                # ib_insync BarData -> dict (ISO for date)
+                dt = getattr(b, "date", None)
+                if hasattr(dt, "isoformat"):
+                    dt_iso = dt.isoformat()
+                else:
+                    dt_iso = str(dt) if dt is not None else ""
+                out.append({
+                    "date": dt_iso,
+                    "open": float(b.open) if b.open is not None else None,
+                    "high": float(b.high) if b.high is not None else None,
+                    "low": float(b.low) if b.low is not None else None,
+                    "close": float(b.close) if b.close is not None else None,
+                    "volume": int(b.volume) if b.volume is not None else 0,
+                    "bar_size": req.bar_size,
+                    "symbol": symbol,
+                })
+            return {
+                "success": True,
+                "symbol": symbol,
+                "bar_size": req.bar_size,
+                "bar_count": len(out),
+                "bars": out,
+                "fetched_at": datetime.now().isoformat(),
+            }
+        except Exception as exc:
+            logger.warning("[RPC] latest-bars %s failed: %s", symbol, exc)
+            return {"success": False, "symbol": symbol, "error": str(exc), "bars": []}
+
+    @app.post("/rpc/quote-snapshot")
+    def rpc_quote_snapshot(req: QuoteRequest):
+        symbol = req.symbol.upper().strip()
+        q = pusher.quotes_buffer.get(symbol)
+        if q:
+            return {"success": True, "symbol": symbol, "quote": q, "source": "live_buffer"}
+        # Not in buffer — we do NOT subscribe on demand (would pollute the
+        # subscription list). Caller should use /rpc/latest-bars for a
+        # close price instead.
+        return {"success": False, "symbol": symbol, "error": "symbol_not_subscribed"}
+
+    def _run_uvicorn():
+        try:
+            uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+        except Exception as exc:
+            logger.error("[RPC] uvicorn server crashed: %s", exc)
+
+    t = _threading.Thread(target=_run_uvicorn, name="ib-pusher-rpc", daemon=True)
+    t.start()
+    logger.info("=" * 55)
+    logger.info(f"  [RPC] Server listening on http://{host}:{port}")
+    logger.info(f"  [RPC] Endpoints: /rpc/health, /rpc/latest-bars, /rpc/quote-snapshot")
+    logger.info("=" * 55)
+    return True
 
 
 def main():

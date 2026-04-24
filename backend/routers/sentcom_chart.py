@@ -442,6 +442,35 @@ async def get_chart_bars(
             "error": result.error,
         }
 
+    # ---- Phase 1: merge latest-session bars via pusher RPC --------------
+    # For intraday timeframes we ask the Windows pusher for the freshest
+    # slice IB has (extended hours included). The dedup pass below merges
+    # the seam — if the historical collector already stored the same bars
+    # this becomes a no-op. When the pusher RPC is disabled / unreachable
+    # (feature flag off, Windows PC down, etc.), we silently fall through
+    # to the historical-only result.
+    live_appended = 0
+    live_source = None
+    live_market_state = None
+    try:
+        tf_cfg = _hybrid_data_service.TIMEFRAMES.get(tf)
+        live_bar_size = tf_cfg.get("ib_bar_size") if tf_cfg else None
+        if live_bar_size and tf in {"1min", "5min", "15min", "1hour"}:
+            live_res = await _hybrid_data_service.fetch_latest_session_bars(
+                symbol.upper(),
+                live_bar_size,
+                active_view=True,  # /chart calls ARE active-view
+                use_rth=False,
+            )
+            if live_res.get("success"):
+                live_bars = live_res.get("bars") or []
+                result.bars.extend(live_bars)
+                live_appended = len(live_bars)
+                live_source = live_res.get("source")
+                live_market_state = live_res.get("market_state")
+    except Exception as _live_exc:
+        logger.info("live-bars merge skipped: %s", _live_exc)
+
     # Normalise + sort
     normalised: List[Dict[str, Any]] = []
     for b in result.bars:
@@ -520,6 +549,10 @@ async def get_chart_bars(
         "latest_available_date": getattr(result, "latest_available_date", None),
         "partial": bool(getattr(result, "partial", False)),
         "coverage": getattr(result, "coverage", None),
+        # Phase 1: live-bar overlay observability
+        "live_appended": live_appended,
+        "live_source": live_source,
+        "market_state": live_market_state,
         "indicators": {
             "vwap": _as_series(times, vwap),
             "ema_20": _as_series(times, ema_20),

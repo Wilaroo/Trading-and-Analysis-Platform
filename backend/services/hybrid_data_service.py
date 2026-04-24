@@ -584,6 +584,121 @@ class HybridDataService:
         
         return list(self._bars_collection.aggregate(pipeline))
     
+    # ------------------------------------------------------------------
+    # Phase 1 — Live Data Architecture
+    # On-demand latest-session fetch via Windows pusher RPC + TTL cache.
+    # ------------------------------------------------------------------
+
+    # Bar-size → IB duration to request for a "latest session" slice.
+    # Values are deliberately modest (1-2 D) because this path is meant to
+    # TOP UP the historical Mongo store with the most recent bars, not
+    # replace the backfill collectors.
+    _LATEST_SESSION_DURATION = {
+        "1 min": "1 D",
+        "5 mins": "2 D",
+        "15 mins": "5 D",
+        "30 mins": "5 D",
+        "1 hour": "10 D",
+        "1 day": "1 M",
+    }
+
+    async def fetch_latest_session_bars(
+        self,
+        symbol: str,
+        bar_size: str,
+        *,
+        active_view: bool = False,
+        use_rth: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Return the freshest available bars for (symbol, bar_size) by asking
+        the Windows pusher RPC. Uses `live_bar_cache` to avoid hammering IB
+        during rapid multi-panel refreshes.
+
+        Returns:
+            {
+                success: bool,
+                bars: [...],
+                source: "cache" | "pusher_rpc" | "none",
+                market_state: "rth" | "extended" | "overnight" | "weekend",
+                fetched_at: ISO ts,
+                cache_hit: bool,
+            }
+        """
+        from .ib_pusher_rpc import get_pusher_rpc_client
+        from .live_bar_cache import (
+            classify_market_state,
+            get_live_bar_cache,
+        )
+
+        symbol_u = symbol.upper()
+        state = classify_market_state()
+        cache = get_live_bar_cache()
+
+        # 1) Cache lookup
+        if cache is not None:
+            cached = cache.get(symbol_u, bar_size)
+            if cached:
+                return {
+                    "success": True,
+                    "bars": cached.get("bars", []),
+                    "source": "cache",
+                    "market_state": cached.get("market_state", state),
+                    "fetched_at": cached.get("fetched_at"),
+                    "cache_hit": True,
+                }
+
+        # 2) Cache miss — call pusher RPC (sync client, wrap in to_thread)
+        rpc = get_pusher_rpc_client()
+        if not rpc.is_configured():
+            return {
+                "success": False,
+                "bars": [],
+                "source": "none",
+                "market_state": state,
+                "cache_hit": False,
+                "error": "pusher_rpc_disabled_or_unconfigured",
+            }
+
+        duration = self._LATEST_SESSION_DURATION.get(bar_size, "1 D")
+        bars = await asyncio.to_thread(
+            rpc.latest_bars,
+            symbol_u,
+            bar_size,
+            duration,
+            use_rth,
+        )
+
+        if bars is None:
+            return {
+                "success": False,
+                "bars": [],
+                "source": "none",
+                "market_state": state,
+                "cache_hit": False,
+                "error": "pusher_rpc_unreachable",
+            }
+
+        # 3) Cache it
+        cached_doc = None
+        if cache is not None:
+            cached_doc = cache.put(
+                symbol_u,
+                bar_size,
+                bars,
+                active_view=active_view,
+                market_state=state,
+            )
+
+        return {
+            "success": True,
+            "bars": bars,
+            "source": "pusher_rpc",
+            "market_state": state,
+            "fetched_at": (cached_doc or {}).get("fetched_at"),
+            "cache_hit": False,
+        }
+
     async def clear_cache(self, symbol: str = None, timeframe: str = None) -> Dict[str, Any]:
         """Clear cached data"""
         if self._bars_collection is None:

@@ -1,5 +1,98 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Phase 1 Live Data Architecture SHIPPED + IB 2174 fix
+
+Foundation for "always-on live data across the entire app" is in. The Windows
+pusher now exposes an RPC surface that the DGX backend can call on-demand
+(weekends, after-hours, active-view refreshes) without opening its own IB
+connection. A Mongo-backed `live_bar_cache` with dynamic TTLs keeps multi-
+panel refreshes cheap while still being aggressive about off-hours refetch.
+
+### New components
+- **`/app/documents/scripts/ib_data_pusher.py` → `start_rpc_server(...)`**
+  FastAPI+uvicorn in a daemon thread. Three endpoints:
+    * `GET  /rpc/health`          — IB connection + push age + client_id
+    * `POST /rpc/latest-bars`     — `{symbol, bar_size, duration, use_rth}`
+    * `POST /rpc/quote-snapshot`  — read-through on `quotes_buffer`
+  Thread-safety: dispatches `reqHistoricalDataAsync` to the ib_insync asyncio
+  loop via `asyncio.run_coroutine_threadsafe` — ib_insync is asyncio-bound
+  and NOT thread-safe; calling it directly from a FastAPI handler thread
+  would race-crash. Silently skipped if fastapi/uvicorn are not installed
+  on Windows (backward-compatible).
+  Env: `IB_PUSHER_RPC_HOST` (default 0.0.0.0), `IB_PUSHER_RPC_PORT` (default 8765).
+
+- **`/app/backend/services/ib_pusher_rpc.py`** — DGX HTTP client.
+  Env-flagged (`ENABLE_LIVE_BAR_RPC`=true/false, `IB_PUSHER_RPC_URL`).
+  Sync interface (wrap in `asyncio.to_thread`). Every error path returns
+  None instead of raising — callers must treat None as "fall back to cache".
+
+- **`/app/backend/services/live_bar_cache.py`** — Mongo TTL cache.
+  Collection: `live_bar_cache`. TTL index on `expires_at` so Mongo auto-purges.
+  Dynamic TTL by market state:
+    * RTH: 30s     * Extended (pre/post): 120s
+    * Overnight: 900s    * Weekend: 3600s
+    * Active-view override: always 30s (user is live-watching this symbol)
+  `classify_market_state()` uses America/New_York offset (no holiday calendar
+  here — holidays round to "overnight" safely).
+
+- **`/app/backend/routers/live_data_router.py`** — operator surface.
+  `GET  /api/live/pusher-rpc-health` · `GET /api/live/latest-bars` ·
+  `GET  /api/live/quote-snapshot`   · `GET /api/live/ttl-plan`        ·
+  `POST /api/live/cache-invalidate`.
+
+- **`HybridDataService.fetch_latest_session_bars(symbol, bar_size, *,
+  active_view, use_rth)`** — the one call site for the whole pipeline.
+  Cache-first → pusher RPC → cache store. Never raises.
+
+- **`/api/sentcom/chart`** now merges live-session bars for intraday
+  timeframes. Returns `live_appended`, `live_source`, `market_state` for
+  observability. The existing dedup pass handles the collector↔live seam.
+
+### Regression protection
+- `backend/tests/test_live_data_phase1.py` — 11 pytest contracts locking:
+  market-state classification (weekend/RTH/extended/overnight), TTL
+  hierarchy (active-view ⊂ RTH ⊂ extended ⊂ overnight ⊂ weekend), RPC
+  client no-raise fall-through (missing URL / flag off / unreachable),
+  `fetch_latest_session_bars` graceful degradation, pusher has
+  `start_rpc_server`, all three RPC routes declared, thread-safe
+  coroutine dispatch, env-configurable port.
+- `backend/tests/test_collector_uses_end_date.py` — extended from 4→4 tests
+  locking the new env-gated space/hyphen format behavior. Both formats now
+  pass `_normalizes_both_date_formats` and `_is_env_gated_and_supports_both_formats`.
+
+### IB Warning 2174 fix (same session, env-gated)
+New env var `IB_ENDDATE_FORMAT=space|hyphen` (default `space`). When set to
+`hyphen`, both the backend planner (strftime call sites at lines ~1330 and
+~2546) and the Windows collector (queue-row normalization at line ~370)
+emit the new IB-preferred form `"YYYYMMDD-HH:MM:SS UTC"`. Default stays
+`space` to avoid regressing the 2026-04-25 walkback fix until the user
+tests hyphen on their live IB Gateway.
+
+### Operator usage on Windows
+1. `git pull` on outer repo.
+2. `pip install fastapi uvicorn` (if not already installed).
+3. Optionally: `setx IB_PUSHER_RPC_PORT 8765` (default) / `setx IB_ENDDATE_FORMAT hyphen` (to silence 2174).
+4. Restart the pusher. Log line: `[RPC] Server listening on http://0.0.0.0:8765`.
+
+### Operator usage on DGX
+1. `git pull`.
+2. Set env: `IB_PUSHER_RPC_URL=http://192.168.50.1:8765`, `ENABLE_LIVE_BAR_RPC=true`.
+3. Restart backend. Verify via `curl /api/live/pusher-rpc-health` (reachable=true).
+4. Chart endpoints automatically start merging live bars.
+
+### What this unblocks (remaining plan)
+- Phase 2 (live subscription layer, tick-level): the RPC channel is ready to
+  host `/rpc/subscribe` + `/rpc/unsubscribe` endpoints next.
+- Phase 3 (Scanner / Briefings / AI Chat): can call
+  `fetch_latest_session_bars` directly — zero wiring needed beyond a single
+  `await` call.
+- Phase 4 (retire Alpaca): `/api/ib/analysis/{symbol}` still has the
+  Alpaca label path — flip `ENABLE_ALPACA_FALLBACK=false` once Phase 3 is
+  verified running for 24h on the user's DGX.
+- DataFreshnessBadge → Command Palette (P3): `live_bar_cache` collection +
+  `/api/live/ttl-plan` are the data sources for the Inspector panel.
+
+
 ## Backlog — DataFreshnessBadge → Command Palette evolution (P2, post-Phase-3)
 
 **Concrete spec** for when the live-data foundation is in place:

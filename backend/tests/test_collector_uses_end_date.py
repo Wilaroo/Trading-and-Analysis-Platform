@@ -5,6 +5,9 @@ every walkback chunk re-fetches the same latest window and IB throttles with
 the 15s "identical request" rule. This silently broke a 21k-request backfill
 for ~36 hours on 2026-04-24.
 
+2026-04-26: widened to allow either "space" (legacy, default) or "hyphen"
+(newer, silences IB Warning 2174) format via env flag IB_ENDDATE_FORMAT.
+
 These contracts don't import ib_insync (not available on the DGX), they
 parse the collector source instead. Fast, deterministic, no network.
 """
@@ -29,12 +32,10 @@ def test_collector_reqhistoricaldata_uses_end_date():
     NOT a hardcoded empty string. If this regresses, chunk walkback breaks."""
     src = _read(COLLECTOR_PATH)
 
-    # Find the reqHistoricalData call
     m = re.search(r"reqHistoricalData\((?P<body>.*?)\)", src, re.DOTALL)
     assert m, "reqHistoricalData call not found in collector"
     body = m.group("body")
 
-    # Must pass endDateTime=end_date (variable), NOT endDateTime="" literal.
     assert 'endDateTime=""' not in body, (
         "REGRESSION: collector hardcodes endDateTime=\"\" — walkback is broken. "
         "Pass the queue row's end_date through instead."
@@ -44,31 +45,43 @@ def test_collector_reqhistoricaldata_uses_end_date():
     )
 
 
-def test_collector_normalizes_hyphen_end_date_to_space():
-    """IB's TWS API requires endDateTime in 'YYYYMMDD HH:MM:SS' form. Legacy
-    queue rows stored a hyphen; the collector must normalize before the call."""
+def test_collector_normalizes_both_date_formats():
+    """Collector must support BOTH formats via IB_ENDDATE_FORMAT env:
+       space form (legacy, default):  'YYYYMMDD HH:MM:SS'
+       hyphen form (newer, 2174 fix): 'YYYYMMDD-HH:MM:SS'
+    The normalization block must flip queue rows into the configured form
+    so legacy/new rows coexist across a rolling env change."""
     src = _read(COLLECTOR_PATH)
-    # Look for the normalization logic: replace hyphen at index 8 with a space.
-    assert 'end_date[8] == "-"' in src, (
-        "collector must tolerate legacy hyphen-form end_date rows in the queue"
+    # Env-driven format selection
+    assert 'IB_ENDDATE_FORMAT' in src, (
+        "collector must read IB_ENDDATE_FORMAT env var to gate space/hyphen format"
+    )
+    # Must still reference the char-index-8 separator (date/time boundary)
+    assert 'end_date[8]' in src, (
+        "collector must inspect end_date[8] (date/time separator) to normalise"
+    )
+    # Both substitutions must appear: '-' -> ' ' (legacy path) and ' ' -> '-'
+    # (preferred path). Exact code shape may differ but both substrings exist.
+    assert 'end_date[:8] + "-" + end_date[9:]' in src, (
+        "collector must be able to flip space -> hyphen when IB_ENDDATE_FORMAT=hyphen"
     )
     assert 'end_date[:8] + " " + end_date[9:]' in src, (
-        "hyphen -> space normalization must occur before reqHistoricalData"
+        "collector must be able to flip hyphen -> space (legacy path)"
     )
 
 
-def test_backend_planner_emits_space_format_end_date():
-    """Backend planner must emit 'YYYYMMDD HH:MM:SS' (space), not hyphen form."""
+def test_backend_planner_is_env_gated_and_supports_both_formats():
+    """Planner must read IB_ENDDATE_FORMAT and emit matching strftime."""
     src = _read(BACKEND_PLANNER_PATH)
-    assert '"%Y%m%d %H:%M:%S"' in src, (
-        "planner must strftime('%Y%m%d %H:%M:%S') — space-separated, IB-native"
+    assert 'IB_ENDDATE_FORMAT' in src, (
+        "planner must read IB_ENDDATE_FORMAT env var to choose date format"
     )
-    # The old hyphen form should no longer be used for enqueueing walkbacks.
-    # (It may still appear in comments or unrelated log lines; restrict match
-    # to actual strftime calls to avoid false positives.)
-    bad = re.findall(r'strftime\(\s*"[^"]*%Y%m%d-%H:%M:%S[^"]*"', src)
-    assert not bad, (
-        f"planner still produces hyphen-form end_date via strftime: {bad}"
+    # Both strftime patterns must be present (env selects which runs)
+    assert '"%Y%m%d %H:%M:%S"' in src, (
+        "planner must support space-format strftime (legacy / default)"
+    )
+    assert '"%Y%m%d-%H:%M:%S"' in src, (
+        "planner must support hyphen-format strftime (IB 2174 preferred)"
     )
 
 
