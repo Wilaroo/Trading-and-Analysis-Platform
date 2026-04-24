@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://finbert-scheduler.preview.emergentagent.com"
+        api_url = "https://always-on-data.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",
