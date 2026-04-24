@@ -3332,3 +3332,95 @@ def queue_sample(
     except Exception as e:
         logger.error(f"Error in queue-sample: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/purge-stale-gap-requests")
+def purge_stale_gap_requests(
+    older_than_days: int = 7,
+    prefix: str = "gap_",
+    dry_run: bool = True,
+):
+    """
+    Delete orphan historical-data requests that were enqueued by an older
+    code path and are now just wasting collector capacity.
+
+    Context (2026-04-25): the pending queue contained 21k+ rows with
+    `request_id` prefix `gap_*` created on 2026-03-17. That prefix isn't
+    produced by any current code path — they're orphans from a superseded
+    enqueuer that never set `end_date`. Every time the collectors wake
+    they re-fetch the same "now-back" window for these rows, IB throttles
+    them as identical requests, and the real `hist_*` walkback chunks
+    produced by smart_backfill barely get a chance to run.
+
+    Defaults to `dry_run=True` so you can preview counts before deleting.
+    Runs a broad-prefix match (default `gap_`) so you can also target
+    any other legacy prefix if needed.
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        coll = db["historical_data_requests"]
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+
+        # Anchor on request_id prefix + status=pending + created_at older than cutoff.
+        # We deliberately exclude claimed/completed so we don't disturb in-flight work.
+        filt = {
+            "request_id": {"$regex": f"^{prefix}"},
+            "status": "pending",
+            "created_at": {"$lt": cutoff},
+        }
+
+        matched = coll.count_documents(filt)
+
+        # Breakdown so you can see what you'd delete before pulling the trigger.
+        pipeline = [
+            {"$match": filt},
+            {"$group": {
+                "_id": {"bar_size": "$bar_size", "duration": "$duration"},
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 20},
+        ]
+        breakdown = [
+            {"bar_size": r["_id"].get("bar_size"),
+             "duration": r["_id"].get("duration"),
+             "count": r["count"]}
+            for r in coll.aggregate(pipeline)
+        ]
+
+        deleted = 0
+        if not dry_run:
+            res = coll.delete_many(filt)
+            deleted = res.deleted_count
+            logger.info(
+                f"[purge-stale] deleted {deleted} orphan pending rows "
+                f"(prefix={prefix!r}, older_than_days={older_than_days})"
+            )
+
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "prefix": prefix,
+            "older_than_days": older_than_days,
+            "cutoff_iso": cutoff,
+            "matched": matched,
+            "deleted": deleted,
+            "breakdown_by_barsize_duration": breakdown,
+            "next_step": (
+                "Call POST /api/ib-collector/smart-backfill to enqueue fresh "
+                "walkback chunks with proper end_date anchors."
+                if not dry_run else
+                "Re-call with dry_run=false to actually delete."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in purge-stale-gap-requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
