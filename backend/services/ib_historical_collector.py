@@ -2429,6 +2429,39 @@ class IBHistoricalCollector:
         now_dt = datetime.now(timezone.utc)
         now_iso = now_dt.isoformat()
 
+        # 0) RESUME: re-queue transient failures before planning, so chunks
+        # that were stuck-claimed and auto-cleared during a collector crash
+        # get picked up where they left off. Without this, a symbol whose
+        # chunk-1 (latest) succeeded but chunks 2-8 (historical) were auto-
+        # cleared would be skipped as "fresh" on re-click and permanently
+        # lose the middle history. Dedup on (pending|claimed) below prevents
+        # double-queueing — the retried items become `pending` before the
+        # new planning loop runs.
+        #
+        # Only retry ERRORS that look TRANSIENT. Permanent failures like
+        # "Symbol not available on any exchange" stay failed (cheap to skip).
+        retry_filter = {
+            "status": "failed",
+            "error": {"$regex": "Auto-cleared|pacing|timeout|connection",
+                      "$options": "i"},
+        }
+        if tier_filter:
+            # If caller filtered to a tier, don't touch failures outside it.
+            # Skip this filter scope — we don't know tier membership of a
+            # raw queue doc without a join. Safe default: only apply tier
+            # scope to planning, but retry all matching transient failures.
+            pass
+        retried_stuck = 0
+        if not dry_run:
+            res = queue.update_many(
+                retry_filter,
+                {"$set": {"status": "pending", "claimed_at": None,
+                          "completed_at": None, "error": None,
+                          "retry_count_auto_cleared": 1,
+                          "last_retried_at": now_iso}},
+            )
+            retried_stuck = res.modified_count
+
         # 1) Classify qualified symbols by dollar-volume tier (fallback to
         # stored `tier` field if the doc has it, from rebuild_adv_from_ib).
         min_dv = self.DOLLAR_VOL_THRESHOLDS["investment"]
