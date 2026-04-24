@@ -1,5 +1,72 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Top Movers tile + Phase 4 Alpaca retirement + AI Chat live snapshots
+
+Three follow-ups on top of the Phase 1–3 live-data foundation:
+
+### 1. TopMoversTile (V5 HUD)
+`frontend/src/components/sentcom/v5/TopMoversTile.jsx` — compact row
+rendered just below `PipelineHUDV5` in SentComV5View. Reads
+`/api/live/briefing-snapshot?symbols=SPY,QQQ,IWM,DIA,VIX` every 30s
+(aligned with the RTH TTL in `live_bar_cache`). Failed snapshots are
+silently filtered — when the pusher is offline the tile shows a
+non-alarming *"no live data (pusher offline or pre-trade)"* line.
+Symbols are clickable → routes through the existing
+`handleOpenTicker` → EnhancedTickerModal. `data-testid`s exposed for
+test automation (`top-movers-tile`, `top-movers-symbol-<SYM>`,
+`top-movers-empty`, `top-movers-error`, `top-movers-market-state`).
+
+### 2. Phase 4 — Alpaca retirement (env-gated, default OFF)
+- New env var `ENABLE_ALPACA_FALLBACK` (default `"false"`).
+- `server.py` now gates `init_alpaca_service()` + the chain of
+  `stock_service.set_alpaca_service(...)` / `sector_service.set_alpaca_service(...)`
+  behind the flag. Default path wires `alpaca_service = None` — all
+  downstream consumers already have IB-pusher / Mongo fallback paths
+  from the 2026-04-23 Alpaca-nuke work.
+- `routers/ib.py` `/api/ib/analysis/{symbol}`: the hardcoded
+  `data_source: "Alpaca"` label is gone. When the shim is active
+  (legacy) the label reads `"Alpaca (legacy shim)"`; when retired
+  (default) it reads `"IB shim (via stock_service)"` — accurate
+  because the shim itself delegates to IBDataProvider.
+- Server boot log now clearly announces retirement:
+  `"Alpaca fallback DISABLED (IB-only). Phase 4 retirement active."`
+
+**Rollback**: `export ENABLE_ALPACA_FALLBACK=true` + restart backend.
+
+### 3. AI Chat live snapshot injection (`chat_server.py`)
+Added section 10.5 — *Live Snapshots (Phase 3 live-data)* — to the
+chat context builder. For every held position + SPY/QQQ/IWM/VIX (capped
+at 10 symbols) the builder calls `GET /api/live/symbol-snapshot/{sym}`
+with a 2-second timeout, per-symbol try/except, and a surrounding block
+try/except so live-data outages never take down the chat flow. Format:
+`SYM $price ±change% (bar TS, market_state, source)`. Bounded at 10
+symbols → no DoS risk on the pusher, no unbounded context bloat.
+
+### Testing
+- **14 new pytests** (`backend/tests/test_phase3_tile_phase4_alpaca_chat.py`).
+  Full suite 66/66 green (live-data phases 1–3 + new + collector + no-alpaca-regression).
+- **`testing_agent_v3_fork` iteration_133** (both front+back): 23/23
+  focused tests pass, 100% frontend render, zero bugs, zero action
+  items. TopMoversTile 30s refresh confirmed via network capture.
+  Phase 4 verified via `/api/ib/analysis/SPY` label + boot log.
+
+### Follow-up noted (not introduced here — pre-existing)
+React warning: *"Cannot update a component (DataCacheProvider) while
+rendering a different component (NIA)"* — hoist the offending setState
+into `useEffect`. Low priority.
+
+### What's next
+- **P1 User verification** post-backfill: once the ~17h IB historical
+  queue drains, trigger full `Train All` to verify P5 sector-relative
+  + Phase 8 `_1day_predictor`.
+- **P3 DataFreshnessBadge → Command Palette Inspector**: all data
+  sources ready (`/api/live/subscriptions` + `/api/live/symbol-snapshot`
+  + `/api/live/ttl-plan`).
+- **P2 Morning Briefing rich UI** refactor consuming `/api/live/briefing-snapshot`.
+- **P3 React warning hoist**: move DataCacheProvider setState into useEffect.
+- **P3 `server.py` breakup** into routers/models/tests.
+
+
 ## 2026-04-26 — Phase 3 Live Data Foundation wired into remaining surfaces
 
 Fifth shipped phase of the live-data architecture. The primitives built in
