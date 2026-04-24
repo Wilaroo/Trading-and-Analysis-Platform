@@ -1,5 +1,70 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Pre-Train Safety Interlock — SHIPPED
+
+Wires every "start training" button in the UI to the
+`/api/backfill/readiness` gate shipped earlier today so it is
+structurally impossible to accidentally kick off a training run on a
+half-loaded / stale / duplicated dataset.
+
+### New primitives
+- **`hooks/useTrainReadiness.js`** — polls `GET /api/backfill/readiness`
+  every 60s. Exposes `{ready, verdict, blockers, warnings, refresh,
+  readiness, loading, error}`. Treats unreachable backend as "unknown"
+  (NOT green) — fails closed.
+- **`components/TrainReadinessGate.jsx`** — render-prop wrapper that
+  exposes badge / gateProps / tooltipText for buttons that need a
+  readiness-aware visual. Also exports `isOverrideClick(event)` for
+  shift/alt click detection — the one-off conscious override pattern.
+
+### Buttons gated (all 5)
+1. **`start-training-btn`** (NIA → AI Training Pipeline) — the main
+   "Start Training" button. Most important gate.
+2. **`train-all-btn`** (UnifiedAITraining → Full Train across all
+   timeframes).
+3. **`full-universe-btn`** (UnifiedAITraining → Full Universe, 1-3h).
+4. **`train-all-dl-btn`** (UnifiedAITraining → Train All DL Models).
+5. **`train-all-setups-btn`** (NIA → Setup Models Panel → Train All).
+
+### Gate behaviour
+- If `ready_to_train !== true` **and** the click is not shift/alt:
+  - Shows a loud `toast.error` explaining the first blocker.
+  - Shows a `toast.info` telling the user shift+click overrides.
+  - Does **not** fire the training action.
+- If `ready_to_train !== true` **and** shift/alt is held:
+  - Shows a `toast.warning` logging the override.
+  - Proceeds with training as normal.
+- If `ready_to_train === true`: behaves exactly like before.
+
+### Visual treatment
+- Buttons dim to `bg-zinc-800/60 text-zinc-500 border-zinc-700` when
+  gated (instead of their bright gradient).
+- A small colored dot (rose / amber) with `animate-pulse` appears next
+  to the button label reflecting the verdict.
+- `data-train-readiness` attribute exposes the verdict to tests.
+- Native `title` tooltip shows the first blocker + "Shift+click to
+  override".
+- In the UnifiedAITraining panel, a dedicated readiness chip above the
+  action row shows the verdict, summary, first two blockers, and has a
+  ↻ refresh button.
+
+### Quality
+- Lint clean across all 5 modified files + 2 new modules.
+- Frontend compiles with no new warnings.
+- Smoke test: click without shift → correctly blocks (2 toasts shown,
+  training did NOT start); shift+click → correctly overrides (warning
+  toast, training starts, button flips to "Starting...").
+- 30 backend tests still pass (readiness + universe-freshness-health +
+  system-health + live-data-phase1).
+
+### Why this matters
+A single fat-fingered click during the backfill (or on Monday morning
+before remembering to check) was enough to poison weeks of validation
+splits. This gate makes that class of accident structurally impossible
+without a conscious shift+click, while still leaving the escape hatch
+open for the user who knows exactly what they're doing.
+
+
 ## 2026-04-24 — Backfill Readiness Checker — SHIPPED
 
 A single-source-of-truth "OK to train?" gate the user can check before

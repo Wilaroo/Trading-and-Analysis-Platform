@@ -12,6 +12,8 @@ import {
 import { toast } from 'sonner';
 import api from '../../utils/api';
 import { useConnectionManager } from '../../contexts/ConnectionManagerContext';
+import { useTrainReadiness } from '../../hooks/useTrainReadiness';
+import { isOverrideClick } from '../TrainReadinessGate';
 
 const CATEGORY_ICONS = {
   generic_directional: TrendingUp,
@@ -501,6 +503,12 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
   const [runningPreflight, setRunningPreflight] = useState(false);
   const optimisticUntilRef = useRef(0); // timestamp until which we ignore "idle" WS updates
 
+  // Pre-train safety interlock (2026-04-24): the pipeline's Start Training
+  // button now polls /api/backfill/readiness. Blocks training launch when
+  // critical symbols are stale, the historical queue is still draining, or
+  // duplicate bars have been detected. Shift+click to override.
+  const trainReadiness = useTrainReadiness();
+
   useEffect(() => {
     console.log('[TrainingPanel] wsTrainingStatus changed:', wsTrainingStatus);
     if (wsTrainingStatus) {
@@ -626,7 +634,19 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
     return () => window.removeEventListener('ws-message', handleWsMessage);
   }, []);
 
-  const handleStartTraining = useCallback(async () => {
+  const handleStartTraining = useCallback(async (event) => {
+    // Pre-train interlock — block if backfill not green (unless shift+click override).
+    if (!trainReadiness.ready && !isOverrideClick(event)) {
+      const reason = trainReadiness.blockers[0]
+        || trainReadiness.readiness?.summary
+        || 'backfill not ready';
+      toast.error(`Training start blocked — ${reason}`);
+      toast.info('Shift+click Start Training to override the readiness gate.');
+      return;
+    }
+    if (!trainReadiness.ready && isOverrideClick(event)) {
+      toast.warning('Override: starting pipeline on a non-green dataset.');
+    }
     setStarting(true);
     const sent = sendWsMessage({ action: 'start_pipeline' });
     if (!sent) {
@@ -659,7 +679,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
       setStarting(false);
       startCallbackRef.current = null;
     }, 5000);
-  }, [sendWsMessage]);
+  }, [sendWsMessage, trainReadiness]);
 
   const handleStopTraining = useCallback(() => {
     const sent = sendWsMessage({ action: 'stop_pipeline' });
@@ -757,8 +777,28 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
               <Square className="w-3 h-3" /> Stop Training
             </button>
           ) : (
-            <button onClick={handleStartTraining} disabled={starting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs text-emerald-400 transition-colors" data-testid="start-training-btn">
+            <button
+              onClick={handleStartTraining}
+              disabled={starting}
+              title={
+                trainReadiness.ready
+                  ? 'Launch the AI training pipeline.'
+                  : `Training blocked — ${(trainReadiness.blockers[0] || trainReadiness.readiness?.summary || 'backfill not ready')}\n\nShift+click to override.`
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                trainReadiness.ready
+                  ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+                  : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700 text-zinc-500 cursor-help'
+              }`}
+              data-testid="start-training-btn"
+              data-train-readiness={trainReadiness.verdict}
+            >
               <Play className="w-3 h-3" /> {starting ? 'Starting...' : 'Start Training'}
+              {!trainReadiness.ready && !starting && (
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ml-0.5 ${trainReadiness.verdict === 'yellow' ? 'bg-amber-400' : 'bg-rose-400 animate-pulse'}`}
+                />
+              )}
             </button>
           )}
           <button onClick={fetchData} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 transition-colors" data-testid="refresh-training-btn">

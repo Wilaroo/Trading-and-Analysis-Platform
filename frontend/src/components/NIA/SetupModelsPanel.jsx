@@ -12,6 +12,8 @@ import {
 import { toast } from 'sonner';
 import api from '../../utils/api';
 import { useTrainCommand } from '../../contexts';
+import { useTrainReadiness } from '../../hooks/useTrainReadiness';
+import { isOverrideClick } from '../TrainReadinessGate';
 
 const SETUP_CONFIG = {
   MOMENTUM:           { icon: TrendingUp, color: 'text-cyan-400',   bg: 'bg-cyan-500/15',   border: 'border-cyan-500/25' },
@@ -630,6 +632,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
   const [batchData, setBatchData] = useState(null);
   const [tbConfigs, setTbConfigs] = useState([]);
   const sendTrainCommand = useTrainCommand();
+  const trainReadiness = useTrainReadiness();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -735,7 +738,17 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
     }
   }, [sendTrainCommand]);
 
-  const handleTrainAll = useCallback(async () => {
+  const handleTrainAll = useCallback(async (event) => {
+    // Pre-train interlock (2026-04-24): gate against /api/backfill/readiness
+    if (!trainReadiness.ready && !isOverrideClick(event)) {
+      const reason = trainReadiness.blockers[0] || 'backfill not ready';
+      toast.error(`Setup Train All blocked — ${reason}`);
+      toast.info('Shift+click to override.');
+      return;
+    }
+    if (!trainReadiness.ready && isOverrideClick(event)) {
+      toast.warning('Override: setup training on a non-green dataset.');
+    }
     setTrainingAll(true);
     toast.info('Queuing all setup model training...');
     try {
@@ -751,7 +764,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
       toast.error(`Error: ${err.message}`);
       setTrainingAll(false);
     }
-  }, [sendTrainCommand]);
+  }, [sendTrainCommand, trainReadiness]);
 
   const models = status?.models || {};
   const trainedCount = status?.models_trained || 0;
@@ -803,13 +816,31 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
           <button
             onClick={handleTrainAll}
             disabled={anyTraining || trainingAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 disabled:opacity-40"
+            title={
+              trainReadiness.ready
+                ? undefined
+                : `Setup training blocked — ${(trainReadiness.blockers[0] || 'backfill not ready')}\n\nShift+click to override.`
+            }
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border disabled:opacity-40 ${
+              trainReadiness.ready
+                ? 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border-cyan-500/30'
+                : 'bg-zinc-800/60 text-zinc-500 border-zinc-700 hover:bg-zinc-800 cursor-help'
+            }`}
             data-testid="train-all-setups-btn"
+            data-train-readiness={trainReadiness.verdict}
           >
             {anyTraining || trainingAll ? (
               <><Loader2 className="w-3 h-3 animate-spin" /> Training...</>
             ) : (
-              <><PlayCircle className="w-3 h-3" /> Train All</>
+              <>
+                <PlayCircle className="w-3 h-3" />
+                Train All
+                {!trainReadiness.ready && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${trainReadiness.verdict === 'yellow' ? 'bg-amber-400' : 'bg-rose-400 animate-pulse'}`}
+                  />
+                )}
+              </>
             )}
           </button>
         </div>

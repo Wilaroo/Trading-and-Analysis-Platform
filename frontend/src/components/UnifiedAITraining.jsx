@@ -43,6 +43,8 @@ import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
 import { useTrainingMode, useTrainCommand } from '../contexts';
 import { useWsData } from '../contexts/WebSocketDataContext';
+import { useTrainReadiness } from '../hooks/useTrainReadiness';
+import { isOverrideClick } from './TrainReadinessGate';
 import PipelineProgressPanel from './PipelineProgressPanel';
 
 // Timeframe configurations
@@ -402,6 +404,13 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const [currentTimeframe, setCurrentTimeframe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+
+  // Pre-train safety interlock (2026-04-24): gate the expensive training
+  // actions against GET /api/backfill/readiness so you can't start Full
+  // Train / Full Universe / DL training while the historical backfill is
+  // still in flight (or has dupes / stale critical symbols). Shift+click
+  // overrides the gate for conscious manual retrains.
+  const trainReadiness = useTrainReadiness();
   
   // Enhanced training progress state
   const [trainingProgress, setTrainingProgress] = useState({
@@ -806,9 +815,21 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   };
 
   // FULL UNIVERSE training - uses ALL data
-  const handleFullUniverseTrain = async () => {
+  const handleFullUniverseTrain = async (event) => {
     console.log('[NIA] Full Universe button clicked!');
-    
+
+    // Pre-train interlock: Full Universe is the most dangerous trigger
+    // (1-3h wall-clock, touches every bar). Gate it hardest.
+    if (!trainReadiness.ready && !isOverrideClick(event)) {
+      const reason = trainReadiness.blockers[0] || 'backfill not ready';
+      toast.error(`Full Universe blocked — ${reason}`);
+      toast.info('Shift+click to override and train anyway.');
+      return;
+    }
+    if (!trainReadiness.ready && isOverrideClick(event)) {
+      toast.warning('Override: Full Universe on a non-green dataset (shift-click).');
+    }
+
     // Confirm with user since this takes a long time
     const confirmed = window.confirm(
       `🌐 Full Universe Training\n\n` +
@@ -991,7 +1012,17 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   };
 
   // Train ALL timeframes
-  const handleTrainAll = async () => {
+  const handleTrainAll = async (event) => {
+    // Pre-train interlock: block if backfill not green (unless shift+click override)
+    if (!trainReadiness.ready && !isOverrideClick(event)) {
+      const reason = trainReadiness.blockers[0] || trainReadiness.readiness?.summary || 'backfill not ready';
+      toast.error(`Train All blocked — ${reason}`);
+      toast.info('Shift+click to override and train anyway.');
+      return;
+    }
+    if (!trainReadiness.ready && isOverrideClick(event)) {
+      toast.warning('Override: training on a non-green dataset (shift-click).');
+    }
     setIsTraining(true);
     notifyTrainingStart('train-all');
     const timeframes = Object.keys(availableData?.timeframes || {});
@@ -1452,6 +1483,64 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
             transition={{ duration: 0.2 }}
           >
             <div className="px-4 pb-4">
+              {/* Pre-train interlock status chip — shows the live readiness
+                  verdict from /api/backfill/readiness so the user knows at
+                  a glance whether the gated Full Train / Full Universe / DL
+                  buttons are armed. */}
+              <div
+                data-testid="train-readiness-chip"
+                data-verdict={trainReadiness.verdict}
+                className={`mb-3 px-3 py-2 rounded-lg border text-xs flex items-start gap-2 ${
+                  trainReadiness.ready
+                    ? 'bg-emerald-900/20 border-emerald-700/50 text-emerald-200'
+                    : trainReadiness.verdict === 'yellow'
+                      ? 'bg-amber-900/20 border-amber-700/50 text-amber-200'
+                      : 'bg-rose-900/20 border-rose-700/50 text-rose-200'
+                }`}
+                title={
+                  trainReadiness.ready
+                    ? 'Backfill ready — safe to train.'
+                    : (trainReadiness.blockers || []).concat(trainReadiness.warnings || []).join(' · ') || 'Checking readiness…'
+                }
+              >
+                <span
+                  className={`mt-1 w-2 h-2 rounded-full shrink-0 ${
+                    trainReadiness.ready
+                      ? 'bg-emerald-400'
+                      : trainReadiness.verdict === 'yellow'
+                        ? 'bg-amber-400'
+                        : 'bg-rose-400 animate-pulse'
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">
+                    {trainReadiness.loading
+                      ? 'Checking backfill readiness…'
+                      : trainReadiness.ready
+                        ? 'READY — backfill clean, Train buttons armed.'
+                        : trainReadiness.readiness?.summary || 'Readiness unknown.'}
+                  </div>
+                  {!trainReadiness.ready && !trainReadiness.loading && (
+                    <div className="opacity-80 mt-0.5 text-[11px]">
+                      {(trainReadiness.blockers.length ? trainReadiness.blockers : trainReadiness.warnings)
+                        .slice(0, 2)
+                        .join(' · ')}
+                      {' · '}
+                      <span className="opacity-60">Shift+click any Train button to override.</span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); trainReadiness.refresh(); }}
+                  className="text-[10px] px-1.5 py-0.5 rounded hover:bg-black/30 opacity-70 hover:opacity-100"
+                  title="Re-check readiness"
+                  data-testid="train-readiness-refresh"
+                >
+                  ↻
+                </button>
+              </div>
+
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
@@ -1476,39 +1565,70 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                 <button
                   onClick={handleTrainAll}
                   disabled={isTraining || timeframeCount === 0}
+                  title={
+                    trainReadiness.ready
+                      ? undefined
+                      : `Backfill not ready — ${(trainReadiness.blockers[0] || trainReadiness.readiness?.summary || 'checking…')}\n\nShift+click to override.`
+                  }
                   className={`
                     flex-1 min-w-[140px] py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all
                     ${isTraining || timeframeCount === 0
                       ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                      : trainReadiness.ready
+                        ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                        : 'bg-zinc-800/60 text-zinc-500 border border-zinc-700 hover:bg-zinc-800 cursor-help'
                     }
                   `}
                   data-testid="train-all-btn"
+                  data-train-readiness={trainReadiness.verdict}
                 >
                   {isTraining && !currentTimeframe ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Training All...</>
                   ) : (
-                    <><Database className="w-4 h-4" /> Full Train ({timeframeCount})</>
+                    <>
+                      <Database className="w-4 h-4" />
+                      Full Train ({timeframeCount})
+                      {!trainReadiness.ready && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ml-1 ${trainReadiness.verdict === 'yellow' ? 'bg-amber-400' : 'bg-rose-400 animate-pulse'}`}
+                        />
+                      )}
+                    </>
                   )}
                 </button>
                 
                 <button
                   onClick={handleFullUniverseTrain}
                   disabled={isTraining || timeframeCount === 0}
+                  title={
+                    trainReadiness.ready
+                      ? 'Train on ALL symbols across ALL timeframes (1-3 hours)'
+                      : `Full Universe blocked — ${(trainReadiness.blockers[0] || 'backfill not ready')}\n\nShift+click to override.`
+                  }
                   className={`
                     flex-1 min-w-[140px] py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all
                     ${isTraining || timeframeCount === 0
                       ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/25'
+                      : trainReadiness.ready
+                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/25'
+                        : 'bg-zinc-800/60 text-zinc-500 border border-zinc-700 hover:bg-zinc-800 cursor-help'
                     }
                   `}
                   data-testid="full-universe-btn"
-                  title="Train on ALL symbols across ALL timeframes (1-3 hours)"
+                  data-train-readiness={trainReadiness.verdict}
                 >
                   {isTraining && trainingProgress.phase === 'full_universe' ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Full Universe...</>
                   ) : (
-                    <><Globe className="w-4 h-4" /> Full Universe</>
+                    <>
+                      <Globe className="w-4 h-4" />
+                      Full Universe
+                      {!trainReadiness.ready && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ml-1 ${trainReadiness.verdict === 'yellow' ? 'bg-amber-400' : 'bg-rose-400 animate-pulse'}`}
+                        />
+                      )}
+                    </>
                   )}
                 </button>
               </div>
@@ -1529,7 +1649,16 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                 <h4 className="text-sm font-medium text-zinc-300 mb-2">Phase 5: Deep Learning Models</h4>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={async () => {
+                    onClick={async (event) => {
+                      if (!trainReadiness.ready && !isOverrideClick(event)) {
+                        const reason = trainReadiness.blockers[0] || 'backfill not ready';
+                        toast.error(`DL Training blocked — ${reason}`);
+                        toast.info('Shift+click to override.');
+                        return;
+                      }
+                      if (!trainReadiness.ready && isOverrideClick(event)) {
+                        toast.warning('Override: DL training on a non-green dataset.');
+                      }
                       try {
                         toast.info('Starting DL model training (VAE + TFT + CNN-LSTM)...');
                         const { data } = await api.post('/api/ai-modules/dl/train-all', { max_symbols: 500, epochs: 50 });
@@ -1543,17 +1672,30 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                       }
                     }}
                     disabled={isTraining}
+                    title={
+                      trainReadiness.ready
+                        ? 'Train VAE Regime + TFT + CNN-LSTM'
+                        : `DL Training blocked — ${(trainReadiness.blockers[0] || 'backfill not ready')}\n\nShift+click to override.`
+                    }
                     className={`
                       py-2 px-4 rounded-lg font-medium text-sm flex items-center gap-2 transition-all
                       ${isTraining
                         ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                        : trainReadiness.ready
+                          ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                          : 'bg-zinc-800/60 text-zinc-500 border border-zinc-700 hover:bg-zinc-800 cursor-help'
                       }
                     `}
                     data-testid="train-all-dl-btn"
-                    title="Train VAE Regime + TFT + CNN-LSTM"
+                    data-train-readiness={trainReadiness.verdict}
                   >
-                    <Brain className="w-4 h-4" /> Train All DL Models
+                    <Brain className="w-4 h-4" />
+                    Train All DL Models
+                    {!trainReadiness.ready && (
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ml-1 ${trainReadiness.verdict === 'yellow' ? 'bg-amber-400' : 'bg-rose-400 animate-pulse'}`}
+                      />
+                    )}
                   </button>
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
