@@ -3283,7 +3283,7 @@ def queue_sample(
             raise HTTPException(status_code=503, detail="Database not initialized")
 
         filt: Dict = {}
-        if status:
+        if status and status.lower() != "any":
             filt["status"] = status
         if symbol:
             filt["symbol"] = symbol
