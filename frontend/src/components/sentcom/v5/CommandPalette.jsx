@@ -6,6 +6,10 @@
  *   - Active live subscriptions
  *   - Core indices (SPY / QQQ / IWM / DIA / VIX)
  *
+ * When the input is empty and the user has previously picked symbols, we
+ * show the most recent 5 (persisted to localStorage) so re-opening the
+ * palette to jump back to a symbol is a single keystroke.
+ *
  * Enter → opens the EnhancedTickerModal for the selected symbol via the
  * `onSelectSymbol` callback (already wired by the V5 page).
  *
@@ -17,6 +21,28 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const CORE = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
+const RECENT_KEY = 'sentcom.cmd-palette.recent';
+const RECENT_MAX = 5;
+
+function _loadRecent() {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string').slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function _saveRecent(symbol) {
+  try {
+    const prev = _loadRecent().filter((s) => s !== symbol);
+    const next = [symbol, ...prev].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore storage quota / disabled */
+  }
+}
 
 async function _get(path) {
   try {
@@ -54,11 +80,14 @@ function _score(query, symbol) {
 export const CommandPalette = ({ onSelectSymbol }) => {
   const [open, setOpen] = useState(false);
   const [corpus, setCorpus] = useState([]);
+  const [recent, setRecent] = useState(_loadRecent());
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef(null);
 
-  // Global ⌘K / Ctrl+K listener — mount ONCE
+  // Global ⌘K / Ctrl+K listener — mount ONCE. Also respond to a custom
+  // `sentcom:open-command-palette` window event so the ⌘K hint chip (or any
+  // other UI) can programmatically open the palette without tight coupling.
   useEffect(() => {
     const onKey = (e) => {
       const isModK = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K');
@@ -69,8 +98,13 @@ export const CommandPalette = ({ onSelectSymbol }) => {
         setOpen(false);
       }
     };
+    const onOpenEvt = () => setOpen(true);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('sentcom:open-command-palette', onOpenEvt);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('sentcom:open-command-palette', onOpenEvt);
+    };
   }, [open]);
 
   // Load corpus when opened
@@ -78,6 +112,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
     if (!open) return;
     setQuery('');
     setSelectedIdx(0);
+    setRecent(_loadRecent());
     _buildCorpus().then(setCorpus);
     // Focus input
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -89,10 +124,20 @@ export const CommandPalette = ({ onSelectSymbol }) => {
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
+  // When the query is empty, show recent picks instead of the full corpus so
+  // re-opening the palette to jump back to a symbol is a single keystroke.
+  const showRecent = !query && recent.length > 0;
+  const visibleItems = showRecent
+    ? recent.map((symbol) => ({ symbol, score: 0, isRecent: true }))
+    : results;
+
   const activate = useCallback(
     (sym) => {
       setOpen(false);
-      if (sym) onSelectSymbol?.(sym);
+      if (sym) {
+        _saveRecent(sym);
+        onSelectSymbol?.(sym);
+      }
     },
     [onSelectSymbol]
   );
@@ -100,13 +145,13 @@ export const CommandPalette = ({ onSelectSymbol }) => {
   const onInputKey = (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIdx((i) => Math.min(i + 1, results.length - 1));
+      setSelectedIdx((i) => Math.min(i + 1, visibleItems.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const pick = results[selectedIdx]?.symbol || query.toUpperCase().trim();
+      const pick = visibleItems[selectedIdx]?.symbol || query.toUpperCase().trim();
       if (pick) activate(pick);
     }
   };
@@ -140,12 +185,20 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           <span className="v5-mono text-[9px] text-zinc-600">esc</span>
         </div>
         <div className="max-h-[50vh] overflow-y-auto v5-scroll">
-          {results.length === 0 && (
+          {showRecent && (
+            <div
+              data-testid="command-palette-recent-header"
+              className="v5-mono text-[9px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
+            >
+              Recent
+            </div>
+          )}
+          {visibleItems.length === 0 && (
             <div className="v5-mono text-[10px] text-zinc-600 px-3 py-4 text-center">
               {query ? `No match for "${query}" — press Enter to open ${query.toUpperCase()}` : 'Type to search…'}
             </div>
           )}
-          {results.map((r, i) => (
+          {visibleItems.map((r, i) => (
             <button
               key={r.symbol}
               type="button"
@@ -155,6 +208,9 @@ export const CommandPalette = ({ onSelectSymbol }) => {
               className={`w-full flex items-center gap-2 px-3 py-1.5 v5-mono text-[11px] text-left hover:bg-zinc-900 ${i === selectedIdx ? 'bg-zinc-900 text-violet-300' : 'text-zinc-200'}`}
             >
               <span className="font-bold w-14">{r.symbol}</span>
+              {r.isRecent && (
+                <span className="text-[9px] text-zinc-600 uppercase tracking-wide">recent</span>
+              )}
               {i === selectedIdx && <span className="ml-auto text-[9px] text-zinc-500">enter ↵</span>}
             </button>
           ))}

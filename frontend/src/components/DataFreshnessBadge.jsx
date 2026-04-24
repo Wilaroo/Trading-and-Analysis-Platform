@@ -28,8 +28,15 @@
  *
  * Deliberately does NOT auto-poll more than once every 10s. This is a
  * status chip, not a real-time feed.
+ *
+ * Click behaviour:
+ *   Clicking the badge opens the FreshnessInspector modal, revealing
+ *   per-subsystem health, live subscriptions, cache TTL plan, and
+ *   pusher RPC state. This makes the badge a true "command entry
+ *   point" — one glance shows status, one click reveals why.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { FreshnessInspector } from './sentcom/v5/FreshnessInspector';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const POLL_MS = 10_000;
@@ -67,6 +74,7 @@ export const DataFreshnessBadge = () => {
   const [pusher, setPusher] = useState(null);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [err, setErr] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -160,19 +168,27 @@ export const DataFreshnessBadge = () => {
   }[tone] || 'bg-zinc-500';
 
   return (
-    <div
-      data-testid="data-freshness-badge"
-      title={title}
-      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-wider select-none ${toneClasses}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
-      <span>{label}</span>
-      {fetchedAt && (
-        <span className="opacity-40 ml-1 hidden sm:inline">
-          · {Math.max(0, Math.floor((Date.now() - fetchedAt) / 1000))}s
-        </span>
-      )}
-    </div>
+    <>
+      <button
+        type="button"
+        data-testid="data-freshness-badge"
+        title={`${title}\n\nClick for details.`}
+        onClick={() => setInspectorOpen(true)}
+        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-wider select-none transition-colors hover:brightness-125 cursor-pointer ${toneClasses}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+        <span>{label}</span>
+        {fetchedAt && (
+          <span className="opacity-40 ml-1 hidden sm:inline">
+            · {Math.max(0, Math.floor((Date.now() - fetchedAt) / 1000))}s
+          </span>
+        )}
+      </button>
+      <FreshnessInspector
+        isOpen={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+      />
+    </>
   );
 };
 

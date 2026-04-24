@@ -1,5 +1,50 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Live Data + Stability Bundle polish — SHIPPED
+
+Small, focused UX improvements on top of the Phase 5 bundle. No new
+surfaces / no backend changes — all frontend polish:
+
+1. **DataFreshnessBadge is now clickable → opens FreshnessInspector**
+   directly. Works on every tab (not just V5) since the badge is
+   globally pinned in `App.js`. Completes the P3 backlog item "Convert
+   DataFreshnessBadge to an active command palette". One glance shows
+   status, one click reveals per-subsystem detail.
+2. **CommandPalette remembers recent symbols** — last 5 picks persist
+   to `localStorage` under `sentcom.cmd-palette.recent`. When the input
+   is empty the palette shows the recent list (tagged "recent") so
+   jumping back to a symbol is a single keystroke.
+3. **CommandPalette discoverability** — new clickable `⌘K search` hint
+   chip rendered in the V5 HUD's `rightExtra` slot, left of
+   `HealthChip`. Clicking it dispatches a
+   `sentcom:open-command-palette` window event that the palette listens
+   for (loose coupling; no prop-drilling required).
+4. **PanelErrorBoundary copy-error button** — adds a "copy error ⧉"
+   button alongside "reload panel ↻" that writes the error message +
+   stack to the clipboard so a user can paste it into chat / GitHub
+   issue in one click.
+5. **FreshnessInspector "+N more" truncation notice** — subscription
+   list silently capped at 20; now appends a "+N more not shown" line
+   when there are more active subs than visible.
+
+**Touched files:**
+- `/app/frontend/src/components/DataFreshnessBadge.jsx`
+- `/app/frontend/src/components/sentcom/v5/CommandPalette.jsx`
+- `/app/frontend/src/components/sentcom/v5/PanelErrorBoundary.jsx`
+- `/app/frontend/src/components/sentcom/v5/FreshnessInspector.jsx`
+- `/app/frontend/src/components/sentcom/SentComV5View.jsx`
+
+**Verification:**
+- Lint: clean across all 5 files (no new warnings).
+- Smoke screenshot: DataFreshnessBadge click opens FreshnessInspector
+  with all subsystems populated (mongo/ib_gateway/historical_queue/
+  pusher_rpc/live_subscriptions/live_bar_cache/task_heartbeats).
+- ⌘K hint click opens CommandPalette showing default corpus
+  (DIA/IWM/QQQ/SPY/VIX).
+- Existing pytest suite (20 tests covering system_health + live_data
+  phase1) still passes.
+
+
 ## 2026-04-26 — Phase 5 stability & ops bundle (A + B + C + D + E + F) — SHIPPED
 
 Six follow-ups on top of the live-data foundation, all to harden the app

@@ -169,6 +169,14 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
                       </span>
                     </div>
                   ))}
+                  {subs.subscriptions.length > 20 && (
+                    <div
+                      data-testid="inspector-subs-more"
+                      className="px-2 py-1 text-[9px] text-zinc-600 uppercase tracking-wide"
+                    >
+                      +{subs.subscriptions.length - 20} more not shown
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="v5-mono text-[10px] text-zinc-600">no active subscriptions</div>

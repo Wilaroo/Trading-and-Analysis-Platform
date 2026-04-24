@@ -40,6 +40,20 @@ export class PanelErrorBoundary extends React.Component {
     this.setState({ hasError: false, error: null });
   };
 
+  copyError = () => {
+    try {
+      const { label = 'panel' } = this.props;
+      const msg = String(this.state.error?.message || this.state.error || 'unknown error');
+      const stack = this.state.error?.stack || '';
+      const text = `[SentCom panel-error] ${label}\n${msg}\n${stack}`;
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text);
+      }
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  };
+
   render() {
     if (!this.state.hasError) return this.props.children;
     const { label = 'panel', compact = false } = this.props;
@@ -53,9 +67,18 @@ export class PanelErrorBoundary extends React.Component {
           <span className="v5-mono font-bold uppercase tracking-wide">⚠ {label} crashed</span>
           <button
             type="button"
+            onClick={this.copyError}
+            data-testid={`panel-error-copy-${label}`}
+            className="ml-auto v5-mono text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            title="Copy error + stack trace to clipboard"
+          >
+            copy error ⧉
+          </button>
+          <button
+            type="button"
             onClick={this.reset}
             data-testid={`panel-error-reset-${label}`}
-            className="ml-auto v5-mono text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            className="v5-mono text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
           >
             reload panel ↻
           </button>
