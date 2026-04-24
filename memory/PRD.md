@@ -1,5 +1,56 @@
 # TradeCommand / SentCom — Product Requirements
 
+## Backlog — DataFreshnessBadge → Command Palette evolution (P2, post-Phase-3)
+
+**Concrete spec** for when the live-data foundation is in place:
+
+Turn the passive `DataFreshnessBadge` chip into an active control surface.
+Clicking the badge opens a slide-down inspector panel (or `⌘K` modal on
+desktop) showing:
+
+  1. **Global pipes** — one row each:
+     - Pusher push age + health (from `/api/ib/pusher-health`)
+     - Historical-queue freshness (from `/api/ib-collector/universe-freshness-health`)
+     - Live-bar cache stats (from Phase 1's `live_bar_cache` collection)
+     - IB Gateway connection (derived from pusher health)
+
+  2. **Per active-view symbol** (the ones user is currently looking at):
+     - Symbol · last bar time · cache TTL remaining · "Refresh now" button
+     - Example: `MRVL · closed 16:00 ET · 42m until refresh · [Refresh now]`
+     - Uses Phase 2's subscription manager to know which symbols are "hot".
+
+  3. **One-click actions**:
+     - `Refresh all now` — bypass cache TTL, force pusher RPC fetch for all hot symbols
+     - `Pause live subs` — emergency lever when IB pacing is tight
+     - `Open pusher-health endpoint` — for deep debugging
+     - `⌘K` fuzzy symbol search — this is also BL-01 (command palette), merges here
+
+  4. **Discovery affordance**: a small pulsing chevron on the chip on first
+     visit per browser session hints that the chip is clickable.
+
+**Why this is the right move:**
+- Current chip is read-only — tells you the state, not how to fix it.
+- Inspector collapses multiple diagnostic endpoints into one pane.
+- BL-01 (⌘K command palette) was listed as P3 separately but naturally
+  shares the surface — wiring them together saves a code path AND gives
+  users a consistent "everything starts from the badge" muscle memory.
+- Directly addresses the 5-week-stale-data RCA: *"nothing in the UI
+  shouted that data was frozen."* Now not only does it shout, it offers
+  the fix button right there.
+
+**Effort estimate:** ~3–4h once Phases 1–3 are in. Do not attempt before —
+it depends on `live_bar_cache` and subscription state that don't exist yet.
+
+**File plan:**
+  - `frontend/src/components/DataFreshnessInspector.jsx` — slide-down panel
+  - `frontend/src/hooks/useActiveViewSymbols.js` — tracks hot symbols
+    across ChartPanel, EnhancedTickerModal, SentComV5View
+  - Extend `DataFreshnessBadge.jsx` — `onClick` opens the inspector
+  - Backend: `GET /api/live/freshness-snapshot` — aggregates the 3 pipes
+    + hot-symbol cache TTL into one response
+
+
+
 ## 2026-04-25 (cont.) — DataFreshnessBadge shipped globally
 
 Small but high-leverage add requested by user during fork prep.
