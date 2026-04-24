@@ -1,5 +1,84 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Phase 5 stability & ops bundle (A + B + C + D + E + F) — SHIPPED
+
+Six follow-ups on top of the live-data foundation, all to harden the app
+while the backfill runs and before the retrain:
+
+### A · System Health Dashboard
+- New service `services/system_health_service.py` aggregating 7
+  subsystems into a single green/yellow/red payload: `mongo`,
+  `pusher_rpc`, `ib_gateway`, `historical_queue`, `live_subscriptions`,
+  `live_bar_cache`, `task_heartbeats`. Every check is ≤1s, no check
+  raises, read-only.
+- New endpoint `GET /api/system/health` on the existing `system_router`.
+  `overall` is the worst subsystem. Subsystem shape: `{name, status,
+  latency_ms, detail, metrics}`. Endpoint itself never 500s even if the
+  aggregator errors.
+- Thresholds: mongo ping yellow≥50ms red≥500ms · queue yellow≥5k
+  red≥25k · task heartbeats stale≥15m dead≥1h · live subs yellow≥80%
+  red≥95% of cap.
+
+### B · React Error Boundaries
+- New `PanelErrorBoundary` component — classic React error-boundary
+  pattern with a reset button. Wrapped around `TopMoversTile`,
+  `ScannerCardsV5`, `ChartPanel`, `BriefingsV5`. A crash in any one panel
+  now shows an inline "⚠ panel crashed — reload panel ↻" card instead
+  of bringing down the whole Command Center.
+
+### C · ⌘K Command Palette
+- New `CommandPalette` mounted at SentComV5View level. Global
+  `⌘K` / `Ctrl+K` / Escape handlers. Corpus = `live/subscriptions`
+  hot symbols + `live/briefing-watchlist` + core indices. Minimal
+  fuzzy match (starts-with > substring) keeps bundle light. Arrow
+  keys + enter → opens `EnhancedTickerModal` via existing
+  `handleOpenTicker` callback.
+
+### D · DataFreshnessBadge → Freshness Inspector
+- New `HealthChip` rendered in the `PipelineHUDV5 rightExtra` slot.
+  Green/yellow/red dot + text like `ALL SYSTEMS` / `2 WARN` /
+  `1 CRITICAL`. Polls `/api/system/health` every 20s. Click →
+  opens `FreshnessInspector`.
+- New `FreshnessInspector` modal. 4 sections aggregating
+  `/api/system/health` + `/api/live/subscriptions` +
+  `/api/live/ttl-plan` + `/api/live/pusher-rpc-health` in one
+  `Promise.all` call. Auto-polls every 15s while open; cleans up
+  interval on close.
+
+### E · Timeout audit
+- Grepped `requests.get` / `requests.post` / `httpx.*` across backend —
+  every call has a timeout. Initial scan showed false positives because
+  the `timeout=` kwarg was on a different line from the method call.
+  No changes needed. Log cleanup deferred with `server.py` breakup (53
+  `print()` calls in `ib.py` alone — not this session's scope).
+
+### F · TestClient / HTTP contract suite
+- New `backend/tests/test_system_health_and_testclient.py` exercising
+  the live running backend via `requests`. 9 tests cover: system
+  health v2 shape, live-data pipeline subsystems coverage,
+  pusher_rpc degrades to yellow when disabled, build_ms<1s,
+  subscribe/unsubscribe ref-count e2e, regression against all
+  `/api/live/*` endpoints. Fast, deterministic, catches regressions
+  without needing the testing agent.
+
+### Screenshots verified end-to-end
+- HealthChip shows `2 WARN` in preview env (pusher_rpc + ib_gateway
+  yellow — correct for no-pusher-no-IB preview).
+- ⌘K opens CommandPalette.
+- Chip click opens FreshnessInspector showing all 4 sections with live
+  data (including SPY `refx1 idle 7s` from the subscribe e2e test).
+
+### Testing totals
+**141 pytests green locally** (21 new Phase 5 + 9 TestClient/HTTP + 17
+Phase 3 tile + 27 P2-A + 47 live-data phases + 16 collector + 4 no-alpaca).
+
+### What's still on the docket
+- 🟡 P1: `Train All` post-backfill (blocked).
+- 🟡 P2: SEC EDGAR 8-K · holiday-aware overnight walkback.
+- 🟡 P3 remaining: `server.py` breakup · Distributed PC Worker ·
+  v5-chip-veto badges (blocked on retrain).
+
+
 ## 2026-04-26 — Auto-hide Overnight Sentiment during RTH
 
 Small UX upgrade on top of the P2-A Morning Briefing work.

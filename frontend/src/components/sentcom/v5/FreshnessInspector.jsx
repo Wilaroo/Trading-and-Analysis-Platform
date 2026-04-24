@@ -1,0 +1,231 @@
+/**
+ * FreshnessInspector — click the DataFreshnessBadge OR HealthChip to
+ * open this modal. Shows:
+ *   - /api/system/health subsystems (colored status grid)
+ *   - /api/live/subscriptions (hot symbols + ref-counts)
+ *   - /api/live/ttl-plan (cache TTLs per market state)
+ *   - /api/live/pusher-rpc-health (RPC channel status)
+ *
+ * No mutation — pure observability surface. Auto-refresh every 15s while
+ * open; stops polling on close.
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, RefreshCw } from 'lucide-react';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const POLL_MS = 15_000;
+
+async function _get(path) {
+  try {
+    const resp = await fetch(`${BACKEND_URL}${path}`);
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+const STATUS_PILL = {
+  green: 'bg-emerald-900/40 text-emerald-300 border-emerald-800/60',
+  yellow: 'bg-amber-900/40 text-amber-300 border-amber-800/60',
+  red: 'bg-rose-900/40 text-rose-300 border-rose-800/60',
+};
+
+export const FreshnessInspector = ({ isOpen, onClose }) => {
+  const [health, setHealth] = useState(null);
+  const [subs, setSubs] = useState(null);
+  const [ttl, setTtl] = useState(null);
+  const [rpc, setRpc] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const reload = useCallback(async () => {
+    if (!isOpen) return;
+    setLoading(true);
+    const [h, s, t, r] = await Promise.all([
+      _get('/api/system/health'),
+      _get('/api/live/subscriptions'),
+      _get('/api/live/ttl-plan'),
+      _get('/api/live/pusher-rpc-health'),
+    ]);
+    setHealth(h);
+    setSubs(s);
+    setTtl(t);
+    setRpc(r);
+    setLoading(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    reload();
+    const id = setInterval(reload, POLL_MS);
+    return () => clearInterval(id);
+  }, [isOpen, reload]);
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/80 z-[60] flex items-start justify-center p-6 overflow-y-auto"
+        data-testid="freshness-inspector"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="bg-zinc-950 border border-zinc-800 rounded-lg w-full max-w-3xl shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+            <div className="flex items-center gap-2">
+              <span className="v5-mono font-bold text-[11px] text-violet-400 uppercase">
+                Freshness Inspector
+              </span>
+              {health && (
+                <span className={`v5-mono text-[9px] px-1.5 py-0.5 rounded border uppercase ${STATUS_PILL[health.overall] || STATUS_PILL.yellow}`}>
+                  {health.overall}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={reload}
+                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                data-testid="freshness-refresh"
+                title="Refresh"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                data-testid="freshness-close"
+                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 space-y-4 max-h-[78vh] overflow-y-auto v5-scroll">
+            {/* Subsystem grid */}
+            <section data-testid="inspector-subsystems">
+              <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                Subsystems
+              </div>
+              {health?.subsystems ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {health.subsystems.map((s) => (
+                    <div
+                      key={s.name}
+                      data-testid={`inspector-subsystem-${s.name}`}
+                      className={`px-2.5 py-1.5 rounded border ${STATUS_PILL[s.status] || STATUS_PILL.yellow}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="v5-mono text-[10px] font-bold">{s.name}</span>
+                        <span className="v5-mono text-[9px] uppercase opacity-70">{s.status}</span>
+                      </div>
+                      <div className="v5-mono text-[9px] opacity-75 mt-0.5 truncate" title={s.detail}>
+                        {s.detail}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+              )}
+            </section>
+
+            {/* Live subscriptions */}
+            <section data-testid="inspector-subs">
+              <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5 flex items-center gap-2">
+                Live subscriptions
+                {subs && (
+                  <span className="text-zinc-400">
+                    {subs.active_count}/{subs.max_subscriptions}
+                  </span>
+                )}
+              </div>
+              {subs?.subscriptions?.length ? (
+                <div className="space-y-0.5 v5-mono text-[10px]">
+                  {subs.subscriptions.slice(0, 20).map((s) => (
+                    <div
+                      key={s.symbol}
+                      data-testid={`inspector-sub-${s.symbol}`}
+                      className="flex items-center gap-2 px-2 py-0.5 rounded hover:bg-zinc-900"
+                    >
+                      <span className="font-bold text-zinc-100 w-12">{s.symbol}</span>
+                      <span className="text-zinc-500">ref×{s.ref_count}</span>
+                      <span className="text-zinc-600">idle {Math.round(s.idle_seconds)}s</span>
+                      <span className={`ml-auto text-[9px] ${s.pusher_ok ? 'text-emerald-500' : 'text-amber-500'}`}>
+                        {s.pusher_ok ? 'pusher ok' : 'no pusher'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="v5-mono text-[10px] text-zinc-600">no active subscriptions</div>
+              )}
+            </section>
+
+            {/* TTL plan + pusher RPC */}
+            <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div data-testid="inspector-ttl">
+                <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                  Cache TTL plan
+                </div>
+                {ttl ? (
+                  <div className="v5-mono text-[10px] space-y-0.5">
+                    <div className="text-zinc-400">
+                      current state: <span className="text-zinc-100 font-bold">{ttl.market_state}</span>
+                    </div>
+                    {Object.entries(ttl.ttl_by_state || {}).map(([k, v]) => (
+                      <div key={k} className="flex gap-2 text-zinc-500">
+                        <span className={`${k === ttl.market_state ? 'text-zinc-100 font-bold' : ''}`}>{k}</span>
+                        <span className="ml-auto text-zinc-400">{v}s</span>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 text-zinc-500 pt-1 border-t border-zinc-900 mt-1">
+                      <span>active view</span>
+                      <span className="ml-auto text-zinc-400">{ttl.ttl_active_view}s</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                )}
+              </div>
+              <div data-testid="inspector-rpc">
+                <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                  Pusher RPC
+                </div>
+                {rpc ? (
+                  <div className="v5-mono text-[10px] space-y-0.5 text-zinc-400">
+                    <div>
+                      reachable: <span className={rpc.reachable ? 'text-emerald-400' : 'text-amber-400'}>
+                        {String(rpc.reachable)}
+                      </span>
+                    </div>
+                    <div className="truncate">url: <span className="text-zinc-100">{rpc.client?.url || 'n/a'}</span></div>
+                    <div>enabled: <span className="text-zinc-100">{String(rpc.client?.enabled)}</span></div>
+                    <div>failures: <span className="text-zinc-100">{rpc.client?.consecutive_failures ?? 0}</span></div>
+                  </div>
+                ) : (
+                  <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                )}
+              </div>
+            </section>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+export default FreshnessInspector;

@@ -27,6 +27,10 @@ import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { TopMoversTile } from './v5/TopMoversTile';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
+import { HealthChip } from './v5/HealthChip';
+import { FreshnessInspector } from './v5/FreshnessInspector';
+import { CommandPalette } from './v5/CommandPalette';
+import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
 import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
@@ -158,6 +162,9 @@ export const SentComV5View = ({
     openTickerModal(sym);
   }, [openTickerModal]);
 
+  // Phase 5 stability bundle — freshness inspector modal visibility.
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+
   return (
     <div
       data-testid="sentcom-v5-root"
@@ -201,6 +208,7 @@ export const SentComV5View = ({
         phase={phase}
         rightExtra={
           <div className="flex items-center gap-2">
+            <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
             <ConnectivityCheck />
             <PusherHealthChip />
             <DeadLetterBadge />
@@ -211,8 +219,17 @@ export const SentComV5View = ({
         }
       />
 
+      {/* Phase 5 stability bundle — global ⌘K palette + freshness inspector */}
+      <CommandPalette onSelectSymbol={handleOpenTicker} />
+      <FreshnessInspector
+        isOpen={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+      />
+
       {/* Phase 3 TopMoversTile — reads /api/live/briefing-snapshot. */}
-      <TopMoversTile onSelectSymbol={handleOpenTicker} />
+      <PanelErrorBoundary label="top-movers" compact>
+        <TopMoversTile onSelectSymbol={handleOpenTicker} />
+      </PanelErrorBoundary>
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
       <div
@@ -235,14 +252,16 @@ export const SentComV5View = ({
             </div>
           </div>
           <div className="overflow-y-auto flex-1 v5-scroll">
-            <ScannerCardsV5
-              setups={setups}
-              alerts={alerts}
-              positions={positions}
-              messages={messages}
-              selectedSymbol={effectiveSymbol}
-              onSelectSymbol={handleOpenTicker}
-            />
+            <PanelErrorBoundary label="scanner">
+              <ScannerCardsV5
+                setups={setups}
+                alerts={alerts}
+                positions={positions}
+                messages={messages}
+                selectedSymbol={effectiveSymbol}
+                onSelectSymbol={handleOpenTicker}
+              />
+            </PanelErrorBoundary>
           </div>
         </section>
 
@@ -261,12 +280,14 @@ export const SentComV5View = ({
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">
-            <ChartPanel
-              symbol={effectiveSymbol}
-              initialTimeframe="5m"
-              height={600}
-              position={positions?.find(p => p.symbol === effectiveSymbol) || null}
-            />
+            <PanelErrorBoundary label="chart">
+              <ChartPanel
+                symbol={effectiveSymbol}
+                initialTimeframe="5m"
+                height={600}
+                position={positions?.find(p => p.symbol === effectiveSymbol) || null}
+              />
+            </PanelErrorBoundary>
           </div>
         </section>
 
@@ -282,7 +303,9 @@ export const SentComV5View = ({
               <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
             </div>
             <div className="overflow-y-auto flex-1 v5-scroll">
-              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} onOpenDeepDive={onOpenBriefingDeepDive} />
+              <PanelErrorBoundary label="briefings">
+                <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} onOpenDeepDive={onOpenBriefingDeepDive} />
+              </PanelErrorBoundary>
             </div>
           </div>
 

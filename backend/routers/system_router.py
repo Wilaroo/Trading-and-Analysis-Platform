@@ -575,3 +575,36 @@ async def system_monitor():
         },
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+# ---- 2026-04-26 — Live-data-era subsystem health (v2) -----------------
+# Parallel to /api/system/monitor (which covers the classic DB/IB/LLM/strategy
+# stack). /api/system/health aggregates the NEW pipeline: pusher RPC,
+# historical queue, live subscriptions, live_bar_cache, task heartbeats.
+# Backs the HUD health chip + Freshness Inspector modal.
+
+@router.get("/api/system/health")
+def system_health_v2():
+    """Aggregated health across the live-data pipeline subsystems.
+
+    Status hierarchy: green < yellow < red. Overall is the worst subsystem.
+    Never raises — individual subsystem failures surface as
+    subsystem.status=red with exception detail.
+    """
+    try:
+        from services.system_health_service import build_health
+        return build_health(_db)
+    except Exception as exc:
+        return {
+            "overall": "red",
+            "counts": {"green": 0, "yellow": 0, "red": 1},
+            "subsystems": [
+                {
+                    "name": "system_health_service",
+                    "status": "red",
+                    "detail": f"{type(exc).__name__}: {str(exc)[:280]}",
+                }
+            ],
+            "build_ms": 0.0,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
