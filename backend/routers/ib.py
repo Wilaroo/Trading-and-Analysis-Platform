@@ -1727,6 +1727,45 @@ async def smart_batch_claim_historical_data_requests(request: Request):
         "1 min": 1500,      # IB provides ~1750+ bars
     }
     DEFAULT_THRESHOLD = 1400  # Conservative default
+
+    # RECENCY guard (2026-04-24): the old completeness check used *bar count
+    # only*. A symbol with 32k bars whose newest was 38 days old still got
+    # marked `skipped_complete` in ~3ms — the collector never even hit IB.
+    # That's why "Collect Data" in NIA silently no-oped for SPY/QQQ/DIA etc.
+    # for weeks. Fix: require BOTH count AND recency (latest bar ≤ threshold).
+    STALE_DAYS = {
+        "1 min": 3,
+        "5 mins": 3,
+        "15 mins": 5,
+        "30 mins": 5,
+        "1 hour": 7,
+        "1 day": 3,
+        "1 week": 14,
+    }
+    DEFAULT_STALE_DAYS = 7
+
+    def _latest_bar_too_old(data_col, symbol: str, bar_size: str) -> bool:
+        """Return True if the newest bar for (symbol, bar_size) is older than
+        the bar_size-specific threshold — meaning this request SHOULD hit IB
+        even if the total bar count is high."""
+        from datetime import datetime, timezone
+        try:
+            doc = data_col.find_one(
+                {"symbol": symbol, "bar_size": bar_size},
+                {"_id": 0, "date": 1},
+                sort=[("date", -1)],
+            )
+            if not doc or not doc.get("date"):
+                return True  # no data → definitely not "complete"
+            s = str(doc["date"]).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
+            return age_days > STALE_DAYS.get(bar_size, DEFAULT_STALE_DAYS)
+        except Exception:
+            # Unknown date format → fail-safe: fetch from IB, don't skip.
+            return True
     
     try:
         body = await request.json()
@@ -1781,10 +1820,14 @@ async def smart_batch_claim_historical_data_requests(request: Request):
                         {"symbol": symbol, "bar_size": bar_size},
                         limit=threshold + 1  # Just need to know if >= threshold
                     )
-                    
-                    if bar_count_existing >= threshold:
+
+                    # RECENCY GUARD: even if count >= threshold, don't skip if
+                    # the latest bar is older than the bar_size-specific
+                    # staleness window. Otherwise SPY with 32k bars whose
+                    # newest is 38 days old is still "skipped_complete".
+                    if bar_count_existing >= threshold and not _latest_bar_too_old(data_col, symbol, bar_size):
                         should_skip = True
-                        # Mark as complete immediately - data is already complete
+                        # Mark as complete immediately - data is already complete AND fresh
                         service.complete_request(
                             request_id=request_id,
                             success=True,

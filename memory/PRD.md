@@ -1,5 +1,90 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — THE actual root cause: skipped_complete coverage-by-count bug
+
+After tracing the full NIA "Collect Data" button chain end-to-end, found
+the REAL reason SPY/QQQ/DIA/IWM have been frozen at 2026-03-16 despite
+daily "Fill Gaps" / "Collect Data" clicks. The bug is in `routers/ib.py`
+`smart-batch-claim` endpoint (lines 1720-1830), which is what the Windows
+collectors call to claim requests from `historical_data_requests`:
+
+```python
+bar_count_existing = data_col.count_documents({symbol, bar_size}, limit=t+1)
+if bar_count_existing >= threshold:
+    should_skip = True
+    # mark skipped_complete, never hit IB
+```
+
+For SPY 5 mins, threshold = 1,400, actual = 32,396 → skip fires. But ALL
+32k bars are ≤ 2026-03-16. The collector marked every SPY request as
+`skipped_complete` in ~3 milliseconds — proved by the user's forensic
+curl `/api/ib-collector/symbol-request-history?symbol=SPY`:
+
+```
+duration: "5 D", end_date: "20260418-15:24:40"
+claimed_at:   2026-04-23T15:25:42.882709
+completed_at: 2026-04-23T15:25:42.885632   ← 3ms, no IB call
+result_status: "skipped_complete"
+```
+
+Compare MSCI (no prior data → count check fails → hit IB):
+```
+claimed_at:   2026-04-23T16:16:57
+completed_at: 2026-04-23T16:18:33   ← 1m 36s real IB call → "success"
+```
+
+**Same family of bug as `gap-analysis`/`fill-gaps` but in a 3rd place.**
+This one was the actual blocker — the smart_backfill planner correctly
+queued 23,931 requests yesterday, but smart-batch-claim instantly
+"completed" every SPY request without fetching anything.
+
+**Fix (`routers/ib.py`):**
+
+  - Added `STALE_DAYS` map mirroring `gap-analysis`/`fill-gaps`
+    (`1 min`/`5 mins`=3d, `15 mins`/`30 mins`=5d, `1 hour`=7d, `1 day`=3d,
+    `1 week`=14d).
+  - Added `_latest_bar_too_old(data_col, symbol, bar_size)` helper that
+    reads max(date) via `sort(date, -1).limit(1)`, parses ISO with Z/tz
+    suffix handling, fail-safes to True on parse errors.
+  - Skip condition hardened from `if bar_count_existing >= threshold:`
+    to `if bar_count_existing >= threshold and not _latest_bar_too_old(...)`.
+  - If latest bar is stale, the request is forwarded to IB even if count
+    is high.
+
+**Regression tests (`tests/test_smart_claim_recency.py`):**
+
+  - 4 new pytest contracts: helper exists & uses sort(date,-1),
+    skip requires count AND recency, STALE_DAYS covers every
+    COMPLETENESS_THRESHOLDS key, intraday bar_sizes ≤7 days threshold.
+  - 17/17 total regression tests green across the 3 suites (pipeline,
+    gap-analysis, smart-claim).
+
+**End-to-end NIA "Collect Data" button chain — verified correct after fix:**
+
+```
+[Collect Data btn] → POST /smart-backfill?freshness_days=2
+    ↓ (planning already had freshness, unchanged)
+_smart_backfill_sync → queue to historical_data_requests (23,931 requests)
+    ↓ (Windows collectors poll)
+POST /api/ib/smart-batch-claim → claim + skip-check
+    ↓ (FIXED: skip now requires count AND recency)
+IB Gateway → historical_data_requests.complete_request(status=success)
+    ↓
+ib_historical_data (bars landed) → chart, training, everything fresh
+```
+
+**User next-steps (after pull + restart):**
+
+  1. Verify SPY request history now shows `success` instead of
+     `skipped_complete` for recent requests.
+  2. Re-click "Collect Data" in NIA — should now fetch fresh SPY/QQQ/DIA.
+  3. Monitor `queue-progress-detailed` — expect ~20k pending requests
+     queued, processing for 10-12h with 4 turbo collectors.
+  4. Once complete, retrain. Fresh data + all training-pipeline
+     observability fixes = proper post-fix verification run.
+
+---
+
 ## 2026-04-24 — Gap-analysis / Fill-Gaps staleness bug (the reason training is frozen at March 16)
 
 **Smoking-gun root cause found for the stale-universe issue.** User ran today's
