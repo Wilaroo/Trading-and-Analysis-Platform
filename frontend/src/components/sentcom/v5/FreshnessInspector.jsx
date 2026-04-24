@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, RefreshCw } from 'lucide-react';
+import { BackfillReadinessCard } from './BackfillReadinessCard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const POLL_MS = 15_000;
@@ -39,6 +40,9 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
   const [ttl, setTtl] = useState(null);
   const [rpc, setRpc] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Counter the BackfillReadinessCard watches — bumping it re-fetches
+  // the readiness endpoint in sync with everything else in the modal.
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   const reload = useCallback(async () => {
     if (!isOpen) return;
@@ -54,6 +58,7 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
     setTtl(t);
     setRpc(r);
     setLoading(false);
+    setRefreshCounter((n) => n + 1);
   }, [isOpen]);
 
   useEffect(() => {
@@ -115,6 +120,11 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
           </div>
 
           <div className="p-4 space-y-4 max-h-[78vh] overflow-y-auto v5-scroll">
+            {/* Backfill readiness ("OK to train?") — surfaced first because
+                it's the single most actionable signal right now while the
+                historical backfill drains. */}
+            <BackfillReadinessCard refreshToken={refreshCounter} />
+
             {/* Subsystem grid */}
             <section data-testid="inspector-subsystems">
               <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">

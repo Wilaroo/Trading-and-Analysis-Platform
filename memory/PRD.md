@@ -1,5 +1,68 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Backfill Readiness Checker — SHIPPED
+
+A single-source-of-truth "OK to train?" gate the user can check before
+kicking off the post-backfill retrain cycle. No more correlating
+/universe-freshness-health + /queue-sample + manual SPY inspection by
+hand.
+
+### Backend
+- New service `services/backfill_readiness_service.py` running 5 checks
+  in parallel (all read-only, <3s total):
+  1. **queue_drained** — `historical_data_requests` pending+claimed
+     must be 0 (RED if anything in flight; YELLOW if >50 recent
+     failures).
+  2. **critical_symbols_fresh** — every symbol in
+     `[SPY, QQQ, DIA, IWM, AAPL, MSFT, NVDA, GOOGL, META, AMZN]`
+     must have a latest bar inside STALE_DAYS for every intraday
+     timeframe.
+  3. **overall_freshness** — % of (intraday-universe symbol × critical
+     timeframe) pairs fresh. GREEN ≥95%, YELLOW ≥85%, RED otherwise.
+  4. **no_duplicates** — aggregation spot-check on critical symbols
+     confirms no `(symbol, date, bar_size)` appears more than once
+     (catches write-path bugs that would silently over-weight bars).
+  5. **density_adequate** — % of intraday-tier symbols with
+     ≥780 5-min bars (anything below is dropped from training).
+- New router `routers/backfill_router.py` exposing
+  **`GET /api/backfill/readiness`** (registered in the Tier 2-4
+  deferred list in `server.py`).
+- Response shape:
+  ```
+  {verdict, ready_to_train, summary, blockers[], warnings[],
+   next_steps[], checks{queue_drained, critical_symbols_fresh,
+   overall_freshness, no_duplicates, density_adequate},
+   generated_at}
+  ```
+- Worst-check-wins verdict aggregation. `ready_to_train` is GREEN-only.
+
+### Frontend
+- New `BackfillReadinessCard` component (in
+  `frontend/src/components/sentcom/v5/`). Pinned to the top of the
+  FreshnessInspector so clicking the global DataFreshnessBadge now
+  surfaces the readiness gate as the very first thing you see.
+- Visuals: giant verdict pill (READY / NOT READY), blockers list (red
+  bullets), warnings list (amber bullets), 2-column per-check grid
+  with color coding, and an actionable next-steps list.
+- Re-fetches in lockstep with the inspector's reload button via a
+  counter-based `refreshToken` prop (safe — no infinite-render loop).
+
+### Tests
+- `/app/backend/tests/test_backfill_readiness.py` (5 tests): happy
+  path green, queue-active → red, stale-critical → red, response
+  shape contract, router registration.
+- All 25 targeted tests pass (backfill_readiness +
+  universe_freshness_health + system_health_and_testclient +
+  live_data_phase1).
+
+### Why this matters
+While the backfill drains, the user has been asking "is it done yet?
+Can I train?". This endpoint answers that definitively. Once the DGX
+queue hits 0, one click on the freshness badge reveals a giant green
+READY pill → confidence to trigger Train All without fear of
+corrupting the validation split.
+
+
 ## 2026-04-24 — Live Data + Stability Bundle polish — SHIPPED
 
 Small, focused UX improvements on top of the Phase 5 bundle. No new
