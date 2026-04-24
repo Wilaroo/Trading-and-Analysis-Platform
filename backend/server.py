@@ -66,6 +66,12 @@ from routers.watchlist import router as watchlist_router, init_watchlist_router,
 from routers.system_router import router as system_router, init_system_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from routers.ai_training import router as ai_training_router
+from routers.sentiment_refresh import (
+    router as sentiment_refresh_router,
+    init_sentiment_router,
+    _run_refresh as _sentiment_run_refresh,
+    DEFAULT_UNIVERSE_SIZE as SENTIMENT_DEFAULT_UNIVERSE_SIZE,
+)
 # --- Tier 2-4 routers deferred to _init_all_services() during startup ---
 from services.social_feed_service import init_social_feed_service
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
@@ -1424,6 +1430,7 @@ app.include_router(focus_mode_router)
 app.include_router(watchlist_router)
 app.include_router(system_router)
 app.include_router(dashboard_router)
+app.include_router(sentiment_refresh_router)
 # Tier 2-4 routers registered during startup via _deferred_routers
 
 class StockQuote(BaseModel):
@@ -3913,6 +3920,49 @@ async def startup_event():
         print("Trading scheduler started")
     except Exception as e:
         print(f"[WARN] Trading scheduler failed: {e}")
+
+    # Standalone FinBERT sentiment refresh — daily 07:45 AM ET pre-market.
+    # Uses AsyncIOScheduler so it shares uvicorn's running loop (no new loop,
+    # avoiding the uvloop conflict that bit us with module-level init).
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        sentiment_scheduler = AsyncIOScheduler(timezone="America/New_York")
+
+        async def _scheduled_sentiment_refresh():
+            try:
+                print("[SENT-REFRESH] Cron fired (07:45 ET) — starting refresh…")
+                res = await _sentiment_run_refresh(
+                    universe_size=SENTIMENT_DEFAULT_UNIVERSE_SIZE
+                )
+                print(f"[SENT-REFRESH] Cron done: symbols={res.get('symbols_count')} "
+                      f"duration={res.get('duration_s')}s errors={len(res.get('errors', []))}")
+            except Exception as _e:
+                print(f"[SENT-REFRESH] Cron failed: {_e}")
+
+        sentiment_scheduler.add_job(
+            _scheduled_sentiment_refresh,
+            trigger=CronTrigger(hour=7, minute=45, timezone="America/New_York"),
+            id="sentiment_refresh",
+            name="Pre-market FinBERT sentiment refresh",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=1800,  # 30 min grace window
+            replace_existing=True,
+        )
+        sentiment_scheduler.start()
+        init_sentiment_router(db, sentiment_scheduler)
+        app.state.sentiment_scheduler = sentiment_scheduler
+        print("[SENT-REFRESH] APScheduler started — next run:",
+              sentiment_scheduler.get_job("sentiment_refresh").next_run_time)
+    except Exception as e:
+        print(f"[WARN] Sentiment scheduler failed: {e}")
+        # Still wire db so manual /api/sentiment/refresh works without a scheduler.
+        try:
+            init_sentiment_router(db, None)
+        except Exception:
+            pass
     
     # === DEBUG: Log event loop health after init ===
     async def _debug_event_loop():
@@ -3977,6 +4027,13 @@ async def shutdown_event():
         pass
     try:
         market_intel_service.stop_scheduler()
+    except Exception:
+        pass
+    try:
+        sched = getattr(app.state, "sentiment_scheduler", None)
+        if sched is not None:
+            sched.shutdown(wait=False)
+            print("[SENT-REFRESH] APScheduler stopped")
     except Exception:
         pass
 

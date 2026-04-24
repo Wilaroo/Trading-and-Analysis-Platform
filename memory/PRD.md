@@ -1,5 +1,43 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Standalone FinBERT sentiment pipeline wired into server
+
+Decoupled pre-market news scoring from the 44h training pipeline. Router
+`/app/backend/routers/sentiment_refresh.py` now mounted on the FastAPI app,
+and APScheduler runs `_run_refresh(universe_size=500)` daily at **07:45 AM ET**
+(`America/New_York`).
+
+**Implementation (`server.py`):**
+  - Imported `sentiment_refresh_router`, `init_sentiment_router`,
+    `_run_refresh`, `DEFAULT_UNIVERSE_SIZE` at module level.
+  - Registered `app.include_router(sentiment_refresh_router)` in Tier-1 block.
+  - Inside `@app.on_event("startup")`, after `scheduler_service.start()`:
+    built `AsyncIOScheduler(timezone="America/New_York")` (shares uvicorn's
+    asyncio loop — sidesteps the uvloop conflict documented at the top of
+    the file), registered the cron job `id="sentiment_refresh"` with
+    `coalesce=True`, `max_instances=1`, `misfire_grace_time=1800`,
+    `replace_existing=True`, called `init_sentiment_router(db, scheduler)`,
+    stashed it on `app.state.sentiment_scheduler`.
+  - Shutdown hook calls `sched.shutdown(wait=False)`.
+
+**Verified endpoints (curl):**
+  - `GET /api/sentiment/schedule` → `enabled: true`, next run
+    `2026-04-24T07:45:00-04:00`, trigger `cron[hour='7', minute='45']`.
+  - `POST /api/sentiment/refresh?universe_size=5` → full pipeline ran end-to-end
+    (Yahoo RSS collected, FinBERT scorer invoked, metadata persisted).
+    Finnhub skipped (no `FINNHUB_API_KEY` on this dev host — user has it set
+    in production).
+  - `GET /api/sentiment/latest` → returns last persisted run document from
+    `sentiment_refresh_history` collection.
+
+**Cleanup:** removed a duplicate trailing `if __name__ == "__main__"` block
+and a stray `ain")` fragment that had caused `server.py` to fail
+`ast.parse` (hot-reload was running off a cached import).
+
+---
+
+# TradeCommand / SentCom — Product Requirements
+
 ## Original problem statement
 AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). Goal: stable massive training pipeline, real-time responsive UI, SentCom chat aware of live portfolio status without hanging the backend, and a bot that can go live for automated trading with accurate dashboards.
 
