@@ -254,7 +254,15 @@ export const ChartPanel = ({
       volumeSeriesRef.current.setData([]);
       return;
     }
-    // Bars must be sorted ascending by time for lightweight-charts
+    // Bars must be sorted ascending AND strictly unique by time for
+    // lightweight-charts — duplicates throw
+    //   "Assertion failed: data must be asc ordered by time, index=N,
+    //    time=T, prev time=T"
+    // which used to crash the whole Command Center. Duplicates can legit
+    // surface after a chunked backfill merges overlapping windows (e.g.
+    // the last bar of chunk N shares its timestamp with the first bar of
+    // chunk N+1 at a session boundary). De-dupe by keeping the last
+    // occurrence — that's the freshest copy of the row.
     const rows = bars
       .map(b => ({
         time: toUtcTimestamp(b.timestamp ?? b.date ?? b.time),
@@ -265,7 +273,16 @@ export const ChartPanel = ({
         volume: Number(b.volume ?? 0),
       }))
       .filter(r => r.time != null && Number.isFinite(r.open))
-      .sort((a, b) => a.time - b.time);
+      .sort((a, b) => a.time - b.time)
+      .reduce((acc, r) => {
+        const last = acc[acc.length - 1];
+        if (last && last.time === r.time) {
+          acc[acc.length - 1] = r;    // keep the freshest duplicate
+        } else {
+          acc.push(r);
+        }
+        return acc;
+      }, []);
 
     const candleData = rows.map(({ time, open, high, low, close }) => (
       { time, open, high, low, close }
@@ -290,11 +307,19 @@ export const ChartPanel = ({
       const series = indicatorSeriesRef.current[spec.key];
       if (!series) continue;
       const points = Array.isArray(indicators[spec.key]) ? indicators[spec.key] : [];
-      series.setData(
-        points
-          .map(p => ({ time: Number(p.time), value: Number(p.value) }))
-          .filter(p => Number.isFinite(p.time) && Number.isFinite(p.value))
-      );
+      // Same ascending-unique contract as the candle series — dedupe by
+      // time so a stray duplicate can't crash the whole Command Center.
+      const cleaned = points
+        .map(p => ({ time: Number(p.time), value: Number(p.value) }))
+        .filter(p => Number.isFinite(p.time) && Number.isFinite(p.value))
+        .sort((a, b) => a.time - b.time)
+        .reduce((acc, p) => {
+          const last = acc[acc.length - 1];
+          if (last && last.time === p.time) acc[acc.length - 1] = p;
+          else acc.push(p);
+          return acc;
+        }, []);
+      series.setData(cleaned);
     }
   }, [indicators]);
 
@@ -316,10 +341,13 @@ export const ChartPanel = ({
     const plugin = markersPluginRef.current;
     if (!plugin) return;
     try {
+      // lightweight-charts also requires markers to be ascending; dedup is
+      // NOT required here (same time can have buy+sell markers), only sort.
       plugin.setMarkers(
         markers
           .map(m => ({ ...m, time: Number(m.time) }))
           .filter(m => Number.isFinite(m.time))
+          .sort((a, b) => a.time - b.time)
       );
     } catch (_) {
       /* markers plugin api may not be ready on first render */
