@@ -255,12 +255,21 @@ class HybridDataService:
                     wait_time = self._ib_rate_limiter.wait_time()
                     logger.warning(f"IB rate limited, need to wait {wait_time:.1f}s")
         
-        # All sources exhausted (Alpaca removed from pipeline)
+        # All sources exhausted. Note: in this deployment the backend does NOT
+        # directly connect to IB Gateway — the Windows pusher does that, and
+        # historical bars land in `ib_historical_data` via the collector. So
+        # "IB disconnected" is almost always the wrong diagnosis; the real
+        # cause is that `ib_historical_data` has no bars matching
+        # {symbol, bar_size, date-window}.
         self._stats["errors"] += 1
         return DataFetchResult(
             success=False,
             source="error",
-            error="Unable to fetch data. IB disconnected and no cached data available."
+            error=(
+                f"No bars found for {symbol} {timeframe} in ib_historical_data "
+                f"(backend reads pusher+cache, not direct IB). "
+                f"Run a backfill or check /api/ib/pusher-health."
+            ),
         )
     
     async def _get_from_cache(
@@ -295,21 +304,41 @@ class HybridDataService:
                 if "date" in bar and "timestamp" not in bar:
                     bar["timestamp"] = bar["date"]
             
-            # Check if we have enough data (at least 80% of expected bars)
+            # Check how much data we have vs what's expected
             if bars:
                 days = (end_dt - start_dt).days
                 if timeframe == "1day":
-                    expected = days * 0.7
+                    expected = max(days * 0.7, 1)
                 elif timeframe == "1hour":
-                    expected = days * 6.5
+                    expected = max(days * 6.5, 1)
                 else:
-                    expected = days * 78
-                
-                coverage = len(bars) / max(expected, 1)
-                
+                    expected = max(days * 78, 1)
+
+                coverage = len(bars) / expected
+
+                # Full-coverage hit — return as a normal cache hit.
                 if coverage >= 0.8:
                     return {"success": True, "bars": bars, "bar_count": len(bars)}
-            
+
+                # Partial coverage — still return what we have rather than
+                # falling through to the "IB disconnected" dead-end.
+                # In this deployment the backend does NOT talk to IB directly
+                # (the Windows pusher does), so an empty return = blank chart
+                # for the user every time there's a cache gap. Better to show
+                # partial data and log the shortfall.
+                logger.info(
+                    f"[hybrid_data] Partial cache hit for {symbol} {timeframe}: "
+                    f"{len(bars)} bars / ~{int(expected)} expected "
+                    f"({coverage*100:.0f}% coverage). Returning partial data."
+                )
+                return {
+                    "success": True,
+                    "bars": bars,
+                    "bar_count": len(bars),
+                    "partial": True,
+                    "coverage": coverage,
+                }
+
             return {"success": False, "bars": [], "bar_count": 0}
             
         except Exception as e:

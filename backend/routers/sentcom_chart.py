@@ -513,6 +513,74 @@ async def get_chart_bars(
     }
 
 
+@router.get("/chart-diagnostic")
+async def chart_diagnostic(
+    symbol: str = Query(..., min_length=1, max_length=10),
+    timeframe: str = Query("5min"),
+) -> Dict[str, Any]:
+    """Why is my chart empty? Dump what `ib_historical_data` actually contains
+    for (symbol, bar_size) so the user can see if data is missing / wrong
+    bar_size / stale.
+
+    Returns: symbol, requested timeframe, the normalised `bar_size` used in
+    Mongo queries, total bar count, date range (earliest/latest), all
+    distinct `bar_size` values for this symbol (in case the chart is asking
+    for one we don't have), and the pusher-health summary. Safe, read-only.
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="DB handle not wired")
+
+    tf_key = timeframe.lower()
+    # Mirror the same map hybrid_data_service uses for TIMEFRAMES
+    tf_to_barsize = {
+        "1min": "1 min", "5min": "5 mins", "15min": "15 mins",
+        "30min": "30 mins", "1hour": "1 hour", "1day": "1 day",
+    }
+    bar_size = tf_to_barsize.get(tf_key)
+    if not bar_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown timeframe '{timeframe}'. Supported: {list(tf_to_barsize)}",
+        )
+
+    sym = symbol.upper()
+    coll = _db["ib_historical_data"]
+
+    total = coll.count_documents({"symbol": sym, "bar_size": bar_size})
+    earliest = coll.find_one(
+        {"symbol": sym, "bar_size": bar_size}, {"_id": 0, "date": 1}, sort=[("date", 1)]
+    )
+    latest = coll.find_one(
+        {"symbol": sym, "bar_size": bar_size}, {"_id": 0, "date": 1}, sort=[("date", -1)]
+    )
+    distinct_bar_sizes = sorted(coll.distinct("bar_size", {"symbol": sym}))
+
+    # Bar counts per bar_size for this symbol (reveals if data is under a
+    # different bar_size key than the chart is asking for)
+    by_bar_size: Dict[str, int] = {}
+    for bs in distinct_bar_sizes:
+        by_bar_size[bs] = coll.count_documents({"symbol": sym, "bar_size": bs})
+
+    # Sample 1 doc so the user can see the stored date format
+    sample = coll.find_one(
+        {"symbol": sym, "bar_size": bar_size},
+        {"_id": 0, "date": 1, "open": 1, "close": 1, "volume": 1},
+    )
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "requested_timeframe": timeframe,
+        "resolved_bar_size": bar_size,
+        "total_bars": total,
+        "earliest_date": (earliest or {}).get("date"),
+        "latest_date": (latest or {}).get("date"),
+        "distinct_bar_sizes_for_symbol": distinct_bar_sizes,
+        "bar_counts_by_bar_size": by_bar_size,
+        "sample_doc": sample,
+    }
+
+
 
 # ─── Scorecard tile → targeted retrain ──────────────────────────────────────
 

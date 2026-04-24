@@ -1,5 +1,34 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — Command Center chart diagnostics + misleading "IB disconnected" fix
+
+User reported the V5 Command Center showing *"Unable to fetch data. IB
+disconnected and no cached data available"* on the SPY chart even though
+the Pusher LIVE badge was green. Root-caused to `hybrid_data_service.py`:
+
+  1. **80% coverage gate** (line 310) would return `success=False` and fall
+     through to `_fetch_from_ib()` whenever cached bars covered <80% of the
+     requested window. Backend doesn't talk to IB directly (pusher does),
+     so every partial-coverage read produced the same confusing error.
+  2. **Error text was architecturally wrong** — the backend was never
+     supposed to have a direct IB connection in this deployment, so
+     "IB disconnected" misleads the user to look at the wrong symptom.
+
+**Fixes applied** (`hybrid_data_service.py`):
+  - Partial-coverage reads now return `success=True` with `partial: true`
+    and `coverage: <float>` so the chart can render whatever we have.
+  - Error message rewritten to accurately point the user at
+    `ib_historical_data` + `/api/ib/pusher-health` for triage.
+
+**New diagnostic endpoint** (`routers/sentcom_chart.py`):
+  - `GET /api/sentcom/chart-diagnostic?symbol=SPY&timeframe=5min` returns
+    total bar count, earliest/latest dates, distinct `bar_size` values
+    available for the symbol, per-bar-size counts, and a sample document.
+    Lets the user immediately see whether SPY 5m bars are missing, stored
+    under a different bar_size key, or have a date-format mismatch.
+
+---
+
 ## 2026-04-24 — Post-training observability + scorecard mirror fixes
 
 Surgical edits to `training_pipeline.py` and regression contracts under
