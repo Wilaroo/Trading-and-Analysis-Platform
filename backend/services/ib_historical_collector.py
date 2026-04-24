@@ -1324,8 +1324,10 @@ class IBHistoricalCollector:
         current_end = chain_from
 
         while current_end > max_lookback_start:
-            # IB endDateTime format: "YYYYMMDD-HH:MM:SS UTC"
-            end_date_str = current_end.strftime("%Y%m%d-%H:%M:%S") + " UTC"
+            # IB endDateTime format: "YYYYMMDD HH:MM:SS UTC" (space-separated;
+            # older hyphen form was rejected by TWS and caused walkback chunks
+            # to silently fall back to "now" — see 2026-04-25 walkback fix.)
+            end_date_str = current_end.strftime("%Y%m%d %H:%M:%S") + " UTC"
             chains.append({
                 "duration": max_duration,
                 "end_date": end_date_str,
@@ -2536,7 +2538,12 @@ class IBHistoricalCollector:
                             end_str = ""
                             first_chunk = False
                         else:
-                            end_str = end_anchor.strftime("%Y%m%d-%H:%M:%S")
+                            # IB wants "YYYYMMDD HH:MM:SS" (space-separated).
+                            # Earlier code used a hyphen ("20260423-16:00:00")
+                            # which IB rejected; chunks 2+ silently errored
+                            # and the collector fell back to endDateTime=""
+                            # → fetched the SAME latest window every time.
+                            end_str = end_anchor.strftime("%Y%m%d %H:%M:%S")
                         to_queue.append((sym, bs, dur, tier, end_str))
                         end_anchor = end_anchor - timedelta(days=take)
                         remaining -= take

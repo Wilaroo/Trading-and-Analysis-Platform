@@ -3253,3 +3253,82 @@ def clear_stale_jobs():
     except Exception as e:
         logger.error(f"Error clearing stale jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/queue-sample")
+def queue_sample(
+    symbol: Optional[str] = None,
+    bar_size: Optional[str] = None,
+    status: str = "pending",
+    limit: int = 10,
+):
+    """
+    Diagnostic: peek at the first N rows of `historical_data_requests` for a
+    given (symbol, bar_size) and status. Used to verify that walkback chunks
+    are being enqueued with *distinct* `end_date` values (hyphen vs space
+    form, blank vs anchored, etc.).
+
+    Example:
+        GET /api/ib-collector/queue-sample?symbol=CI&bar_size=1%20min
+
+    Returns each row's (request_id, symbol, bar_size, duration, end_date,
+    status, created_at) plus a `distinct_end_dates` count so you can spot
+    a planner that collapsed all chunks to end_date="" in one glance.
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+
+        filt: Dict = {}
+        if status:
+            filt["status"] = status
+        if symbol:
+            filt["symbol"] = symbol
+        if bar_size:
+            filt["bar_size"] = bar_size
+
+        cursor = db["historical_data_requests"].find(
+            filt,
+            {
+                "_id": 0,
+                "request_id": 1,
+                "symbol": 1,
+                "bar_size": 1,
+                "duration": 1,
+                "end_date": 1,
+                "status": 1,
+                "created_at": 1,
+                "tier": 1,
+            },
+        ).limit(max(1, min(limit, 100)))
+
+        rows = list(cursor)
+        end_dates = [r.get("end_date") or "" for r in rows]
+
+        # Classify end_date format so we can spot legacy hyphen rows.
+        def _fmt(ed: str) -> str:
+            if not ed:
+                return "empty"
+            if len(ed) >= 9 and ed[8] == "-":
+                return "hyphen (legacy)"
+            if len(ed) >= 9 and ed[8] == " ":
+                return "space (IB-native)"
+            return "unknown"
+
+        return {
+            "success": True,
+            "filter": filt,
+            "count": len(rows),
+            "distinct_end_dates": len(set(end_dates)),
+            "end_date_formats": {f: sum(1 for e in end_dates if _fmt(e) == f)
+                                 for f in ["empty", "hyphen (legacy)", "space (IB-native)", "unknown"]},
+            "rows": rows,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in queue-sample: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

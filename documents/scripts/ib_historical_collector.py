@@ -360,7 +360,18 @@ class IBHistoricalCollector:
             # Dedup key now includes duration/end_date so different chunks
             # of the same (symbol, bar_size) don't pay the 15s identical-
             # request tax. See IBPacingManager._key docstring.
-            end_date = request.get("end_date", "") or ""
+            raw_end_date = request.get("end_date", "") or ""
+            # ---- 2026-04-25 walkback fix ---------------------------------
+            # IB's reqHistoricalData wants endDateTime as "YYYYMMDD HH:MM:SS"
+            # (space between date and time). The backend planner used to
+            # emit a hyphen ("20260423-16:00:00") which IB rejects. Normalise
+            # here so legacy queue rows work without a DB migration.
+            # Also accept a trailing " UTC" / " US/Eastern" timezone.
+            end_date = raw_end_date.strip()
+            if end_date:
+                # Split hyphen form: "YYYYMMDD-HH:MM:SS[ TZ]" -> "YYYYMMDD HH:MM:SS[ TZ]"
+                if len(end_date) >= 9 and end_date[8] == "-":
+                    end_date = end_date[:8] + " " + end_date[9:]
             if not self.pacing.can_make_request(symbol, bar_size, duration, end_date):
                 wait = self.pacing.wait_time(symbol, bar_size, duration, end_date)
                 if wait > 0:
@@ -379,9 +390,14 @@ class IBHistoricalCollector:
             
             self.pacing.record_request(symbol, bar_size, duration, end_date)
             
+            # CRITICAL: pass the chunk's end_date through to IB. Previously
+            # this was hardcoded to "" (= now), which meant every walkback
+            # chunk re-fetched the SAME latest window. That's why a 21k
+            # backfill queue drained into the same 1950 bars per symbol and
+            # triggered IB's own 15s identical-request throttle.
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime="",
+                endDateTime=end_date,  # "" = latest, else walked-back anchor
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",

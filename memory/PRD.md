@@ -1,5 +1,61 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Walkback bug fix: collector now honors queue `end_date`
+
+User reported collectors still "pacing conservatively" after restart — logs
+showed `CI (1 min): 1950 bars` repeating 4× per cycle with 13.3–13.9s
+`Pacing: waiting` between each, even though only 3 of 58 window slots used.
+
+**Root cause (two bugs, same blast radius):**
+
+1. `documents/scripts/ib_historical_collector.py::fetch_historical_data`
+   hardcoded `reqHistoricalData(endDateTime="")` — i.e. "now". The queue
+   planner correctly enqueued walkback chunks with distinct anchors, but
+   the collector threw those away and asked IB for the *same* latest
+   window every time. IB then applied its own server-side "no identical
+   request within 15s" rule → 13s waits, duplicate bars, queue never
+   actually drains.
+2. Backend planner (`services/ib_historical_collector.py`) strftime'd
+   end_dates with a hyphen (`"20260423-16:00:00"`). IB TWS expects a
+   space (`"20260423 16:00:00"`); the hyphen form is rejected outright.
+
+**Fix:**
+  - Collector: pass `end_date = request.get("end_date", "")` into
+    `reqHistoricalData(endDateTime=end_date)`. Also normalize legacy
+    hyphen-form rows in the queue (`ed[8]=='-'` → replace with space)
+    so old queued rows work without a DB migration.
+  - Backend planner: two call sites changed from `%Y%m%d-%H:%M:%S` to
+    `%Y%m%d %H:%M:%S` — lines 1328 and 2544.
+  - New diagnostic: `GET /api/ib-collector/queue-sample` returns N
+    pending rows and summarizes distinct end_dates + format class
+    (empty / hyphen / space / unknown) to verify the planner emits
+    distinct walkback anchors.
+
+**Regression tests (`tests/test_collector_uses_end_date.py`):**
+  - reqHistoricalData must reference `end_date` var, not `""`
+  - collector tolerates legacy hyphen-form rows
+  - planner emits space-format from every strftime call
+  - pacing key tuple still contains (symbol, bar_size, duration, end_date)
+  - 4/4 new + 15/15 existing collector contracts green.
+
+**Impact on active backfill:**
+  - Before: each walkback chunk re-fetched the same 1950-bar slice; queue
+    "drained" without adding new history (5-week gap persisted).
+  - After: each chunk fetches a *distinct* historical window walking
+    backward in time; queue drain rate now bottlenecked only by IB's
+    ~232 req/10min hard cap across 4 collectors (as designed).
+
+**Action for user:**
+  1. On Windows PC: `git pull` (patched collector script ships with repo)
+  2. Restart the 4 collectors (`spark_restart` or the NIA workflow)
+  3. Hit `GET /api/ib-collector/queue-sample?symbol=CI&bar_size=1%20min`
+     — `distinct_end_dates` should be close to `count` and
+     `end_date_formats.space (IB-native)` should dominate.
+  4. Watch a collector terminal; successive calls should show different
+     bar counts / timestamps, no more "Pacing: waiting 13s" between
+     chunks of the same symbol.
+
+
 ## 2026-04-24 — IBPacingManager dedup key widened (backfill ~6× faster)
 
 User observed every `(symbol, bar_size)` chunk pair paying a 13.9-second
