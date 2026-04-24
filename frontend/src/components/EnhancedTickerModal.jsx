@@ -35,6 +35,7 @@ import {
   Activity
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
+import { CandlestickSeries } from 'lightweight-charts';
 import api from '../utils/api';
 import { useTickerModal } from '../hooks/useTickerModal';
 import { HelpTooltip } from './HelpTooltip';
@@ -773,7 +774,7 @@ const EnhancedTickerModal = ({
         
         chartRef.current = chart;
         
-        const candleSeries = chart.addCandlestickSeries({
+        const candleSeries = chart.addSeries(CandlestickSeries, {
           upColor: '#00FF94', 
           downColor: '#FF2E2E',
           borderUpColor: '#00FF94', 
@@ -821,7 +822,18 @@ const EnhancedTickerModal = ({
         high: Number(bar.high), 
         low: Number(bar.low), 
         close: Number(bar.close),
-      })).sort((a, b) => a.time - b.time);
+      }))
+        .filter(b => Number.isFinite(b.time) && Number.isFinite(b.open))
+        .sort((a, b) => a.time - b.time)
+        // De-dupe by time — duplicates crash lightweight-charts with
+        // "Assertion failed: data must be asc ordered by time". See
+        // ChartPanel for the full RCA (2026-04-24 walkback fix).
+        .reduce((acc, b) => {
+          const last = acc[acc.length - 1];
+          if (last && last.time === b.time) acc[acc.length - 1] = b;
+          else acc.push(b);
+          return acc;
+        }, []);
       
       candleSeriesRef.current.setData(chartData);
       if (chartRef.current) chartRef.current.timeScale().fitContent();
