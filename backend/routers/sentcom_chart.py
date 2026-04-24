@@ -526,23 +526,22 @@ async def chart_diagnostic(
 ) -> Dict[str, Any]:
     """Why is my chart empty? Dump what `ib_historical_data` actually contains
     for (symbol, bar_size) so the user can see if data is missing / wrong
-    bar_size / stale.
+    bar_size / stale / different date type.
 
-    Returns: symbol, requested timeframe, the normalised `bar_size` used in
-    Mongo queries, total bar count, date range (earliest/latest), all
-    distinct `bar_size` values for this symbol (in case the chart is asking
-    for one we don't have), and the pusher-health summary. Safe, read-only.
+    Returns rich diagnostics including: latest & earliest date (via true BSON
+    sort, so datetime objects and strings are both handled), date type
+    distribution, recent `collected_at` timestamps (shows when the last
+    backfill actually ran), top-10 freshest bars, distinct bar_sizes, per-
+    bar-size counts, and pusher health. Read-only, safe.
     """
     if _db is None:
         raise HTTPException(status_code=503, detail="DB handle not wired")
 
-    tf_key = timeframe.lower()
-    # Mirror the same map hybrid_data_service uses for TIMEFRAMES
     tf_to_barsize = {
         "1min": "1 min", "5min": "5 mins", "15min": "15 mins",
         "30min": "30 mins", "1hour": "1 hour", "1day": "1 day",
     }
-    bar_size = tf_to_barsize.get(tf_key)
+    bar_size = tf_to_barsize.get(timeframe.lower())
     if not bar_size:
         raise HTTPException(
             status_code=400,
@@ -551,27 +550,62 @@ async def chart_diagnostic(
 
     sym = symbol.upper()
     coll = _db["ib_historical_data"]
+    q = {"symbol": sym, "bar_size": bar_size}
 
-    total = coll.count_documents({"symbol": sym, "bar_size": bar_size})
-    earliest = coll.find_one(
-        {"symbol": sym, "bar_size": bar_size}, {"_id": 0, "date": 1}, sort=[("date", 1)]
+    total = coll.count_documents(q)
+
+    # BSON-native sort. If `date` is stored as a string in some docs and a
+    # datetime in others, MongoDB's type-bracket sort returns the newest of
+    # each type — we surface both so the user can see the heterogeneity.
+    earliest_asc = coll.find_one(q, {"_id": 0, "date": 1, "collected_at": 1}, sort=[("date", 1)])
+    latest_desc = coll.find_one(q, {"_id": 0, "date": 1, "collected_at": 1}, sort=[("date", -1)])
+
+    # Recency via `collected_at` — a real datetime field the collector writes
+    # on every insert/update. If this is fresh but `date` looks stale, the
+    # backfill IS running but writing backdated bars (or the `date` query
+    # window is wrong in hybrid_data_service).
+    latest_by_collected = list(
+        coll.find(q, {"_id": 0, "date": 1, "collected_at": 1})
+            .sort("collected_at", -1).limit(10)
     )
-    latest = coll.find_one(
-        {"symbol": sym, "bar_size": bar_size}, {"_id": 0, "date": 1}, sort=[("date", -1)]
-    )
+
+    # Date type breakdown — catches the "bars exist but as datetime objects
+    # while hybrid_data_service queries with ISO strings" footgun.
+    date_type_counts = {
+        "string":   coll.count_documents({**q, "date": {"$type": "string"}}),
+        "datetime": coll.count_documents({**q, "date": {"$type": "date"}}),
+        "int":      coll.count_documents({**q, "date": {"$type": "int"}}),
+        "long":     coll.count_documents({**q, "date": {"$type": "long"}}),
+        "double":   coll.count_documents({**q, "date": {"$type": "double"}}),
+    }
+
+    # All bar_sizes we have for this symbol + their counts
     distinct_bar_sizes = sorted(coll.distinct("bar_size", {"symbol": sym}))
-
-    # Bar counts per bar_size for this symbol (reveals if data is under a
-    # different bar_size key than the chart is asking for)
     by_bar_size: Dict[str, int] = {}
     for bs in distinct_bar_sizes:
         by_bar_size[bs] = coll.count_documents({"symbol": sym, "bar_size": bs})
 
-    # Sample 1 doc so the user can see the stored date format
-    sample = coll.find_one(
-        {"symbol": sym, "bar_size": bar_size},
-        {"_id": 0, "date": 1, "open": 1, "close": 1, "volume": 1},
+    # Top-5 freshest bars (by date) so user sees actual values
+    freshest = list(
+        coll.find(q, {"_id": 0, "date": 1, "close": 1, "volume": 1, "collected_at": 1})
+            .sort("date", -1).limit(5)
     )
+
+    # Rough age of latest data (using collected_at if present)
+    age_seconds = None
+    if latest_by_collected:
+        ca = latest_by_collected[0].get("collected_at")
+        if ca:
+            try:
+                if isinstance(ca, str):
+                    ca_dt = datetime.fromisoformat(ca.replace("Z", "+00:00"))
+                else:
+                    ca_dt = ca
+                if ca_dt.tzinfo is None:
+                    ca_dt = ca_dt.replace(tzinfo=timezone.utc)
+                age_seconds = (datetime.now(timezone.utc) - ca_dt).total_seconds()
+            except Exception:
+                age_seconds = None
 
     return {
         "success": True,
@@ -579,11 +613,60 @@ async def chart_diagnostic(
         "requested_timeframe": timeframe,
         "resolved_bar_size": bar_size,
         "total_bars": total,
-        "earliest_date": (earliest or {}).get("date"),
-        "latest_date": (latest or {}).get("date"),
+        "earliest_date_bson_sort": (earliest_asc or {}).get("date"),
+        "latest_date_bson_sort": (latest_desc or {}).get("date"),
+        "latest_10_by_collected_at": latest_by_collected,
+        "collected_at_age_seconds": age_seconds,
+        "date_type_breakdown": date_type_counts,
         "distinct_bar_sizes_for_symbol": distinct_bar_sizes,
         "bar_counts_by_bar_size": by_bar_size,
-        "sample_doc": sample,
+        "freshest_5_bars_by_date": freshest,
+    }
+
+
+@router.get("/chart-diagnostic-universe")
+async def chart_diagnostic_universe(
+    timeframe: str = Query("5min"),
+    limit: int = Query(20, ge=1, le=200),
+) -> Dict[str, Any]:
+    """Top-N symbols by latest bar-date for (bar_size) — shows whether the
+    backfill ran recently across the universe or just for SPY. Groups by
+    symbol, returns the max `collected_at` and max `date` per symbol."""
+    if _db is None:
+        raise HTTPException(status_code=503, detail="DB handle not wired")
+
+    tf_to_barsize = {
+        "1min": "1 min", "5min": "5 mins", "15min": "15 mins",
+        "30min": "30 mins", "1hour": "1 hour", "1day": "1 day",
+    }
+    bar_size = tf_to_barsize.get(timeframe.lower())
+    if not bar_size:
+        raise HTTPException(status_code=400, detail=f"Unknown timeframe '{timeframe}'")
+
+    pipeline = [
+        {"$match": {"bar_size": bar_size}},
+        {"$group": {
+            "_id": "$symbol",
+            "max_date": {"$max": "$date"},
+            "max_collected_at": {"$max": "$collected_at"},
+            "bars": {"$sum": 1},
+        }},
+        {"$sort": {"max_collected_at": -1}},
+        {"$limit": int(limit)},
+        {"$project": {
+            "_id": 0,
+            "symbol": "$_id",
+            "max_date": 1,
+            "max_collected_at": 1,
+            "bars": 1,
+        }},
+    ]
+    rows = list(_db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+    return {
+        "success": True,
+        "bar_size": bar_size,
+        "count": len(rows),
+        "symbols": rows,
     }
 
 
