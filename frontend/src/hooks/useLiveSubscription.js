@@ -53,13 +53,13 @@ export function useLiveSubscription(symbol, { enabled = true } = {}) {
       if (cancelled) return;
       if (resp && resp.accepted) {
         subscribedRef.current = sym;
+        // Only start heartbeat when backend actually accepted the sub.
+        // Cap-rejected / not-configured responses get no heartbeat — saves
+        // wasted network every 2 min for symbols the backend isn't tracking.
+        heartbeatTimer = setInterval(() => {
+          _post(`/api/live/heartbeat/${encodeURIComponent(sym)}`);
+        }, HEARTBEAT_MS);
       }
-      // Start heartbeat regardless — if subscribe was cap-rejected the
-      // heartbeat will no-op and we'll retry via the timer cycle if the
-      // cap clears.
-      heartbeatTimer = setInterval(() => {
-        _post(`/api/live/heartbeat/${encodeURIComponent(sym)}`);
-      }, HEARTBEAT_MS);
     };
 
     subscribe();

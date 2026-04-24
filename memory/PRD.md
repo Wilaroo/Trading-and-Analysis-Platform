@@ -1,5 +1,85 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Phase 2 Live Subscription Layer SHIPPED
+
+Tick-level dynamic watchlist end-to-end. Frontend components (ChartPanel,
+EnhancedTickerModal, Scanner top-10) auto-subscribe the symbols on screen;
+backend ref-counts so concurrent consumers of the same symbol coexist and
+only the LAST unmount triggers the pusher unsubscribe. A 5-min heartbeat
+sweep prevents orphan subs if a browser tab crashes mid-use.
+
+### What shipped
+
+- **`services/live_subscription_manager.py`** — thread-safe ref-counted
+  manager. Methods: `subscribe(sym)`, `unsubscribe(sym)`, `heartbeat(sym)`,
+  `list_subscriptions()`, `sweep_expired(now)`. Cap: `MAX_LIVE_SUBSCRIPTIONS`
+  env var (**default 60**, half of IB's ~100 L1 ceiling for safety margin).
+  TTL: `LIVE_SUB_HEARTBEAT_TTL_S` env var (default 300s = 5 min).
+  Background daemon thread runs sweep every 30s.
+
+- **DGX routes** (`routers/live_data_router.py`):
+    * `POST /api/live/subscribe/{symbol}`   — ref-count++ (forwards to pusher on 0→1)
+    * `POST /api/live/unsubscribe/{symbol}` — ref-count-- (forwards to pusher on 1→0)
+    * `POST /api/live/heartbeat/{symbol}`   — renew last_heartbeat_at
+    * `GET  /api/live/subscriptions`        — full state (active_count, max, TTL, per-sub)
+    * `POST /api/live/subscriptions/sweep`  — manual stale-sub sweep (operator lever)
+
+- **Windows pusher RPC** (`ib_data_pusher.py::start_rpc_server`):
+    * `POST /rpc/subscribe`      — `{symbols: [...]}` → calls `subscribe_market_data`
+    * `POST /rpc/unsubscribe`    — `cancelMktData` + pop from `subscribed_contracts` / `quotes_buffer` / `fundamentals_buffer`
+    * `GET  /rpc/subscriptions`  — current watchlist + total
+
+- **Frontend hooks** (`frontend/src/hooks/useLiveSubscription.js`):
+    * `useLiveSubscription(symbol)`           — single-symbol (ChartPanel, EnhancedTickerModal)
+    * `useLiveSubscriptions(symbols, {max})`  — multi-symbol diff-based (Scanner top-10)
+  Both subscribe on mount, heartbeat every 2 min (well under 5-min backend TTL),
+  unsubscribe on unmount. Heartbeat only starts when backend accepted — cap
+  rejections don't waste network.
+
+### Wiring
+- `ChartPanel.jsx` line ~99: `useLiveSubscription(symbol)`
+- `EnhancedTickerModal.jsx` line ~544: `useLiveSubscription(ticker?.symbol || null)`
+- `ScannerCardsV5.jsx` line ~327: `useLiveSubscriptions(cards.slice(0,10).map(c=>c.symbol), {max:10})`
+
+### Testing
+- **Backend pytest**: `backend/tests/test_live_subscription_manager.py` —
+  24 contracts locking ref-count semantics, cap enforcement, heartbeat/sweep,
+  endpoint shape, pusher RPC source invariants, hook wiring. Full suite
+  35/35 green (24 Phase 2 + 11 Phase 1).
+- **Backend HTTP suite** (testing_agent_v3_fork iteration_130):
+  `backend/tests/test_live_subscription_phase2_http.py` — 19/19 pass against
+  running backend. Zero bugs.
+- **Frontend integration** (testing_agent_v3_fork iteration_131): 100%
+  verifiable paths green. ChartPanel / EnhancedTickerModal / Scanner wiring
+  confirmed. Subscribe/unsubscribe fires as designed. Zero runtime errors.
+
+### Env contract for DGX / Windows
+
+On the **DGX** side:
+```
+IB_PUSHER_RPC_URL=http://192.168.50.1:8765
+ENABLE_LIVE_BAR_RPC=true
+MAX_LIVE_SUBSCRIPTIONS=60               # optional, default 60
+LIVE_SUB_HEARTBEAT_TTL_S=300            # optional, default 300
+```
+
+On the **Windows PC** side:
+```
+IB_PUSHER_RPC_PORT=8765                 # optional, default 8765
+IB_PUSHER_RPC_HOST=0.0.0.0              # optional, default 0.0.0.0
+pip install fastapi uvicorn             # required for RPC server
+```
+
+### What this unblocks
+- **Phase 3** (wire remaining surfaces — Briefings / AI Chat / deeper Scanner):
+  `fetch_latest_session_bars` + `useLiveSubscription` / `useLiveSubscriptions`
+  are the two primitives now. Every new surface that needs live data uses
+  them.
+- **Phase 4** (retire Alpaca): blocker is Phase 3 soak-test first.
+- **DataFreshnessBadge → Command Palette** (P3): `/api/live/subscriptions`
+  gives the hot-symbol list the Inspector needs.
+
+
 ## 2026-04-26 — Phase 1 Live Data Architecture SHIPPED + IB 2174 fix
 
 Foundation for "always-on live data across the entire app" is in. The Windows
