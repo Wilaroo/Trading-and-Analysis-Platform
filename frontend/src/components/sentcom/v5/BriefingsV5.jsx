@@ -60,7 +60,7 @@ const ClickableSymbol = ({ symbol, onSymbolClick, className = '' }) => {
 };
 
 
-const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick }) => {
+const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const gp = data?.game_plan;
   const drc = data?.drc;
   const scanner = data?.scanner;
@@ -92,7 +92,20 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick }) =
           {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
+        <div className="flex items-center gap-2">
+          {onOpenDeepDive && (
+            <button
+              type="button"
+              data-testid="briefing-open-deep-dive"
+              onClick={(e) => { e.stopPropagation(); onOpenDeepDive(); }}
+              className="v5-mono text-[9px] text-zinc-500 hover:text-violet-400 transition-colors uppercase tracking-wide"
+              title="Open full briefing (top movers + overnight sentiment)"
+            >
+              full briefing ↗
+            </button>
+          )}
+          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
+        </div>
       </div>
       <div className="v5-why mt-1">
         {loading && !hasData && <span className="text-zinc-500">Loading...</span>}
@@ -305,7 +318,7 @@ const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick
 };
 
 
-export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick }) => {
+export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpenDeepDive }) => {
   const { loading, data } = useMorningBriefing({ refreshMs: 120_000 });
   const [expandedKey, setExpandedKey] = useState('morning');
   const toggle = (key) => setExpandedKey(curr => curr === key ? null : key);
@@ -326,6 +339,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick }) => 
         expanded={expandedKey === 'morning'}
         onToggle={() => toggle('morning')}
         onSymbolClick={onSymbolClick}
+        onOpenDeepDive={onOpenDeepDive}
       />
       <MidDayRecapCard
         positions={positions}

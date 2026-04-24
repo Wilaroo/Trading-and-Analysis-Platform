@@ -1,5 +1,82 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — P2-A Morning Briefing rich UI + React warning fix
+
+Three sections shipped:
+
+### 1. Morning Briefing dynamic top-movers + overnight-sentiment
+
+**Backend** (`backend/services/overnight_sentiment_service.py` + 3 new
+endpoints in `routers/live_data_router.py`):
+
+- `GET /api/live/briefing-watchlist` — server-built dynamic watchlist
+  (positions + latest scanner top-10 + core indices
+  SPY/QQQ/IWM/DIA/VIX, deduped, capped at 12)
+- `GET /api/live/briefing-top-movers?bar_size=5+mins` — wraps
+  `briefing-snapshot` with the dynamic watchlist auto-supplied
+- `GET /api/live/overnight-sentiment?symbols=` — per-symbol scoring of
+  **yesterday_close window** (16:00 ET prior day → 00:00 ET today) vs
+  **premarket window** (00:00 ET today → 09:30 ET today). Reuses
+  `SentimentAnalysisService._analyze_keywords` so scores are directly
+  comparable to other surfaces. Swing threshold locked at ±0.30 per
+  user choice; symbols exceeding the threshold get `notable=true`.
+  Ranked notable-first, then by |swing|. Capped at 12 symbols.
+
+**Frontend** (`MorningBriefingModal.jsx` + new hook
+`sentcom/v5/useBriefingLiveData.js`):
+
+- Two new sections rendered ABOVE the existing game plan:
+    * `briefing-section-top-movers` — mini-grid of price + change%
+      (2–4 cols responsive, 8 symbols max, graceful empty state)
+    * `briefing-section-overnight-sentiment` — row per symbol with
+      swing chip (`v5-chip-manage` / `v5-chip-veto` / `v5-chip-close`
+      by direction), yesterday-close vs premarket scores, top
+      headline truncated with full text in `title`. Notable rows
+      highlighted with a subtle `bg-zinc-900/60`.
+- Refresh button now reloads BOTH the original `useMorningBriefing`
+  feed and the new `useBriefingLiveData` feed.
+- Parallel fetch via `Promise.all` on both endpoints — one round-trip
+  of latency, two data feeds.
+
+### 2. Modal trigger wiring (end-to-end fix)
+Testing agent iteration_134 caught that the existing
+`MorningBriefingModal` was state-dead (`showBriefing` declared but no
+caller toggled it to `true`). Fixed by:
+- Co-locating modal state + mount inside `SentCom.jsx`
+  (`showBriefingDeepDive` state + `<MorningBriefingModal>` after
+  `<SentComV5View>`)
+- Threading `onOpenBriefingDeepDive` prop through SentComV5View →
+  BriefingsV5 → MorningPrepCard
+- Adding a `full briefing ↗` button in MorningPrepCard header with
+  `data-testid="briefing-open-deep-dive"` and
+  `e.stopPropagation()` so card expand doesn't fire alongside
+
+Screenshot-verified end-to-end: click → modal opens → both new
+sections render with real data (or graceful empty state).
+
+### 3. React warning fix (NIA render-phase setState)
+`NIA/index.jsx` was calling `setCached('niaData', ...)` (which
+triggers setState on `DataCacheProvider`) inside a
+`setData(current => { setCached(...); return current; })` updater —
+React 18+ warns: *"Cannot update a component (DataCacheProvider) while
+rendering a different component (NIA)"*. Fixed by hoisting the cache
+write into a dedicated `useEffect` gated by `initialLoadDone`, so the
+cache persist happens after commit. Verified 0 warnings over a 6-second
+NIA fetch cycle in the testing agent's console listener.
+
+### Testing
+- **20 new pytest contracts** (`backend/tests/test_p2a_morning_briefing.py`).
+- Full suite now **83/83 green** locally.
+- `testing_agent_v3_fork` iteration_134 (both front+back): 31/31 focused
+  tests PASS, 0 backend bugs, NIA warning confirmed gone, initial
+  trigger gap caught + fixed in this same session.
+
+### User choices locked in PRD
+- **Watchlist source**: positions + scanner top-10 + SPY/QQQ/IWM/DIA/VIX
+- **Swing threshold**: ±0.30 (moderate)
+- **React warning fix**: bundled in same session
+
+
 ## 2026-04-26 — Top Movers tile + Phase 4 Alpaca retirement + AI Chat live snapshots
 
 Three follow-ups on top of the Phase 1–3 live-data foundation:

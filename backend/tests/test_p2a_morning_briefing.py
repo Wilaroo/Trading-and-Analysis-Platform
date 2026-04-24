@@ -178,6 +178,37 @@ def test_hook_fetches_in_parallel():
     assert "Promise.all" in HOOK_SRC
 
 
+# ====================== Modal trigger wiring (fix for iter_134 bug) ======
+
+SENTCOM_SRC = Path("/app/frontend/src/components/SentCom.jsx").read_text(encoding="utf-8")
+V5_VIEW_SRC = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text(encoding="utf-8")
+BRIEFINGS_V5_SRC = Path("/app/frontend/src/components/sentcom/v5/BriefingsV5.jsx").read_text(encoding="utf-8")
+
+
+def test_sentcom_mounts_morning_briefing_modal():
+    assert "import MorningBriefingModal" in SENTCOM_SRC
+    assert "<MorningBriefingModal" in SENTCOM_SRC
+    assert "showBriefingDeepDive" in SENTCOM_SRC, (
+        "SentCom must own the deep-dive modal visibility state"
+    )
+
+
+def test_deep_dive_prop_threaded_to_briefings_v5():
+    assert "onOpenBriefingDeepDive" in SENTCOM_SRC
+    assert "onOpenBriefingDeepDive" in V5_VIEW_SRC
+    assert "onOpenDeepDive" in BRIEFINGS_V5_SRC
+    assert "onOpenDeepDive={onOpenBriefingDeepDive}" in V5_VIEW_SRC, (
+        "SentComV5View must forward onOpenBriefingDeepDive to BriefingsV5 as onOpenDeepDive"
+    )
+
+
+def test_morning_prep_card_exposes_deep_dive_button():
+    """The trigger UX: a small 'full briefing ↗' link inside MorningPrepCard."""
+    assert 'data-testid="briefing-open-deep-dive"' in BRIEFINGS_V5_SRC
+    # stopPropagation so card doesn't toggle expand when button is clicked
+    assert "e.stopPropagation()" in BRIEFINGS_V5_SRC
+
+
 # ====================== NIA DataCacheProvider warning fix ================
 
 NIA_SRC = Path("/app/frontend/src/components/NIA/index.jsx").read_text(encoding="utf-8")

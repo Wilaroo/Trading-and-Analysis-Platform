@@ -83,12 +83,14 @@ import { ChartPanel } from './sentcom/panels/ChartPanel';
 import { ModelHealthScorecard } from './sentcom/panels/ModelHealthScorecard';
 // Stage 2d: V5 Command Center layout (opt-in via ?v5=1)
 import { SentComV5View } from './sentcom/SentComV5View';
+import MorningBriefingModal from './MorningBriefingModal';
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
 const SentCom = ({ compact = false, embedded = false }) => {
+  const [showBriefingDeepDive, setShowBriefingDeepDive] = useState(false);
   const { status, loading: statusLoading } = useSentComStatus();
   const { messages, loading: streamLoading, refresh: refreshStream } = useSentComStream();
   const { positions, totalPnl, loading: positionsLoading } = useSentComPositions();
@@ -336,23 +338,30 @@ const SentCom = ({ compact = false, embedded = false }) => {
     && (new URLSearchParams(window.location.search).get('v4') === '1');
   if (!_v5QueryOptOut && !compact) {
     return (
-      <SentComV5View
-        status={status}
-        context={context}
-        positions={positions}
-        totalPnl={totalPnl}
-        positionsLoading={positionsLoading}
-        setupsLoading={setupsLoading}
-        contextLoading={contextLoading}
-        alertsLoading={alertsLoading}
-        setups={setups}
-        alerts={alerts}
-        messages={messages}
-        streamLoading={streamLoading}
-        handleChat={handleChat}
-        selectedPosition={selectedPosition}
-        setSelectedPosition={setSelectedPosition}
-      />
+      <>
+        <SentComV5View
+          status={status}
+          context={context}
+          positions={positions}
+          totalPnl={totalPnl}
+          positionsLoading={positionsLoading}
+          setupsLoading={setupsLoading}
+          contextLoading={contextLoading}
+          alertsLoading={alertsLoading}
+          setups={setups}
+          alerts={alerts}
+          messages={messages}
+          streamLoading={streamLoading}
+          handleChat={handleChat}
+          selectedPosition={selectedPosition}
+          setSelectedPosition={setSelectedPosition}
+          onOpenBriefingDeepDive={() => setShowBriefingDeepDive(true)}
+        />
+        <MorningBriefingModal
+          isOpen={showBriefingDeepDive}
+          onClose={() => setShowBriefingDeepDive(false)}
+        />
+      </>
     );
   }
 

@@ -117,6 +117,7 @@ export const SentComV5View = ({
   handleChat,
   selectedPosition,
   setSelectedPosition,
+  onOpenBriefingDeepDive,
 }) => {
   useV5Styles();
   const safety = useSafety();
@@ -281,7 +282,7 @@ export const SentComV5View = ({
               <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
             </div>
             <div className="overflow-y-auto flex-1 v5-scroll">
-              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} />
+              <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} onOpenDeepDive={onOpenBriefingDeepDive} />
             </div>
           </div>
 
