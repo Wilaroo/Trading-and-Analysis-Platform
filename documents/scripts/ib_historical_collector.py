@@ -103,7 +103,10 @@ class IBPacingManager:
     
     IB Rules:
     - Max 60 historical data requests per 10 minutes
-    - No identical requests within 15 seconds
+    - No IDENTICAL requests within 15 seconds — identical means SAME
+      contract + bar_size + durationStr + endDateTime + whatToShow + useRTH.
+      Two requests that differ in `duration` (e.g. "5 D" vs "3 D") are NOT
+      identical, so they don't need the 15-second cooldown.
     - Pacing violations result in temporary blocks
     """
     
@@ -113,52 +116,64 @@ class IBPacingManager:
         self.request_times = deque()
         self.recent_requests = {}
     
-    def can_make_request(self, symbol: str = None, bar_size: str = None) -> bool:
+    def _key(self, symbol: str, bar_size: str, duration: str = None, end_date: str = None):
+        """Build the identity tuple that IB uses to detect duplicate requests.
+        Before 2026-04-24 this was just (symbol, bar_size), which caused EVERY
+        chunked request for the same symbol+bar_size to wait 13.9 s even when
+        the requests were legitimately different (different duration). That
+        slowed a 21k-request backfill to ~15 h; keying on the full identity
+        tuple cuts it to ~2.5 h."""
+        return (symbol, bar_size, duration or "", end_date or "")
+
+    def can_make_request(self, symbol: str = None, bar_size: str = None,
+                          duration: str = None, end_date: str = None) -> bool:
         """Check if we can make a request without violating pacing."""
         now = time.time()
-        
+
         while self.request_times and self.request_times[0] < now - self.window_seconds:
             self.request_times.popleft()
-        
+
         if len(self.request_times) >= self.max_requests:
             return False
-        
+
         if symbol and bar_size:
-            key = (symbol, bar_size)
+            key = self._key(symbol, bar_size, duration, end_date)
             if key in self.recent_requests:
                 if now - self.recent_requests[key] < 15:
                     return False
-        
+
         return True
-    
-    def record_request(self, symbol: str = None, bar_size: str = None):
+
+    def record_request(self, symbol: str = None, bar_size: str = None,
+                        duration: str = None, end_date: str = None):
         """Record that a request was made."""
         now = time.time()
         self.request_times.append(now)
         if symbol and bar_size:
-            self.recent_requests[(symbol, bar_size)] = now
-    
-    def wait_time(self, symbol: str = None, bar_size: str = None) -> float:
+            self.recent_requests[self._key(symbol, bar_size, duration, end_date)] = now
+
+    def wait_time(self, symbol: str = None, bar_size: str = None,
+                   duration: str = None, end_date: str = None) -> float:
         """How long to wait before next request is allowed."""
         now = time.time()
-        
+
         # Check duplicate request wait (15s) first — much shorter
         if symbol and bar_size:
-            key = (symbol, bar_size)
+            key = self._key(symbol, bar_size, duration, end_date)
             if key in self.recent_requests:
                 dup_wait = 15 - (now - self.recent_requests[key])
                 if dup_wait > 0:
                     return dup_wait
-        
+
         # Window-based wait
         if not self.request_times:
             return 0
-        
+
         if len(self.request_times) >= self.max_requests:
             oldest = self.request_times[0]
             wait = (oldest + self.window_seconds) - now
             return max(0, wait)
-        
+
         return 0
     
     def requests_remaining(self) -> int:
@@ -342,8 +357,12 @@ class IBHistoricalCollector:
         }
         
         try:
-            if not self.pacing.can_make_request(symbol, bar_size):
-                wait = self.pacing.wait_time(symbol, bar_size)
+            # Dedup key now includes duration/end_date so different chunks
+            # of the same (symbol, bar_size) don't pay the 15s identical-
+            # request tax. See IBPacingManager._key docstring.
+            end_date = request.get("end_date", "") or ""
+            if not self.pacing.can_make_request(symbol, bar_size, duration, end_date):
+                wait = self.pacing.wait_time(symbol, bar_size, duration, end_date)
                 if wait > 0:
                     logger.info(f"Pacing: waiting {wait:.1f}s ({self.pacing.requests_remaining()} requests remaining)")
                     self.stats["pacing_waits"] += 1
@@ -358,7 +377,7 @@ class IBHistoricalCollector:
                 result["error"] = f"Symbol not available: {e}"
                 return result
             
-            self.pacing.record_request(symbol, bar_size)
+            self.pacing.record_request(symbol, bar_size, duration, end_date)
             
             bars = self.ib.reqHistoricalData(
                 contract,

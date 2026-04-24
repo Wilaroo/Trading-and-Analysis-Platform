@@ -1,5 +1,54 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — IBPacingManager dedup key widened (backfill ~6× faster)
+
+User observed every `(symbol, bar_size)` chunk pair paying a 13.9-second
+identical-request cooldown even when the requests differed in `duration`
+(e.g. "5 D" vs "3 D" walk-back chunks) — which IB itself would accept
+as non-identical. That turned a 21k-request backfill into a ~15h task.
+
+**Root cause (`documents/scripts/ib_historical_collector.py`):**
+
+`IBPacingManager` keyed dedup on `(symbol, bar_size)` only. IB's actual
+rule ("no identical historical data requests within 15s") matches on the
+full identity tuple `(contract, bar_size, durationStr, endDateTime,
+whatToShow, useRTH)`. Two requests that differ in duration are not
+identical and do NOT need the cooldown.
+
+**Fix:**
+
+  - Added `IBPacingManager._key(symbol, bar_size, duration, end_date)`
+    helper building a 4-tuple.
+  - `can_make_request`, `record_request`, `wait_time` accept optional
+    `duration` + `end_date` kwargs (backward compatible — if not provided,
+    key still works via `or ""` fallback).
+  - `fetch_historical_data` passes `duration` and `end_date` from the
+    queue request into all three pacing methods.
+  - Window-based 60/10min rate limit unchanged — still the hard cap.
+
+**Impact on active backfill:**
+
+  - Before: ~15h for 21,270 requests (dominated by same-symbol 13.9s waits)
+  - After: ~2.5h (only window-limit and IB fetch time remain)
+  - 6× speedup; SPY/QQQ/DIA/IWM land within first ~30 min instead of hours
+
+**Regression tests (`tests/test_pacing_manager_dedup.py`):**
+
+  - 5 new contracts: methods accept duration+end_date kwargs, _key helper
+    builds correct 4-tuple, hot-path calls pass all 4 args, window limit
+    still enforced, max_requests default ≤ 60.
+  - 27/27 total across 5 suites passing.
+
+**User next steps (requires collector restart on Windows):**
+
+Because `ib_historical_collector.py` lives in `documents/scripts/` and
+runs on the Windows PC (client IDs 16-19), `git pull` + a collector
+restart on Windows is required to apply this. Then you'll see the pacing
+waits drop from 13.9s to near-zero whenever the backfill has work to do
+across different durations.
+
+---
+
 ## 2026-04-24 — `GET /api/ib-collector/universe-freshness-health` one-call retrain readiness rollup
 
 Added a dedicated endpoint that replaces the 4-curl correlation needed to
