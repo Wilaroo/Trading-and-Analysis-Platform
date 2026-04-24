@@ -1,5 +1,65 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Walkback fix VERIFIED live + 2 collateral issues resolved
+
+After the earlier collector + planner patches, the live DGX system still showed
+the same 13s dup-waits. Deep-dive diagnosis revealed 3 compounding issues.
+
+**Issue A: Stale queue orphans blocked new walkback chunks.**
+`historical_data_requests` held 11k+ rows created 2026-03-17 with 3 prefixes
+(`gap_`, `gap2_`, and legacy `hist_`) — all with missing/empty `end_date`.
+Because `_smart_backfill_sync` outer-dedups on `(symbol, bar_size)` regardless
+of end_date, these orphans blocked the fresh planner from enqueuing any real
+walkback chunks (`skipped_already_queued: 11,241`). 
+Fix: new `POST /api/ib-collector/purge-stale-gap-requests` endpoint (prefix +
+dry-run + age cutoff, counts + breakdown returned). Purged 56+2+370 rows to
+unblock the planner.
+
+**Issue B: Windows collector running stale code (nested git clone).**
+The Windows machine had `C:\Users\...\Trading-and-Analysis-Platform` (outer
+repo used by TradeCommand.bat) AND a nested clone inside it. Previous
+controller pulls had been silently stuck in an abandoned merge state
+(`MERGE_HEAD exists`) — `Windows code updated!` was a lie for weeks.
+Fix: `git merge --abort`, `git fetch origin`, `git reset --hard origin/main`,
+`git clean -fd`, deleted nested duplicate repo. Confirmed with:
+`python -c "...; print('HAS_FIX:', 'endDateTime=end_date' in src)"` → True.
+
+**Issue C: `git clean -fd` wiped untracked `ib_data_pusher.py` at Windows
+repo root** (collateral damage from the cleanup). Live market data feed
+died silently during the next controller start — launcher logged `[SKIP]
+ib_data_pusher.py not found` but continued. Fix: copied canonical
+`documents/scripts/ib_data_pusher.py` → repo root, reclaimed IB Gateway
+client ID 15 by restarting IB Gateway.
+
+**Verified live behaviour (UPS, 10-request batch on 2026-04-24):**
+```
+UPS (1 min): 1950 bars   ← chunk ending now
+UPS (1 min): 1950 bars   ← week -1 (distinct data)
+UPS (1 min): 1950 bars   ← week -2
+... 7 more chunks walking back ...
+UPS (1 min): 390 bars    ← hit data-availability limit
+Batch reported: 10 results, 10,428 bars stored to DB
+Session: 20 done, 29,452 bars
+Queue: 265,617/285,731 (93%)
+```
+**Throughput per 10-request batch: 10,428 bars (vs ~1,130 before fix) — ~10×.**
+No more `Pacing: waiting 13s (55 remaining)` — only legit window-cap waits.
+
+**P2 follow-up filed — IB Warning 2174 (time-zone deprecation):**
+IB Gateway logs a deprecation warning on every request because the current
+normalization produces `"YYYYMMDD HH:MM:SS UTC"` (space) but IB's next API
+release will prefer `"YYYYMMDD-HH:MM:SS UTC"` (hyphen). Currently a warning,
+not an error — no behaviour impact today. When addressed, flip both the
+collector's `end_date[8]=="-"` normalization AND the backend planner's
+`strftime("%Y%m%d %H:%M:%S")` back to hyphen form, and re-run pytest.
+
+**Tests / endpoints shipped in this session:**
+  - `POST /api/ib-collector/queue-sample` (diagnostic — distinct end_date count + format classifier)
+  - `POST /api/ib-collector/purge-stale-gap-requests` (cleanup — prefix + age + dry-run)
+  - `backend/tests/test_collector_uses_end_date.py` (4 regression contracts, all green)
+
+
+
 ## 2026-04-25 — Walkback bug fix: collector now honors queue `end_date`
 
 User reported collectors still "pacing conservatively" after restart — logs
