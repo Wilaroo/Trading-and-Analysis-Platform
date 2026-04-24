@@ -1,5 +1,118 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Live-data architecture plan APPROVED, ready to build
+
+After the collector walkback fix verified live (10k+ bars/batch vs 1130), user
+reported duplicate-timestamp chart crash + discovered the EnhancedTickerModal
+was still on lightweight-charts v4 API while the package is at v5.1. Both
+fixed. Fresh architectural scope defined for the next (max-tier) session:
+**make every app surface capable of fast, up-to-date live data — market open,
+after hours, weekends, any symbol.**
+
+### User's requirements (verbatim-faithful paraphrase):
+
+> "Throughout the entire app I want access to the most up-to-date and
+> preferably live data when I want it. IB is my best bet — I pay for it.
+> During market-closed hours or weekends, if the app is open and connected
+> to IB/ib pusher, I should still be able to access the last available live
+> data for any symbol we have in our database across any timeframe for as
+> far back as our data/charts will allow."
+
+> "Make sure our trade journal, SentCom, AI chat, scanners, portfolio
+> management, charting, enhanced ticker modal, briefings, unified stream,
+> NIA — all of it — has access to live data when it needs to and can get
+> that data fast. If we need to refactor or break up ports or websockets,
+> do it so the entire app can be stable while doing all of this in
+> real-time or near-real-time."
+
+### User clarifications (answered before fork):
+- **Long research sessions on same symbol**: Yes, sometimes → active-view
+  symbol gets 30s TTL regardless of market state.
+- **Extended hours in latest-session fetch**: Yes → `useRTH=False` on the
+  pusher RPC call.
+- **Alpaca fallback**: Keep until the new path is verified, then retire via
+  env flag `ENABLE_ALPACA_FALLBACK=false` (default), then rip in follow-up.
+- **Scope**: Full app. Pusher becomes dual-mode (push loop + RPC server).
+
+### Approved 4-phase plan (each phase ships standalone)
+
+**🔴 Phase 1 — Foundation: on-demand IB fetch + TTL cache**
+  Files to add:
+  - Windows pusher: `POST /rpc/latest-bars`, `/rpc/quote-snapshot`,
+    `/rpc/health` — FastAPI mounted alongside push loop, shares client-id 15.
+  - DGX: `backend/services/ib_pusher_rpc.py` — HTTP client.
+  - DGX: extend `backend/services/hybrid_data_service.py` with
+    `fetch_latest_session_bars(symbol, bar_size)`.
+  - New Mongo collection `live_bar_cache` with dynamic TTL index:
+    - RTH open: 30s · Pre/post-market: 2 min · Overnight: 15 min ·
+      Weekend/holiday: 60 min · Active-view symbol: 30s regardless.
+  - Wire `/api/sentcom/chart` and `/api/ib/analysis/{symbol}` to merge
+    historical (Mongo) + latest session (pusher RPC via TTL cache).
+    Existing dedup from 2026-04-24 fix handles the overlap seam.
+  Risk: 1× backend restart + 1× pusher restart. Collectors retry ~1 min.
+  Effort: ~4–6h at normal tier.
+
+**🟡 Phase 2 — Live subscription layer (tick-level)**
+  - Pusher: `POST /rpc/subscribe`, `POST /rpc/unsubscribe` + dynamic watchlist.
+  - DGX: `POST /api/live/subscribe/{symbol}` + `/unsubscribe/{symbol}`.
+  - Frontend: `useLiveSubscription(symbol)` hook used by ChartPanel and
+    EnhancedTickerModal. Auto-cleanup on unmount. Scanner top-5 auto-subs.
+  - WebSocket pipe pusher → backend → frontend already exists; extend the
+    per-socket watchlist state.
+  Delivers: whichever symbol user is actively viewing gets tick-level updates.
+  Effort: ~3–4h.
+
+**🟡 Phase 3 — Wire remaining surfaces**
+  - Scanner: call `fetch_latest_session_bars` for candidate symbols.
+  - Briefings: pre-market brief = yesterday close + today's pre-market.
+  - AI Chat context: inject latest-session snapshot per symbol mentioned.
+  - Trade Journal: snapshot price-at-close on trade date (immutable after).
+  - Portfolio/positions: already live via pusher stream — verify freshness
+    chip reflects reality.
+  Effort: ~3–4h.
+
+**🟢 Phase 4 — Safely retire Alpaca**
+  - Gate `_stock_service` init behind `ENABLE_ALPACA_FALLBACK` env var
+    (default false). Don't init the shim unless flag is true.
+  - Remove `"Alpaca"` label from `/api/ib/analysis/{symbol}:3222`.
+  - Verify 24h with flag off, then rip the code paths in a follow-up PR.
+  Effort: ~1h.
+
+### Critical infra facts for next agent
+- DGX cannot talk to IB Gateway directly (binds to 127.0.0.1:4002 on Windows);
+  all IB I/O must route through Windows pusher. That's the whole reason
+  Phase 1 needs a new RPC layer on the pusher.
+- Pusher runs IB client-id 15 (separate 58/10min quota from collectors 16–19,
+  so adding on-demand reqHistoricalData calls does NOT steal from backfill).
+- Existing `lightweight-charts` version is **v5.1.0** — use `addSeries(Series, opts)`
+  NOT `addCandlestickSeries(opts)`. ChartPanel is correct; EnhancedTickerModal
+  just fixed today.
+- The chart dedup contract (sort + reduce by time) is now in:
+  - `frontend/.../ChartPanel.jsx` (bars + indicators)
+  - `frontend/.../EnhancedTickerModal.jsx` (bars)
+  - `backend/routers/sentcom_chart.py` (source of truth)
+  New chart integrations MUST replicate this.
+- User's Windows repo had a nested clone trap (resolved 2026-04-25). If Windows
+  collector or pusher code changes, verify with:
+  ```powershell
+  python -c "import pathlib; p=pathlib.Path('documents/scripts/ib_historical_collector.py'); print('HAS_FIX:', 'endDateTime=end_date' in p.read_text(encoding='utf-8'))"
+  ```
+  Reject fixes until `HAS_FIX: True`.
+
+### Session state at fork
+- Historical backfill queue: ~13,700 pending, 95.1% done, draining at ~800
+  items/hour combined across 4 collectors, ETA ~17 hours. **DO NOT start
+  AI retrain until queue is empty.**
+- Chart duplicate-timestamp crash: **fixed** (frontend + backend dedup +
+  pytest contracts). 6/6 regression tests green.
+- EnhancedTickerModal "Failed to initialize chart": **fixed** (v5 migration).
+- V5 chart header ticker-swap input: **shipped** (small input next to SPY
+  button, Enter commits, Esc cancels, 10-char cap). Hard-refresh to see.
+- Alpaca chip: **still visible** on MRVL modal. Phase 4 retires it.
+- IB Warning 2174 (hyphen vs space time format): deferred P3, no impact today.
+
+
+
 ## 2026-04-25 — Walkback fix VERIFIED live + 2 collateral issues resolved
 
 After the earlier collector + planner patches, the live DGX system still showed
