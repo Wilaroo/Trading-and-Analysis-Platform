@@ -252,6 +252,7 @@ export const SentComV5View = ({
             position={positions?.find(p => p.symbol === effectiveSymbol)}
             focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
             onSymbolClick={handleOpenTicker}
+            onChangeSymbol={setFocusedSymbol}
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -331,8 +332,18 @@ export const SentComV5View = ({
 
 
 /** Header strip above the chart showing symbol + entry/SL/PT if position is open. */
-const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClick }) => {
+const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClick, onChangeSymbol }) => {
   const dir = (position?.direction || position?.side || '').toLowerCase();
+  const [draft, setDraft] = useState('');
+  const commit = useCallback(() => {
+    const next = draft.trim().toUpperCase();
+    if (!next || next === symbol) {
+      setDraft('');
+      return;
+    }
+    onChangeSymbol?.(next);
+    setDraft('');
+  }, [draft, symbol, onChangeSymbol]);
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-3 min-w-0">
@@ -348,6 +359,24 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
           </button>
         ) : (
           <span className="v5-mono font-bold text-base text-zinc-100">{symbol}</span>
+        )}
+        {onChangeSymbol && (
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.toUpperCase())}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commit(); }
+              if (e.key === 'Escape') { setDraft(''); e.currentTarget.blur(); }
+            }}
+            onBlur={commit}
+            placeholder="type ticker ↵"
+            maxLength={10}
+            spellCheck={false}
+            autoComplete="off"
+            data-testid="chart-header-symbol-input"
+            className="bg-transparent border border-zinc-800 focus:border-cyan-700 focus:outline-none rounded px-2 py-[2px] text-[11px] v5-mono uppercase tracking-wider w-28 placeholder-zinc-600 text-zinc-200"
+          />
         )}
         <LiveDataChip />
         {focusedSymbolIsPosition && (
