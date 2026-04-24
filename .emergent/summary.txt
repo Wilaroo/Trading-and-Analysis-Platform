@@ -1,139 +1,129 @@
-<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. The UI/UX redesign of the main SentCom dashboard needs to provide an extreme-information-density view of the bot's pre-market prep, real-time pipeline funnel, open positions, and PnL, eliminating dead space and scrolling.
+<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. Recent goals included enforcing a strict IB-only data pipeline (removing Alpaca) and decoupling the FinBERT news sentiment scoring into a standalone scheduled pre-market task.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform running on a DGX Spark (Linux) and Windows PC. The  and historical data queue endpoints have been fully hardened against MongoDB aggregation timeouts. The AI training pipeline now includes a preflight invariant validator and data-readiness checks. The V5 Command Center (SentCom) has been significantly cleaned up (floating buttons removed/relocated) and enriched with a , ,  drawer, and correctly wired live data streams (chat, open positions target prices, and scanner states now properly read from backend schemas).
+**what currently exists?**: A full-stack AI trading platform running natively on a physical DGX Spark (Linux). The  fallback has been completely removed in favor of a strict . The V5 UI has been upgraded with data freshness indicators. The AI training pipeline (Phases 4 & 8) is debugged. The foundational file for the standalone sentiment pipeline () and RSS collectors are created, but the router and  cron jobs are not yet wired into the main FastAPI application.
 
 **Last working item**:
-    - Last item agent was working: Making all ticker symbols in the V5 Command Center clickable so they open the . The agent had started wiring  into  and passing it down to child components (, , , ) to ensure any rendered symbol can trigger the detailed chart/data modal.
-    - Status: IN PROGRESS
+    - Last item agent was working: Completing the standalone FinBERT Sentiment pipeline + APScheduler. The agent was investigating  to figure out where to mount the  router and how to safely start the  at 7:45 AM EST on application startup without conflicting with . The agent proposed a plan and invoked the  tool.
+    - Status: IN PROGRESS / BLOCKED (Waiting for user response to )
     - Agent Testing Done: N
-    - Which testing method agent to use? Frontend testing agent / manual curl / screenshot tool
+    - Which testing method agent to use? manual curl / python -c
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: V5 Command Center symbols are not all clickable/wired to  (P0)
-     - Attempted fixes: Added  in  which updates  and triggers . Started updating  to bind  events. 
-     - Next debug checklist: Finish passing  to , , and . Ensure symbols visually indicate they are clickable (cursor-pointer, hover states) and trigger the modal correctly. Verify the modal uses smart caching for non-realtime historical data to load fast.
-     - Why fix this issue and what will be achieved with the fix? Fulfills user request for deep interactivity; lets the user instantly view charts, insights, and news for any symbol they see in the stream or scanner.
-     - Status: IN PROGRESS
+  Issue 1: P5 Sector-Relative phase trained 0 models in recent runs (P2)
+     - Attempted fixes: Assumed to be caused by  starving the sample size.
+     - Next debug checklist: Wait for the user to run a full-quality training run overnight, then verify if P5 trains models. If it still returns 0 samples, debug  and SPY/sector-ETF dependencies.
+     - Why fix this issue and what will be achieved with the fix? Ensures the bot is not blind to sector-relative strength gating.
+     - Status: USER VERIFICATION PENDING
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? frontend
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Ensure EnhancedTickerModal uses smart caching for historical data
-     - Where to resume: Review  and  data fetching logic (lines ~576-696) to confirm caching is utilized for static historical data (like daily bars) to ensure fast load times, as requested by the user.
-     - What will be achieved with this? Prevents API spam and UI lag when clicking rapidly between symbols.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? frontend
-     - Blocked on something: Needs completion of the symbol clickability wiring (Issue 1).
+  Task 1: Complete standalone FinBERT Sentiment pipeline + APScheduler
+     - Where to resume: Await user response to the pending plan. Then edit  to import and mount . Initialize  in the FastAPI startup event to run the sentiment refresh function daily at 7:45 AM EST ().
+     - What will be achieved with this? Decouples news scoring from the 44-hour AI training pipeline, allowing fresh pre-market sentiment analysis every morning on 500 symbols.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: Waiting on user confirmation from  tool.
 
 **Upcoming and Future Tasks**:
     Upcoming Tasks:
-    - 🟡 (P3) Add a  drift badge onto each scorecard tile in the V5 Command Center (visualizing model drift). *Blocked until models are actually retrained.*
-    - 🟡 (P3) Add a  badge on each scorecard tile showing each model's . *Blocked until models are actually retrained.*
+    - 🟡 (P1) Update Morning Briefing UI to show overnight sentiment swings and flag new 8-K filings based on the new standalone sentiment engine.
+    - 🟡 (P2) Add SEC EDGAR 8-K integration for material events.
+    - 🟡 (P3) Add a  drift badge and  badge onto each scorecard tile (Blocked until models are actually retrained).
     
     Future Tasks:
     - 🟡 (P3) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
+    - 🟡 (P3) [BL-01] Add  symbol command palette +  chat focus.
+    - 🟡 (P3) [BL-02] Add hover tooltips on data points across the app.
     - 🟡 (P3) Server.py breakup -> routers/, models/, tests/
 
 **Completed work in this session**:
-- **Bug Fix**: Fixed  in . (DONE)
-- **Feature**: Completed  logic and wired it to the Collect Data button in UI. Created 6 passing unit tests. (DONE)
-- **Hardening**: Refactored , , and  endpoints to use  and  instead of massive  aggregations. Solved the timeout crashes. (DONE)
-- **Feature**: Added  to Data Collection Panel with persistent history. (DONE)
-- **Feature**: Wired  into the  POST route to abort bad training runs early. Added  to the UI. (DONE)
-- **UI UX Cleanup**: Removed overlapping floating buttons (Flatten all, Morning Briefing, Alert Settings, Volume) from V5 Command Center. Moved Settings to the main Settings page, nested Flatten All neatly in the header HUD. (DONE)
-- **Feature**: Added  (reads heartbeats) and  (reads failed queue items) to V5 HUD. (DONE)
-- **Feature**: Created Triage flow for Failed Items with  supporting  regex matching for per-group retries. (DONE)
-- **Feature**: Added  diagnostic drawer in V5. (DONE)
-- **Bug Fixes (V5 Wiring)**: Fixed 8 frontend data mapping issues (e.g.,  to , chat stream body returning blank because of missing  mapping,  404 pointing to wrong route,  singular mapped to  array). (DONE)
-- **Enhancement**: Added , , , and  to . (DONE)
+- Agent gathered context on  and  using bash and file viewing tools to prepare for the scheduler wiring.
 
-**Earlier issues found/mentioned but not fixed**:
-   None unaddressed.
+- Recently completed (Previous Session):
+  - Wired  to all V5 components to seamlessly open the  (DONE).
+  - Nuked  completely and added strict  CI guard (DONE).
+  - Built  and  (DONE).
+  - Fixed UI percentage calculation () in  (DONE).
+  - Fixed Phase 4 and Phase 8 training bugs related to bar sizes and profiles (DONE).
 
-**Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: None.
+**Earlier issues found/mentioned but not fixed**
+   Issue 1: VAE Regime Detector reported 100.0% accuracy in 
+   - Debug checklist: Validate metrics after removing  for the overnight run.
+   - Why to solve this issue and what will be achieved with this? Ensure the model isn't over-fitting on tiny samples and yields honest metrics.
+   - Should Test frontend/backend/both after fix: backend
+   - Is recurring issue? N
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: None
   - Recurrence count: 0
   - Status: RESOLVED
 
-**Code Architecture**:
-DGX Spark (Linux) runs Backend (FastAPI on :8001), MongoDB, Frontend (React on :3000). Windows PC runs IB Gateway + pusher.
-The historical data architecture features a Data Pusher for live quotes and Turbo Collectors that pull historical bars on demand.
-The ML Training pipeline runs in 9 isolated phases managed by .
-Frontend relies heavily on the React context and components inside .
+**Code Architecture**
+DGX Spark (Linux) runs Backend (FastAPI on :8001), MongoDB, Frontend (React on :3000). 
+Windows PC runs IB Gateway + pusher which feeds .
+The ML Training pipeline runs in 12 isolated phases managed by . 
+FinBERT sentiment scoring occurs locally using HuggingFace  and Finnhub/Yahoo RSS.
 
-**Key Technical Concepts**:
-Interactive Brokers Gateway, FastAPI, React, Pytest, MongoDB, Background subprocesses (training), Asyncio event loops, WebSocket data streaming.
+**Key Technical Concepts**
+Interactive Brokers Gateway, FastAPI, React, Pytest, MongoDB, Background subprocesses (training), Asyncio event loops, APScheduler, FinBERT.
 
-**key DB schema**:
-  - :  (Primary historical bars collection - 178M+ rows)
-  - :  (Collector queue)
-  - : Status of async ML training jobs.
+**key DB schema**
+  - : 
+  - : 
+  - : 
 
-**changes in tech stack**:
-  - None
+**changes in tech stack**
+  -  and  were recently added for cron jobs and Yahoo RSS integration.
 
-**All files of reference**:
-  -  (Fixed and hardened)
-  -  (Modified for retry-failed logic)
-  -  (Modified)
-  -  (Added preflight and data-readiness)
-  -  (Modified)
-  -  (Currently modifying)
-  -  (Currently modifying)
-  -  (Created)
-  -  (Created)
-  -  (Created)
-  -  (Reference for caching)
-  -  (Updated)
+**All files of reference**
+  -  (Contains the standalone sentiment logic, needs to be mounted)
+  -  (Target for APScheduler wiring and router mounting)
+  -  (Contains Finnhub/Yahoo logic)
+  - 
 
 **Areas that need refactoring**:
-  -  is quite monolithic and requires breaking down into , ,  in the future.
+  -  is quite monolithic (4400+ lines) and requires breaking down into , ,  in the future.
 
-**key api endpoints**:
-  -  
+**key api endpoints**
   - 
   - 
-  - 
-  - 
-  - 
+  -  (In Progress)
 
-**Critical Info for New Agent**:
-- **HARDWARE WARNING:** The codebase runs on the user's physical DGX Spark (Linux). E2E workflow testing via the standard testing subagent against live IB data is impossible. You must provide the user with precise information to test via clicking or running Python/bash scripts.
-- The  symbol clickability feature was just started. Complete the prop drilling of / to , , , and .
-- Data-heavy endpoints querying  MUST use  or index-backed queries rather than  aggregations to avoid blocking the FastAPI event loop.
+**Critical Info for New Agent**
+- **HARDWARE WARNING:** The codebase runs natively on the user's physical DGX Spark (Linux). E2E workflow testing via the standard testing subagent against live IB data is impossible. Use manual curl or Python scripts to test features.
+- **DO NOT TOUCH ALPACA:** Alpaca fallback has been banned. A regression test exists to ensure  is not imported anywhere outside the shim.
+- **APScheduler & uvloop Warning**: As noted in the  file comments,  conflicts with  if initialized incorrectly. Ensure  is properly started inside the  startup event ( or lifespan) in , and specifically use the  timezone for the 7:45 AM job.
+- You are currently blocked waiting for the human to respond to your  tool call regarding the implementation plan. Start by checking their response.
 
-**documents and test reports created in this job**:
-  - 
-  -  (Updated)
+**documents and test reports created in this job**
+  -  (Updated in previous run)
 
-**Last 10 User Messages and any pending HUMAN messages**:
- - *User*: ok now what can we with the new Cmmand Center/sentcom rebuild while the training is going to test that everything is connected and working as it should be while this training is running?
- - *Agent*: Built a V5 Connectivity Check drawer testing all upstream endpoints. Found and fixed several V5 wiring bugs where frontend keys did not match backend JSON schemas.
- - *User*: save that improvement. maybe we wil do it. now check to make sure everything is pulling the right data from the right places if you didnt just already do that... make sure our chat/AI is all wired correctly where it needs to be"
- - *Agent*: Audited all V5 wiring components. Found 8 bugs (e.g. Chat stream rendering blanks, `/sentcom/chats` 404, Open Positions ignoring multiple target prices). Fixed them all and enriched the status endpoint.
- - *User*: "yea lets do that improvement"
- - *Agent*: Implemented SentCom status enrichment (`trading_phase`, `account_equity`, etc). Verified the fixes with curl.
- - *User*: "ok now we need to make sure every ticker symbol is clickable and that it opens to our enhanced ticker modal, with correct information and that it loads fairly quickly and it uses smart caching for data that doesnt necessarily need to be realtime
- - *Agent*: Started investigating  and how  is used. Began adding  to  and passing it as  down to child components.
- - *Pending HUMAN message*: None. You need to finish the implementation of symbol clickability across the V5 Command Center.
+**Last 10 User Messages and any pending HUMAN messages** 
+ - *Agent*: Gathered context about  routing, , and the newly created . Noticed where  should be safely initialized.
+ - *Agent*: Invoked  to present the plan for modifying  to the user and request approval before proceeding.
+ - *Pending HUMAN message*: The human has not responded yet. **Wait for and read the human's response to your plan before editing .**
 
-**Project Health Check**:
-Healthy. Timeouts heavily mitigated. SentCom V5 wiring is stable and actively being improved for interactivity.
+**Project Health Check:**
+Healthy. The old Alpaca fallback logic was successfully removed.
 
-**3rd Party Integrations**:
-  - Interactive Brokers (Data & Execution)
-  - LLM Integrations (used in Chat/Insights)
+**3rd Party Integrations**
+  - Interactive Brokers (Data & Execution - Requires User credentials)
+  - HuggingFace (ProsusAI/finbert - Local Execution)
+  - Finnhub (News - Requires User API Key)
+  - Yahoo RSS (News)
 
-**Testing status**:
+**Testing status**
   - Testing agent used after significant changes: NO (Physical hardware constraints)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-  - Known regressions: None.
+  - Test files created: None this session
+  - Known regressions: None
 
 **Credentials to test flow:** N/A
 
-**What agent forgot to execute**:
-The agent started passing  (as ) through  and modified , but did not finish wiring up the click handlers in , , or . The agent also did not review/confirm the caching mechanism inside  to ensure fast loads for non-realtime data as the user requested.</analysis>
+**What agent forgot to execute**
+The agent did not forget anything; they correctly paused execution to get approval on the plan for modifying the massive 4400-line  file via . The task remains to wire  and start  in .</analysis>
