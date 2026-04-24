@@ -890,6 +890,226 @@ async def get_last_smart_backfill():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/universe-freshness-health")
+async def universe_freshness_health(
+    min_fresh_pct_to_retrain: float = 95.0,
+    critical_symbols: str = "SPY,QQQ,DIA,IWM,AAPL,MSFT,NVDA,GOOGL,META,AMZN",
+):
+    """One-call health rollup answering **"Am I ready to retrain?"**
+
+    Rolls up fresh/stale/missing counts per (tier × bar_size), overall stats,
+    the top-10 oldest symbols in the core universe, the top-10 freshest
+    symbols, the timestamp of the last successful backfill run, and a
+    simple boolean `ready_to_retrain` gate based on:
+
+      - All `critical_symbols` have latest bar within their bar_size-specific
+        staleness threshold for every timeframe they're expected to have, AND
+      - Overall fresh_pct ≥ `min_fresh_pct_to_retrain` across all tiers.
+
+    Replaces the need to correlate /gap-analysis + /smart-backfill/last +
+    /chart-diagnostic-universe + /chart-diagnostic by hand. Read-only; safe
+    to poll every minute while the collector churns.
+    """
+    import asyncio
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            return {"success": False, "error": "database not initialized"}
+
+        crit_list = [s.strip().upper() for s in critical_symbols.split(",") if s.strip()]
+
+        def _rollup():
+            data_col = db["ib_historical_data"]
+            adv_col = db["symbol_adv_cache"]
+
+            # Mirror the same tier config + STALE_DAYS used everywhere else
+            tiers = {
+                "intraday": {
+                    "min_adv": 500_000,
+                    "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
+                },
+                "swing": {
+                    "min_adv": 100_000, "max_adv": 500_000,
+                    "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"],
+                },
+                "investment": {
+                    "min_adv": 50_000, "max_adv": 100_000,
+                    "timeframes": ["1 hour", "1 day", "1 week"],
+                },
+            }
+            STALE_DAYS = {
+                "1 min": 3, "5 mins": 3, "15 mins": 5, "30 mins": 5,
+                "1 hour": 7, "1 day": 3, "1 week": 14,
+            }
+            now_utc = datetime.now(timezone.utc)
+
+            def _age_days(max_date_str):
+                if not max_date_str:
+                    return None
+                try:
+                    s = str(max_date_str).replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return (now_utc - dt).total_seconds() / 86400.0
+                except Exception:
+                    return None
+
+            # max_date per (bar_size, symbol) — one pass per bar_size
+            needed_tfs = {tf for cfg in tiers.values() for tf in cfg["timeframes"]}
+            max_date_by_tf = {}
+            for tf in needed_tfs:
+                rows = data_col.aggregate(
+                    [
+                        {"$match": {"bar_size": tf}},
+                        {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
+                    ],
+                    allowDiskUse=True,
+                )
+                max_date_by_tf[tf] = {r["_id"]: r.get("max_date") for r in rows if r.get("_id")}
+
+            # Per-tier fresh/stale/missing counts
+            tier_rollup = []
+            total_fresh = total_stale = total_missing = 0
+            for tier_name, cfg in tiers.items():
+                q = {"avg_volume": {"$gte": cfg["min_adv"]}}
+                if "max_adv" in cfg:
+                    q["avg_volume"]["$lt"] = cfg["max_adv"]
+                tier_symbols = {d["symbol"] for d in adv_col.find(q, {"symbol": 1, "_id": 0}) if d.get("symbol")}
+                tier_total = len(tier_symbols)
+                if not tier_total:
+                    continue
+                tf_breakdown = []
+                for tf in cfg["timeframes"]:
+                    tf_max = max_date_by_tf.get(tf, {})
+                    missing = sum(1 for s in tier_symbols if s not in tf_max)
+                    stale = sum(
+                        1 for s in tier_symbols
+                        if s in tf_max and (ad := _age_days(tf_max[s])) is not None
+                        and ad > STALE_DAYS.get(tf, 7)
+                    )
+                    fresh = tier_total - missing - stale
+                    tf_breakdown.append({
+                        "timeframe": tf,
+                        "fresh": fresh, "stale": stale, "missing": missing,
+                        "fresh_pct": round(100.0 * fresh / tier_total, 1),
+                    })
+                    total_fresh += fresh
+                    total_stale += stale
+                    total_missing += missing
+                tier_rollup.append({
+                    "tier": tier_name,
+                    "total_symbols": tier_total,
+                    "timeframes": tf_breakdown,
+                })
+
+            overall_total = total_fresh + total_stale + total_missing
+            overall_fresh_pct = (100.0 * total_fresh / overall_total) if overall_total else 0.0
+
+            # Critical-symbol readiness check — every one must be fresh on the
+            # intraday timeframes (the ones the training pipeline actually uses
+            # heavily). Anchor-quality symbols only.
+            critical_status = []
+            all_critical_fresh = True
+            for sym in crit_list:
+                sym_tfs = []
+                sym_ok = True
+                for tf in ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]:
+                    md = max_date_by_tf.get(tf, {}).get(sym)
+                    age = _age_days(md)
+                    is_fresh = age is not None and age <= STALE_DAYS.get(tf, 7)
+                    sym_tfs.append({
+                        "timeframe": tf,
+                        "latest": md,
+                        "age_days": round(age, 2) if age is not None else None,
+                        "fresh": is_fresh,
+                    })
+                    if not is_fresh:
+                        sym_ok = False
+                critical_status.append({"symbol": sym, "all_fresh": sym_ok, "timeframes": sym_tfs})
+                if not sym_ok:
+                    all_critical_fresh = False
+
+            # Oldest & freshest in the 1-day universe (broadest)
+            daily_map = max_date_by_tf.get("1 day", {})
+            scored = sorted(
+                ((s, _age_days(d)) for s, d in daily_map.items() if _age_days(d) is not None),
+                key=lambda x: x[1],
+            )
+            freshest_10 = [
+                {"symbol": s, "age_days": round(a, 2), "latest": daily_map[s]}
+                for s, a in scored[:10]
+            ]
+            oldest_10 = [
+                {"symbol": s, "age_days": round(a, 2), "latest": daily_map[s]}
+                for s, a in scored[-10:][::-1]
+            ]
+
+            # Last successful backfill timestamp (from history collection)
+            last_backfill = None
+            try:
+                hist = db["ib_smart_backfill_history"].find_one(sort=[("ran_at", -1)])
+                if hist:
+                    last_backfill = {
+                        "ran_at": hist.get("ran_at"),
+                        "queued": hist.get("queued", 0),
+                        "skipped_fresh": hist.get("skipped_fresh", 0),
+                    }
+            except Exception:
+                pass
+
+            # Queue snapshot — are we still mid-collection?
+            try:
+                q_col = db["historical_data_requests"]
+                pending = q_col.count_documents({"status": "pending"})
+                claimed = q_col.count_documents({"status": "claimed"})
+            except Exception:
+                pending = claimed = None
+
+            ready = all_critical_fresh and overall_fresh_pct >= min_fresh_pct_to_retrain
+            reasons = []
+            if not all_critical_fresh:
+                bad = [c["symbol"] for c in critical_status if not c["all_fresh"]]
+                reasons.append(f"Critical symbols not fresh on all timeframes: {bad}")
+            if overall_fresh_pct < min_fresh_pct_to_retrain:
+                reasons.append(
+                    f"Overall fresh_pct {overall_fresh_pct:.1f}% "
+                    f"< threshold {min_fresh_pct_to_retrain:.1f}%"
+                )
+            if pending and pending > 0:
+                reasons.append(f"{pending} requests still pending in queue")
+
+            return {
+                "success": True,
+                "ready_to_retrain": ready,
+                "blocking_reasons": reasons,
+                "overall": {
+                    "total_symbol_timeframes": overall_total,
+                    "fresh": total_fresh,
+                    "stale": total_stale,
+                    "missing": total_missing,
+                    "fresh_pct": round(overall_fresh_pct, 2),
+                    "threshold_pct": min_fresh_pct_to_retrain,
+                },
+                "critical_symbols": {
+                    "all_fresh": all_critical_fresh,
+                    "detail": critical_status,
+                },
+                "by_tier": tier_rollup,
+                "oldest_10_daily": oldest_10,
+                "freshest_10_daily": freshest_10,
+                "last_successful_backfill": last_backfill,
+                "queue_snapshot": {"pending": pending, "claimed": claimed},
+                "generated_at": now_utc.isoformat(),
+            }
+
+        return await asyncio.to_thread(_rollup)
+    except Exception as e:
+        logger.error(f"universe-freshness-health failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/failure-analysis")
 def get_failure_analysis():
     """

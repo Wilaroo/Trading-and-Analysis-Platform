@@ -1,5 +1,63 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-24 — `GET /api/ib-collector/universe-freshness-health` one-call retrain readiness rollup
+
+Added a dedicated endpoint that replaces the 4-curl correlation needed to
+answer "Am I ready to retrain?". Single request returns
+`ready_to_retrain: bool` plus full diagnostic detail.
+
+**Response shape:**
+```
+{
+  "ready_to_retrain": bool,
+  "blocking_reasons": [str, ...],
+  "overall": {total_symbol_timeframes, fresh, stale, missing, fresh_pct, threshold_pct},
+  "critical_symbols": {all_fresh, detail: [{symbol, all_fresh, timeframes: [...]}]},
+  "by_tier": [{tier, total_symbols, timeframes: [...]}],
+  "oldest_10_daily": [{symbol, age_days, latest}, ...],
+  "freshest_10_daily": [{symbol, age_days, latest}, ...],
+  "last_successful_backfill": {ran_at, queued, skipped_fresh},
+  "queue_snapshot": {pending, claimed},
+  "generated_at": iso_ts
+}
+```
+
+**Gate logic:** `ready_to_retrain = all_critical_fresh AND overall_fresh_pct >= threshold`.
+
+Defaults:
+  - `min_fresh_pct_to_retrain = 95.0` (query param)
+  - `critical_symbols = "SPY,QQQ,DIA,IWM,AAPL,MSFT,NVDA,GOOGL,META,AMZN"`
+    — these must all be fresh on every intraday timeframe.
+
+Reuses the SAME `STALE_DAYS` map as `/gap-analysis` + `/fill-gaps` +
+smart-batch-claim recency guard so all four code paths agree on what
+"fresh" means. Pytest contract enforces this map-equality invariant —
+if anyone diverges the test fails.
+
+**Regression tests (`tests/test_universe_freshness_health.py`):**
+  - 5 new contracts locking: endpoint registered, AND-gate logic,
+    STALE_DAYS equality across 3+ endpoints, response shape has every
+    key field, default critical_symbols include SPY/QQQ/IWM/AAPL/MSFT.
+  - Full suite: 22/22 green across 4 suites.
+
+**Usage:**
+```bash
+# Poll during backfill
+curl -s http://localhost:8001/api/ib-collector/universe-freshness-health | jq '{
+  ready_to_retrain, blocking_reasons,
+  overall: .overall.fresh_pct,
+  pending: .queue_snapshot.pending
+}'
+
+# When ready_to_retrain: true, kick off training
+curl -X POST http://localhost:8001/api/ai-training/start
+```
+
+**Files touched:** `routers/ib_collector_router.py`,
+`tests/test_universe_freshness_health.py`.
+
+---
+
 ## 2026-04-24 — THE actual root cause: skipped_complete coverage-by-count bug
 
 After tracing the full NIA "Collect Data" button chain end-to-end, found
