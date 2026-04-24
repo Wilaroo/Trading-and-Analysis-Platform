@@ -18,10 +18,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, RefreshCw } from 'lucide-react';
 import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
+import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
 
 
 const fmtUsd = (v) => (v == null || Number.isNaN(Number(v))) ? '$—' : `${Number(v) >= 0 ? '+$' : '−$'}${Math.abs(Number(v)).toFixed(0)}`;
 const fmtPct = (v) => (v == null || Number.isNaN(Number(v))) ? '—' : `${(Number(v) * 100).toFixed(0)}%`;
+const fmtPrice = (v) => (v == null || Number.isNaN(Number(v))) ? '—' : `$${Number(v).toFixed(2)}`;
+const fmtChangePct = (v) => {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}%`;
+};
+const fmtSwing = (v) => {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}`;
+};
 
 const Section = ({ title, accent = 'text-zinc-200', right, children, testid }) => (
   <section data-testid={testid} className="border-t border-zinc-800">
@@ -37,6 +51,7 @@ const Section = ({ title, accent = 'text-zinc-200', right, children, testid }) =
 const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   useV5Styles();
   const { loading, data, reload } = useMorningBriefing({ enabled: isOpen, refreshMs: 0 });
+  const live = useBriefingLiveData({ enabled: isOpen });
 
   const gp = data?.game_plan;
   const drc = data?.drc;
@@ -105,12 +120,12 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
             </div>
             <div className="flex items-center gap-1">
               <button
-                onClick={reload}
+                onClick={() => { reload(); live.reload(); }}
                 className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
                 data-testid="briefing-refresh"
                 title="Refresh"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading || live.loading ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={onClose}
@@ -158,6 +173,105 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                 <RefreshCw className="w-4 h-4 text-violet-400 animate-spin" />
               </div>
             )}
+
+            {/* P2-A: Top Movers on dynamic watchlist (positions + scanner top-10 + indices) */}
+            <Section
+              title="Top movers · watchlist"
+              accent="text-emerald-400"
+              testid="briefing-section-top-movers"
+              right={
+                live.marketState && (
+                  <span data-testid="briefing-top-movers-market-state" className="v5-mono text-[9px] text-zinc-500 uppercase">
+                    {live.marketState}
+                  </span>
+                )
+              }
+            >
+              {live.loading && live.topMovers.length === 0 && (
+                <div data-testid="briefing-top-movers-loading" className="v5-mono text-[10px] text-zinc-600">loading…</div>
+              )}
+              {!live.loading && live.topMovers.length === 0 && (
+                <div data-testid="briefing-top-movers-empty" className="v5-mono text-[10px] text-zinc-600">
+                  No live data (pusher offline or pre-trade)
+                </div>
+              )}
+              {live.topMovers.length > 0 && (
+                <div data-testid="briefing-top-movers-grid" className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-zinc-900">
+                  {live.topMovers.map((s) => {
+                    const up = (s.change_pct || 0) >= 0;
+                    return (
+                      <div
+                        key={s.symbol}
+                        data-testid={`briefing-mover-${s.symbol}`}
+                        className="bg-zinc-950 px-3 py-2 flex flex-col gap-0.5"
+                      >
+                        <span className="v5-mono text-[10px] font-bold text-zinc-100">{s.symbol}</span>
+                        <span className="v5-mono text-[10px] text-zinc-400">{fmtPrice(s.latest_price)}</span>
+                        <span className={`v5-mono text-[10px] font-bold ${up ? 'v5-up text-emerald-400' : 'v5-down text-rose-400'}`}>
+                          {fmtChangePct(s.change_pct)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Section>
+
+            {/* P2-A: Overnight sentiment swings (yesterday close vs premarket) */}
+            <Section
+              title="Overnight sentiment swings"
+              accent="text-amber-400"
+              testid="briefing-section-overnight-sentiment"
+              right={
+                live.notableSwingCount > 0 && (
+                  <span data-testid="briefing-notable-swing-count" className="v5-chip v5-chip-veto">
+                    {live.notableSwingCount} notable
+                  </span>
+                )
+              }
+            >
+              {live.loading && live.sentimentResults.length === 0 && (
+                <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+              )}
+              {!live.loading && live.sentimentResults.length === 0 && (
+                <div data-testid="briefing-sentiment-empty" className="v5-mono text-[10px] text-zinc-600">
+                  No overnight news for watchlist symbols.
+                </div>
+              )}
+              {live.sentimentResults.length > 0 && (
+                <div data-testid="briefing-sentiment-list" className="space-y-1.5">
+                  {live.sentimentResults.slice(0, 8).map((r) => {
+                    const chipCls = r.swing_direction === 'up'
+                      ? 'v5-chip v5-chip-manage'
+                      : r.swing_direction === 'down'
+                        ? 'v5-chip v5-chip-veto'
+                        : 'v5-chip v5-chip-close';
+                    return (
+                      <div
+                        key={r.symbol}
+                        data-testid={`briefing-sentiment-${r.symbol}`}
+                        className={`flex items-start gap-2 px-2 py-1.5 rounded ${r.notable ? 'bg-zinc-900/60' : ''}`}
+                      >
+                        <span className="v5-mono text-[10px] font-bold text-zinc-100 w-10 shrink-0">
+                          {r.symbol}
+                        </span>
+                        <span className={`${chipCls} v5-mono text-[9px] shrink-0`} data-testid={`briefing-sentiment-chip-${r.symbol}`}>
+                          {fmtSwing(r.swing)}
+                        </span>
+                        <span className="v5-mono text-[9px] text-zinc-500 shrink-0">
+                          y.close {fmtSwing(r.sentiment_yesterday_close)} · pre {fmtSwing(r.sentiment_premarket)}
+                        </span>
+                        {r.top_headline && (
+                          <span className="text-[10px] text-zinc-400 truncate flex-1" title={r.top_headline}>
+                            · {r.top_headline}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Section>
 
             {/* GAMEPLAN */}
             <Section

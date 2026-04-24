@@ -208,10 +208,13 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
         mergeData(slowUpdates);
       }
 
-      setData(current => {
-        setCached('niaData', current, 60000);
-        return current;
-      });
+      // Note: the `setCached('niaData', ...)` call used to live inside a
+      // `setData(current => { setCached(...); return current; })` block.
+      // React treats setCached as a setState on the parent DataCacheProvider,
+      // and calling setState on another component *inside* a setState updater
+      // is a render-phase side-effect → "Cannot update a component (...) while
+      // rendering a different component" warning. Moved to a dedicated effect
+      // below so the cache write happens AFTER commit.
 
       if (showToast) toast.success('NIA intel refreshed');
     } catch (err) {
@@ -223,6 +226,14 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
       setInitialLoadDone(true);
     }
   }, [setCached, mergeData]);
+
+  // Persist the latest `data` snapshot to the DataCacheProvider whenever it
+  // changes — runs after commit, so no render-phase setState warning.
+  useEffect(() => {
+    if (initialLoadDone) {
+      setCached('niaData', data, 60000);
+    }
+  }, [data, initialLoadDone, setCached]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {

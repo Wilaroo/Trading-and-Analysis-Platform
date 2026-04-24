@@ -13,7 +13,7 @@ Meant for operators + frontend DataFreshnessInspector (future P3).
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -214,4 +214,130 @@ async def briefing_snapshot(
         "market_state": classify_market_state(),
         "bar_size": bar_size,
         "snapshots": ranked,
+    }
+
+
+# ========================================================================
+# P2-A — Morning Briefing rich UI support
+# ========================================================================
+
+_CORE_INDICES = ("SPY", "QQQ", "IWM", "DIA", "VIX")
+
+
+async def _build_briefing_watchlist(db) -> List[str]:
+    """Pull briefing-watchlist symbols from:
+        (1) open positions (ib_live_snapshot)
+        (2) scanner top-10 recent cards (market_scanner_results)
+        (3) core indices (always included)
+    Deduped, capped at 12 symbols to stay under news-provider + pusher RPC
+    budgets."""
+    watchlist: List[str] = []
+    try:
+        if db is not None:
+            snap = db["ib_live_snapshot"].find_one(
+                {"_id": "current"}, {"_id": 0, "positions": 1}
+            )
+            for p in (snap or {}).get("positions", []) or []:
+                sym = (p.get("symbol") or "").upper().strip()
+                if sym and sym not in watchlist:
+                    watchlist.append(sym)
+    except Exception:
+        pass
+    try:
+        if db is not None:
+            # Most recent scanner result set (if any)
+            latest = db["market_scanner_results"].find_one(
+                sort=[("created_at", -1)],
+                projection={"_id": 0, "candidates": 1, "results": 1, "top_picks": 1},
+            )
+            if latest:
+                candidates = (
+                    latest.get("top_picks")
+                    or latest.get("candidates")
+                    or latest.get("results")
+                    or []
+                )
+                for c in candidates[:10]:
+                    if isinstance(c, dict):
+                        sym = (c.get("symbol") or "").upper().strip()
+                    else:
+                        sym = str(c or "").upper().strip()
+                    if sym and sym not in watchlist:
+                        watchlist.append(sym)
+    except Exception:
+        pass
+    for idx in _CORE_INDICES:
+        if idx not in watchlist:
+            watchlist.append(idx)
+    return watchlist[:12]
+
+
+@router.get("/briefing-watchlist")
+async def briefing_watchlist() -> Dict[str, Any]:
+    """Return the dynamic watchlist the MorningBriefing UI uses for its
+    top-movers + overnight-sentiment rows. Positions + scanner top-10 +
+    core indices, deduped, capped at 12."""
+    from server import db as _app_db
+    syms = await _build_briefing_watchlist(_app_db)
+    return {
+        "success": True,
+        "symbols": syms,
+        "count": len(syms),
+        "sources": {
+            "positions": True,
+            "scanner_top_10": True,
+            "core_indices": list(_CORE_INDICES),
+        },
+    }
+
+
+@router.get("/briefing-top-movers")
+async def briefing_top_movers(bar_size: str = Query("5 mins")) -> Dict[str, Any]:
+    """Top movers across the DYNAMIC briefing watchlist (positions + scanner
+    + core indices). Wrapper around /api/live/briefing-snapshot with the
+    watchlist auto-built server-side."""
+    from server import db as _app_db
+    from services.live_symbol_snapshot import get_snapshots_bulk
+    from services.live_bar_cache import classify_market_state
+    syms = await _build_briefing_watchlist(_app_db)
+    snaps = await get_snapshots_bulk(syms, bar_size)
+    ranked = sorted(
+        snaps,
+        key=lambda s: (
+            0 if s.get("success") else 1,
+            -(abs(s.get("change_pct") or 0)),
+        ),
+    )
+    return {
+        "success": True,
+        "watchlist": syms,
+        "count": len(ranked),
+        "market_state": classify_market_state(),
+        "bar_size": bar_size,
+        "snapshots": ranked,
+    }
+
+
+@router.get("/overnight-sentiment")
+async def overnight_sentiment(
+    symbols: str = Query("", description="Comma-separated. Omit to auto-build from positions+scanner+indices."),
+) -> Dict[str, Any]:
+    """Compare yesterday-close vs premarket news sentiment per symbol.
+    Swing threshold ±0.30 (notable=true when |swing| >= 0.30).
+    Max 12 symbols per call."""
+    from services.overnight_sentiment_service import compute_batch, SWING_THRESHOLD
+    if symbols:
+        syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        from server import db as _app_db
+        syms = await _build_briefing_watchlist(_app_db)
+    results = await compute_batch(syms)
+    notable_count = sum(1 for r in results if r.get("notable"))
+    return {
+        "success": True,
+        "watchlist": syms,
+        "count": len(results),
+        "notable_count": notable_count,
+        "swing_threshold": SWING_THRESHOLD,
+        "results": results,
     }
