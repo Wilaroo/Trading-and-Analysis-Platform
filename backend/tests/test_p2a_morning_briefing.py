@@ -30,8 +30,49 @@ def test_compute_windows_has_yesterday_close_and_premarket():
     assert pm["start"] < pm["end"]
     # yesterday_close must end exactly where premarket starts (midnight ET today)
     assert yc["end"] == pm["start"]
-    # yesterday_close window is exactly 8 hours (16:00→24:00 ET)
+    # Tue briefing: yesterday_close = Mon 16:00 → Tue 00:00 ET = 8 hours
     assert yc["end"] - yc["start"] == timedelta(hours=8)
+
+
+def test_compute_windows_monday_walks_back_to_friday_close():
+    """Monday-morning catchup — yesterday_close must span the entire weekend
+    (Fri 16:00 ET → Mon 00:00 ET = 56 hours) so the briefing surfaces the
+    weekend news backlog."""
+    from services.overnight_sentiment_service import compute_windows
+    # Monday 2026-04-27 14:00 UTC (≈ 10:00 ET)
+    mon = datetime(2026, 4, 27, 14, 0, tzinfo=timezone.utc)
+    w = compute_windows(now_utc=mon)
+    yc = w["yesterday_close"]
+    # Fri 16:00 ET → Mon 00:00 ET = 56 hours (8h Fri + 24h Sat + 24h Sun)
+    assert yc["end"] - yc["start"] == timedelta(hours=56), (
+        f"Monday briefing yesterday_close must span entire weekend; got {yc['end'] - yc['start']}"
+    )
+
+
+def test_compute_windows_tuesday_is_single_day_step():
+    """Tue–Fri briefings should still be a 1-day walkback (8h window)."""
+    from services.overnight_sentiment_service import compute_windows
+    # Wednesday 2026-04-29 14:00 UTC
+    wed = datetime(2026, 4, 29, 14, 0, tzinfo=timezone.utc)
+    w = compute_windows(now_utc=wed)
+    yc = w["yesterday_close"]
+    assert yc["end"] - yc["start"] == timedelta(hours=8), (
+        "Mid-week briefings walk back just one day (Tue close → Wed 00:00 ET)"
+    )
+
+
+def test_compute_windows_sunday_walks_to_friday():
+    """Sunday (app used on weekends) — yesterday_close still anchors on Fri
+    16:00 ET so the weekend briefing shows Friday-through-now news."""
+    from services.overnight_sentiment_service import compute_windows
+    # Sunday 2026-04-26 14:00 UTC
+    sun = datetime(2026, 4, 26, 14, 0, tzinfo=timezone.utc)
+    w = compute_windows(now_utc=sun)
+    yc = w["yesterday_close"]
+    # Fri 16:00 ET → Sun 00:00 ET = 32h (8h Fri + 24h Sat)
+    assert yc["end"] - yc["start"] == timedelta(hours=32), (
+        "Sunday briefing yesterday_close should walk back to Friday 16:00 ET (32h span)"
+    )
 
 
 def test_compute_windows_premarket_frozen_after_0930():
@@ -207,6 +248,32 @@ def test_morning_prep_card_exposes_deep_dive_button():
     assert 'data-testid="briefing-open-deep-dive"' in BRIEFINGS_V5_SRC
     # stopPropagation so card doesn't toggle expand when button is clicked
     assert "e.stopPropagation()" in BRIEFINGS_V5_SRC
+
+
+# ====================== Monday-morning catchup ==========================
+
+def test_router_exposes_yesterday_close_hours():
+    """The overnight-sentiment endpoint must return how many hours the
+    yesterday_close window spans so the UI can surface 'weekend catchup'
+    context on Mondays."""
+    src = Path("/app/backend/routers/live_data_router.py").read_text(encoding="utf-8")
+    assert "yesterday_close_hours" in src
+    assert "yesterday_close_start" in src
+    assert "yesterday_close_end" in src
+
+
+def test_ui_shows_weekend_catchup_badge():
+    """When window widens (>10h = post-weekend / post-holiday), modal must
+    surface a 'since Nh ago' badge in the Overnight Sentiment section."""
+    assert 'data-testid="briefing-weekend-catchup-badge"' in MODAL_SRC
+    assert "yesterdayCloseHours > 10" in MODAL_SRC, (
+        "Badge must only appear when window is meaningfully widened (>10h)"
+    )
+
+
+def test_hook_captures_yesterday_close_fields():
+    assert "yesterdayCloseHours" in HOOK_SRC
+    assert "yesterdayCloseStart" in HOOK_SRC
 
 
 # ====================== NIA DataCacheProvider warning fix ================

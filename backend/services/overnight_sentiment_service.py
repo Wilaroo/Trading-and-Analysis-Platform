@@ -50,11 +50,19 @@ def compute_windows(now_utc: Optional[datetime] = None) -> Dict[str, Dict[str, d
     """Return {yesterday_close: {start, end}, premarket: {start, end}} in UTC.
 
     Both windows are anchored to ET wall-clock:
-        yesterday_close  = prior-day 16:00 ET  → today 00:00 ET
+        yesterday_close  = LAST-CLOSE 16:00 ET → today 00:00 ET
+                           (walks back over weekends so a Monday briefing
+                           covers Friday 16:00 → Monday 00:00 — the entire
+                           weekend news backlog)
         premarket        = today 00:00 ET      → today 09:30 ET (or now, whichever earlier)
 
     If `now` is before 09:30 ET, premarket end = now.
     If `now` is after 09:30 ET, premarket end = 09:30 ET today (frozen).
+
+    The "last-close" walkback handles weekends implicitly via weekday()
+    (Sat=5, Sun=6). Holiday-aware walkback would need a market calendar —
+    see PRD backlog. For weekday holidays today, the window is slightly
+    narrower than ideal but never wrong.
     """
     now = now_utc or datetime.now(timezone.utc)
     et_offset = _et_offset_hours(now)
@@ -64,14 +72,26 @@ def compute_windows(now_utc: Optional[datetime] = None) -> Dict[str, Dict[str, d
     et_midnight_today = et_now.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_midnight_today = et_midnight_today - timedelta(hours=et_offset)
 
-    utc_16_yesterday = utc_midnight_today - timedelta(hours=8)   # 16:00 ET prior day
-    utc_09_30_today = utc_midnight_today + timedelta(hours=9, minutes=30)
+    # Walk back from yesterday until we land on a weekday (Mon=0..Fri=4).
+    # On Tue–Fri this is a single-day step; on Mon it walks Sun → Sat → Fri.
+    # Cap the walk to 6 days as a safety belt against any unforeseen clock
+    # edge case — a closed market longer than a week would be exceptional.
+    probe = et_midnight_today - timedelta(days=1)
+    for _ in range(6):
+        if probe.weekday() < 5:  # 0..4 = Mon..Fri
+            break
+        probe -= timedelta(days=1)
+    # probe is the ET-midnight of the last trading day. Its 16:00 ET is
+    # when that session's cash close prints.
+    anchor_close_et = probe.replace(hour=16)
+    utc_anchor_close = anchor_close_et - timedelta(hours=et_offset)
 
+    utc_09_30_today = utc_midnight_today + timedelta(hours=9, minutes=30)
     premarket_end = min(now, utc_09_30_today)
 
     return {
         "yesterday_close": {
-            "start": utc_16_yesterday,
+            "start": utc_anchor_close,
             "end": utc_midnight_today,
         },
         "premarket": {

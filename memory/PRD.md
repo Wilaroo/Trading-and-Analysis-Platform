@@ -1,5 +1,42 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Monday-morning catchup (weekend news widening)
+
+Extended `overnight_sentiment_service.compute_windows` to walk the
+yesterday_close anchor back over weekends. On a Monday briefing the
+window is now **Friday 16:00 ET → Monday 00:00 ET (56 hours)** instead of
+8h, so the weekend news backlog actually lands in the section. Handled
+dynamically via `weekday()` — no hardcoded Monday logic, so Sunday use
+also walks back to Friday (32h), and the 6-day safety cap guards against
+any clock edge case.
+
+### What shipped
+- `compute_windows(now_utc)` — walks the probe day back one step at a
+  time while `weekday() >= 5` (Sat/Sun). 6-day cap for safety.
+- `/api/live/overnight-sentiment` response now also returns:
+  `yesterday_close_hours`, `yesterday_close_start`, `yesterday_close_end`
+  so the UI can show context.
+- `MorningBriefingModal` Overnight-Sentiment header now renders a
+  small amber "since Nh ago" badge (`data-testid="briefing-weekend-catchup-badge"`)
+  when the window is >10h wide (post-weekend or post-holiday).
+
+### Tests
+- 3 new window contracts: Monday walks back 56h, Tue–Fri remains 8h,
+  Sunday walks back 32h.
+- UI contract: badge only renders when window >10h.
+- Hook contract: captures `yesterdayCloseHours` + `yesterdayCloseStart`
+  from the API response.
+
+Full suite **92/92 green** (23 P2-A + 69 regression).
+
+### Known limitation (backlog)
+Holiday calendar not integrated — Tue after a Monday holiday will use
+an 8h window (Mon 16:00 → Tue 00:00) even though Mon was closed.
+Adding `pandas_market_calendars` would upgrade this path to
+"last-actual-trading-close" walkback. Not urgent — worst case is a
+narrower-than-ideal window, never wrong.
+
+
 ## 2026-04-26 — P2-A Morning Briefing rich UI + React warning fix
 
 Three sections shipped:

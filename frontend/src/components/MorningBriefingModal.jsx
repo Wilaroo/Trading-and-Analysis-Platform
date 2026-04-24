@@ -223,11 +223,22 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               accent="text-amber-400"
               testid="briefing-section-overnight-sentiment"
               right={
-                live.notableSwingCount > 0 && (
-                  <span data-testid="briefing-notable-swing-count" className="v5-chip v5-chip-veto">
-                    {live.notableSwingCount} notable
-                  </span>
-                )
+                <div className="flex items-center gap-1.5">
+                  {live.yesterdayCloseHours != null && live.yesterdayCloseHours > 10 && (
+                    <span
+                      data-testid="briefing-weekend-catchup-badge"
+                      className="v5-mono text-[9px] text-amber-400 uppercase tracking-wide"
+                      title={`Window widened to catch weekend / holiday news since ${live.yesterdayCloseStart || 'last close'}`}
+                    >
+                      since {Math.round(live.yesterdayCloseHours)}h ago
+                    </span>
+                  )}
+                  {live.notableSwingCount > 0 && (
+                    <span data-testid="briefing-notable-swing-count" className="v5-chip v5-chip-veto">
+                      {live.notableSwingCount} notable
+                    </span>
+                  )}
+                </div>
               }
             >
               {live.loading && live.sentimentResults.length === 0 && (

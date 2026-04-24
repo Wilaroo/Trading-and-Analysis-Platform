@@ -325,7 +325,7 @@ async def overnight_sentiment(
     """Compare yesterday-close vs premarket news sentiment per symbol.
     Swing threshold ±0.30 (notable=true when |swing| >= 0.30).
     Max 12 symbols per call."""
-    from services.overnight_sentiment_service import compute_batch, SWING_THRESHOLD
+    from services.overnight_sentiment_service import compute_batch, compute_windows, SWING_THRESHOLD
     if symbols:
         syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     else:
@@ -333,11 +333,22 @@ async def overnight_sentiment(
         syms = await _build_briefing_watchlist(_app_db)
     results = await compute_batch(syms)
     notable_count = sum(1 for r in results if r.get("notable"))
+    # Expose the actual span of yesterday_close — on Mondays this is 56h
+    # (whole weekend), on Tue–Fri it's 8h. Lets the frontend tell the user
+    # "since Fri 4:00pm ET" when the walkback widened.
+    _windows = compute_windows()
+    _yc_hours = round(
+        (_windows["yesterday_close"]["end"] - _windows["yesterday_close"]["start"]).total_seconds() / 3600,
+        1,
+    )
     return {
         "success": True,
         "watchlist": syms,
         "count": len(results),
         "notable_count": notable_count,
         "swing_threshold": SWING_THRESHOLD,
+        "yesterday_close_hours": _yc_hours,
+        "yesterday_close_start": _windows["yesterday_close"]["start"].isoformat(),
+        "yesterday_close_end": _windows["yesterday_close"]["end"].isoformat(),
         "results": results,
     }

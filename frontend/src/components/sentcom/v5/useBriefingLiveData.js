@@ -36,6 +36,8 @@ export function useBriefingLiveData({ enabled = true } = {}) {
   const [marketState, setMarketState] = useState(null);
   const [sentimentResults, setSentimentResults] = useState([]);
   const [notableSwingCount, setNotableSwingCount] = useState(0);
+  const [yesterdayCloseHours, setYesterdayCloseHours] = useState(null);
+  const [yesterdayCloseStart, setYesterdayCloseStart] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -61,12 +63,16 @@ export function useBriefingLiveData({ enabled = true } = {}) {
       if (sentRes && sentRes.success) {
         setSentimentResults(sentRes.results || []);
         setNotableSwingCount(sentRes.notable_count || 0);
+        setYesterdayCloseHours(sentRes.yesterday_close_hours || null);
+        setYesterdayCloseStart(sentRes.yesterday_close_start || null);
         if (!moversRes || !moversRes.success) {
           setWatchlist(sentRes.watchlist || []);
         }
       } else {
         setSentimentResults([]);
         setNotableSwingCount(0);
+        setYesterdayCloseHours(null);
+        setYesterdayCloseStart(null);
       }
     } catch (e) {
       setError(String(e.message || e));
@@ -87,6 +93,8 @@ export function useBriefingLiveData({ enabled = true } = {}) {
     marketState,
     sentimentResults,
     notableSwingCount,
+    yesterdayCloseHours,
+    yesterdayCloseStart,
     reload,
   };
 }
