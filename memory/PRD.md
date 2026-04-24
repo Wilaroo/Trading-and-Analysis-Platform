@@ -1,5 +1,37 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 (cont.) — DataFreshnessBadge shipped globally
+
+Small but high-leverage add requested by user during fork prep.
+
+- New component: `frontend/src/components/DataFreshnessBadge.jsx`
+- Mounted globally: pinned to the right of the TickerTape in `App.js`
+  so it's visible on every tab (Command Center, NIA, Trade Journal, etc.)
+- Polls `/api/ib/pusher-health` every 10s (low overhead)
+- States rendered as a traffic-light chip with hover-tooltip:
+    LIVE · Ns ago            (green, pulse) — pusher healthy, <10s age
+    DELAYED · Nm ago         (amber)        — slow pusher during RTH
+    WEEKEND · CLOSED         (grey)         — expected for off-hours
+    OVERNIGHT · QUIET        (grey)
+    EXT HOURS                (grey)
+    STALE · PUSHER DOWN      (red, pulse)   — red + RTH = failure
+    STALE · LAST CLOSE       (amber)        — red outside RTH = ok
+    NO PUSH YET              (grey)         — backend up, pusher never fed
+    UNREACHABLE              (red)          — backend not responding
+
+Market-state gating lives client-side via a tiny America/New_York-aware
+check (no holiday calendar here — that's on the backend and irrelevant
+for a status chip). Badge is lint-clean and has `data-testid` for
+future automated screenshot tests.
+
+**Why it matters:** the 5-week stale-chart incident 2026-03-17 → 2026-04-24
+happened partly because nothing in the UI shouted that data was frozen.
+Now the chip is the FIRST thing you look at across any surface. When
+Phase 1 of the live-data architecture lands, this badge will also be
+the natural home for `live_bar_cache` TTL state.
+
+
+
 ## 2026-04-25 — Live-data architecture plan APPROVED, ready to build
 
 After the collector walkback fix verified live (10k+ bars/batch vs 1130), user

@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 
 // Import refactored components
 import { Sidebar, TickerTape, PriceAlertNotification } from './components';
+import { DataFreshnessBadge } from './components/DataFreshnessBadge';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -501,9 +502,15 @@ function App() {
           <div className="absolute top-1/2 right-0 w-1/3 h-1/3 bg-cyan-400/[0.05] rounded-full blur-[100px]" />
         </div>
         
-        {/* Ticker Tape */}
-        <div>
-          <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
+        {/* Ticker Tape + global data-freshness badge. The badge is pinned
+            to the right so it's visible on every tab (Command Center, NIA,
+            Trade Journal, etc.) — one glance tells you if the whole app
+            is on live data or showing stale history. */}
+        <div className="flex items-center gap-3 pr-3">
+          <div className="flex-1 min-w-0">
+            <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
+          </div>
+          <DataFreshnessBadge />
         </div>
         
         {/* Main Content Area - Tabs stay mounted to preserve state */}
