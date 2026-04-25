@@ -2494,13 +2494,53 @@ class IBHistoricalCollector:
         tier_counts = {t: len(syms) for t, syms in qualified.items()}
 
         # 2) Plan each (symbol, bar_size): measure gap, chain if needed.
+        #
+        # IMPORTANT — bar_size selection rule:
+        # The tier dictates which timeframes are *required* on initial
+        # backfill, but any timeframe the symbol *already has data for*
+        # must also be kept fresh. Otherwise tier reclassification
+        # (e.g. GOOGL drops from intraday → swing on a quiet week)
+        # silently abandons the 1-min / 15-min history we already paid
+        # to collect, and `overall_freshness` rolls red on the next
+        # readiness check. Caught 2026-04-25 after GOOGL + 1,533 other
+        # symbols slipped this exact crack. Test:
+        # backend/tests/test_smart_backfill_per_bar_size.py
+        all_bar_sizes_with_data: Dict[str, set] = {}
+        if self._data_col is not None:
+            try:
+                # One distinct() per bar_size — fast on the
+                # (symbol, bar_size, date) compound index. Returns the
+                # unique symbols holding at least one bar at that size.
+                for _bs in ["1 min", "5 mins", "15 mins", "30 mins",
+                            "1 hour", "1 day", "1 week"]:
+                    syms_with = set(self._data_col.distinct(
+                        "symbol", {"bar_size": _bs}
+                    ))
+                    all_bar_sizes_with_data[_bs] = syms_with
+            except Exception as e:
+                logger.warning(
+                    f"smart_backfill: could not enumerate per-bar_size "
+                    f"symbol sets ({e}); falling back to tier-only plan"
+                )
+                all_bar_sizes_with_data = {}
+
         to_queue: List[tuple] = []
         skipped_fresh = 0
         skipped_already_queued = 0
 
         for tier, syms in qualified.items():
+            tier_required_bs = set(self.TIMEFRAMES_BY_TIER[tier])
             for sym in syms:
-                for bs in self.TIMEFRAMES_BY_TIER[tier]:
+                # Union of (a) tier requirement and (b) bar_sizes we
+                # already have history for. (b) catches the
+                # tier-reclassification case.
+                effective_bs = set(tier_required_bs)
+                for _bs, _syms_with in all_bar_sizes_with_data.items():
+                    if sym in _syms_with:
+                        effective_bs.add(_bs)
+                # Iterate in a stable order for repeatable plans / logs.
+                for bs in [b for b in self.BAR_SIZE_ORDER if b in effective_bs] \
+                        if hasattr(self, "BAR_SIZE_ORDER") else sorted(effective_bs):
                     # Dedupe against pending/claimed requests already there.
                     if queue.find_one({"symbol": sym, "bar_size": bs,
                                         "status": {"$in": ["pending", "claimed"]}},

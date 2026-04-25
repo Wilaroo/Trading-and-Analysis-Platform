@@ -1,6 +1,50 @@
 # TradeCommand / SentCom — Product Requirements
 
-## 2026-04-25 — Post-Backfill Audit + Readiness Service Hardening — SHIPPED
+## 2026-04-25 (P.M.) — Smart-Backfill ROOT-CAUSE Fix + Contract Test
+
+User flagged the recurrence pattern: "we fix something, miss something, fix something, break something." Rather than ship more bandaids, audited the wiring of NIA's "Collect Data" + "Run Again" buttons end-to-end and surfaced the structural bug.
+
+### Wiring audit (verified clean)
+- `frontend/src/components/NIA/DataCollectionPanel.jsx:305` — `<button onClick={handleCollectData}>Collect Data</button>` ✅
+- `frontend/src/components/NIA/DataCollectionPanel.jsx:346` — `<LastBackfillCard onRerun={handleCollectData}>` ("Run Again") ✅
+- Both buttons call `POST /api/ib-collector/smart-backfill?dry_run=false&freshness_days=2` (line 250) ✅
+
+The buttons were NEVER broken. The endpoint they call was structurally broken.
+
+### The actual bug
+`_smart_backfill_sync()` planned only the bar_sizes that the symbol's CURRENT tier required. So when a symbol's `avg_dollar_volume` dipped below $50M (tier "intraday" floor), smart-backfill silently demoted it from intraday → swing. The swing tier doesn't list 1-min or 15-min as required, so smart-backfill **stopped refreshing existing 1-min/15-min history**, even though the data was already in `ib_historical_data` from when the symbol was in intraday. Result: GOOGL + ~1,533 other intraday-graded-by-share-volume symbols had 1-min/15-min latest bars stuck on 2026-03-17 (39 days stale).
+
+This is also why `overall_freshness` was 68.9% (1-min: 42% fresh, 15-min: 42% fresh) on the post-backfill audit despite a 196M-bar collection.
+
+### Fix
+`backend/services/ib_historical_collector.py::_smart_backfill_sync()` now plans the **union** of:
+1. Tier-required bar_sizes (initial-collection rule), AND
+2. Bar_sizes the symbol already has data for (preserve-history rule).
+
+Implementation: one `distinct("symbol", {"bar_size": bs})` per bar_size up front, cached per-call. New symbols only get tier-required collection (no over-collection); reclassified symbols keep their history fresh.
+
+### Contract test
+`backend/tests/test_smart_backfill_per_bar_size.py` — 4 tests:
+1. `test_swing_tier_symbol_with_existing_1min_data_gets_refreshed` (the GOOGL regression)
+2. `test_swing_tier_symbol_without_1min_history_skips_1min` (no over-collection)
+3. `test_intraday_tier_symbol_gets_all_required_timeframes` (happy-path sanity)
+4. `test_freshness_skip_works_per_bar_size_not_per_symbol`
+
+Total contract test coverage on the readiness + collector + chart paths is now **25 tests** (was 21).
+
+### Side note: bulk_fix_stale_intraday.py is now redundant
+The script we shipped this morning to manually queue ~3,000 missed refills was a workaround for this exact bug. With the root fix, it's only needed once more (to clear today's leftover stale state); after that, `Collect Data` does the right thing.
+
+### Backlog (unchanged from morning, all unblocked once bulk-fix queue drains)
+- 🔴 **P0** — Fire Train All, verify P5 / Phase 8 fixes.
+- 🟡 **P1** — Integrate AURA wordmark + ArcGauge + DecisionFeed + TradeTimeline into V5.
+- 🟡 **P2** — SEC EDGAR 8-K integration; IB hyphen date-format deprecation; `[SKIP] ib_data_pusher.py` launcher path bug.
+- 🟡 **P3** — ⌘K palette additions; "Don't show again" help tooltips; `server.py` breakup.
+- 🟡 **P3** — Retry the 204 historical `qualify_failed` items via `/api/ib-collector/retry-failed` after first clean training cycle.
+
+---
+
+## 2026-04-25 (A.M.) — Post-Backfill Audit + Readiness Service Hardening
 
 The DGX historical backfill finally completed (~196M bars in `ib_historical_data`). Built a comprehensive post-backfill audit suite, surfaced a real GOOGL data gap, fixed it surgically, and hardened the readiness service so it never hangs again.
 
