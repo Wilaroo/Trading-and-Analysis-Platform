@@ -507,7 +507,7 @@ const JobManager = ({ compact = false }) => {
   };
 
   return (
-    <div className="glass-panel" data-testid="job-manager">
+    <div className="glass-panel" data-testid="job-manager" data-help-id="job-manager">
       {/* Header */}
       <div
         onClick={() => setIsExpanded(!isExpanded)}

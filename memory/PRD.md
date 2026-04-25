@@ -1,5 +1,49 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Help Wiring for Journal, AI Chat, Job Manager — SHIPPED
+
+Closed out the remaining `data-help-id` gaps from the backlog.
+
+### 4 new glossary entries
+- **trade-journal** — Trading Journal page (playbooks, DRCs, game
+  plans, trade log, AI post-mortems)
+- **r-multiple** — P&L expressed as multiples of initial risk (was
+  referenced by the open-positions entry but undefined)
+- **ai-chat** — "Ask SentCom" assistant; now documented with the
+  full context it sees (live market state, open positions, glossary,
+  session memory, trade execution)
+- **job-manager** — Bottom-right popup listing long-running backend
+  jobs (backfills, training runs, evaluations) with progress + cancel
+
+Total glossary: **88 entries × 15 categories**. Backend cache reloaded.
+
+### data-help-id wired on
+- \`pages/TradeJournalPage.js\` root → \`trade-journal\`
+- \`components/JobManager.jsx\` root → \`job-manager\`
+- \`components/sentcom/panels/ChatInput.jsx\` form →
+  \`ai-chat\` (+ new \`sentcom-chat-input\` /
+  \`sentcom-chat-input-field\` testids)
+- \`components/ChatBubbleOverlay.jsx\` floating chat button →
+  \`ai-chat\` (so the overlay is discoverable from any page)
+
+### Verified
+- All 5 touched files lint clean.
+- 10/10 glossary pytests still pass.
+- Browser automation: navigated to Trade Journal → confirmed 1
+  helpable element on page; Command Center overlay now shows 19
+  unique help-ids (was 17) including \`ai-chat\` and \`unified-stream\`.
+- Chat glossary knows all 4 new terms (via cache reload).
+
+### Coverage snapshot
+Helpable surfaces now cover every major UI area the user interacts
+with on a daily basis: Pipeline HUD (every stage + phase), Top
+Movers, Scanner, Briefings (each card), Open Positions, Unified
+Stream, Model scorecards, Flatten All, Safety Armed, Account Guard,
+Pre-flight, Test mode, all 5 gated train buttons, Command Palette
+hint, floating ❓ button, Trade Journal, AI Chat input, chat bubble,
+Job Manager. **23 help-ids live** across app.
+
+
 ## 2026-04-25 — Help Overlay Coverage Expansion — SHIPPED
 
 Filled in the remaining `data-help-id` gaps so the press-`?` overlay

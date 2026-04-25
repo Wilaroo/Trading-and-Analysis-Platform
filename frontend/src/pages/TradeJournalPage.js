@@ -1450,7 +1450,7 @@ const TradeJournalPage = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in" data-testid="trade-journal-page">
+    <div className="space-y-6 animate-fade-in" data-testid="trade-journal-page" data-help-id="trade-journal">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

@@ -258,6 +258,7 @@ const ChatBubbleOverlay = ({
             onClick={() => setIsOpen(true)}
             className="fixed bottom-6 right-6 z-30 w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center hover:shadow-emerald-500/50 hover:scale-105 transition-all cursor-pointer"
             data-testid="chat-bubble-btn"
+            data-help-id="ai-chat"
           >
             <MessageSquare className="w-5 h-5 text-white" />
             {unreadCount > 0 && (

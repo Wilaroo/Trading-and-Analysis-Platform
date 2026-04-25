@@ -1341,6 +1341,87 @@ Click any filter chip to narrow the stream. Toggle **LIVE** to pause/resume. Eac
       tags: ['ui', 'panel', 'stream', 'feed']
     },
     {
+      id: 'trade-journal',
+      term: 'Trade Journal',
+      category: 'app-ui',
+      shortDef: 'Dedicated page for reviewing every trade the bot has closed, with notes, replays, and AI post-mortems.',
+      fullDef: `The Trading Journal is the bot's long-term memory. It captures:
+
+**Per-trade record**
+- Symbol, side, entry/exit prices, size, P&L, R-multiple, duration
+- Reason the bot took the trade (setup type + gate score at entry)
+- Immutable close-time snapshot of price, VWAP, vol, regime (from the pusher RPC)
+- Freeform notes + screenshots you add
+- **AI post-mortem** — a LLM-generated analysis of what worked / didn't
+
+**Tabs**
+- **Trade Log** — chronological list of every closed trade
+- **Playbook** — your curated "this is how I trade X" notes
+- **Game Plan** — daily pre-market plan
+- **Daily Report Card (DRC)** — end-of-day self-review
+- **Weekly Report** — aggregated performance
+
+**Performance matrix** tile shows per-setup-type hit rate, avg R, and
+AI-suggested improvements.`,
+      relatedTerms: ['r-multiple', 'gate-score'],
+      tags: ['ui', 'page', 'journal', 'history']
+    },
+    {
+      id: 'r-multiple',
+      term: 'R-Multiple',
+      category: 'app-ui',
+      shortDef: 'P&L expressed as a multiple of the position\'s initial risk. +1R = you made back one unit of risk; -1R = you lost exactly your stop.',
+      fullDef: `R is the dollar distance from entry to initial stop. Every position's P&L is tracked in those units:
+
+- **+2R** = position is up 2× the initial risk (doubling your loss if stopped out at entry)
+- **0R** = break-even
+- **-1R** = hit initial stop, lost exactly your planned risk
+- **-1.5R** = slipped past the stop (gap, slippage, or manual override)
+
+Why R matters: normalizes P&L across position sizes. A 10-share trade up $2 and a 100-share trade up $0.20 are both +1R if both risked $2 of R. Makes apples-to-apples comparison across setups / symbols / days possible.`,
+      relatedTerms: ['trade-journal', 'open-positions'],
+      tags: ['trading', 'risk', 'metric']
+    },
+    {
+      id: 'ai-chat',
+      term: 'Ask SentCom (AI Chat)',
+      category: 'app-ui',
+      shortDef: 'The chat box bottom-right of the Command Center. Ask the bot anything — it knows live data, open positions, and the full glossary.',
+      fullDef: `Conversational interface to the trading bot. The LLM has access to:
+
+- **Live market state** — current quotes, watchlist movers, open positions, daily P&L
+- **Historical context** — your recent trades, today's scanner results, yesterday's close
+- **The app glossary** — 80+ term definitions so "what does X chip mean?" gets quoted verbatim
+- **Session memory** — remembers what you discussed earlier in the conversation
+- **Trade execution** — if you say "close LABD", the chat can fire a close order (emits a \`TRADE_ACTION\` JSON block you confirm)
+
+**Session management** — conversations persist across reloads via a session_id. Each response is stored so you can audit what the bot told you and when.
+
+Ask: "why did we skip AAPL at 10:15?", "what's my best setup this month?", "close all energy positions", or "what is the Backfill Readiness card?".`,
+      relatedTerms: ['glossary-drawer', 'gate-score', 'flatten-all'],
+      tags: ['ui', 'chat', 'ai']
+    },
+    {
+      id: 'job-manager',
+      term: 'Job Manager',
+      category: 'app-ui',
+      shortDef: 'Bottom-right popup panel listing every long-running backend job (backfills, training runs, evaluations) with progress + cancel controls.',
+      fullDef: `Any operation that takes more than a few seconds registers as a "job":
+
+- **smart_backfill** — enqueue historical-data requests for a universe
+- **training_pipeline** — Train All run (P1-P9)
+- **dl_training** — VAE / TFT / CNN-LSTM
+- **evaluation** — backtest a model over a date range
+- **gap_filler** — auto-detect + fill data holes
+- **scanner_sweep** — one-shot universe scan
+
+Each job shows: name, % complete, ETA, current phase, and a cancel button. Clicking a job opens its detailed log view.
+
+Status chips show counts at a glance: \`2 running · 1 queued · 3 done\`.`,
+      relatedTerms: ['training-pipeline-phases', 'backfill-readiness'],
+      tags: ['ui', 'panel', 'jobs']
+    },
+    {
       id: 'safety-armed',
       term: 'Safety Armed',
       category: 'app-ui',

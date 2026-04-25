@@ -16,7 +16,7 @@ export const ChatInput = ({ onSend, disabled }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-4 border-t border-white/5">
+    <form onSubmit={handleSubmit} className="p-4 border-t border-white/5" data-testid="sentcom-chat-input" data-help-id="ai-chat">
       <div className="flex gap-2">
         <input
           type="text"
@@ -24,6 +24,7 @@ export const ChatInput = ({ onSend, disabled }) => {
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Ask SentCom anything..."
           disabled={disabled || sending}
+          data-testid="sentcom-chat-input-field"
           className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
         />
         <button
