@@ -89,6 +89,7 @@ export const PipelineHUDV5 = ({
   return (
     <div
       data-testid="v5-pipeline-hud"
+      data-help-id="pipeline-hud"
       className="border-b border-zinc-800 bg-zinc-950 px-3 py-2"
     >
       <div className="flex items-center gap-2">
@@ -112,12 +113,13 @@ export const PipelineHUDV5 = ({
           {rightExtra}
           <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
           <Metric label="Equity"  value={formatEquity(equity)} />
-          <Metric
-            label="Latency"
+          <Metric label="Latency"
             value={latencySeconds != null ? `${Number(latencySeconds).toFixed(1)}s` : '—'}
             color={latencySeconds != null && Number(latencySeconds) < 10 ? 'text-emerald-400' : 'text-amber-400'}
           />
-          <Metric label="Phase"   value={phase}                      color={phaseColor} />
+          <span data-help-id="pipeline-phase">
+            <Metric label="Phase" value={phase} color={phaseColor} />
+          </span>
         </div>
       </div>
     </div>

@@ -178,7 +178,7 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
     );
   }
   return (
-    <div data-testid="v5-unified-stream" className="flex flex-col">
+    <div data-testid="v5-unified-stream" data-help-id="unified-stream" className="flex flex-col">
       <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
       {filtered.map((m, i) => (
         <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} />

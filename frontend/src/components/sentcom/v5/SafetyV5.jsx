@@ -159,6 +159,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
       <button
         onClick={() => setOpen(true)}
         data-testid="v5-flatten-all-btn"
+        data-help-id="flatten-all"
         title="Emergency flatten — cancel all pending + close all positions"
         className={btnClass}
       >
@@ -282,6 +283,7 @@ export const SafetyHudChip = ({ safety }) => {
   return (
     <span
       data-testid="v5-safety-hud-chip"
+      data-help-id="safety-armed"
       className={`v5-chip ${color}`}
       title={`Daily loss cap: $${cfg.max_daily_loss_usd.toFixed(0)} · max positions: ${cfg.max_positions} · per-symbol cap: $${cfg.max_symbol_exposure_usd.toLocaleString()}`}
     >
@@ -394,7 +396,7 @@ export const AccountGuardChipV5 = ({ safety }) => {
   }
 
   return (
-    <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
+    <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" data-help-id="account-mismatch" tabIndex={0}>
       <span
         data-testid="v5-account-guard-chip"
         className={`v5-chip ${mode === 'LIVE' ? 'v5-chip-veto' : 'v5-chip-manage'}`}

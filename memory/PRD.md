@@ -1,5 +1,61 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Help Overlay Coverage Expansion — SHIPPED
+
+Filled in the remaining `data-help-id` gaps so the press-`?` overlay
+now lights up virtually every interactive surface in the Command
+Center and NIA pages.
+
+### Coverage jump: 8 → 19 helpable elements (17 unique terms)
+
+Wired `data-help-id` onto:
+- **Safety/HUD chips** — v5-flatten-all-btn (→ flatten-all),
+  v5-safety-hud-chip (→ safety-armed), v5-account-guard-chip-wrap
+  (→ account-mismatch)
+- **Pipeline HUD** — v5-pipeline-hud (→ pipeline-hud), Phase metric
+  (→ pipeline-phase)
+- **Command Center right column** — v5-briefings (→ briefings),
+  v5-scanner-cards-list (→ scanner-panel), v5-open-positions
+  (→ open-positions), v5-unified-stream (→ unified-stream)
+- **Model scorecards** — sentcom/panels/ModelHealthScorecard
+  (→ gate-score), NIA/ModelScorecard (→ drift-veto)
+- **Training controls** — training-pipeline-panel
+  (→ training-pipeline-phases), run-preflight-btn (→ preflight),
+  test-mode-start-btn (→ test-mode), and all 5 gated train buttons
+  (start-training-btn, train-all-btn, full-universe-btn,
+  train-all-dl-btn, train-all-setups-btn) → pre-train-interlock
+- **Morning Briefing modal** → briefings
+
+### 3 new glossary entries added
+- **scanner-panel** — left column of Command Center, alerts ranked by
+  gate score, auto-subscribes top 10
+- **open-positions** — right column tile with per-position P&L,
+  R-multiple, stop status
+- **unified-stream** — right column event feed (SCAN/EVAL/ORDER/FILL/
+  WIN/LOSS/SKIP) with filterable chips
+
+Glossary now 84 entries × 15 categories. Backend cache reloaded via
+`POST /api/help/reload`.
+
+### Verified
+- Lint clean across all touched files
+- Press-? shows banner + cyan chips on 19 elements across the full
+  V5 grid (screenshot confirmed)
+- All 10 glossary pytests still pass
+
+### Files touched
+- `data/glossaryData.js` (+3 entries)
+- `components/sentcom/v5/SafetyV5.jsx` (+3 help-ids)
+- `components/sentcom/panels/PipelineHUDV5.jsx` (+2 help-ids)
+- `components/sentcom/v5/BriefingsV5.jsx`, `ScannerCardsV5.jsx`,
+  `OpenPositionsV5.jsx`, `UnifiedStreamV5.jsx` (+1 each)
+- `components/sentcom/panels/ModelHealthScorecard.jsx` (+1)
+- `components/NIA/ModelScorecard.jsx`, `TrainingPipelinePanel.jsx`,
+  `SetupModelsPanel.jsx` (+4 total)
+- `components/UnifiedAITraining.jsx` (+3)
+- `components/MorningBriefingModal.jsx` (+1)
+
+
 ## 2026-04-25 — AI Chat knows the Glossary — SHIPPED
 
 The embedded AI chat now quotes app-specific definitions **verbatim**

@@ -827,6 +827,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
                 : 'bg-zinc-800/60 text-zinc-500 border-zinc-700 hover:bg-zinc-800 cursor-help'
             }`}
             data-testid="train-all-setups-btn"
+            data-help-id="pre-train-interlock"
             data-train-readiness={trainReadiness.verdict}
           >
             {anyTraining || trainingAll ? (

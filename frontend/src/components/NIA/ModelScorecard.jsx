@@ -74,6 +74,7 @@ export default function ModelScorecard({ scorecard, onClose }) {
     <div
       className="bg-zinc-950/80 border border-zinc-800/60 rounded-lg p-3 text-zinc-300 backdrop-blur-sm"
       data-testid="model-scorecard"
+      data-help-id="drift-veto"
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-2 pb-2 border-b border-zinc-800/60">

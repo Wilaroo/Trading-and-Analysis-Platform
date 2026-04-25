@@ -111,6 +111,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
           className="w-full max-w-xl max-h-[88vh] overflow-hidden rounded-lg bg-zinc-950 border border-zinc-800 shadow-2xl v5-root"
           onClick={(e) => e.stopPropagation()}
           data-testid="morning-briefing-modal"
+          data-help-id="briefings"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/90">

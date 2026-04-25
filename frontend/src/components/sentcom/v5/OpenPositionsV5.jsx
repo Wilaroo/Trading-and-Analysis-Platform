@@ -92,7 +92,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
   const open = (positions || []).filter(p => p && p.status !== 'closed');
 
   return (
-    <div data-testid="v5-open-positions" className="flex flex-col">
+    <div data-testid="v5-open-positions" data-help-id="open-positions" className="flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <div className="v5-panel-title">Open ({open.length})</div>

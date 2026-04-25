@@ -332,7 +332,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
   };
 
   return (
-    <div data-testid="v5-briefings" className="flex flex-col">
+    <div data-testid="v5-briefings" data-help-id="briefings" className="flex flex-col">
       <MorningPrepCard
         data={briefing}
         loading={loading}

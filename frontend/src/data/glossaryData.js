@@ -1285,6 +1285,62 @@ Each briefing badge shows status: \`PASSED\` (already ran), \`NEW\` (currently a
       tags: ['ui', 'briefings', 'schedule']
     },
     {
+      id: 'scanner-panel',
+      term: 'Scanner Panel',
+      category: 'app-ui',
+      shortDef: 'Left column of the Command Center — live setups the bot is currently watching, ranked by gate score.',
+      fullDef: `The scanner panel shows every alert that's passed the configured filters in real time. Each card displays:
+
+- Symbol + price + signed % change
+- Setup type (e.g. ORB, breakout, pullback, second-chance)
+- Gate score (0-100) — A/B/C tier coloring
+- Time since the alert fired
+- Click → open the EnhancedTickerModal for full chart + entry details
+
+**Live indicator chip** at the top shows whether the scanner has fresh ticks (green LIVE), is paused (amber), or has gone quiet (red DEAD).
+
+Auto-subscribes the top 10 candidates to the IB pusher's live tick feed (Phase 2) so charts and prices stay current as you click through them.`,
+      relatedTerms: ['gate-score', 'live-data-chip', 'subscription-manager'],
+      tags: ['ui', 'panel', 'scanner']
+    },
+    {
+      id: 'open-positions',
+      term: 'Open Positions Panel',
+      category: 'app-ui',
+      shortDef: 'Right column tile listing every currently-open position with live P&L, R-multiple, and stop status.',
+      fullDef: `Each open-position row shows:
+
+- **Symbol** + side (LONG/SHORT)
+- **Qty** + entry price + current price
+- **P&L** (signed dollars + signed %)
+- **R-multiple** — current P&L expressed as multiples of initial risk (R)
+- **Stop status** — distance to stop, breached/not, trailing/fixed
+- **Manage actions** — close, adjust stop, partial-close
+
+The panel header shows aggregate **Total R**, # of open positions, and a "stop breached" warning chip if any position is below its stop.`,
+      relatedTerms: ['flatten-all', 'r-multiple'],
+      tags: ['ui', 'panel', 'positions']
+    },
+    {
+      id: 'unified-stream',
+      term: 'Unified Stream',
+      category: 'app-ui',
+      shortDef: 'Right column event feed: scans, evaluations, orders, fills, wins, losses, skips — chronological.',
+      fullDef: `Real-time event timeline with filterable chips at the top:
+
+- \`SCAN\` — new alert detected by the scanner
+- \`EVAL\` — alert evaluated by the gate score
+- \`ORDER\` — order placed (with side/qty/price)
+- \`FILL\` — order filled
+- \`WIN\` — position closed at profit
+- \`LOSS\` — position closed at loss
+- \`SKIP\` — alert filtered out (with reason)
+
+Click any filter chip to narrow the stream. Toggle **LIVE** to pause/resume. Each event row shows a timestamp and a one-line description of what the bot did and why.`,
+      relatedTerms: ['gate-score', 'pipeline-hud'],
+      tags: ['ui', 'panel', 'stream', 'feed']
+    },
+    {
       id: 'safety-armed',
       term: 'Safety Armed',
       category: 'app-ui',

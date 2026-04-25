@@ -299,6 +299,7 @@ export const ModelHealthScorecard = ({
   return (
     <div
       data-testid="model-health-scorecard"
+      data-help-id="gate-score"
       className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-950/90 via-zinc-950/80 to-zinc-900/80 backdrop-blur-xl ${className}`}
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">

@@ -398,6 +398,7 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
             disabled={runningPreflight}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="run-preflight-btn"
+            data-help-id="preflight"
             title="Synthetic-bar shape validator (~2s). Catches feature-list drift before launching a multi-hour run."
           >
             {runningPreflight ? <Loader2Spinner /> : <CheckCircle2 className="w-3 h-3" />}
@@ -408,6 +409,7 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
             disabled={starting || isTraining || blocked}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-[11px] text-violet-300 hover:text-violet-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             data-testid="test-mode-start-btn"
+            data-help-id="test-mode"
             title="Run a small-universe quick training to validate the pipeline end-to-end before the full overnight run."
           >
             <Zap className="w-3 h-3" />
@@ -763,7 +765,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
   const totalTrained = (inventory?.total_trained || 0) + cnnModels.length;
 
   return (
-    <div className="mt-6" data-testid="training-pipeline-panel">
+    <div className="mt-6" data-testid="training-pipeline-panel" data-help-id="training-pipeline-phases">
       {/* Section Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -791,6 +793,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
                   : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700 text-zinc-500 cursor-help'
               }`}
               data-testid="start-training-btn"
+              data-help-id="pre-train-interlock"
               data-train-readiness={trainReadiness.verdict}
             >
               <Play className="w-3 h-3" /> {starting ? 'Starting...' : 'Start Training'}

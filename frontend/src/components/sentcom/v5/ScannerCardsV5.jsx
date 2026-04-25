@@ -342,7 +342,7 @@ export const ScannerCardsV5 = ({
   }
 
   return (
-    <div data-testid="v5-scanner-cards-list" className="flex flex-col">
+    <div data-testid="v5-scanner-cards-list" data-help-id="scanner-panel" className="flex flex-col">
       {cards.map((c) => (
         <ScannerCard
           key={c.symbol + c.stage}

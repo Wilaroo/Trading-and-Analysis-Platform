@@ -1581,6 +1581,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                     }
                   `}
                   data-testid="train-all-btn"
+                  data-help-id="pre-train-interlock"
                   data-train-readiness={trainReadiness.verdict}
                 >
                   {isTraining && !currentTimeframe ? (
@@ -1616,6 +1617,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                     }
                   `}
                   data-testid="full-universe-btn"
+                  data-help-id="pre-train-interlock"
                   data-train-readiness={trainReadiness.verdict}
                 >
                   {isTraining && trainingProgress.phase === 'full_universe' ? (
@@ -1688,6 +1690,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                       }
                     `}
                     data-testid="train-all-dl-btn"
+                    data-help-id="pre-train-interlock"
                     data-train-readiness={trainReadiness.verdict}
                   >
                     <Brain className="w-4 h-4" />
