@@ -312,6 +312,7 @@ def _init_all_services():
     from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
     from routers.ib_collector_router import router as ib_collector_router
     from routers.backfill_router import router as backfill_router
+    from routers.help_router import router as help_router
     from routers.learning import router as learning_router
     from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
     from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
@@ -1409,7 +1410,7 @@ def _init_all_services():
         smart_stops_router, technicals_router, tqs_router, trade_snapshots_router,
         # Tier 3: NIA/Training
         advanced_backtest_router, data_storage_router, ev_tracking_router,
-        hybrid_data_router, ib_collector_router, backfill_router, learning_router,
+        hybrid_data_router, ib_collector_router, backfill_router, help_router, learning_router,
         learning_connectors_router, learning_dashboard_router,
         market_scanner_router, medium_learning_router, scanner_router,
         scheduler_router_ext, simulator_router, slow_learning_router,

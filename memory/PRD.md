@@ -1,5 +1,76 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — AI Chat knows the Glossary — SHIPPED
+
+The embedded AI chat now quotes app-specific definitions **verbatim**
+when asked "what is the Gate Score?", "why is Pre-Train Interlock
+blocking me?", "explain the Backfill Readiness card", etc. Single
+source of truth = the same \`glossaryData.js\` that powers the
+GlossaryDrawer / ⌘K / press-? overlay / tours.
+
+### New backend plumbing
+- \`services/glossary_service.py\` — tolerant JS parser that reads the
+  frontend file directly (no duplication, no cron sync). Handles
+  single/double/backtick strings and nested arrays. Result cached with
+  \`@lru_cache\`; \`reload_glossary()\` re-parses on demand.
+  - \`load_glossary()\` → {categories, entries}
+  - \`get_term(id)\` → entry
+  - \`find_terms(q, limit)\` → matches against term / id / shortDef / tags
+  - \`glossary_for_chat(max_chars)\` → compact "- Term: shortDef" block
+- \`routers/help_router.py\` — mounted at \`/api/help\`:
+  - \`GET /api/help/terms[?q=…&limit=N]\` — full list or search
+  - \`GET /api/help/terms/{id}\` — single entry (404 if unknown)
+  - \`POST /api/help/reload\` — force re-parse after doc edits
+- Registered in the Tier 2-4 deferred list in \`server.py\`.
+
+### Chat injection
+\`chat_server.py\` now pulls \`glossary_for_chat(max_chars=10000)\` into
+the system prompt alongside the existing LIVE DATA / MEMORY / SESSION
+blocks. Added a dedicated **APP HELP / GLOSSARY** rules section above
+it telling the model:
+
+> When I ask "what is X?", "what does X mean?", "explain the X
+> badge/chip/score", etc. about an APP UI ELEMENT — quote the
+> matching definition VERBATIM. NEVER invent meanings for
+> app-specific terms. If not in the glossary, say so honestly.
+
+After quoting, the model offers: "want the full explanation? click
+the ❓ button or press ? on the page." — looping the chat back into
+the rest of the help system.
+
+### Parser verified against the real file
+81 entries × 15 categories parse correctly. Full glossary-for-chat
+block is ~7.8KB, well inside any modern LLM context window.
+Template-literal fullDef values (multi-line backtick strings) unescape
+properly. The cache makes per-request cost sub-millisecond after first
+parse.
+
+### Tests (10 new pytests — all green)
+- Parses cleanly (≥60 entries, every entry has id+term+shortDef)
+- 6 known stable IDs present (backfill-readiness, pre-train-interlock,
+  data-freshness-badge, ib-pusher, cmd-k, gate-score)
+- \`get_term\` round-trips, \`find_terms\` honours query
+- Chat block fits at 10KB cap, includes all critical terms, truncates
+  cleanly at small caps
+- \`GET /api/help/terms\`, \`?q=interlock\`, \`/terms/gate-score\`,
+  404 for unknown IDs — all pass against live backend
+
+### Files
+- \`backend/services/glossary_service.py\` (new)
+- \`backend/routers/help_router.py\` (new)
+- \`backend/tests/test_glossary_help.py\` (new)
+- \`backend/chat_server.py\` (glossary block injected into prompt)
+- \`backend/server.py\` (router registered)
+
+### Why this matters
+The chat was previously trained on generic trading knowledge — it had
+no idea what "Pre-Train Interlock" or "Backfill Readiness" or "Pusher
+RPC" meant in **this** app. Now it answers from the same source of
+truth the UI uses, ensuring the chat, drawer, ⌘K, and tours all say
+the same thing. Edit a definition once in \`glossaryData.js\` → every
+surface updates after a cache reload.
+
+
 ## 2026-04-25 — In-App Help System ("How-to / Explainer") — SHIPPED
 
 A full discoverability suite so users (operator + less-technical

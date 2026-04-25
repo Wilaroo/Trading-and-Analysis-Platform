@@ -22,6 +22,20 @@ from typing import Optional
 import requests  # Still needed for Ollama calls
 from pymongo import MongoClient
 
+# Glossary lives next to the rest of the backend services. Add the
+# parent directory to sys.path defensively so this module can be run
+# either via supervisor (cwd=/app/backend) or directly (cwd=anywhere).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from services.glossary_service import glossary_for_chat  # type: ignore
+except Exception as _glossary_import_err:  # pragma: no cover
+    logging.getLogger("chat_server").warning(
+        f"Glossary unavailable in chat: {_glossary_import_err}"
+    )
+
+    def glossary_for_chat(max_chars: int = 4000) -> str:  # type: ignore
+        return ""
+
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("chat_server")
@@ -1077,6 +1091,16 @@ def chat(request: ChatRequest):
     session_block = ""
     if last_session:
         session_block = f"\n\nLAST SESSION CONTEXT:\n{last_session}"
+
+    # Load the app glossary so the model can quote definitions verbatim when
+    # asked "what is the X badge / score / chip?". Cached in the
+    # glossary_service after first parse — sub-millisecond cost per request.
+    # Full block is ~8KB which fits in any modern model's context budget.
+    try:
+        glossary_block = glossary_for_chat(max_chars=10000)
+    except Exception as e:
+        logger.warning(f"glossary_for_chat failed: {e}")
+        glossary_block = ""
     
     system_prompt = f"""You are SentCom — my AI trading partner. We trade together as a team.
 
@@ -1166,6 +1190,15 @@ TRADE EXECUTION:
   <<<TRADE_ACTION: {{"action": "close", "symbol": "LABD", "reason": "user_requested"}}>>>
 - Only include this when I'm clearly requesting a trade action, not when discussing hypotheticals.
 - Confirm the action in plain English BEFORE the JSON block.
+
+APP HELP / GLOSSARY:
+- The block below ("APP GLOSSARY") lists every badge / chip / score / verdict / panel in the app, with its definition.
+- When I ask "what is X?", "what does X mean?", "explain the X badge/chip/score", "why is X red/yellow/green?", or anything similar about an APP UI ELEMENT — quote the matching definition VERBATIM (one or two sentences). Do not paraphrase the meaning of these technical terms.
+- If the term I ask about is NOT in the glossary, say so honestly: "That's not in the SentCom glossary — let me know if you want me to explain my best guess."
+- After quoting a definition, you can offer "want the full explanation? click the ❓ button bottom-right or press ? on the page."
+- NEVER invent meanings for app-specific terms (e.g., 'Backfill Readiness', 'Pre-Train Interlock', 'Pusher RPC', 'Gate Score'). Only use the glossary text below.
+
+{glossary_block}
 
 === LIVE DATA ===
 {context}
