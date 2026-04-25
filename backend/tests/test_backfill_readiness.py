@@ -27,9 +27,15 @@ class _FakeCursor:
 class _FakeCollection:
     def __init__(self):
         self.docs = []
+        self._indexes = []
 
     def insert(self, doc):
         self.docs.append(doc)
+
+    def list_indexes(self):
+        # Mongo returns _id_ + whatever the collection set up. Tests can
+        # opt-in to indexes by appending to ._indexes.
+        return iter(self._indexes)
 
     def count_documents(self, filt):
         return sum(1 for d in self.docs if self._match(d, filt))
@@ -140,6 +146,12 @@ def fresh_db():
     recent_iso = now.isoformat()
     # Intraday universe = critical list + 2 extras so density/freshness rollups have data.
     universe = svc.CRITICAL_SYMBOLS + ["TSLA", "INTC"]
+    # Stamp the unique compound index so _check_no_duplicates passes.
+    db["ib_historical_data"]._indexes.append({
+        "name": "symbol_1_bar_size_1_date_1",
+        "key": {"symbol": 1, "bar_size": 1, "date": 1},
+        "unique": True,
+    })
     for sym in universe:
         db["symbol_adv_cache"].insert({"symbol": sym, "avg_volume": 1_000_000})
         for tf in svc.CRITICAL_TIMEFRAMES:

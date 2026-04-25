@@ -44,8 +44,18 @@ collectors drain.
 """
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
+
+# Per-check wall-clock budget. With this, the whole endpoint can never
+# exceed ~CHECK_BUDGET_SECONDS (checks run in parallel). Hitting the
+# budget downgrades that one check to "yellow — slow query" rather than
+# hanging the whole endpoint.
+CHECK_BUDGET_SECONDS = 15
 
 
 CRITICAL_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]
@@ -167,55 +177,41 @@ def _check_critical_symbols(db) -> Dict[str, Any]:
 
 
 def _check_no_duplicates(db) -> Dict[str, Any]:
-    """Spot-check critical symbols for duplicate (date, bar_size) rows.
-
-    Duplicates indicate a write-path bug (the pusher or collector
-    inserting the same bar twice). Training will silently over-weight
-    these bars. Catch them here.
+    """Confirm the unique compound index on `ib_historical_data` is in
+    place. The index `{symbol:1, bar_size:1, date:1}` is `unique=True`,
+    so duplicates are impossible at the write path — verifying its
+    existence is O(1) and replaces the previous 50× aggregation scan
+    that timed out on multi-million-row collections.
     """
     data = db["ib_historical_data"]
-    dupes: List[Dict[str, Any]] = []
-    checked = 0
-
-    for sym in CRITICAL_SYMBOLS:
-        for tf in CRITICAL_TIMEFRAMES:
-            checked += 1
-            try:
-                cursor = data.aggregate(
-                    [
-                        {"$match": {"symbol": sym, "bar_size": tf}},
-                        {"$group": {
-                            "_id": {"date": "$date"},
-                            "n": {"$sum": 1},
-                        }},
-                        {"$match": {"n": {"$gt": 1}}},
-                        {"$limit": 3},
-                    ],
-                    allowDiskUse=True,
-                )
-                found = list(cursor)
-                if found:
-                    dupes.append({
-                        "symbol": sym,
-                        "bar_size": tf,
-                        "dupe_count": len(found),
-                        "sample_dates": [f["_id"].get("date") for f in found],
-                    })
-            except Exception:
-                # Single aggregation failing shouldn't fail the whole check.
-                continue
-
-    if dupes:
+    target_keys = [("symbol", 1), ("bar_size", 1), ("date", 1)]
+    try:
+        indexes = list(data.list_indexes())
+    except Exception as e:
         return {
-            "status": "red",
-            "detail": f"Duplicate bars found on {len(dupes)} (symbol, timeframe) combos",
-            "checked": checked,
-            "dupes": dupes,
+            "status": "yellow",
+            "detail": f"Could not list indexes ({e}); cannot prove dedup guarantee",
+            "checked": 0,
+            "dupes": [],
+        }
+
+    unique_present = any(
+        list(idx.get("key", {}).items()) == target_keys
+        and bool(idx.get("unique"))
+        for idx in indexes
+    )
+
+    if unique_present:
+        return {
+            "status": "green",
+            "detail": "Unique index on (symbol, bar_size, date) present — duplicates impossible at write path",
+            "checked": 1,
+            "dupes": [],
         }
     return {
-        "status": "green",
-        "detail": f"No duplicates found across {checked} critical combos",
-        "checked": checked,
+        "status": "red",
+        "detail": "Missing UNIQUE index on (symbol, bar_size, date) — duplicates may exist. Recreate index before training.",
+        "checked": 1,
         "dupes": [],
     }
 
@@ -256,6 +252,7 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
                 {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
             ],
             allowDiskUse=True,
+            maxTimeMS=int((CHECK_BUDGET_SECONDS - 2) * 1000),
         )
         max_by_sym = {r["_id"]: r.get("max_date") for r in rows if r.get("_id")}
         fresh = sum(
@@ -322,6 +319,7 @@ def _check_density_adequate(db) -> Dict[str, Any]:
             {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
         ],
         allowDiskUse=True,
+        maxTimeMS=int((CHECK_BUDGET_SECONDS - 2) * 1000),
     )
     counts = {r["_id"]: r.get("bars", 0) for r in rows}
 
@@ -360,20 +358,57 @@ _RANK = {"green": 0, "yellow": 1, "red": 2}
 _REVERSE = {v: k for k, v in _RANK.items()}
 
 
-def compute_readiness(db) -> Dict[str, Any]:
-    """Run all readiness checks, return a single aggregated report.
-
-    The caller (the router) wraps this in a thread so the checks — which
-    are blocking pymongo aggregations — don't stall the FastAPI event
-    loop.
+def _run_check_safely(name: str, fn, db) -> Dict[str, Any]:
+    """Execute a single check with a wall-clock budget. On timeout or
+    exception we return a `yellow` result with the reason — the endpoint
+    must always return SOMETHING so the UI can render.
     """
-    checks: Dict[str, Dict[str, Any]] = {
-        "queue_drained": _check_queue_drained(db),
-        "critical_symbols_fresh": _check_critical_symbols(db),
-        "overall_freshness": _check_overall_freshness(db),
-        "no_duplicates": _check_no_duplicates(db),
-        "density_adequate": _check_density_adequate(db),
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(fn, db).result(timeout=CHECK_BUDGET_SECONDS)
+    except _FutTimeout:
+        logger.warning(f"backfill readiness check {name} exceeded {CHECK_BUDGET_SECONDS}s budget")
+        return {
+            "status": "yellow",
+            "detail": f"Check exceeded {CHECK_BUDGET_SECONDS}s budget — slow Mongo aggregation. Verify indexes on ib_historical_data.",
+            "timed_out": True,
+        }
+    except Exception as e:
+        logger.error(f"backfill readiness check {name} failed: {e}", exc_info=True)
+        return {
+            "status": "yellow",
+            "detail": f"Check raised {type(e).__name__}: {e}",
+            "error": True,
+        }
+
+
+def compute_readiness(db) -> Dict[str, Any]:
+    """Run all readiness checks in parallel, return a single aggregated
+    report. Each check is bounded by `CHECK_BUDGET_SECONDS`; failures
+    degrade to `yellow` rather than blowing up the endpoint.
+    """
+    check_fns = {
+        "queue_drained":          _check_queue_drained,
+        "critical_symbols_fresh": _check_critical_symbols,
+        "overall_freshness":      _check_overall_freshness,
+        "no_duplicates":          _check_no_duplicates,
+        "density_adequate":       _check_density_adequate,
     }
+    # Run all 5 in parallel — total wall-clock ≈ slowest check, capped
+    # at CHECK_BUDGET_SECONDS.
+    checks: Dict[str, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=len(check_fns)) as pool:
+        futures = {name: pool.submit(_run_check_safely, name, fn, db)
+                   for name, fn in check_fns.items()}
+        for name, fut in futures.items():
+            try:
+                checks[name] = fut.result(timeout=CHECK_BUDGET_SECONDS + 2)
+            except Exception as e:
+                checks[name] = {
+                    "status": "yellow",
+                    "detail": f"Outer harness raised {type(e).__name__}: {e}",
+                    "error": True,
+                }
 
     # Overall verdict = worst check.
     worst = max((_RANK[c["status"]] for c in checks.values()), default=0)

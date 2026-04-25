@@ -22,8 +22,8 @@ hit() {
   # $1 = label, $2 = path, $3 = jq filter (optional, default = .)
   local label="$1" path="$2" filter="${3:-.}"
   bold "$label   →   GET $path"
-  if ! curl -fs --max-time 30 "${API}${path}" | jq -C "${filter}"; then
-    warn "  (request failed or non-200)"
+  if ! curl -fs --max-time 90 "${API}${path}" | jq -C "${filter}"; then
+    warn "  (request failed, timed out, or returned non-JSON)"
   fi
 }
 
@@ -69,7 +69,14 @@ hit "7. DATA COVERAGE (critical symbols)" \
 
 # 8. Top-level health roll-up.
 hit "8. SYSTEM HEALTH" "/api/ib-collector/system-health" '
-  {status, score, alerts, summary}'
+  {
+    health_status,
+    queue,
+    data_freshness,
+    issues,
+    stuck_requests,
+    recommendations: (.recommendations | map(select(. != null)))
+  }'
 
 bold "DONE"
 date -u +"finished: %Y-%m-%dT%H:%M:%SZ"
