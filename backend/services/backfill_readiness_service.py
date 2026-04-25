@@ -55,7 +55,12 @@ logger = logging.getLogger(__name__)
 # exceed ~CHECK_BUDGET_SECONDS (checks run in parallel). Hitting the
 # budget downgrades that one check to "yellow — slow query" rather than
 # hanging the whole endpoint.
-CHECK_BUDGET_SECONDS = 15
+#
+# 60s is sized for the freshness/density aggregations against ~8M-row
+# `ib_historical_data` collections — the planner needs time even when
+# we hint the unique compound index, because the $in clause spans ~2.6k
+# symbols.
+CHECK_BUDGET_SECONDS = 60
 
 
 CRITICAL_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]
@@ -245,15 +250,29 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
 
     total_fresh = total_pairs = 0
     per_tf: List[Dict[str, Any]] = []
+    intraday_list = list(intraday_symbols)
     for tf in CRITICAL_TIMEFRAMES:
-        rows = data.aggregate(
-            [
-                {"$match": {"bar_size": tf, "symbol": {"$in": list(intraday_symbols)}}},
-                {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
-            ],
-            allowDiskUse=True,
-            maxTimeMS=int((CHECK_BUDGET_SECONDS - 2) * 1000),
-        )
+        try:
+            rows = data.aggregate(
+                [
+                    {"$match": {"bar_size": tf, "symbol": {"$in": intraday_list}}},
+                    {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
+                ],
+                allowDiskUse=True,
+                maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
+                hint=[("symbol", 1), ("bar_size", 1), ("date", 1)],
+            )
+        except Exception:
+            # Hint mismatch (e.g. index missing on this collection) —
+            # fall back to letting the planner pick.
+            rows = data.aggregate(
+                [
+                    {"$match": {"bar_size": tf, "symbol": {"$in": intraday_list}}},
+                    {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
+                ],
+                allowDiskUse=True,
+                maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
+            )
         max_by_sym = {r["_id"]: r.get("max_date") for r in rows if r.get("_id")}
         fresh = sum(
             1 for s in intraday_symbols
@@ -313,14 +332,25 @@ def _check_density_adequate(db) -> Dict[str, Any]:
             "low_density_sample": [],
         }
 
-    rows = data.aggregate(
-        [
-            {"$match": {"bar_size": "5 mins", "symbol": {"$in": intraday_symbols}}},
-            {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
-        ],
-        allowDiskUse=True,
-        maxTimeMS=int((CHECK_BUDGET_SECONDS - 2) * 1000),
-    )
+    try:
+        rows = data.aggregate(
+            [
+                {"$match": {"bar_size": "5 mins", "symbol": {"$in": intraday_symbols}}},
+                {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
+            ],
+            allowDiskUse=True,
+            maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
+            hint=[("symbol", 1), ("bar_size", 1), ("date", 1)],
+        )
+    except Exception:
+        rows = data.aggregate(
+            [
+                {"$match": {"bar_size": "5 mins", "symbol": {"$in": intraday_symbols}}},
+                {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
+            ],
+            allowDiskUse=True,
+            maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
+        )
     counts = {r["_id"]: r.get("bars", 0) for r in rows}
 
     low: List[Dict[str, Any]] = []
