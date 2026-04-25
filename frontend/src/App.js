@@ -10,6 +10,7 @@ import { GlossaryDrawer, openGlossary } from './components/GlossaryDrawer';
 import { TourOverlay } from './components/TourOverlay';
 import { useHelpOverlay } from './hooks/useHelpOverlay';
 import { HelpCircle } from 'lucide-react';
+import { AuraMockupPreview } from './pages/AuraMockupPreview';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -104,6 +105,14 @@ const WebSocketStatusSync = ({ isConnected }) => {
 
 // ===================== MAIN APP =====================
 function App() {
+  // Concept-preview escape hatch: when ?preview=aura is in the URL we
+  // render only the standalone mockup page. We compute the flag up-front
+  // but cannot early-return here because the rest of App() calls hooks
+  // unconditionally (Rules of Hooks). Instead we short-circuit at the
+  // very top of the JSX render below.
+  const isAuraPreview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=aura');
+
   // Startup status dashboard - shows system initialization progress
   const [showStartupStatus, setShowStartupStatus] = useState(false);
   const [startupStatusMinimized, setStartupStatusMinimized] = useState(false);
@@ -443,6 +452,13 @@ function App() {
     <DataCacheProvider>
     <WebSocketDataProvider wsMessage={lastWsMessage}>
     <TickerModalProvider>
+      {/* ?preview=aura URL — render concept mockup ONLY, no other UI.
+          All providers above remain mounted (cheap; they don't do work
+          until consumed) so the preview is isolated and reversible. */}
+      {isAuraPreview ? (
+        <AuraMockupPreview />
+      ) : (
+      <>
       {/* Sync WebSocket status to SystemStatusContext */}
       <WebSocketStatusSync isConnected={isConnected} />
       <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
@@ -566,6 +582,8 @@ function App() {
       >
         <HelpCircle className="w-5 h-5" />
       </button>
+      </>
+      )}
     </TickerModalProvider>
     </WebSocketDataProvider>
     </DataCacheProvider>
