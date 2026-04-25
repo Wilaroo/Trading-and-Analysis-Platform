@@ -45,7 +45,8 @@ collectors drain.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait as _fwait
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
@@ -394,34 +395,37 @@ _RANK = {"green": 0, "yellow": 1, "red": 2}
 _REVERSE = {v: k for k, v in _RANK.items()}
 
 
-def _run_check_safely(name: str, fn, db) -> Dict[str, Any]:
-    """Execute a single check with a wall-clock budget. On timeout or
-    exception we return a `yellow` result with the reason — the endpoint
-    must always return SOMETHING so the UI can render.
-    """
-    try:
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(fn, db).result(timeout=CHECK_BUDGET_SECONDS)
-    except _FutTimeout:
-        logger.warning(f"backfill readiness check {name} exceeded {CHECK_BUDGET_SECONDS}s budget")
-        return {
-            "status": "yellow",
-            "detail": f"Check exceeded {CHECK_BUDGET_SECONDS}s budget — slow Mongo aggregation. Verify indexes on ib_historical_data.",
-            "timed_out": True,
-        }
-    except Exception as e:
-        logger.error(f"backfill readiness check {name} failed: {e}", exc_info=True)
-        return {
-            "status": "yellow",
-            "detail": f"Check raised {type(e).__name__}: {e}",
-            "error": True,
-        }
+def _yellow_timeout(name: str) -> Dict[str, Any]:
+    return {
+        "status": "yellow",
+        "detail": f"Check '{name}' exceeded {CHECK_BUDGET_SECONDS}s budget — slow Mongo aggregation. Verify index '{HIST_INDEX_NAME}' is present.",
+        "timed_out": True,
+    }
+
+
+def _yellow_error(name: str, exc: BaseException) -> Dict[str, Any]:
+    return {
+        "status": "yellow",
+        "detail": f"Check '{name}' raised {type(exc).__name__}: {exc}",
+        "error": True,
+    }
+
+
+# Module-level executor — reused across requests so we don't pay
+# thread-startup cost on every poll. 5 workers = one per check.
+_CHECK_POOL = ThreadPoolExecutor(max_workers=5, thread_name_prefix="readiness")
 
 
 def compute_readiness(db) -> Dict[str, Any]:
-    """Run all readiness checks in parallel, return a single aggregated
-    report. Each check is bounded by `CHECK_BUDGET_SECONDS`; failures
-    degrade to `yellow` rather than blowing up the endpoint.
+    """Run all readiness checks in parallel against a single deadline.
+
+    Whole-endpoint wall-clock is bounded by `CHECK_BUDGET_SECONDS`. Any
+    check that hasn't finished by the deadline is recorded as `yellow —
+    timed out` and the in-flight Mongo aggregation is cancelled
+    (`fut.cancel()` + `maxTimeMS` server-side). Crucially we DO NOT
+    `shutdown(wait=True)` a per-request pool — that's what caused the
+    earlier ≥120s hangs (inner pool's __exit__ blocked waiting on a
+    still-running Mongo call).
     """
     check_fns = {
         "queue_drained":          _check_queue_drained,
@@ -430,21 +434,31 @@ def compute_readiness(db) -> Dict[str, Any]:
         "no_duplicates":          _check_no_duplicates,
         "density_adequate":       _check_density_adequate,
     }
-    # Run all 5 in parallel — total wall-clock ≈ slowest check, capped
-    # at CHECK_BUDGET_SECONDS.
+    futures = {name: _CHECK_POOL.submit(fn, db) for name, fn in check_fns.items()}
+    deadline = _time.monotonic() + CHECK_BUDGET_SECONDS
+    pending = set(futures.values())
+
+    # Drain futures as they complete, bounded by the global deadline.
+    while pending:
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            break
+        _done, pending = _fwait(pending, timeout=remaining, return_when=FIRST_COMPLETED)
+
     checks: Dict[str, Dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=len(check_fns)) as pool:
-        futures = {name: pool.submit(_run_check_safely, name, fn, db)
-                   for name, fn in check_fns.items()}
-        for name, fut in futures.items():
+    for name, fut in futures.items():
+        if fut.done():
             try:
-                checks[name] = fut.result(timeout=CHECK_BUDGET_SECONDS + 2)
-            except Exception as e:
-                checks[name] = {
-                    "status": "yellow",
-                    "detail": f"Outer harness raised {type(e).__name__}: {e}",
-                    "error": True,
-                }
+                checks[name] = fut.result()
+            except Exception as exc:
+                logger.error(f"readiness check {name} failed: {exc}", exc_info=True)
+                checks[name] = _yellow_error(name, exc)
+        else:
+            # Best-effort cancel — won't kill an in-flight Mongo call,
+            # but prevents the future from being scheduled if it's still
+            # queued, and lets it finish in the background harmlessly.
+            fut.cancel()
+            checks[name] = _yellow_timeout(name)
 
     # Overall verdict = worst check.
     worst = max((_RANK[c["status"]] for c in checks.values()), default=0)
