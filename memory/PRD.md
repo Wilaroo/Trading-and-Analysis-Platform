@@ -42,6 +42,20 @@ The script we shipped this morning to manually queue ~3,000 missed refills was a
 - 🟡 **P3** — ⌘K palette additions; "Don't show again" help tooltips; `server.py` breakup.
 - 🟡 **P3** — Retry the 204 historical `qualify_failed` items via `/api/ib-collector/retry-failed` after first clean training cycle.
 
+### Bonus — Click-to-explain BackfillReadinessCard tiles
+While we were on the topic of "I keep having to drop into the terminal to figure out what's actually red," shipped an enhancement to `frontend/src/components/sentcom/v5/BackfillReadinessCard.jsx`:
+
+- Each per-check tile is now click-to-expand. Clicking opens an inline drawer styled to match the data shape:
+  - `queue_drained` — pending/claimed/completed/failed pills + ETA estimate
+  - `critical_symbols_fresh` — list of stale symbols as red chips + "POST smart-backfill?freshness_days=1" one-click action button
+  - `overall_freshness` — per-timeframe horizontal bar chart sorted worst-offender first + one-click smart-backfill action
+  - `no_duplicates` — explanation of the unique-index guarantee
+  - `density_adequate` — `dense_pct` + low-density sample chips with bar counts
+- Action buttons POST to the right `/api/ib-collector/*` endpoint and re-poll readiness 2s later so the card updates in place.
+- `data-testid`s on every drilldown row + chip + button so the testing agent can assert per-status messages without dropping into curl.
+
+This is the proper UX answer to "stop hiding the actual numbers behind a single binary verdict." Eliminates the need for `post_backfill_audit.sh` for routine triage — the card surfaces everything inline now.
+
 ---
 
 ## 2026-04-25 (A.M.) — Post-Backfill Audit + Readiness Service Hardening
