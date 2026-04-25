@@ -57,11 +57,11 @@ logger = logging.getLogger(__name__)
 # budget downgrades that one check to "yellow — slow query" rather than
 # hanging the whole endpoint.
 #
-# 60s is sized for the freshness/density aggregations against ~85M-row
-# `ib_historical_data` collections — the planner needs time even when
-# we hint the unique compound index, because the $in clause spans ~2.6k
-# symbols.
-CHECK_BUDGET_SECONDS = 60
+# 90s is sized for the freshness/density aggregations against ~85M-row
+# `ib_historical_data` collections — even with the unique compound index
+# hint, MongoDB's planner takes 60-90s when the $in clause spans ~2.6k
+# symbols on the user's hardware (DGX Spark + local Mongo).
+CHECK_BUDGET_SECONDS = 90
 
 # Index name pymongo's `hint=` param needs (must be a *string* index
 # name for aggregate(), not a list of tuples — that one tripped us
