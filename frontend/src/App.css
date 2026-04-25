@@ -7,3 +7,77 @@ iframe#webpack-dev-server-client-overlay,
 #webpack-dev-server-client-overlay {
   display: none !important;
 }
+
+/* ====================================================================
+ * Help overlay (press ? to highlight every glossary-aware element).
+ * Activated by useHelpOverlay() flipping data-help-mode="on" on <body>.
+ * ==================================================================== */
+
+body[data-help-mode="on"] {
+  cursor: help;
+}
+
+/* Subtle outline + animated dashed border on every helpable element */
+body[data-help-mode="on"] [data-help-id] {
+  outline: 1px dashed rgba(34, 211, 238, 0.55) !important;
+  outline-offset: 2px;
+  position: relative;
+  cursor: help !important;
+  transition: outline-color 120ms ease-out;
+  z-index: 1;
+}
+
+body[data-help-mode="on"] [data-help-id]:hover {
+  outline-color: rgba(34, 211, 238, 1) !important;
+  outline-style: solid;
+  outline-width: 2px;
+  background-color: rgba(34, 211, 238, 0.06);
+}
+
+/* Pinned ❓ chip in the top-right corner of every helpable element */
+body[data-help-mode="on"] [data-help-id]::before {
+  content: "?";
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: rgb(34, 211, 238);
+  color: rgb(8, 47, 73);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Banner explaining what's happening */
+body[data-help-mode="on"]::after {
+  content: "HELP MODE — Click any highlighted element to learn what it does. Press ? or Esc to exit.";
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  background-color: rgba(34, 211, 238, 0.95);
+  color: rgb(8, 47, 73);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  animation: helpModeFadeIn 200ms ease-out;
+}
+
+@keyframes helpModeFadeIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}

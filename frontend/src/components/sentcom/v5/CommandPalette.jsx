@@ -18,6 +18,9 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import glossaryData from '../../../data/glossaryData';
+import { openGlossary } from '../../GlossaryDrawer';
+import { tours, startTour } from '../../../data/tours';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const CORE = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
@@ -42,6 +45,35 @@ function _saveRecent(symbol) {
   } catch {
     /* ignore storage quota / disabled */
   }
+}
+
+/** Search the glossary for terms matching the post-`?` query. */
+function _searchGlossary(q) {
+  if (!q) return glossaryData.entries.slice(0, 8);
+  const needle = q.toLowerCase();
+  return glossaryData.entries
+    .filter((e) =>
+      e.term.toLowerCase().includes(needle) ||
+      e.id.includes(needle) ||
+      e.shortDef.toLowerCase().includes(needle) ||
+      (e.tags || []).some((t) => t.toLowerCase().includes(needle))
+    )
+    .slice(0, 8);
+}
+
+/** Build the ">command" mode result list. Currently: tours. */
+function _searchCommands(q) {
+  const needle = (q || '').toLowerCase();
+  const all = Object.values(tours).map((t) => ({
+    type: 'tour',
+    id: t.id,
+    label: `tour ${t.id}`,
+    description: t.description,
+  }));
+  if (!needle) return all;
+  return all.filter(
+    (c) => c.label.toLowerCase().includes(needle) || c.description.toLowerCase().includes(needle)
+  );
 }
 
 async function _get(path) {
@@ -124,16 +156,42 @@ export const CommandPalette = ({ onSelectSymbol }) => {
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
+  // Help mode: query starts with `?` → switch corpus to glossary entries.
+  const helpMode = query.startsWith('?');
+  const helpResults = helpMode ? _searchGlossary(query.slice(1).trim()) : [];
+
+  // Command mode: query starts with `>` → run-an-action mode (currently tours).
+  const cmdMode = query.startsWith('>');
+  const cmdResults = cmdMode ? _searchCommands(query.slice(1).trim()) : [];
+
   // When the query is empty, show recent picks instead of the full corpus so
   // re-opening the palette to jump back to a symbol is a single keystroke.
   const showRecent = !query && recent.length > 0;
-  const visibleItems = showRecent
-    ? recent.map((symbol) => ({ symbol, score: 0, isRecent: true }))
-    : results;
+  const visibleItems = helpMode
+    ? helpResults.map((g) => ({ symbol: g.term, glossary: g, score: 0 }))
+    : cmdMode
+      ? cmdResults.map((c) => ({ symbol: c.label, command: c, score: 0 }))
+      : showRecent
+        ? recent.map((symbol) => ({ symbol, score: 0, isRecent: true }))
+        : results;
 
   const activate = useCallback(
-    (sym) => {
+    (item) => {
       setOpen(false);
+      // `item` may be a string (back-compat) or an object {symbol, glossary, command, ...}
+      const sym = typeof item === 'string' ? item : item?.symbol;
+      const glossary = typeof item === 'object' ? item?.glossary : null;
+      const command = typeof item === 'object' ? item?.command : null;
+      if (glossary) {
+        setTimeout(() => openGlossary(glossary.id), 50);
+        return;
+      }
+      if (command) {
+        if (command.type === 'tour') {
+          setTimeout(() => startTour(command.id), 50);
+        }
+        return;
+      }
       if (sym) {
         _saveRecent(sym);
         onSelectSymbol?.(sym);
@@ -151,7 +209,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
       setSelectedIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const pick = visibleItems[selectedIdx]?.symbol || query.toUpperCase().trim();
+      const pick = visibleItems[selectedIdx] || (helpMode || cmdMode ? null : query.toUpperCase().trim());
       if (pick) activate(pick);
     }
   };
@@ -178,14 +236,30 @@ export const CommandPalette = ({ onSelectSymbol }) => {
               setSelectedIdx(0);
             }}
             onKeyDown={onInputKey}
-            placeholder="Type a symbol…"
+            placeholder="Symbol… · ? for glossary · > for tours"
             data-testid="command-palette-input"
             className="flex-1 bg-transparent outline-none text-zinc-100 v5-mono text-xs placeholder:text-zinc-600"
           />
           <span className="v5-mono text-[9px] text-zinc-600">esc</span>
         </div>
         <div className="max-h-[50vh] overflow-y-auto v5-scroll">
-          {showRecent && (
+          {helpMode && (
+            <div
+              data-testid="command-palette-help-header"
+              className="v5-mono text-[9px] text-cyan-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-cyan-500/5"
+            >
+              Glossary · {visibleItems.length} match{visibleItems.length === 1 ? '' : 'es'}
+            </div>
+          )}
+          {cmdMode && (
+            <div
+              data-testid="command-palette-cmd-header"
+              className="v5-mono text-[9px] text-violet-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-violet-500/5"
+            >
+              Commands · {visibleItems.length} available
+            </div>
+          )}
+          {!helpMode && !cmdMode && showRecent && (
             <div
               data-testid="command-palette-recent-header"
               className="v5-mono text-[9px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
@@ -195,23 +269,61 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           )}
           {visibleItems.length === 0 && (
             <div className="v5-mono text-[10px] text-zinc-600 px-3 py-4 text-center">
-              {query ? `No match for "${query}" — press Enter to open ${query.toUpperCase()}` : 'Type to search…'}
+              {helpMode
+                ? `No glossary match for "${query.slice(1)}"`
+                : cmdMode
+                  ? `No command matches "${query.slice(1)}"`
+                  : query
+                    ? `No match for "${query}" — press Enter to open ${query.toUpperCase()}`
+                    : 'Type to search…'}
             </div>
           )}
           {visibleItems.map((r, i) => (
             <button
-              key={r.symbol}
+              key={r.glossary ? `g-${r.glossary.id}` : r.command ? `c-${r.command.id}` : r.symbol}
               type="button"
-              data-testid={`command-palette-item-${r.symbol}`}
+              data-testid={
+                r.glossary
+                  ? `command-palette-glossary-${r.glossary.id}`
+                  : r.command
+                    ? `command-palette-cmd-${r.command.id}`
+                    : `command-palette-item-${r.symbol}`
+              }
               onMouseEnter={() => setSelectedIdx(i)}
-              onClick={() => activate(r.symbol)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 v5-mono text-[11px] text-left hover:bg-zinc-900 ${i === selectedIdx ? 'bg-zinc-900 text-violet-300' : 'text-zinc-200'}`}
+              onClick={() => activate(r)}
+              className={`w-full flex items-start gap-2 px-3 py-1.5 v5-mono text-[11px] text-left hover:bg-zinc-900 ${i === selectedIdx ? 'bg-zinc-900 text-violet-300' : 'text-zinc-200'}`}
             >
-              <span className="font-bold w-14">{r.symbol}</span>
-              {r.isRecent && (
-                <span className="text-[9px] text-zinc-600 uppercase tracking-wide">recent</span>
+              {r.glossary ? (
+                <>
+                  <span className="text-cyan-400 mt-0.5">?</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="font-bold text-zinc-100 block truncate">{r.glossary.term}</span>
+                    <span className="text-[10px] text-zinc-500 line-clamp-1 leading-tight block">
+                      {r.glossary.shortDef}
+                    </span>
+                  </span>
+                  {i === selectedIdx && <span className="text-[9px] text-zinc-500 mt-0.5">enter ↵</span>}
+                </>
+              ) : r.command ? (
+                <>
+                  <span className="text-violet-400 mt-0.5">›</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="font-bold text-zinc-100 block truncate">{r.command.label}</span>
+                    <span className="text-[10px] text-zinc-500 line-clamp-1 leading-tight block">
+                      {r.command.description}
+                    </span>
+                  </span>
+                  {i === selectedIdx && <span className="text-[9px] text-zinc-500 mt-0.5">run ↵</span>}
+                </>
+              ) : (
+                <>
+                  <span className="font-bold w-14">{r.symbol}</span>
+                  {r.isRecent && (
+                    <span className="text-[9px] text-zinc-600 uppercase tracking-wide">recent</span>
+                  )}
+                  {i === selectedIdx && <span className="ml-auto text-[9px] text-zinc-500">enter ↵</span>}
+                </>
               )}
-              {i === selectedIdx && <span className="ml-auto text-[9px] text-zinc-500">enter ↵</span>}
             </button>
           ))}
         </div>

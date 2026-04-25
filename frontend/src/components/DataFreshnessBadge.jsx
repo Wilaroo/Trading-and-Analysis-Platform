@@ -172,6 +172,7 @@ export const DataFreshnessBadge = () => {
       <button
         type="button"
         data-testid="data-freshness-badge"
+        data-help-id="data-freshness-badge"
         title={`${title}\n\nClick for details.`}
         onClick={() => setInspectorOpen(true)}
         className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-wider select-none transition-colors hover:brightness-125 cursor-pointer ${toneClasses}`}

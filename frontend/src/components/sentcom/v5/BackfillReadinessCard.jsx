@@ -82,7 +82,7 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
   const checks = data?.checks || {};
 
   return (
-    <section data-testid="backfill-readiness-card" className="space-y-2">
+    <section data-testid="backfill-readiness-card" data-help-id="backfill-readiness" className="space-y-2">
       <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
         Backfill readiness · OK to train?
         {loading && (

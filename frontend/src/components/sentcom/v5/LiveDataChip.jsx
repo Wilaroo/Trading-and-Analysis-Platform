@@ -34,6 +34,7 @@ export const LiveDataChip = ({ compact = false, className = '' }) => {
   return (
     <span
       data-testid="live-data-chip"
+      data-help-id="live-data-chip"
       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] v5-mono uppercase tracking-wider ${state.cls} ${className}`}
       title={`Pusher ${state.label} · last push ${age} ago`}
     >

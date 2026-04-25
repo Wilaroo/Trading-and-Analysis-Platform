@@ -6,6 +6,10 @@ import { Toaster } from 'sonner';
 // Import refactored components
 import { Sidebar, TickerTape, PriceAlertNotification } from './components';
 import { DataFreshnessBadge } from './components/DataFreshnessBadge';
+import { GlossaryDrawer, openGlossary } from './components/GlossaryDrawer';
+import { TourOverlay } from './components/TourOverlay';
+import { useHelpOverlay } from './hooks/useHelpOverlay';
+import { HelpCircle } from 'lucide-react';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -103,6 +107,9 @@ function App() {
   // Startup status dashboard - shows system initialization progress
   const [showStartupStatus, setShowStartupStatus] = useState(false);
   const [startupStatusMinimized, setStartupStatusMinimized] = useState(false);
+
+  // Mount the global press-? help overlay listener once at app root.
+  useHelpOverlay();
   
   // Startup modal state - shows wave-based loading progress
   const [showStartupModal, setShowStartupModal] = useState(() => {
@@ -542,6 +549,23 @@ function App() {
         </>
       )}
       </div>
+
+      {/* Global help system — slide-in glossary drawer + floating "?" button.
+          Drawer opens via window event 'sentcom:open-glossary' (dispatched by
+          the press-? overlay, ⌘K ?<term>, inline tooltips, and this button).
+          Pinned bottom-right so it's discoverable from any tab. */}
+      <GlossaryDrawer />
+      <TourOverlay />
+      <button
+        type="button"
+        data-testid="floating-help-btn"
+        data-help-id="glossary-drawer"
+        title="Open Glossary · or press ? on the page to highlight every helpable element"
+        onClick={() => openGlossary()}
+        className="fixed bottom-4 right-4 z-[55] w-11 h-11 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-cyan-950 shadow-lg shadow-cyan-500/40 flex items-center justify-center transition-all hover:scale-105"
+      >
+        <HelpCircle className="w-5 h-5" />
+      </button>
     </TickerModalProvider>
     </WebSocketDataProvider>
     </DataCacheProvider>

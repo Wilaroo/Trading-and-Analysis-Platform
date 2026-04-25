@@ -1,5 +1,104 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — In-App Help System ("How-to / Explainer") — SHIPPED
+
+A full discoverability suite so users (operator + less-technical
+viewer) can learn what every badge / chip / score / verdict means
+without leaving the page. Single-source-of-truth content lives in
+\`data/glossaryData.js\`; every help surface (drawer, ⌘K, press-?
+overlay, tours) reads from it.
+
+### 1. Content audit — 37 new glossary entries
+Added 5 new categories:
+- **app-ui** — DataFreshnessBadge, LiveDataChip, FreshnessInspector,
+  HealthChip, PipelineHUD, TopMoversTile, Briefings, SafetyArmed,
+  FlattenAll, AccountMismatch, TradingPhase
+- **data-pipeline** — IB Pusher, IB Gateway, Turbo Collector,
+  Pusher RPC, Live Bar Cache, TTL Plan, Subscription Manager,
+  Historical Data Queue, Pusher Health
+- **ai-training** — Backfill Readiness + 5 sub-checks (queue_drained,
+  critical_symbols_fresh, overall_freshness, no_duplicates,
+  density_adequate), Pre-Train Interlock, Train Readiness Chip,
+  Shift+Click Override, Training Pipeline Phases (P1-P9), Pre-Flight,
+  Test Mode, Gate Score, Drift Veto, Calibration Snapshot
+- **power-user** — ⌘K, Recent Symbols, ⌘K Help Mode (?term),
+  Help Overlay (press ?), Glossary Drawer, Guided Tour
+
+### 2. GlossaryDrawer (\`components/GlossaryDrawer.jsx\`)
+Slide-in side panel (max-w-md). Open via:
+- Floating ❓ button pinned bottom-right (mounted globally in App.js)
+- \`window.dispatchEvent(new CustomEvent('sentcom:open-glossary',
+  {detail:{termId}}))\`
+- Press-? overlay → click any helpable element
+- ⌘K \`?term\` → Enter
+
+Features search, category chips, full markdown rendering for
+fullDef, related-terms quick-jump, tag pills, Esc-to-close.
+
+### 3. ⌘K Help Mode + Command Mode
+Extended \`CommandPalette\`:
+- \`?<term>\` → switches corpus to glossary entries; Enter opens the
+  GlossaryDrawer at that term.
+- \`>\` → command mode; currently lists guided tours
+  (\`>command-center\`, \`>training-workflow\`).
+
+### 4. Press-? Help Overlay (\`hooks/useHelpOverlay.js\` + App.css)
+Press \`?\` (Shift+/) anywhere outside an input → enters help mode:
+- Body gets \`data-help-mode="on"\`
+- Every \`[data-help-id]\` element gets a dashed cyan outline + a
+  cyan \`?\` chip pinned to its top-right corner
+- Banner across the top: "HELP MODE — click any highlighted element…"
+- Click any chip → opens the GlossaryDrawer at that termId
+- Press \`?\` again, Esc, or click outside → exit
+
+Wired \`data-help-id\` onto: DataFreshnessBadge, HealthChip,
+LiveDataChip, BackfillReadinessCard, TopMoversTile,
+TrainReadinessChip, ⌘K hint, FloatingHelpBtn (8 elements at launch;
+adding to remaining components is incremental).
+
+### 5. Guided Tours (\`data/tours.js\` + \`components/TourOverlay.jsx\`)
+Lightweight tour engine — no library. Each step has a CSS selector,
+title, body, and optional helpId. Renders a spotlight (box-shadow
+hole) + popover anchored next to the target element. Tracks the
+target rect on every animation frame so scrolling/resizing keeps it
+anchored.
+
+Two tours shipped:
+- **command-center** — 6-step walkthrough of the V5 dashboard
+- **training-workflow** — 3-step Backfill → Train safety walkthrough
+
+\`localStorage.sentcom.tours.seen\` records completed tours so the
+user isn't re-prompted automatically.
+
+### Verification
+- All 6 modified/new files lint clean.
+- Frontend compiles (only pre-existing warnings).
+- Smoke test confirms: floating button opens drawer + jumps to
+  Backfill Readiness term · ⌘K \`?gate\` shows 7 glossary matches
+  (IB Pusher, IB Gateway, Turbo Collector, Backfill Readiness,
+  Pre-Train Interlock, Shift+Click Override, Gate Score) · ⌘K \`>\`
+  lists tours · clicking command-center starts Tour step 1/6 with
+  the spotlight on the freshness badge · press-\`?\` reveals 8
+  helpable elements with cyan chips and the banner.
+
+### Files touched
+- \`data/glossaryData.js\` (+37 entries, +5 categories)
+- \`data/tours.js\` (new)
+- \`components/GlossaryDrawer.jsx\` (new)
+- \`components/TourOverlay.jsx\` (new)
+- \`hooks/useHelpOverlay.js\` (new)
+- \`App.css\` (+74 lines for the press-? overlay styles)
+- \`App.js\` (mount drawer + tour overlay + floating ❓ button + hook)
+- \`components/sentcom/v5/CommandPalette.jsx\` (\`?\` and \`>\` modes)
+- \`components/DataFreshnessBadge.jsx\` (data-help-id)
+- \`components/sentcom/v5/HealthChip.jsx\` (data-help-id)
+- \`components/sentcom/v5/LiveDataChip.jsx\` (data-help-id)
+- \`components/sentcom/v5/BackfillReadinessCard.jsx\` (data-help-id)
+- \`components/sentcom/v5/TopMoversTile.jsx\` (data-help-id)
+- \`components/sentcom/SentComV5View.jsx\` (data-help-id on cmdk-hint)
+- \`components/UnifiedAITraining.jsx\` (data-help-id on readiness chip)
+
+
 ## 2026-04-24 — Pre-Train Safety Interlock — SHIPPED
 
 Wires every "start training" button in the UI to the

@@ -211,6 +211,7 @@ export const SentComV5View = ({
             <button
               type="button"
               data-testid="cmdk-hint"
+              data-help-id="cmd-k"
               title="Press ⌘K (Mac) or Ctrl+K to open the symbol search palette"
               onClick={() => window.dispatchEvent(new CustomEvent('sentcom:open-command-palette'))}
               className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 v5-mono text-[9px] text-zinc-500 uppercase tracking-wide select-none hover:border-violet-700 hover:text-violet-300 transition-colors"

@@ -1489,6 +1489,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                   buttons are armed. */}
               <div
                 data-testid="train-readiness-chip"
+                data-help-id="train-readiness-chip"
                 data-verdict={trainReadiness.verdict}
                 className={`mb-3 px-3 py-2 rounded-lg border text-xs flex items-start gap-2 ${
                   trainReadiness.ready

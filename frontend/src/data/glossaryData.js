@@ -17,6 +17,10 @@ export const glossaryData = {
     { id: 'market', name: 'Market Context', icon: 'Globe', description: 'Broader market conditions' },
     { id: 'earnings', name: 'Earnings & Catalysts', icon: 'Calendar', description: 'Event-driven opportunities' },
     { id: 'abbreviations', name: 'Abbreviations', icon: 'Hash', description: 'Common shorthand terms' },
+    { id: 'app-ui', name: 'App UI Elements', icon: 'BookOpen', description: 'Buttons, badges, chips, and panels you see in the app' },
+    { id: 'data-pipeline', name: 'Data Pipeline', icon: 'Activity', description: 'How market data flows from IB Gateway into the app' },
+    { id: 'ai-training', name: 'AI Training', icon: 'Brain', description: 'Model lifecycle, readiness gates, and pipeline phases' },
+    { id: 'power-user', name: 'Power-User Features', icon: 'Zap', description: 'Keyboard shortcuts, command palette, and pro tools' },
   ],
 
   // ==================== GLOSSARY ENTRIES ====================
@@ -1155,6 +1159,688 @@ When heavily shorted stocks rally:
 Must complete scoring in under 3 minutes. If it takes longer, the edge is unclear.`,
       relatedTerms: ['smb-methodology', 'earnings', 'catalyst-score'],
       tags: ['smb', 'earnings', 'catalyst']
+    },
+
+    // ==================== APP UI ELEMENTS ====================
+    {
+      id: 'data-freshness-badge',
+      term: 'Data Freshness Badge',
+      category: 'app-ui',
+      shortDef: 'The pinned chip in the top-right that tells you whether the app is showing live or stale data.',
+      fullDef: `Always-visible status pill that answers the single question "is what I'm looking at live or stale?" in one glance.
+
+**States:**
+- **LIVE · Ns ago** (green) — IB pusher is feeding bars to the backend within the last 10s. Trust everything you see.
+- **CACHED · Nm ago** (amber) — Pusher is slower than 10s but inside the warning window. Likely fine outside RTH.
+- **DELAYED** (amber, RTH only) — Pusher running slow during market hours. Investigate the Windows pusher.
+- **STALE · PUSHER DOWN** (red, RTH) — Pusher hasn't pushed in minutes. Charts and scanner are showing the last known close.
+- **MARKET CLOSED / WEEKEND / OVERNIGHT** (grey) — Expected quiet state. Nothing to worry about.
+- **NO PUSH YET** (grey) — Backend is up but has never received a push from Windows. Start \`ib_data_pusher.py\`.
+- **UNREACHABLE** (red) — DGX backend itself is unreachable.
+
+**Click action:**
+Opens the **Freshness Inspector** — a full read-out of every subsystem (mongo, IB gateway, historical queue, live subscriptions, cache TTLs, pusher RPC) plus the **Backfill Readiness** card.`,
+      relatedTerms: ['freshness-inspector', 'live-data-chip', 'pusher-rpc', 'pusher-health'],
+      tags: ['ui', 'badge', 'freshness', 'header']
+    },
+    {
+      id: 'live-data-chip',
+      term: 'Live Data Chip',
+      category: 'app-ui',
+      shortDef: 'Per-panel "is this panel\'s data live?" mini-badge.',
+      fullDef: `Smaller cousin of the Data Freshness Badge — drops onto individual panels (e.g. Scanner, Chart) so you can tell whether THAT panel's data is fresh independent of the global state.
+
+**States:**
+- **LIVE · Ns** (green) — Live ticks flowing
+- **SLOW · Nm** (amber) — Pusher slower than warning threshold
+- **DEAD** (red, pulsing) — No ticks at all during RTH
+- **—** (grey) — Unknown / out of session
+
+Reads from the same shared \`usePusherHealth\` hook the global badge uses, so all chips show the same source of truth.`,
+      relatedTerms: ['data-freshness-badge', 'pusher-health'],
+      tags: ['ui', 'chip', 'panel']
+    },
+    {
+      id: 'freshness-inspector',
+      term: 'Freshness Inspector',
+      category: 'app-ui',
+      shortDef: 'The "what is fresh?" diagnostic modal. Click the freshness badge to open.',
+      fullDef: `One-click drill-down into every data subsystem. Read-only. Shows:
+
+1. **Backfill Readiness card** at the top — the GREEN/YELLOW/RED "OK to train?" verdict.
+2. **Subsystems grid** — colored status pills for: \`mongo\`, \`pusher_rpc\`, \`ib_gateway\`, \`historical_queue\`, \`live_subscriptions\`, \`live_bar_cache\`, \`task_heartbeats\`. Each shows latency / detail.
+3. **Live subscriptions list** — every symbol the bot is currently subscribing to via the IB pusher, with ref-count and idle time.
+4. **Cache TTL plan** — current market state (rth / extended / overnight / weekend) and the live_bar_cache TTL applied for each.
+5. **Pusher RPC** — reachable, URL, enabled, recent failures.
+
+Auto-refreshes every 15 seconds while open.`,
+      relatedTerms: ['data-freshness-badge', 'backfill-readiness', 'system-health', 'live-bar-cache', 'ttl-plan', 'pusher-rpc'],
+      tags: ['ui', 'modal', 'diagnostic']
+    },
+    {
+      id: 'health-chip',
+      term: 'Health Chip',
+      category: 'app-ui',
+      shortDef: 'Top-right chip in the V5 HUD showing overall system health.',
+      fullDef: `Small dot + label. Polls \`/api/system/health\` every 20s and aggregates seven subsystems into one verdict.
+
+**Labels:**
+- **all systems** (green) — every subsystem GREEN
+- **N warn** (amber) — N subsystems are YELLOW
+- **N critical** (red, pulsing) — N subsystems are RED
+- **health offline** (red) — backend unreachable
+
+Click → opens the Freshness Inspector for full detail.`,
+      relatedTerms: ['freshness-inspector', 'system-health'],
+      tags: ['ui', 'chip', 'health']
+    },
+    {
+      id: 'pipeline-hud',
+      term: 'Pipeline HUD',
+      category: 'app-ui',
+      shortDef: 'The top-bar 5-stage trade lifecycle: Scan → Evaluate → Order → Manage → Close.',
+      fullDef: `Always-visible heads-up display showing live counts and aggregated metrics for each pipeline stage.
+
+**Stages (left → right):**
+1. **SCAN** — # of setups currently being scanned (with timeframe + universe size)
+2. **EVALUATE** — # of alerts that passed scanning and are being evaluated by the gate score
+3. **ORDER** — pipeline status (filled / pending / ack latency)
+4. **MANAGE** — # of open positions, total R, stops breached
+5. **CLOSE** — # of closed trades today, win-rate, R closed
+
+The right side shows the **HealthChip**, **⌘K hint**, **ConnectivityCheck**, **PusherHealthChip**, **DeadLetterBadge**, **FlattenAll**, **AccountGuard**, and **SafetyHud**.`,
+      relatedTerms: ['gate-score', 'open-positions', 'flatten-all', 'health-chip'],
+      tags: ['ui', 'hud', 'pipeline']
+    },
+    {
+      id: 'top-movers-tile',
+      term: 'Top Movers Tile',
+      category: 'app-ui',
+      shortDef: 'Horizontal strip just below the Pipeline HUD showing the biggest movers in your watchlist right now.',
+      fullDef: `Reads \`/api/live/briefing-snapshot\` every 30 seconds and ranks the watchlist by absolute % change. Each chip shows symbol, latest price, and signed % change.
+
+**Behaviors:**
+- Clicking a chip opens the Enhanced Ticker Modal for that symbol.
+- Hidden gracefully when pusher is offline (no point showing noise).
+- Defaults to SPY / QQQ / IWM / DIA / VIX but can be overridden.
+
+The 30-second cadence matches the Phase 1 \`live_bar_cache\` TTL during RTH so it doesn't spam the IB pusher.`,
+      relatedTerms: ['data-freshness-badge', 'live-bar-cache'],
+      tags: ['ui', 'tile', 'movers']
+    },
+    {
+      id: 'briefings',
+      term: 'Briefings',
+      category: 'app-ui',
+      shortDef: 'Time-of-day micro-reports auto-generated by the bot: Morning Prep, Mid-Day Recap, Power Hour, Close Recap.',
+      fullDef: `Four scheduled briefings appear in the right column of the Command Center:
+
+- **Morning Prep** (08:30 ET) — Overnight gap analysis, sentiment swings, expected catalysts. The card auto-hides during RTH and walks back to the previous prep on weekends.
+- **Mid-Day Recap** (12:00 ET) — Mid-session P&L, open positions, model agreement.
+- **Power Hour** (15:00 ET) — Late-session opportunities, exit decisions, sizing for end-of-day moves.
+- **Close Recap** (16:00 ET) — Day's results, lessons learned, journal entries.
+
+Each briefing badge shows status: \`PASSED\` (already ran), \`NEW\` (currently active), or scheduled time.`,
+      relatedTerms: ['overnight-sentiment'],
+      tags: ['ui', 'briefings', 'schedule']
+    },
+    {
+      id: 'safety-armed',
+      term: 'Safety Armed',
+      category: 'app-ui',
+      shortDef: 'Green chip indicating the kill-switch is configured and ready to disarm runaway trading.',
+      fullDef: `Shows in the Pipeline HUD when:
+1. The bot is connected to a real account
+2. Daily-loss / per-trade / max-position guards are configured
+
+When tripped, the **Safety Banner** appears at the top of the screen and the **Flatten All** button becomes the primary action.`,
+      relatedTerms: ['flatten-all', 'safety-banner'],
+      tags: ['ui', 'chip', 'safety']
+    },
+    {
+      id: 'flatten-all',
+      term: 'Flatten All Button',
+      category: 'app-ui',
+      shortDef: 'Emergency-stop button that closes every open position immediately at market.',
+      fullDef: `Single click triggers a market-order flush across all open positions on the connected IB account. Use only when the bot has gone wrong or you need to exit fast.
+
+Confirmation dialog requires you to type "FLATTEN" before firing. Logs the flush event to the trade journal with reason "manual flatten".`,
+      relatedTerms: ['safety-armed', 'open-positions'],
+      tags: ['ui', 'button', 'safety', 'emergency']
+    },
+    {
+      id: 'account-mismatch',
+      term: 'ACCOUNT MISMATCH',
+      category: 'app-ui',
+      shortDef: 'Warning chip that appears when the IB account on the Windows pusher doesn\'t match the configured account.',
+      fullDef: `Triggers when:
+- The Windows pusher reports an account ID different from \`IB_ACCOUNT_ID\` in your backend env
+- Often a harmless race condition on startup before the pusher transmits its initial account snapshot
+
+If it persists past 30s of pusher uptime, double-check the Windows IB Gateway is logged into the right account.`,
+      relatedTerms: ['account-guard'],
+      tags: ['ui', 'warning', 'account']
+    },
+    {
+      id: 'pipeline-phase',
+      term: 'Trading Phase',
+      category: 'app-ui',
+      shortDef: 'PAPER / LIVE / TEST — the trading mode the bot is currently in.',
+      fullDef: `Top-right of the Pipeline HUD shows one of:
+
+- **PAPER** — All orders simulated. No real money at risk. Default for development.
+- **LIVE** — Real orders going to IB. Real money at risk.
+- **TEST** — Synthetic-bar mode for pipeline validation (no orders fired, no real data consumed).
+
+Toggle via the trading bot config endpoint or the bot's settings panel.`,
+      relatedTerms: ['test-mode'],
+      tags: ['ui', 'mode', 'paper', 'live']
+    },
+
+    // ==================== DATA PIPELINE ====================
+    {
+      id: 'ib-pusher',
+      term: 'IB Pusher',
+      category: 'data-pipeline',
+      shortDef: 'The Windows-side script that streams live IB Gateway ticks/bars to the DGX backend.',
+      fullDef: `\`ib_data_pusher.py\` runs on the Windows PC alongside IB Gateway (Client ID 15). Its job is to:
+
+1. Connect to IB Gateway (which only runs on Windows)
+2. Subscribe to live ticks/bars for symbols the DGX backend asks for
+3. Push every update over HTTP/WebSocket to the DGX backend
+
+The DGX cannot talk to IB Gateway directly — every market data byte goes through this pusher.
+
+**Phase 1+:** the pusher also exposes an RPC server on port 8765 (\`/rpc/latest-bars\`, \`/rpc/subscribe\`, etc.) so the DGX can pull live session bars on-demand.`,
+      relatedTerms: ['ib-gateway', 'pusher-rpc', 'pusher-health', 'turbo-collector'],
+      tags: ['data', 'pipeline', 'ib', 'windows']
+    },
+    {
+      id: 'ib-gateway',
+      term: 'IB Gateway',
+      category: 'data-pipeline',
+      shortDef: 'Interactive Brokers\' Java client that hosts the API connection. Runs on the Windows PC.',
+      fullDef: `IB Gateway is a stripped-down version of IB Trader Workstation (TWS) used purely as an API host. The IB Pusher and the four Turbo Collectors all connect to it as separate API clients (Client IDs 15–19).
+
+**Status indicators (in the Gateway UI):**
+- API Server: connected
+- Market Data Farm: ON: usfarm
+- Historical Data Farm: ON: ushmds
+- API Client: 4 connected (or 5 with the pusher)
+
+If any of these go red, the data pipeline starves.`,
+      relatedTerms: ['ib-pusher', 'turbo-collector'],
+      tags: ['data', 'ib', 'gateway']
+    },
+    {
+      id: 'turbo-collector',
+      term: 'Turbo Collector',
+      category: 'data-pipeline',
+      shortDef: 'One of 4 parallel Windows scripts that backfill historical bars from IB Gateway in batches of 10 requests.',
+      fullDef: `\`ib_historical_collector.py --turbo\` instances run on the Windows PC (Client IDs 16–19). Each one:
+
+1. Polls \`historical_data_requests\` on the DGX backend for pending requests
+2. Pulls a batch of 10
+3. Sends them to IB Gateway in parallel
+4. Walks back further into history with each cycle (newest → oldest)
+5. Stores results in \`ib_historical_data\` on MongoDB
+6. Reports per-cycle: bars stored, skipped, queue %
+
+**Healthy throughput:** ~6,000–10,000 bars per 10-request cycle, ~2-3 minutes per cycle. Throughput naturally tapers as walkback hits the edge of each symbol's available history (smaller / partial bar returns).
+
+**Skip reasons:** timeout, no_data, rate_limited, pacing_violation. A handful per cycle is normal; floods indicate IB Gateway trouble.`,
+      relatedTerms: ['ib-gateway', 'historical-data-requests', 'queue-drained'],
+      tags: ['data', 'collector', 'historical', 'backfill']
+    },
+    {
+      id: 'pusher-rpc',
+      term: 'Pusher RPC',
+      category: 'data-pipeline',
+      shortDef: 'On-demand HTTP server inside the IB pusher that lets the DGX request live data without subscribing.',
+      fullDef: `Phase 1 of the Live Data Architecture. Endpoints exposed by the Windows pusher on port 8765:
+
+- \`POST /rpc/latest-bars\` — fetch the latest N bars for a symbol/timeframe (used for live session top-up)
+- \`POST /rpc/quote-snapshot\` — one-shot quote (used for AI Chat context, immutable trade-close snapshots)
+- \`POST /rpc/subscribe\` / \`POST /rpc/unsubscribe\` — Phase 2 ref-counted live tick subscriptions
+- \`GET /rpc/health\` — pusher RPC liveness
+
+When **reachable=false**, the app gracefully falls back to MongoDB-stored bars (which may be a few minutes stale).`,
+      relatedTerms: ['ib-pusher', 'live-bar-cache', 'subscription-manager'],
+      tags: ['data', 'rpc', 'live', 'pipeline']
+    },
+    {
+      id: 'live-bar-cache',
+      term: 'Live Bar Cache',
+      category: 'data-pipeline',
+      shortDef: 'MongoDB-backed TTL cache for live session bars fetched via the pusher RPC.',
+      fullDef: `Collection: \`live_bar_cache\`. Keyed by (symbol, bar_size). Stores the most recent live bars pulled from the pusher RPC.
+
+**TTL is dynamic by market state** — see "Cache TTL plan":
+- RTH: 30 seconds
+- Extended hours: 120 seconds
+- Overnight: 900 seconds (15 min)
+- Weekend: 3600 seconds (1 hour)
+- Active view (symbol you're staring at): 30 seconds regardless of state
+
+Cache hits avoid hitting the pusher RPC. Misses trigger a fresh fetch.`,
+      relatedTerms: ['pusher-rpc', 'ttl-plan'],
+      tags: ['data', 'cache', 'mongo']
+    },
+    {
+      id: 'ttl-plan',
+      term: 'Cache TTL Plan',
+      category: 'data-pipeline',
+      shortDef: 'How long live_bar_cache entries stay valid before re-fetching, varies by market state.',
+      fullDef: `Different market states warrant different freshness budgets. The TTL plan tells the cache how aggressively to expire entries:
+
+| State | TTL | Why |
+|-------|-----|-----|
+| rth (regular trading hours) | 30s | Prices move, so we want near-real-time |
+| extended (pre/post market) | 120s | Lower volume, less need to re-poll |
+| overnight | 900s | Almost no movement, conserve pusher load |
+| weekend | 3600s | Markets closed, basically static |
+| active view | 30s | The symbol you're focused on always gets the freshest treatment |
+
+Visible in the Freshness Inspector → "Cache TTL plan" section.`,
+      relatedTerms: ['live-bar-cache', 'freshness-inspector'],
+      tags: ['data', 'cache', 'ttl']
+    },
+    {
+      id: 'subscription-manager',
+      term: 'Live Subscription Manager',
+      category: 'data-pipeline',
+      shortDef: 'Ref-counted broker for live tick subscriptions through the pusher RPC.',
+      fullDef: `Phase 2 of the Live Data Architecture. When two panels both want live ticks for AAPL, the manager coordinates:
+
+1. First subscribe → calls \`/rpc/subscribe\` once on the pusher, stores \`{symbol, ref_count: 1}\`
+2. Second subscribe → just bumps ref_count to 2
+3. First unsubscribe → ref_count drops to 1
+4. Last unsubscribe → ref_count = 0 → calls \`/rpc/unsubscribe\` and frees the slot
+
+**Cap: 60 concurrent subscriptions** (configurable). Visible in the Freshness Inspector → "Live subscriptions" with each symbol's ref_count and idle time.`,
+      relatedTerms: ['pusher-rpc', 'use-live-subscription'],
+      tags: ['data', 'subscription', 'live']
+    },
+    {
+      id: 'historical-data-requests',
+      term: 'Historical Data Queue',
+      category: 'data-pipeline',
+      shortDef: 'MongoDB collection holding pending IB historical-data requests for the Turbo Collectors to process.',
+      fullDef: `Collection: \`historical_data_requests\`. Each row = one request to IB for a (symbol, bar_size, end_date, duration) chunk.
+
+**Status flow:**
+\`pending\` → \`claimed\` (by a collector) → \`completed\` / \`failed\`
+
+**Sources:**
+- \`smart_backfill\` enqueues walkback chunks
+- \`gap_filler\` enqueues holes detected in \`ib_historical_data\`
+- One-off requests for individual symbols
+
+**Health check:** \`pending + claimed = 0\` means the queue is drained — a prerequisite for training. Visible in the Backfill Readiness card.`,
+      relatedTerms: ['turbo-collector', 'queue-drained', 'smart-backfill'],
+      tags: ['data', 'queue', 'mongo']
+    },
+    {
+      id: 'pusher-health',
+      term: 'Pusher Health',
+      category: 'data-pipeline',
+      shortDef: 'How recently the IB pusher fed the backend. Drives every freshness chip in the app.',
+      fullDef: `Backend exposes \`/api/ib/pusher-health\` returning \`{health, age_seconds}\`:
+
+- **green** — last push <10s ago
+- **amber** — last push between 10s and 60s
+- **red** — last push >60s ago (likely pusher crashed)
+- **unknown** — backend has never received a push (pusher never started)
+
+Note the **interpretation depends on market state**:
+- During RTH: amber/red is alarming
+- Outside RTH: amber/red is normal — markets are quiet`,
+      relatedTerms: ['data-freshness-badge', 'live-data-chip', 'ib-pusher'],
+      tags: ['data', 'health']
+    },
+
+    // ==================== AI TRAINING ====================
+    {
+      id: 'backfill-readiness',
+      term: 'Backfill Readiness',
+      category: 'ai-training',
+      shortDef: 'Single GREEN/YELLOW/RED verdict answering "is the data clean enough to train on?"',
+      fullDef: `\`GET /api/backfill/readiness\` runs five independent checks in parallel and reduces them to one verdict:
+
+1. **queue_drained** — \`historical_data_requests\` pending+claimed = 0, plus low recent-failure count
+2. **critical_symbols_fresh** — SPY, QQQ, DIA, IWM, AAPL, MSFT, NVDA, GOOGL, META, AMZN all fresh on every intraday timeframe
+3. **overall_freshness** — % of intraday-universe symbols fresh across critical timeframes (GREEN ≥95%, YELLOW ≥85%, RED otherwise)
+4. **no_duplicates** — spot-check critical symbols for duplicate \`(symbol, date, bar_size)\` rows (catches write-path bugs)
+5. **density_adequate** — % of symbols with ≥780 5-min bars (anything below is dropped from training)
+
+**ready_to_train** = GREEN only. **Worst-check-wins** for the overall verdict.
+
+The Backfill Readiness Card is pinned to the top of the Freshness Inspector. The same gate disables the **Train All / Full Train / Full Universe / DL Train / Setup Train** buttons until verdict=green.`,
+      relatedTerms: ['pre-train-interlock', 'queue-drained', 'critical-symbols-fresh', 'overall-freshness', 'no-duplicates', 'density-adequate'],
+      tags: ['ai', 'training', 'readiness', 'gate']
+    },
+    {
+      id: 'pre-train-interlock',
+      term: 'Pre-Train Interlock',
+      category: 'ai-training',
+      shortDef: 'Safety gate that blocks "Start Training" until Backfill Readiness is GREEN. Shift+click overrides.',
+      fullDef: `Every "start training" button (\`start-training-btn\`, \`train-all-btn\`, \`full-universe-btn\`, \`train-all-dl-btn\`, \`train-all-setups-btn\`) polls \`/api/backfill/readiness\` every 60 seconds.
+
+**Behavior:**
+- 🔴 Not ready + click → blocked with a toast explaining the first blocker.
+- 🟢 Ready + click → normal training launch.
+- ⇧ **Shift/Alt + click** → conscious override; training fires regardless. Logged with a warning toast.
+
+**Visual gating:**
+- Buttons go dim (zinc bg, dimmer text) when blocked.
+- A small rose/amber pulsing dot appears next to the label.
+- \`data-train-readiness\` attribute exposes the verdict to tests/automation.
+
+**Why:** historical bug — a fat-fingered click during backfill poisoned weeks of validation splits. The interlock makes that class of accident structurally impossible without a conscious override.`,
+      relatedTerms: ['backfill-readiness', 'train-readiness-chip', 'shift-click-override'],
+      tags: ['ai', 'training', 'safety', 'gate']
+    },
+    {
+      id: 'train-readiness-chip',
+      term: 'Train Readiness Chip',
+      category: 'ai-training',
+      shortDef: 'The colored summary chip above the Train Action buttons in UnifiedAITraining.',
+      fullDef: `Shows at a glance whether the gated Train buttons are armed:
+
+- **READY** (green) — backfill clean, all train buttons armed
+- **summary string from /api/backfill/readiness** (yellow/red) — followed by the first 1-2 blockers/warnings
+- ↻ refresh button — force re-check
+
+Has a hint reminder: "Shift+click any Train button to override."`,
+      relatedTerms: ['backfill-readiness', 'pre-train-interlock'],
+      tags: ['ai', 'training', 'chip']
+    },
+    {
+      id: 'shift-click-override',
+      term: 'Shift+Click Override',
+      category: 'ai-training',
+      shortDef: 'Holding Shift (or Alt) while clicking a gated button bypasses the readiness check.',
+      fullDef: `The escape hatch for the Pre-Train Interlock. Use sparingly:
+
+- For partial retrains where a known-stale subset is acceptable
+- For debugging when you want to see whether training itself errors
+- When you've manually verified the data despite a yellow verdict
+
+Always logs a warning toast so the override is visible in your action history.`,
+      relatedTerms: ['pre-train-interlock'],
+      tags: ['ai', 'training', 'override', 'shortcut']
+    },
+    {
+      id: 'queue-drained',
+      term: 'Queue Drained Check',
+      category: 'ai-training',
+      shortDef: '"Is the historical_data_requests queue empty?" — first of the five Backfill Readiness checks.',
+      fullDef: `Reads \`historical_data_requests\` and returns:
+
+- 🟢 **GREEN** — pending=0, claimed=0, recent failures <50 in last 24h
+- 🟡 **YELLOW** — queue drained but >50 recent failures (look at \`/api/ib-collector/failed-requests\`)
+- 🔴 **RED** — anything still in flight (pending+claimed > 0)
+
+Until this is green, training will read incomplete data.`,
+      relatedTerms: ['backfill-readiness', 'historical-data-requests'],
+      tags: ['ai', 'training', 'queue', 'check']
+    },
+    {
+      id: 'critical-symbols-fresh',
+      term: 'Critical Symbols Fresh Check',
+      category: 'ai-training',
+      shortDef: '"Are SPY/QQQ/DIA/IWM + FAAMG all fresh on every intraday timeframe?"',
+      fullDef: `The 10 anchor symbols the training pipeline depends on most: SPY, QQQ, DIA, IWM, AAPL, MSFT, NVDA, GOOGL, META, AMZN.
+
+**STALE_DAYS thresholds:**
+- 1 min / 5 mins: 3 days
+- 15 mins / 30 mins: 5 days
+- 1 hour: 7 days
+- 1 day: 3 days
+
+Any anchor stale on any timeframe → 🔴 RED. The pipeline will produce garbage models without these. Often the very first thing to fix when verdict goes red.`,
+      relatedTerms: ['backfill-readiness'],
+      tags: ['ai', 'training', 'check', 'symbols']
+    },
+    {
+      id: 'overall-freshness',
+      term: 'Overall Freshness Check',
+      category: 'ai-training',
+      shortDef: 'What fraction of (symbol × intraday timeframe) pairs are fresh across the whole intraday universe.',
+      fullDef: `Aggregates freshness across the ADV-gated intraday universe (\`avg_volume ≥ 500_000\`):
+
+- 🟢 **GREEN** ≥95% — full retrain quality
+- 🟡 **YELLOW** ≥85% — minor gaps, retrain still possible but expect lower coverage
+- 🔴 **RED** <85% — data layer broken, fix before training
+
+Does not require every symbol to be perfect — accepts a long tail of newly-listed / thinly-traded names.`,
+      relatedTerms: ['backfill-readiness', 'density-adequate'],
+      tags: ['ai', 'training', 'check', 'freshness']
+    },
+    {
+      id: 'no-duplicates',
+      term: 'No Duplicates Check',
+      category: 'ai-training',
+      shortDef: 'Spot-check that no `(symbol, date, bar_size)` row appears more than once.',
+      fullDef: `Aggregates the 10 critical symbols across critical timeframes (50 combos) looking for duplicate \`date\` values.
+
+If any combo has dupes → 🔴 RED. Duplicates indicate a write-path bug — the pusher or collector inserted the same bar twice — which silently over-weights those bars during training.
+
+**Fix:** run a dedup pass before retraining. \`db.ib_historical_data.aggregate([{$group: {_id: {symbol, date, bar_size}, n: {$sum:1}}}, {$match: {n: {$gt:1}}}])\``,
+      relatedTerms: ['backfill-readiness'],
+      tags: ['ai', 'training', 'check', 'data-quality']
+    },
+    {
+      id: 'density-adequate',
+      term: 'Density Adequate Check',
+      category: 'ai-training',
+      shortDef: 'What % of intraday universe has ≥780 5-min bars (the floor for inclusion in training).',
+      fullDef: `5-min is the anchor timeframe. <780 bars ≈ <2 trading days of 5-min data — too thin to train on.
+
+Symbols below this threshold are dropped from the training universe (not a hard error). Density check returns:
+
+- 🟢 **GREEN** ≥90% of universe is dense enough
+- 🟡 **YELLOW** <90% — note the low_density_sample to know which symbols will be excluded
+
+Never RED — density gaps are warnings, not blockers.`,
+      relatedTerms: ['backfill-readiness'],
+      tags: ['ai', 'training', 'check', 'density']
+    },
+    {
+      id: 'training-pipeline-phases',
+      term: 'Training Pipeline Phases',
+      category: 'ai-training',
+      shortDef: 'The numbered phases (P1–P9) that a Train All cycle runs through.',
+      fullDef: `Each Train All cycle executes phases sequentially. Roughly:
+
+- **P1 — Data Loading** Load \`ib_historical_data\` for the universe + timeframes.
+- **P2 — Feature Engineering** Compute technicals, regime, microstructure features.
+- **P3 — Triple-Barrier Labeling** Generate forward-looking labels using TB config.
+- **P4 — Model Training** Per-timeframe XGBoost / lightgbm fits.
+- **P5 — Sector-Relative** Train sector-relative variants.
+- **P6 — Calibration** Isotonic / Platt fit per model.
+- **P7 — Validation** Hold-out backtest, drift checks, performance scorecards.
+- **P8 — Ensembling** Stack daily/intraday predictors into ensembles.
+- **P9 — Promotion** Optionally promote new models to production.
+
+Phase progress is visible in the AI Training page during a run.`,
+      relatedTerms: ['gate-score', 'preflight'],
+      tags: ['ai', 'training', 'phases']
+    },
+    {
+      id: 'preflight',
+      term: 'Pre-Flight',
+      category: 'ai-training',
+      shortDef: 'Synthetic-data validation that catches feature/schema drift before launching the full pipeline.',
+      fullDef: `Runs in <5 seconds on synthetic bars (no DB dependency, safe during heavy collection). Validates:
+
+- Feature names match what each model expects
+- Output shapes match downstream consumers
+- No NaN/Inf leaks at preprocessing boundaries
+
+**Why it exists:** the 2026-04-21 run died 12 minutes into Phase 1 because of feature-list drift. Pre-flight catches that class of bug instantly.
+
+Click the **Pre-flight** button in the Training Pipeline panel before any big retrain.`,
+      relatedTerms: ['training-pipeline-phases', 'pre-train-interlock'],
+      tags: ['ai', 'training', 'validation']
+    },
+    {
+      id: 'test-mode',
+      term: 'Test Mode',
+      category: 'ai-training',
+      shortDef: 'End-to-end pipeline run on synthetic bars. No real data consumed, no orders fired.',
+      fullDef: `Click the **Test mode** button in the Training Pipeline panel to run the full pipeline (P1–P9) on synthetic bars. Useful when:
+
+- You want to validate phase wiring without burning IB requests
+- You're debugging a phase failure and need fast iteration
+- You want a baseline performance signal that isn't market-dependent
+
+Models trained in test mode are flagged \`source: synthetic\` and never promoted to production.`,
+      relatedTerms: ['preflight', 'training-pipeline-phases'],
+      tags: ['ai', 'training', 'mode']
+    },
+    {
+      id: 'gate-score',
+      term: 'Gate Score',
+      category: 'ai-training',
+      shortDef: 'Composite 0-100 score the bot computes per alert to decide whether to trade it.',
+      fullDef: `Combines: regime fit, model agreement, microstructure signals, sector momentum, calibration confidence.
+
+**Gate thresholds:**
+- ≥80: A-tier setup, full sizing
+- 60-79: B-tier, normal size
+- 40-59: C-tier, half-size or skip
+- <40: skip — not worth the risk
+
+In the V5 Pipeline HUD, **Eval** stage shows "% gate pass · avg N" so you can monitor whether today's setups are clearing the bar.`,
+      relatedTerms: ['overall-score', 'pipeline-hud'],
+      tags: ['ai', 'training', 'score', 'gate']
+    },
+    {
+      id: 'drift-veto',
+      term: 'Drift Veto Chip (v5-chip-veto)',
+      category: 'ai-training',
+      shortDef: 'Per-model badge that flags when a model\'s recent feature distribution has drifted from training.',
+      fullDef: `Compares the live feature distribution against the training distribution using KS-test. When divergence exceeds threshold:
+
+- 🟢 **OK** — no significant drift detected
+- 🟡 **DRIFT** — distribution shift detected; model output trustworthy but degraded
+- 🔴 **VETO** — drift extreme; model's predictions are vetoed for trading
+
+Currently planned for the scorecard tiles but **blocked until the post-backfill retrain finishes**.`,
+      relatedTerms: ['calibration-snapshot', 'pre-train-interlock'],
+      tags: ['ai', 'model-health', 'drift']
+    },
+    {
+      id: 'calibration-snapshot',
+      term: 'Calibration Snapshot',
+      category: 'ai-training',
+      shortDef: 'Per-model badge showing whether the calibrator (isotonic/Platt) still produces well-calibrated probabilities.',
+      fullDef: `Computes Brier score / reliability diagram on a recent window:
+
+- 🟢 calibrated within tolerance
+- 🟡 mild miscalibration — predictions still useful but less reliable as probabilities
+- 🔴 severe miscalibration — recalibrate or retrain
+
+Same UI slot as the drift-veto chip on each scorecard.`,
+      relatedTerms: ['drift-veto'],
+      tags: ['ai', 'model-health', 'calibration']
+    },
+
+    // ==================== POWER USER FEATURES ====================
+    {
+      id: 'cmd-k',
+      term: '⌘K Command Palette',
+      category: 'power-user',
+      shortDef: 'Press ⌘K (Mac) or Ctrl+K to open a global symbol/command launcher.',
+      fullDef: `Spotlight-style overlay for jumping to anything in the app.
+
+**Modes:**
+- **Symbol search** (default) — type a ticker to open its EnhancedTickerModal
+- **Recent** — empty input shows your last 5 picks (persisted to localStorage)
+- **? help mode** — type \`?<term>\` (e.g. \`?gate\`) to inline-show a glossary entry
+- **> command mode** — coming soon: \`>flatten all\`, \`>train all\`, etc.
+
+**Keys:**
+- ⌘K / Ctrl+K — toggle palette
+- ↑ / ↓ — navigate
+- Enter — activate
+- Esc — close
+
+The "⌘K search" hint chip in the Pipeline HUD (right side) also opens the palette on click.`,
+      relatedTerms: ['recent-symbols', 'cmdk-help-mode'],
+      tags: ['ui', 'palette', 'shortcut', 'power-user']
+    },
+    {
+      id: 'recent-symbols',
+      term: 'Recent Symbols',
+      category: 'power-user',
+      shortDef: 'Last 5 symbols you opened from ⌘K — persisted to localStorage for fast re-entry.',
+      fullDef: `When you open ⌘K with an empty query, you see your last 5 picks tagged "recent". Selecting one is a single keystroke (Enter).
+
+Stored in \`localStorage\` under \`sentcom.cmd-palette.recent\`. Survives reloads. Tab-independent.`,
+      relatedTerms: ['cmd-k'],
+      tags: ['palette', 'history']
+    },
+    {
+      id: 'cmdk-help-mode',
+      term: '⌘K Help Mode (?term)',
+      category: 'power-user',
+      shortDef: 'Type `?` then a term in ⌘K to inline-show its glossary definition.',
+      fullDef: `Examples:
+- \`?gate\` → Gate Score definition
+- \`?readiness\` → Backfill Readiness definition
+- \`?vwap\` → VWAP definition
+
+Saves you a tab switch when you forget what a badge means. Press Enter to open the full glossary entry in the side drawer.`,
+      relatedTerms: ['cmd-k', 'glossary-drawer', 'help-overlay'],
+      tags: ['help', 'palette']
+    },
+    {
+      id: 'help-overlay',
+      term: 'Help Overlay (Press ?)',
+      category: 'power-user',
+      shortDef: 'Hold the "?" key to highlight every element on screen with a definition.',
+      fullDef: `Press \`?\` (Shift + /) to enter help mode. While active:
+
+- Every glossary-aware element shows a small \`?\` chip
+- Hovering reveals a quick definition
+- Clicking opens the full entry in the Glossary Drawer
+
+Press \`?\` again or Esc to exit. Doesn't fire when you're typing into an input.
+
+Great for the "what is this thing showing me?" reflex without leaving the page.`,
+      relatedTerms: ['glossary-drawer', 'cmdk-help-mode'],
+      tags: ['help', 'shortcut']
+    },
+    {
+      id: 'glossary-drawer',
+      term: 'Glossary Drawer',
+      category: 'power-user',
+      shortDef: 'Slide-in side panel that shows the full glossary without leaving your current tab.',
+      fullDef: `Open via:
+- Floating ❓ button (bottom-right corner of any tab)
+- Pressing \`?\` overlay → click any chip
+- ⌘K → \`?<term>\` → Enter
+- Direct link from inline tooltips
+
+The drawer mirrors the dedicated Glossary page but slides over your current view (e.g. a chart) so you don't lose context. Search, browse by category, deep-link by term.`,
+      relatedTerms: ['help-overlay', 'cmd-k'],
+      tags: ['help', 'drawer']
+    },
+    {
+      id: 'guided-tour',
+      term: 'Guided Tour',
+      category: 'power-user',
+      shortDef: 'Step-by-step walkthrough overlay highlighting key parts of a feature.',
+      fullDef: `Open via ⌘K → type \`>tour\` → pick a tour. Available tours:
+
+- **Command Center** — 6 steps covering Pipeline HUD, Scanner, Chart, Briefings, Stream, Health
+- **Backfill → Train workflow** — Readiness, Pre-flight, Train All, Phases (coming soon)
+
+Each step spotlights one element with a popover showing the title + body. Click "Next" to advance, "Skip" to exit. Once you've seen a tour, you won't be re-prompted (saved to localStorage).`,
+      relatedTerms: ['help-overlay', 'glossary-drawer'],
+      tags: ['help', 'tour', 'onboarding']
     }
   ]
 };

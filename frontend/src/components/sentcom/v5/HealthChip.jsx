@@ -52,6 +52,7 @@ export const HealthChip = ({ onOpenInspector }) => {
     <button
       type="button"
       data-testid="health-chip"
+      data-help-id="health-chip"
       onClick={() => onOpenInspector?.()}
       title={error || `${status.toUpperCase()} — click for details`}
       className={`flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-900 transition-colors v5-mono text-[10px] ${colors.text}`}
