@@ -56,11 +56,17 @@ logger = logging.getLogger(__name__)
 # budget downgrades that one check to "yellow — slow query" rather than
 # hanging the whole endpoint.
 #
-# 60s is sized for the freshness/density aggregations against ~8M-row
+# 60s is sized for the freshness/density aggregations against ~85M-row
 # `ib_historical_data` collections — the planner needs time even when
 # we hint the unique compound index, because the $in clause spans ~2.6k
 # symbols.
 CHECK_BUDGET_SECONDS = 60
+
+# Index name pymongo's `hint=` param needs (must be a *string* index
+# name for aggregate(), not a list of tuples — that one tripped us
+# up the first time around). This matches the unique compound index
+# created by services/ib_historical_collector.py: line 191.
+HIST_INDEX_NAME = "symbol_1_bar_size_1_date_1"
 
 
 CRITICAL_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN"]
@@ -260,7 +266,7 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
                 ],
                 allowDiskUse=True,
                 maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-                hint=[("symbol", 1), ("bar_size", 1), ("date", 1)],
+                hint=HIST_INDEX_NAME,
             )
         except Exception:
             # Hint mismatch (e.g. index missing on this collection) —
@@ -340,7 +346,7 @@ def _check_density_adequate(db) -> Dict[str, Any]:
             ],
             allowDiskUse=True,
             maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-            hint=[("symbol", 1), ("bar_size", 1), ("date", 1)],
+            hint=HIST_INDEX_NAME,
         )
     except Exception:
         rows = data.aggregate(

@@ -57,7 +57,7 @@ try:
     rows = list(hist.aggregate(
         pipeline,
         allowDiskUse=True,
-        hint=[("symbol", 1), ("bar_size", 1), ("date", 1)],
+        hint="symbol_1_bar_size_1_date_1",
         maxTimeMS=120_000,
     ))
 except Exception as e:
