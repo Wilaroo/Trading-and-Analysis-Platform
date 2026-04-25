@@ -37,8 +37,10 @@ class _FakeCollection:
         # opt-in to indexes by appending to ._indexes.
         return iter(self._indexes)
 
-    def count_documents(self, filt):
-        return sum(1 for d in self.docs if self._match(d, filt))
+    def count_documents(self, filt, **kwargs):
+        limit = kwargs.get("limit")
+        n = sum(1 for d in self.docs if self._match(d, filt))
+        return min(n, limit) if limit else n
 
     def find(self, filt=None, projection=None):
         return _FakeCursor([d for d in self.docs if self._match(d, filt or {})])

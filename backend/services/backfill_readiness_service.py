@@ -258,34 +258,20 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
     total_fresh = total_pairs = 0
     per_tf: List[Dict[str, Any]] = []
     intraday_list = list(intraday_symbols)
+    # Per-symbol find_one with the unique compound index is O(1) per
+    # call (~2-5ms). 2.6k symbols × 5 timeframes = ~13s total — well
+    # under budget — and bypasses the slow $in:[2.6k symbols] aggregation
+    # that timed out at 90s on the user's 85M-row collection.
+    PROJ = {"_id": 0, "date": 1}
+    SORT = [("date", -1)]
     for tf in CRITICAL_TIMEFRAMES:
-        try:
-            rows = data.aggregate(
-                [
-                    {"$match": {"bar_size": tf, "symbol": {"$in": intraday_list}}},
-                    {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
-                ],
-                allowDiskUse=True,
-                maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-                hint=HIST_INDEX_NAME,
-            )
-        except Exception:
-            # Hint mismatch (e.g. index missing on this collection) —
-            # fall back to letting the planner pick.
-            rows = data.aggregate(
-                [
-                    {"$match": {"bar_size": tf, "symbol": {"$in": intraday_list}}},
-                    {"$group": {"_id": "$symbol", "max_date": {"$max": "$date"}}},
-                ],
-                allowDiskUse=True,
-                maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-            )
-        max_by_sym = {r["_id"]: r.get("max_date") for r in rows if r.get("_id")}
-        fresh = sum(
-            1 for s in intraday_symbols
-            if (a := _age_days(max_by_sym.get(s), now)) is not None
-            and a <= STALE_DAYS.get(tf, 7)
-        )
+        fresh = 0
+        budget = STALE_DAYS.get(tf, 7)
+        for s in intraday_list:
+            doc = data.find_one({"symbol": s, "bar_size": tf}, PROJ, sort=SORT)
+            age = _age_days(doc.get("date") if doc else None, now)
+            if age is not None and age <= budget:
+                fresh += 1
         per_tf.append({
             "timeframe": tf,
             "fresh": fresh,
@@ -339,26 +325,17 @@ def _check_density_adequate(db) -> Dict[str, Any]:
             "low_density_sample": [],
         }
 
-    try:
-        rows = data.aggregate(
-            [
-                {"$match": {"bar_size": "5 mins", "symbol": {"$in": intraday_symbols}}},
-                {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
-            ],
-            allowDiskUse=True,
-            maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-            hint=HIST_INDEX_NAME,
+    # Per-symbol count_documents with a limit-bounded count is O(min(N,
+    # threshold)) per call thanks to the (symbol, bar_size, date) index
+    # — at most 780 index entries scanned per symbol. 2.6k × ~5ms = ~13s
+    # total, replacing the slow $in:[2.6k symbols] aggregation that
+    # timed out at 90s on the user's 85M-row collection.
+    counts: Dict[str, int] = {}
+    for s in intraday_symbols:
+        counts[s] = data.count_documents(
+            {"symbol": s, "bar_size": "5 mins"},
+            limit=DENSITY_MIN_5MIN_BARS,
         )
-    except Exception:
-        rows = data.aggregate(
-            [
-                {"$match": {"bar_size": "5 mins", "symbol": {"$in": intraday_symbols}}},
-                {"$group": {"_id": "$symbol", "bars": {"$sum": 1}}},
-            ],
-            allowDiskUse=True,
-            maxTimeMS=int((CHECK_BUDGET_SECONDS - 5) * 1000),
-        )
-    counts = {r["_id"]: r.get("bars", 0) for r in rows}
 
     low: List[Dict[str, Any]] = []
     dense = 0
@@ -412,8 +389,10 @@ def _yellow_error(name: str, exc: BaseException) -> Dict[str, Any]:
 
 
 # Module-level executor — reused across requests so we don't pay
-# thread-startup cost on every poll. 5 workers = one per check.
-_CHECK_POOL = ThreadPoolExecutor(max_workers=5, thread_name_prefix="readiness")
+# thread-startup cost on every poll. Workers > #checks gives buffer
+# for any leaked threads from previous timed-out runs (Python can't
+# kill threads, only mark them done).
+_CHECK_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="readiness")
 
 
 def compute_readiness(db) -> Dict[str, Any]:

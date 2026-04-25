@@ -1,5 +1,59 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-25 — Post-Backfill Audit + Readiness Service Hardening — SHIPPED
+
+The DGX historical backfill finally completed (~196M bars in `ib_historical_data`). Built a comprehensive post-backfill audit suite, surfaced a real GOOGL data gap, fixed it surgically, and hardened the readiness service so it never hangs again.
+
+### What we discovered
+- **The "28M bars" reported by `/api/ib-collector/inventory/summary` was a stale cache.** The real `ib_historical_data` collection holds **195,668,605 bars** (~196M). Inventory was 5x understated until rebuilt.
+- **GOOGL was the only critical-symbol blocker** — its 1-min and 15-min timeframes were stuck on `2026-03-17` (~39 days old). `smart-backfill` skipped GOOGL because its 5-min/1-hour/1-day were already fresh, so the per-symbol "any-bar-size-recent" heuristic deemed it fresh overall.
+- **204 historical `qualify_failed` `UnboundLocalError`s** in the queue from a pre-fix pusher run. Code is already fixed in repo (`ib_data_pusher.py` lines 1509 + 2082); just legacy DB rows.
+
+### Code shipped
+**`backend/services/backfill_readiness_service.py`** — 4 incremental fixes
+1. **Removed nested `ThreadPoolExecutor`** that deadlocked on `__exit__` (was blocking endpoint at 120s+).
+2. **Module-level `_CHECK_POOL`** with 16 workers (buffer for any leaked threads from prior timed-out runs).
+3. **Single global deadline** via `wait(FIRST_COMPLETED)` — endpoint strictly bounded by `CHECK_BUDGET_SECONDS=90`.
+4. **Replaced two slow `$in:[2.6k symbols]` aggregations** with per-symbol `find_one` (overall_freshness) and limit-bounded `count_documents` (density_adequate). Each uses the existing UNIQUE `(symbol, bar_size, date)` index for O(1) per call. New cost: ~13s per check vs >90s timeout.
+5. **`_check_no_duplicates` rewrote as O(1) unique-index assertion** — the previous 50× `$group` aggregation was redundant given the index already guarantees no duplicates at write time.
+
+**`backend/tests/test_backfill_readiness.py`** — Mock collection now exposes `list_indexes()` + `count_documents(limit=)` to match the real pymongo API. 5/5 contract tests still pass.
+
+### New scripts
+- **`scripts/post_backfill_audit.sh`** — 8-section read-only audit (readiness verdict, queue, failures, inventory, timeframe stats, freshness, coverage, system health).
+- **`scripts/verify_bar_counts.py`** — Direct Mongo probe that bypasses the inventory-summary cache. Reports real bar counts per timeframe, per tier, and lists the latest bar for each of the 10 critical symbols. Ground-truth tool.
+- **`scripts/inspect_symbol.sh`** — Per-symbol request history + suggested next action.
+- **`scripts/fix_googl_intraday.py`** — Surgical queue-injection bypassing smart-backfill's heuristic. Inserts (symbol, bar_size, duration) requests directly via `HistoricalDataQueueService.create_request()` for any symbol the smart heuristic skipped.
+- **`scripts/rebuild_and_check.sh`** — One-shot inventory rebuild + readiness re-poll.
+
+### Mockup archived
+- **`documents/mockups/AuraMockupPreview.v1.jsx`** + `README.md` — User opted to defer integrating the AURA wordmark/ArcGauges/anatomical-brain SVG into the production V5 grid; archive preserved with a steal-list for future use. The live preview at `/?preview=aura` remains available.
+
+### Verified outcome
+After the surgical GOOGL fill, the readiness verdict resolved to:
+```
+verdict: yellow, ready_to_train: false, blockers: [], googl: []
+checks: { queue_drained: green, critical_symbols_fresh: green,
+          no_duplicates: green, overall_freshness: yellow (timeout),
+          density_adequate: yellow (timeout) }
+```
+The two yellows are pure performance timeouts on the heavy aggregations — not data quality issues. The new per-symbol code path (in this commit) should bring both to GREEN.
+
+### Backlog ready (no longer blocked)
+- 🔴 **P0** P5/Phase 8 retrain verification — was blocked by backfill; now unblocked.
+- 🟡 **P1** Integrate accepted AURA elements into V5 (wordmark, ArcGauge, DecisionFeed, TradeTimeline).
+- 🟡 **P2** SEC EDGAR 8-K integration.
+- 🟡 **P2** IB hyphen date-format deprecation (Warning 2174).
+- 🟡 **P3** ⌘K palette: `>flatten all`, `>purge stale gaps`, `>reload glossary`.
+- 🟡 **P3** "Don't show again" persisted dismissal on help tooltips.
+- 🟡 **P3** Fix the `[SKIP] ib_data_pusher.py not found` path bug in `tradecommand.bat` (cosmetic — pusher actually does run).
+- 🟡 **P3** `server.py` breakup → `routers/`, `models/`, `tests/` (deferred — was waiting on backfill, now safe to do).
+- 🟡 **P3** Rerun the 204 historical `qualify_failed` items via `/api/ib-collector/retry-failed` after a normal training cycle.
+
+---
+
+
+
 ## 2026-04-25 — Help Wiring for Journal, AI Chat, Job Manager — SHIPPED
 
 Closed out the remaining `data-help-id` gaps from the backlog.
