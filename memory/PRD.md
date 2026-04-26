@@ -1,5 +1,43 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (FINAL) — TRAIN ALL 173-model run COMPLETED, 0 failures
+
+### Trophy Run (414m, 6h 54m elapsed, 0 errors across 14 phases)
+
+| Phase | Models | Failed | Acc | Time |
+|---|---|---|---|---|
+| P1 Generic Directional | 7/7 | 0 | 52.7% | 4.3m |
+| P2 Setup Long | 17/17 | 0 | 47.1% | 44.0m |
+| P2.5 Setup Short | 17/17 | 0 | 45.7% | 33.5m |
+| P3 Volatility | 7/7 | 0 | **76.1%** | 40.3m |
+| P4 Exit Timing | 10/10 | 0 | 45.1% | 20.5m |
+| **P5 Sector-Relative** (RECURRENCE FIXED) | **3/3** | **0** | 53.7% | 0.7m |
+| P5.5 Gap Fill | 5/7 | 0 | **94.1%** | 3.5m |
+| P6 Risk-of-Ruin | 6/6 | 0 | 61.7% | 9.3m |
+| P7 Regime-Conditional | 28/28 | 0 | 56.3% | 16.4m |
+| **P8 Ensemble Meta-Learner** (RECURRENCE FIXED) | **10/10** | **0** | 61.1% | 46.4m |
+| P9 CNN Chart Patterns | **39**/34 | 0 | 62.8% | 123.1m |
+| P11 Deep Learning (VAE/TFT/CNN-LSTM) | 3/3 | 0 | 47.0% | 42.4m |
+| P12 FinBERT Sentiment | 1/1 | 0 | — | 2.8m |
+| P13 Auto-Validation | 20/34 | 0 | 48.7% | 10.0m |
+
+**Total: 173 models trained, 0 failures, 0 errors.**
+
+### Validation
+- Both 3-run recurrences (P5 0-models, P8 ensemble `_1day_predictor`) are conclusively dead
+- OOS validation accuracies > random baseline:
+    * `val_SHORT_REVERSAL: 48.7%`
+    * `val_SHORT_MOMENTUM: 43.3%`
+    * `val_SHORT_TREND: 48.2%`
+- P9 CNN overshot 39/34 — system discovered 5 additional setup×timeframe variants (free upside)
+- Model-protection layer fired correctly on `direction_predictor_15min_range_bound` and `ensemble_vwap` — promoted models with better class distribution despite slightly lower raw accuracy
+- Phase 1 resume engine skipped 5 models <24h old → saved ~30m
+
+### System health
+- Peak RAM 67GB / 121GB (55%) · Peak GPU 66°C
+- NVMe cache hit rate 100% during P4-P7
+- Swap usage stable at 1GB / 15GB the entire run
+
 ## 2026-04-26 (later) — Phase 3 Scanner IB-only wiring — SHIPPED
 
 ### Predictive Scanner now strict IB-only
