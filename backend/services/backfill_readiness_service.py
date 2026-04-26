@@ -105,6 +105,43 @@ def _age_days(date_str: Any, now_utc: datetime) -> float | None:
         return None
 
 
+def _market_state_now() -> str:
+    """Re-export of services.live_bar_cache.classify_market_state so the
+    readiness check can be weekend/overnight-aware. Imported lazily to
+    avoid circular imports."""
+    try:
+        from services.live_bar_cache import classify_market_state
+        return classify_market_state()
+    except Exception:
+        return "rth"  # safe default — never relax freshness if unsure
+
+
+def _adjusted_stale_days(tf: str, market_state: str) -> int:
+    """Stale-days threshold for a timeframe, expanded on weekends/overnight.
+
+    Friday 16:00 ET → Monday 09:30 ET is ~2.7 days. The base STALE_DAYS
+    threshold for 1-min/5-min is 3 days, which means *Monday morning
+    before market open* incorrectly flags every intraday symbol as stale.
+    The market simply hasn't traded — the Friday-close bar is the most
+    recent bar that exists.
+
+    Weekend rule:  add 3 days (covers Fri-close → Mon-premarket comfortably
+                   without masking real backfill gaps that span weeks).
+    Overnight rule: add 1 day (covers afterhours → next-day premarket).
+
+    Daily / weekly timeframes are unaffected (their thresholds already
+    span multi-day windows that absorb a normal weekend gap).
+    """
+    base = STALE_DAYS.get(tf, 7)
+    if tf in ("1 day", "1 week"):
+        return base
+    if market_state == "weekend":
+        return base + 3
+    if market_state == "overnight":
+        return base + 1
+    return base
+
+
 def _check_queue_drained(db) -> Dict[str, Any]:
     """Check historical_data_requests queue depth + recent failures."""
     q = db["historical_data_requests"]
@@ -146,6 +183,7 @@ def _check_critical_symbols(db) -> Dict[str, Any]:
     """Every critical symbol must be fresh on every intraday timeframe."""
     now = datetime.now(timezone.utc)
     data = db["ib_historical_data"]
+    market_state = _market_state_now()
 
     per_symbol: List[Dict[str, Any]] = []
     all_fresh = True
@@ -162,7 +200,8 @@ def _check_critical_symbols(db) -> Dict[str, Any]:
             )
             latest = doc.get("date") if doc else None
             age = _age_days(latest, now)
-            fresh = age is not None and age <= STALE_DAYS.get(tf, 7)
+            stale_threshold = _adjusted_stale_days(tf, market_state)
+            fresh = age is not None and age <= stale_threshold
             if not fresh:
                 sym_ok = False
             tf_detail.append({
@@ -170,6 +209,7 @@ def _check_critical_symbols(db) -> Dict[str, Any]:
                 "latest": latest,
                 "age_days": round(age, 2) if age is not None else None,
                 "fresh": fresh,
+                "stale_threshold_days": stale_threshold,
             })
         if not sym_ok:
             all_fresh = False
@@ -180,12 +220,15 @@ def _check_critical_symbols(db) -> Dict[str, Any]:
             "timeframes": tf_detail,
         })
 
+    detail_suffix = (f" (market_state={market_state}, weekend buffer applied)"
+                     if market_state in ("weekend", "overnight") else "")
     return {
         "status": "green" if all_fresh else "red",
-        "detail": "All critical symbols fresh" if all_fresh
-                  else f"Stale on intraday: {', '.join(stale_symbols)}",
+        "detail": ("All critical symbols fresh" + detail_suffix) if all_fresh
+                  else f"Stale on intraday: {', '.join(stale_symbols)}{detail_suffix}",
         "all_fresh": all_fresh,
         "stale_symbols": stale_symbols,
+        "market_state": market_state,
         "per_symbol": per_symbol,
     }
 
@@ -240,6 +283,7 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
     """
     now = datetime.now(timezone.utc)
     data = db["ib_historical_data"]
+    market_state = _market_state_now()
 
     intraday_symbols = get_universe(db, "intraday")
     total_symbols = len(intraday_symbols)
@@ -249,6 +293,7 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
             "detail": "No intraday universe resolved (symbol_adv_cache empty?)",
             "fresh_pct": 0.0,
             "universe_size": 0,
+            "market_state": market_state,
         }
 
     total_fresh = total_pairs = 0
@@ -262,7 +307,8 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
     SORT = [("date", -1)]
     for tf in CRITICAL_TIMEFRAMES:
         fresh = 0
-        budget = STALE_DAYS.get(tf, 7)
+        # Weekend/overnight-aware threshold (Friday close → Mon open ~2.7d)
+        budget = _adjusted_stale_days(tf, market_state)
         for s in intraday_list:
             doc = data.find_one({"symbol": s, "bar_size": tf}, PROJ, sort=SORT)
             age = _age_days(doc.get("date") if doc else None, now)
@@ -273,26 +319,30 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
             "fresh": fresh,
             "total": total_symbols,
             "fresh_pct": round(100.0 * fresh / total_symbols, 2),
+            "stale_threshold_days": budget,
         })
         total_fresh += fresh
         total_pairs += total_symbols
 
     fresh_pct = 100.0 * total_fresh / total_pairs if total_pairs else 0.0
+    state_suffix = (f" · market_state={market_state}"
+                    if market_state in ("weekend", "overnight") else "")
     if fresh_pct >= FRESHNESS_GREEN_PCT:
         status = "green"
-        detail = f"Overall intraday freshness {fresh_pct:.1f}% (≥{FRESHNESS_GREEN_PCT}%)"
+        detail = f"Overall intraday freshness {fresh_pct:.1f}% (≥{FRESHNESS_GREEN_PCT}%){state_suffix}"
     elif fresh_pct >= FRESHNESS_YELLOW_PCT:
         status = "yellow"
-        detail = f"Overall intraday freshness {fresh_pct:.1f}% (below {FRESHNESS_GREEN_PCT}% target, above {FRESHNESS_YELLOW_PCT}% floor)"
+        detail = f"Overall intraday freshness {fresh_pct:.1f}% (below {FRESHNESS_GREEN_PCT}% target, above {FRESHNESS_YELLOW_PCT}% floor){state_suffix}"
     else:
         status = "red"
-        detail = f"Overall intraday freshness {fresh_pct:.1f}% (below {FRESHNESS_YELLOW_PCT}% floor)"
+        detail = f"Overall intraday freshness {fresh_pct:.1f}% (below {FRESHNESS_YELLOW_PCT}% floor){state_suffix}"
 
     return {
         "status": status,
         "detail": detail,
         "fresh_pct": round(fresh_pct, 2),
         "universe_size": total_symbols,
+        "market_state": market_state,
         "per_timeframe": per_tf,
     }
 

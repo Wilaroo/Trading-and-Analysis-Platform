@@ -93,11 +93,17 @@ async def safety_status() -> Dict[str, Any]:
     try:
         from services.account_guard import summarize_for_ui
         current = None
+        ib_connected = None
         # Mirror the exact extraction used by /api/ib/account/summary so the
         # guard reads the pusher's live account id (see routers/ib.py:735-739).
         try:
-            from routers.ib import get_pushed_account_id
+            from routers.ib import get_pushed_account_id, is_pusher_connected
             current = get_pushed_account_id()
+            # is_pusher_connected reflects the pusher process; a true pusher
+            # connection without an account id means IB Gateway itself is
+            # offline (weekend), which is the case that should soften
+            # account-mismatch from RED to PENDING.
+            ib_connected = bool(is_pusher_connected()) and bool(current)
         except Exception:
             current = None
         # Fallback: direct-connected IB service (when pusher is offline).
@@ -107,9 +113,11 @@ async def safety_status() -> Dict[str, Any]:
                 ib = get_ib_service()
                 status_obj = ib.get_status() if ib else None
                 current = (status_obj or {}).get("account_id")
+                if current and ib_connected is None:
+                    ib_connected = True
             except Exception:
                 pass
-        resp["account_guard"] = summarize_for_ui(current)
+        resp["account_guard"] = summarize_for_ui(current, ib_connected=ib_connected)
     except Exception as e:
         logger.debug("safety.status account_guard error: %s", e)
         resp["account_guard"] = {"match": True, "reason": "unavailable"}

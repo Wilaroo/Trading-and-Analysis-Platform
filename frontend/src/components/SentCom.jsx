@@ -791,8 +791,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
           <StreamPanel messages={messages} loading={streamLoading} />
         </div>
         
-        {/* Chat Input */}
-        <ChatInput onSend={handleChat} disabled={!status?.connected} />
+        {/* Chat Input — independent of IB connectivity (chat_server :8002) */}
+        <ChatInput onSend={handleChat} />
       </div>
     );
   }
@@ -835,7 +835,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
           <div className="col-span-5">
             <div className="h-[600px] flex flex-col">
               <StreamPanel messages={messages} loading={streamLoading} />
-              <ChatInput onSend={handleChat} disabled={!status?.connected} />
+              <ChatInput onSend={handleChat} />
             </div>
           </div>
 

@@ -1,5 +1,67 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (LATER) — Weekend/Overnight Awareness Sweep — SHIPPED
+
+### Symptom: weekend false-positives across the UI
+On Sunday/Mon-premarket the V5 surfaces incorrectly flagged everything red:
+- `account_guard` chip → `ACCOUNT MISMATCH` (pusher has no account snapshot
+  on weekends because IB Gateway is offline, returned `match: false`)
+- `BackfillReadinessCard` → `Stale on intraday: SPY, QQQ, ...` (Friday close
+  bars are 2.7d old on Mon morning — the stale-days threshold flipped
+  even though the market simply hadn't traded)
+- `LastTrophyRunCard` → showed `0 models · 0 failed · 0 errors` because
+  the synth fallback's phase_history keys didn't match the P-code label map
+- `ChatInput` → disabled all weekend because `disabled={!status?.connected}`
+  tied chat to IB Gateway connectivity (chat is independent of IB)
+
+### Fixes
+1. **`services/account_guard.py::check_account_match`**: new `ib_connected`
+   parameter. When `current_account_id is None` AND `ib_connected=False`,
+   returns `(True, "pending — IB Gateway disconnected")` instead of
+   `(False, "no account reported")`. Real account *drift* (paper mode but
+   pusher reports a LIVE alias) still flags MISMATCH even with IB offline.
+2. **`routers/safety_router.py`**: passes the resolved `ib_connected` flag
+   from the pusher into the guard.
+3. **`services/backfill_readiness_service.py`**: new helpers
+   `_market_state_now()` (re-export of `live_bar_cache.classify_market_state`)
+   + `_adjusted_stale_days()` that adds **+3 days on weekend** and **+1 day
+   overnight** to intraday stale-thresholds (Daily/weekly unchanged because
+   their windows already absorb a normal weekend gap).
+4. **`routers/ai_training.py::last-trophy-run`**: synth fallback now
+   re-keys phase_history under the P-code labels (long-name → short-code
+   map: `generic_directional → P1`, `cnn_patterns → P9`, etc.) so the
+   trophy tile renders correctly for the just-completed pre-archive run.
+5. **`SentComV5View.jsx`** + **`SentCom.jsx`** (legacy view): removed
+   `disabled={!status?.connected}` from the ChatInput. Chat talks to
+   `chat_server` on port 8002 — it's independent of IB Gateway.
+
+### Tests (8 new regression tests)
+- `tests/test_weekend_aware_safety.py`: 8 tests
+    * intraday stale_days unchanged during RTH/extended
+    * intraday stale_days +3d on weekend, +1d overnight
+    * daily/weekly stale_days NOT weekend-buffered
+    * account match when alias hits
+    * account pending (not mismatch) when None + ib_connected=False
+    * account drift to LIVE alias still flags MISMATCH on weekend
+    * pre-fix behaviour preserved when ib_connected=True
+    * UI summary payload includes ib_connected field
+- 80/80 tests green across phase-1/2/3 + scanner + canonical universe +
+  weekend-aware safety + trophy-run archive + autonomy readiness
+
+### Files changed
+- `backend/services/account_guard.py`
+- `backend/routers/safety_router.py`
+- `backend/services/backfill_readiness_service.py`
+- `backend/routers/ai_training.py`
+- `frontend/src/components/sentcom/SentComV5View.jsx`
+- `frontend/src/components/SentCom.jsx`
+- `backend/tests/test_weekend_aware_safety.py` (new)
+
+### Still open from this session's audit
+- 🟡 Scanner shows idle in UI — needs runtime curl data to diagnose
+- 🟢 Chart scroll-wheel doesn't fetch more bars (P2 cosmetic)
+- 🟢 Unified stream weekend-setups stub message is just text (P2 cosmetic)
+
 ## 2026-04-26 (FINAL+) — Trophy Run Tile + Autonomy Readiness Dashboard — SHIPPED
 
 ### "Last Successful Trophy Run" tile (operator SLA badge)

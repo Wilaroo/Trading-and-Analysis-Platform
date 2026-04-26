@@ -343,7 +343,11 @@ export const SentComV5View = ({
               <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
             </div>
             <div className="border-t border-zinc-800">
-              <ChatInput onSend={handleChat} disabled={!status?.connected} />
+              {/* Chat is independent of IB Gateway — chat_server (port
+                  8002) is always reachable. Previously this was tied to
+                  status?.connected which falsely disabled chat every
+                  weekend / overnight when IB was offline. */}
+              <ChatInput onSend={handleChat} />
             </div>
           </div>
         </aside>

@@ -102,12 +102,20 @@ def load_account_expectation() -> AccountExpectation:
 def check_account_match(
     current_account_id: Optional[str],
     expectation: Optional[AccountExpectation] = None,
+    ib_connected: Optional[bool] = None,
 ) -> Tuple[bool, str]:
     """Compare the pusher's current account_id against any authorised alias.
 
     Returns (ok: bool, reason: str). When no expectation is configured
     (env var blank for the active mode) we return (True, 'unconfigured') —
     the guard is opt-in so existing installations keep working unchanged.
+
+    `ib_connected` is an *optional* hint. When IB Gateway is offline (weekends,
+    overnight before Gateway boots) the pusher has no fresh account snapshot
+    to push, so `current_account_id` is None — treating that as a MISMATCH
+    is wrong because it's just an absence of data, not a drift. When the
+    caller passes `ib_connected=False`, we soften the verdict to a neutral
+    'pending' state so the UI chip doesn't go red while the market is closed.
     """
     exp = expectation or load_account_expectation()
 
@@ -115,6 +123,11 @@ def check_account_match(
         return True, "unconfigured"
 
     if not current_account_id:
+        if ib_connected is False:
+            return True, (
+                f"pending — IB Gateway disconnected, no account snapshot from pusher "
+                f"(expected {'/'.join(exp.expected_aliases)} once IB connects)"
+            )
         return False, (
             f"no account reported by pusher; expected "
             f"{'/'.join(exp.expected_aliases)} ({exp.active_mode})"
@@ -144,10 +157,17 @@ def check_account_match(
     )
 
 
-def summarize_for_ui(current_account_id: Optional[str]) -> dict:
-    """Payload consumed by the V5 header chip."""
+def summarize_for_ui(
+    current_account_id: Optional[str],
+    ib_connected: Optional[bool] = None,
+) -> dict:
+    """Payload consumed by the V5 header chip.
+
+    `ib_connected` is forwarded to `check_account_match` so weekend/offline
+    states show 'pending' instead of 'mismatch'.
+    """
     exp = load_account_expectation()
-    ok, reason = check_account_match(current_account_id, exp)
+    ok, reason = check_account_match(current_account_id, exp, ib_connected=ib_connected)
     return {
         "active_mode": exp.active_mode,
         "expected_account_id": exp.expected_account_id,
@@ -159,4 +179,5 @@ def summarize_for_ui(current_account_id: Optional[str]) -> dict:
         "paper_aliases": list(exp.paper_aliases),
         "match": ok,
         "reason": reason,
+        "ib_connected": ib_connected,
     }
