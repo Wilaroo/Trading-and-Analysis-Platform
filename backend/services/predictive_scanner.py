@@ -237,7 +237,8 @@ class PredictiveScannerService:
         self._scan_interval: int = 30  # seconds between scans
         
         # Service dependencies (lazy loaded)
-        self._alpaca_service = None
+        # Phase 3: Alpaca dependency removed — live data flows through
+        # services.live_symbol_snapshot (pusher RPC + cache).
         self._scoring_engine = None
         self._fundamental_service = None
         self._trading_intelligence = None
@@ -254,13 +255,6 @@ class PredictiveScannerService:
         logger.info("Predictive scanner: wired to enhanced scanner for shared market data")
     
     # ==================== SERVICE GETTERS ====================
-    
-    @property
-    def alpaca_service(self):
-        if self._alpaca_service is None:
-            from services.alpaca_service import AlpacaService
-            self._alpaca_service = AlpacaService()
-        return self._alpaca_service
     
     @property
     def scoring_engine(self):
@@ -329,7 +323,8 @@ class PredictiveScannerService:
         """Fetch comprehensive market data for a symbol.
         
         Uses enhanced scanner's real tape data when available (accurate VWAP, EMA, RSI, RVOL).
-        Falls back to Alpaca quotes with estimated technicals otherwise.
+        Falls back to live pusher-RPC snapshots with estimated technicals
+        otherwise (Phase 3 IB-only path).
         """
         try:
             # Try getting real tape data from the enhanced scanner first
@@ -376,28 +371,36 @@ class PredictiveScannerService:
                 except Exception as e:
                     logger.debug(f"Could not get enhanced scanner data for {symbol}: {e}")
             
-            # Fallback: Get real-time quote from Alpaca
-            quote = await self.alpaca_service.get_quote(symbol)
-            if not quote or quote.get("price", 0) <= 0:
+            # Phase 3 fallback: live snapshot from pusher RPC (IB-only).
+            # Replaces the previous Alpaca quote path. `get_latest_snapshot`
+            # uses the cached pusher bars (live_bar_cache) when fresh and
+            # only round-trips to the Windows pusher on a miss. Returns the
+            # last-bar close as the price plus prev-bar close for change.
+            from services.live_symbol_snapshot import get_latest_snapshot
+            snap = await get_latest_snapshot(symbol, bar_size="5 mins")
+            if not snap.get("success") or not snap.get("latest_price"):
                 return None
-            
-            current_price = quote.get("price", 0)
+
+            current_price = float(snap["latest_price"])
             atr_estimate = current_price * 0.02  # 2% of price as ATR estimate
-            
+            change_abs = float(snap.get("change_abs") or 0.0)
+            spread = max(current_price * 0.0005, 0.01)  # 5 bps default spread
+
             return {
                 "symbol": symbol,
                 "current_price": current_price,
-                "bid": quote.get("bid", current_price * 0.999),
-                "ask": quote.get("ask", current_price * 1.001),
-                "volume": quote.get("volume", 0),
-                "timestamp": quote.get("timestamp"),
+                "bid": current_price - spread,
+                "ask": current_price + spread,
+                "volume": 0,  # live_symbol_snapshot is price-only by design
+                "timestamp": snap.get("latest_bar_time")
+                    or snap.get("fetched_at"),
                 "fundamentals": None,
                 "technicals": {
-                    "vwap": current_price * 0.995,
-                    "ema_9": current_price * 0.99,
-                    "ema_20": current_price * 0.985,
+                    "vwap": current_price,  # estimate when no enhanced tape
+                    "ema_9": current_price - change_abs * 0.3,
+                    "ema_20": current_price - change_abs * 0.6,
                     "rsi_14": 50,
-                    "rvol": 1.5,
+                    "rvol": 1.0,
                     "atr": atr_estimate,
                     "high": current_price * 1.02,
                     "low": current_price * 0.98,

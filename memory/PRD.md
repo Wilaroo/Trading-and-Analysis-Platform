@@ -1,5 +1,50 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (later) — Phase 3 Scanner IB-only wiring — SHIPPED
+
+### Predictive Scanner now strict IB-only
+- `services/predictive_scanner.py::_get_market_data` — when the enhanced
+  scanner has no tape data, fallback path now calls
+  `services.live_symbol_snapshot.get_latest_snapshot(symbol)` (Phase 3
+  helper that goes pusher RPC → cache). Replaces the previous
+  `alpaca_service.get_quote(symbol)` path.
+- Removed `self._alpaca_service` instance var + `alpaca_service`
+  lazy-init property — they were only consumed by the fallback.
+- Snapshot-failure path returns `None` cleanly (symbol skipped this
+  scan cycle) instead of synthetic Alpaca-shape data — no more
+  hallucinated bid/ask spreads on weekends.
+- Bid/ask now derived from `latest_price ± 5bps`; volume left at 0
+  because `live_symbol_snapshot` is price-only by design (consumers
+  needing volume should use `fetch_latest_session_bars` directly).
+
+### Phase 3 surface coverage — COMPLETE
+| Surface | Wiring |
+|---|---|
+| AI Chat | `chat_server.py` → `/api/live/symbol-snapshot/{sym}` (held + indices) |
+| Briefings (UI) | `useBriefingLiveData.js` → `/api/live/briefing-top-movers` |
+| TopMoversTile | `/api/live/briefing-snapshot` |
+| Command Palette | `/api/live/briefing-watchlist` |
+| **Scanner (NEW)** | `predictive_scanner._get_market_data` → `get_latest_snapshot` |
+| ScannerCardsV5 (UI) | `useLiveSubscriptions(topSymbols, {max:10})` |
+
+### Tests (6 new regression tests)
+- `tests/test_scanner_phase3_ib_only.py`:
+    * No `_alpaca_service` instance var on `PredictiveScannerService`
+    * No `alpaca_service` property
+    * `_get_market_data` imports `get_latest_snapshot`
+    * No `alpaca_service.get_quote` call in source
+    * Fallback returns scanner-shaped dict with all `technicals`/`scores` keys
+    * Returns `None` on snapshot failure (no synthetic data)
+- 105/105 phase-1/2/3 tests green
+  (`test_scanner_phase3_ib_only.py`, `test_live_subscription_manager.py`,
+  `test_universe_canonical.py`, `test_live_data_phase1.py`,
+  `test_live_data_phase3.py`, `test_live_data_phase3_http.py`,
+  `test_live_subscription_phase2_http.py`).
+
+### Files changed this session
+- `backend/services/predictive_scanner.py`
+- `backend/tests/test_scanner_phase3_ib_only.py` (new)
+
 ## 2026-04-26 (later) — Phase 1 LIVE + Phase 2 verified + IB-only cleanup — SHIPPED
 
 ### Phase 1: Live Data RPC reachable from DGX → Pusher (FULLY ON)
