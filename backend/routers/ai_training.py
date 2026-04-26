@@ -1648,8 +1648,36 @@ async def get_last_trophy_run(only_trophy: bool = True):
             )
             if live and live.get("phase") == "completed":
                 ph_hist = live.get("phase_history") or {}
-                trained = sum((ph.get("models") or 0) for ph in ph_hist.values())
-                failed = sum((ph.get("failed") or 0) for ph in ph_hist.values())
+                # Long-name → P-code map so the UI tile renders correctly
+                # (the existing route's `phase_labels` lookup uses short codes).
+                LONG_TO_SHORT = {
+                    "generic_directional":   "P1",
+                    "setup_specific":        "P2",
+                    "short_setup_specific":  "P2.5",
+                    "volatility_prediction": "P3",
+                    "exit_timing":           "P4",
+                    "sector_relative":       "P5",
+                    "gap_fill":              "P5.5",
+                    "risk_of_ruin":          "P6",
+                    "regime_conditional":    "P7",
+                    "ensemble_meta":         "P8",
+                    "cnn_patterns":          "P9",
+                    "deep_learning":         "P11",
+                    "finbert_sentiment":     "P12",
+                    "auto_validation":       "P13",
+                }
+                # Re-key phase_history under short codes so downstream
+                # phase_labels lookup + per-phase rendering works.
+                ph_remapped = {}
+                for k, v in ph_hist.items():
+                    short = LONG_TO_SHORT.get(k, k)
+                    ph_remapped[short] = v
+                trained = sum((ph.get("models") or 0) for ph in ph_remapped.values())
+                failed = sum((ph.get("failed") or 0) for ph in ph_remapped.values())
+                # Build a flat list of completed models from the live
+                # `recently_completed` — only available for the very last
+                # few; combined with phase counts above for the totals.
+                recent = list(live.get("recently_completed") or [])
                 start = live.get("started_at")
                 end = live.get("updated_at") or live.get("completed_at")
                 elapsed = 0.0
@@ -1668,8 +1696,8 @@ async def get_last_trophy_run(only_trophy: bool = True):
                     "models_failed_count": failed,
                     "errors": int(live.get("errors") or 0),
                     "total_samples": 0,
-                    "models_trained": list(live.get("recently_completed") or []),
-                    "phase_breakdown": ph_hist,
+                    "models_trained": recent,
+                    "phase_breakdown": ph_remapped,
                     "is_trophy": failed == 0 and int(live.get("errors") or 0) == 0,
                     "_synthesized_from_live": True,
                 }
