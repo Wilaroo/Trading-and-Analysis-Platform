@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, RefreshCw } from 'lucide-react';
 import { BackfillReadinessCard } from './BackfillReadinessCard';
+import { LastTrainingRunCard } from './LastTrainingRunCard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const POLL_MS = 15_000;
@@ -124,6 +125,12 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
                 it's the single most actionable signal right now while the
                 historical backfill drains. */}
             <BackfillReadinessCard refreshToken={refreshCounter} />
+
+            {/* Last training run — sibling tile that closes the loop on
+                "did the retrain actually produce models?" Highlights P5 +
+                P8 specially since those have been the recurring failures
+                across prior sessions. */}
+            <LastTrainingRunCard refreshToken={refreshCounter} />
 
             {/* Subsystem grid */}
             <section data-testid="inspector-subsystems">

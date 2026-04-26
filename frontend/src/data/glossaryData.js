@@ -1653,8 +1653,24 @@ Note the **interpretation depends on market state**:
 **ready_to_train** = GREEN only. **Worst-check-wins** for the overall verdict.
 
 The Backfill Readiness Card is pinned to the top of the Freshness Inspector. The same gate disables the **Train All / Full Train / Full Universe / DL Train / Setup Train** buttons until verdict=green.`,
-      relatedTerms: ['pre-train-interlock', 'queue-drained', 'critical-symbols-fresh', 'overall-freshness', 'no-duplicates', 'density-adequate'],
+      relatedTerms: ['pre-train-interlock', 'queue-drained', 'critical-symbols-fresh', 'overall-freshness', 'no-duplicates', 'density-adequate', 'last-training-run'],
       tags: ['ai', 'training', 'readiness', 'gate']
+    },
+    {
+      id: 'last-training-run',
+      term: 'Last Training Run',
+      category: 'ai-training',
+      shortDef: 'Sibling tile to Backfill Readiness — surfaces the most recent training run\'s phase-by-phase model count without dropping into terminal logs.',
+      fullDef: `Pinned underneath Backfill Readiness in the Freshness Inspector. Polls \`GET /api/ai-training/status\` and shows:
+
+- **Status pill**: IDLE / RUNNING / COMPLETED / CANCELLED / ERROR (auto-refreshes every 30s while RUNNING).
+- **Top-line counters**: \`models DONE/TARGET\`, \`failed\`, \`elapsed\`, \`errors\`.
+- **Per-phase tiles** for P1 → P8 with status dot, model count, average accuracy, ETA. Click-to-expand each phase to see the per-model accuracy list.
+- **Recurring-failure highlight**: P5 (Sector-Relative) and P8 (Ensemble) get a rose-ring outline if they trained 0 models — both have failed in 2 prior sessions, so the visual makes regression instant to spot.
+
+**Why this exists:** before this tile, the only way to verify "did P5 actually train models this time?" was \`tail -f /tmp/backend.log | grep PHASE\`. Now you click one tile and see the per-model accuracy breakdown. Closes the diagnostic loop for *training* the same way the Backfill Readiness clickable tiles closed it for *data*.`,
+      relatedTerms: ['backfill-readiness', 'training-pipeline-phases', 'pre-train-interlock'],
+      tags: ['ai', 'training', 'observability', 'card']
     },
     {
       id: 'pre-train-interlock',
