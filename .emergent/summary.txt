@@ -1,129 +1,171 @@
-<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating auto-updating validation, and fixing model training. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. Recent goals included enforcing a strict IB-only data pipeline (removing Alpaca) and decoupling the FinBERT news sentiment scoring into a standalone scheduled pre-market task.
+<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Recent goals: always-on live data across the entire application using an RPC server on the Windows Pusher. Immediate Goal: Resolve massive dataset staleness, optimize data readiness checks, and implement a canonical universe to ensure AI training processes the correct slice of data without 68-hour runtimes.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform running natively on a physical DGX Spark (Linux). The  fallback has been completely removed in favor of a strict . The V5 UI has been upgraded with data freshness indicators. The AI training pipeline (Phases 4 & 8) is debugged. The foundational file for the standalone sentiment pipeline () and RSS collectors are created, but the router and  cron jobs are not yet wired into the main FastAPI application.
+**what currently exists?**: A full-stack AI trading platform natively running on DGX Spark (Linux) and Windows PC. The Canonical Universe Refactor is completely implemented across the backend ()—unifying the symbol list across , , and the AI . A new UI component  gives real-time visibility into the training data slice. The Windows PC  has been updated with an RPC Server listening on port 8765. However, DGX is currently blocked by Windows Firewall from accessing this new RPC port.
 
 **Last working item**:
-    - Last item agent was working: Completing the standalone FinBERT Sentiment pipeline + APScheduler. The agent was investigating  to figure out where to mount the  router and how to safely start the  at 7:45 AM EST on application startup without conflicting with . The agent proposed a plan and invoked the  tool.
-    - Status: IN PROGRESS / BLOCKED (Waiting for user response to )
-    - Agent Testing Done: N
-    - Which testing method agent to use? manual curl / python -c
+    - Last item agent was working: Troubleshooting network/firewall connectivity for Live Data Architecture (Phase 1). The RPC server on the Windows Pusher is successfully running on  and responds to  calls on Windows. However, the DGX machine () gets connection timeouts when reaching out to  despite the  command succeeding. Agent provided commands to determine if the Windows Public profile is overriding the allow rule or if 3rd-party AV is blocking the port.
+    - Status: BLOCKED (Waiting for user to run firewall diagnostics on Windows/DGX)
+    - Agent Testing Done: N (Requires user to run commands on physical machine)
+    - Which testing method agent to use? manual testing by curl/bash
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: P5 Sector-Relative phase trained 0 models in recent runs (P2)
-     - Attempted fixes: Assumed to be caused by  starving the sample size.
-     - Next debug checklist: Wait for the user to run a full-quality training run overnight, then verify if P5 trains models. If it still returns 0 samples, debug  and SPY/sector-ETF dependencies.
-     - Why fix this issue and what will be achieved with the fix? Ensures the bot is not blind to sector-relative strength gating.
-     - Status: USER VERIFICATION PENDING
+  Issue 1: 🔴 (P0) Windows Firewall blocking Live Data RPC Port 8765
+     - Attempted fixes: Created an inbound firewall rule for port 8765 set to . Verified  is bound to . Verified routing is working because port 4002 is reachable from DGX.
+     - Next debug checklist: Await user output for: 1)  to check  on Public profile. 2) Temporarily disabling Public firewall profile to see if  succeeds. 3) Asking user to check system tray for 3rd-party Antivirus (Norton, McAfee, etc.). Once unblocked, set  and  in  and restart DGX backend.
+     - Why fix this issue and what will be achieved with the fix? It is the core prerequisite for Phase 1 of the Live Data Architecture.
+     - Status: IN PROGRESS
      - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend (via curl)
+     - Blocked on other issue: User providing diagnostic output.
+
+  Issue 2: 🟡 (P1) P5 Sector-Relative phase trained 0 models & Phase 8  failure
+     - Attempted fixes: Implemented Canonical Universe to ensure identical train/collect symbol lists.
+     - Next debug checklist: Await historical queue to fully drain (currently at ~9,889 requests). Once readiness is completely green, instruct user to click  in the NIA panel and monitor the Phase 5 / Phase 8 logs.
+     - Why fix this issue and what will be achieved with the fix? Core model generation pipeline requires this to succeed.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
+     - Blocked on other issue: Historical data queue draining.
+
+  Issue 3: 🟡 (P3) Startup script  path bug
+     - Attempted fixes: None yet.
+     - Next debug checklist: Check  or  and fix the path validation logic that causes the false warning on startup.
+     - Why fix this issue and what will be achieved with the fix? Cleans up CLI startup output.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? manual testing by bash
+     - Blocked on other issue: None.
 
 **In progress Task List**:
-  Task 1: Complete standalone FinBERT Sentiment pipeline + APScheduler
-     - Where to resume: Await user response to the pending plan. Then edit  to import and mount . Initialize  in the FastAPI startup event to run the sentiment refresh function daily at 7:45 AM EST ().
-     - What will be achieved with this? Decouples news scoring from the 44-hour AI training pipeline, allowing fresh pre-market sentiment analysis every morning on 500 symbols.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on something: Waiting on user confirmation from  tool.
+  Task 1: 🟡 (P1) Live Data Architecture - Phase 1 (Foundation)
+     - Where to resume: Once the firewall (Issue 1) is resolved, finalize wiring DGX client () and  using the new .
+     - What will be achieved with this? Allows DGX backend to pull live/extended-hours data directly from IB Gateway via the Windows pusher.
+     - Status: BLOCKED
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on something: Issue 1 (Firewall blocking port 8765).
 
-**Upcoming and Future Tasks**:
+**Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🟡 (P1) Update Morning Briefing UI to show overnight sentiment swings and flag new 8-K filings based on the new standalone sentiment engine.
+    - 🟡 (P1) Integrate AURA UI concepts (wordmark, gauges) into V5 production UI.
+    - 🟡 (P1) Live Data Architecture - Phase 2: Live subscription layer (dynamic watchlist, ).
+    - 🟡 (P1) Live Data Architecture - Phase 3: Wire remaining surfaces (Scanner, Briefings, AI Chat) to .
+    - 🟡 (P1) Live Data Architecture - Phase 4: Safely retire Alpaca fallback ().
     - 🟡 (P2) Add SEC EDGAR 8-K integration for material events.
-    - 🟡 (P3) Add a  drift badge and  badge onto each scorecard tile (Blocked until models are actually retrained).
+    - 🟡 (P3) Add , ,  actions to ⌘K palette.
+    - 🟡 (P3) Add dismissible forever option to Help System tooltips.
     
     Future Tasks:
-    - 🟡 (P3) Phase 6: Distributed PC Worker - Create a training coordinator to offload heavy DL models to the Windows PC over LAN.
-    - 🟡 (P3) [BL-01] Add  symbol command palette +  chat focus.
-    - 🟡 (P3) [BL-02] Add hover tooltips on data points across the app.
-    - 🟡 (P3) Server.py breakup -> routers/, models/, tests/
+    - 🟡 (P3) Retry the 204 historical  items via .
+    - 🟡 (P3)  breakup -> routers/, models/, tests/ (Wait until system is stable).
 
-**Completed work in this session**:
-- Agent gathered context on  and  using bash and file viewing tools to prepare for the scheduler wiring.
-
-- Recently completed (Previous Session):
-  - Wired  to all V5 components to seamlessly open the  (DONE).
-  - Nuked  completely and added strict  CI guard (DONE).
-  - Built  and  (DONE).
-  - Fixed UI percentage calculation () in  (DONE).
-  - Fixed Phase 4 and Phase 8 training bugs related to bar sizes and profiles (DONE).
+**Completed work in this session**
+- Created  as the unified source of truth for symbol tiering (DONE).
+- Wired Canonical Universe into ,  collector, and AI  (DONE).
+- Created  and added it to the Freshness Inspector (DONE).
+- Updated IB date format default to hyphen to resolve Warning 2174 (DONE).
+- Updated  endpoint to set  in cache on repeated No security definition errors (DONE).
+- Created and passed contract tests for Canonical Universe () (DONE).
 
 **Earlier issues found/mentioned but not fixed**
-   Issue 1: VAE Regime Detector reported 100.0% accuracy in 
-   - Debug checklist: Validate metrics after removing  for the overnight run.
-   - Why to solve this issue and what will be achieved with this? Ensure the model isn't over-fitting on tiny samples and yields honest metrics.
+   Issue 1: Alpaca string hardcoded in 
+   - Debug checklist: Remove the  block in .
+   - Why to solve this issue and what will be achieved with this? User requested a strict IB-only architecture.
    - Should Test frontend/backend/both after fix: backend
    - Is recurring issue? N
 
+   Issue 2: ACCOUNT MISMATCH UI Chip / IB.reqAccountUpdates() error
+   - Debug checklist: Remove the unexpected keyword argument  from  in the pusher script due to  API drift.
+   - Why to solve this issue and what will be achieved with this? Resolves harmless race condition/error log on startup.
+   - Should Test frontend/backend/both after fix: manual python -c
+   - Is recurring issue? Y (on startup)
+
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: None
-  - Recurrence count: 0
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: Phase 8 ensemble  failure, P5 0-models failure.
+  - Recurrence count: 3
+  - Status: TESTING PENDING (Wait for queue to drain -> trigger Train All).
 
 **Code Architecture**
 DGX Spark (Linux) runs Backend (FastAPI on :8001), MongoDB, Frontend (React on :3000). 
-Windows PC runs IB Gateway + pusher which feeds .
-The ML Training pipeline runs in 12 isolated phases managed by . 
-FinBERT sentiment scoring occurs locally using HuggingFace  and Finnhub/Yahoo RSS.
+Windows PC runs IB Gateway (:4002) + IB Data Pusher (:8765) + 4 Turbo Collectors.
 
 **Key Technical Concepts**
-Interactive Brokers Gateway, FastAPI, React, Pytest, MongoDB, Background subprocesses (training), Asyncio event loops, APScheduler, FinBERT.
+FastAPI, React, MongoDB, Interactive Brokers API (), Pytest, Uvicorn, Windows Defender Firewall routing.
 
 **key DB schema**
   - : 
   - : 
-  - : 
 
 **changes in tech stack**
-  -  and  were recently added for cron jobs and Yahoo RSS integration.
+  - To use the fastapi command, please install "fastapi[standard]":
+
+	pip install "fastapi[standard]" and  added to the Windows PC environment for the new RPC Server.
 
 **All files of reference**
-  -  (Contains the standalone sentiment logic, needs to be mounted)
-  -  (Target for APScheduler wiring and router mounting)
-  -  (Contains Finnhub/Yahoo logic)
-  - 
+  -  (Created - Core logic for canonical symbols)
+  -  (Updated to use canonical universe)
+  -  (Updated to use canonical universe)
+  -  (Updated to use canonical universe)
+  -  (Created)
+  -  (Created)
+  -  (Running on Windows PC - contains the RPC Server)
 
 **Areas that need refactoring**:
-  -  is quite monolithic (4400+ lines) and requires breaking down into , ,  in the future.
+  -  is highly monolithic (defer for now).
 
 **key api endpoints**
+  -  (Added)
   - 
-  - 
-  -  (In Progress)
+  -  (Updated)
 
 **Critical Info for New Agent**
-- **HARDWARE WARNING:** The codebase runs natively on the user's physical DGX Spark (Linux). E2E workflow testing via the standard testing subagent against live IB data is impossible. Use manual curl or Python scripts to test features.
-- **DO NOT TOUCH ALPACA:** Alpaca fallback has been banned. A regression test exists to ensure  is not imported anywhere outside the shim.
-- **APScheduler & uvloop Warning**: As noted in the  file comments,  conflicts with  if initialized incorrectly. Ensure  is properly started inside the  startup event ( or lifespan) in , and specifically use the  timezone for the 7:45 AM job.
-- You are currently blocked waiting for the human to respond to your  tool call regarding the implementation plan. Start by checking their response.
+- **HARDWARE WARNING:** The code executes on a physical DGX Spark and Windows PC. Standard AI testing agents running E2E tests against live IB/GPU endpoints will time out or fail. Validate via manual bash/curl commands with the user.
+- **DO NOT TRIGGER AI TRAINING:** The historical data queue (~9,889 requests) is currently draining on the Windows PC. You must wait for it to hit 0 pending/claimed and overall freshness to hit green before instructing the user to run .
+- **FIREWALL STATUS:** DGX can reach the Windows PC on port 4002, but port 8765 is timing out. The agent was in the middle of diagnosing whether the Windows Public profile defaults or a 3rd party antivirus is dropping packets. Await the user's latest terminal outputs to conclude diagnosis.
 
 **documents and test reports created in this job**
-  -  (Updated in previous run)
+  - 
+  -  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - *Agent*: Gathered context about  routing, , and the newly created . Noticed where  should be safely initialized.
- - *Agent*: Invoked  to present the plan for modifying  to the user and request approval before proceeding.
- - *Pending HUMAN message*: The human has not responded yet. **Wait for and read the human's response to your plan before editing .**
+ - *Agent*: Created and wired Canonical Universe across the backend, updated PRD, and verified components with tests.
+ - *User*: Restarted services, verified collectors are healthy, and confirmed the Canonical Universe UI matches predictions perfectly. Asked to proceed with Live Data RPC.
+ - *Agent*: Guided user to install  on Windows and run the Pusher.
+ - *User*: Pusher failed to run initially due to missing  flag.
+ - *Agent*: Advised running with the  file or explicitly passing flags.
+ - *User*: Ran successfully. Logs showed .
+ - *Agent*: Instructed user to test reachability from DGX via .
+ - *User*:  returned empty/timeout from DGX. Verified  test on Windows PC works.
+ - *Agent*: Realized firewall is blocking. Found that Windows  is set to Public network. Advised making the firewall rule .
+ - *User*: Made rule . Tested  (Success) and  (Timeout).
+ - *Agent*: Sent final diagnostic commands to find blocking Public profile rules or check for 3rd-party Antivirus.
+ - *Pending HUMAN message*: Awaiting user to execute diagnostic commands on Windows PowerShell and DGX shell to unblock Port 8765. 
 
 **Project Health Check:**
-Healthy. The old Alpaca fallback logic was successfully removed.
+Broken (Connectivity: DGX cannot reach Windows Pusher RPC on port 8765).
 
 **3rd Party Integrations**
-  - Interactive Brokers (Data & Execution - Requires User credentials)
-  - HuggingFace (ProsusAI/finbert - Local Execution)
-  - Finnhub (News - Requires User API Key)
-  - Yahoo RSS (News)
+  - Interactive Brokers (Data & Execution - Requires User credentials via Windows IB Gateway)
+  - HuggingFace (Local Execution)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Physical hardware constraints)
+  - Testing agent used after significant changes: NO (Hardware constraints). Used Pytest instead.
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None this session
+  - Test files created: 
   - Known regressions: None
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent did not forget anything; they correctly paused execution to get approval on the plan for modifying the massive 4400-line  file via . The task remains to wire  and start  in .</analysis>
+The agent did not forget anything, but was interrupted by the context limit while waiting for the user's network diagnostic results.
+
+**Debugging checklist for current issue**
+    Issue: Live Data RPC Port 8765 blocked by Windows
+    Backend files to check: N/A (OS-level network issue)
+    Checklist for next action:
+    - Review user's output for  and the DGX  after temporarily disabling the Public profile.
+    - If it succeeds, advise the user to leave the Public firewall off for that adapter, or change the adapter to Private.
+    - If it still fails, instruct the user to check system tray for McAfee/Norton/Bitdefender overriding Windows Defender.
+    - Once  passes, immediately add the env vars and restart the DGX backend to conclude Phase 1 setup.</analysis>
