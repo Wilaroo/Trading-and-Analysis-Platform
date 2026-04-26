@@ -879,10 +879,12 @@ class TrainingPipelineStatus:
 
 
 async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[str]:
-    """Get symbols that have enough bars for training, ranked by ADV (most liquid first).
-    
+    """Get symbols that have enough bars for training, drawn from the
+    canonical universe (`services.symbol_universe`).
+
     Uses a two-step approach to avoid expensive full-collection aggregation:
-    1. Get top symbols from symbol_adv_cache (small, fast, indexed)
+    1. Get tier-qualified symbols from `services.symbol_universe.get_universe_for_bar_size`
+       (canonical, shared with smart-backfill + backfill_readiness)
     2. Verify bar counts only for those candidates
     """
     try:
@@ -891,17 +893,21 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
         loop = asyncio.get_event_loop()
         
         def _run_query():
-            # Step 1: Get top symbols by ADV from the cache (fast — small collection)
-            # Fetch more candidates than we need to account for some lacking enough bars
-            candidate_limit = 5000  # Get all qualifying symbols from ADV cache
-            adv_cursor = db["symbol_adv_cache"].find(
-                {}, {"_id": 0, "symbol": 1, "avg_volume": 1}
-            ).sort("avg_volume", -1).limit(candidate_limit)
-            adv_ranked = list(adv_cursor)
+            from services.symbol_universe import (
+                get_universe_for_bar_size, BAR_SIZE_TIER,
+            )
+            # Step 1: Pull the canonical universe for this bar_size.
+            # Excludes `unqualifiable=true` symbols and applies the
+            # dollar-volume tier threshold matching smart-backfill.
+            universe = get_universe_for_bar_size(db, bar_size)
+            tier_label = BAR_SIZE_TIER.get(bar_size, "swing")
             
-            if not adv_ranked:
-                # Fallback: no ADV data — use the old aggregation approach
-                logger.warning("[get_available_symbols] No ADV cache data, falling back to aggregation")
+            if not universe:
+                # Fallback: no canonical universe resolved — use the old aggregation approach
+                logger.warning(
+                    f"[get_available_symbols] Canonical universe empty for "
+                    f"bar_size={bar_size} (tier={tier_label}); falling back to aggregation"
+                )
                 pipeline = [
                     {"$match": {"bar_size": bar_size}},
                     {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
@@ -910,8 +916,16 @@ async def get_available_symbols(db, bar_size: str, min_bars: int = 100) -> List[
                 symbols_with_bars = list(db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True, maxTimeMS=120000))
                 return [r["_id"] for r in symbols_with_bars]
             
-            candidate_symbols = [d["symbol"] for d in adv_ranked]
-            logger.info(f"[get_available_symbols] {len(candidate_symbols)} ADV candidates, verifying bar counts...")
+            # Preserve dollar-volume ranking so larger names train first.
+            adv_ranked = list(db["symbol_adv_cache"].find(
+                {"symbol": {"$in": list(universe)}},
+                {"_id": 0, "symbol": 1, "avg_dollar_volume": 1}
+            ).sort("avg_dollar_volume", -1))
+            candidate_symbols = [d["symbol"] for d in adv_ranked if d.get("symbol")]
+            logger.info(
+                f"[get_available_symbols] {len(candidate_symbols)} canonical "
+                f"candidates (tier={tier_label}); verifying bar counts..."
+            )
             
             # Step 2: Verify bar counts in batches using aggregation (faster than per-symbol count)
             verified = []

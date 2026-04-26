@@ -1588,28 +1588,30 @@ class TimeSeriesAIService:
         if self._db is None:
             return []
         
-        from services.ai_modules.setup_training_config import get_adv_threshold
-        adv_threshold = get_adv_threshold(bar_size)
+        from services.symbol_universe import (
+            get_universe_for_bar_size, BAR_SIZE_TIER,
+        )
+        tier = BAR_SIZE_TIER.get(bar_size, "swing")
         
         def _blocking_query():
             """This runs in a thread pool"""
             try:
-                # Step 1: Get ADV-qualified symbols from cache — this IS the filter
-                adv_qualified = set()
-                adv_cursor = self._db["symbol_adv_cache"].find(
-                    {"avg_volume": {"$gte": adv_threshold}},
-                    {"_id": 0, "symbol": 1}
-                )
-                for doc in adv_cursor:
-                    adv_qualified.add(doc["symbol"])
+                # Step 1: Get tier-qualified symbols from the canonical
+                # universe — shared with smart-backfill + readiness +
+                # training_pipeline.get_available_symbols. Excludes
+                # `unqualifiable=true` symbols automatically.
+                adv_qualified = get_universe_for_bar_size(self._db, bar_size)
                 
                 if not adv_qualified:
-                    logger.warning(f"No symbols meet ADV threshold {adv_threshold:,} for {bar_size}")
+                    logger.warning(
+                        f"No symbols in canonical {tier!r} universe for "
+                        f"bar_size={bar_size}"
+                    )
                     return []
                 
                 logger.info(
-                    f"ADV filter: {len(adv_qualified)} symbols >= {adv_threshold:,} volume "
-                    f"(threshold for {bar_size})"
+                    f"Canonical {tier!r} universe: {len(adv_qualified)} "
+                    f"symbols (bar_size={bar_size})"
                 )
                 
                 # Step 2: From those, find symbols with enough bars — no artificial limit
@@ -1633,8 +1635,8 @@ class TimeSeriesAIService:
             loop = asyncio.get_event_loop()
             symbols = await loop.run_in_executor(None, _blocking_query)
             logger.info(
-                f"Found {len(symbols)} ADV-filtered symbols with sufficient {bar_size} data "
-                f"(ADV >= {adv_threshold:,})"
+                f"Found {len(symbols)} canonical {tier!r}-tier symbols "
+                f"with sufficient {bar_size} data"
             )
             return symbols if symbols else [
                 "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 

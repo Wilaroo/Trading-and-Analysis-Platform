@@ -102,11 +102,13 @@ def _get_validation_symbols(db, bar_size: str, limit: int = None) -> List[str]:
     n = limit or VALIDATION_CONFIG["num_symbols"]
     min_dollar_vol = get_dollar_vol_threshold(bar_size)
     
-    # Try dollar volume from cache first (fast — no price lookups needed)
+    # Try dollar volume from cache first (fast — no price lookups needed).
+    # Excludes `unqualifiable=true` symbols (canonical universe rule).
     cursor = db["symbol_adv_cache"].find(
         {
             "avg_dollar_volume": {"$gte": min_dollar_vol},
             "atr_pct": {"$gte": ATR_PCT_MIN, "$lte": ATR_PCT_MAX},
+            "unqualifiable": {"$ne": True},
         },
         {"_id": 0, "symbol": 1, "avg_dollar_volume": 1}
     ).sort("avg_dollar_volume", -1).limit(n)

@@ -55,6 +55,22 @@ DOLLAR_VOL_THRESHOLDS: Dict[str, int] = {
     "investment": INVESTMENT_THRESHOLD,
 }
 
+# Per-bar-size → tier mapping. Used by every training entry point so a
+# 1-min model trains on the same universe smart-backfill is keeping
+# fresh, never on a wider/narrower one.
+#   1m / 5m / 15m / 30m  → intraday tier   (≥ $50M/day)
+#   1h  / 1d              → swing tier      (≥ $10M/day, super-set of intraday)
+#   1w                    → investment tier (≥ $2M/day,  super-set of swing)
+BAR_SIZE_TIER: Dict[str, str] = {
+    "1 min":   "intraday",
+    "5 mins":  "intraday",
+    "15 mins": "intraday",
+    "30 mins": "intraday",
+    "1 hour":  "swing",
+    "1 day":   "swing",
+    "1 week":  "investment",
+}
+
 # Bar sizes each tier needs on initial backfill. Smart-backfill in the
 # collector adds the union of `(tier-required, already-on-disk)` so
 # tier reclassification doesn't strand existing history (preserve-history
@@ -109,6 +125,19 @@ def get_universe(
     return {d["symbol"] for d in cursor if d.get("symbol")}
 
 
+def get_universe_for_bar_size(
+    db,
+    bar_size: str,
+    *,
+    include_unqualifiable: bool = False,
+) -> Set[str]:
+    """Return the canonical universe the AI training pipeline should
+    use for a given bar_size — single source of truth shared with
+    smart-backfill and readiness."""
+    tier = BAR_SIZE_TIER.get(bar_size, "swing")
+    return get_universe(db, tier, include_unqualifiable=include_unqualifiable)
+
+
 def classify_tier(avg_dollar_volume: Optional[float]) -> Optional[str]:
     """Map a dollar volume to its tier name. None → unqualified."""
     if avg_dollar_volume is None or avg_dollar_volume <= 0:
@@ -140,10 +169,12 @@ def get_symbol_tier(db, symbol: str) -> Optional[str]:
 
 
 def get_universe_stats(db) -> Dict[str, Any]:
-    """Diagnostic snapshot — counts per tier + unqualifiable counts.
+    """Diagnostic snapshot — counts per tier + unqualifiable counts +
+    per-bar-size training-universe projection.
 
-    Used by /api/backfill/readiness and the universe-freshness-health
-    endpoint to surface universe drift.
+    Used by /api/backfill/readiness and the FreshnessInspector UI to
+    surface universe drift and answer the operator question
+    "how many symbols will training pick up for each bar_size?".
     """
     if db is None:
         return {"error": "db not initialized"}
@@ -153,6 +184,22 @@ def get_universe_stats(db) -> Dict[str, Any]:
     invest_or_better = len(get_universe(db, "investment"))
     unqualifiable_count = adv.count_documents({"unqualifiable": True})
     total = adv.count_documents({})
+
+    # Per-bar-size training universe sizes — exactly what each training
+    # phase will pick up via get_universe_for_bar_size (also used by
+    # smart-backfill via TIMEFRAMES_BY_TIER for collection planning).
+    per_bar_size: Dict[str, Dict[str, Any]] = {}
+    by_tier_count = {
+        "intraday":   intraday,
+        "swing":      swing_or_better,
+        "investment": invest_or_better,
+    }
+    for bs, tier in BAR_SIZE_TIER.items():
+        per_bar_size[bs] = {
+            "tier": tier,
+            "symbols": by_tier_count[tier],
+        }
+
     return {
         "intraday": intraday,
         "swing_only": swing_or_better - intraday,
@@ -161,6 +208,7 @@ def get_universe_stats(db) -> Dict[str, Any]:
         "unqualifiable": unqualifiable_count,
         "total_in_cache": total,
         "thresholds": dict(DOLLAR_VOL_THRESHOLDS),
+        "training_universe_per_bar_size": per_bar_size,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

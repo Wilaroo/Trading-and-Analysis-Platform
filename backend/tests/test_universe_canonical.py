@@ -296,3 +296,79 @@ def test_default_iberndate_format_is_hyphen():
     assert 'IB_ENDDATE_FORMAT", "hyphen"' in src, (
         'IB_ENDDATE_FORMAT default must be "hyphen" (was "space" until 2026-04-26).'
     )
+
+
+# ---- Bar-size → tier mapping contract --------------------------------
+
+def test_bar_size_to_tier_mapping_is_canonical():
+    """1m–30m must train on intraday tier; 1h/1d on swing+; 1w on
+    investment+. This is the contract every training phase relies on."""
+    from services.symbol_universe import BAR_SIZE_TIER
+    assert BAR_SIZE_TIER["1 min"]   == "intraday"
+    assert BAR_SIZE_TIER["5 mins"]  == "intraday"
+    assert BAR_SIZE_TIER["15 mins"] == "intraday"
+    assert BAR_SIZE_TIER["30 mins"] == "intraday"
+    assert BAR_SIZE_TIER["1 hour"]  == "swing"
+    assert BAR_SIZE_TIER["1 day"]   == "swing"
+    assert BAR_SIZE_TIER["1 week"]  == "investment"
+
+
+def test_get_universe_for_bar_size_routes_correctly():
+    from services.symbol_universe import get_universe_for_bar_size
+    db = _DB(_adv_fixture())
+    # 1-min training pulls the intraday universe.
+    assert get_universe_for_bar_size(db, "1 min")  == {"AAPL", "MSFT", "TSLA"}
+    # 1-hour training pulls swing+ (intraday ⊂ swing).
+    assert get_universe_for_bar_size(db, "1 hour") == {"AAPL", "MSFT", "TSLA",
+                                                       "DIS", "ROKU"}
+    # 1-week training pulls investment+ (everything qualified).
+    assert get_universe_for_bar_size(db, "1 week") == {"AAPL", "MSFT", "TSLA",
+                                                       "DIS", "ROKU", "PLTR",
+                                                       "ABCD"}
+
+
+def test_universe_stats_exposes_per_bar_size_training_projection():
+    from services.symbol_universe import get_universe_stats
+    db = _DB(_adv_fixture())
+    stats = get_universe_stats(db)
+    per_bs = stats.get("training_universe_per_bar_size", {})
+    assert "1 min" in per_bs and per_bs["1 min"]["tier"] == "intraday"
+    assert per_bs["1 min"]["symbols"] == 3   # AAPL, MSFT, TSLA
+    assert per_bs["1 hour"]["symbols"] == 5  # + DIS, ROKU
+    assert per_bs["1 week"]["symbols"] == 7  # + PLTR, ABCD
+
+
+# ---- Training pipeline integration invariants ------------------------
+
+def test_training_pipeline_uses_canonical_universe_module():
+    """get_available_symbols MUST go through services.symbol_universe.
+    Locks out the historical 'rank by share volume from raw adv cache'
+    regression that drove training to 4,000+ symbols pre-2026-04-26."""
+    src = inspect.getsource(
+        importlib.import_module("services.ai_modules.training_pipeline")
+    )
+    assert "get_universe_for_bar_size" in src, (
+        "training_pipeline must call get_universe_for_bar_size so the "
+        "AI training universe matches smart-backfill + readiness."
+    )
+
+
+def test_timeseries_service_uses_canonical_universe_module():
+    src = inspect.getsource(
+        importlib.import_module("services.ai_modules.timeseries_service")
+    )
+    assert "get_universe_for_bar_size" in src, (
+        "timeseries_service get_training_symbols must call "
+        "get_universe_for_bar_size to share the canonical universe."
+    )
+
+
+def test_post_training_validator_excludes_unqualifiable():
+    """Validator must respect the canonical universe's unqualifiable
+    flag, otherwise validation backtests run on dead/delisted symbols."""
+    src = inspect.getsource(
+        importlib.import_module("services.ai_modules.post_training_validator")
+    )
+    assert '"unqualifiable":' in src and '$ne' in src, (
+        "_get_validation_symbols must filter out unqualifiable symbols."
+    )

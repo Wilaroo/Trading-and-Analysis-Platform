@@ -1,6 +1,66 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (cont.) — Training Pipeline canonicalization + UI surface
+
+Closing the loop: every AI training entry point now reads from the
+same `services.symbol_universe.get_universe_for_bar_size(db, bar_size)`
+that smart-backfill + readiness use. The 4,000-symbol-runaway training
+class of bug is now structurally impossible.
+
+### Code wired through canonical universe
+- **`services/symbol_universe.py`** — added `BAR_SIZE_TIER` map and
+  `get_universe_for_bar_size(db, bar_size)` helper. 1m/5m/15m/30m →
+  intraday, 1h/1d → swing, 1w → investment.
+- **`ai_modules/training_pipeline.py::get_available_symbols`** —
+  replaced "rank by share volume from raw adv cache, return up to 5000"
+  with "pull canonical universe, rank by dollar volume". Excludes
+  `unqualifiable=true` automatically.
+- **`ai_modules/timeseries_service.py::get_training_symbols`** —
+  replaced share-volume threshold with `get_universe_for_bar_size`.
+- **`ai_modules/post_training_validator.py::_get_validation_symbols`**
+  — added `unqualifiable: {"$ne": True}` filter on the dollar-volume
+  fast path so validation backtests can't pick up dead symbols.
+- **`get_universe_stats`** now returns `training_universe_per_bar_size`
+  — the per-bar-size symbol-count projection that reveals exactly
+  what each training phase will pick up.
+
+### New UI tile
+- **`frontend/src/components/sentcom/v5/CanonicalUniverseCard.jsx`** —
+  fetches `/api/backfill/universe?tier=all` and renders:
+  total qualified · intraday count · unqualifiable count · per-bar-size
+  training universe sizes (1m/5m/.../1w → ## symbols, color-coded by
+  tier). Mounted between BackfillReadinessCard and LastTrainingRunCard
+  in the FreshnessInspector — operator now sees the readiness verdict,
+  the universe each timeframe will train on, and the last training
+  outcome stacked vertically.
+
+### Test coverage (6 additional contract tests)
+- `BAR_SIZE_TIER` mapping locked: 1m/5m/15m/30m → intraday, 1h/1d → swing, 1w → investment.
+- `get_universe_for_bar_size` routes correctly through `get_universe`.
+- `get_universe_stats` exposes per-bar-size training projection.
+- Source-level invariants: `training_pipeline.get_available_symbols`,
+  `timeseries_service.get_training_symbols`, and
+  `post_training_validator._get_validation_symbols` MUST go through
+  the canonical universe / unqualifiable filter.
+- 70/70 directly-related tests green, 4 services lint-clean (1 unused
+  variable removed during refactor).
+
+### Verified live
+- `GET /api/backfill/universe?tier=all` returns the new
+  `training_universe_per_bar_size` block with per-tier counts.
+- Backend + frontend supervisor both RUNNING after restart.
+
+### What this delivers operationally
+- Smart-backfill, readiness, and ALL training paths can never disagree
+  on the universe definition again — they share one Python module.
+- The FreshnessInspector now answers three operator questions in one
+
 ## 2026-04-26 — Canonical Universe Refactor + IB hyphen default — SHIPPED
+
+  click: "Am I ready to train?" + "What will training pick up?" +
+  "What did the last run produce?".
+
+
 
 **Root-cause fix** for the 68-hour AI training projection: smart-backfill
 classified its universe by **dollar volume** (`avg_dollar_volume ≥ $50M` →
