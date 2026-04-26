@@ -3087,7 +3087,8 @@ async def get_comprehensive_analysis(symbol: str):
     - Matched strategies
     - Trading opportunities summary
     
-    Note: Uses Alpaca as primary data source when IB is busy or unavailable.
+    Note: Strict IB-only — Pushed IB → IB Position → Direct IB → MongoDB.
+    Alpaca paths removed (canonical universe + pusher RPC architecture).
     """
     from datetime import datetime, timezone
     from pymongo import MongoClient
@@ -3106,7 +3107,7 @@ async def get_comprehensive_analysis(symbol: str):
             is_connected = status.get("connected", False)
             ib_is_busy, busy_operation = _ib_service.is_busy()
             if ib_is_busy:
-                print(f"[Analysis] IB busy with '{busy_operation}', using Alpaca for {symbol}")
+                print(f"[Analysis] IB busy with '{busy_operation}' — degraded mode for {symbol}")
         except:
             pass
     
@@ -3162,7 +3163,7 @@ async def get_comprehensive_analysis(symbol: str):
                    "NVDA": 875.0, "TSLA": 245.0, "JPM": 195.0, "V": 280.0, "JNJ": 155.0}
     base_price = base_prices.get(symbol, 100 + random.random() * 200)
     
-    # ── QUOTE PRIORITY: Pushed IB (live) → Direct IB → Alpaca → IB Position → MongoDB ──
+    # ── QUOTE PRIORITY: Pushed IB (live) → IB Position → Direct IB → MongoDB ──
     quote_fetched = False
     
     # 1. Pushed IB data (LIVE — from Windows PC pusher, updates every few seconds)
@@ -3226,29 +3227,9 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"IB quote error: {e}")
     
-    # 4. Legacy stock_service fallback (Alpaca shim — only active when
-    # ENABLE_ALPACA_FALLBACK=true). When the flag is off _stock_service is
-    # still wired but has no Alpaca backend; the shim delegates to
-    # IBDataProvider, so the label here is accurate as "ib_shim".
-    if not quote_fetched and _stock_service:
-        try:
-            quote = await _stock_service.get_quote(symbol)
-            if quote and quote.get("price", 0) > 0:
-                analysis["quote"] = quote
-                base_price = quote.get("price", base_price)
-                quote_fetched = True
-                analysis["data_freshness"] = "live"
-                _flag = os.environ.get("ENABLE_ALPACA_FALLBACK", "false").strip().lower()
-                analysis["data_source"] = (
-                    "Alpaca (legacy shim)"
-                    if _flag in {"1", "true", "yes", "on"}
-                    else "IB shim (via stock_service)"
-                )
-                analysis["data_as_of"] = datetime.now(timezone.utc).isoformat()
-        except Exception as e:
-            print(f"stock_service quote error: {e}")
-    
-    # 5. MongoDB last known price (STALE — from historical bars)
+    # 4. MongoDB last known price (STALE — from historical bars)
+    # Strict IB-only architecture: legacy `_stock_service` (Alpaca-shim)
+    # fallback removed. Pushed IB → IB position → Direct IB → MongoDB.
     if not quote_fetched:
         try:
             from database import get_database
@@ -3294,24 +3275,11 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"Error getting fundamentals: {e}")
     
-    # Try Alpaca first for historical data
+    # Strict IB-only — historical bars come from IB directly (or pusher RPC
+    # via fetch_latest_session_bars during market hours). Alpaca path
+    # removed.
     bars = []
-    if _alpaca_service:
-        try:
-            alpaca_bars = await _alpaca_service.get_bars(symbol, "5Min", 200)
-            if alpaca_bars and len(alpaca_bars) > 20:
-                bars = [{
-                    "open": b["open"],
-                    "high": b["high"],
-                    "low": b["low"],
-                    "close": b["close"],
-                    "volume": b["volume"]
-                } for b in alpaca_bars]
-        except Exception as e:
-            print(f"Alpaca historical error: {e}")
-    
-    # Fallback to IB for historical data
-    if not bars and is_connected and _ib_service:
+    if is_connected and _ib_service:
         try:
             hist_data = await _ib_service.get_historical_data(symbol=symbol, duration="5 D", bar_size="5 mins")
             bars = hist_data if isinstance(hist_data, list) else hist_data.get("bars", [])
@@ -3495,38 +3463,8 @@ async def get_comprehensive_analysis(symbol: str):
         }
     
     if not analysis["support_resistance"]:
-        # Try to get bars from Alpaca for enhanced S/R even if IB didn't have data
-        try:
-            if _alpaca_service:
-                fallback_bars = await _alpaca_service.get_bars(symbol, timeframe="1Day", limit=60)
-                if fallback_bars and len(fallback_bars) >= 10:
-                    sr_service = get_sr_service()
-                    sr_analysis = await sr_service.get_sr_analysis(
-                        symbol=symbol,
-                        bars=fallback_bars,
-                        current_price=base_price,
-                        include_pivots=True,
-                        include_volume_profile=True,
-                        include_reaction_zones=True
-                    )
-                    sr_summary = sr_service.get_key_levels_summary(sr_analysis)
-                    
-                    analysis["support_resistance"] = {
-                        "resistance_1": sr_summary["nearest_resistance"]["price"] if sr_summary["nearest_resistance"] else round(base_price * 1.025, 2),
-                        "resistance_2": sr_summary["resistance_levels"][1]["price"] if len(sr_summary["resistance_levels"]) > 1 else round(base_price * 1.05, 2),
-                        "support_1": sr_summary["nearest_support"]["price"] if sr_summary["nearest_support"] else round(base_price * 0.975, 2),
-                        "support_2": sr_summary["support_levels"][1]["price"] if len(sr_summary["support_levels"]) > 1 else round(base_price * 0.95, 2),
-                        "pivot": sr_summary["pivot_point"] if sr_summary["pivot_point"] else round(base_price, 2),
-                        "day_high": round(base_price * 1.015, 2),
-                        "day_low": round(base_price * 0.985, 2),
-                        "volume_profile": sr_summary["volume_profile"],
-                        "confluence_zones": sr_summary["confluence_zones"],
-                        "support_levels": sr_summary["support_levels"],
-                        "resistance_levels": sr_summary["resistance_levels"]
-                    }
-        except Exception as e:
-            print(f"Fallback S/R calculation error: {e}")
-        
+        # Strict IB-only — Alpaca S/R fallback removed. If IB historical
+        # didn't yield bars, fall through to the heuristic ±2.5% band below.
         # Final fallback if still not populated
         if not analysis["support_resistance"]:
             analysis["support_resistance"] = {

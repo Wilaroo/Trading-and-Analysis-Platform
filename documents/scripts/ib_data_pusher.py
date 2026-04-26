@@ -986,8 +986,10 @@ class IBDataPusher:
         try:
             accounts = self.ib.managedAccounts()
             if accounts:
-                # Use subscribe=True to get continuous updates, don't wait for response
-                self.ib.reqAccountUpdates(subscribe=True, account=accounts[0])
+                # ib_insync's IB.reqAccountUpdates only accepts `account` —
+                # the underlying `subscribe` toggle lives on ib.client.
+                # Calling with just `account` subscribes by default.
+                self.ib.reqAccountUpdates(account=accounts[0])
                 logger.info(f"  Requested account updates for {accounts[0]}")
         except Exception as e:
             logger.error(f"Account update request error: {e}")

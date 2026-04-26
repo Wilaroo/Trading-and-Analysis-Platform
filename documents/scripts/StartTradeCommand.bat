@@ -275,7 +275,8 @@ if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     start "[IB PUSHER] Market Data" cmd /k "title [IB PUSHER] Market Data Feed to Spark && color 0E && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [IB PUSHER] Real-Time Market Data && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_PUSHER_CLIENT_ID% ^| Color: YELLOW && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %SPARK_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
     echo        Data pusher started (client ID: %IB_PUSHER_CLIENT_ID%)
 ) else (
-    echo        [SKIP] ib_data_pusher.py not found
+    echo        [SKIP] ib_data_pusher.py not found at: %SCRIPTS_DIR%\ib_data_pusher.py
+    echo               Check that REPO_DIR (line 16) points to the actual repo root.
 )
 echo.
 

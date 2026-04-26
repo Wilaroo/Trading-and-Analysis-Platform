@@ -1,5 +1,58 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (later) — Phase 1 LIVE + Phase 2 verified + IB-only cleanup — SHIPPED
+
+### Phase 1: Live Data RPC reachable from DGX → Pusher (FULLY ON)
+- DGX `.env` updated: `IB_PUSHER_RPC_URL=http://192.168.50.1:8765`, `ENABLE_LIVE_BAR_RPC=true`.
+- Windows firewall rule `IB Pusher RPC` (Profile=Any, Allow Inbound TCP 8765) installed.
+- `Ethernet 3` adapter category permanently flipped from **Public → Private**, so
+  the Public-profile `Python` Block rule no longer overrides our Allow.
+- `GET /api/live/pusher-rpc-health` from DGX backend returns
+  `reachable: true, client.url: "http://192.168.50.1:8765"`. Phase 1
+  closed.
+- On weekends (`market_state: "weekend"` and `ib_connected: false` on the
+  pusher) the `latest-bars` path correctly returns
+  `error: pusher_rpc_unreachable` — expected behaviour, validates the
+  weekend kill-switch path.
+
+### Phase 2: Live Subscription Layer — VERIFIED end-to-end
+- `services/live_subscription_manager.py` (ref-counted, sweep, heartbeat) +
+  `routers/live_data_router.py` Phase 2 endpoints already in code.
+- Pusher `/rpc/subscribe`, `/rpc/unsubscribe`, `/rpc/subscriptions` exist
+  in `documents/scripts/ib_data_pusher.py`.
+- Frontend hook `hooks/useLiveSubscription.js` wired into `ChartPanel`,
+  `EnhancedTickerModal`, `ScannerCardsV5`. 2-min heartbeat + unmount
+  unsubscribe behaviour matches backend's 5-min auto-expire sweep.
+- Smoke test on the cloud-preview backend: subscribe → ref_count 1 →
+  subscribe → ref_count 2 → heartbeat → unsubscribe → ref_count 1 →
+  unsubscribe (1→0, fully_unsubscribed=true) all return `accepted: true`
+  with correct ref-count semantics. List endpoint reports
+  `age_seconds`, `idle_seconds`, `pusher_ok`. Sweep endpoint live.
+- Tests: 99/99 phase-1/2/3 tests green.
+
+### IB-only cleanup (P3)
+- `routers/ib.py::get_comprehensive_analysis` (`/api/ib/analysis/{symbol}`)
+  — removed all hardcoded Alpaca paths:
+    * Quote step 4 (`_stock_service` legacy shim) — DELETED.
+    * Historical-bars step 1 (`_alpaca_service.get_bars(...)`) — DELETED;
+      now goes IB direct → MongoDB ib_historical_data fallback.
+    * S/R fallback `_alpaca_service.get_bars(...)` — DELETED; goes
+      straight to the heuristic ±2.5% band when IB has no bars.
+    * Quote priority comment + busy-mode log message updated to reflect
+      Pushed IB → IB Position → Direct IB → MongoDB.
+- `documents/scripts/ib_data_pusher.py::request_account_updates` — fixed
+  ib_insync API drift: `IB.reqAccountUpdates(account=...)` (the
+  `subscribe` kwarg lives on `ib.client`, not the high-level `IB` class).
+- `documents/scripts/StartTradeCommand.bat` — `[SKIP] ib_data_pusher.py
+  not found` now prints the full path it checked.
+
+### Files changed this session
+- `backend/routers/ib.py`
+- `documents/scripts/ib_data_pusher.py`
+- `documents/scripts/StartTradeCommand.bat`
+- `backend/.env` (DGX side, manual edit)
+- `backend/tests/test_live_subscription_e2e_curl.md` (new — operator run book)
+
 ## 2026-04-26 (cont.) — Training Pipeline canonicalization + UI surface
 
 Closing the loop: every AI training entry point now reads from the
