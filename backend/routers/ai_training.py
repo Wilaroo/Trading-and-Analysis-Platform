@@ -1582,3 +1582,178 @@ def get_gpu_status():
         return {"success": True, "gpu": info}
     except Exception as e:
         return {"success": True, "gpu": {"gpu": "Unknown", "cuda": False, "error": str(e)}}
+
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  TROPHY RUN — last successful training pipeline summary (for the
+#  FreshnessInspector "Last Trophy Run" SLA tile).
+#
+#  Reads from `training_runs_archive` (populated when the pipeline marks
+#  itself completed in services/ai_modules/training_pipeline.py).
+# ──────────────────────────────────────────────────────────────────────
+
+@router.get("/last-trophy-run")
+async def get_last_trophy_run(only_trophy: bool = True):
+    """Return the most recent archived training run summary.
+
+    A "trophy run" is one that completed with 0 failed models and 0 errors.
+    By default returns only trophy runs; pass `only_trophy=false` to fall
+    back to the most recent run regardless of failure status.
+
+    Response shape (compact, frontend-friendly):
+        {
+          "success": True,
+          "found": true|false,
+          "is_trophy": bool,
+          "started_at": iso,
+          "completed_at": iso,
+          "elapsed_seconds": float,
+          "elapsed_human": "6h 54m",
+          "models_trained_count": int,
+          "models_failed_count": int,
+          "errors": int,
+          "phase_health": [
+              {"phase": "P5", "label": "Sector-Relative",
+               "models": 3, "total": 3, "failed": 0, "acc": 0.537,
+               "is_recurrence_watch": true, "ok": true},
+              ...
+          ],
+          "headline_accuracies": [
+              {"model": "vae_regime_detector", "accuracy": 1.00},
+              {"model": "..._predictor", "accuracy": 0.94},
+              ...
+          ]
+        }
+    """
+    try:
+        from server import db
+        if db is None:
+            return {"success": False, "found": False, "error": "db_unavailable"}
+
+        col = db["training_runs_archive"]
+        query = {"is_trophy": True} if only_trophy else {}
+        # Most recent by completed_at
+        doc = col.find_one(query, sort=[("completed_at", -1)], projection={"_id": 0})
+        if not doc and only_trophy:
+            # Fall back to any most-recent run if no trophy on file
+            doc = col.find_one({}, sort=[("completed_at", -1)], projection={"_id": 0})
+
+        # Fallback for backfilling pre-archive runs: if no archived doc but
+        # the live pipeline_status shows a completed run, synthesize a doc
+        # from it so the just-finished run shows up in the UI immediately.
+        if not doc:
+            live = db["training_pipeline_status"].find_one(
+                {"_id": "pipeline"}, projection={"_id": 0},
+            )
+            if live and live.get("phase") == "completed":
+                ph_hist = live.get("phase_history") or {}
+                trained = sum((ph.get("models") or 0) for ph in ph_hist.values())
+                failed = sum((ph.get("failed") or 0) for ph in ph_hist.values())
+                start = live.get("started_at")
+                end = live.get("updated_at") or live.get("completed_at")
+                elapsed = 0.0
+                if start and end:
+                    try:
+                        elapsed = (datetime.fromisoformat(end.replace("Z", "+00:00"))
+                                   - datetime.fromisoformat(start.replace("Z", "+00:00"))
+                                  ).total_seconds()
+                    except Exception:
+                        pass
+                doc = {
+                    "started_at": start,
+                    "completed_at": end,
+                    "elapsed_seconds": elapsed,
+                    "models_trained_count": trained,
+                    "models_failed_count": failed,
+                    "errors": int(live.get("errors") or 0),
+                    "total_samples": 0,
+                    "models_trained": list(live.get("recently_completed") or []),
+                    "phase_breakdown": ph_hist,
+                    "is_trophy": failed == 0 and int(live.get("errors") or 0) == 0,
+                    "_synthesized_from_live": True,
+                }
+
+        if not doc:
+            return {"success": True, "found": False}
+
+        # ── Phase health rollup (recurrence-watch on P5 + P8) ────────
+        phase_breakdown = doc.get("phase_breakdown") or {}
+        recurrence_watch = {"P5", "P8"}
+        phase_labels = {
+            "P1": "Generic Directional",
+            "P2": "Setup Long",
+            "P2.5": "Setup Short",
+            "P3": "Volatility",
+            "P4": "Exit Timing",
+            "P5": "Sector-Relative",
+            "P5.5": "Gap Fill",
+            "P6": "Risk-of-Ruin",
+            "P7": "Regime-Conditional",
+            "P8": "Ensemble",
+            "P9": "CNN Patterns",
+            "P11": "Deep Learning",
+            "P12": "FinBERT",
+            "P13": "Validation",
+        }
+        phase_health = []
+        for pk, ph in phase_breakdown.items():
+            if not isinstance(ph, dict):
+                continue
+            models = ph.get("models") or ph.get("completed") or 0
+            total = ph.get("total") or ph.get("target") or 0
+            failed = ph.get("failed") or 0
+            phase_health.append({
+                "phase": pk,
+                "label": phase_labels.get(pk, pk),
+                "models": models,
+                "total": total,
+                "failed": failed,
+                "acc": ph.get("acc"),
+                "time_minutes": ph.get("time"),
+                "is_recurrence_watch": pk in recurrence_watch,
+                "ok": failed == 0 and (total == 0 or models >= total),
+            })
+        phase_health.sort(key=lambda x: x["phase"])
+
+        # ── Headline accuracies — top 6 by accuracy across all models ──
+        models_list = doc.get("models_trained") or []
+        scored = [m for m in models_list
+                  if isinstance(m.get("accuracy"), (int, float))]
+        scored.sort(key=lambda m: m["accuracy"], reverse=True)
+        headline = [
+            {"model": m["name"], "phase": m.get("phase"),
+             "accuracy": float(m["accuracy"])}
+            for m in scored[:6] if m.get("name")
+        ]
+
+        # Elapsed-human
+        secs = float(doc.get("elapsed_seconds") or 0)
+        h = int(secs // 3600)
+        m = int((secs % 3600) // 60)
+        elapsed_human = (f"{h}h {m}m" if h else f"{m}m") if secs > 0 else "—"
+
+        return {
+            "success": True,
+            "found": True,
+            "is_trophy": bool(doc.get("is_trophy")),
+            "started_at": doc.get("started_at"),
+            "completed_at": doc.get("completed_at"),
+            "archived_at": doc.get("archived_at"),
+            "elapsed_seconds": secs,
+            "elapsed_human": elapsed_human,
+            "models_trained_count": int(doc.get("models_trained_count") or 0),
+            "models_failed_count": int(doc.get("models_failed_count") or 0),
+            "errors": int(doc.get("errors") or 0),
+            "total_samples": int(doc.get("total_samples") or 0),
+            "phase_health": phase_health,
+            "phase_count": len(phase_health),
+            "phase_recurrence_watch_ok": all(
+                p["ok"] for p in phase_health if p["is_recurrence_watch"]
+            ),
+            "headline_accuracies": headline,
+            "validation_summary": doc.get("validation_summary") or {},
+        }
+    except Exception as e:
+        logger.exception("last-trophy-run failed")
+        return {"success": False, "found": False, "error": str(e)}

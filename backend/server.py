@@ -1452,6 +1452,8 @@ except Exception as _ldr_exc:
 # Safety guardrails — kill-switch, exposure caps, emergency flatten-all
 from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)
+from routers.autonomy_router import router as autonomy_router  # noqa: E402
+app.include_router(autonomy_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

@@ -1,5 +1,69 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 (FINAL+) — Trophy Run Tile + Autonomy Readiness Dashboard — SHIPPED
+
+### "Last Successful Trophy Run" tile (operator SLA badge)
+- New collection `training_runs_archive` written from
+  `services/ai_modules/training_pipeline.py` when the pipeline marks itself
+  completed. Contains: started_at, completed_at, elapsed_seconds,
+  models_trained list w/ accuracy + phase, phase_breakdown deep-copy,
+  is_trophy boolean (failed=0 AND errors=0).
+- New endpoint `GET /api/ai-training/last-trophy-run` returning structured
+  summary with phase_recurrence_watch_ok (P5/P8), headline_accuracies (top 6),
+  elapsed_human, total_samples. Falls back to synthesizing from live
+  `training_pipeline_status` when archive is empty (so the just-completed
+  run shows up without retraining).
+- New frontend tile `LastTrophyRunCard.jsx` mounted in FreshnessInspector
+  underneath `LastTrainingRunCard`. Shows verdict pill (TROPHY ✓ / PARTIAL),
+  per-phase health strip with star markers on P5+P8, top-5 accuracies.
+
+### Autonomy Readiness Dashboard (Monday-morning go/no-go)
+- New router `routers/autonomy_router.py` with `GET /api/autonomy/readiness`
+  aggregating 7 sub-checks:
+    1. account_active — paper vs live confirmed, current account_id known
+    2. pusher_rpc — DGX → Windows pusher reachable AND ib_connected
+    3. live_bars — pusher returns real bars on a SPY query
+    4. trophy_run — last successful run within 7 days
+    5. kill_switch — enabled: true, not currently tripped
+    6. eod_auto_close — auto-close before market close enabled
+    7. risk_consistency — bot risk_params don't conflict with kill switch
+  Verdict: green (all pass) | amber (warnings) | red (blockers).
+- New frontend tile `AutonomyReadinessCard.jsx` mounted in FreshnessInspector
+  beneath the trophy-run tile. Shows verdict pill, per-check grid with
+  click-to-expand drawer, auto-execute master-gate banner (LIVE/OFF), and
+  `next_steps` action list.
+- The dashboard correctly identified 2 blockers (pusher_rpc, trophy_run on
+  preview pod) + 3 warnings (account/live_bars on weekend, risk_consistency
+  conflicts) — surfaces real config issues operators need to fix.
+
+### Risk-param conflicts surfaced (warnings, not blockers)
+- `trading_bot.max_open_positions=10 > kill_switch.max_positions=5` →
+  effective cap: 5 (kill switch wins)
+- `trading_bot.max_daily_loss=0` (unset); kill switch caps at $500 → bot
+  value should match
+- `min_risk_reward=0.8` accepts trades where reward < risk
+- `max_position_pct=50%` allows a single position to be half capital
+
+### Tests (15 new regression tests)
+- `tests/test_trophy_run_archive.py`: 10 tests — endpoint smoke, trophy
+  classification, recurrence-watch rollup, headline accuracies sort, top-N cap
+- `tests/test_autonomy_readiness.py`: 5 tests — endpoint smoke, verdict logic,
+  ready_for_autonomous gate, risk-consistency edge cases (clean / cap conflict
+  / daily_loss unset / rr<1 / aggressive position pct)
+- 111/111 tests green
+  (+15 new + 96 existing across phase 1/2/3 + scanner + canonical universe)
+
+### Files added/changed
+- `backend/services/ai_modules/training_pipeline.py` — archive snapshot
+- `backend/routers/ai_training.py` — `/last-trophy-run` endpoint
+- `backend/routers/autonomy_router.py` — NEW
+- `backend/server.py` — wire autonomy_router
+- `frontend/src/components/sentcom/v5/LastTrophyRunCard.jsx` — NEW
+- `frontend/src/components/sentcom/v5/AutonomyReadinessCard.jsx` — NEW
+- `frontend/src/components/sentcom/v5/FreshnessInspector.jsx` — mount cards
+- `backend/tests/test_trophy_run_archive.py` — NEW
+- `backend/tests/test_autonomy_readiness.py` — NEW
+
 ## 2026-04-26 (FINAL) — TRAIN ALL 173-model run COMPLETED, 0 failures
 
 ### Trophy Run (414m, 6h 54m elapsed, 0 errors across 14 phases)

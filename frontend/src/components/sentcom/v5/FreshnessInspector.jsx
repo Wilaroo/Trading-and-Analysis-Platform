@@ -15,7 +15,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, RefreshCw } from 'lucide-react';
 import { BackfillReadinessCard } from './BackfillReadinessCard';
 import { LastTrainingRunCard } from './LastTrainingRunCard';
+import { LastTrophyRunCard } from './LastTrophyRunCard';
 import { CanonicalUniverseCard } from './CanonicalUniverseCard';
+import { AutonomyReadinessCard } from './AutonomyReadinessCard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const POLL_MS = 15_000;
@@ -137,6 +139,18 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
                 P8 specially since those have been the recurring failures
                 across prior sessions. */}
             <LastTrainingRunCard refreshToken={refreshCounter} />
+
+            {/* Last successful TROPHY run — permanent SLA badge that
+                survives starting a new run. Reads from
+                training_runs_archive (with a fallback synth from live
+                status for the most recent run before archive existed). */}
+            <LastTrophyRunCard refreshToken={refreshCounter} />
+
+            {/* Autonomy readiness — single go/no-go gate before flipping
+                auto-execute. Aggregates 7 sub-checks (account, pusher,
+                live bars, trophy run, kill switch, EOD, risk consistency)
+                + the auto-execute master-gate status. */}
+            <AutonomyReadinessCard refreshToken={refreshCounter} />
 
             {/* Subsystem grid */}
             <section data-testid="inspector-subsystems">

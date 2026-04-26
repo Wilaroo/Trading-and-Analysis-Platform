@@ -3796,6 +3796,47 @@ async def run_training_pipeline(
             f"[Total time: {_total_hrs}h{_total_min:02d}m]"
         )
 
+        # ── Archive the run as a "trophy run" snapshot ───────────────────
+        # Persisted into `training_runs_archive` so the FreshnessInspector
+        # can show the last successful run as a permanent SLA badge that
+        # survives starting a new training run.
+        try:
+            if self._db is not None:
+                from copy import deepcopy
+                snap = {
+                    "_id": results.get("started_at") or results["completed_at"],
+                    "started_at": results.get("started_at"),
+                    "completed_at": results["completed_at"],
+                    "elapsed_seconds": _total_elapsed,
+                    "models_trained_count": len(results["models_trained"]),
+                    "models_failed_count": len(results["models_failed"]),
+                    "models_trained": [
+                        {"name": m.get("name") or m.get("model"),
+                         "phase": m.get("phase"),
+                         "accuracy": m.get("accuracy"),
+                         "samples": m.get("samples")}
+                        for m in (results.get("models_trained") or [])
+                    ],
+                    "phase_breakdown": deepcopy(self._status.get("phase_history") or {}),
+                    "total_samples": results.get("total_samples", 0),
+                    "errors": results.get("errors", 0),
+                    "validation_summary": results.get("validation_summary", {}),
+                    "is_trophy": (len(results["models_failed"]) == 0
+                                  and results.get("errors", 0) == 0),
+                    "archived_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self._db["training_runs_archive"].update_one(
+                    {"_id": snap["_id"]}, {"$set": snap}, upsert=True,
+                )
+                logger.info(
+                    f"[TROPHY] Archived run snapshot to training_runs_archive: "
+                    f"{snap['models_trained_count']} models, "
+                    f"{snap['models_failed_count']} failed, "
+                    f"is_trophy={snap['is_trophy']}"
+                )
+        except Exception as exc:
+            logger.warning(f"[TROPHY] Failed to archive run snapshot: {exc}")
+
     except Exception as e:
         logger.error(f"Training pipeline error: {e}")
         results["error"] = str(e)
