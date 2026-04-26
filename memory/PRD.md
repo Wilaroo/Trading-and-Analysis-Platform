@@ -1,5 +1,110 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-26 — Canonical Universe Refactor + IB hyphen default — SHIPPED
+
+**Root-cause fix** for the 68-hour AI training projection: smart-backfill
+classified its universe by **dollar volume** (`avg_dollar_volume ≥ $50M` →
+~1,186 symbols) while backfill_readiness used **share volume**
+(`avg_volume ≥ 500k` → ~2,648 symbols). Training picked up the union
+(4,000+ symbols) and ran for 68h. Worse, readiness could never go fully
+green because it counted symbols that smart-backfill never tried to
+refresh.
+
+### Single source of truth
+- New module **`backend/services/symbol_universe.py`** — every consumer
+  (smart-backfill, readiness checks, training pipeline, AI chat snapshots)
+  pulls universes from one place. Public API:
+    * `get_universe(db, tier)` — `tier ∈ {intraday, swing, investment, all}`,
+      defaults to excluding unqualifiable symbols
+    * `classify_tier(avg_dollar_volume)` — pure function, used by
+      smart-backfill when an `adv` doc lacks a stored `tier`
+    * `get_symbol_tier(db, symbol)` — single-symbol lookup
+    * `get_universe_stats(db)` — diagnostics for the UI / readiness
+    * `mark_unqualifiable(db, symbol)` — tracks IB "No security
+      definition" strikes; promotes to `unqualifiable=true` after 3
+    * `reset_unqualifiable(db, symbol)` — operator escape hatch
+- **Locked thresholds** (user-confirmed 2026-04-26):
+  intraday ≥ $50M, swing ≥ $10M, investment ≥ $2M.
+
+### Schema additions on `symbol_adv_cache`
+- `unqualifiable: bool` — exclude from every universe selector once true
+- `unqualifiable_failure_count: int` — running count of IB failures
+- `unqualifiable_marked_at`, `unqualifiable_reason`, `unqualifiable_last_seen_at`
+
+### Wiring
+- **`backfill_readiness_service.py`** — `_check_overall_freshness` and
+  `_check_density_adequate` both replaced their `avg_volume ≥ 500k`
+  query with `get_universe(db, 'intraday')`.
+- **`ib_historical_collector.py::_smart_backfill_sync`** — reads from
+  the canonical universe + tier classification, and excludes
+  `unqualifiable=true` symbols (so dead/delisted names don't get
+  re-queued every run).
+- **`routers/ib.py::/historical-data/skip-symbol`** — when the pusher
+  reports a "No security definition" symbol, the endpoint now also
+  calls `mark_unqualifiable`. After 3 strikes that symbol is promoted
+  and silently dropped from every future readiness/backfill/training
+  selection (preserves the preserve-history rule from 2026-04-25 — a
+  promoted-then-recovered symbol can be reset via the operator endpoint).
+
+### New operator endpoints
+- `GET  /api/backfill/universe?tier=intraday|swing|investment|all` —
+  returns the canonical symbol list + universe stats (counts per tier,
+  unqualifiable count, current thresholds).
+- `POST /api/backfill/universe/reset-unqualifiable/{symbol}` — clear
+  the unqualifiable flag on a symbol after an IB Gateway re-sync.
+
+### IB Warning 2174 (date format) default flipped — hyphen
+Per user choice: `IB_ENDDATE_FORMAT` now defaults to **`hyphen`**
+(`"YYYYMMDD-HH:MM:SS"`), the IB-recommended form. Silences the noisy
+deprecation warning + future-proofs against IB removing the legacy
+space form. Three call sites updated (backend planner ×2, Windows
+collector ×1). `IB_ENDDATE_FORMAT=space` remains a one-line revert.
+
+### Test coverage (16 new contract tests)
+- `backend/tests/test_universe_canonical.py`:
+    * Threshold lock contract (intraday $50M / swing $10M / investment $2M)
+    * `classify_tier` boundary semantics
+    * `get_universe` per-tier supersets + default exclusion of unqualifiable
+    * `mark_unqualifiable` strike promotion + idempotency
+    * `reset_unqualifiable` rehabilitation
+    * **Source-level invariant**: smart-backfill + readiness MUST import
+      from `services.symbol_universe` (catches future drift)
+    * Locks default `IB_ENDDATE_FORMAT="hyphen"`
+- `test_backfill_readiness.py` updated: fixture inserts
+  `avg_dollar_volume=100M` so the readiness rollup can resolve the
+  dollar-volume universe.
+- 64 directly-related tests green (universe + readiness + collector +
+  smart-backfill + live-data phase 1 + live subscription manager).
+- All three changed services lint-clean.
+
+### Verified live
+Backend restarted successfully. New endpoints respond:
+- `GET /api/backfill/universe?tier=intraday` → 200 OK
+- `GET /api/backfill/universe?tier=bogus` → 400 + actionable error
+- `POST /api/backfill/universe/reset-unqualifiable/AAPL` → 200 OK
+- `GET /api/backfill/readiness` → operates on canonical universe.
+
+### Why this matters
+Once the user's DGX backfill queue drains (~current 11k items) and
+Train All is fired:
+- Training will operate on ~1,186 high-quality intraday symbols (not
+  4,000+). Estimated 30-40h instead of 68h.
+- `overall_freshness` will reach green because both surfaces agree on
+  the same denominator.
+- Dead/delisted names self-prune from the queue after 3 IB strikes.
+
+### Backlog (next priorities)
+- 🔴 P0 — User: trigger Train All once collectors drain → verify
+  P5 sector-relative + Phase 8 `_1day_predictor` produce >0 models.
+- 🟡 P1 — Live Data Architecture verify Phase 1 (RPC server) end-to-end on user's DGX/Windows.
+- 🟡 P2 — Remove Alpaca string in `/api/ib/analysis/{symbol}` (Phase 4 retirement).
+- 🟡 P2 — Fix `[SKIP] ib_data_pusher.py not found` startup launcher path.
+- 🟡 P3 — AURA UI integration · ⌘K palette extensions · `server.py`
+  breakup · retry 204 historical `qualify_failed` items.
+
+---
+
+
 ## 2026-04-25 (P.M.) — Smart-Backfill ROOT-CAUSE Fix + Contract Test
 
 User flagged the recurrence pattern: "we fix something, miss something, fix something, break something." Rather than ship more bandaids, audited the wiring of NIA's "Collect Data" + "Run Again" buttons end-to-end and surfaced the structural bug.

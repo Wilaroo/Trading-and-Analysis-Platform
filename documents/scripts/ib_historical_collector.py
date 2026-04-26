@@ -371,7 +371,7 @@ class IBHistoricalCollector:
             # IB_ENDDATE_FORMAT). This collector normalizes to whichever form
             # the collector is configured for so legacy queue rows still work
             # across a rolling env change — no DB migration needed.
-            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "space").strip().lower()
+            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "hyphen").strip().lower()
             end_date = raw_end_date.strip()
             if end_date and len(end_date) >= 9:
                 # Current separator between date and time is at index 8

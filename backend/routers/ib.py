@@ -2145,12 +2145,27 @@ async def skip_symbol_requests(request: Request):
         
         skipped = result.modified_count
         logger.info(f"Bulk-skipped {skipped} pending requests for dead symbol: {symbol}")
-        
+
+        # Track this symbol against the canonical universe so future
+        # smart-backfill / readiness runs stop selecting it once we've
+        # seen >=UNQUALIFIABLE_FAILURE_THRESHOLD strikes.
+        unqualifiable_state: Dict[str, Any] = {}
+        try:
+            from services.symbol_universe import mark_unqualifiable
+            db = service.collection.database
+            unqualifiable_state = mark_unqualifiable(db, symbol, reason=reason)
+        except Exception as e:
+            logger.warning(
+                f"Could not update symbol_adv_cache unqualifiable for "
+                f"{symbol}: {e}"
+            )
+
         return {
             "success": True,
             "symbol": symbol,
             "skipped": skipped,
-            "reason": reason
+            "reason": reason,
+            "unqualifiable_state": unqualifiable_state,
         }
         
     except HTTPException:

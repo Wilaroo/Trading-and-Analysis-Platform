@@ -1329,7 +1329,7 @@ class IBHistoricalCollector:
             # address Warning 2174 (hyphen form preferred in newer TWS) without
             # regressing the 2026-04-25 walkback fix. Defaults to the proven
             # space form; flip env to "hyphen" to silence 2174.
-            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "space").strip().lower()
+            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "hyphen").strip().lower()
             if _fmt == "hyphen":
                 end_date_str = current_end.strftime("%Y%m%d-%H:%M:%S") + " UTC"
             else:
@@ -2470,22 +2470,30 @@ class IBHistoricalCollector:
             )
             retried_stuck = res.modified_count
 
-        # 1) Classify qualified symbols by dollar-volume tier (fallback to
-        # stored `tier` field if the doc has it, from rebuild_adv_from_ib).
-        min_dv = self.DOLLAR_VOL_THRESHOLDS["investment"]
+        # 1) Classify qualified symbols via the canonical universe module
+        # (`backend/services/symbol_universe.py`). This is the single
+        # source of truth — readiness checks and training pipeline read
+        # from the same table with the same dollar-volume thresholds.
+        # Symbols promoted to `unqualifiable=true` (after 3 IB
+        # "No security definition" strikes) are excluded automatically.
+        from .symbol_universe import (
+            DOLLAR_VOL_THRESHOLDS as _UNI_THRESHOLDS,
+            classify_tier as _classify_tier,
+        )
+        min_dv = _UNI_THRESHOLDS["investment"]
         qualified: Dict[str, List[str]] = {"intraday": [], "swing": [], "investment": []}
-        for doc in adv.find({"avg_dollar_volume": {"$gte": min_dv}},
-                            {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1}):
+        for doc in adv.find(
+            {"avg_dollar_volume": {"$gte": min_dv},
+             "unqualifiable": {"$ne": True}},
+            {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1},
+        ):
             sym = doc.get("symbol")
             if not sym:
                 continue
             tier = doc.get("tier")
             if tier not in self.TIMEFRAMES_BY_TIER:
-                dv = doc.get("avg_dollar_volume", 0) or 0
-                if   dv >= self.DOLLAR_VOL_THRESHOLDS["intraday"]:   tier = "intraday"
-                elif dv >= self.DOLLAR_VOL_THRESHOLDS["swing"]:      tier = "swing"
-                elif dv >= self.DOLLAR_VOL_THRESHOLDS["investment"]: tier = "investment"
-                else:
+                tier = _classify_tier(doc.get("avg_dollar_volume", 0) or 0)
+                if tier is None:
                     continue
             if tier_filter and tier != tier_filter:
                 continue
@@ -2589,7 +2597,7 @@ class IBHistoricalCollector:
                             # the 2026-04-25 walkback fix. Default "space" is the
                             # proven working form. Flip env to "hyphen" once TWS
                             # is upgraded to silence the deprecation warning.
-                            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "space").strip().lower()
+                            _fmt = os.environ.get("IB_ENDDATE_FORMAT", "hyphen").strip().lower()
                             if _fmt == "hyphen":
                                 end_str = end_anchor.strftime("%Y%m%d-%H:%M:%S")
                             else:

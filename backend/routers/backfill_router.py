@@ -17,6 +17,11 @@ from fastapi import APIRouter, HTTPException
 
 from services.backfill_readiness_service import compute_readiness
 from services.ib_historical_collector import get_ib_collector
+from services.symbol_universe import (
+    get_universe,
+    get_universe_stats,
+    reset_unqualifiable,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/backfill", tags=["backfill"])
@@ -64,4 +69,61 @@ async def backfill_readiness():
         raise
     except Exception as e:
         logger.error(f"backfill/readiness failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/universe")
+async def backfill_universe(tier: str = "all", include_unqualifiable: bool = False):
+    """Return the canonical symbol universe at a given tier.
+
+    `tier` ∈ {`intraday` (≥$50M/d), `swing` (≥$10M/d), `investment`
+    (≥$2M/d), `all`}. Unqualifiable symbols (3+ IB "No security
+    definition" strikes) are excluded by default.
+
+    Used by the AI training pipeline + readiness checks to ensure
+    everything operates on the same slice. See
+    `services/symbol_universe.py` for the source of truth.
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        symbols = sorted(
+            await asyncio.to_thread(
+                get_universe, db, tier,
+                include_unqualifiable=include_unqualifiable,
+            )
+        )
+        stats = await asyncio.to_thread(get_universe_stats, db)
+        return {
+            "success": True,
+            "tier": tier,
+            "count": len(symbols),
+            "symbols": symbols,
+            "stats": stats,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"backfill/universe failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/universe/reset-unqualifiable/{symbol}")
+async def backfill_universe_reset(symbol: str):
+    """Operator escape hatch — clear `unqualifiable=true` for a symbol."""
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        ok = await asyncio.to_thread(reset_unqualifiable, db, symbol)
+        return {"success": ok, "symbol": symbol.upper()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"backfill/universe/reset-unqualifiable failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -117,6 +117,8 @@ class _FakeCollection:
                         return False
                     elif op == "$nin" and actual in arg:
                         return False
+                    elif op == "$ne" and actual == arg:
+                        return False
                     elif op == "$regex":
                         import re
                         if not (isinstance(actual, str) and re.search(arg, actual)):
@@ -155,7 +157,11 @@ def fresh_db():
         "unique": True,
     })
     for sym in universe:
-        db["symbol_adv_cache"].insert({"symbol": sym, "avg_volume": 1_000_000})
+        db["symbol_adv_cache"].insert({
+            "symbol": sym,
+            "avg_volume": 1_000_000,
+            "avg_dollar_volume": 100_000_000,  # qualifies for intraday
+        })
         for tf in svc.CRITICAL_TIMEFRAMES:
             # Insert enough 5 mins bars to clear the density floor.
             bars = svc.DENSITY_MIN_5MIN_BARS + 1 if tf == "5 mins" else 200

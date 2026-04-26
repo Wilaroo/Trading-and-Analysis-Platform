@@ -50,6 +50,8 @@ from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait as _fwa
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
+from .symbol_universe import get_universe
+
 logger = logging.getLogger(__name__)
 
 # Per-check wall-clock budget. With this, the whole endpoint can never
@@ -238,14 +240,8 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
     """
     now = datetime.now(timezone.utc)
     data = db["ib_historical_data"]
-    adv = db["symbol_adv_cache"]
 
-    intraday_symbols = {
-        d["symbol"]
-        for d in adv.find({"avg_volume": {"$gte": 500_000}},
-                          {"symbol": 1, "_id": 0})
-        if d.get("symbol")
-    }
+    intraday_symbols = get_universe(db, "intraday")
     total_symbols = len(intraday_symbols)
     if not total_symbols:
         return {
@@ -309,14 +305,8 @@ def _check_density_adequate(db) -> Dict[str, Any]:
     because it's expected to have a tail — we just need to know how big.
     """
     data = db["ib_historical_data"]
-    adv = db["symbol_adv_cache"]
 
-    intraday_symbols = [
-        d["symbol"]
-        for d in adv.find({"avg_volume": {"$gte": 500_000}},
-                          {"symbol": 1, "_id": 0})
-        if d.get("symbol")
-    ]
+    intraday_symbols = sorted(get_universe(db, "intraday"))
     if not intraday_symbols:
         return {
             "status": "yellow",
