@@ -1,5 +1,78 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Adaptive RPC Fanout + Wave Auto-Subscription — SHIPPED
+
+### Why
+Two high-leverage scanner improvements bundled together:
+
+**Diagnosis**: scanner was firing only `relative_strength_leader` alerts
+because (a) only the pusher's hardcoded 14 base symbols had live ticks
+flowing — for the wave scanner's other ~190 symbols, the scanner was
+falling back to STALE Mongo close bars, so strict intraday strategies
+could never trigger; and (b) `relative_strength` has the loosest gate
+(`|rs|≥2% + rvol≥1.0`) which liquid mega-caps satisfy constantly.
+
+**Speed**: per-symbol RPC `latest-bars` calls were sequential — primed
+qualified-cache makes each call ~250ms but a 25-symbol scan still took
+~6s end-to-end.
+
+### A) Adaptive RPC Fanout
+**Pusher (`documents/scripts/ib_data_pusher.py`)**:
+- New endpoint `POST /rpc/latest-bars-batch` — accepts `symbols: list`,
+  fires all `qualifyContractsAsync + reqHistoricalDataAsync` calls in a
+  single `asyncio.gather()` on the IB event loop. Honors the
+  qualified-contract cache.
+
+**DGX backend**:
+- `services/ib_pusher_rpc.py::latest_bars_batch()` — sync wrapper that
+  POSTs to the new endpoint; returns `{symbol: bars}` dict.
+- `services/hybrid_data_service.py::fetch_latest_session_bars_batch()` —
+  async high-level method. Tries `live_bar_cache` first per symbol
+  (cache hits skip the round-trip), batches misses into a single
+  fanout, writes results back to the cache.
+
+Expected speedup: 25 sequential calls × 250ms = **6.3s → ~300ms** in one
+batch round-trip with warm cache.
+
+### B) Wave Scanner Auto-Subscription
+**`services/enhanced_scanner.py`**: `_get_active_symbols()` now calls
+two new helpers each scan cycle:
+
+1. **`_sync_wave_subscriptions(wave_symbols, batch)`** — diffs the new
+   wave against last cycle's, calls `LiveSubscriptionManager.subscribe`
+   for new symbols and `unsubscribe` for dropped ones. Heartbeats
+   retained ones to prevent TTL expiry. Capped at `WAVE_SCANNER_MAX_SUBS`
+   (default 40) leaving 20 of pusher's 60-sub ceiling for UI consumers.
+   Priority order at cap: Tier-1 (Smart Watchlist) > Tier-2 (high-RVOL) >
+   Tier-3 (rotating).
+
+2. **`_prime_wave_live_bars(symbols)`** — single-RPC parallel fanout to
+   populate `live_bar_cache` for the entire wave. Now every symbol the
+   scanner evaluates uses fresh 5-min bars — strict intraday strategies
+   (breakout, vwap_bounce, ORB, mean_reversion, etc.) can finally trigger
+   on the full universe instead of just the 14 hardcoded subscriptions.
+
+Ref-counting via `LiveSubscriptionManager` ensures wave-scanner's
+unsubscribe never kills a UI consumer's chart subscription.
+
+### Operator action
+1. `git pull` Windows pusher + DGX backend.
+2. Restart pusher.
+3. After ~30s of running:
+   - **Live subscriptions tile** should jump from `1/60` → `~14/60`
+     (Tier-1 base) and start rotating up to `~40/60` as Tier-3 waves
+     advance.
+   - **PusherHeartbeatTile RPC latency** should drop noticeably as the
+     batch endpoint takes over for scan cycles.
+   - **Scanner alerts** should diversify beyond `relative_strength` —
+     watch for `breakout`, `vwap_bounce`, `mean_reversion`, `range_break`,
+     `squeeze`, etc. as the wave covers more symbols with fresh data.
+
+### Tests
+52/52 pass across all relevant suites. New methods are opt-in (no-op
+when LiveSubscriptionManager / pusher RPC unavailable, e.g. preview env).
+
+
 ## 2026-02 — Pusher RPC Qualified-Contract Cache — SHIPPED
 
 ### Why

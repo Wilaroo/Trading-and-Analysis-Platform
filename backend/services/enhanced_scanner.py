@@ -20,6 +20,7 @@ Data Source Hierarchy:
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass, asdict, field
@@ -1107,6 +1108,133 @@ class EnhancedBackgroundScanner:
     # every alert the scanner fires is on a symbol the AI has models for.
     # See the Scanner Universe Alignment audit (Feb 2026).
 
+    # Wave-subscription state (Feb-2026): tracks which wave-tier symbols this
+    # scanner has refs on so we can release them when the wave rotates.
+    # Tier-1 (Smart Watchlist) symbols are NEVER unsubscribed by us — UI
+    # consumers may share refs on them, and the LiveSubscriptionManager's
+    # ref-counting handles the rest.
+    @property
+    def _active_wave_subscriptions(self) -> set:
+        if not hasattr(self, "_active_wave_subs_set"):
+            self._active_wave_subs_set: set = set()
+        return self._active_wave_subs_set
+
+    @property
+    def _wave_sub_max(self) -> int:
+        # Reserve 20 slots out of pusher's 60-sub cap for UI/chart consumers.
+        return int(os.environ.get("WAVE_SCANNER_MAX_SUBS", "40"))
+
+    async def _sync_wave_subscriptions(self, wave_symbols: List[str], batch: Dict) -> None:
+        """Diff the new wave against last cycle's, then subscribe/release.
+
+        Order of priority when at cap:
+            Tier-1 (always)  >  Tier-2 (high-RVOL pool)  >  Tier-3 (rotating)
+        """
+        try:
+            from services.live_subscription_manager import get_live_subscription_manager
+        except Exception as e:
+            logger.debug(f"LiveSubscriptionManager unavailable: {e}")
+            return
+
+        mgr = get_live_subscription_manager()
+
+        tier1 = list(batch.get("tier1_watchlist") or [])
+        tier2 = list(batch.get("tier2_high_rvol") or [])
+        tier3 = list(batch.get("tier3_wave") or [])
+
+        # Build prioritized target set, capped.
+        cap = self._wave_sub_max
+        target: list = []
+        seen = set()
+        for sym in tier1 + tier2 + tier3:
+            if sym in seen:
+                continue
+            seen.add(sym)
+            target.append(sym)
+            if len(target) >= cap:
+                break
+        target_set = set(target)
+
+        old = self._active_wave_subscriptions
+        to_subscribe = [s for s in target if s not in old]
+        to_release = [s for s in old if s not in target_set]
+
+        # Subscribe new — offload to a thread (HTTP I/O blocks).
+        import asyncio
+        added: list = []
+        for sym in to_subscribe:
+            try:
+                resp = await asyncio.to_thread(mgr.subscribe, sym)
+                if resp.get("accepted"):
+                    added.append(sym)
+                elif resp.get("reason") == "cap_reached":
+                    # Pusher full — stop trying further down the priority list.
+                    logger.debug(f"wave-sub cap reached at {sym}; stopping.")
+                    break
+            except Exception as e:
+                logger.debug(f"wave subscribe {sym} error: {e}")
+
+        # Release dropped — concurrently to keep latency low.
+        released: list = []
+        async def _release_one(sym):
+            try:
+                resp = await asyncio.to_thread(mgr.unsubscribe, sym)
+                if resp.get("accepted"):
+                    released.append(sym)
+            except Exception as e:
+                logger.debug(f"wave unsubscribe {sym} error: {e}")
+
+        if to_release:
+            await asyncio.gather(*[_release_one(s) for s in to_release])
+
+        # Heartbeat retained ones so they don't TTL-expire.
+        retained = [s for s in target if s in old]
+        for sym in retained:
+            try:
+                mgr.heartbeat(sym)
+            except Exception:
+                pass
+
+        self._active_wave_subs_set = set(target)
+
+        if added or released:
+            logger.info(
+                f"📡 Wave subs synced: +{len(added)} -{len(released)} "
+                f"(retained {len(retained)}, total tracked {len(self._active_wave_subs_set)})"
+            )
+
+    async def _prime_wave_live_bars(self, symbols: List[str]) -> None:
+        """Single-RPC parallel fanout to populate live_bar_cache for the
+        current wave so per-symbol snapshot reads downstream are cache hits.
+
+        This is what stops the scanner from evaluating strategies against
+        STALE Mongo close bars on non-subscribed symbols — every symbol in
+        the wave gets fresh 5-min bars within a single ~300ms call (with
+        qualified-contract caching warmed up on the pusher)."""
+        if not symbols:
+            return
+        try:
+            from services.hybrid_data_service import get_hybrid_data_service
+            from services.ib_pusher_rpc import is_live_bar_rpc_enabled
+        except Exception as e:
+            logger.debug(f"prime live bars import failed: {e}")
+            return
+        if not is_live_bar_rpc_enabled():
+            return
+
+        try:
+            hds = get_hybrid_data_service()
+            primed = await hds.fetch_latest_session_bars_batch(
+                symbols, "5 mins", active_view=False, use_rth=False
+            )
+            if primed:
+                logger.debug(
+                    f"📊 Wave bars primed: {len(primed)}/{len(symbols)} symbols "
+                    "have fresh 5-min cache entries"
+                )
+        except Exception as e:
+            logger.debug(f"prime_wave_live_bars failed: {e}")
+
     def _get_safety_watchlist(self) -> List[str]:
         """Tiny ETF-only fallback used before db is wired (cold boot, tests)."""
         return [
@@ -1151,6 +1279,11 @@ class EnhancedBackgroundScanner:
         - Tier 1: Smart Watchlist (always)
         - Tier 2: High RVOL pool
         - Tier 3: Rotating universe wave
+
+        Also (Feb-2026): auto-subscribes the current wave to the IB pusher
+        via LiveSubscriptionManager (ref-counted, cap-enforced) and primes
+        the live_bar_cache with a single batch RPC call so strategies
+        evaluate against fresh intraday data — not stale Mongo closes.
         """
         active_symbols = []
         skipped = 0
@@ -1183,6 +1316,11 @@ class EnhancedBackgroundScanner:
                 f"Wave={wave_info.get('current_wave', 0)}/{wave_info.get('total_waves', 0)} "
                 f"({wave_info.get('progress_pct', 0)}%)"
             )
+
+            # ---- Phase-A: auto-subscribe + prime live cache -----------------
+            await self._sync_wave_subscriptions(active_symbols, batch)
+            await self._prime_wave_live_bars(active_symbols)
+            # -----------------------------------------------------------------
             
         except Exception as e:
             logger.warning(f"Wave scanner unavailable, falling back to static watchlist: {e}")
