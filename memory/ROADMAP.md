@@ -5,10 +5,23 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (2026-04-27)
 
-### P0 — RESOLVED 2026-04-27 (this session) — Scanner regression
-~~Wave scanner only producing relative-strength alerts~~ — root cause was
-commit `80cf8501` renaming `self._symbol_adv_cache` → `self._adv_cache`
-(two different things). Fix shipped — see CHANGELOG.
+### P0 — RESOLVED 2026-04-27 (this session)
+- ~~Scanner regression `_adv_cache` rename~~ — fix shipped.
+- ~~Bot persistence replaces defaults instead of merging~~ — fix shipped + hot-fix Mongo command provided.
+
+### P0 — Pusher RPC catastrophic latency (2026-04-27)
+- `rpc_latency_ms_last: 350s`, `pushes_per_min: 0`, `pusher_dead: true`
+  even though `connected: true` and 45 quotes tracked. UI chart stays
+  DEAD because pusher can't deliver bars in reasonable time.
+- Investigation needed:
+  1. Are we hammering IB with too many subscriptions? (45 quotes is fine
+     in principle, but maybe paired w/ L2 + fundamentals + news = pacing
+     limit hit)
+  2. Is DGX backend slow to respond to pusher's RPC calls? Profile the
+     `/rpc/*` handlers — any synchronous Mongo writes / locks?
+  3. Network between Windows ↔ DGX — packet loss / link saturation?
+  4. Restart the Windows pusher and watch if RPC latency stays high or
+     resets — distinguishes warmup vs persistent.
 
 ### P0 — Wave-scanner background loop never started
 `/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.

@@ -2,6 +2,82 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-27 — Bot persistence overrides defaults — 7 strategies invisible — SHIPPED
+
+### Why
+Even after fixing the scanner regression (`_adv_cache` vs
+`_symbol_adv_cache`) and pulling to DGX, operator's logs still showed:
+```
+⏭️ AMZN relative_strength_leader not in enabled setups
+⏭️ GOOG relative_strength_leader not in enabled setups
+... (8 alerts skipped per scan tick)
+```
+TradingBot was producing alerts but immediately filtering them out as
+"not enabled". Source: `bot_state.enabled_setups` in Mongo had been
+persisted by an older code version that didn't include
+`relative_strength_leader`, `relative_strength_laggard`,
+`reversal`, `halfback_reversal`, `halfback`, `vwap_reclaim`,
+`vwap_rejection`. On every startup, `bot_persistence.py:53` REPLACED
+the in-memory defaults with that stale list, so newly-added defaults
+were invisible to the bot.
+
+### Fix
+`backend/services/bot_persistence.py · BotPersistence.load_state()`
+— now MERGES saved with current defaults instead of replacing.
+`bot._enabled_setups = sorted(set(defaults) | set(saved))`. Logs the
+diff so operators can see what got added on each startup.
+
+This is a permanent fix — when future code adds a new strategy to the
+default list, restarts will auto-pick it up instead of silently
+hiding it behind the persisted list.
+
+### Hot-fix for current operator state
+Operator was instructed to run a one-off Mongo update adding the 7
+missing entries to the persisted list, so the bug resolves
+immediately without waiting for the deploy:
+```python
+db.bot_state.update_one({'_id': 'bot_state'},
+  {'$addToSet': {'enabled_setups': {'$each': [
+    'relative_strength_leader', 'relative_strength_laggard',
+    'reversal', 'halfback_reversal', 'halfback',
+    'vwap_reclaim', 'vwap_rejection']}}}, upsert=True)
+```
+
+### Verification
+- Lint: clean (1 unrelated pre-existing F841 warning).
+- Operator should observe `✅ {sym} relative_strength_leader passed
+  filter` lines in backend log within 30 seconds of running the hot-fix.
+
+---
+
+## 2026-04-27 — Pusher RPC catastrophic latency surfaced — INVESTIGATION PARKED
+
+### What we saw
+`/api/ib/pusher-health` returned:
+```
+rpc_latency_ms_last: 350,296.7 ms (5.8 minutes)
+rpc_latency_ms_p95:  278,097.3 ms (4.6 minutes)
+rpc_latency_ms_avg:   37,087.9 ms (37 seconds)
+pushes_per_min: 0
+push_count_total: 17 (since startup)
+pusher_dead: true
+```
+Pusher is `connected: true` and tracking 45 quotes, but every RPC call
+back to the cloud takes minutes. This is why the UI chart shows DEAD
+and Top Movers stays at "Loading..." even when scanner produces hits.
+
+### Root cause TBD — possibilities
+- IB pacing throttle (we may be hammering IB with subscriptions)
+- DGX backend slow to respond to pusher RPC calls (each scan tick
+  fires 8 skip-checks; could be lock contention)
+- Network between Windows ↔ DGX degraded
+- Pusher-side RPC client blocked on some I/O
+
+### Action
+Logged to ROADMAP "🔴 Now / Near-term" for next session.
+
+---
+
 ## 2026-04-27 — Scanner regression — wrong attribute name killed 11 detectors — SHIPPED
 
 ### Why

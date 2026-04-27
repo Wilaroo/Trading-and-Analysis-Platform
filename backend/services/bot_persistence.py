@@ -49,10 +49,24 @@ class BotPersistence:
                     bot._watchlist = saved_watchlist
                     logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist[:5])}{'...' if len(saved_watchlist) > 5 else ''}")
 
-                # Restore enabled setups only if more than defaults were saved
+                # Restore enabled setups — MERGE saved list with current
+                # defaults instead of replacing. Replacing was silently
+                # filtering out new strategies whenever the codebase added
+                # one (e.g. `relative_strength_leader`, REVERSAL bases) —
+                # the operator would persist a list, then ship new defaults,
+                # then on restart the saved list would win and the new
+                # strategies would be invisible until manually re-enabled.
                 if saved_setups and len(saved_setups) > 10:
-                    bot._enabled_setups = saved_setups
-                    logger.info(f"🎯 Restored {len(saved_setups)} strategies")
+                    merged = sorted(set(bot._enabled_setups) | set(saved_setups))
+                    added = sorted(set(bot._enabled_setups) - set(saved_setups))
+                    bot._enabled_setups = merged
+                    if added:
+                        logger.info(
+                            f"🎯 Merged {len(merged)} strategies "
+                            f"(saved {len(saved_setups)} + {len(added)} new defaults: {added[:5]}{'...' if len(added) > 5 else ''})"
+                        )
+                    else:
+                        logger.info(f"🎯 Restored {len(merged)} strategies (no new defaults to merge)")
                 else:
                     logger.info(f"🎯 Using default {len(bot._enabled_setups)} strategies")
 
