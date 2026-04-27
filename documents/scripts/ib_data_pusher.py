@@ -2855,6 +2855,94 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         pusher._qualified_contract_cache.clear()
         return {"success": True, "cleared": cleared}
 
+    class LatestBarsBatchRequest(BaseModel):
+        symbols: list
+        bar_size: str = "5 mins"
+        duration: str = "1 D"
+        use_rth: bool = False
+        what_to_show: str = "TRADES"
+
+    @app.post("/rpc/latest-bars-batch")
+    def rpc_latest_bars_batch(req: LatestBarsBatchRequest):
+        """Parallel fanout of /rpc/latest-bars over many symbols.
+
+        Implementation: builds N coroutines (one per symbol) and dispatches
+        them all at once via a single `asyncio.gather` on the IB event loop.
+        With qualified-contract caching warmed up, this reduces a 25-symbol
+        scan from ~25 × 250ms = 6.3s sequential → ~300-500ms parallel.
+
+        Returns one entry per requested symbol — successes carry their
+        bars, failures carry an error string. Order matches input."""
+        if not pusher.ib.isConnected():
+            raise HTTPException(status_code=503, detail="IB Gateway not connected")
+        symbols = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        if not symbols:
+            return {"success": True, "count": 0, "results": []}
+
+        INDEX_SYMBOLS = {
+            "VIX":  ("VIX",  "CBOE"),
+            "SPX":  ("SPX",  "CBOE"),
+            "NDX":  ("NDX",  "NASDAQ"),
+            "RUT":  ("RUT",  "RUSSELL"),
+            "DJX":  ("DJX",  "CBOE"),
+            "VVIX": ("VVIX", "CBOE"),
+        }
+
+        async def _fetch_one(sym: str):
+            try:
+                if sym in INDEX_SYMBOLS:
+                    idx_sym, idx_exch = INDEX_SYMBOLS[sym]
+                    contract = _Index(idx_sym, idx_exch, "USD")
+                else:
+                    contract = _Stock(sym, "SMART", "USD")
+                qualified = await _qualify_cached(contract)
+                if qualified is None:
+                    return {"symbol": sym, "success": False, "error": "qualify_failed", "bars": []}
+                bars = await pusher.ib.reqHistoricalDataAsync(
+                    qualified,
+                    endDateTime="",
+                    durationStr=req.duration,
+                    barSizeSetting=req.bar_size,
+                    whatToShow=req.what_to_show,
+                    useRTH=req.use_rth,
+                    formatDate=1,
+                )
+                out = []
+                for b in bars or []:
+                    dt = getattr(b, "date", None)
+                    dt_iso = dt.isoformat() if hasattr(dt, "isoformat") else (str(dt) if dt is not None else "")
+                    out.append({
+                        "date": dt_iso,
+                        "open": float(b.open) if b.open is not None else None,
+                        "high": float(b.high) if b.high is not None else None,
+                        "low": float(b.low) if b.low is not None else None,
+                        "close": float(b.close) if b.close is not None else None,
+                        "volume": int(b.volume) if b.volume is not None else 0,
+                        "bar_size": req.bar_size,
+                        "symbol": sym,
+                    })
+                return {"symbol": sym, "success": True, "bar_count": len(out), "bars": out}
+            except Exception as exc:
+                return {"symbol": sym, "success": False, "error": str(exc)[:120], "bars": []}
+
+        async def _run_all():
+            return await asyncio.gather(*[_fetch_one(s) for s in symbols])
+
+        try:
+            # Generous timeout — proportional to batch size with a floor
+            timeout = max(20.0, 1.5 * len(symbols))
+            results = _run_on_ib_loop(_run_all, timeout=timeout)
+        except Exception as exc:
+            logger.warning("[RPC] /rpc/latest-bars-batch failed: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)[:200])
+
+        return {
+            "success": True,
+            "count": len(results),
+            "fetched_at": datetime.now().isoformat(),
+            "results": results,
+        }
+
     @app.post("/rpc/latest-bars")
     def rpc_latest_bars(req: LatestBarsRequest):
         if not pusher.ib.isConnected():

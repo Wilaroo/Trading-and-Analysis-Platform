@@ -717,6 +717,94 @@ class HybridDataService:
             "deleted_count": result.deleted_count
         }
 
+    async def fetch_latest_session_bars_batch(
+        self,
+        symbols: List[str],
+        bar_size: str,
+        active_view: bool = False,
+        use_rth: bool = False,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Parallel fanout of `fetch_latest_session_bars()`.
+
+        Hits the pusher's /rpc/latest-bars-batch (single round-trip,
+        symbols fetched concurrently on the IB side via asyncio.gather).
+        Each successful symbol's bars are written into `live_bar_cache`
+        so the next per-symbol read is a cache hit.
+
+        Returns a `{symbol: bars_list}` dict — symbols that failed are
+        omitted. Callers should treat missing symbols as "no fresh data
+        available, fall back to Mongo".
+        """
+        if not symbols:
+            return {}
+
+        # 1. Try to satisfy from live_bar_cache first — anything fresh skips
+        #    the network round-trip entirely.
+        from services.live_bar_cache import get_live_bar_cache
+        cache = get_live_bar_cache()
+        ttl = self._cache_ttl_for(active_view=active_view)
+
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        misses: List[str] = []
+        for sym in symbols:
+            cached = cache.get(sym, bar_size, ttl_seconds=ttl)
+            if cached:
+                out[sym] = cached
+            else:
+                misses.append(sym)
+
+        if not misses:
+            return out
+
+        # 2. Fanout the misses in a single batch RPC call.
+        try:
+            from services.ib_pusher_rpc import get_pusher_rpc_client, is_live_bar_rpc_enabled
+        except Exception as e:
+            logger.debug(f"Cannot import pusher RPC client: {e}")
+            return out
+
+        if not is_live_bar_rpc_enabled():
+            return out
+        client = get_pusher_rpc_client()
+        if not client.is_configured():
+            return out
+
+        # ib_pusher_rpc's HTTP client is sync; offload to a thread so we
+        # don't block the FastAPI event loop while the pusher fans out.
+        try:
+            import asyncio as _asyncio
+            batch = await _asyncio.to_thread(
+                client.latest_bars_batch,
+                misses, bar_size,
+                "1 D",      # duration
+                use_rth,
+                "TRADES",
+            )
+        except Exception as e:
+            logger.debug(f"latest_bars_batch failed: {e}")
+            return out
+
+        if not batch:
+            return out
+
+        # 3. Cache and return.
+        for sym, bars in batch.items():
+            if bars:
+                cache.put(sym, bar_size, bars)
+                out[sym] = bars
+        return out
+
+    @staticmethod
+    def _cache_ttl_for(active_view: bool = False) -> int:
+        """Match the TTL plan used by `fetch_latest_session_bars()` — the
+        single source of truth lives in that method, but for the batch
+        fanout we want the same numbers without coupling. Pulled from
+        the same env vars."""
+        if active_view:
+            return int(os.environ.get("LIVE_BAR_TTL_ACTIVE_S", "30"))
+        # During RTH / extended-hours we honor the regular TTL.
+        return int(os.environ.get("LIVE_BAR_TTL_RTH_S", "30"))
+
 
 # Singleton instance
 _hybrid_data_service: Optional[HybridDataService] = None

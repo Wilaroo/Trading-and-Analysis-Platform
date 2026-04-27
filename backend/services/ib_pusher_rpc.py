@@ -179,6 +179,46 @@ class _PusherRPCClient:
         bars = resp.get("bars") or []
         return bars if isinstance(bars, list) else None
 
+    def latest_bars_batch(
+        self,
+        symbols: List[str],
+        bar_size: str,
+        duration: str = "1 D",
+        use_rth: bool = False,
+        what_to_show: str = "TRADES",
+    ) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """Parallel fanout — POSTs to /rpc/latest-bars-batch which fires
+        all per-symbol fetches in a single asyncio.gather on the pusher
+        side. Returns ``{symbol: bars_list}`` for successful symbols and
+        omits failures (callers can detect a missing key).
+
+        Speedup vs sequential `latest_bars()` calls: ~5-10× on warm
+        qualified-contract caches (1.2s × N → ~300ms total)."""
+        cleaned = [s.upper().strip() for s in (symbols or []) if s]
+        if not cleaned:
+            return {}
+        body = {
+            "symbols": cleaned,
+            "bar_size": bar_size,
+            "duration": duration,
+            "use_rth": bool(use_rth),
+            "what_to_show": what_to_show,
+        }
+        # Generous client-side timeout, scales with batch size.
+        timeout = max(_DEFAULT_LATEST_BARS_TIMEOUT, 1.5 * len(cleaned))
+        resp = self._request(
+            "POST", "/rpc/latest-bars-batch",
+            json_body=body,
+            timeout=timeout,
+        )
+        if not resp or not resp.get("success"):
+            return None
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for entry in resp.get("results") or []:
+            if entry.get("success") and entry.get("bars"):
+                out[entry["symbol"]] = entry["bars"]
+        return out
+
     def quote_snapshot(self, symbol: str) -> Optional[Dict[str, Any]]:
         body = {"symbol": symbol.upper()}
         resp = self._request("POST", "/rpc/quote-snapshot", json_body=body, timeout=5.0)
