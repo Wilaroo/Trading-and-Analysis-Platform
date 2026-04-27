@@ -242,6 +242,75 @@ def test_get_friday_snapshot_returns_none_when_db_none():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Recent track record — pin self-improvement loop math
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _fake_snapshots_db(snapshots):
+    """Build a mock Mongo db whose `friday_close_snapshots` collection
+    returns `snapshots` (newest first) on `find()`."""
+    db = MagicMock()
+    col = MagicMock()
+    col.find = MagicMock(return_value=iter(snapshots))
+    col.create_index = MagicMock()
+    db.__getitem__.return_value = col
+    db.list_collection_names = MagicMock(return_value=["friday_close_snapshots"])
+    return db
+
+
+def test_track_record_aggregates_wins_losses():
+    snaps = [
+        {"iso_week": "2026-W17", "snapshot_at": "2026-04-25T20:01Z",
+         "watches": [
+             {"symbol": "AAPL", "change_pct": 2.5, "thesis": "earnings"},
+             {"symbol": "NVDA", "change_pct": -1.2, "thesis": "AI rotation"},
+             {"symbol": "TSLA", "change_pct": None, "thesis": "no data"},
+         ]},
+        {"iso_week": "2026-W16", "snapshot_at": "2026-04-18T20:01Z",
+         "watches": [
+             {"symbol": "MSFT", "change_pct": 0.8, "thesis": "Azure"},
+             {"symbol": "META", "change_pct": -3.1, "thesis": "ad spend"},
+         ]},
+    ]
+    db = _fake_snapshots_db(snaps)
+    svc = WeekendBriefingService(db)
+    tr = svc.get_recent_track_record(weeks=4)
+    assert tr["weeks_graded"] == 2
+    assert tr["total_calls"] == 4   # TSLA's None excluded
+    assert tr["wins"] == 2          # AAPL, MSFT
+    assert tr["losses"] == 2        # NVDA, META
+    assert tr["win_rate"] == 0.5
+    assert tr["best_call"]["symbol"] == "AAPL"
+    assert tr["worst_call"]["symbol"] == "META"
+
+
+def test_track_record_empty_when_no_snapshots():
+    db = _fake_snapshots_db([])
+    svc = WeekendBriefingService(db)
+    assert svc.get_recent_track_record(weeks=4) == {}
+
+
+def test_track_record_empty_when_no_db():
+    svc = WeekendBriefingService(None)
+    assert svc.get_recent_track_record() == {}
+
+
+def test_track_record_caps_weeks_at_twelve():
+    """Ensure `weeks` clamps so callers can't slurp 999 weeks of data."""
+    snaps = [{"iso_week": f"2026-W{i:02d}", "watches": []} for i in range(20)]
+    db = _fake_snapshots_db(snaps)
+    svc = WeekendBriefingService(db)
+    # Should not crash + the underlying find call uses the clamped limit.
+    out = svc.get_recent_track_record(weeks=999)
+    # All snapshots have empty watches → result is {}.
+    assert out == {}
+    # Verify the find call's `limit` kwarg was clamped to 12.
+    db["friday_close_snapshots"].find.assert_called_once()
+    _, kwargs = db["friday_close_snapshots"].find.call_args
+    assert kwargs.get("limit") == 12
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Gameplan JSON coercion — locks in resilience guarantees of the LLM
 # response parser. The model may return strict JSON, JSON in fences,
 # JSON with trailing prose, or pure prose. All four must yield a usable

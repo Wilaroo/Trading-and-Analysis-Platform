@@ -586,6 +586,36 @@ async def _synthesize_gameplan(facts: Dict[str, Any]) -> Dict[str, Any]:
             (c.get("headline") or "")[:80] for c in catalysts[:3]
         ))
 
+    # Self-improvement signal — last 4 weeks of gameplan grades. Given
+    # to the model so it can adjust thesis style based on what's been
+    # working vs flopping. Critical for closing the self-correct loop.
+    track_record = facts.get("track_record") or {}
+    if track_record.get("total_calls"):
+        wr = int(track_record.get("win_rate", 0) * 100)
+        avg = track_record.get("avg_change_pct")
+        summary_lines.append(
+            f"YOUR RECENT TRACK RECORD ({track_record.get('weeks_graded')} weeks, "
+            f"{track_record.get('total_calls')} calls): "
+            f"{track_record.get('wins')}W/{track_record.get('losses')}L · "
+            f"{wr}% WR · avg {avg:+.2f}%"
+        )
+        bc = track_record.get("best_call") or {}
+        wc = track_record.get("worst_call") or {}
+        if bc.get("symbol") and bc.get("change_pct") is not None:
+            summary_lines.append(
+                f"Best call: {bc['symbol']} {bc['change_pct']:+.2f}% "
+                f"({bc.get('iso_week', '')})"
+            )
+        if wc.get("symbol") and wc.get("change_pct") is not None:
+            summary_lines.append(
+                f"Worst call: {wc['symbol']} {wc['change_pct']:+.2f}% "
+                f"({wc.get('iso_week', '')})"
+            )
+        summary_lines.append(
+            "Use this track record to self-correct — lean into the thesis "
+            "style of the winners and dial down what's been losing."
+        )
+
     prompt = "\n".join([
         "Compose the weekly gameplan note based on these facts:",
         *summary_lines,
@@ -712,12 +742,17 @@ class WeekendBriefingService:
         risk_map = _build_risk_map(positions_held, earnings, macro)
 
         # Synthesize the gameplan paragraph + structured watches from facts.
+        # Last 4 weeks of grading flow into the prompt so the model can
+        # self-correct against its own track record (e.g. dial down
+        # thesis types it's been wrong about, lean into the winners).
+        track_record = self.get_recent_track_record(weeks=4)
         facts: Dict[str, Any] = {
             "last_week_recap": last_week_recap,
             "earnings_calendar": earnings,
             "macro_calendar": macro,
             "sector_catalysts": catalysts,
             "positions_held": positions_held,
+            "track_record": track_record,
         }
         gameplan_payload = await _synthesize_gameplan(facts)
         # Enrich watches with the IB close at briefing-generation time so
@@ -873,6 +908,77 @@ class WeekendBriefingService:
         except Exception as exc:
             logger.warning(f"get_friday_snapshot failed: {exc}")
             return None
+
+    def get_recent_track_record(self, weeks: int = 4) -> Dict[str, Any]:
+        """Aggregate the last `weeks` Friday-close snapshots into a
+        compact track-record summary the LLM can self-correct against.
+
+        Returns:
+            {
+              "weeks_graded": int,
+              "total_calls": int,
+              "wins": int,
+              "losses": int,
+              "win_rate": float,
+              "avg_change_pct": float,
+              "per_week": [{iso_week, wins, losses, avg_change_pct}],
+              "best_call": {symbol, change_pct, iso_week},
+              "worst_call": {symbol, change_pct, iso_week},
+            }
+        """
+        if self._db is None:
+            return {}
+        try:
+            cursor = self._db[self.SNAPSHOT_COLLECTION].find(
+                {}, projection={"_id": 0},
+                sort=[("snapshot_at", -1)], limit=max(1, min(int(weeks), 12)),
+            )
+            snaps = list(cursor)
+            if not snaps:
+                return {}
+            all_graded: List[Dict[str, Any]] = []
+            per_week = []
+            for s in snaps:
+                graded = [w for w in (s.get("watches") or [])
+                          if w.get("change_pct") is not None]
+                if not graded:
+                    continue
+                wins = sum(1 for w in graded if w["change_pct"] > 0)
+                losses = sum(1 for w in graded if w["change_pct"] < 0)
+                avg = round(sum(w["change_pct"] for w in graded) / len(graded), 2)
+                per_week.append({
+                    "iso_week": s.get("iso_week"),
+                    "wins": wins,
+                    "losses": losses,
+                    "avg_change_pct": avg,
+                })
+                for w in graded:
+                    all_graded.append({**w, "iso_week": s.get("iso_week")})
+            if not all_graded:
+                return {}
+            wins = sum(1 for w in all_graded if w["change_pct"] > 0)
+            losses = sum(1 for w in all_graded if w["change_pct"] < 0)
+            avg = round(sum(w["change_pct"] for w in all_graded) / len(all_graded), 2)
+            best = max(all_graded, key=lambda w: w["change_pct"])
+            worst = min(all_graded, key=lambda w: w["change_pct"])
+            return {
+                "weeks_graded": len(per_week),
+                "total_calls": len(all_graded),
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(wins / max(1, len(all_graded)), 3),
+                "avg_change_pct": avg,
+                "per_week": per_week,
+                "best_call": {"symbol": best.get("symbol"),
+                              "change_pct": best.get("change_pct"),
+                              "iso_week": best.get("iso_week")},
+                "worst_call": {"symbol": worst.get("symbol"),
+                               "change_pct": worst.get("change_pct"),
+                               "iso_week": worst.get("iso_week")},
+            }
+        except Exception as exc:
+            logger.warning(f"get_recent_track_record failed: {exc}")
+            return {}
 
     def _build_previous_week_recap(self) -> Dict[str, Any]:
         """Return a compact recap of last Sunday's gameplan, joined with
