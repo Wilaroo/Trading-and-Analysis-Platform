@@ -184,3 +184,97 @@ def test_sector_etfs_includes_all_eleven_select_sector_spdrs():
     expected = {"XLK", "XLF", "XLE", "XLV", "XLI", "XLC",
                 "XLY", "XLP", "XLU", "XLRE", "XLB"}
     assert set(SECTOR_ETFS.keys()) == expected
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Gameplan JSON coercion — locks in resilience guarantees of the LLM
+# response parser. The model may return strict JSON, JSON in fences,
+# JSON with trailing prose, or pure prose. All four must yield a usable
+# {text, watches[]} dict.
+# ──────────────────────────────────────────────────────────────────────
+
+
+from services.weekend_briefing_service import _coerce_gameplan_payload  # noqa: E402
+
+
+def test_gameplan_coerce_strict_json():
+    raw = '{"text": "Fed week. Watch SPY 480.", "watches": [' \
+          '{"symbol": "AAPL", "thesis": "earnings beat", ' \
+          '"key_level": "break $185", "invalidation": "loses $180"}]}'
+    out = _coerce_gameplan_payload(raw)
+    assert out["text"].startswith("Fed week")
+    assert len(out["watches"]) == 1
+    w = out["watches"][0]
+    assert w["symbol"] == "AAPL"
+    assert w["key_level"] == "break $185"
+    assert w["invalidation"] == "loses $180"
+
+
+def test_gameplan_coerce_strips_markdown_fences():
+    raw = '```json\n{"text": "ok", "watches": []}\n```'
+    out = _coerce_gameplan_payload(raw)
+    assert out == {"text": "ok", "watches": []}
+
+
+def test_gameplan_coerce_extracts_first_json_block_from_prose():
+    raw = "Sure! Here's the gameplan:\n" \
+          '{"text": "lorem", "watches": [{"symbol": "MSFT", "thesis": "t", ' \
+          '"key_level": "k", "invalidation": "i"}]}\n' \
+          "Hope that helps!"
+    out = _coerce_gameplan_payload(raw)
+    assert out["text"] == "lorem"
+    assert len(out["watches"]) == 1
+    assert out["watches"][0]["symbol"] == "MSFT"
+
+
+def test_gameplan_coerce_falls_back_to_prose_on_invalid_json():
+    raw = "Sorry, can't do JSON today. Here's the gameplan: buy dips."
+    out = _coerce_gameplan_payload(raw)
+    assert out["text"] == raw
+    assert out["watches"] == []
+
+
+def test_gameplan_coerce_handles_empty_input():
+    assert _coerce_gameplan_payload("") == {"text": "", "watches": []}
+    assert _coerce_gameplan_payload(None) == {"text": "", "watches": []}
+
+
+def test_gameplan_coerce_caps_watches_at_five():
+    watches = [{"symbol": f"S{i}", "thesis": "t", "key_level": "k",
+                "invalidation": "i"} for i in range(20)]
+    raw = __import__("json").dumps({"text": "ok", "watches": watches})
+    out = _coerce_gameplan_payload(raw)
+    assert len(out["watches"]) == 5
+
+
+def test_gameplan_coerce_skips_watches_without_symbol():
+    raw = '{"text": "ok", "watches": [' \
+          '{"symbol": "", "thesis": "no sym"}, ' \
+          '{"symbol": "AAPL", "thesis": "with sym"}]}'
+    out = _coerce_gameplan_payload(raw)
+    assert len(out["watches"]) == 1
+    assert out["watches"][0]["symbol"] == "AAPL"
+
+
+def test_gameplan_coerce_truncates_long_fields():
+    raw = '{"text": "ok", "watches": [' \
+          '{"symbol": "AAPL", "thesis": "' + ("x" * 500) + '", ' \
+          '"key_level": "' + ("y" * 500) + '", ' \
+          '"invalidation": "' + ("z" * 500) + '"}]}'
+    out = _coerce_gameplan_payload(raw)
+    w = out["watches"][0]
+    assert len(w["thesis"]) <= 160
+    assert len(w["key_level"]) <= 80
+    assert len(w["invalidation"]) <= 160
+
+
+def test_gameplan_coerce_uppercases_symbol():
+    raw = '{"text": "", "watches": [{"symbol": "aapl", "thesis": "x"}]}'
+    out = _coerce_gameplan_payload(raw)
+    assert out["watches"][0]["symbol"] == "AAPL"
+
+
+def test_gameplan_coerce_drops_oversized_symbols():
+    raw = '{"text": "", "watches": [{"symbol": "TOOLONGSYM", "thesis": "x"}]}'
+    out = _coerce_gameplan_payload(raw)
+    assert out["watches"] == []

@@ -271,6 +271,91 @@ const Catalysts = ({ items }) => {
 };
 
 
+/**
+ * GameplanBlock — renders the LLM-synthesized weekly thesis.
+ *
+ * Backend may return either:
+ *   - A structured object: `{ text: string, watches: [{symbol, thesis,
+ *     key_level, invalidation}] }` — preferred new shape.
+ *   - A legacy string: from older cached docs before the JSON-mode
+ *     migration. Rendered as a single paragraph block.
+ *
+ * Watches are clickable cards — click the ticker to open the existing
+ * enhanced ticker modal (same `onSymbolClick` handler that flows in
+ * from `SentComV5View`).
+ */
+const GameplanBlock = ({ gameplan, onSymbolClick }) => {
+  // Empty state: nothing returned from the backend at all.
+  if (!gameplan || (typeof gameplan === 'string' && !gameplan.trim())) {
+    return <div className="text-zinc-600">Gameplan synthesis skipped (LLM unavailable).</div>;
+  }
+  // Legacy string shape — render as a single paragraph block.
+  if (typeof gameplan === 'string') {
+    return (
+      <div className="whitespace-pre-wrap leading-snug text-[10px] text-zinc-300">
+        {gameplan}
+      </div>
+    );
+  }
+
+  const text = gameplan.text || '';
+  const watches = Array.isArray(gameplan.watches) ? gameplan.watches : [];
+
+  return (
+    <div className="space-y-3">
+      {watches.length > 0 && (
+        <div data-testid="gameplan-watches">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1.5">
+            top {watches.length} watch{watches.length === 1 ? '' : 'es'}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {watches.map((w, i) => (
+              <div
+                key={`${w.symbol}-${i}`}
+                data-testid={`gameplan-watch-${w.symbol}`}
+                className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 hover:border-cyan-500/40 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <ClickableSymbol
+                    symbol={w.symbol}
+                    onSymbolClick={onSymbolClick}
+                    className="text-zinc-100 font-bold text-[11px]"
+                  />
+                  {w.key_level && (
+                    <span
+                      className="text-cyan-400 text-[9px] tabular-nums truncate max-w-[60%]"
+                      title={w.key_level}
+                    >
+                      {w.key_level}
+                    </span>
+                  )}
+                </div>
+                {w.thesis && (
+                  <div className="text-zinc-300 text-[10px] leading-snug">{w.thesis}</div>
+                )}
+                {w.invalidation && (
+                  <div className="text-rose-400/80 text-[9px] leading-snug mt-0.5">
+                    × {w.invalidation}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {text && (
+        <div className="whitespace-pre-wrap leading-snug text-[10px] text-zinc-300">
+          {text}
+        </div>
+      )}
+      {!text && watches.length === 0 && (
+        <div className="text-zinc-600">Gameplan synthesis skipped (LLM unavailable).</div>
+      )}
+    </div>
+  );
+};
+
+
 /* ── Main card ─────────────────────────────────────────────────────── */
 
 export const WeekendBriefingCard = ({ onSymbolClick }) => {
@@ -391,11 +476,12 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
       {briefing && (
         <div>
           {/* Gameplan first — most opinionated, what the operator
-              actually wants to read first thing Sunday afternoon. */}
+              actually wants to read first thing Sunday afternoon.
+              Backend returns either a structured object
+              ({text, watches[]}) or a legacy string (older cache). We
+              normalise here so both render. */}
           <Section title="Bot's Gameplan" icon={TrendingUp} defaultOpen>
-            {briefing.gameplan
-              ? <div className="whitespace-pre-wrap leading-snug text-[10px] text-zinc-300">{briefing.gameplan}</div>
-              : <div className="text-zinc-600">Gameplan synthesis skipped (LLM unavailable).</div>}
+            <GameplanBlock gameplan={briefing.gameplan} onSymbolClick={onSymbolClick} />
           </Section>
 
           <Section title="Risk Map" icon={AlertTriangle} count={briefing.risk_map?.length}>

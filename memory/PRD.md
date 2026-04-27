@@ -4018,3 +4018,16 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
 - `backend/tests/test_weekend_briefing.py` (NEW, 26 tests)
 - `frontend/src/components/sentcom/v5/WeekendBriefingCard.jsx` (NEW)
 - `frontend/src/components/sentcom/v5/BriefingsV5.jsx` (weekend-gated wire-in)
+
+## 2026-02-01 — Gameplan: structured top-watches JSON (LLM JSON-mode)
+- **Where**: `services/weekend_briefing_service.py` + `WeekendBriefingCard.jsx`.
+- **What**:
+  1. **Backend prompt** rewritten to demand strict JSON `{text, watches[]}` from `gpt-oss:120b-cloud`. System prompt pins the schema with example shape; user prompt has a "respond with STRICT JSON only" reminder.
+  2. **`_coerce_gameplan_payload(raw)`** — resilient parser that handles 4 model-misbehaviour cases: strict JSON → fenced JSON (```json...```) → JSON embedded in prose → pure prose fallback. Also caps watches at 5, uppercases symbols, drops oversized/empty symbols, truncates oversized fields, swallows JSON decode errors.
+  3. **`_synthesize_gameplan()`** now returns `{"text": str, "watches": [...]}` instead of a raw string. Briefing dict's `gameplan` field is the structured object.
+  4. **`get_latest`/`generate` cache check** detects "has gameplan" across BOTH old (str) and new (dict) shapes — back-compat with any pre-migration cached docs.
+- **Frontend**:
+  - New `<GameplanBlock>` component handles both shapes (legacy string → single paragraph; new dict → cards grid + paragraph).
+  - Watches render as a grid of clickable cards: bold ticker symbol (clickable → existing enhanced ticker modal), key level on the right (cyan tabular-nums), thesis below, invalidation in rose-400/80. Hover effect: cyan border. `data-testid="gameplan-watch-{SYMBOL}"` for QA.
+- **Tests**: 10 new pytest cases pin the parser's resilience guarantees — strict JSON, markdown fences, prose+JSON sandwich, pure prose, empty input, watches cap (5), missing symbol, oversized fields, lowercase symbol, oversized symbol. All 36 weekend-briefing tests pass.
+- **Verification**: Live curl confirms `gameplan: {text: "", watches: []}` (empty in preview pod due to no LLM/Finnhub key). On Spark with Ollama+Finnhub wired, you'll see populated watches as a card grid in the Bot's Gameplan section.

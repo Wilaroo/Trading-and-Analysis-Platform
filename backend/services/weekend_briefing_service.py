@@ -419,22 +419,100 @@ _GAMEPLAN_SYSTEM_PROMPT = (
     "You are SentCom, an AI trading-bot strategist writing the operator's "
     "weekly gameplan note for the upcoming Mon-Fri trading week. Be "
     "concrete, opinionated, and brief. Always cite specific tickers when "
-    "relevant. Avoid filler and disclaimers. Output 4-6 short paragraphs "
-    "covering: market backdrop · top 3-5 watches with thesis · key levels "
-    "if known · risk + what would invalidate the view."
+    "relevant. Avoid filler and disclaimers.\n\n"
+    "OUTPUT STRICT JSON ONLY (no prose before or after, no markdown fences). "
+    "The JSON object must match this schema exactly:\n"
+    "{\n"
+    '  "text": "<4-6 short paragraphs covering market backdrop and reasoning, '
+    'separated by \\n\\n>",\n'
+    '  "watches": [\n'
+    "    {\n"
+    '      "symbol": "<TICKER>",\n'
+    '      "thesis": "<one-line thesis, 80 chars max>",\n'
+    '      "key_level": "<price level or trigger, e.g. \\"break above $185\\">",\n'
+    '      "invalidation": "<what kills the trade, 80 chars max>"\n'
+    "    }\n"
+    "  ]\n"
+    "}\n\n"
+    "Provide 3-5 watches. The `text` ends with a one-line risk caveat."
 )
 
 
-async def _synthesize_gameplan(facts: Dict[str, Any]) -> str:
-    """Ask the local LLM to compose the gameplan paragraph from the facts."""
+def _coerce_gameplan_payload(raw: str) -> Dict[str, Any]:
+    """Parse the LLM's JSON-only response into a structured gameplan.
+
+    Resilient to common model misbehaviours:
+      * Wraps in ```json fences → strip them.
+      * Trails with prose → take the first balanced JSON object.
+      * Returns plain prose → fall back to {"text": <prose>, "watches": []}
+        so the UI still renders the paragraph view.
+
+    Always returns a dict with `text: str` and `watches: list[dict]`.
+    """
+    import json
+    import re
+
+    if not raw:
+        return {"text": "", "watches": []}
+
+    cleaned = raw.strip()
+    # Strip optional markdown fences.
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+
+    # Try direct parse first.
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Last-ditch — find the first balanced { ... } block.
+        m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                return {"text": cleaned[:2000], "watches": []}
+        else:
+            return {"text": cleaned[:2000], "watches": []}
+
+    if not isinstance(parsed, dict):
+        return {"text": cleaned[:2000], "watches": []}
+
+    text = str(parsed.get("text") or "").strip()
+    watches_raw = parsed.get("watches") or []
+    watches: List[Dict[str, str]] = []
+    if isinstance(watches_raw, list):
+        for w in watches_raw[:5]:  # cap at 5 — UI fits ~4 cards comfortably
+            if not isinstance(w, dict):
+                continue
+            sym = str(w.get("symbol") or "").upper().strip()
+            if not sym or len(sym) > 6:
+                continue
+            watches.append({
+                "symbol": sym,
+                "thesis": str(w.get("thesis") or "").strip()[:160],
+                "key_level": str(w.get("key_level") or "").strip()[:80],
+                "invalidation": str(w.get("invalidation") or "").strip()[:160],
+            })
+
+    return {"text": text, "watches": watches}
+
+
+async def _synthesize_gameplan(facts: Dict[str, Any]) -> Dict[str, Any]:
+    """Ask the local LLM to compose the gameplan + structured watches.
+
+    Returns ``{"text": str, "watches": [{symbol, thesis, key_level, invalidation}]}``.
+    Empty payload (`{"text": "", "watches": []}`) when LLM is unavailable —
+    callers should treat this as a degraded section, not an error.
+    """
     try:
         from agents.llm_provider import get_llm_provider
         provider = get_llm_provider()
     except Exception as exc:
         logger.warning(f"weekend_briefing: LLM unavailable ({exc}) — skipping gameplan")
-        return ""
+        return {"text": "", "watches": []}
     if provider is None:
-        return ""
+        return {"text": "", "watches": []}
 
     # Compose a tight fact pack for the prompt — keep it small or the
     # cloud model rate-limits us.
@@ -471,23 +549,23 @@ async def _synthesize_gameplan(facts: Dict[str, Any]) -> str:
         *summary_lines,
         "",
         "Audience: a discretionary day-trading operator who runs an AI bot.",
-        "Format: 4-6 short paragraphs. End with a one-line risk caveat.",
+        "Reminder: respond with STRICT JSON only — no prose, no markdown.",
     ])
 
     try:
         resp = await provider.generate(
             prompt=prompt,
             system_prompt=_GAMEPLAN_SYSTEM_PROMPT,
-            temperature=0.5,
-            max_tokens=900,
+            temperature=0.4,
+            max_tokens=1200,
         )
         if not getattr(resp, "success", False):
             logger.warning(f"weekend_briefing LLM call failed: {getattr(resp, 'error', 'unknown')}")
-            return ""
-        return (resp.content or "").strip()
+            return {"text": "", "watches": []}
+        return _coerce_gameplan_payload(resp.content or "")
     except Exception as exc:
         logger.warning(f"weekend_briefing LLM call exception: {exc}")
-        return ""
+        return {"text": "", "watches": []}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -536,9 +614,19 @@ class WeekendBriefingService:
             existing = self._db[self.COLLECTION].find_one(
                 {"_id": wid}, projection={"_id": 0}
             )
-            if existing and existing.get("gameplan"):
-                logger.info(f"weekend_briefing: returning cached {wid}")
-                return existing
+            if existing:
+                # Detect "has gameplan" across both old (str) and new
+                # (dict {text, watches}) shapes for back-compat with any
+                # cached docs from before the structured-output migration.
+                gp = existing.get("gameplan")
+                has_gp = (
+                    bool(gp) and isinstance(gp, str)
+                ) or (
+                    isinstance(gp, dict) and bool(gp.get("text") or gp.get("watches"))
+                )
+                if has_gp:
+                    logger.info(f"weekend_briefing: returning cached {wid}")
+                    return existing
 
         logger.info(f"weekend_briefing: generating fresh briefing for {wid}")
 
@@ -570,7 +658,7 @@ class WeekendBriefingService:
 
         risk_map = _build_risk_map(positions_held, earnings, macro)
 
-        # Synthesize the gameplan paragraph from facts.
+        # Synthesize the gameplan paragraph + structured watches from facts.
         facts: Dict[str, Any] = {
             "last_week_recap": last_week_recap,
             "earnings_calendar": earnings,
@@ -578,7 +666,7 @@ class WeekendBriefingService:
             "sector_catalysts": catalysts,
             "positions_held": positions_held,
         }
-        gameplan_text = await _synthesize_gameplan(facts)
+        gameplan_payload = await _synthesize_gameplan(facts)
 
         briefing: Dict[str, Any] = {
             "iso_week": wid,
@@ -589,7 +677,10 @@ class WeekendBriefingService:
             "macro_calendar": macro,
             "sector_catalysts": catalysts,
             "ipo_calendar": ipo_cal,
-            "gameplan": gameplan_text,
+            # gameplan is now a structured object: {text, watches[]}.
+            # Older cached docs that stored a raw string still render OK
+            # because the frontend handles both shapes.
+            "gameplan": gameplan_payload,
             "risk_map": risk_map,
             "positions_held": positions_held,
             "sources": {
@@ -598,7 +689,7 @@ class WeekendBriefingService:
                 "earnings": "finnhub" if FINNHUB_API_KEY else "unavailable",
                 "macro": "finnhub" if FINNHUB_API_KEY else "unavailable",
                 "ipo": "finnhub" if FINNHUB_API_KEY else "unavailable",
-                "gameplan": "gpt-oss:120b-cloud" if gameplan_text else "skipped",
+                "gameplan": "gpt-oss:120b-cloud" if gameplan_payload.get("text") else "skipped",
             },
         }
 
