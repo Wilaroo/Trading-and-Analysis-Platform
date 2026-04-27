@@ -2,6 +2,45 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-27 — Chart day-boundary tick labels + RPC latency headline — SHIPPED
+
+### Why
+Operator screenshot showed the 5m chart x-axis as `9:30 AM → 1:00 PM →
+4:00 AM → 8:00 AM …` — time appeared to go backwards because the
+session crosses midnight and our tick formatter only ever rendered
+`HH:MM AM/PM`, never a date. Same screenshot showed Pusher RPC as
+`avg 1117ms · p95 982ms · last 335ms` — `avg > p95` is mathematically
+possible (one large outlier above p95 pulls the mean up) but it
+confuses operators because the headline reads "1117ms" while the live
+number is 335ms.
+
+### Scope
+- `frontend/src/utils/timeET.js · chartTickMarkFormatterET()` now
+  branches on lightweight-charts `TickMarkType`:
+  - `0|1|2` (Year / Month / DayOfMonth) → render `Apr 27` style date.
+  - `3|4` (Time / TimeWithSeconds)      → render `9:30 AM` 12-h time.
+  Day boundaries on intraday charts now show a date label instead of
+  silently wrapping the clock.
+- `frontend/src/components/sentcom/v5/PusherHeartbeatTile.jsx · RPC
+  block`: headline is now `rpcLast` (most actionable "right now"
+  number); `p95` and `avg` demoted to context. Stops the avg-skew-by-
+  outlier from misleading operators.
+
+### Verification
+- ESLint: clean on both files.
+- `chartTickMarkFormatterET` tested against lightweight-charts'
+  TickMarkType enum (0=Year, 1=Month, 2=DayOfMonth, 3=Time,
+  4=TimeWithSeconds — matches their docs).
+
+### Operator note (not a bug)
+The `222 DLQ` red badge in the header is **not a regression** — it's
+`DeadLetterBadge.jsx` correctly surfacing 222 historical-data requests
+that permanently failed qualification (matches the "204 qualify_failed"
+item in ROADMAP P3). Click the badge to open the NIA Data Collection
+panel and use `/api/ib-collector/retry-failed` to reattempt them.
+
+---
+
 ## 2026-04-27 — App-wide ET 12-Hour Time Format — SHIPPED
 
 ### Why

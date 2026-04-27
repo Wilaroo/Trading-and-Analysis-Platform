@@ -82,14 +82,27 @@ export const fmtET12Short = (input) => {
 
 /**
  * tickMarkFormatter for lightweight-charts.
- * Receives a Unix-seconds time and a TickMarkType, returns a label.
- * We always output ET-12h labels — daily candles get "Feb 19", smaller
- * timeframes get "9:30 AM".
+ *
+ * lightweight-charts passes a `TickMarkType` enum telling us what *kind*
+ * of boundary this tick represents:
+ *   0 = Year, 1 = Month, 2 = DayOfMonth   → render a DATE label
+ *   3 = Time, 4 = TimeWithSeconds         → render a 12-hour TIME label
+ *
+ * Without this branch, intraday charts that span multiple sessions
+ * print non-monotonic labels (e.g. "1:00 PM → 4:00 AM" because the
+ * day boundary tick still showed time-of-day instead of "Apr 27").
  */
-export const chartTickMarkFormatterET = (time, tickMarkType /* eslint-disable-line no-unused-vars */) => {
-  // time arrives as either { year, month, day } (daily) or seconds (intraday)
+export const chartTickMarkFormatterET = (time, tickMarkType) => {
+  // Daily-series ticks arrive as { year, month, day } regardless of type.
   if (time && typeof time === 'object' && 'year' in time) {
     const d = new Date(Date.UTC(time.year, (time.month || 1) - 1, time.day || 1));
+    return d.toLocaleDateString('en-US', { timeZone: ET_TZ, month: 'short', day: 'numeric' });
+  }
+  // Intraday ticks: switch on the boundary type so day-rollovers show a
+  // date and intra-day ticks show a 12-h clock.
+  if (tickMarkType === 0 || tickMarkType === 1 || tickMarkType === 2) {
+    const d = _normalize(time);
+    if (!d) return '—';
     return d.toLocaleDateString('en-US', { timeZone: ET_TZ, month: 'short', day: 'numeric' });
   }
   return fmtET12(time);

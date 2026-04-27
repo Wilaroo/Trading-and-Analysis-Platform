@@ -117,21 +117,23 @@ export const PusherHeartbeatTile = () => {
         )}
       </div>
 
-      {/* RPC latency */}
+      {/* RPC latency — headline is `last` (most actionable "right now"
+          number); `avg` and `p95` are demoted to context because a few
+          slow outliers skew avg above p95 and confuse operators. */}
       <div
         className="flex items-center gap-1.5 text-xs"
         data-testid="pusher-heartbeat-rpc"
       >
         <Zap className="w-3.5 h-3.5 text-zinc-500" />
         <span className="text-zinc-500">RPC</span>
-        <span className="font-bold text-zinc-200 v5-mono">{fmtLat(rpcAvg)}</span>
+        <span className="font-bold text-zinc-200 v5-mono">{fmtLat(rpcLast)}</span>
         <span className="text-zinc-500 text-[10px]">
-          avg
+          last
           {rpcP95 != null && (
             <span className="ml-1">· p95 {fmtLat(rpcP95)}</span>
           )}
-          {rpcLast != null && (
-            <span className="ml-1">· last {fmtLat(rpcLast)}</span>
+          {rpcAvg != null && (
+            <span className="ml-1">· avg {fmtLat(rpcAvg)}</span>
           )}
         </span>
         {rpcSamples > 0 && (
