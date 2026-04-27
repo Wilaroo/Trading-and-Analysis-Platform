@@ -1,5 +1,39 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — DEFERRED: Auto-Strategy-Weighting (parked, not yet built)
+
+### Idea
+Self-improving feedback loop: the scanner *automatically tones down*
+setups with `avg_r ≤ 0` over last 30 days (raise RVOL threshold +0.3 or
+skip entirely below `n=10` outcomes) and *amplifies* setups with
+`avg_r ≥ +0.8` (lower threshold slightly). Turns StrategyMixCard from a
+diagnostic into an active feedback loop.
+
+### Why parked
+Small-sample auto-tuning amplifies noise. We need real outcome data
+first. Activation criteria — turn this on only when ALL are true:
+- ≥ 50 resolved alert_outcomes recorded across ≥ 5 distinct strategies
+- ≥ 14 trading days of continuous scanner uptime (post wave-sub fix)
+- StrategyMixCard concentration ≤ 60% (no single-strategy dominance bug
+  recurring)
+- Operator has visually validated the avg_r columns make sense for at
+  least 2 weeks (no obvious outcome-recording bugs)
+
+### Scope when activated (~60 lines)
+- Add `services/strategy_weighting_service.py` reading from
+  `/api/scanner/strategy-mix` cache.
+- Modify `enhanced_scanner._is_setup_valid_now()` to consult weighting
+  table.
+- Add a "Strategy weighting" section to AI summary tab + a kill-switch
+  toggle on V5 dashboard so operator can disable the auto-tuning at any
+  time.
+- Tests: weighting math, kill-switch respected, sample-size guards.
+
+### Signal it's time to build
+When `StrategyMixCard` shows ≥ 5 strategies with `n ≥ 10` outcomes each
+AND the operator says "I trust these numbers".
+
+
 ## 2026-02 — Strategy Mix Card: P&L Attribution — SHIPPED
 
 ### Why
