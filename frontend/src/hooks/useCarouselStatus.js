@@ -73,7 +73,7 @@ export const useCarouselStatus = () => {
 
   const watches = briefing?.gameplan?.watches;
   if (!Array.isArray(watches) || watches.length === 0) {
-    return { ..._emptyStatus, active: true };
+    return { ..._emptyStatus, active: true, watches: [] };
   }
 
   const hhmm = snap.et_hhmm ?? 0;
@@ -86,7 +86,8 @@ export const useCarouselStatus = () => {
   const secondsIntoSlot = (minutesIntoSlot * 60) + realSeconds;
   const secondsUntilNext = Math.max(0, SLOT_MINUTES * 60 - secondsIntoSlot);
 
-  const currentSymbol = String(watches[slotIndex % watches.length]?.symbol || '').toUpperCase();
+  const currentIdx = slotIndex % watches.length;
+  const currentSymbol = String(watches[currentIdx]?.symbol || '').toUpperCase();
   const nextSymbol = String(watches[(slotIndex + 1) % watches.length]?.symbol || '').toUpperCase();
 
   // `tick` referenced so React knows to re-render every second — the
@@ -99,6 +100,10 @@ export const useCarouselStatus = () => {
     nextSymbol: nextSymbol || null,
     secondsUntilNext,
     totalWatches: watches.length,
+    watches: watches.map((w) => ({
+      symbol: String(w?.symbol || '').toUpperCase(),
+    })).filter((w) => w.symbol),
+    currentIdx,
   };
 };
 

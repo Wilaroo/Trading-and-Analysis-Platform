@@ -16,7 +16,7 @@
  * All V5 components live in `./v5/`. Existing panels are left untouched so
  * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React, { useCallback, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
 import { ModelHealthScorecard } from './panels/ModelHealthScorecard';
@@ -135,10 +135,11 @@ export const SentComV5View = ({
   );
   // Tracks whether the operator has clicked anything this session — used
   // by the Monday-morning auto-load hook so it never overrides an
-  // explicit manual choice.
-  const userHasFocusedRef = useRef(false);
+  // explicit manual choice. State (not ref) so the carousel chip
+  // re-renders into PAUSED mode the moment the operator takes over.
+  const [userHasFocused, setUserHasFocused] = useState(false);
   const setFocusedSymbolUserDriven = useCallback((sym) => {
-    userHasFocusedRef.current = true;
+    setUserHasFocused(true);
     setFocusedSymbol(sym);
   }, []);
 
@@ -178,7 +179,7 @@ export const SentComV5View = ({
   // anything since page load — explicit user choice always wins.
   useMondayMorningAutoLoad({
     setFocusedSymbol,
-    userHasFocused: userHasFocusedRef.current,
+    userHasFocused,
   });
 
   // Phase 5 stability bundle — freshness inspector modal visibility.
@@ -307,6 +308,8 @@ export const SentComV5View = ({
             focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
             onSymbolClick={handleOpenTicker}
             onChangeSymbol={setFocusedSymbolUserDriven}
+            onCarouselPick={setFocusedSymbolUserDriven}
+            userHasFocused={userHasFocused}
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -394,7 +397,7 @@ export const SentComV5View = ({
 
 
 /** Header strip above the chart showing symbol + entry/SL/PT if position is open. */
-const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClick, onChangeSymbol }) => {
+const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClick, onChangeSymbol, onCarouselPick, userHasFocused }) => {
   const dir = (position?.direction || position?.side || '').toLowerCase();
   const [draft, setDraft] = useState('');
   const commit = useCallback(() => {
@@ -441,7 +444,11 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
           />
         )}
         <LiveDataChip />
-        <CarouselCountdownChip />
+        <CarouselCountdownChip
+          onManualPick={onCarouselPick}
+          userHasFocused={userHasFocused}
+          currentChartSymbol={symbol}
+        />
         {focusedSymbolIsPosition && (
           <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
             {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}

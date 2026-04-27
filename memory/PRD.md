@@ -4062,3 +4062,14 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
   3. Wired into `V5ChartHeader` next to the existing `LiveDataChip` so it sits inline with the symbol input + LONG/SHORT badge.
 - **Result**: Operator sees `LIVE · AAPL · 02:14 → MSFT` and knows exactly how long the chart will stay on the current watch before rotating. Combined with the LIVE chip on the matching watch card in the Weekend Briefing's gameplan section, the auto-frame feels intentional rather than mysterious.
 - **Verification**: Lint clean, frontend compiles green.
+
+## 2026-02-01 — Manual rotation controls in carousel chip
+- **Where**: `frontend/src/components/sentcom/v5/CarouselCountdownChip.jsx` (rewrite to add ‹/› buttons), `hooks/useCarouselStatus.js` (expose `watches[]` + `currentIdx`), `components/sentcom/SentComV5View.jsx` (state migration + prop wiring).
+- **What**:
+  1. Chip now has two modes:
+     - **AUTO** — rotation active, cyan tone, animated radio icon, `LIVE · ‹ AAPL · 02:14 → MSFT ›`. Clicking ‹/› immediately picks the prev/next watch, marks the manual-override flag (pauses auto-rotation for the session), and triggers re-render into PAUSED mode.
+     - **PAUSED** — operator has taken over, zinc tone, `WATCHES · ‹ AAPL ›`. Arrows still work — chip becomes a tiny manual watches-cycler. Useful for stepping through the bot's gameplan watches with one click each.
+  2. In PAUSED mode the cycler navigates relative to the chart's *current* symbol (`currentChartSymbol` prop), so operator can step `‹/›` from wherever they last landed instead of jumping back to the carousel's auto-slot.
+  3. **State migration in `SentComV5View`**: `userHasFocusedRef` → `useState(userHasFocused)`. The ref version didn't trigger re-renders, so the chip wouldn't flip into PAUSED mode immediately when the operator clicked. State trigger fixes the snap-into-pause UX.
+  4. New `onCarouselPick` + `userHasFocused` props threaded through `V5ChartHeader` → `<CarouselCountdownChip>`.
+- **Verification**: Lint clean, frontend compiles green.
