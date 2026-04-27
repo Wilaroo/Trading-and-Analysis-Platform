@@ -3950,3 +3950,18 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
   6. Mounted in `App.js` between `MarketStateProvider` and `WebSocketDataProvider`. Matching `</AutonomyReadinessProvider>` close tag added.
 - **Result**: Future surfaces (V5 header chip / ⌘K palette preview / pre-Monday go-live banner) can `useAutonomyReadiness()` for free — no extra fetches, byte-perfect lock-step across all surfaces. 1 round-trip per 30s for the entire app instead of N (one per mounted consumer).
 - **Verification**: Lint clean, frontend compiles green, no new warnings.
+
+## 2026-02-01 — V5 Header Autonomy Verdict Chip
+- **Where**: `frontend/src/components/sentcom/v5/AutonomyVerdictChip.jsx` (NEW), wired into `SentCom.jsx` header next to the wordmark moon.
+- **What**:
+  1. Tiny pill (1.5px dot + `AUTO · READY/WARN/BLOCKED/…` label) reads from `useAutonomyReadiness()` (canonical 30s-poll context).
+  2. Verdict mapping:
+     - **GREEN** → emerald pulse, when `verdict='green' && ready_for_autonomous=true`.
+     - **AMBER** → amber dot, on warnings OR `verdict='green' && !ready_for_autonomous` (caution: green checks but auto-execute eligibility off).
+     - **RED** → rose pulse, on blockers.
+     - **ZINC** → loading/error/unconfigured.
+  3. Click opens the FreshnessInspector with `scrollToTestId="autonomy-readiness-card"` — operator lands directly on the Autonomy card.
+  4. Label hidden on small screens (`sm:inline`) — dot stays visible always.
+- **FreshnessInspector** updated to accept a `scrollToTestId` prop and `scrollIntoView` the matching element 120ms after open (gives the cards a frame to mount).
+- **Result**: Permanent at-a-glance "am I cleared to flip auto-execute?" signal in the header. Same source-of-truth context as the modal card, so they can never disagree. ~80 lines for the chip + 13 lines for the deep-link scroll.
+- **Verification**: Lint clean, frontend compiles green, no new warnings. Ready for visual confirmation on Spark.

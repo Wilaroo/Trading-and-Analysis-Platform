@@ -51,6 +51,7 @@ import { PulsingDot } from './sentcom/primitives/PulsingDot';
 import { useAIInsights } from './sentcom/hooks/useAIInsights';
 import { useMarketSession } from './sentcom/hooks/useMarketSession';
 import { useMarketState } from '../hooks/useMarketState';
+import { AutonomyVerdictChip } from './sentcom/v5/AutonomyVerdictChip';
 import { useSentComStatus } from './sentcom/hooks/useSentComStatus';
 import { useSentComStream } from './sentcom/hooks/useSentComStream';
 import { useSentComPositions } from './sentcom/hooks/useSentComPositions';
@@ -426,6 +427,12 @@ const SentCom = ({ compact = false, embedded = false }) => {
                       </motion.span>
                     )}
                   </AnimatePresence>
+                  {/* Autonomy verdict chip — permanent at-a-glance "am I
+                      cleared to flip auto-execute?" indicator. Click opens
+                      the FreshnessInspector deep-linked to the Autonomy
+                      card. Drives off the same AutonomyReadinessContext
+                      shared with the modal so they can never disagree. */}
+                  <AutonomyVerdictChip />
                 </h2>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="flex items-center gap-1">

@@ -40,7 +40,7 @@ const STATUS_PILL = {
   red: 'bg-rose-900/40 text-rose-300 border-rose-800/60',
 };
 
-export const FreshnessInspector = ({ isOpen, onClose }) => {
+export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) => {
   const [health, setHealth] = useState(null);
   const [subs, setSubs] = useState(null);
   const [ttl, setTtl] = useState(null);
@@ -73,6 +73,21 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
     const id = setInterval(reload, POLL_MS);
     return () => clearInterval(id);
   }, [isOpen, reload]);
+
+  // Deep-link scroll: when the inspector is opened with a `scrollToTestId`,
+  // scroll the matching element into view once the DOM has had a frame to
+  // mount the cards. Used by the V5 header AutonomyVerdictChip to land
+  // operators directly on the Autonomy card.
+  useEffect(() => {
+    if (!isOpen || !scrollToTestId) return undefined;
+    const t = setTimeout(() => {
+      const el = document.querySelector(`[data-testid="${scrollToTestId}"]`);
+      if (el?.scrollIntoView) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [isOpen, scrollToTestId]);
 
   if (!isOpen) return null;
 
