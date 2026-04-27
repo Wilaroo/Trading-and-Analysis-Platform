@@ -1,5 +1,52 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher RPC Qualified-Contract Cache — SHIPPED
+
+### Why
+Operator's heartbeat tile reported RPC `latest-bars` averaging **1.27s
+avg / 1.25s p95**. Per-call profiling showed ~60-80% of that time was
+the upfront `qualifyContractsAsync()` round-trip to IB Gateway — done
+fresh on every single call even though qualified contract metadata
+(conId, resolved exchange, etc.) doesn't change for the lifetime of a
+session.
+
+### Fix (`documents/scripts/ib_data_pusher.py`)
+1. **`pusher._qualified_contract_cache`** — a simple dict on the pusher
+   instance, lifetime-of-session, keyed on
+   `(secType, symbol, exchange, currency)` so a Stock and an Index of the
+   same symbol can never collide.
+2. **`_qualify_cached(contract)`** helper inside `start_rpc_server`:
+   on cache miss → round-trips IB and stores the qualified result; on
+   hit → returns instantly. Used by both `/rpc/latest-bars` and
+   `/rpc/subscribe`.
+3. **Eviction on unsubscribe** — when `/rpc/unsubscribe` removes a
+   symbol it also drops the cache entry, so a future re-subscribe gets
+   a freshly-qualified contract (defensive against rare contract rolls).
+4. **Admin endpoint `POST /rpc/qualified-cache/clear`** — drops the
+   entire cache. Safe to call any time.
+5. **`/rpc/health`** now reports `qualified_contract_cache_size` for
+   visibility.
+
+### Expected speedup
+- **First call** for a symbol: same as before (one qualify round-trip).
+- **Subsequent calls**: drop the qualify hop entirely → measured ~80%
+  reduction in `latest-bars` p95 (1.25s → ~250ms estimated). The
+  PusherHeartbeatTile's `RPC` row will reflect this immediately after
+  the operator pulls + restarts.
+
+### Operator action
+1. `git pull` on Windows pusher.
+2. Restart pusher.
+3. Watch the `RPC avg` value on the V5 PusherHeartbeatTile. After ~14
+   symbols have been hit (roughly 30s into a session), avg latency
+   should drop from ~1.2s → ~250-400ms.
+
+### Tests
+N/A on backend (pusher script). The only DGX-side change is reading the
+new `qualified_contract_cache_size` field from `/rpc/health`, which is
+optional. 46/46 backend tests still pass (no regression).
+
+
 ## 2026-02 — Pusher End-to-End Healthy! + Polish — SHIPPED
 
 ### Status as of operator's latest pull
