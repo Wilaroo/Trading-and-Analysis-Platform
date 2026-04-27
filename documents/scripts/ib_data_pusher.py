@@ -921,6 +921,17 @@ class IBDataPusher:
         
         # Always log what we have
         if not has_data:
+            # Surface this so "last push never" UX bug can be diagnosed.
+            # Throttle to once every ~10 calls so we don't spam.
+            self._empty_buffer_skips = getattr(self, "_empty_buffer_skips", 0) + 1
+            if self._empty_buffer_skips % 10 == 1:
+                logger.warning(
+                    "[PUSH] Skipping push — all buffers empty (quotes=%d, positions=%d, "
+                    "account=%d, l2=%d, fundamentals=%d, news=%d). IB ticks not flowing yet?",
+                    len(self.quotes_buffer), len(self.positions_data), len(self.account_data),
+                    len(self.level2_buffer), len(self.fundamentals_buffer),
+                    sum(len(items) for items in self.news_buffer.values()),
+                )
             return
         
         # Log what we're pushing
@@ -2659,6 +2670,19 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
 
     app = FastAPI(title="IB Pusher RPC", version="1.0.0")
 
+    # ---- Cache the IB event loop on THIS thread (the main thread where
+    # ib_insync was instantiated). FastAPI sync handlers run in a thread-
+    # pool worker that doesn't have ib_insync's loop attached, so calling
+    # `_ibu.getLoop()` from the handler returns None → every RPC call
+    # fails with "IB event loop not available". Capturing the reference
+    # here, ONCE, on the right thread, fixes that.
+    try:
+        _captured_ib_loop = _ibu.getLoop()
+    except Exception as _e:
+        _captured_ib_loop = None
+        logger.warning("[RPC] could not capture IB event loop at startup: %s", _e)
+    pusher._ib_event_loop = _captured_ib_loop
+
     class LatestBarsRequest(BaseModel):
         symbol: str
         bar_size: str = "5 mins"
@@ -2673,17 +2697,32 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         symbols: list
 
     def _get_ib_loop():
-        """Return the asyncio loop ib_insync is bound to."""
+        """Return the asyncio loop ib_insync is bound to.
+
+        Reads the loop captured at start_rpc_server() init time (main
+        thread). Falls back to a fresh `_ibu.getLoop()` only if the
+        cached one was closed/never captured — which should never happen
+        in normal operation."""
+        loop = getattr(pusher, "_ib_event_loop", None)
+        if loop is not None and not loop.is_closed():
+            return loop
         try:
             return _ibu.getLoop()
         except Exception:
             return None
 
-    def _run_on_ib_loop(coro, timeout: float):
-        """Dispatch a coroutine to the IB event loop from a different thread."""
+    def _run_on_ib_loop(coro_factory, timeout: float):
+        """Dispatch a coroutine to the IB event loop from a different thread.
+
+        Takes a zero-arg `coro_factory` (a callable returning a fresh
+        coroutine) instead of a pre-built coroutine — that way, if the
+        loop lookup fails, we never construct the coroutine at all and
+        avoid the noisy "coroutine was never awaited" RuntimeWarning.
+        """
         loop = _get_ib_loop()
         if loop is None:
             raise RuntimeError("IB event loop not available")
+        coro = coro_factory()
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         return fut.result(timeout=timeout)
 
@@ -2727,7 +2766,7 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
                 )
                 return bars
 
-            bars = _run_on_ib_loop(_fetch(), timeout=18.0)
+            bars = _run_on_ib_loop(_fetch, timeout=18.0)
             out = []
             for b in bars or []:
                 # ib_insync BarData -> dict (ISO for date)

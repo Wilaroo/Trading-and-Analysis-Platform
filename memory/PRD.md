@@ -1,5 +1,41 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher RPC Bug Fix + Push Diagnostic — SHIPPED
+
+### Symptoms (from user's pusher terminal logs after restart)
+1. Every `/rpc/latest-bars` call failed with `"IB event loop not available"`,
+   spamming `RuntimeWarning: coroutine '_fetch' was never awaited`.
+2. UI banner "IB PUSHER DEAD · last push never · bot + scanner paused"
+   even though IB Gateway and the pusher were both connected.
+
+### Root Cause #1 — `_get_ib_loop()` returning None from FastAPI thread
+`ib_insync.util.getLoop()` was called from inside the FastAPI sync handler
+(running on a uvicorn threadpool worker). That worker thread doesn't have
+ib_insync's loop attached, so `getLoop()` returned None → handler raised
+`RuntimeError("IB event loop not available")` → coroutine never scheduled →
+"never awaited" warning.
+
+### Fix (pusher script `documents/scripts/ib_data_pusher.py`)
+1. **Cache the loop reference at `start_rpc_server()` init time** (which
+   runs on the main thread, where ib_insync IS bound). Stored as
+   `pusher._ib_event_loop`. The handler reads from this cache instead
+   of re-discovering.
+2. **`_run_on_ib_loop()` now takes a `coro_factory` callable** instead
+   of a pre-built coroutine. If the loop lookup fails we never construct
+   the coroutine at all, eliminating the `RuntimeWarning` noise.
+3. **`push_data_to_cloud()` now logs when it skips on empty buffers**
+   (throttled to every 10 calls) so the operator can see whether IB ticks
+   are flowing — directly diagnoses the "last push never" UX banner.
+
+### Action required from operator
+1. `git pull` on Windows pusher.
+2. Restart `python ib_data_pusher.py` — should see no more `[RPC]
+   latest-bars … failed: IB event loop not available` warnings.
+3. If "last push never" persists, the new throttled `[PUSH] Skipping push
+   — all buffers empty …` log line will reveal whether quotes/L2 are
+   not yet streaming from IB Gateway.
+
+
 ## 2026-02 — STRONG_EDGE Audio Cue — SHIPPED
 
 ### Why
