@@ -356,6 +356,13 @@ def _init_all_services():
     # Initialize End-of-Day Generation Service (scheduler starts in startup event)
     eod_service = get_eod_service(db)
 
+    # Initialize Weekend Briefing Service — singleton that backs the
+    # /api/briefings/weekend/{latest,generate} surfaces. The Sunday 14:00 ET
+    # cron is wired separately in eod_generation_service so we can reuse the
+    # already-running BackgroundScheduler.
+    from services.weekend_briefing_service import get_weekend_briefing_service
+    weekend_briefing_service = get_weekend_briefing_service(db)
+
     # Phase 4 — Alpaca retirement. Gated by ENABLE_ALPACA_FALLBACK env var
     # (default "false"). When disabled we skip all Alpaca service init and
     # wire None into the consumers; they already have IB-pusher / Mongo
@@ -1459,6 +1466,11 @@ app.include_router(autonomy_router)
 # autonomy gate, and any future ops dashboard.
 from routers.market_state_router import router as market_state_router  # noqa: E402
 app.include_router(market_state_router)
+# Weekend briefing surfaces (`/api/briefings/weekend/{latest,generate}`).
+# Drives the BriefingsV5 weekend card; auto-generated Sunday 14:00 ET via
+# the eod_generation_service scheduler + on-demand from the UI button.
+from routers.weekend_briefing_router import router as weekend_briefing_router  # noqa: E402
+app.include_router(weekend_briefing_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

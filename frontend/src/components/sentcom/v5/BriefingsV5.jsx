@@ -12,6 +12,8 @@
  */
 import React, { useMemo, useState } from 'react';
 import { useMorningBriefing } from './useMorningBriefing';
+import { useMarketState } from '../../../contexts';
+import { WeekendBriefingCard } from './WeekendBriefingCard';
 
 const nowET = () => {
   // Locale-based ET time (close enough for UI labels; not trade-critical)
@@ -322,6 +324,12 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
   const { loading, data } = useMorningBriefing({ refreshMs: 120_000 });
   const [expandedKey, setExpandedKey] = useState('morning');
   const toggle = (key) => setExpandedKey(curr => curr === key ? null : key);
+  // Surface the Weekend Briefing on Sat/Sun (canonical state from the
+  // shared MarketStateContext — same source as the wordmark moon).
+  // We render it FIRST in the panel during the weekend so the operator
+  // sees the week-ahead read before the (idle) morning prep card.
+  const marketState = useMarketState();
+  const isWeekend = marketState?.is_weekend === true;
 
   // Use `context` as a secondary source if briefing endpoints are unavailable
   const briefing = data || {
@@ -333,6 +341,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
 
   return (
     <div data-testid="v5-briefings" data-help-id="briefings" className="flex flex-col">
+      {isWeekend && <WeekendBriefingCard onSymbolClick={onSymbolClick} />}
       <MorningPrepCard
         data={briefing}
         loading={loading}

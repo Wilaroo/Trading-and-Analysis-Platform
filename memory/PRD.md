@@ -3972,3 +3972,49 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - **Fix**: One-line change in `SentCom.jsx` V5 dispatch — pass the already-computed `allMessages` memo (which dedups `localMessages` + stream `messages`, sorts by timestamp, takes last 30) instead of raw stream `messages`.
 - **Also fixed**: CORS spam in browser console — `DataFreshnessBadge.jsx:74` was sending `credentials: 'include'` on `/api/ib/pusher-health` which clashed with the backend's `Access-Control-Allow-Origin: *`. Dropped the unnecessary flag (endpoint is read-only, no auth needed).
 - **Verification**: Lint clean, frontend compiles green. User can now confirm the AI reply appears in the V5 unified stream.
+
+## 2026-02-01 — Weekend Briefing Report (Sunday afternoon, full pipeline)
+
+### What was built
+A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 14:00 ET each Sunday + on-demand from the UI.
+
+### Backend
+- **`services/weekend_briefing_service.py`** (NEW) — orchestrator with 7 section builders:
+  1. `last_week_recap` — Sector ETF returns from `ib_historical_data` (7-day price delta) + closed-trade P&L from `closed_positions`/`trade_history`/`trades` collections (best-effort discovery).
+  2. `major_news` — Finnhub `/news?category=general` (cached 7d window).
+  3. `earnings_calendar` — Finnhub `/calendar/earnings` filtered to user's positions ∪ default mega-caps (AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, AMD, AVGO, NFLX, CRM, ORCL).
+  4. `macro_calendar` — Finnhub `/calendar/economic` filtered to US events with `impact in {high, medium}`.
+  5. `sector_catalysts` — keyword-filtered headlines (FDA, earnings, IPO, Fed/FOMC, lawsuit, conference, etc.) with matched-keyword tags.
+  6. `gameplan` — LLM (`gpt-oss:120b-cloud` via `agents.llm_provider`) synthesizes 4-6 short paragraphs from the collected facts.
+  7. `risk_map` — flags earnings on held positions (high) + high-impact macro events (medium).
+- All section builders fail-soft: a missing Finnhub key, missing IB data, missing LLM, or per-call timeout each degrade to an empty section without breaking the whole briefing. Sources are reported in `briefing.sources` so the UI can show what data went in.
+- Cached in MongoDB collection `weekend_briefings` keyed by ISO week (`%G-W%V`). Idempotent — same week = same `_id`, upsert.
+- Singleton accessor `get_weekend_briefing_service(db)` mirrors codebase convention.
+
+- **`routers/weekend_briefing_router.py`** (NEW):
+  - `GET  /api/briefings/weekend/latest` → `{success, found, briefing}`
+  - `POST /api/briefings/weekend/generate?force=1` → `{success, briefing}`
+- Wired into `server.py` after `market_state_router`.
+
+- **`services/eod_generation_service.py`** — added Sunday 14:00 ET cron via the existing `BackgroundScheduler`. New private method `_auto_generate_weekend_briefing()` calls into the service.
+
+### Frontend
+- **`components/sentcom/v5/WeekendBriefingCard.jsx`** (NEW) — collapsible 7-section card. All ticker symbols use `<ClickableSymbol>` so clicks open the existing enhanced ticker modal via `onSymbolClick`. Includes:
+  - Header with ISO week, last-generated timestamp, refresh-icon button
+  - Default-open "Bot's Gameplan" section + "Risk Map" + "Earnings Calendar" + "Macro Calendar" + "Sector Catalysts" + "Last Week Recap" (sectors + closed P&L) + "Major News (7d)"
+  - Sources footer with green/red indicators per data source
+  - "Generate Now" button when no briefing exists yet
+- **`BriefingsV5.jsx`** — imports the card + `useMarketState`, renders it FIRST in the panel ONLY when `is_weekend=true` (canonical source). Mon-Fri the card stays out of the way.
+
+### Testing
+- **`tests/test_weekend_briefing.py`** (26 tests) — pin ISO-week format, catalyst keyword classification (parametrized over 10 keywords), risk-map flagging logic, get_latest fallback path, sector ETF surface stability. All pass in 0.16s.
+- Live curl verified: `GET /api/briefings/weekend/latest` → `{success: true, found: false}` (no cache yet on preview), `POST /generate?force=1` → returns full schema with empty sections (preview pod has no Finnhub key + no IB data — expected). On Spark with the env wired, all sections will populate.
+
+### Files added/changed
+- `backend/services/weekend_briefing_service.py` (NEW, 480 lines)
+- `backend/routers/weekend_briefing_router.py` (NEW)
+- `backend/services/eod_generation_service.py` (Sunday cron + `_auto_generate_weekend_briefing`)
+- `backend/server.py` (init service + register router)
+- `backend/tests/test_weekend_briefing.py` (NEW, 26 tests)
+- `frontend/src/components/sentcom/v5/WeekendBriefingCard.jsx` (NEW)
+- `frontend/src/components/sentcom/v5/BriefingsV5.jsx` (weekend-gated wire-in)

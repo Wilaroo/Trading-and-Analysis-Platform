@@ -75,6 +75,18 @@ class EndOfDayGenerationService:
                 id='auto_self_reflection',
                 replace_existing=True
             )
+
+            # Weekend briefing — every Sunday at 14:00 ET. The
+            # WeekendBriefingService aggregates last week's sector
+            # returns + closed P&L, fetches Finnhub news / earnings /
+            # macro / IPO calendars, and synthesizes the gameplan via
+            # gpt-oss:120b-cloud. Idempotent within an ISO week.
+            self.scheduler.add_job(
+                lambda: _run_async(self._auto_generate_weekend_briefing),
+                CronTrigger(hour=14, minute=0, day_of_week='sun', timezone=self.et_timezone),
+                id='auto_generate_weekend_briefing',
+                replace_existing=True
+            )
             
             self.scheduler.start()
             logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
@@ -264,6 +276,26 @@ class EndOfDayGenerationService:
             self._log_generation("playbook_analysis", date, "error", str(e))
             return {"status": "error", "error": str(e)}
     
+    async def _auto_generate_weekend_briefing(self) -> Dict:
+        """Sunday 14:00 ET hook — kick off the WeekendBriefingService."""
+        try:
+            from services.weekend_briefing_service import get_weekend_briefing_service
+            svc = get_weekend_briefing_service(self.db)
+            if svc is None:
+                print("[WeekendBriefing] Service not initialized — skipping cron")
+                return {"success": False, "error": "service_not_initialized"}
+            briefing = await svc.generate(force=False)
+            print(
+                f"[WeekendBriefing] Cron generated briefing for "
+                f"{briefing.get('iso_week')} — gameplan_len="
+                f"{len(briefing.get('gameplan') or '')}"
+            )
+            return {"success": True, "iso_week": briefing.get("iso_week")}
+        except Exception as exc:
+            print(f"[WeekendBriefing] Cron failed: {exc}")
+            return {"success": False, "error": str(exc)}
+
+
     async def auto_self_reflection(self, date: str = None) -> Dict:
         """
         Bot self-reflection — runs after-hours to analyze today's performance.
