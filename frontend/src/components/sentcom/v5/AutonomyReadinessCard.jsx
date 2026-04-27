@@ -12,9 +12,8 @@
  *   blockers, warnings, next_steps, checks{...}
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+import React, { useState } from 'react';
+import { useAutonomyReadiness } from '../../../contexts';
 
 const TONE = {
   green: 'bg-emerald-900/30 text-emerald-200 border-emerald-800',
@@ -37,28 +36,13 @@ const CHECK_LABELS = {
   risk_consistency: 'Risk params',
 };
 
-export const AutonomyReadinessCard = ({ refreshToken = 0 }) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+export const AutonomyReadinessCard = () => {
+  // App-wide canonical autonomy snapshot. Same source as any future
+  // header chip / ⌘K palette preview / pre-Monday checklist banner —
+  // all surfaces flip in lock-step on a 30s cadence (see
+  // contexts/AutonomyReadinessContext.jsx).
+  const { data, loading, error } = useAutonomyReadiness();
   const [expanded, setExpanded] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await fetch(`${BACKEND_URL}/api/autonomy/readiness`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const json = await resp.json();
-      setData(json);
-      setError(null);
-    } catch (e) {
-      setError(String(e.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load, refreshToken]);
 
   const verdict = data?.verdict || 'zinc';
 

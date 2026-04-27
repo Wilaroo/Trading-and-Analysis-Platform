@@ -3938,3 +3938,15 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
   4. Mounted in `App.js` between `DataCacheProvider` and `WebSocketDataProvider`. Closed with matching `</MarketStateProvider>` tag.
 - **Result**: 1 round-trip per 60s instead of 3+ (one per mounted consumer). Wordmark moon, chip moon, and FreshnessInspector banner now flip in **byte-perfect lock-step** since they share a single state reference.
 - **Verification**: Lint clean, frontend compiles green, smoke screenshot confirmed app boots with new provider tree (TradeCommand startup modal renders normally). No new tests — pure refactor with identical observable behaviour.
+
+## 2026-02-01 — AutonomyReadinessContext: app-wide single poll
+- **Where**: `frontend/src/contexts/AutonomyReadinessContext.jsx` (NEW), wired into `App.js` provider tree.
+- **What** (mirrors the MarketStateContext pattern):
+  1. `AutonomyReadinessProvider` runs ONE 30s poll of `/api/autonomy/readiness` for the entire app instance. Exposes `{ data, loading, error, refresh }` so consumers can also force an immediate refetch (e.g. after the operator toggles the kill-switch).
+  2. `useAutonomyReadiness()` consumes via `useContext` and falls back to a neutral `{ data: null, loading: true, error: null, refresh: noop }` outside the Provider so legacy code paths don't crash.
+  3. `AutonomyReadinessCard` refactored: dropped its private `useState`/`useCallback`/`useEffect`/`refreshToken` prop, now reads from `useAutonomyReadiness()`. Net: -19 lines + simpler reasoning model.
+  4. `FreshnessInspector.jsx` — removed the now-unused `refreshToken` prop on the `AutonomyReadinessCard` call site.
+  5. Re-exported from `contexts/index.js` for the canonical import path.
+  6. Mounted in `App.js` between `MarketStateProvider` and `WebSocketDataProvider`. Matching `</AutonomyReadinessProvider>` close tag added.
+- **Result**: Future surfaces (V5 header chip / ⌘K palette preview / pre-Monday go-live banner) can `useAutonomyReadiness()` for free — no extra fetches, byte-perfect lock-step across all surfaces. 1 round-trip per 30s for the entire app instead of N (one per mounted consumer).
+- **Verification**: Lint clean, frontend compiles green, no new warnings.

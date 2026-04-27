@@ -23,7 +23,8 @@ import {
   StartupManagerProvider,
   useSystemStatus,
   TrainCommandProvider,
-  MarketStateProvider
+  MarketStateProvider,
+  AutonomyReadinessProvider
 } from './contexts';
 import { WebSocketDataProvider } from './contexts/WebSocketDataContext';
 import api from './utils/api';
@@ -452,6 +453,7 @@ function App() {
     <TrainCommandProvider value={sendTrainCommand}>
     <DataCacheProvider>
     <MarketStateProvider>
+    <AutonomyReadinessProvider>
     <WebSocketDataProvider wsMessage={lastWsMessage}>
     <TickerModalProvider>
       {/* ?preview=aura URL — render concept mockup ONLY, no other UI.
@@ -588,6 +590,7 @@ function App() {
       )}
     </TickerModalProvider>
     </WebSocketDataProvider>
+    </AutonomyReadinessProvider>
     </MarketStateProvider>
     </DataCacheProvider>
     </TrainCommandProvider>

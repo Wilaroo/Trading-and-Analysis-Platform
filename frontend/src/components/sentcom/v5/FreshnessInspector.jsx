@@ -163,8 +163,10 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
             {/* Autonomy readiness — single go/no-go gate before flipping
                 auto-execute. Aggregates 7 sub-checks (account, pusher,
                 live bars, trophy run, kill switch, EOD, risk consistency)
-                + the auto-execute master-gate status. */}
-            <AutonomyReadinessCard refreshToken={refreshCounter} />
+                + the auto-execute master-gate status. Drives off the
+                shared AutonomyReadinessContext so the verdict stays in
+                lock-step across the modal + future header chip / ⌘K. */}
+            <AutonomyReadinessCard />
 
             {/* Subsystem grid */}
             <section data-testid="inspector-subsystems">

@@ -7,4 +7,5 @@ export { FocusModeProvider, useFocusMode, useFocusAwarePolling, FOCUS_MODES } fr
 export { StartupManagerProvider, useStartupManager, useFeatureGate, POLLING_INTERVALS, FEATURE_POLLING } from './StartupManagerContext';
 export { TrainCommandProvider, useTrainCommand } from './TrainCommandContext';
 export { MarketStateProvider, useMarketState } from './MarketStateContext';
+export { AutonomyReadinessProvider, useAutonomyReadiness } from './AutonomyReadinessContext';
 
