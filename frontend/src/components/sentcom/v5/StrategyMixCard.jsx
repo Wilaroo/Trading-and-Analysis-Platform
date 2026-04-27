@@ -120,36 +120,74 @@ export const StrategyMixCard = () => {
       </div>
 
       <div className="space-y-1">
-        {visible.map((b, i) => (
-          <div
-            key={b.setup_type}
-            data-testid={`strategy-mix-bucket-${b.setup_type}`}
-            className="flex items-center gap-2 text-xs"
-          >
-            <span className="w-32 truncate text-zinc-400">{b.label}</span>
-            <div className="flex-1 h-2 rounded bg-zinc-900/80 overflow-hidden relative">
-              <div
-                className={`h-full ${PALETTE[i % PALETTE.length]} transition-all duration-500`}
-                style={{ width: `${Math.min(100, b.pct)}%` }}
-              />
-            </div>
-            <span className="w-10 text-right v5-mono font-bold text-zinc-200">
-              {b.pct.toFixed(0)}%
-            </span>
-            <span className="w-8 text-right v5-mono text-zinc-500">
-              {b.count}
-            </span>
-            {b.strong_edge_count > 0 && (
-              <span
-                className="flex items-center gap-0.5 text-[10px] text-fuchsia-300"
-                data-testid={`strategy-mix-strong-edge-${b.setup_type}`}
-              >
-                <Zap className="w-3 h-3" />
-                {b.strong_edge_count}
+        {visible.map((b, i) => {
+          // P&L coloring — green if avg R > 0, red if < 0, neutral if null.
+          const hasPnl = b.outcomes_count != null && b.outcomes_count > 0;
+          const avgRColor = !hasPnl
+            ? 'text-zinc-600'
+            : b.avg_r_multiple > 0.2
+            ? 'text-emerald-300'
+            : b.avg_r_multiple < -0.2
+            ? 'text-rose-300'
+            : 'text-zinc-300';
+          const winRateColor = !hasPnl
+            ? 'text-zinc-600'
+            : b.win_rate_pct >= 55
+            ? 'text-emerald-300'
+            : b.win_rate_pct <= 40
+            ? 'text-rose-300'
+            : 'text-zinc-300';
+
+          return (
+            <div
+              key={b.setup_type}
+              data-testid={`strategy-mix-bucket-${b.setup_type}`}
+              className="flex items-center gap-2 text-xs"
+            >
+              <span className="w-32 truncate text-zinc-400">{b.label}</span>
+              <div className="flex-1 h-2 rounded bg-zinc-900/80 overflow-hidden relative">
+                <div
+                  className={`h-full ${PALETTE[i % PALETTE.length]} transition-all duration-500`}
+                  style={{ width: `${Math.min(100, b.pct)}%` }}
+                />
+              </div>
+              <span className="w-10 text-right v5-mono font-bold text-zinc-200">
+                {b.pct.toFixed(0)}%
               </span>
-            )}
-          </div>
-        ))}
+              <span className="w-8 text-right v5-mono text-zinc-500">
+                {b.count}
+              </span>
+              {b.strong_edge_count > 0 && (
+                <span
+                  className="flex items-center gap-0.5 text-[10px] text-fuchsia-300"
+                  data-testid={`strategy-mix-strong-edge-${b.setup_type}`}
+                >
+                  <Zap className="w-3 h-3" />
+                  {b.strong_edge_count}
+                </span>
+              )}
+              {/* P&L columns — avg R-multiple + win rate. Null when no
+                  alert_outcomes recorded yet for this setup_type. */}
+              <span
+                className={`w-14 text-right v5-mono font-bold ${avgRColor}`}
+                data-testid={`strategy-mix-avg-r-${b.setup_type}`}
+              >
+                {hasPnl
+                  ? `${b.avg_r_multiple > 0 ? '+' : ''}${b.avg_r_multiple.toFixed(2)}R`
+                  : '—'}
+              </span>
+              <span
+                className={`w-12 text-right v5-mono ${winRateColor}`}
+                data-testid={`strategy-mix-win-rate-${b.setup_type}`}
+              >
+                {hasPnl ? `${b.win_rate_pct.toFixed(0)}%` : '—'}
+              </span>
+              <span className="w-8 text-right v5-mono text-zinc-600 text-[10px]">
+                {hasPnl ? `n${b.outcomes_count}` : ''}
+              </span>
+            </div>
+          );
+        })}
         {hidden > 0 && (
           <div
             className="text-[10px] text-zinc-600 italic pl-32"
@@ -159,6 +197,21 @@ export const StrategyMixCard = () => {
           </div>
         )}
       </div>
+
+      {/* Column legend — only render once strategies are populated. */}
+      {visible.length > 0 && (
+        <div
+          className="flex items-center justify-end gap-2 text-[9px] text-zinc-600 pl-32 pt-1 v5-mono"
+          data-testid="strategy-mix-legend"
+        >
+          <span className="w-10 text-right">freq%</span>
+          <span className="w-8 text-right">n</span>
+          <span className="w-3" />
+          <span className="w-14 text-right">avg R/30d</span>
+          <span className="w-12 text-right">win %</span>
+          <span className="w-8 text-right">outcomes</span>
+        </div>
+      )}
     </div>
   );
 };

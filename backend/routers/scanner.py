@@ -386,14 +386,78 @@ def get_strategy_mix(n: int = 100):
             base = _base(r.get("setup_type", ""))
             strong_edge_counts[base] = strong_edge_counts.get(base, 0) + 1
 
+    # ---- Per-strategy P&L attribution from `alert_outcomes` ---------------
+    # Pull last-30-days realized outcomes grouped by setup_type so we can
+    # surface "this strategy fires often, but is it actually making money?"
+    # right next to the frequency bar. Same field shape as
+    # `learning_connectors_service` for consistency.
+    pnl_by_setup: dict = {}
+    try:
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff_iso = cutoff.isoformat()
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
+            {"$group": {
+                "_id": "$setup_type",
+                "total": {"$sum": 1},
+                "wins": {"$sum": {"$cond": [{"$gt": ["$r_multiple", 0]}, 1, 0]}},
+                "avg_r": {"$avg": "$r_multiple"},
+                "total_r": {"$sum": "$r_multiple"},
+            }},
+        ]
+        for row in db["alert_outcomes"].aggregate(pipeline):
+            base = _base(row.get("_id", ""))
+            t = int(row.get("total") or 0)
+            if t == 0:
+                continue
+            existing = pnl_by_setup.get(base)
+            if existing:
+                # Merge long+short variants of same base setup.
+                merged_total = existing["total"] + t
+                merged_wins = existing["wins"] + int(row.get("wins") or 0)
+                merged_total_r = existing["total_r"] + float(row.get("total_r") or 0)
+                pnl_by_setup[base] = {
+                    "total": merged_total,
+                    "wins": merged_wins,
+                    "total_r": merged_total_r,
+                    "avg_r": merged_total_r / merged_total if merged_total else 0.0,
+                    "win_rate": merged_wins / merged_total if merged_total else 0.0,
+                }
+            else:
+                pnl_by_setup[base] = {
+                    "total": t,
+                    "wins": int(row.get("wins") or 0),
+                    "total_r": float(row.get("total_r") or 0),
+                    "avg_r": float(row.get("avg_r") or 0),
+                    "win_rate": (int(row.get("wins") or 0) / t) if t else 0.0,
+                }
+    except Exception as e:
+        logger.debug(f"strategy-mix P&L join failed: {e}")
+
     buckets = []
     for setup_type, c in counts.most_common():
+        pnl = pnl_by_setup.get(setup_type) or {}
         buckets.append({
             "setup_type": setup_type,
             "label": setup_type.replace("_", " ").title(),
             "count": c,
             "pct": round((c / total) * 100, 1),
             "strong_edge_count": strong_edge_counts.get(setup_type, 0),
+            # P&L fields — null when no outcomes recorded yet for this
+            # setup_type. Front-end shows "—" in those cases.
+            "outcomes_count": pnl.get("total"),
+            "win_rate_pct": (
+                round(pnl["win_rate"] * 100, 1)
+                if pnl.get("total")
+                else None
+            ),
+            "avg_r_multiple": (
+                round(pnl["avg_r"], 2) if pnl.get("total") else None
+            ),
+            "total_r_30d": (
+                round(pnl["total_r"], 2) if pnl.get("total") else None
+            ),
         })
 
     # Concentration metric: % of total taken by the single most common

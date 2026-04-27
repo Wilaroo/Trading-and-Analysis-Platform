@@ -1,5 +1,44 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Strategy Mix Card: P&L Attribution — SHIPPED
+
+### Why
+Frequency alone doesn't tell you a strategy is *working*. A scanner can
+be busy AND wrong. Surfacing realized R-multiple per strategy turns the
+StrategyMixCard from a "what's firing" view into a "what's actually
+making money" view — directly feeding the self-improving loop.
+
+### Backend (`routers/scanner.py::get_strategy_mix`)
+After computing the frequency buckets, the endpoint now JOINs
+`alert_outcomes` over the **last 30 days** and attaches per-bucket:
+- `outcomes_count` — number of resolved alerts
+- `win_rate_pct` — % of outcomes with `r_multiple > 0`
+- `avg_r_multiple` — mean realized R
+- `total_r_30d` — cumulative R over the window
+
+Long/short variants merge into the same base bucket (e.g.
+`orb_long` + `orb_short` → `orb`) for both frequency AND P&L. Buckets
+with zero recorded outcomes carry `null` so the UI can render `—`.
+
+### Frontend (`v5/StrategyMixCard.jsx`)
+Each bucket row now renders three new columns:
+- **avg R** — colored emerald (>0.2R), rose (<-0.2R), neutral
+  otherwise; format `+1.20R` or `-0.50R`
+- **win %** — colored emerald (≥55%), rose (≤40%)
+- **outcomes** — sample size as `n42`
+
+A small column legend appears below the buckets explaining
+`freq% / n / avg R/30d / win % / outcomes`.
+
+### Tests (4 new, 11 total in this file)
+- avg_r + win_rate + outcomes_count attached to each bucket
+- long/short variants merge correctly in the P&L join
+- outcomes >30 days old are excluded from the join
+- buckets with no outcomes get null P&L fields (UI renders `—`)
+
+All 11 pass; no regressions in the 53/53 wider suite.
+
+
 ## 2026-02 — Strategy Mix Card — SHIPPED
 
 ### Why
