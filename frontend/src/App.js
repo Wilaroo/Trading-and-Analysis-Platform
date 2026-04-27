@@ -22,7 +22,8 @@ import {
   FocusModeProvider,
   StartupManagerProvider,
   useSystemStatus,
-  TrainCommandProvider
+  TrainCommandProvider,
+  MarketStateProvider
 } from './contexts';
 import { WebSocketDataProvider } from './contexts/WebSocketDataContext';
 import api from './utils/api';
@@ -450,6 +451,7 @@ function App() {
     <TrainingModeProvider>
     <TrainCommandProvider value={sendTrainCommand}>
     <DataCacheProvider>
+    <MarketStateProvider>
     <WebSocketDataProvider wsMessage={lastWsMessage}>
     <TickerModalProvider>
       {/* ?preview=aura URL — render concept mockup ONLY, no other UI.
@@ -586,6 +588,7 @@ function App() {
       )}
     </TickerModalProvider>
     </WebSocketDataProvider>
+    </MarketStateProvider>
     </DataCacheProvider>
     </TrainCommandProvider>
     </TrainingModeProvider>

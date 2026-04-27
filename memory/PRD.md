@@ -3928,3 +3928,13 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
   3. `FreshnessInspector.jsx` — removed the now-unused `refreshToken` prop from the `MarketStateBanner` call site.
 - **Why**: All three surfaces (V5 wordmark moon, DataFreshnessBadge chip moon, FreshnessInspector banner) now flip in lock-step on state boundaries — no risk of one being amber while another is grey for up to 60s during RTH→extended transitions.
 - **Verification**: Lint clean, frontend compiles green, no new warnings.
+
+## 2026-02-01 — MarketStateContext: app-wide single poll
+- **Where**: `frontend/src/contexts/MarketStateContext.jsx` (NEW), wired into `App.js` provider tree.
+- **What**:
+  1. New `MarketStateProvider` runs ONE 60s poll of `/api/market-state` for the entire app instance. All consumers read via `useMarketState()` from `useContext`.
+  2. The old `frontend/src/hooks/useMarketState.js` is now a thin re-export of the context hook — every existing import (`SentCom.jsx`, `DataFreshnessBadge.jsx`, `MarketStateBanner.jsx`) keeps working with zero rewrites.
+  3. Re-exported from `contexts/index.js` so future consumers can `import { useMarketState } from '../contexts'` like the other context hooks.
+  4. Mounted in `App.js` between `DataCacheProvider` and `WebSocketDataProvider`. Closed with matching `</MarketStateProvider>` tag.
+- **Result**: 1 round-trip per 60s instead of 3+ (one per mounted consumer). Wordmark moon, chip moon, and FreshnessInspector banner now flip in **byte-perfect lock-step** since they share a single state reference.
+- **Verification**: Lint clean, frontend compiles green, smoke screenshot confirmed app boots with new provider tree (TradeCommand startup modal renders normally). No new tests — pure refactor with identical observable behaviour.

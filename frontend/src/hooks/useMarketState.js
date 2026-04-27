@@ -1,37 +1,16 @@
 /**
- * useMarketState — thin React hook around the canonical
- * `/api/market-state` endpoint (services/market_state.py — single source of
- * truth shared with live_bar_cache TTLs, backfill_readiness, account_guard,
- * enhanced_scanner gating).
+ * useMarketState — back-compat re-export of the canonical hook now
+ * implemented in `contexts/MarketStateContext.jsx`.
  *
- * Buckets only flip on hour boundaries so the default 60s poll is plenty.
- * Returns `null` until first fetch resolves so consumers can render
- * nothing instead of guessing a default.
+ * Background (2026-02): originally each consumer of `/api/market-state`
+ * ran its own 60s polling effect — fine when there's one consumer, but
+ * with the V5 wordmark moon + DataFreshnessBadge chip + FreshnessInspector
+ * banner all reading the same snapshot we'd issue 3+ round-trips every
+ * minute and risk the surfaces drifting out of sync during state flips.
+ *
+ * The implementation moved into a single Provider mounted once at the
+ * top of `App.js`. This file stays so the existing
+ * `import { useMarketState } from '../hooks/useMarketState'` imports
+ * keep working — no consumer rewrites needed.
  */
-import { useEffect, useState } from 'react';
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const DEFAULT_POLL_MS = 60_000;
-
-export const useMarketState = (pollMs = DEFAULT_POLL_MS) => {
-  const [snap, setSnap] = useState(null);
-
-  useEffect(() => {
-    let alive = true;
-    const fetchOnce = async () => {
-      try {
-        const resp = await fetch(`${BACKEND_URL}/api/market-state`);
-        if (!resp.ok) return;
-        const body = await resp.json();
-        if (alive && body?.success) setSnap(body);
-      } catch { /* swallow — leave stale snapshot */ }
-    };
-    fetchOnce();
-    const id = setInterval(fetchOnce, pollMs);
-    return () => { alive = false; clearInterval(id); };
-  }, [pollMs]);
-
-  return snap;
-};
-
-export default useMarketState;
+export { useMarketState, default } from '../contexts/MarketStateContext';
