@@ -35,6 +35,7 @@ import { BriefingsV5 } from './v5/BriefingsV5';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 import { PusherHealthChip } from './v5/PusherHealthChip';
+import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
@@ -273,6 +274,12 @@ export const SentComV5View = ({
       {/* Phase 3 TopMoversTile — reads /api/live/briefing-snapshot. */}
       <PanelErrorBoundary label="top-movers" compact>
         <TopMoversTile onSelectSymbol={handleOpenTicker} />
+      </PanelErrorBoundary>
+
+      {/* Pusher Heartbeat — positive proof-of-life: pushes/min + RPC latency.
+          Reuses the shared usePusherHealth() hook (no extra polling). */}
+      <PanelErrorBoundary label="pusher-heartbeat" compact>
+        <PusherHeartbeatTile />
       </PanelErrorBoundary>
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}

@@ -57,6 +57,37 @@ class _PusherRPCClient:
         # Track consecutive failures to auto-suppress noisy logs
         self._consecutive_failures = 0
         self._last_success_ts: Optional[float] = None
+        # Rolling window of recent RPC latencies (last 50 successful calls)
+        # used by /api/ib/pusher-health → PusherHeartbeatTile so the
+        # operator can see RPC perf at a glance.
+        from collections import deque
+        self._latency_ms_window: deque = deque(maxlen=50)
+        self._call_count_total: int = 0
+        self._success_count_total: int = 0
+
+    # ---- public latency stats ----------------------------------------------
+    def latency_stats(self) -> Dict[str, Any]:
+        """Return rolling latency stats for the heartbeat tile."""
+        samples = list(self._latency_ms_window)
+        if samples:
+            sorted_s = sorted(samples)
+            avg = round(sum(samples) / len(samples), 1)
+            # p95 — last 5% of sorted samples; for 50-element window ≈ index 47
+            p95_idx = max(0, int(len(sorted_s) * 0.95) - 1)
+            p95 = round(sorted_s[p95_idx], 1)
+            last = round(samples[-1], 1)
+        else:
+            avg = p95 = last = None
+        return {
+            "rpc_latency_ms_avg": avg,
+            "rpc_latency_ms_p95": p95,
+            "rpc_latency_ms_last": last,
+            "rpc_sample_size": len(samples),
+            "rpc_call_count_total": self._call_count_total,
+            "rpc_success_count_total": self._success_count_total,
+            "rpc_consecutive_failures": self._consecutive_failures,
+            "rpc_last_success_ts": self._last_success_ts,
+        }
 
     # ---- internal helpers -------------------------------------------------
 
@@ -74,6 +105,9 @@ class _PusherRPCClient:
         if not base:
             return None
         url = f"{base}{path}"
+        import time as _t
+        _start = _t.time()
+        self._call_count_total += 1
         try:
             with self._lock:
                 resp = self._session.request(
@@ -93,8 +127,10 @@ class _PusherRPCClient:
                 self._consecutive_failures += 1
                 return None
             self._consecutive_failures = 0
-            import time as _t
             self._last_success_ts = _t.time()
+            self._success_count_total += 1
+            # Record latency for the heartbeat tile.
+            self._latency_ms_window.append((_t.time() - _start) * 1000.0)
             return resp.json()
         except (requests.Timeout, requests.ConnectionError) as exc:
             if self._consecutive_failures < 3:

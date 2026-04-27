@@ -130,6 +130,14 @@ _pushed_ib_data = {
     "connected": False
 }
 
+# Heartbeat tracking (Feb-2026): rolling deque of recent push timestamps so
+# /api/ib/pusher-health can report `pushes_per_min` to the operator. 120
+# entries ≈ 2 min window assuming the pusher pushes once per second. Also
+# carries a session-wide counter for trend dashboards.
+from collections import deque as _deque
+_push_timestamps: "_deque[float]" = _deque(maxlen=120)
+_push_count_total: int = 0
+
 
 def get_pushed_ib_data() -> dict:
     """Get reference to pushed IB data for other services."""
@@ -419,13 +427,19 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
     Sync handler — runs in thread pool so it doesn't compete with the event loop.
     Critical for live trading: this MUST respond fast to the Windows PC pusher.
     """
-    global _pushed_ib_data
+    global _pushed_ib_data, _push_count_total
     
     try:
         # Use server-side UTC timestamp for consistent staleness checks
         # (IB Pusher sends local time, but staleness checks compare with UTC)
         _pushed_ib_data["last_update"] = datetime.now(timezone.utc).isoformat()
         _pushed_ib_data["connected"] = True
+
+        # Heartbeat: append push timestamp + bump counter (read by
+        # /api/ib/pusher-health → PusherHeartbeatTile).
+        import time as _t
+        _push_timestamps.append(_t.time())
+        _push_count_total += 1
         
         # Merge quotes
         if request.quotes:
@@ -5802,6 +5816,28 @@ async def get_pusher_health():
             or (age_seconds >= PUSHER_DEAD_S and in_market_hours)
         )
 
+        # Heartbeat metrics — pushes/min over the last 60s + RPC latency
+        # stats. Used by the V5 PusherHeartbeatTile to give the operator
+        # positive proof-of-life rather than only learning from a red banner.
+        import time as _t
+        _now_ts = _t.time()
+        _recent_pushes = [t for t in _push_timestamps if _now_ts - t <= 60.0]
+        pushes_per_min = len(_recent_pushes)
+        # Last-60s push rate as a fraction of expected (1/sec) → 1.0 = healthy
+        push_rate_health = (
+            "healthy" if pushes_per_min >= 30 else
+            "degraded" if pushes_per_min >= 5 else
+            "stalled" if pushes_per_min > 0 else
+            "no_pushes"
+        )
+
+        rpc_stats: dict = {}
+        try:
+            from services.ib_pusher_rpc import get_pusher_rpc_client
+            rpc_stats = get_pusher_rpc_client().latency_stats()
+        except Exception:
+            rpc_stats = {}
+
         return {
             "success": True,
             "health": health,
@@ -5816,6 +5852,12 @@ async def get_pusher_health():
                 "quotes": len(quotes),
                 "positions": len(positions),
                 "level2_symbols": len(level2),
+            },
+            "heartbeat": {
+                "pushes_per_min": pushes_per_min,
+                "push_count_total": _push_count_total,
+                "push_rate_health": push_rate_health,
+                **rpc_stats,
             },
             "collection_mode": {
                 "active": bool(_collection_mode_status.get("active")),

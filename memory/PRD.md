@@ -1,5 +1,56 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher Heartbeat Tile — SHIPPED
+
+### Why
+"Pusher dead" only tells you AFTER it's broken. The heartbeat tile flips
+that around: it shows pushes/min and RPC latency in real time so a
+degrading pipeline shows up BEFORE the dead threshold trips.
+
+### Backend (`routers/ib.py`, `services/ib_pusher_rpc.py`)
+- Added rolling-deque push-timestamp tracking (`maxlen=120` ≈ 2 min) +
+  session-wide counter `_push_count_total`. Both updated on every
+  `POST /api/ib/push-data`.
+- Added rolling-deque RPC latency tracking (`maxlen=50`) on
+  `_PusherRPCClient`. Each successful `_request` records its duration in
+  ms. Public `latency_stats()` returns `avg`, `p95`, `last`, plus session
+  counts.
+- Extended `GET /api/ib/pusher-health` response with a new `heartbeat`
+  block:
+  ```
+  heartbeat: {
+    pushes_per_min, push_count_total, push_rate_health,
+    rpc_latency_ms_avg, rpc_latency_ms_p95, rpc_latency_ms_last,
+    rpc_sample_size, rpc_call_count_total, rpc_success_count_total,
+    rpc_consecutive_failures, rpc_last_success_ts,
+  }
+  ```
+  `push_rate_health` thresholds: `healthy ≥ 30`, `degraded ≥ 5`,
+  `stalled > 0`, `no_pushes` otherwise.
+
+### Frontend (`v5/PusherHeartbeatTile.jsx`)
+- New always-visible tile wired between `TopMoversTile` and the main
+  3-col grid in `SentComV5View.jsx`.
+- Surfaces: animated pulse dot (color-coded by health) · last push age ·
+  pushes/min (with `slowing` / `stalled` chip) · RPC avg + p95 + last
+  latency (sample-size annotated) · session push counter · quote/pos/L2
+  counts on the right.
+- Wrapped in `PanelErrorBoundary`. Reuses the shared `usePusherHealth()`
+  hook — zero extra polling.
+- Test IDs: `pusher-heartbeat-tile`, `pusher-heartbeat-pulse`,
+  `pusher-heartbeat-rate`, `pusher-heartbeat-rpc`,
+  `pusher-heartbeat-total`, `pusher-heartbeat-counts`,
+  `pusher-heartbeat-dead-hint`.
+
+### Tests
+- `tests/test_pusher_heartbeat.py` (7 tests): empty-window stats,
+  populated-window avg/p95/last, deque cap-at-50, endpoint surfaces
+  `heartbeat` block, 60s push-rate window, all four `push_rate_health`
+  threshold cases, and `/push-data` POST appends to deque + bumps
+  counter. **All pass.** Backend lint clean, frontend lint clean.
+- Live curl `/api/ib/pusher-health` confirmed to return the new block.
+
+
 ## 2026-02 — Pusher RPC: Index Contract Support — SHIPPED
 
 ### Why
