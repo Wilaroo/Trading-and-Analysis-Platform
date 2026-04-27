@@ -87,6 +87,19 @@ class EndOfDayGenerationService:
                 id='auto_generate_weekend_briefing',
                 replace_existing=True
             )
+
+            # Friday close snapshot — every Friday at 16:01 ET, capture
+            # the closing price of each gameplan watch into
+            # `friday_close_snapshots`. The Sunday briefing then surfaces
+            # last week's per-watch P&L in the Last Week Recap section,
+            # closing the feedback loop on whether the bot's weekly
+            # thesis was right.
+            self.scheduler.add_job(
+                lambda: _run_async(self._auto_snapshot_friday_close),
+                CronTrigger(hour=16, minute=1, day_of_week='fri', timezone=self.et_timezone),
+                id='auto_snapshot_friday_close',
+                replace_existing=True
+            )
             
             self.scheduler.start()
             logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
@@ -293,6 +306,25 @@ class EndOfDayGenerationService:
             return {"success": True, "iso_week": briefing.get("iso_week")}
         except Exception as exc:
             print(f"[WeekendBriefing] Cron failed: {exc}")
+            return {"success": False, "error": str(exc)}
+
+    async def _auto_snapshot_friday_close(self) -> Dict:
+        """Friday 16:01 ET hook — snapshot per-watch closes for grading."""
+        try:
+            from services.weekend_briefing_service import get_weekend_briefing_service
+            svc = get_weekend_briefing_service(self.db)
+            if svc is None:
+                print("[FridayClose] Service not initialized — skipping cron")
+                return {"success": False, "error": "service_not_initialized"}
+            result = svc.snapshot_friday_close()
+            print(
+                f"[FridayClose] Cron persisted snapshot for "
+                f"{result.get('iso_week')} — watches="
+                f"{len(result.get('watches') or [])}"
+            )
+            return result
+        except Exception as exc:
+            print(f"[FridayClose] Cron failed: {exc}")
             return {"success": False, "error": str(exc)}
 
 

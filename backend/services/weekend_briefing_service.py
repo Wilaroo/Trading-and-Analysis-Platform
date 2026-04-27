@@ -104,6 +104,48 @@ def _last_week_window(now_utc: Optional[datetime] = None) -> Dict[str, str]:
     }
 
 
+def _latest_ib_close(db, symbol: str) -> Optional[float]:
+    """Most recent 1-day close for `symbol` from ib_historical_data."""
+    if db is None or not symbol:
+        return None
+    try:
+        bar = db["ib_historical_data"].find_one(
+            {"symbol": symbol.upper(), "bar_size": {"$in": ["1day", "1 day"]}},
+            {"_id": 0, "close": 1, "date": 1},
+            sort=[("date", -1)],
+        )
+        if not bar:
+            return None
+        return float(bar.get("close")) if bar.get("close") is not None else None
+    except Exception as exc:
+        logger.warning(f"weekend_briefing._latest_ib_close({symbol}) failed: {exc}")
+        return None
+
+
+def _enrich_watches_with_signal_prices(db, watches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attach `signal_price` (latest IB close at briefing-generation time)
+    to each watch so the Friday-close snapshot can compute a P&L.
+    Non-destructive — leaves watches without IB data untouched."""
+    if not watches:
+        return watches
+    enriched: List[Dict[str, Any]] = []
+    for w in watches:
+        sym = (w.get("symbol") or "").upper()
+        price = _latest_ib_close(db, sym)
+        new_w = dict(w)
+        if price is not None:
+            new_w["signal_price"] = round(price, 4)
+        enriched.append(new_w)
+    return enriched
+
+
+def _previous_iso_week(now_utc: Optional[datetime] = None) -> str:
+    """ISO week id for the immediately-prior week — used to look up last
+    Sunday's gameplan when generating the new Sunday's briefing."""
+    et = (now_utc or datetime.now(timezone.utc)) - timedelta(hours=5)
+    return (et - timedelta(days=7)).strftime("%G-W%V")
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Section builders — each is independently testable + safely fallback to
 # an empty payload on upstream failure so a single sub-source outage
@@ -577,6 +619,7 @@ class WeekendBriefingService:
     """Generates and caches the Sunday-afternoon weekly briefing."""
 
     COLLECTION = "weekend_briefings"
+    SNAPSHOT_COLLECTION = "friday_close_snapshots"
 
     def __init__(self, db):
         self._db = db
@@ -584,6 +627,8 @@ class WeekendBriefingService:
             try:
                 db[self.COLLECTION].create_index([("_id", 1)])
                 db[self.COLLECTION].create_index([("generated_at", -1)])
+                db[self.SNAPSHOT_COLLECTION].create_index([("_id", 1)])
+                db[self.SNAPSHOT_COLLECTION].create_index([("snapshot_at", -1)])
             except Exception:
                 pass  # missing perms — non-fatal
 
@@ -636,6 +681,10 @@ class WeekendBriefingService:
         # Run all data fetches in parallel where they're independent.
         sector_returns = _sector_returns_from_ib(self._db)
         closed_recap = _user_closed_positions_recap(self._db)
+        # Per-watch P&L from last Sunday's gameplan (joined from
+        # friday_close_snapshots). Empty if no prior briefing exists or
+        # if the Friday cron hasn't fired yet for that week.
+        prev_recap = self._build_previous_week_recap()
 
         # Earnings watchlist = positions ∪ default mega-caps.
         watchlist = list({*positions_held, *DEFAULT_EARNINGS_WATCHLIST})
@@ -654,6 +703,10 @@ class WeekendBriefingService:
             "sectors": sector_returns,
             "closed_trades": closed_recap.get("trades", []),
             "closed_summary": closed_recap.get("summary", {}),
+            # Per-watch P&L from last Sunday's gameplan (joined from
+            # friday_close_snapshots). Empty if no prior briefing exists
+            # or if the Friday cron hasn't fired yet for that week.
+            "gameplan_recap": prev_recap,
         }
 
         risk_map = _build_risk_map(positions_held, earnings, macro)
@@ -667,6 +720,13 @@ class WeekendBriefingService:
             "positions_held": positions_held,
         }
         gameplan_payload = await _synthesize_gameplan(facts)
+        # Enrich watches with the IB close at briefing-generation time so
+        # we can compute per-watch P&L when the Friday-close snapshot
+        # fires next week.
+        if isinstance(gameplan_payload, dict):
+            gameplan_payload["watches"] = _enrich_watches_with_signal_prices(
+                self._db, gameplan_payload.get("watches") or []
+            )
 
         briefing: Dict[str, Any] = {
             "iso_week": wid,
@@ -726,6 +786,129 @@ class WeekendBriefingService:
         except Exception as exc:
             logger.warning(f"weekend_briefing._fetch_open_position_symbols failed: {exc}")
             return []
+
+    # ── Friday close snapshot ───────────────────────────────────────
+    def snapshot_friday_close(self) -> Dict[str, Any]:
+        """Capture the Friday close price for each watch in the current
+        week's gameplan and persist into `friday_close_snapshots`.
+        Idempotent — re-running for the same ISO week upserts.
+
+        Returns the snapshot doc shape:
+            {iso_week, snapshot_at, watches: [
+                {symbol, signal_price, friday_close, change_pct, thesis}
+            ]}
+        """
+        if self._db is None:
+            return {"success": False, "error": "db_unavailable"}
+
+        wid = _iso_week()
+        try:
+            briefing = self._db[self.COLLECTION].find_one(
+                {"_id": wid}, projection={"_id": 0}
+            )
+            if not briefing:
+                return {"success": False, "iso_week": wid,
+                        "error": "no_briefing_for_week"}
+
+            gp = briefing.get("gameplan") or {}
+            watches = gp.get("watches") if isinstance(gp, dict) else []
+            if not watches:
+                return {"success": False, "iso_week": wid,
+                        "error": "no_watches_in_briefing"}
+
+            entries: List[Dict[str, Any]] = []
+            for w in watches:
+                sym = (w.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                signal_price = w.get("signal_price")
+                friday_close = _latest_ib_close(self._db, sym)
+                change_pct: Optional[float] = None
+                if (
+                    signal_price not in (None, 0)
+                    and friday_close is not None
+                ):
+                    try:
+                        change_pct = round(
+                            (float(friday_close) - float(signal_price))
+                            / float(signal_price) * 100.0,
+                            2,
+                        )
+                    except (ValueError, TypeError, ZeroDivisionError):
+                        change_pct = None
+                entries.append({
+                    "symbol": sym,
+                    "signal_price": signal_price,
+                    "friday_close": round(friday_close, 4) if friday_close is not None else None,
+                    "change_pct": change_pct,
+                    "thesis": (w.get("thesis") or "")[:160],
+                })
+
+            snap = {
+                "_id": wid,
+                "iso_week": wid,
+                "snapshot_at": datetime.now(timezone.utc).isoformat(),
+                "watches": entries,
+            }
+            self._db[self.SNAPSHOT_COLLECTION].update_one(
+                {"_id": wid}, {"$set": snap}, upsert=True,
+            )
+            logger.info(
+                f"weekend_briefing.snapshot_friday_close: persisted {wid} "
+                f"with {len(entries)} watches"
+            )
+            return {"success": True, **{k: v for k, v in snap.items() if k != "_id"}}
+        except Exception as exc:
+            logger.exception("snapshot_friday_close failed")
+            return {"success": False, "iso_week": wid, "error": str(exc)}
+
+    def get_friday_snapshot(self, iso_week: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        if self._db is None:
+            return None
+        wid = iso_week or _iso_week()
+        try:
+            return self._db[self.SNAPSHOT_COLLECTION].find_one(
+                {"_id": wid}, projection={"_id": 0}
+            )
+        except Exception as exc:
+            logger.warning(f"get_friday_snapshot failed: {exc}")
+            return None
+
+    def _build_previous_week_recap(self) -> Dict[str, Any]:
+        """Return a compact recap of last Sunday's gameplan, joined with
+        the friday_close_snapshot for that week. Empty dict when no
+        prior data exists so the frontend can hide the section.
+        """
+        if self._db is None:
+            return {}
+        try:
+            prev_wid = _previous_iso_week()
+            snap = self.get_friday_snapshot(prev_wid)
+            if not snap or not snap.get("watches"):
+                return {}
+            watches = snap["watches"]
+            graded = [w for w in watches if w.get("change_pct") is not None]
+            wins = sum(1 for w in graded if w["change_pct"] > 0)
+            losses = sum(1 for w in graded if w["change_pct"] < 0)
+            avg = (
+                round(sum(w["change_pct"] for w in graded) / len(graded), 2)
+                if graded else None
+            )
+            return {
+                "iso_week": prev_wid,
+                "snapshot_at": snap.get("snapshot_at"),
+                "watches": watches,
+                "summary": {
+                    "graded": len(graded),
+                    "wins": wins,
+                    "losses": losses,
+                    "avg_change_pct": avg,
+                },
+            }
+        except Exception as exc:
+            logger.warning(f"_build_previous_week_recap failed: {exc}")
+            return {}
+
 
 
 # Singleton accessor — pattern matches the other services in this codebase.

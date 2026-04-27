@@ -4085,3 +4085,25 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
      - `setFocusedSymbolUserDriven` writes the paused flag the moment the operator takes over.
 - **Result**: Once the operator clicks a ticker, arrow, or search box, the carousel is paused for that ISO week. Reloading the page during 09:10-09:50 ET keeps the chip in PAUSED mode + leaves the chart on the operator's choice.
 - **Verification**: Lint clean, frontend compiles green.
+
+## 2026-02-01 — Friday close snapshot + last-week gameplan grade
+- **Where**: `services/weekend_briefing_service.py`, `routers/weekend_briefing_router.py`, `services/eod_generation_service.py`, `frontend/src/components/sentcom/v5/WeekendBriefingCard.jsx`.
+- **What**:
+  1. **Signal-price enrichment at briefing-generation time** — every watch in `gameplan.watches` gets a `signal_price` field (latest IB 1day close at generation time). Foundation for grading.
+  2. **`WeekendBriefingService.snapshot_friday_close()`** — reads the current week's briefing, fetches the latest IB close for each watch, computes `change_pct` vs `signal_price`, persists into `friday_close_snapshots[iso_week]`. Idempotent (upsert).
+  3. **`WeekendBriefingService.get_friday_snapshot(iso_week)`** — read-only accessor.
+  4. **`_build_previous_week_recap()`** — joined via `_previous_iso_week()`. Returns `{iso_week, snapshot_at, watches[], summary: {graded, wins, losses, avg_change_pct}}`. The `generate()` orchestrator now embeds this into `last_week_recap.gameplan_recap`.
+  5. **Friday 16:01 ET cron** added to `eod_generation_service` BackgroundScheduler. Calls `_auto_snapshot_friday_close()` which delegates to the service.
+  6. **API additions**:
+     - `POST /api/briefings/weekend/snapshot-friday-close` — manual on-demand trigger.
+     - `GET  /api/briefings/weekend/snapshot/{iso_week}` — ad-hoc audit.
+  7. **Frontend** — `LastWeekRecap` renders a new "Last Week's Gameplan Grade" block at the top: per-watch P&L (clickable ticker → enhanced ticker modal), `W/L · avg ±X%` summary, color-coded change_pct.
+- **Testing**: 5 new pytest cases pin `_previous_iso_week()` boundary, `snapshot_friday_close()` skip paths (no briefing, no watches, no DB), `get_friday_snapshot(None)` safety. **41/41 weekend-briefing tests pass.**
+- **Live verification**: `POST /snapshot-friday-close` returns `no_watches_in_briefing` (preview pod has no LLM-populated briefing — expected). `GET /snapshot/2026-W17` returns `found: false`. On Spark with the cron firing weekly, the next Sunday's briefing's "Last Week's Gameplan Grade" block will populate automatically.
+
+### Files changed
+- `backend/services/weekend_briefing_service.py` (signal_price enrichment, snapshot_friday_close, get_friday_snapshot, _build_previous_week_recap)
+- `backend/routers/weekend_briefing_router.py` (2 new endpoints)
+- `backend/services/eod_generation_service.py` (Friday 16:01 ET cron + handler)
+- `backend/tests/test_weekend_briefing.py` (5 new tests)
+- `frontend/src/components/sentcom/v5/WeekendBriefingCard.jsx` (LastWeekRecap renders gameplan_recap)

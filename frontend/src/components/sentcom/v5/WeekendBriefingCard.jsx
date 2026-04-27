@@ -96,11 +96,51 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
   const sectors = data?.sectors || [];
   const trades = data?.closed_trades || [];
   const summary = data?.closed_summary || {};
-  if (!sectors.length && !trades.length) {
+  const recap = data?.gameplan_recap;
+  const recapWatches = recap?.watches || [];
+  const recapSummary = recap?.summary || {};
+  if (!sectors.length && !trades.length && !recapWatches.length) {
     return <div className="text-zinc-600">No data — IB historical or trade history unavailable.</div>;
   }
   return (
     <div className="space-y-3">
+      {recapWatches.length > 0 && (
+        <div data-testid="gameplan-recap">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">
+            last week's gameplan grade
+            {recap?.iso_week && <span className="ml-1 text-zinc-600">· {recap.iso_week}</span>}
+          </div>
+          <div className="text-[10px] mb-1.5">
+            {recapSummary.wins ?? 0}W · {recapSummary.losses ?? 0}L
+            {recapSummary.avg_change_pct != null && (
+              <span className={` · ${recapSummary.avg_change_pct >= 0 ? 'v5-up' : 'v5-down'}`}>
+                {' · '}avg {fmtPctSigned(recapSummary.avg_change_pct)}
+              </span>
+            )}
+          </div>
+          <div className="space-y-0.5">
+            {recapWatches.map((w, i) => (
+              <div key={`recap-${w.symbol}-${i}`} className="flex justify-between gap-2">
+                <span className="truncate">
+                  <ClickableSymbol symbol={w.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200 font-medium" />
+                  {w.thesis && (
+                    <span className="ml-1.5 text-zinc-500 text-[9px] truncate">
+                      {w.thesis}
+                    </span>
+                  )}
+                </span>
+                <span className={
+                  w.change_pct == null
+                    ? 'text-zinc-600'
+                    : w.change_pct >= 0 ? 'v5-up' : 'v5-down'
+                }>
+                  {w.change_pct == null ? '—' : fmtPctSigned(w.change_pct)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {sectors.length > 0 && (
         <div>
           <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">sector returns (7d)</div>

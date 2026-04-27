@@ -66,3 +66,32 @@ async def generate_weekend_briefing(force: bool = Query(False, description=
     except Exception as exc:
         logger.exception("weekend_briefing generate failed")
         return {"success": False, "error": str(exc)}
+
+
+@router.post("/snapshot-friday-close")
+async def trigger_friday_close_snapshot():
+    """Manually fire the Friday-close snapshot job. Normally runs
+    automatically via the Friday 16:01 ET cron — exposed here as an
+    endpoint so the operator can run it on-demand if the cron missed
+    a Friday for any reason.
+    """
+    svc = get_weekend_briefing_service()
+    if svc is None:
+        return {"success": False, "error": "service_not_initialized"}
+    try:
+        result = svc.snapshot_friday_close()
+        return result
+    except Exception as exc:
+        logger.exception("snapshot-friday-close failed")
+        return {"success": False, "error": str(exc)}
+
+
+@router.get("/snapshot/{iso_week}")
+async def get_friday_close_snapshot(iso_week: str):
+    """Return the Friday-close snapshot for a given ISO week (e.g. 2026-W17).
+    Useful for ad-hoc auditing of how the bot's weekly calls performed."""
+    svc = get_weekend_briefing_service()
+    if svc is None:
+        return {"success": False, "error": "service_not_initialized"}
+    snap = svc.get_friday_snapshot(iso_week)
+    return {"success": True, "found": snap is not None, "snapshot": snap}

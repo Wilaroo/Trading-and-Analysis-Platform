@@ -187,6 +187,61 @@ def test_sector_etfs_includes_all_eleven_select_sector_spdrs():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Friday close snapshot — pin the per-watch P&L computation + idempotency
+# ──────────────────────────────────────────────────────────────────────
+
+
+from services.weekend_briefing_service import _previous_iso_week  # noqa: E402
+
+
+def test_previous_iso_week_is_one_week_back():
+    sun = datetime(2026, 1, 11, 19, 0, tzinfo=timezone.utc)  # Sun 14:00 ET
+    # _iso_week(sun) = 2026-W02; previous = 2026-W01.
+    assert _previous_iso_week(sun) == "2026-W01"
+
+
+def test_snapshot_friday_close_skips_when_no_briefing():
+    db = MagicMock()
+    db.list_collection_names.return_value = ["weekend_briefings"]
+    col = db["weekend_briefings"]
+    col.find_one = MagicMock(return_value=None)
+    db.__getitem__.return_value = col
+    svc = WeekendBriefingService(db)
+    out = svc.snapshot_friday_close()
+    assert out["success"] is False
+    assert out["error"] == "no_briefing_for_week"
+
+
+def test_snapshot_friday_close_skips_when_no_watches():
+    """Briefing exists but gameplan has no watches (LLM unavailable)."""
+    db = MagicMock()
+    col = MagicMock()
+    col.find_one = MagicMock(return_value={
+        "iso_week": "2026-W17",
+        "gameplan": {"text": "no LLM today", "watches": []},
+    })
+    col.create_index = MagicMock()
+    db.__getitem__.return_value = col
+    db.list_collection_names = MagicMock(return_value=["weekend_briefings"])
+    svc = WeekendBriefingService(db)
+    out = svc.snapshot_friday_close()
+    assert out["success"] is False
+    assert out["error"] == "no_watches_in_briefing"
+
+
+def test_snapshot_friday_close_returns_no_db_error_when_db_none():
+    svc = WeekendBriefingService(None)
+    out = svc.snapshot_friday_close()
+    assert out["success"] is False
+    assert out["error"] == "db_unavailable"
+
+
+def test_get_friday_snapshot_returns_none_when_db_none():
+    svc = WeekendBriefingService(None)
+    assert svc.get_friday_snapshot("2026-W17") is None
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Gameplan JSON coercion — locks in resilience guarantees of the LLM
 # response parser. The model may return strict JSON, JSON in fences,
 # JSON with trailing prose, or pure prose. All four must yield a usable
