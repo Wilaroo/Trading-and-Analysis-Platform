@@ -3868,3 +3868,37 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - 🟡 P2 SEC EDGAR 8-K integration
 - 🟡 P3 ⌘K palette additions, Help-System "dismissible forever" tooltips
 - 🟡 P3 Retry 204 historical `qualify_failed` items
+
+## 2026-02-01 — Market State Promotion + Last 5 Runs Timeline (User Requested)
+
+### Refactor: `classify_market_state()` promoted to its own module
+- **Why**: Same ET-hour math was duplicated across `live_bar_cache.py`, `backfill_readiness_service.py`, `enhanced_scanner._get_current_time_window()`, and indirectly relied upon by `account_guard`. Three subsystems already had weekend-awareness wired but each via its own private import path.
+- **What**:
+  1. New canonical module `backend/services/market_state.py` exporting `classify_market_state()`, `is_weekend()`, `is_market_open()`, `is_market_closed()`, `get_snapshot()`, plus stable `STATE_*` constants. Uses `zoneinfo.ZoneInfo("America/New_York")` for proper EST/EDT (replacing the old fixed UTC-5 offset hack).
+  2. `live_bar_cache.classify_market_state()` is now a thin re-export of the canonical impl — keeps every existing import (`hybrid_data_service.py`, etc.) working unchanged.
+  3. `backfill_readiness_service._market_state_now()` switched to import from `services.market_state` directly.
+  4. `enhanced_scanner._get_current_time_window()` now delegates the coarse "is the market even open?" gate to the canonical helper, then keeps its intra-RTH minute-precision sub-window math (PREMARKET / OPENING_AUCTION / MORNING_MOMENTUM / …).
+  5. New router `routers/market_state_router.py` exposing `GET /api/market-state` (registered in `server.py:1457`).
+- **Verification**:
+  - `tests/test_market_state.py` (17 tests) pins bucket boundaries (RTH open inclusive, close exclusive, pre/post extended, overnight, weekend) + locks the `/api/market-state` response shape + asserts the `live_bar_cache` re-export matches the canonical answer at 5 sample timestamps. All pass.
+  - Live `GET /api/market-state` correctly returns `state: weekend, buffers_active: true, et_hhmm: 1250` on Sunday evening.
+  - Existing tests (live_data_phase1, account_guard, scanner_phase3_ib_only, weekend_aware_safety) all green — 43 tests, no regressions.
+
+### Frontend: FreshnessInspector now shows "Weekend Mode · buffers active" banner + Last 5 Runs sparkline
+- **`MarketStateBanner.jsx`** — new top-of-modal banner that renders ONLY when `buffers_active=true` (weekend OR overnight). Stays silent during RTH + extended hours so operators don't see false-positive "warning" UI. Polls `/api/market-state` every 60s. Shows ET wall-clock for confirmation.
+- **`LastRunsTimeline.jsx`** — sparkline strip of the last 5 archived training runs. Each bar height = `models_trained_count` (relative to the max in window), color = trophy (emerald) vs non-trophy (rose), star-icon for trophies. Quick "did the latest run train fewer models?" regression spotter — no MongoDB hunting needed now that the trophy archive write actually fires (2026-02 fix).
+- **New endpoint** `GET /api/ai-training/recent-runs?limit=5` — compact projection (started_at, completed_at, elapsed_human, models_trained_count, models_failed_count, is_trophy). Cap is 1≤limit≤20.
+- **FreshnessInspector layout (top→bottom)**: MarketStateBanner → BackfillReadinessCard → CanonicalUniverseCard → **LastRunsTimeline** → LastTrainingRunCard → LastTrophyRunCard → AutonomyReadinessCard → Subsystem grid → Live subscriptions → TTL plan + RPC.
+
+### Files changed/added
+- `backend/services/market_state.py` (NEW — canonical impl)
+- `backend/routers/market_state_router.py` (NEW — `/api/market-state`)
+- `backend/services/live_bar_cache.py` (refactored to re-export)
+- `backend/services/backfill_readiness_service.py` (use canonical import)
+- `backend/services/enhanced_scanner.py` (delegate coarse gate to canonical)
+- `backend/server.py` (register `market_state_router`)
+- `backend/routers/ai_training.py` (NEW endpoint `/recent-runs`)
+- `backend/tests/test_market_state.py` (NEW — 17 tests)
+- `frontend/src/components/sentcom/v5/MarketStateBanner.jsx` (NEW)
+- `frontend/src/components/sentcom/v5/LastRunsTimeline.jsx` (NEW)
+- `frontend/src/components/sentcom/v5/FreshnessInspector.jsx` (wire both)

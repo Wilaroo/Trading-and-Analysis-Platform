@@ -50,35 +50,16 @@ TTL_ACTIVE_VIEW = 30      # user is actively staring at this symbol
 
 
 def classify_market_state(now_utc: Optional[datetime] = None) -> str:
-    """
-    Return one of: "rth" | "extended" | "overnight" | "weekend".
+    """Re-export of ``services.market_state.classify_market_state``.
 
-    Uses America/New_York wall-clock implicitly by offsetting from UTC.
-    We do NOT consult a holiday calendar here — that concern lives on the
-    backend /api/sentcom/market-state endpoint. For TTL classification,
-    "holiday weekday" rounds to "overnight" which is a safe/conservative
-    fallback (15-min cache, not 30s).
+    Kept here for backwards compatibility with callers that import directly
+    from `services.live_bar_cache`. The canonical implementation lives in
+    `services/market_state.py` (promoted 2026-02 so the same answer is
+    shared across live_bar_cache TTLs, backfill readiness, account guard,
+    enhanced_scanner gating, and the new /api/market-state endpoint).
     """
-    now = now_utc or datetime.now(timezone.utc)
-    # Approx America/New_York: UTC - 4h (EDT) or -5h (EST). For TTL purposes
-    # we pick a blanket -5h offset which slightly widens "overnight" into
-    # late-RTH on DST days — safe because TTLs only err toward stale side.
-    et = now - timedelta(hours=5)
-    dow = et.weekday()   # Mon=0 .. Sun=6
-    if dow >= 5:
-        return "weekend"
-    hour = et.hour
-    minute = et.minute
-    # Regular trading hours: 09:30 – 16:00 ET
-    hhmm = hour * 60 + minute
-    if 9 * 60 + 30 <= hhmm < 16 * 60:
-        return "rth"
-    # Extended hours: 04:00 – 09:30 pre / 16:00 – 20:00 post
-    if 4 * 60 <= hhmm < 9 * 60 + 30:
-        return "extended"
-    if 16 * 60 <= hhmm < 20 * 60:
-        return "extended"
-    return "overnight"
+    from .market_state import classify_market_state as _canonical
+    return _canonical(now_utc)
 
 
 def ttl_for_state(state: str, active_view: bool = False) -> int:

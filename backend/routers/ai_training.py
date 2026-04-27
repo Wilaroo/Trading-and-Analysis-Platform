@@ -1833,3 +1833,79 @@ async def get_last_trophy_run(only_trophy: bool = True):
     except Exception as e:
         logger.exception("last-trophy-run failed")
         return {"success": False, "found": False, "error": str(e)}
+
+
+@router.get("/recent-runs")
+async def get_recent_runs(limit: int = 5):
+    """Return the last N archived training runs for the UI timeline strip.
+
+    Compact shape — only what the FreshnessInspector LastRunsTimeline tile
+    needs (counts + trophy flag + elapsed). The full per-run breakdown is
+    still available via `/api/ai-training/last-trophy-run`.
+
+    Response:
+        {
+          "success": True,
+          "count": int,
+          "runs": [
+            {
+              "started_at": iso,
+              "completed_at": iso,
+              "elapsed_seconds": float,
+              "elapsed_human": "6h 54m",
+              "models_trained_count": int,
+              "models_failed_count": int,
+              "is_trophy": bool,
+            }, ...
+          ]
+        }
+    """
+    try:
+        from server import db
+        if db is None:
+            return {"success": False, "runs": [], "error": "db_unavailable"}
+
+        # Cap the limit — the timeline strip in the UI fits ~10 dots max.
+        limit = max(1, min(int(limit), 20))
+
+        col = db["training_runs_archive"]
+        cursor = col.find(
+            {},
+            sort=[("completed_at", -1)],
+            limit=limit,
+            projection={
+                "_id": 0,
+                "started_at": 1,
+                "completed_at": 1,
+                "elapsed_seconds": 1,
+                "models_trained_count": 1,
+                "models_failed_count": 1,
+                "errors": 1,
+                "is_trophy": 1,
+            },
+        )
+        runs = []
+        for d in cursor:
+            secs = float(d.get("elapsed_seconds") or 0)
+            h = int(secs // 3600)
+            m = int((secs % 3600) // 60)
+            elapsed_human = (f"{h}h {m}m" if h else f"{m}m") if secs > 0 else "—"
+            runs.append({
+                "started_at": d.get("started_at"),
+                "completed_at": d.get("completed_at"),
+                "elapsed_seconds": secs,
+                "elapsed_human": elapsed_human,
+                "models_trained_count": int(d.get("models_trained_count") or 0),
+                "models_failed_count": int(d.get("models_failed_count") or 0),
+                "errors": int(d.get("errors") or 0),
+                "is_trophy": bool(d.get("is_trophy")),
+            })
+
+        return {
+            "success": True,
+            "count": len(runs),
+            "runs": runs,
+        }
+    except Exception as e:
+        logger.exception("recent-runs failed")
+        return {"success": False, "runs": [], "error": str(e)}

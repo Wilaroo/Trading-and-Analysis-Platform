@@ -1454,6 +1454,11 @@ from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)
 from routers.autonomy_router import router as autonomy_router  # noqa: E402
 app.include_router(autonomy_router)
+# Canonical market-state surface — single source of truth for
+# weekend/RTH/extended/overnight, consumed by FreshnessInspector banner,
+# autonomy gate, and any future ops dashboard.
+from routers.market_state_router import router as market_state_router  # noqa: E402
+app.include_router(market_state_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

@@ -16,8 +16,10 @@ import { X, RefreshCw } from 'lucide-react';
 import { BackfillReadinessCard } from './BackfillReadinessCard';
 import { LastTrainingRunCard } from './LastTrainingRunCard';
 import { LastTrophyRunCard } from './LastTrophyRunCard';
+import { LastRunsTimeline } from './LastRunsTimeline';
 import { CanonicalUniverseCard } from './CanonicalUniverseCard';
 import { AutonomyReadinessCard } from './AutonomyReadinessCard';
+import { MarketStateBanner } from './MarketStateBanner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const POLL_MS = 15_000;
@@ -124,6 +126,11 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
           </div>
 
           <div className="p-4 space-y-4 max-h-[78vh] overflow-y-auto v5-scroll">
+            {/* Weekend / Overnight banner — surfaces ONLY when buffers are
+                active so operators don't mistake softer freshness warnings
+                for a regression. Stays silent during RTH + extended hours. */}
+            <MarketStateBanner refreshToken={refreshCounter} />
+
             {/* Backfill readiness ("OK to train?") — surfaced first because
                 it's the single most actionable signal right now while the
                 historical backfill drains. */}
@@ -133,6 +140,11 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
                 Sourced from services/symbol_universe.py and shared with
                 smart-backfill + readiness so all surfaces agree. */}
             <CanonicalUniverseCard refreshToken={refreshCounter} />
+
+            {/* Last 5 runs sparkline — quick "did the latest run train fewer
+                models than the previous one?" regression spotter. Reads
+                from training_runs_archive (durable), no DB hunting. */}
+            <LastRunsTimeline refreshToken={refreshCounter} limit={5} />
 
             {/* Last training run — sibling tile that closes the loop on
                 "did the retrain actually produce models?" Highlights P5 +

@@ -1504,8 +1504,20 @@ class EnhancedBackgroundScanner:
     # ==================== MARKET CONTEXT ====================
     
     def _get_current_time_window(self) -> TimeWindow:
-        """Determine current time window for strategy filtering"""
+        """Determine current time window for strategy filtering.
+
+        The coarse "are we even open?" gate (weekend / overnight / extended)
+        is delegated to `services.market_state.classify_market_state` so
+        every subsystem agrees. Sub-window math (PREMARKET / OPENING_AUCTION
+        / MORNING_MOMENTUM / …) stays here because it's intra-RTH minute
+        precision that only the scanner needs.
+        """
         from zoneinfo import ZoneInfo
+        from .market_state import classify_market_state, STATE_WEEKEND, STATE_OVERNIGHT
+        coarse = classify_market_state()
+        # Weekend + overnight collapse to CLOSED — no scan-window math.
+        if coarse in (STATE_WEEKEND, STATE_OVERNIGHT):
+            return TimeWindow.CLOSED
         now = datetime.now(ZoneInfo("America/New_York"))  # Handles EST/EDT automatically
         hour = now.hour
         minute = now.minute

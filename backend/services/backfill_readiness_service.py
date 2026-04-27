@@ -106,11 +106,13 @@ def _age_days(date_str: Any, now_utc: datetime) -> float | None:
 
 
 def _market_state_now() -> str:
-    """Re-export of services.live_bar_cache.classify_market_state so the
-    readiness check can be weekend/overnight-aware. Imported lazily to
-    avoid circular imports."""
+    """Single source of truth — `services/market_state.classify_market_state`.
+
+    Lazy import keeps backfill readiness importable in early boot before
+    the full service tree is wired.
+    """
     try:
-        from services.live_bar_cache import classify_market_state
+        from services.market_state import classify_market_state
         return classify_market_state()
     except Exception:
         return "rth"  # safe default — never relax freshness if unsure
