@@ -3902,3 +3902,11 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - `frontend/src/components/sentcom/v5/MarketStateBanner.jsx` (NEW)
 - `frontend/src/components/sentcom/v5/LastRunsTimeline.jsx` (NEW)
 - `frontend/src/components/sentcom/v5/FreshnessInspector.jsx` (wire both)
+
+## 2026-02-01 — DataFreshnessBadge: moon icon when market is closed
+- **Where**: `frontend/src/components/DataFreshnessBadge.jsx`.
+- **What**:
+  1. Removed the local `marketState()` helper (duplicated ET-hour math — exact same bug class we just refactored away on the backend). Replaced with a 60s slow-poll of the canonical `/api/market-state` endpoint.
+  2. Renders a `lucide-react` `<Moon />` icon next to the status dot ONLY when `is_market_closed=true` (weekend OR overnight). Hidden during RTH + extended hours so the normal tone signal stays uncluttered.
+  3. The `mkt` variable now flows from the canonical snapshot — single source of truth across the entire app.
+- **Verification**: Frontend compiles clean. Lint OK. The chip now shows the moon at-a-glance without requiring the operator to open the FreshnessInspector.

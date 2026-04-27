@@ -36,31 +36,18 @@
  *   point" — one glance shows status, one click reveals why.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { Moon } from 'lucide-react';
 import { FreshnessInspector } from './sentcom/v5/FreshnessInspector';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const POLL_MS = 10_000;
+// Market-state polls less frequently — buckets only flip on hour boundaries.
+const MARKET_STATE_POLL_MS = 60_000;
 
-// Simple ET market-hours gate — good enough for a status chip. Full holiday
-// calendar lives in the backend; don't duplicate it here.
-const marketState = () => {
-  try {
-    const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const day = etNow.getDay(); // 0 Sun, 6 Sat
-    if (day === 0 || day === 6) return 'weekend';
-    const minutes = etNow.getHours() * 60 + etNow.getMinutes();
-    const open = 9 * 60 + 30;
-    const close = 16 * 60;
-    const premktOpen = 4 * 60;
-    const postmktClose = 20 * 60;
-    if (minutes >= open && minutes < close) return 'rth';
-    if (minutes >= premktOpen && minutes < open) return 'pre';
-    if (minutes >= close && minutes < postmktClose) return 'post';
-    return 'overnight';
-  } catch {
-    return 'rth';
-  }
-};
+// Market state comes from the canonical /api/market-state endpoint
+// (services/market_state.py — single source of truth shared with
+// live_bar_cache TTLs, backfill_readiness, account_guard, scanner).
+// Returns one of: 'rth' | 'extended' | 'overnight' | 'weekend' | null.
 
 const formatAge = (secs) => {
   if (secs == null || !Number.isFinite(secs)) return '—';
@@ -75,6 +62,9 @@ export const DataFreshnessBadge = () => {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [err, setErr] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  // Canonical market-state snapshot (services/market_state.py via
+  // /api/market-state). Replaces the old local ET-hour math fn.
+  const [marketSnap, setMarketSnap] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -99,7 +89,25 @@ export const DataFreshnessBadge = () => {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  const mkt = marketState();
+  // Separate slow-poll for market state — buckets only flip on hour
+  // boundaries so 60s is plenty.
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/api/market-state`);
+        if (!res.ok) return;
+        const j = await res.json();
+        if (alive) setMarketSnap(j);
+      } catch { /* leave stale snapshot — chip just won't update tone */ }
+    };
+    poll();
+    const id = setInterval(poll, MARKET_STATE_POLL_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  const mkt = marketSnap?.state || 'rth';
+  const marketClosed = !!marketSnap?.is_market_closed;
   const { label, tone, title } = useMemo(() => {
     if (err && !pusher) {
       return {
@@ -142,8 +150,7 @@ export const DataFreshnessBadge = () => {
         tone: 'grey',
         title: `Pusher quiet (${age_seconds}s ago) — normal for ${mkt}. Last session close shown.`,
       };
-    }
-    // red
+    }    // red
     return {
       label: mkt === 'rth' ? 'STALE · PUSHER DOWN' : 'STALE · LAST CLOSE',
       tone: mkt === 'rth' ? 'red' : 'amber',
@@ -178,6 +185,17 @@ export const DataFreshnessBadge = () => {
         className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-wider select-none transition-colors hover:brightness-125 cursor-pointer ${toneClasses}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+        {/* Moon icon when the market is closed (weekend OR overnight) —
+            single-glance "buffers active, expect softer warnings" cue.
+            Hidden during RTH + extended hours so we don't muddy the
+            normal tone signal. */}
+        {marketClosed && (
+          <Moon
+            data-testid="data-freshness-moon-icon"
+            className="w-3 h-3 opacity-70"
+            title={marketSnap?.label || 'Market closed'}
+          />
+        )}
         <span>{label}</span>
         {fetchedAt && (
           <span className="opacity-40 ml-1 hidden sm:inline">
