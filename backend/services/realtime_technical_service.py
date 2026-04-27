@@ -107,6 +107,11 @@ class TechnicalSnapshot:
     # Source tracking
     bars_used: int
     data_quality: str  # "real", "partial", "estimated"
+    # NEW (Feb-2026): Tracks which data path produced these intraday bars.
+    #   "live_only"    — entire 5-min window came from pusher RPC live bars
+    #   "live_extended" — pusher RPC bars appended onto Mongo backfill bars
+    #   "mongo_only"   — Mongo `ib_historical_data` only (RPC unavailable / disabled)
+    data_source: str = "mongo_only"
 
 
 class RealTimeTechnicalService:
@@ -154,6 +159,99 @@ class RealTimeTechnicalService:
         except Exception as e:
             logger.debug(f"Error fetching intraday bars for {symbol}: {e}")
         return None
+
+    async def _get_live_intraday_bars(
+        self, symbol: str, bar_size: str = "5 mins"
+    ) -> Optional[List[Dict]]:
+        """
+        Fetch the freshest intraday bars from the Windows pusher RPC via
+        `HybridDataService.fetch_latest_session_bars()` (which itself reads
+        from `live_bar_cache` first, then falls back to a live RPC call).
+
+        Returns bars in chronological order (oldest first), normalized to
+        the same shape as `_get_intraday_bars_from_db()` (i.e. each bar has
+        a 'timestamp' key). Returns ``None`` if the pusher RPC is disabled,
+        unconfigured, or unreachable — in which case the caller should fall
+        back to the Mongo path.
+        """
+        try:
+            from services.ib_pusher_rpc import is_live_bar_rpc_enabled, get_pusher_rpc_client
+            from services.hybrid_data_service import get_hybrid_data_service
+        except Exception as e:
+            logger.debug(f"live-bar imports failed for {symbol}: {e}")
+            return None
+
+        # Cheap kill-switch + config check before doing any network work.
+        if not is_live_bar_rpc_enabled():
+            return None
+        try:
+            if not get_pusher_rpc_client().is_configured():
+                return None
+        except Exception:
+            return None
+
+        try:
+            hds = get_hybrid_data_service()
+            result = await hds.fetch_latest_session_bars(
+                symbol.upper(), bar_size, active_view=False, use_rth=False
+            )
+        except Exception as e:
+            logger.debug(f"fetch_latest_session_bars failed for {symbol}: {e}")
+            return None
+
+        if not result or not result.get("success"):
+            return None
+
+        bars = result.get("bars") or []
+        if not bars:
+            return None
+
+        # Normalize to the same shape as _get_intraday_bars_from_db. Pusher
+        # RPC returns bars with a `date` field; rename to `timestamp` so
+        # downstream indicator calc doesn't care about the source.
+        normalized: List[Dict] = []
+        for bar in bars:
+            ts = bar.get("timestamp") or bar.get("date")
+            if ts is None:
+                continue
+            normalized.append({
+                "timestamp": ts,
+                "open": bar.get("open", 0),
+                "high": bar.get("high", 0),
+                "low": bar.get("low", 0),
+                "close": bar.get("close", 0),
+                "volume": bar.get("volume", 0),
+            })
+        # Pusher RPC returns chronological asc already, but defend against
+        # ordering surprises.
+        normalized.sort(key=lambda b: str(b["timestamp"]))
+        return normalized or None
+
+    @staticmethod
+    def _merge_live_into_history(
+        mongo_bars: Optional[List[Dict]],
+        live_bars: Optional[List[Dict]],
+    ) -> Tuple[Optional[List[Dict]], str]:
+        """
+        Combine Mongo-historical bars with live-pusher bars by timestamp.
+
+        Live bars override matching Mongo timestamps (live wins on overlap)
+        and any newer live bars are appended. Returns the merged list and
+        the appropriate `data_source` label for `TechnicalSnapshot`.
+        """
+        if not live_bars and not mongo_bars:
+            return (None, "mongo_only")
+        if not mongo_bars:
+            return (live_bars, "live_only")
+        if not live_bars:
+            return (mongo_bars, "mongo_only")
+
+        # Index Mongo bars by timestamp for O(1) override.
+        merged: Dict[str, Dict] = {str(b["timestamp"]): b for b in mongo_bars}
+        for b in live_bars:
+            merged[str(b["timestamp"])] = b
+        out = sorted(merged.values(), key=lambda b: str(b["timestamp"]))
+        return (out, "live_extended")
 
     def _check_staleness(self, bars: Optional[List[Dict]], max_age_hours: int = 24) -> bool:
         """Check if bars are fresh enough for trading decisions.
@@ -307,15 +405,27 @@ class RealTimeTechnicalService:
         try:
             # Get intraday bars (5-min) from MongoDB — same source as training
             intraday_bars = await asyncio.to_thread(self._get_intraday_bars_from_db, symbol, "5 mins", 78)
-            
+
+            # Live-bar overlay (Feb-2026): when the IB pusher RPC is up, we
+            # prefer the freshest 5-min bars from `live_bar_cache` /
+            # pusher RPC. Pusher bars OVERWRITE matching Mongo timestamps
+            # and any newer bars are appended on top. This keeps the indicator
+            # warm-up (200-period EMA, 14-RSI etc.) intact while making sure
+            # the trailing edge of the series is real-time, not stale.
+            live_bars = await self._get_live_intraday_bars(symbol, "5 mins")
+            intraday_bars, intraday_source = self._merge_live_into_history(
+                intraday_bars, live_bars
+            )
+
             # Staleness check: skip symbol if intraday data is too old
             # BUT: if IB Pusher has a live quote, bars are fine for indicator calc
             ib_quote = self._get_ib_quote(symbol)
             ib_pusher_live = ib_quote and ib_quote.get("price", 0) > 0
-            
+
             if not ib_pusher_live and self._check_staleness(intraday_bars):
                 logger.debug(f"Stale or missing intraday data for {symbol}, no live IB quote — skipping")
                 intraday_bars = None  # Will use fallback estimates
+                intraday_source = "mongo_only"
             
             # Get daily bars for ATR, average volume, daily levels from MongoDB
             daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, symbol, 50)
@@ -345,10 +455,13 @@ class RealTimeTechnicalService:
                 quote=quote,
                 spy_change_pct=spy_change
             )
-            
+            # Stamp which data path produced the intraday bars so callers
+            # (e.g. the LiveAlertCard UI) can prove freshness at a glance.
+            snapshot.data_source = intraday_source
+
             # Cache the result
             self._cache[symbol] = snapshot
-            
+
             return snapshot
             
         except Exception as e:

@@ -171,3 +171,10 @@ def get_pusher_rpc_client() -> _PusherRPCClient:
     if _client_instance is None:
         _client_instance = _PusherRPCClient()
     return _client_instance
+
+
+def is_live_bar_rpc_enabled() -> bool:
+    """Public kill-switch reader. Honored by callers (e.g. the scanner's
+    realtime_technical_service) that want to skip a live RPC call when the
+    operator has explicitly turned it off via `ENABLE_LIVE_BAR_RPC=false`."""
+    return _is_enabled()

@@ -434,6 +434,16 @@ class LiveAlert:
     ai_predicted_move_pct: float = 0.0    # Predicted % move in next 30 mins
     ai_agrees_with_direction: bool = False  # True if AI prediction matches alert direction
     ai_model_version: str = ""            # Version of AI model used
+
+    # NEW: AI Confidence Baseline / Edge (Feb-2026)
+    # Compares current AI confidence to the rolling 30-day mean for this
+    # (symbol, direction) so the operator can tell at a glance whether the
+    # AI is *more* confident than usual on this name or just hitting its
+    # baseline.
+    ai_baseline_confidence: float = 0.0   # 30-day rolling mean (0 if INSUFFICIENT_DATA)
+    ai_confidence_delta_pp: float = 0.0   # current − baseline, in pp
+    ai_edge_label: str = "INSUFFICIENT_DATA"  # STRONG_EDGE / ABOVE_BASELINE / AT_BASELINE / BELOW_BASELINE / INSUFFICIENT_DATA
+    ai_baseline_sample: int = 0           # sample size of the rolling baseline
     
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
@@ -5107,6 +5117,25 @@ class EnhancedBackgroundScanner:
                     alert.ai_agrees_with_direction = ai_is_bullish
                 else:
                     alert.ai_agrees_with_direction = not ai_is_bullish
+
+                # NEW (Feb-2026): Stamp the AI confidence delta vs the
+                # rolling 30-day baseline for this (symbol, direction). Tells
+                # the operator whether THIS alert is exceptionally confident
+                # or just hitting the model's usual mark for this name.
+                try:
+                    from services.ai_confidence_baseline import get_baseline_service
+                    baseline_svc = get_baseline_service()
+                    if baseline_svc._db is None and self.db is not None:
+                        baseline_svc.set_db(self.db)
+                    edge = baseline_svc.compute_delta(
+                        alert.symbol, alert.direction, alert.ai_confidence
+                    )
+                    alert.ai_baseline_confidence = edge["ai_baseline_confidence"]
+                    alert.ai_confidence_delta_pp = edge["ai_confidence_delta_pp"]
+                    alert.ai_edge_label = edge["ai_edge_label"]
+                    alert.ai_baseline_sample = edge["ai_baseline_sample"]
+                except Exception as edge_err:
+                    logger.debug(f"AI confidence delta unavailable for {alert.symbol}: {edge_err}")
                 
                 logger.debug(
                     f"AI for {alert.symbol}: {direction} ({confidence:.0f}% confidence), "
@@ -5134,7 +5163,7 @@ class EnhancedBackgroundScanner:
             "scan_count": self._scan_count,
             "alerts_generated": self._alerts_generated,
             "active_alerts": len(self._live_alerts),
-            "watchlist_size": wave_info.get("universe_stats", {}).get("total_unique", len(self._watchlist)),
+            "watchlist_size": wave_info.get("universe_stats", {}).get("qualified_total", len(self._watchlist)),
             "symbols_scanned_last": self._symbols_scanned_last,
             "symbols_skipped_adv": self._symbols_skipped_adv,
             "symbols_skipped_rvol": self._symbols_skipped_rvol,

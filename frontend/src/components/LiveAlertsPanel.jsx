@@ -253,6 +253,70 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
               </div>
             </div>
           )}
+
+          {/* AI Edge — confidence + delta vs 30-day baseline */}
+          {alert.ai_confidence > 0 && (
+            <div
+              className="flex items-center gap-2 mt-2 text-xs flex-wrap"
+              data-testid={`ai-edge-row-${alert.id}`}
+            >
+              <CustomTip
+                label="AI Confidence"
+                description="Time-Series AI model confidence in the trade direction (0-100). Sourced from the same models the training pipeline produces."
+              >
+                <div
+                  className="flex items-center gap-1"
+                  data-testid={`ai-confidence-${alert.id}`}
+                >
+                  <span className="text-zinc-500">AI:</span>
+                  <span
+                    className={`font-bold ${
+                      alert.ai_confidence >= 70
+                        ? 'text-emerald-400'
+                        : alert.ai_confidence >= 50
+                        ? 'text-yellow-400'
+                        : 'text-red-400'
+                    }`}
+                  >
+                    {Math.round(alert.ai_confidence)}%
+                  </span>
+                </div>
+              </CustomTip>
+              {alert.ai_edge_label && alert.ai_edge_label !== 'INSUFFICIENT_DATA' && (
+                <CustomTip
+                  label="AI Edge vs 30-day Baseline"
+                  description={`This symbol's last 30 days of AI predictions averaged ${Math.round(alert.ai_baseline_confidence)}% confidence (n=${alert.ai_baseline_sample}). The current ${Math.round(alert.ai_confidence)}% is ${alert.ai_confidence_delta_pp >= 0 ? '+' : ''}${alert.ai_confidence_delta_pp.toFixed(1)}pp away from that baseline.`}
+                >
+                  <span
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-bold ${
+                      alert.ai_edge_label === 'STRONG_EDGE'
+                        ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40'
+                        : alert.ai_edge_label === 'ABOVE_BASELINE'
+                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                        : alert.ai_edge_label === 'BELOW_BASELINE'
+                        ? 'bg-red-500/15 text-red-300 border border-red-500/30'
+                        : 'bg-zinc-500/15 text-zinc-300 border border-zinc-500/30'
+                    }`}
+                    data-testid={`ai-edge-pill-${alert.id}`}
+                  >
+                    {alert.ai_edge_label === 'STRONG_EDGE' && <Zap className="w-3 h-3" />}
+                    {alert.ai_edge_label === 'ABOVE_BASELINE' && <TrendingUp className="w-3 h-3" />}
+                    {alert.ai_edge_label === 'BELOW_BASELINE' && <TrendingDown className="w-3 h-3" />}
+                    Δ {alert.ai_confidence_delta_pp >= 0 ? '+' : ''}
+                    {alert.ai_confidence_delta_pp.toFixed(1)}pp vs 30d
+                  </span>
+                </CustomTip>
+              )}
+              {alert.ai_edge_label === 'INSUFFICIENT_DATA' && alert.ai_baseline_sample < 5 && (
+                <span
+                  className="text-zinc-500 italic"
+                  data-testid={`ai-edge-insufficient-${alert.id}`}
+                >
+                  baseline building ({alert.ai_baseline_sample}/5)
+                </span>
+              )}
+            </div>
+          )}
           
           {/* Timing */}
           <div className="flex items-center gap-2 mt-2">

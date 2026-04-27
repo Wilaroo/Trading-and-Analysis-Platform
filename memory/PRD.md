@@ -1,5 +1,78 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — AI Confidence Delta + Live-Bar Overlay — SHIPPED
+
+### Why
+Two follow-ons to the Scanner Universe Alignment refactor. After the
+scanner became aligned to the AI training universe, the next questions
+were:
+  1. "Is the AI's confidence on THIS alert exceptional, or just baseline?"
+  2. "Are these scans actually using live data, or stale Mongo bars?"
+
+### A) AI Confidence Delta vs 30-day Baseline
+**New service** `services/ai_confidence_baseline.py` aggregates the last
+30 days of `live_alerts` per (symbol, normalized_direction) and returns a
+rolling-mean `ai_confidence`. Below a 5-alert sample size the baseline is
+withheld (`INSUFFICIENT_DATA`).
+
+**Edge classification** (delta = current − baseline, in pp):
+| Delta | Label |
+|---|---|
+| ≥ +15pp | `STRONG_EDGE` |
+| ≥ +5pp  | `ABOVE_BASELINE` |
+| −5..+5pp | `AT_BASELINE` |
+| ≤ −5pp  | `BELOW_BASELINE` |
+
+**Wired into** `EnhancedBackgroundScanner._enrich_alert_with_ai()` —
+every alert now ships with 4 new fields:
+`ai_baseline_confidence`, `ai_confidence_delta_pp`, `ai_edge_label`,
+`ai_baseline_sample`.
+
+**Frontend**: `LiveAlertsPanel.jsx` got a new "AI Edge" row that renders
+a colored pill (`Δ +12.3pp vs 30d` with Zap/TrendingUp/TrendingDown
+icons depending on label).
+
+### B) Scanner Uses LIVE Bars When Available
+**`services/realtime_technical_service.py`** now overlays live pusher RPC
+bars onto the Mongo `ib_historical_data` 5-min slice. Live bars
+overwrite any matching timestamps and append newer ones — this preserves
+the indicator warm-up window (200-EMA, 14-RSI, etc.) while making the
+trailing edge of the series real-time.
+
+The merge result is one of three labels stamped onto the new
+`TechnicalSnapshot.data_source` field:
+  * `live_extended` — pusher RPC bars merged onto Mongo backfill
+  * `live_only`     — pusher RPC bars only (no Mongo history yet)
+  * `mongo_only`    — RPC disabled / unconfigured / unreachable
+
+Honors the `ENABLE_LIVE_BAR_RPC` kill-switch and `IB_PUSHER_RPC_URL`
+config — when either is missing, the scanner cleanly falls back to
+Mongo-only (no exception, no log spam).
+
+### Bonus Fixes
+- Fixed `enhanced_scanner.get_stats()` `watchlist_size` regression
+  (was looking up `total_unique` from the legacy index_universe stats;
+  now reads `qualified_total` from the canonical universe stats).
+- New public alias `services.ib_pusher_rpc.is_live_bar_rpc_enabled()` for
+  safe external kill-switch checks.
+
+### Tests (11 new + 45 regression)
+- `tests/test_ai_edge_and_live_bars.py` (11 tests):
+    * baseline returns None below 5-alert min sample
+    * 30-day rolling mean correctly excludes >30d-old alerts
+    * delta thresholds map to STRONG_EDGE / ABOVE / AT / BELOW correctly
+    * INSUFFICIENT_DATA when no history exists
+    * direction aliases (`long` / `buy` / `bullish` / `up`) pool together
+    * `_merge_live_into_history` overrides on overlapping timestamps
+    * merge gracefully handles None inputs (mongo_only fallback)
+    * `_get_live_intraday_bars` short-circuits when kill-switch is off
+    * `_get_live_intraday_bars` short-circuits when RPC URL is unset
+    * `LiveAlert.to_dict()` ships the 4 new edge fields
+    * `TechnicalSnapshot.data_source` defaults to "mongo_only"
+- All 45 regression tests across canonical-universe + IB-only +
+  no-Alpaca + scanner-alignment suites still green.
+
+
 ## 2026-02 — Scanner Universe Alignment Audit & Refactor — SHIPPED
 
 ### Symptom
