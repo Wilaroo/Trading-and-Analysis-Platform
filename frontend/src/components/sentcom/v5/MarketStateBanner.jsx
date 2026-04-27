@@ -14,6 +14,7 @@
 import React from 'react';
 import { Moon, Coffee } from 'lucide-react';
 import { useMarketState } from '../../../hooks/useMarketState';
+import { fmtET12 } from '../../../utils/timeET';
 
 const BANNER_BY_STATE = {
   weekend: {
@@ -46,10 +47,7 @@ export const MarketStateBanner = () => {
   // ET 12-hr clock for human-friendly display.
   let etClock = '';
   try {
-    const d = new Date(snap.now_et);
-    etClock = d.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    etClock = fmtET12(snap.now_et);
   } catch { /* ignore */ }
 
   return (

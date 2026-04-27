@@ -1,5 +1,60 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-04-27 — App-wide ET 12-Hour Time Format — SHIPPED
+
+### Why
+Operator complained displays were still showing military time (e.g. `18:30`)
+instead of the requested ET 12-hour format (`6:30 PM`). Time hierarchy must
+be unambiguous for trade decisions.
+
+### Scope
+Routed every user-facing time formatter through the existing
+`/app/frontend/src/utils/timeET.js` utility (`fmtET12`, `fmtET12Sec`).
+Files updated:
+- `components/sentcom/v5/MarketStateBanner.jsx` — etClock chip
+- `components/sentcom/v5/BriefingsV5.jsx` — `nowETDisplay()` for cards;
+  `formatTimeRange()` re-rendered as `9:30 AM ET` style. (Internal
+  `nowET()` retained as 24h `HH:MM` for `minutesET()` math only.)
+- `components/sentcom/v5/SafetyV5.jsx` — kill-switch tripped-at chip
+- `components/RightSidebar.jsx` — alert timestamp row
+- `components/StreamOfConsciousness.jsx` — thought timestamp + last-update
+- `components/MorningBriefingModal.jsx` — modal time label
+
+### Verification
+- `mcp_lint_javascript`: clean across all 6 files.
+- Node smoke test against `timeET.js`:
+  - `fmtET12("2026-04-27T18:30:00Z") → "2:30 PM"` ✅
+  - `fmtET12Sec(...) → "2:30:00 PM"` ✅
+  - `fmtET12Date(...) → "Apr 27, 2026, 2:30 PM"` ✅
+
+### Operator action required
+Pull the changes on DGX and let CRA hot-reload (`yarn start` already running),
+or `sudo supervisorctl restart frontend`.
+
+---
+
+## 2026-04-27 — Scanner Diversity Cache Rebuild — INSTRUCTION FOR OPERATOR
+
+### Why
+Wave scanner was only emitting "relative-strength" hits because
+`symbol_adv_cache` was empty on DGX, forcing fallback to the 14-symbol
+hardcoded pusher list.
+
+### Action (run on DGX)
+```bash
+curl -X POST http://localhost:8001/api/ib-collector/rebuild-adv-from-ib
+```
+This populates `symbol_adv_cache` from MongoDB daily bars (must have daily
+bars present — if response is `{"success": false, "error": "No daily bar
+data found"}`, run `/api/ib-collector/smart-backfill` first to seed dailies,
+then retry).
+
+Once populated, the wave scanner picks up the full canonical universe on
+its next tick — no code change required.
+
+---
+
+
 ## 2026-02 — DEFERRED: Auto-Strategy-Weighting (parked, not yet built)
 
 ### Idea

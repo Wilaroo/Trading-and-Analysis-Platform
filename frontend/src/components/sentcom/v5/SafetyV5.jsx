@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertOctagon, ShieldAlert, X, Loader2, Power, Clock } from 'lucide-react';
 import api from '../../../utils/api';
+import { fmtET12Sec } from '../../../utils/timeET';
 
 
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -70,7 +71,7 @@ export const SafetyBannerV5 = ({ safety }) => {
   if (!state?.kill_switch_active) return null;
 
   const trippedAt = state.kill_switch_tripped_at
-    ? new Date(state.kill_switch_tripped_at * 1000).toLocaleTimeString('en-US', { hour12: false })
+    ? fmtET12Sec(state.kill_switch_tripped_at * 1000)
     : '—';
 
   const handleReset = async () => {

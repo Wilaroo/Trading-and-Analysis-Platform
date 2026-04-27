@@ -29,6 +29,7 @@ import MarketIntelPanel from './MarketIntelPanel';
 import QuickActionsMenu from './QuickActionsMenu';
 import SimulatorControl from './SimulatorControl';
 import api, { safeGet } from '../utils/api';
+import { fmtET12Sec } from '../utils/timeET';
 
 // ===================== CALENDAR-STYLE EARNINGS WIDGET =====================
 const EarningsWidget = ({ onTickerSelect }) => {
@@ -648,11 +649,10 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
               const isConfirmed = alert.headline?.toLowerCase().includes('confirmed') ||
                                   (alert.headline?.toLowerCase().includes('breakout') && !isApproaching);
               
-              // Format timestamp
+              // Format timestamp — ET 12-hour with seconds via shared util.
               const formatTime = (isoString) => {
                 if (!isoString) return '';
-                const date = new Date(isoString);
-                return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                return fmtET12Sec(isoString);
               };
               
               // SMB Integration: Get trade style display

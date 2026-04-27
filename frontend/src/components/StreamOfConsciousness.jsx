@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api, { safeGet, safePost } from '../utils/api';
 import { useWsData } from '../contexts/WebSocketDataContext';
+import { fmtET12Sec } from '../utils/timeET';
 import ClickableTicker from './shared/ClickableTicker';
 import { 
   Search, TrendingUp, TrendingDown, AlertTriangle, Activity, 
@@ -18,16 +19,10 @@ import {
   StopCircle, ShoppingCart, Ban, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 
-// Format timestamp
+// Format timestamp — ET 12-hour with seconds via shared util.
 const formatTime = (timestamp) => {
   if (!timestamp) return '--:--';
-  const time = new Date(timestamp);
-  return time.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false 
-  });
+  return fmtET12Sec(timestamp);
 };
 
 // Hook for fetching S.O.C. stream data — uses WebSocket with initial fetch fallback
@@ -686,13 +681,8 @@ const StreamOfConsciousness = ({ className = '' }) => {
     ['setup', 'alert', 'decision', 'trade'].includes(t.type)
   ).length;
   
-  // Format last update time
-  const lastUpdateStr = lastUpdate ? lastUpdate.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false 
-  }) : '--:--:--';
+  // Format last update time — ET 12-hour
+  const lastUpdateStr = lastUpdate ? fmtET12Sec(lastUpdate) : '--:--:--';
   
   return (
     <div 

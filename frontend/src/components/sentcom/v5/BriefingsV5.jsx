@@ -13,14 +13,18 @@
 import React, { useMemo, useState } from 'react';
 import { useMorningBriefing } from './useMorningBriefing';
 import { useMarketState } from '../../../contexts';
+import { fmtET12 } from '../../../utils/timeET';
 import { WeekendBriefingCard } from './WeekendBriefingCard';
 
+// 24h "HH:MM" string in ET — kept for internal math (split by ':' for minutes-of-day).
 const nowET = () => {
-  // Locale-based ET time (close enough for UI labels; not trade-critical)
   return new Date().toLocaleTimeString('en-US', {
     hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York',
   });
 };
+
+// 12-hour ET label for user-facing display ("9:30 AM").
+const nowETDisplay = () => fmtET12(new Date());
 
 const minutesET = () => {
   const [h, m] = nowET().split(':').map(Number);
@@ -35,9 +39,17 @@ const statusFor = (windowStart, windowEnd) => {
 };
 
 const formatTimeRange = (startHH, startMM) => {
-  const hh = String(startHH).padStart(2, '0');
-  const mm = String(startMM).padStart(2, '0');
-  return `${hh}:${mm} ET`;
+  // Render "9:30 AM ET" / "11:30 AM ET" / "3:00 PM ET" — ET 12-hour.
+  const today = new Date();
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHH, startMM);
+  // Build the label in ET to be safe across observer timezones.
+  const label = d.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return `${label} ET`;
 };
 
 
@@ -181,7 +193,7 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClic
           {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowET()}</span>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowETDisplay()}</span>
       </div>
       <div className="v5-why mt-1">
         {(closed.length === 0 && open.length === 0) ? (
@@ -233,7 +245,7 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick 
           {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowET()}</span>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowETDisplay()}</span>
       </div>
       <div className="v5-why mt-1">
         {open.length === 0 ? (
@@ -286,7 +298,7 @@ const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick
           {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">DONE</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowET()}</span>
+        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowETDisplay()}</span>
       </div>
       <div className="v5-why mt-1">
         {closed.length === 0 ? (

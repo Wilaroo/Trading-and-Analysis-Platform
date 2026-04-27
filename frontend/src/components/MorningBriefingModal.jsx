@@ -19,6 +19,7 @@ import { X, RefreshCw } from 'lucide-react';
 import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
 import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
+import { fmtET12 } from '../utils/timeET';
 
 
 const fmtUsd = (v) => (v == null || Number.isNaN(Number(v))) ? '$—' : `${Number(v) >= 0 ? '+$' : '−$'}${Math.abs(Number(v)).toFixed(0)}`;
@@ -87,7 +88,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   const dateLabel = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
   });
-  const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const timeLabel = fmtET12(new Date());
 
   const biasChip = marketBias === 'bullish' || marketBias === 'LONG' ? 'v5-chip-manage'
                   : marketBias === 'bearish' || marketBias === 'SHORT' ? 'v5-chip-veto'
