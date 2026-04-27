@@ -413,8 +413,22 @@ async def get_chart_bars(
     symbol: str = Query(..., min_length=1, max_length=10),
     timeframe: str = Query("5min"),
     days: int = Query(5, ge=1, le=365),
+    rth_only: bool = Query(
+        True,
+        description=(
+            "When true (default for intraday), filter bars to RTH "
+            "(9:30-16:00 ET, weekdays only). Closes the visual gaps "
+            "between sessions and during weekends. Pass false to "
+            "include pre/post-market and overnight bars."
+        ),
+    ),
 ) -> Dict[str, Any]:
-    """Return OHLCV bars + overlay indicator series for `symbol`/`timeframe`."""
+    """Return OHLCV bars + overlay indicator series for `symbol`/`timeframe`.
+
+    `rth_only` (added 2026-04-28) removes the visual gaps the operator
+    flagged: overnight (4pm → 9:30am next day) + weekend (Fri 4pm → Mon
+    9:30am) + sparse pre/post-market bars. Daily/weekly timeframes
+    don't need this filter (their bars are already 1-per-session)."""
     if _hybrid_data_service is None:
         raise HTTPException(status_code=503, detail="hybrid_data_service not initialised")
 
@@ -514,6 +528,41 @@ async def get_chart_bars(
             "indicators": {},
             "error": "no parseable bars",
         }
+
+    # 2026-04-28: RTH-only filter for intraday timeframes. Closes the
+    # visual gaps the operator flagged (overnight, weekend, pre/post-
+    # market sparseness) without changing the underlying cache. Daily
+    # and weekly bars are already 1-per-session so we never filter them.
+    if rth_only and tf in {"1min", "5min", "15min", "1hour"}:
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        rth_open_min = 9 * 60 + 30   # 9:30 ET
+        rth_close_min = 16 * 60      # 16:00 ET
+        before = len(normalised)
+        normalised = [
+            r for r in normalised
+            if (
+                # Convert UTC seconds to ET minute-of-day; weekends excluded.
+                (lambda dt: (
+                    dt.weekday() < 5
+                    and rth_open_min <= dt.hour * 60 + dt.minute < rth_close_min
+                ))(datetime.fromtimestamp(r["time"], tz=et))
+            )
+        ]
+        if not normalised:
+            # Fall back to original set if RTH filter wiped everything
+            # (e.g., test data is purely after-hours). Better to show
+            # gappy data than no data.
+            return {
+                "success": False,
+                "symbol": symbol.upper(),
+                "timeframe": tf,
+                "bar_count": 0,
+                "bars": [],
+                "indicators": {},
+                "error": "no RTH bars in window",
+                "rth_filter_dropped": before,
+            }
 
     times = [r["time"] for r in normalised]
     closes = [r["close"] for r in normalised]

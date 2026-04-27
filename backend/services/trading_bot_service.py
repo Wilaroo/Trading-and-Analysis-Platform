@@ -1207,14 +1207,51 @@ class TradingBotService:
             return "closing"
     
     async def _get_account_value(self) -> float:
-        """Get current account value from Alpaca"""
+        """
+        Get current account NetLiquidation. Order of resolution:
+          1. IB live account values (pushed from Windows pusher / IB Gateway)
+          2. Alpaca (legacy, only if explicitly re-enabled — phase 4 default OFF)
+          3. Hardcoded $100k fallback (last resort)
+
+        Before 2026-04-28 this only checked Alpaca, which always
+        returned None after Phase 4 Alpaca retirement → bot kept
+        sizing on the $100k default no matter what the operator's IB
+        account balance was. Now we read NetLiquidation from
+        `routers.ib._pushed_ib_data` first.
+        """
+        # 1) IB account from the pushed data (preferred when pusher is up).
+        try:
+            from routers.ib import _pushed_ib_data, _extract_account_value
+            account = (_pushed_ib_data or {}).get("account") or {}
+            if account:
+                net_liq = _extract_account_value(account, "NetLiquidation", 0)
+                if net_liq and net_liq > 0:
+                    # Update risk_params.starting_capital so future scans
+                    # see the live value too — this also feeds position
+                    # sizing helpers that read starting_capital directly.
+                    try:
+                        self.risk_params.starting_capital = float(net_liq)
+                    except Exception:
+                        pass
+                    return float(net_liq)
+        except Exception as exc:
+            logger.debug(f"_get_account_value: IB read failed: {exc}")
+
+        # 2) Alpaca (legacy fallback — almost always None after Phase 4).
         try:
             if self._alpaca_service:
                 account = await self._alpaca_service.get_account()
-                return float(account.get("portfolio_value", 100000)) if account else 100000
+                if account:
+                    pv = float(account.get("portfolio_value") or 0)
+                    if pv > 0:
+                        return pv
         except Exception as e:
-            logger.warning(f"Could not get account value: {e}")
-        return 100000  # Default fallback
+            logger.warning(f"Could not get account value from Alpaca: {e}")
+
+        # 3) Last-resort hardcoded fallback. Sized for paper trading
+        # so the bot can still produce SOME output when fully offline,
+        # but the operator should investigate (no IB push, no Alpaca).
+        return float(self.risk_params.starting_capital or 100_000)
     
     async def _restore_state(self):
         """Restore bot state — delegated to BotPersistence module."""

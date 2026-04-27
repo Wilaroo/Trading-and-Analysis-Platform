@@ -355,13 +355,20 @@ export const SentComV5View = ({
             userHasFocused={userHasFocused}
           />
 
-          {/* Chart (~60% of center) */}
-          <div className="flex-1 min-h-0 overflow-hidden" style={{ flexBasis: '60%' }}>
+          {/* Chart (~60% of center). Container styling matters here:
+              the inner ChartPanel has a ResizeObserver that re-fits
+              the chart to the parent's actual height — so the parent
+              MUST have a deterministic height (flex-basis + min-h-0
+              + overflow-hidden) or the volume pane / x-axis ticks
+              get clipped. */}
+          <div
+            className="min-h-0 overflow-hidden flex flex-col"
+            style={{ flex: '60 1 0%' }}
+          >
             <PanelErrorBoundary label="chart">
               <ChartPanel
                 symbol={effectiveSymbol}
                 initialTimeframe="5m"
-                height={600}
                 position={positions?.find(p => p.symbol === effectiveSymbol) || null}
               />
             </PanelErrorBoundary>
@@ -372,8 +379,8 @@ export const SentComV5View = ({
               thoughts have room to breathe. */}
           <div
             data-testid="sentcom-v5-stream-center"
-            className="border-t border-zinc-800 flex flex-col min-h-0"
-            style={{ flexBasis: '40%' }}
+            className="border-t border-zinc-800 flex flex-col min-h-0 overflow-hidden"
+            style={{ flex: '40 1 0%' }}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Unified Stream</div>

@@ -53,7 +53,10 @@ const toUtcTimestamp = (ts) => {
 export const ChartPanel = ({
   symbol = 'SPY',
   initialTimeframe = '5m',
-  height = 480,
+  // 2026-04-28: default to null so the chart fills its flex parent.
+  // Legacy callers passing an explicit pixel value still work — see
+  // the container <div> render at the bottom of this component.
+  height = null,
   autoRefreshMs = 30_000,
   className = '',
   // Optional focused position — if supplied, Entry / SL / PT horizontal
@@ -155,7 +158,10 @@ export const ChartPanel = ({
       },
       autoSize: false,
       width: containerRef.current.clientWidth,
-      height,
+      // When `height` prop is null (V5 default), use the container's
+      // current clientHeight; otherwise honour the prop value.
+      // ResizeObserver below will continue to track height changes.
+      height: height || containerRef.current.clientHeight || 480,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -210,11 +216,20 @@ export const ChartPanel = ({
       markersPluginRef.current = null;
     }
 
-    // Resize with container
+    // Resize with container — observe BOTH width AND height so the
+    // chart fits the new flex parent on every layout change. Before
+    // 2026-04-28 this only forwarded `width` and the chart kept the
+    // hardcoded `height={600}` from the prop, which clipped the
+    // volume pane + x-axis tick row when the parent was shorter than
+    // 600px (regressed after the V5 layout move that put the Unified
+    // Stream below the chart).
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const { width } = entry.contentRect;
-        chart.applyOptions({ width });
+        const { width, height: ch } = entry.contentRect;
+        // Floor at 240 so a collapsed parent doesn't crush the chart
+        // into an unreadable strip; ceil is the natural container size.
+        const nextH = Math.max(240, Math.floor(ch || height));
+        chart.applyOptions({ width, height: nextH });
       }
     });
     ro.observe(containerRef.current);
@@ -676,11 +691,20 @@ export const ChartPanel = ({
         </div>
       </div>
 
-      {/* Chart container */}
+      {/* Chart container.
+          2026-04-28: when `height` prop is omitted (the default in V5
+          where the flex parent dictates height), use `flex-1` + `100%`
+          so the container fills the available slot. The internal
+          ResizeObserver re-fits the chart canvas on every height
+          change, so the volume pane + x-axis ticks stay visible no
+          matter the slot size.
+          When an explicit `height` IS passed (legacy callers), honour
+          it inline. */}
       <div
         data-testid="chart-container"
         ref={containerRef}
-        style={{ height, width: '100%' }}
+        className={height ? '' : 'flex-1 min-h-0'}
+        style={height ? { height, width: '100%' } : { width: '100%' }}
       />
 
       {/* Overlays: loading / empty / error states */}

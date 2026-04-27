@@ -1884,11 +1884,15 @@ class EnhancedBackgroundScanner:
                 # Check if market is open
                 current_window = self._get_current_time_window()
                 if current_window == TimeWindow.CLOSED:
-                    # AFTER-HOURS MODE: Scan daily charts for swing/position setups
+                    # AFTER-HOURS MODE:
+                    # 1. Scan daily charts for swing/position setups
+                    # 2. Re-rank today's intraday alerts as tomorrow-open
+                    #    carry-forward candidates (added 2026-04-28).
                     if self._scan_count % 20 == 0 or self._scan_count == 0:
-                        logger.info("Market closed — running daily chart scan for swing/position setups")
+                        logger.info("Market closed — running daily chart scan + tomorrow-open carry-forward ranker")
                         try:
                             await self._scan_daily_setups()
+                            await self._rank_carry_forward_setups_for_tomorrow()
                             self._cleanup_expired_alerts()
                         except Exception as e:
                             logger.debug(f"After-hours daily scan error: {e}")
@@ -4151,6 +4155,235 @@ class EnhancedBackgroundScanner:
             logger.info(f"📊 Daily scan: {scanned} symbols, {alerts_found} swing/position alerts found")
         except Exception as e:
             logger.error(f"Daily scan error: {e}")
+
+
+    async def _rank_carry_forward_setups_for_tomorrow(self):
+        """
+        After-hours carry-forward ranker (added 2026-04-28, operator-flagged).
+
+        Operator quote: "the scanner should now recognize that its after
+        hours and should be scanning setups that it found today that
+        might be ready for tomorrow when the market opens."
+
+        What this does:
+          1. Pulls TODAY'S intraday alerts (live + Mongo-persisted).
+          2. Scores each one for tomorrow-open viability:
+             - HIGH-priority continuation candidates (RS leaders,
+               momentum breakouts, daily-aligned squeezes that fired
+               late) → tagged `day_2_continuation`
+             - REVERSAL / fade alerts that closed near intraday
+               extremes → tagged `gap_fill_open`
+             - Lower-conviction or already-played-out alerts dropped.
+          3. Surfaces the top 10 as fresh alerts with `valid_through`
+             set to tomorrow 09:30 ET so the V5 watchlist + morning
+             prep card hydrate from them automatically.
+
+        Idempotent — re-running just refreshes the carry-forward set.
+        """
+        try:
+            if self.db is None:
+                return
+
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            tomorrow_open_iso = self._next_market_open_iso().isoformat()
+
+            # Pull today's alerts: both in-memory (current process) and
+            # the Mongo-persisted ring (survives restarts).
+            todays_alerts: List[Dict] = []
+            seen_keys = set()
+
+            for alert in (self._live_alerts or {}).values():
+                # `created_at` on LiveAlert is an ISO string by default.
+                created_str = str(getattr(alert, "created_at", "") or "")
+                if not created_str.startswith(today):
+                    continue
+                key = (alert.symbol, alert.setup_type, getattr(alert, "direction", "long"))
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                todays_alerts.append({
+                    "symbol": alert.symbol,
+                    "setup_type": alert.setup_type,
+                    "direction": getattr(alert, "direction", "long"),
+                    "tqs_score": float(getattr(alert, "tqs_score", 0) or 0),
+                    "tqs_grade": getattr(alert, "tqs_grade", ""),
+                    "priority": getattr(alert, "priority", None),
+                    "current_price": getattr(alert, "current_price", 0),
+                    "trigger_price": getattr(alert, "trigger_price", 0),
+                    "stop_loss": getattr(alert, "stop_loss", 0),
+                    "target": getattr(alert, "target", 0),
+                    "risk_reward": getattr(alert, "risk_reward", 0),
+                    "headline": getattr(alert, "headline", "") or "",
+                    "reasoning": list(getattr(alert, "reasoning", []) or []),
+                })
+
+            # Also pull today's Mongo-persisted alerts (persistence ring
+            # may have ones the in-memory dict already evicted).
+            try:
+                cursor = self.db["live_alerts"].find(
+                    {
+                        "created_at": {"$regex": f"^{today}"},
+                    },
+                    {"_id": 0},
+                ).sort("tqs_score", -1).limit(200)
+                for doc in cursor:
+                    sym = doc.get("symbol")
+                    st = doc.get("setup_type")
+                    di = doc.get("direction") or "long"
+                    if not sym or not st:
+                        continue
+                    key = (sym, st, di)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    todays_alerts.append({
+                        "symbol": sym,
+                        "setup_type": st,
+                        "direction": di,
+                        "tqs_score": float(doc.get("tqs_score") or 0),
+                        "tqs_grade": doc.get("tqs_grade") or "",
+                        "priority": doc.get("priority"),
+                        "current_price": doc.get("current_price") or doc.get("entry_price") or 0,
+                        "trigger_price": doc.get("trigger_price") or doc.get("entry_price") or 0,
+                        "stop_loss": doc.get("stop_loss") or doc.get("stop_price") or 0,
+                        "target": doc.get("target") or doc.get("target_price") or 0,
+                        "risk_reward": float(doc.get("risk_reward") or 0),
+                        "headline": doc.get("headline") or "",
+                        "reasoning": list(doc.get("reasoning") or []),
+                    })
+            except Exception as exc:
+                logger.debug(f"carry-forward: Mongo read failed: {exc}")
+
+            if not todays_alerts:
+                logger.info("Carry-forward scan: no intraday alerts from today to re-rank")
+                return
+
+            # Score each for tomorrow-viability.
+            ranked: List[Dict] = []
+            for a in todays_alerts:
+                score = a["tqs_score"]
+                tag = None
+                why = ""
+                # CONTINUATION candidates: momentum / RS / breakouts
+                # at high quality. Day-2 follow-through is best when
+                # the prior day saw clean strength + closed strong.
+                cont_setups = {
+                    "relative_strength_leader",
+                    "relative_strength",
+                    "breakout",
+                    "hod_breakout",
+                    "trend_continuation",
+                    "squeeze",
+                    "vwap_bounce",
+                    "rubber_band",
+                    "opening_drive",
+                    "morning_momentum",
+                }
+                fade_setups = {
+                    "gap_fade", "vwap_fade", "vwap_rejection", "vwap_reclaim",
+                    "halfback_reversal", "reversal", "rs_laggard",
+                    "relative_strength_laggard",
+                }
+                if a["setup_type"] in cont_setups and score >= 60:
+                    tag = "day_2_continuation"
+                    why = (
+                        f"Today's {a['setup_type'].replace('_', ' ')} fired with "
+                        f"TQS {score:.0f} — viable as a Day-2 continuation play "
+                        f"if {a['symbol']} opens above today's close."
+                    )
+                    score += 5  # small carry-forward bonus
+                elif a["setup_type"] in fade_setups and score >= 60:
+                    tag = "gap_fill_open"
+                    why = (
+                        f"Today's {a['setup_type'].replace('_', ' ')} (TQS "
+                        f"{score:.0f}) — watch for a gap-fill print at the open "
+                        f"if {a['symbol']} gaps the wrong way overnight."
+                    )
+                else:
+                    # Generic carry-forward for anything still high-quality.
+                    if score >= 70:
+                        tag = "carry_forward_watch"
+                        why = (
+                            f"Today's {a['setup_type'].replace('_', ' ')} graded "
+                            f"{a['tqs_grade'] or 'B+'} — keeping {a['symbol']} on "
+                            f"tomorrow's watchlist for a re-look."
+                        )
+
+                if not tag:
+                    continue
+                ranked.append({**a, "carry_forward_tag": tag, "carry_forward_why": why, "carry_forward_score": score})
+
+            # Top 10 by carry-forward score.
+            ranked.sort(key=lambda x: x["carry_forward_score"], reverse=True)
+            top = ranked[:10]
+
+            promoted = 0
+            for entry in top:
+                try:
+                    new_alert = LiveAlert(
+                        id=f"cf_{entry['symbol']}_{entry['setup_type']}_{int(datetime.now(timezone.utc).timestamp())}",
+                        symbol=entry["symbol"],
+                        setup_type=entry["carry_forward_tag"],
+                        strategy_name=entry["carry_forward_tag"],
+                        direction=entry.get("direction") or "long",
+                        priority=AlertPriority.HIGH if entry["carry_forward_score"] >= 75 else AlertPriority.MEDIUM,
+                        current_price=float(entry.get("current_price") or entry.get("trigger_price") or 0),
+                        trigger_price=float(entry.get("trigger_price") or entry.get("current_price") or 0),
+                        stop_loss=float(entry.get("stop_loss") or 0),
+                        target=float(entry.get("target") or 0),
+                        risk_reward=float(entry.get("risk_reward") or 0),
+                        trigger_probability=min(0.95, entry["carry_forward_score"] / 100.0),
+                        win_probability=min(0.95, entry["carry_forward_score"] / 100.0),
+                        minutes_to_trigger=0,
+                        headline=(
+                            f"CARRY-FORWARD {entry['symbol']} ({entry['carry_forward_tag'].replace('_', ' ')}) "
+                            f"— TQS {entry['carry_forward_score']:.0f}"
+                        ),
+                        reasoning=[entry["carry_forward_why"]] + (entry.get("reasoning") or [])[:2],
+                        time_window="CLOSED",
+                        market_regime=str(getattr(self._market_regime, "value", "neutral")),
+                        scan_tier="swing",
+                        trade_style="multi_day",
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                        expires_at=tomorrow_open_iso,
+                        tqs_score=entry["carry_forward_score"],
+                        tqs_grade=entry.get("tqs_grade") or "",
+                    )
+                    await self._process_new_alert(new_alert)
+                    promoted += 1
+                except Exception as exc:
+                    logger.debug(f"carry-forward: promote {entry['symbol']} failed: {exc}")
+
+            if promoted:
+                logger.info(
+                    f"📅 Carry-forward ranker: promoted {promoted} of today's "
+                    f"alerts as tomorrow-open watchlist (top scoring {top[0]['symbol']} "
+                    f"@ {top[0]['carry_forward_score']:.0f})"
+                )
+            else:
+                logger.info("📅 Carry-forward ranker: today's alerts all below quality bar (≥60 TQS)")
+        except Exception as e:
+            logger.error(f"Carry-forward scan error: {e}")
+
+    def _next_market_open_iso(self) -> datetime:
+        """Return tomorrow's 09:30 ET as a tz-aware UTC datetime.
+        Used by carry-forward alerts as their `valid_through`. Skips
+        weekends so a Friday after-hours scan promotes alerts that
+        stay valid through Monday's open (not Saturday)."""
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        now_et = datetime.now(et)
+        next_day = now_et.date()
+        # Roll forward at least 1 day; skip Sat/Sun.
+        from datetime import timedelta as _td
+        for _ in range(1, 6):
+            next_day = next_day + _td(days=1)
+            if next_day.weekday() < 5:  # 0=Mon..4=Fri
+                break
+        next_open = datetime(
+            next_day.year, next_day.month, next_day.day, 9, 30, 0, tzinfo=et
+        )
+        return next_open.astimezone(timezone.utc)
 
 
     async def _scan_premarket_setups(self):

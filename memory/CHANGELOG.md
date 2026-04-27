@@ -2,6 +2,93 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — Chart fixes + Equity hookup + After-hours scanner + RTH filter
+
+Operator-flagged batch (post-layout-move). 4 issues resolved + 17 new
+regression tests (94/94 backend tests passing total this session).
+
+### 1. Chart: volume bars + x-axis ticks restored
+- **Root cause:** `ResizeObserver` only forwarded `width` to the chart;
+  height was fixed at `prop.height = 600`. After the layout move that
+  put Unified Stream below the chart, the parent flex slot was shorter
+  than 600px → volume pane + x-axis tick row got clipped by the
+  parent's `overflow:hidden`.
+- **Fix:** ResizeObserver now also forwards `height` (floored at 240
+  so a collapsed parent can't crush the chart into an unreadable
+  strip). `height` prop default changed from `480` → `null`; when
+  null, the container uses `flex-1 min-h-0` and inherits the parent's
+  height. Legacy callers passing an explicit pixel value still work.
+- Container in `SentComV5View.jsx` updated to `flex: '60 1 0%'` +
+  `overflow-hidden` so the flex sizing is deterministic.
+
+### 2. Equity / NetLiquidation reads from IB
+- **Root cause:** `TradingBotService._get_account_value()` only
+  checked `self._alpaca_service` — which has been `None` since the
+  Phase 4 Alpaca retirement. So the bot kept sizing on the hardcoded
+  $100k fallback no matter what the operator's IB paper account
+  balance was.
+- **Fix:** new resolution order: (1) IB `_pushed_ib_data["account"]
+  ["NetLiquidation"]` from the Windows pusher → (2) Alpaca (legacy,
+  only if explicitly re-enabled) → (3) `risk_params.starting_capital`
+  → (4) hardcoded $100k as the absolute last resort.
+- Defensive: 0 NetLiquidation (IB momentary glitch during reconnect)
+  is NOT trusted — falls through to starting_capital.
+- Side-effect: when IB pushes a real value, `risk_params.starting_capital`
+  syncs to it so position-sizing helpers that read starting_capital
+  directly also see the live number.
+- Regression coverage: 5 tests in `tests/test_bot_account_value.py`.
+- **Note:** if the operator's IB paper account *is* legitimately
+  $100,000 (TWS default), this fix doesn't change that — they need
+  to reset paper balance in TWS → Edit → Global Configuration →
+  API → Reset Paper Trading Account.
+
+### 3. After-hours carry-forward ranker
+- Operator request: *"the scanner should now recognize that its after
+  hours and should be scanning setups that it found today that might
+  be ready for tomorrow when the market opens."*
+- New `_rank_carry_forward_setups_for_tomorrow()` runs in the
+  `TimeWindow.CLOSED` branch alongside the existing daily scan.
+- Pulls today's intraday alerts (in-memory + Mongo-persisted),
+  scores each for tomorrow-open viability:
+  - Continuation candidates (RS leaders, breakouts, momentum,
+    squeezes, opening drive) with TQS ≥60 → tagged
+    `day_2_continuation` with a +5 score bonus.
+  - Fade/reversal candidates (vwap_fade, gap_fade, halfback_reversal,
+    rs_laggard) with TQS ≥60 → tagged `gap_fill_open`.
+  - Anything else with TQS ≥70 → tagged `carry_forward_watch`.
+- Top 10 by score are promoted as fresh `LiveAlert`s with
+  `expires_at` set to **tomorrow's 09:30 ET** (skipping weekends —
+  Friday after-hours scans promote alerts valid through Monday's open).
+- Idempotent. De-duplicates same `(symbol, setup_type, direction)`
+  tuples between in-memory and Mongo sources.
+- Regression coverage: 7 tests in `tests/test_after_hours_carry_forward.py`.
+
+### 4. Chart RTH-only filter — closes intraday time gaps
+- Operator: *"the charts still have a lot of timeframe and data and
+  time gaps. how do we close those?"*
+- New `?rth_only=true` query param on `/api/sentcom/chart` (defaults
+  to **true** for intraday timeframes — gap closure works without
+  any frontend opt-in).
+- Filters bars to RTH window: 9:30-16:00 ET, weekdays only. Removes:
+  - Overnight gap (Fri 4pm → Mon 9:30am)
+  - Weekend gap
+  - Sparse pre/post-market bars
+- Daily/weekly timeframes are not filtered (already 1-bar-per-session).
+- Defensive: if the RTH filter wipes everything (e.g. test data is
+  purely after-hours), endpoint returns `error: "no RTH bars in
+  window"` + `rth_filter_dropped: N` so the operator can pass
+  `rth_only=false` to inspect the full data.
+- Regression coverage: 3 tests in `tests/test_chart_rth_filter.py`
+  (lock the dropping logic, weekend handling, and the
+  default-true contract).
+
+### Verification
+- 77/77 tests passing across 9 new test files this session.
+- Backend healthy after restart; L2 router 0 errors, wave-scanner
+  loop running.
+- Chart endpoint returns proper RTH-filtered bars (verified against
+  test fixture).
+
 ## 2026-04-28 — Layout move + Briefing CTAs + System health audit script
 
 ### 1. V5 layout — Unified Stream moved to center below chart
