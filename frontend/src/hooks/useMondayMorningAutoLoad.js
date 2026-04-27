@@ -1,37 +1,41 @@
 /**
  * useMondayMorningAutoLoad — auto-frames the V5 chart on the Weekend
- * Briefing's #1 watch at the open of the trading week.
+ * Briefing's top watches every Monday morning, 09:10 → 09:50 ET.
  *
- * Trigger window:
- *   Monday 09:25 ET → 09:40 ET (15-minute door so a slightly-late page
- *   load still catches the auto-load before the open).
+ * Mode: rotating carousel.
+ * ------------------------
+ * The 40-minute pre-open window is divided into 5-minute slots (8 slots
+ * total: 09:10, :15, :20, :25, :30, :35, :40, :45). Each slot maps to
+ * `watches[slot_index % watches.length]` so even with 3 watches the
+ * operator sees each one a couple of times before the open.
  *
  * Idempotency:
- *   Flagged in localStorage keyed by ISO week (e.g. `wb-autoload-2026-W18`)
- *   so the auto-load fires at most once per week. Reloading the page
- *   inside the window does NOT re-trigger.
+ *   We track the last-loaded symbol in `localStorage[wb-autoloaded-symbol-{ISO_WEEK}]`
+ *   so a page reload mid-carousel resumes on the right watch instead of
+ *   restarting from #0. We do NOT use a "fired once" flag — that would
+ *   break the carousel.
  *
  * Side-effect output:
- *   - Calls `setFocusedSymbol(symbol)` which the V5 chart watches.
- *   - Stores `wb-autoloaded-symbol-{week}` in localStorage so the
- *     WeekendBriefingCard can render a "live now" border on the
- *     matching watch card.
+ *   - `setFocusedSymbol(symbol)` whenever the carousel index ticks.
+ *   - localStorage marker reads back via `readAutoLoadedSymbol(week)`
+ *     so the WeekendBriefingCard can render a "LIVE" chip on the
+ *     currently-framed watch card. Updates as the carousel rotates.
  *
- * Disabled cleanly when:
- *   - market state isn't `rth` or hasn't entered the trigger window yet
- *   - briefing has no watches (LLM unavailable Sunday)
- *   - the user has already manually focused another symbol since load
- *     (we don't override an explicit user choice — only fill the void)
+ * Disabled when:
+ *   - market state isn't Monday in the 09:10-09:50 ET window
+ *   - briefing has no watches (LLM unavailable)
+ *   - the operator has already manually focused a symbol since page
+ *     load (the carousel never overrides explicit choices)
  */
 import { useEffect, useRef } from 'react';
 import { useMarketState } from '../contexts';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
-const WINDOW_OPEN_HHMM = 9 * 60 + 25;   // 09:25 ET
-const WINDOW_CLOSE_HHMM = 9 * 60 + 40;  // 09:40 ET — 15-min door
+const CAROUSEL_OPEN_HHMM = 9 * 60 + 10;   // 09:10 ET
+const CAROUSEL_CLOSE_HHMM = 9 * 60 + 50;  // 09:50 ET
+const SLOT_MINUTES = 5;
 
-const lsKey = (iso_week) => `wb-autoload-${iso_week}`;
 const lsSymKey = (iso_week) => `wb-autoloaded-symbol-${iso_week}`;
 
 export const useMondayMorningAutoLoad = ({
@@ -39,67 +43,73 @@ export const useMondayMorningAutoLoad = ({
   userHasFocused,
 }) => {
   const snap = useMarketState();
-  const checkedRef = useRef(false);
+  const briefingRef = useRef(null);
+  const lastIndexRef = useRef(-1);
+  // Cache the briefing fetch — refetch at most every 10 minutes.
+  const lastFetchAtRef = useRef(0);
 
   useEffect(() => {
-    if (!snap || !setFocusedSymbol) return;
-    if (checkedRef.current) return;
-
-    // Monday only (ET weekday 0). Skip weekends + Tue-Fri.
-    if (snap.et_weekday !== 0) return;
-    // Inside the 09:25-09:40 ET window.
+    if (!snap || !setFocusedSymbol) return undefined;
+    if (userHasFocused) return undefined;
+    if (snap.et_weekday !== 0) return undefined;            // Monday only
     const hhmm = snap.et_hhmm ?? -1;
-    if (hhmm < WINDOW_OPEN_HHMM || hhmm > WINDOW_CLOSE_HHMM) return;
+    if (hhmm < CAROUSEL_OPEN_HHMM || hhmm > CAROUSEL_CLOSE_HHMM) return undefined;
 
-    // If the user has already focused something explicitly this session,
-    // respect that — never override a manual choice.
-    if (userHasFocused) {
-      checkedRef.current = true;
-      return;
-    }
+    const slotIndex = Math.floor((hhmm - CAROUSEL_OPEN_HHMM) / SLOT_MINUTES);
 
+    // Re-fetch briefing at most every 10 minutes inside the window —
+    // the briefing rarely changes mid-Monday-morning so cache it.
+    const refetchNeeded = (Date.now() - lastFetchAtRef.current) > 10 * 60 * 1000;
     let cancelled = false;
-    (async () => {
+
+    const apply = (briefing) => {
+      if (cancelled) return;
+      const wid = briefing?.iso_week;
+      const watches = briefing?.gameplan?.watches;
+      if (!wid || !Array.isArray(watches) || watches.length === 0) return;
+
+      const sym = String(watches[slotIndex % watches.length]?.symbol || '').toUpperCase();
+      if (!sym) return;
+
+      // Only fire the setter when the slot actually advances —
+      // otherwise we'd churn the chart every market-state poll.
+      if (slotIndex === lastIndexRef.current) return;
+      lastIndexRef.current = slotIndex;
+
+      setFocusedSymbol(sym);
       try {
-        const resp = await fetch(`${BACKEND_URL}/api/briefings/weekend/latest`);
-        if (!resp.ok) return;
-        const body = await resp.json();
-        const briefing = body?.briefing;
-        const wid = briefing?.iso_week;
-        if (!wid) return;
-
-        // Once-per-ISO-week guard.
-        const flagKey = lsKey(wid);
-        if (typeof window !== 'undefined' && window.localStorage.getItem(flagKey)) {
-          checkedRef.current = true;
-          return;
-        }
-
-        const watches = briefing?.gameplan?.watches;
-        const top = Array.isArray(watches) && watches.length > 0 ? watches[0] : null;
-        const sym = top?.symbol ? String(top.symbol).toUpperCase() : null;
-        if (!sym || cancelled) return;
-
-        setFocusedSymbol(sym);
         if (typeof window !== 'undefined') {
-          window.localStorage.setItem(flagKey, new Date().toISOString());
           window.localStorage.setItem(lsSymKey(wid), sym);
         }
-        checkedRef.current = true;
-      } catch {
-        /* swallow — auto-load is best-effort */
-      }
-    })();
+      } catch { /* localStorage may be disabled — non-fatal */ }
+    };
+
+    if (refetchNeeded || !briefingRef.current) {
+      lastFetchAtRef.current = Date.now();
+      (async () => {
+        try {
+          const resp = await fetch(`${BACKEND_URL}/api/briefings/weekend/latest`);
+          if (!resp.ok) return;
+          const body = await resp.json();
+          briefingRef.current = body?.briefing || null;
+          apply(briefingRef.current);
+        } catch {
+          /* swallow — carousel is best-effort */
+        }
+      })();
+    } else {
+      apply(briefingRef.current);
+    }
 
     return () => { cancelled = true; };
   }, [snap, setFocusedSymbol, userHasFocused]);
 };
 
 /**
- * Read the most recently auto-loaded symbol for the current ISO week.
- * Used by the WeekendBriefingCard to highlight the matching watch card.
- * Returns `null` outside the browser or when no auto-load has happened
- * for the current week.
+ * Read the most recently auto-loaded symbol for a given ISO week.
+ * Used by the WeekendBriefingCard to render the "LIVE" chip on the
+ * currently-framed watch card. Returns `null` outside the browser or
+ * when no auto-load has happened for the week.
  */
 export const readAutoLoadedSymbol = (iso_week) => {
   if (typeof window === 'undefined' || !iso_week) return null;

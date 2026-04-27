@@ -4041,3 +4041,15 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
   4. **`SentComV5View.jsx`** introduces `setFocusedSymbolUserDriven` — wraps `setFocusedSymbol` with the user-flag bookkeeping. The auto-load hook still calls the raw setter so its own action doesn't lock itself out.
   5. **Visual marker**: `WeekendBriefingCard.GameplanBlock` reads `readAutoLoadedSymbol(isoWeek)` and stamps the matching watch card with a cyan border + `LIVE` chip. Operators see at a glance which watch is currently on the chart.
 - **Verification**: Lint clean. Frontend hot-reloads green. The hook is purely additive — no other behaviour touched, manual ticker clicks still work identically.
+
+## 2026-02-01 — Monday morning watch carousel (09:10-09:50 ET)
+- **Where**: `frontend/src/hooks/useMondayMorningAutoLoad.js` — refactored from a single-shot auto-load into a rotating carousel.
+- **What**:
+  1. **40-min window** sliced into eight 5-minute slots (09:10/15/20/25/30/35/40/45 ET).
+  2. Each slot maps to `watches[slot_index % watches.length]` so even with 3 watches the operator sees each one a couple times before the open.
+  3. `setFocusedSymbol(sym)` fires ONLY when the slot index actually advances — `lastIndexRef` prevents churn between market-state polls.
+  4. Briefing is fetched once and cached for 10 minutes inside the window — no spam to `/api/briefings/weekend/latest` every 60s.
+  5. Idempotency now uses the per-week symbol marker (`wb-autoloaded-symbol-{ISO_WEEK}`) instead of a "fired-once" flag — page reloads mid-carousel resume on the right watch instead of restarting from #0.
+  6. **`userHasFocused` gate is unchanged** — the moment the operator clicks any ticker the carousel becomes a no-op for the rest of the session.
+- **Visual marker** in `WeekendBriefingCard.GameplanBlock` automatically follows the carousel: the cyan border + LIVE chip move to whichever watch the chart is currently framed on, since they read from the same localStorage key.
+- **Verification**: Lint clean, frontend compiles green. No backend changes.
