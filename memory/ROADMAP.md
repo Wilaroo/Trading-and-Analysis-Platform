@@ -1,0 +1,444 @@
+# TradeCommand / SentCom — Roadmap & Backlog
+
+Open priorities, deferred ideas, and backlog. Move items to
+`CHANGELOG.md` once shipped; promote/demote priority by reordering.
+
+## 🔴 Now / Near-term (2026-04-27)
+
+### P0 — Unblock scanner diversity
+- Run `curl -X POST http://localhost:8001/api/ib-collector/rebuild-adv-from-ib` on DGX.
+  - If it returns `{"success": false, "error": "No daily bar data found"}`,
+    seed dailies via `/api/ib-collector/smart-backfill` first, then retry.
+- Goal: fix "only relative-strength setups" — wave scanner falls back to
+  14-symbol hardcoded list when `symbol_adv_cache` is empty.
+
+### P1 — Live Data Phase 4: retire Alpaca fallback
+- Set `ENABLE_ALPACA_FALLBACK=false`, run smoke for 1 trading day, then
+  remove the Alpaca client + fixtures entirely.
+
+### P1 — User-verification pending
+- Visually confirm new ET 12-hour formatting on DGX after frontend
+  hot-reload (chart x-axis, alerts row, S.O.C., briefings — see
+  CHANGELOG `2026-04-27 — App-wide ET 12-Hour Time Format`).
+
+### P2 — SEC EDGAR 8-K integration
+- Material-events feed for the Briefings panel.
+
+### P3 — Quick wins
+- ⌘K palette: `>flatten all`, `>purge stale gaps`, `>reload glossary`.
+- "Dismissible forever" tooltip option on Help System.
+- Retry the 204 historical `qualify_failed` items via `/api/ib-collector/retry-failed`.
+- Auto-strategy-weighting (parked — see CHANGELOG `2026-02 — DEFERRED`).
+- Refactor monolithic `server.py` → routers/, models/, tests/ (defer
+  until pipeline is 100% stable).
+
+---
+
+## Backlog — DataFreshnessBadge → Command Palette evolution (P2, post-Phase-3)
+
+**Concrete spec** for when the live-data foundation is in place:
+
+Turn the passive `DataFreshnessBadge` chip into an active control surface.
+Clicking the badge opens a slide-down inspector panel (or `⌘K` modal on
+desktop) showing:
+
+  1. **Global pipes** — one row each:
+     - Pusher push age + health (from `/api/ib/pusher-health`)
+     - Historical-queue freshness (from `/api/ib-collector/universe-freshness-health`)
+     - Live-bar cache stats (from Phase 1's `live_bar_cache` collection)
+     - IB Gateway connection (derived from pusher health)
+
+  2. **Per active-view symbol** (the ones user is currently looking at):
+     - Symbol · last bar time · cache TTL remaining · "Refresh now" button
+     - Example: `MRVL · closed 16:00 ET · 42m until refresh · [Refresh now]`
+     - Uses Phase 2's subscription manager to know which symbols are "hot".
+
+  3. **One-click actions**:
+     - `Refresh all now` — bypass cache TTL, force pusher RPC fetch for all hot symbols
+     - `Pause live subs` — emergency lever when IB pacing is tight
+     - `Open pusher-health endpoint` — for deep debugging
+     - `⌘K` fuzzy symbol search — this is also BL-01 (command palette), merges here
+
+  4. **Discovery affordance**: a small pulsing chevron on the chip on first
+     visit per browser session hints that the chip is clickable.
+
+**Why this is the right move:**
+- Current chip is read-only — tells you the state, not how to fix it.
+- Inspector collapses multiple diagnostic endpoints into one pane.
+- BL-01 (⌘K command palette) was listed as P3 separately but naturally
+  shares the surface — wiring them together saves a code path AND gives
+  users a consistent "everything starts from the badge" muscle memory.
+- Directly addresses the 5-week-stale-data RCA: *"nothing in the UI
+  shouted that data was frozen."* Now not only does it shout, it offers
+  the fix button right there.
+
+**Effort estimate:** ~3–4h once Phases 1–3 are in. Do not attempt before —
+it depends on `live_bar_cache` and subscription state that don't exist yet.
+
+**File plan:**
+  - `frontend/src/components/DataFreshnessInspector.jsx` — slide-down panel
+  - `frontend/src/hooks/useActiveViewSymbols.js` — tracks hot symbols
+    across ChartPanel, EnhancedTickerModal, SentComV5View
+  - Extend `DataFreshnessBadge.jsx` — `onClick` opens the inspector
+  - Backend: `GET /api/live/freshness-snapshot` — aggregates the 3 pipes
+    + hot-symbol cache TTL into one response
+
+
+
+
+## 🗂️ Backlog — UX Power-User Layer (not started, user approved for later)
+
+### [BL-01] Keyboard Shortcuts + Symbol Command Palette
+- **`⌘K` / `Ctrl+K`** → opens centered fuzzy-match symbol picker. Tiers: (1) open positions, (2) today's setups/alerts, (3) watchlist, (4) recent stream symbols, (5) full 264K universe from `ib_historical_data` (lazy, cached in localStorage daily).
+- **`/`** → focus the V5 chat input.
+- **`Esc`** → close active modal/palette. **`?`** → shortcut cheatsheet overlay.
+- New files: `CommandPaletteV5.jsx`, `useKeyboardShortcuts.js`. New backend (optional): `GET /api/ib-collector/symbol-universe` (distinct symbols).
+- Reuses existing `handleOpenTicker` + 3-min modal cache. ~1 hour effort.
+
+### [BL-02] Hover Tooltips Everywhere
+- Add explanatory hover tooltips to virtually every data point and UI feature in V5 (and across the app): HUD metrics, scorecard values, gate scores, R multiples, DRC states, pipeline stage chips, chart header abbreviations (E/SL/PT/R:R), briefing timings, scanner metric abbreviations (RVol, Sharpe, P(win)), etc.
+- Goal: user never has to guess what a number means. Teach the platform through discovery.
+- Suggested approach: shadcn `Tooltip` component, centralized `/utils/fieldDefinitions.js` as single source of truth (label + short explanation + optional formula), reusable `<FieldTooltip field="gate_score">…</FieldTooltip>` wrapper.
+
+### [BL-03] Training Integrity Card on V5 HUD
+- Small card showing per-phase health of the last training run: `models_trained_this_run / expected_models` as a color-coded bar, red when 0% of a phase completed, yellow when partial, green when 100%.
+- Would have caught 2026-04-23's silent-zero P3/P5/P7 phases in seconds instead of the hours of mongo detective work we did today.
+- Source: `/api/ai-training/status.pipeline_status.phase_history[].models_trained` vs configured `expected_models`. Data already exists; just needs a card.
+- Bonus: add a "Last Full Retrain" timestamp + 3 avg accuracy bands (`< 50%` red, `50-55%` yellow, `> 55%` green) so the user always knows at a glance whether the models are trustworthy.
+- ~30 min effort.
+
+
+
+
+## TODO (user note 2026-04-22)
+- 🟡 Revisit `MorningBriefingModal.jsx` to look like the user's "newer more in-depth briefing modal" (screenshot they shared). Current V5-restyled modal is a minimal summary; they want richer detail. Revisit after Stage 2d polish.
+
+
+
+## Backlog — P1 / P2 ideas captured but not yet scheduled
+
+### Regime-Aware Strategy Phase Auto-Throttle (captured 2026-04-22)
+**Idea:** In `trading_bot_service.py`, track rolling 30-day per-side Sharpe (LONG vs SHORT aggregated across all paper/live setups). When one side outperforms the other by >1.0 Sharpe, auto-tilt position sizing (e.g. 60/40 short-heavy when shorts dominate, back to 50/50 when parity returns). Also works as an early-warning: if BOTH sides' rolling Sharpe drop below 0.5 at the same time, auto-pause new entries and flag for review (likely regime shift the models haven't caught up to).
+
+**Why it matters:** current state has 3 shorts paper-promoted and longs still recovering — hardcoded sizing doesn't reflect where the measurable edge actually lives. Auto-throttle lets the bot compound on its proven side without manual tuning every week, and gives us a principled way to exit a bad regime before it costs too much.
+
+**Implementation sketch:**
+- Query `bot_trades` for last 30d, compute per-side Sharpe + expectancy by setup-type.
+- Add `position_multiplier_by_side` to `opportunity_evaluator.calculate_position_size` (default 1.0 for both).
+- Persist the current tilt + reasoning to a new `strategy_tilt_snapshots` Mongo collection (audit trail).
+- Expose via `GET /api/trading-bot/strategy-tilt` for the dashboard.
+- Unit tests for Sharpe crossover, parity, dual-collapse pause.
+
+**Status:** NOT STARTED · P1 · deferred until post-Phase-13-v3 (need LONG side producing real data first so tilt math isn't lopsided by definition).
+
+### CRITICAL FIX #2 — Model Protection gate was class-collapse-blind (2026-04-22, post first retrain)
+
+**Finding:** After shipping CRITICAL FIX #1, the Phase 1 retrain ran successfully and produced a class-balanced `direction_predictor_5min` v20260422_162431 with accuracy 43.5%, UP recall ~0.30, macro-F1 0.36. BUT the Model Protection gate rejected it because `0.4346 < 0.5351` (old model's accuracy). Problem: the old collapsed model "wins" accuracy precisely BY collapsing — predicting the DOWN majority class on every bar gives high aggregate accuracy in bearish training windows while yielding zero tradeable LONG signals. Classic Goodhart's law — we were measuring the wrong thing.
+
+**Fix (`services/ai_modules/timeseries_gbm.py` L461–L540, `_save_model`):**
+- Replaced `new.accuracy > old.accuracy` with a multi-metric gate driven by per-class recall and macro-F1.
+- **Escape hatch**: if active is class-collapsed (`recall_up < 0.05`), promote ANY new model whose UP recall beats active AND DOWN recall ≥ 10%. This unblocks the specific situation we're in right now.
+- **Normal path** (once active is healthy): require new UP recall ≥ 10% AND DOWN recall ≥ 10% AND new macro-F1 ≥ 0.92 × active macro-F1. The 8% macro-F1 slack allows for noise while preventing outright regression.
+- Logs much richer: both accuracy AND macro-F1 AND per-class recall for active vs new.
+
+**Regression tests — `tests/test_model_protection_class_collapse.py` (8 new, all passing):**
+- `test_promote_when_active_is_collapsed_and_new_improves_up_recall` — reproduces the EXACT Phase 13 v2 situation; asserts the fix now promotes.
+- Escape hatch must still reject if new's DOWN recall is broken.
+- Normal path rejects any model with UP recall < 10%, DOWN recall < 10%, or macro-F1 below the 92% floor.
+- Legacy active models without recall fields → treated as collapsed → new promotes.
+
+**Force-promote command (one-shot unblock for current archived model):**
+```bash
+# on Spark, outside Python:
+mongo tradecommand --eval '
+  const a = db.timeseries_models_archive.findOne(
+    {name:"direction_predictor_5min", version:"v20260422_162431"},
+    {_id:0}
+  );
+  if (!a) { print("archived model not found"); quit(1); }
+  a.updated_at = new Date();
+  a.promoted_at = new Date();
+  db.timeseries_models.updateOne({name:"direction_predictor_5min"}, {$set: a}, {upsert:true});
+  print("PROMOTED direction_predictor_5min v20260422_162431");
+'
+```
+
+Or future retrains will auto-promote once the protection fix is pulled + backend restarted.
+
+
+
+### CRITICAL FIX #1 — Generic direction_predictor class-balance (2026-04-22, Phase 13 v2 post-mortem)
+
+**Finding:** Phase 13 v2 revalidation showed 10/10 LONG setups with `trades=0` in Phase 1 (shorts promoted cleanly: SHORT_SCALP 1.52 Sharpe, SHORT_VWAP 1.76, SHORT_REVERSAL 1.94). Root cause found via code review: `revalidate_all.py` loads ONE model for AI filtering — `direction_predictor_5min` — and that model is trained by `TimeSeriesAIService.train_full_universe` in `services/ai_modules/timeseries_service.py`. That path builds `xgb.DMatrix(...)` without `weight=` and calls `xgb.train()` directly, **completely bypassing** `TimeSeriesGBM.train_from_features()` where the 2026-04-20 class-balance fix was applied. Net effect: the generic directional model never gets per-class sample weights, collapses to the bearish-majority class (DOWN/FLAT), argmax never resolves to UP, and every LONG setup Phase 1 backtest records `trades=0`.
+
+**Fix (`services/ai_modules/timeseries_service.py` L1111–L1141):**
+- Compute `compute_per_sample_class_weights(y_train, num_classes=3, clip_ratio=5.0)` via the existing `services.ai_modules.dl_training_utils` helpers (same math used by `train_from_features` for setup-specific models).
+- Pass as `weight=` to `xgb.DMatrix` for `dtrain`. Validation DMatrix left uniform (weights are a training-signal concern only).
+- Log line `[FULL UNIVERSE] class_balanced sample weights applied (per-class weights=[…], sample_w_mean=1.000)` — mirrors the log pattern the user greps on Spark.
+- Non-fatal: wrapped in `try/except` falling back to uniform with a warning so an 8-hour retrain never dies on a class-balance edge case.
+
+**Diagnostic script — `backend/scripts/diagnose_long_model_collapse.py`:**
+- Probes `direction_predictor_5min` + every LONG setup-specific 5m/1m model across 20 liquid symbols, ~120 rolling predictions each.
+- Classifies each into MODE A (2-class regression), MODE B (3-class UP never wins argmax), MODE C (argmax UP but below threshold), MODE D (code-level miss), HEALTHY, or MODEL MISSING.
+- Dumps `/tmp/long_model_collapse_report.md` + `.json`.
+- Runs on Spark: `PYTHONPATH=backend /home/spark-1a60/venv/bin/python backend/scripts/diagnose_long_model_collapse.py`.
+
+**Regression tests (17 new, all passing):**
+- `tests/test_diagnose_long_model_collapse.py` (11): tally math on empty/all-UP/all-FLAT/mixed, classifier covers every MODE branch + missing-model + no-data, `LONG_ONLY_SETUPS` excludes shorts.
+- `tests/test_train_full_universe_class_balance.py` (6): class-weight math proportional to Phase 13 v2 skew, `clip_ratio=5` respected, **source-level guards** that train_full_universe (a) passes `weight=` to DMatrix, (b) logs `[FULL UNIVERSE] class_balanced`, (c) imports the class-balance helpers, (d) wraps the block in a non-fatal try/except. These guards prevent a silent regression back to uniform weights.
+
+**Full session suite: 63/63 passing** in diag + class-balance + dl_utils + xgb_balance + resolver + smb_profiles scopes.
+
+**User verification on Spark after git pull + restart + retrain:**
+```bash
+# 1. After retrain, confirm the NEW log line appears for direction_predictor training:
+grep "\[FULL UNIVERSE\] class_balanced" /home/spark-1a60/Trading-and-Analysis-Platform/backend/training_subprocess.log
+
+# 2. Run the forensic diagnostic (quick — ~2-3 min):
+cd ~/Trading-and-Analysis-Platform
+PYTHONPATH=backend /home/spark-1a60/venv/bin/python backend/scripts/diagnose_long_model_collapse.py
+cat /tmp/long_model_collapse_report.md
+
+# 3. Rerun Phase 13 v2:
+/home/spark-1a60/venv/bin/python backend/scripts/revalidate_all.py 2>&1 | tee /tmp/phase13_v3.log
+```
+Expected: LONG setups show non-zero Phase 1 trade counts (100s like the SHORTs) and at least some LONG models promote.
+
+### Option A — SMB Profiles + Resolver Ordering (2026-04-22)
+**Finding:** Phase 13 v2 coverage-trace confirmed 3/12 scanner names had no training profile: `opening_drive`, `second_chance`, `big_dog`. These are distinct SMB patterns (not family variants of SCALP/VWAP/REVERSAL), so pure routing can't help — each needs a dedicated model. Also confirmed: XGBoost class-balance + DL purged-split fixes from prior session BOTH ACTIVE in the 8.8hr retrain.
+
+**Changes in `setup_training_config.py`:**
+  - `"OPENING_DRIVE"` — 2 profiles (5 mins / 1 min, forecast_horizon 12 / 30). Intraday opening continuation, same feature class as ORB.
+  - `"SECOND_CHANCE"` — 1 profile (5 mins, forecast_horizon 12). Breakout re-try on 5-min bars.
+  - `"BIG_DOG"` — 2 profiles (5 mins / 1 day). The 1-day profile has forecast_horizon=3 for multi-day holds, scale_pos_weight=1.1 for the bullish trend bias big-dog plays carry.
+  - All use `num_classes=3` (triple-barrier) so they pick up the class-weighted CE + uniqueness weights automatically on next retrain.
+
+**Changes in `timeseries_service._resolve_setup_model_key`:**
+  - Added `OPENING_DRIVE / SECOND_CHANCE / BIG_DOG` to the family-substring match tuple so scanner variants like `big_dog_rvol` or `second_chance_breakout` route correctly.
+  - **Ordering fix**: compound SMB keys go FIRST in the tuple. Without this, `SECOND_CHANCE_BREAKOUT` was matching BREAKOUT (substring hit earlier in iteration) instead of SECOND_CHANCE.
+
+**Regression coverage** — `backend/tests/test_smb_profiles.py` (9 tests): each profile declared correctly, required fields present, generated model names match loader expectations, exact-name routing, family-substring routing (including the ordering bug regression), SMB short fallback to base, no-models-loaded fallback. All pass.
+
+**Full session suite: 79/79 passing** (added 9 SMB tests to the previous 70).
+
+**User impact after Save+Pull+Next-Retrain:**
+- Coverage rate: 75% → ~100% for the 12-name scanner sample
+- 5 new models: `opening_drive_5min_predictor`, `opening_drive_1min_predictor`, `second_chance_5min_predictor`, `big_dog_5min_predictor`, `big_dog_1day_predictor`
+- Existing retrain already added `class_balanced` + `Purged split` to all models → these will too
+- Live trading: scanner alerts for `opening_drive`, `second_chance`, `big_dog` (all 3 already in `_enabled_setups`) will hit a dedicated model instead of the general direction_predictor
+
+### Paper-Mode Enablement for the 3 Promoted Shorts (2026-04-24)
+**Change:** Added REVERSAL-family and VWAP-family scanner base names to `trading_bot_service._enabled_setups`:
+  - `reversal`, `halfback_reversal`, `halfback` — so scanner alerts for REVERSAL-style setups (e.g. `halfback_reversal_short`) pass the enabled-setups filter and reach `predict_for_setup` → `SHORT_REVERSAL` model (Sharpe 1.94, +7.6pp edge).
+  - `rubber_band_scalp` — was a gap; scanner emits `rubber_band_scalp_short` which strips to `rubber_band_scalp` (NOT `rubber_band`), which wasn't enabled.
+  - `vwap_reclaim`, `vwap_rejection` — additional scanner variants that route to `SHORT_VWAP` (Sharpe 1.76).
+  
+Comments inline document why each base was added — so the next person understands the filter chain.
+
+**User promotion commands (run on Spark after pull + restart):**
+```
+# Promote each of the 3 proven shorts to PAPER phase
+for STRAT in short_scalp short_vwap short_reversal; do
+  curl -s -X POST "http://localhost:8001/api/strategy-promotion/promote" \
+    -H "Content-Type: application/json" \
+    -d "{\"strategy_name\":\"$STRAT\",\"target_phase\":\"paper\",\"approved_by\":\"user\",\"force\":false}" \
+    | python3 -m json.tool
+done
+
+# Verify they're now in PAPER
+curl -s http://localhost:8001/api/strategy-promotion/phases | python3 -m json.tool | grep -iE "short_(scalp|vwap|reversal)|paper"
+```
+
+If the first promotion call fails with "not found" or "not registered", the strategy may need to be registered first — paste the error and we handle it.
+
+### Startup Model-Load Consistency Diagnostic SHIPPED (2026-04-24)
+**Rationale:** The latent bug above (17 trained, 0 loaded) went undetected for weeks because nothing cross-checked `timeseries_models` vs `_setup_models`. This is the safety net.
+
+**Fix:**
+- New `TimeSeriesAIService.diagnose_model_load_consistency()` — scans `timeseries_models` collection, compares against in-memory `_setup_models` keyed by `model_name`, produces a report with `trained_in_db_count` / `loaded_count` / `missing_count` / `missing_models` + per-profile `by_setup` rows with `status: loaded|missing_in_memory|not_trained`.
+- Auto-runs at end of `_load_setup_models_from_db()` — **logs a WARNING on boot if anything is missing in memory**. Would have caught the 2026-04-24 bug at the first startup after the XGBoost migration.
+- Exposed at `GET /api/ai-training/model-load-diagnostic` for on-demand inspection.
+- Handles `_db=None` gracefully (structured error, no exception).
+
+**Regression coverage** — `backend/tests/test_model_load_diagnostic.py` (9 tests): detects missing, clean-state, partial load, ignores failed-deserialize GBMs, by_setup coverage + status values, `_db=None` safe, endpoint wrapper + 500 error path. All pass.
+
+**Full session suite: 70/70 passing.**
+
+**User check on Spark after pull + restart (next boot will run the diagnostic automatically):**
+```
+# 1. Look for the consistency line in backend.log
+grep -E "Model load consistency" /tmp/backend.log
+
+# 2. On-demand check anytime
+curl -s "http://localhost:8001/api/ai-training/model-load-diagnostic" | python3 -m json.tool | head -40
+```
+If you see `Model load consistency: 17/17 trained models reachable` on boot, the fix worked. If you see `MISSING:` followed by names, the loader still isn't finding them and we dig deeper.
+
+### CRITICAL BUG FIX — setup models never loaded at startup (2026-04-24)
+**Finding:** After shipping the resolver, live test on Spark showed `loaded_models_count: 0` from resolver-trace — but `/api/ai-modules/timeseries/setups/status` reported 17 trained models. Investigation:
+  - Training writes to `timeseries_models` collection (xgboost_json_zlib format)
+  - Startup loader `_load_setup_models_from_db()` only scanned `setup_type_models` collection (legacy xgboost_json format, effectively empty)
+  - `predict_for_setup` does a pure in-memory `_setup_models.get()` lookup, no DB fallback
+  - **Net effect: every `predict_for_setup` call was silently falling through to the general direction_predictor, including calls that should have used the 3 promoted SHORT_* models.** Option A routing was academically correct but had nothing to route to. Latent bug present since the XGBoost migration.
+
+**Fix:** Extended `_load_setup_models_from_db()`. After the legacy loop, it iterates every declared profile in `SETUP_TRAINING_PROFILES`, computes `get_model_name(setup, bar)`, and looks it up in `timeseries_models`. Uses the existing `TimeSeriesGBM.set_db() → _load_model()` path which already handles xgboost_json_zlib deserialization, feature_names restore, num_classes restore. Skips dups; skips models that fail deserialization.
+
+**Regression coverage** — `backend/tests/test_setup_models_load_from_timeseries.py` (5 tests): primary load path, empty DB safe, failed-deserialize not cached, legacy not overwritten, `_db=None` early-exit.
+
+**Full session suite: 61/61 passing.**
+
+**User verification on Spark after pull + restart:**
+```
+curl -s "http://localhost:8001/api/ai-training/setup-resolver-trace?batch=SHORT_SCALP,SHORT_VWAP,SHORT_REVERSAL,rubber_band_scalp_short,vwap_reclaim_short" | python3 -m json.tool
+```
+`loaded_models_count` should now report ≥17 and all shorts should show `resolved_loaded: true`.
+
+
+## Active P0 Blockers
+### 🟢 Pusher double-execution bug — FIXED (pending verification on Windows)
+- **Root cause**: TWS mid-session auto-upgrade caused the pusher's IB client connection (fixed clientId=15) to reconnect with stale session state. Previously-submitted MKT orders got replayed by TWS as if new, causing 2×-3× execution for each flatten order.
+- **Fixes applied (2026-04-20)**:
+  1. `ib_data_pusher.py` — `_recently_submitted` in-memory cache stamps each `order_id → (timestamp, ib_order_id)` immediately after `placeOrder()`. Any duplicate poll of same order_id is blocked + reported rejected within 10-min window.
+  2. `StartTradeCommand.bat` — pusher clientId now randomized 20–69 each startup (`set /a IB_PUSHER_CLIENT_ID=%RANDOM% %% 50 + 20`). TWS can't replay a clientId it's never seen.
+  3. `routers/portfolio.py` flatten endpoint — refuses to fire if pusher snapshot > 30s old (prevents flattening against stale positions).
+  4. Pre-flight cancel of prior `flatten_*` orders (already done in first pass).
+- **Verification plan for next session**: re-enable TWS API, restart pusher with new fixes, queue a single test order, confirm IB shows exactly one fill.
+
+### 🚨 Security — paper password was committed to git
+- `StartTradeCommand.bat` had `set IB_PASSWORD=Socr1025!@!?` hardcoded (line 30, pre-fix).
+- **Fixed**: password moved to local `.ib_secret` file loaded via `call "%REPO_DIR%\.ib_secret"`. `.gitignore` updated to cover `*.secret`. `documents/scripts/README_SECRETS.md` explains setup.
+- **User action required**: rotate the paper password in IB Account Management, then create `.ib_secret` on the Windows PC with the new password.
+
+
+## P1 Outstanding
+- Phase 13 revalidation: `backend/scripts/revalidate_all.py` against the fixed fail-closed validator (was next after Morning Briefing)
+- Phase 6 Distributed PC Worker: offload CNN/DL training to Windows PC over LAN
+- Rebuild TFT / CNN-LSTM with triple-barrier targets (binary up/down → majority-class collapse)
+- Wire FinBERT into confidence gate as Layer 12
+- Wire confidence gate into live validation
+
+
+## Model Inventory & Deprecation Status (2026-04-21)
+
+| Layer | Model family | Count | Status | Notes |
+|---|---|---|---|---|
+| **Sub-models** | XGBoost `setup_specific_<setup>_<bs>` | 17 long + 17 short = 34 | ✅ Keep (retraining now) | Tabular direction predictor, uses FFD+CUSUM+TB |
+| | XGBoost `direction_predictor_<bs>`, `vol_<bs>`, `exit_*`, `risk_*`, `regime_*`, `sector_*`, `gap_*` | ~65 | ✅ Keep | Generic + specialist tabular models |
+| | DL `cnn_lstm_chart` | 1 | ✅ Keep | 1D CNN+LSTM on OHLCV sequences; feeds Phase 2E tabular arm |
+| | DL `tft_<bs>`, `vae_<bs>` | 2 | ✅ Keep | Temporal fusion + regime encoder |
+| | FinBERT sentiment | 1 | ✅ Keep | Layer 12 of confidence gate (pending wire-in) |
+| | Legacy `cnn_<setup>_<bs>` | 34 | 🗑 **Deprecate post-Phase 2E** | Strict subset of Phase 2E; no unique value |
+| **Meta-labelers** | XGBoost `ensemble_<setup>` (Phase 8) | 10 | ✅ Keep | Tabular meta-labeler, P(win). **Phase 2C equivalent.** Just redesigned 2026-04-21 |
+| | Phase 2E `phase2e_<setup>` (visual+tabular) | 0 | 🔨 **Build** | Hybrid multimodal meta-labeler; will supersede legacy CNN |
+| **Fusion** | `P(win)_final = w_tab·P_tab + w_vis·P_vis` | 0 | 🔮 Future | After both meta-labelers prove individual edge |
+
+**Net reduction once Phase 2E ships**: 34 legacy CNN models → ~10 Phase 2E models. Phase 9 removed from training pipeline. Full-retrain time drops from ~7h to ~5h.
+
+
+## Post-Retrain Roadmap (proper sequencing)
+
+The order below is intentional — each step depends on artifacts from the prior step.
+
+### Step 1 — [USER] Full retrain with all flags
+- `TB_USE_CUSUM=1 TB_USE_FFD_FEATURES=1`
+- Populates `timeseries_models.scorecard` with 15-metric grades across all current setups.
+- Produces the first deflated-Sharpe-validated, uniqueness-weighted, CUSUM+FFD-featured model set.
+
+### Step 1.5 — Setup Coverage Audit (run immediately after retrain)
+Run `PYTHONPATH=backend python backend/scripts/audit_setup_coverage.py`.
+
+Writes `/tmp/setup_coverage_audit.md` summarising, per taxonomy code:
+- # of tagged trades across `trades` / `bot_trades` / `trade_snapshots` / `live_alerts`
+- Win rate + avg R-multiple
+- Verdict: `trainable` / `thin` / `negative_edge` / `too_few` / `unknown_outcome`
+- Highlighted Phase 2E Tier-1 candidates (visual-pattern setups with enough data).
+
+This is the critical bridge: TRADING_TAXONOMY.md defines ~35 SMB setups but the
+XGBoost pipeline only trains 10 long + 10 short generic families. The audit tells
+us which of the 35 have the journal coverage to warrant dedicated (setup, bar_size)
+XGBoost + CNN model pairs in Step 5/Step 6.
+
+Inputs to Step 2 (scorecard triage): A-grade generic model + strong audit
+coverage  →  split into dedicated setup-specific model.
+
+### Step 2 — Scorecard triage
+- Sort all models by composite grade (A-F).
+- **Delete** setups grading D/F that can't be salvaged (REVERSAL/5min almost certainly in this bucket — see `/app/memory/notes_sweep_observations.md`).
+- **Widen PT/SL sweep grid** on daily setups (all converged to pt=1.5/sl=1.5/max_bars=5 — suspicious).
+- Free up training budget for new setups in Step 5.
+
+### Step 3 — Phase 2C: XGBoost Tabular Meta-Labeler ✅ COMPLETED 2026-04-21
+**Consolidated into Phase 8 Ensemble** (see "Phase 8 Ensemble — REDESIGNED as Meta-Labeler" above).
+Each `ensemble_<setup>` now IS the Phase 2C tabular bet-sizer: P(win | setup_direction, meta_features).
+
+### Step 3.5 — Wire bet-sizer into `trading_bot_service.py` (NEXT)
+- `confidence_gate.py` → add `_get_meta_label_signal(setup_type, features)` reading `ensemble_<setup>`
+- Expose `meta_label_p_win` in confidence gate result
+- `opportunity_evaluator.calculate_position_size()` → new `meta_multiplier` (capped [0.3, 1.5]) alongside volatility + regime multipliers
+- Skip trade if `P(win) < 0.50` (meta-labeler says "no edge")
+- Log `meta_label_p_win` + `meta_multiplier` in `trade.entry_context` for backtest uplift tracking
+- Fallback: absent `ensemble_<setup>` → unchanged sizing (safe)
+
+### Step 4 — Phase 6: Distributed PC Worker infrastructure
+- Training coordinator on Spark offloads CNN/DL jobs to Windows PC over LAN.
+- REST endpoint contract + job queue + heartbeat + result sync.
+- Enables Step 5 (CNN visual meta-labeler would otherwise bottleneck Spark's GB10).
+
+### Step 5 — Phase 2E: Setup-Specific Visual CNN Meta-Labeler ⭐ (high conviction)
+Scalp setups (especially SMB-style) are visually defined. Tabular features flatten the chart into 46 numbers; a CNN trained on the actual chart image sees the shape.
+
+**Architecture:** Hybrid multimodal — chart-image CNN + tabular MLP → concat → classifier.
+
+**Pipeline:**
+1. **Chart rendering** — OHLCV window → 96×96 or 128×128 PNG with candlesticks, volume bars, and setup-relevant overlays (9EMA/21EMA/VWAP). No axis labels; pure visual signal.
+2. **Shared backbone** — train one CNN (EfficientNet-Small or similar) on ALL setups' charts with triple-barrier labels. Self-supervised contrastive pre-training optional.
+3. **Per-setup fine-tune heads** — each setup gets a lightweight fine-tuning head on ~5-10k labeled examples.
+4. **Tabular fusion** — concat MLP features (46 base + setup + regime + VIX + sub-model probs from cnn_lstm/TFT) with backbone visual features before the classifier head.
+5. **Inference** — López de Prado meta-labeling, visual edition: XGBoost says "rubberband scalp candidate" → multimodal CNN sees the chart + context → returns `P(win)`. Combined into bet size.
+6. **Explainability** — Grad-CAM activation overlay surfaced to NIA UI so user can verify the CNN is learning real patterns (exhaustion wick, volume climax) vs spurious noise.
+
+**Distribution (requires Step 4):** Spark GB10 trains the shared backbone once a week; Windows PC fine-tunes per-setup heads overnight.
+
+### Step 5.5 — DEPRECATE legacy `cnn_<setup>_<bs>` (34 models) — post-Phase 2E
+The current 34 per-setup CNN models in `cnn_models` collection are a **strict subset** of what Phase 2E does:
+- Image-only input (no tabular fusion)
+- Isolated per-setup training (~2K samples each, no shared backbone transfer learning)
+- 17-class pattern head is tautologically 100% (every sample has same setup_type); only the win-AUC head carries signal
+
+**Cutover plan:**
+1. Phase 2E models go live + validated on scorecard (≥2 weeks shadow mode)
+2. Switch `confidence_gate.py` to read `phase2e_<setup>` instead of `cnn_<setup>`
+3. **Remove Phase 9 from the training pipeline** (shaves ~1h 51min off every full retrain — from ~7h to ~5h)
+4. Archive `cnn_models` collection (30-day backup), then drop
+5. Remove `chart_pattern_cnn.py` + per-setup loop in `cnn_training_pipeline.py`
+6. Scorecard: replace 34 `cnn_<setup>` rows with ~10 `phase2e_<setup>` rows
+
+**Keep** `cnn_lstm_chart` (DL model) — different modality (1D CNN+LSTM on OHLCV sequences, not images). Its output feeds into Phase 2E's tabular arm as a stacking feature.
+
+### Step 6 — Add SMB-specific setups (tiered)
+Only after visual CNN infrastructure exists, and only for setups the CNN/scorecard analysis justifies.
+
+**Tier 1 — Scalp/Intraday (5-min and 1-min):**
+- `RUBBERBAND_SCALP` (long + short) — 2+ ATR stretch from 9EMA/VWAP → reversion scalp
+- `EMA9_PULLBACK` (long + short) — trending stock pulls to 9EMA on lower volume → continuation
+- `FIRST_RED_CANDLE` / `FIRST_GREEN_CANDLE` — first reversal candle after parabolic move
+
+**Tier 2 — Day-structure:**
+- `OPENING_DRIVE_REVERSAL` (5 min) — exhausted opening drive fade
+- `HALFBACK_REVERSION` — 50% morning-range retrace
+- `INSIDE_DAY_BREAKOUT` (1 day)
+
+**Tier 3 — Cross-instrument (needs SPY sync in training data):**
+- `RS_VS_SPY_LONG` / `RW_VS_SPY_SHORT` — relative strength divergence vs SPY
+
+Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor in `setup_features.py`/`short_setup_features.py`, PT/SL sweep entry, and (if visual) chart-render config.
+
+
+## P2 / Backlog
+- Motor async MongoDB driver migration (replace sync PyMongo in hot paths)
+- Per-signal weight optimizer for gate auto-tuning
+- Earnings calendar + news feed in Chat
+- Sparkline (12-wk promotion rate) on ValidationSummaryCard
+- `server.py` breakup → `routers/` + `models/` + `tests/`
+
+
