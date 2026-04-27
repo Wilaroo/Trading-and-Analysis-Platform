@@ -3,25 +3,154 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (2026-04-27)
+## 🔴 Now / Near-term (handoff to next session — 2026-04-27 EOD)
 
-### P0 — RESOLVED 2026-04-27 (this session)
-- ~~Scanner regression `_adv_cache` rename~~ — fix shipped.
-- ~~Bot persistence replaces defaults instead of merging~~ — fix shipped + hot-fix Mongo command provided.
+### Operator user-noted issues at end of session
+- **Paper account shows $100,000** instead of operator's expected balance
+  → Not a code bug. Operator is logged into IB paper account `DUN615665`.
+  Resolution: in TWS → Edit → Global Configuration → API →
+  Reset Paper Trading Account → set custom starting balance. One-time
+  TWS-side action, no code change needed.
+- **Scanner still mostly RS hits** — partly explained by the small
+  pusher subscription set (14 symbols). Live-tick-driven detectors
+  (RVOL, EMA9 distance) are starved on symbols not in the pusher's
+  subscription. Resolved long-term by item below ("Live tick → Mongo
+  bar persistence") — see ROADMAP.
 
-### P0 — Pusher RPC catastrophic latency (2026-04-27)
-- `rpc_latency_ms_last: 350s`, `pushes_per_min: 0`, `pusher_dead: true`
-  even though `connected: true` and 45 quotes tracked. UI chart stays
-  DEAD because pusher can't deliver bars in reasonable time.
-- Investigation needed:
-  1. Are we hammering IB with too many subscriptions? (45 quotes is fine
-     in principle, but maybe paired w/ L2 + fundamentals + news = pacing
-     limit hit)
-  2. Is DGX backend slow to respond to pusher's RPC calls? Profile the
-     `/rpc/*` handlers — any synchronous Mongo writes / locks?
-  3. Network between Windows ↔ DGX — packet loss / link saturation?
-  4. Restart the Windows pusher and watch if RPC latency stays high or
-     resets — distinguishes warmup vs persistent.
+### P0 — Pusher cleanup (small, contained, batch in next session)
+- **Lower L2 sub limit from 5 → 3** in `/app/documents/scripts/ib_data_pusher.py`
+  to silence the `Error 309 Max number (3) of market depth requests`
+  spam (IB caps L2 at 3 simultaneous subs).
+- **Backend: skip `/rpc/latest-bars` for symbols not in pusher's
+  subscription** — currently `enhanced_scanner` / `wave_scanner` ask the
+  pusher for bars on HD/ARKK/COP/SHOP that pusher isn't tracking →
+  pusher tries `reqHistoricalData` → IB times out → noisy warnings.
+  Fix: hit `/rpc/subscriptions` once at startup (and on subscribe
+  events), cache the set, gate `/rpc/latest-bars` calls on
+  membership. Symbols not in the set fall through to Mongo-only.
+
+### P1 — L2 dynamic routing for top-3 EVAL alerts (operator-requested)
+- **Why:** L2 is currently fixed at startup (SPY/QQQ/IWM/DIA/XOM
+  attempted, only 3 succeed due to IB cap). Operator wants L2 used
+  surgically: only request L2 for the **top 3 setups currently in
+  EVAL stage** so depth-of-book is fresh on the alerts being
+  evaluated, not wasted on indices that don't change strategy.
+- **Design (operator approved "use my judgment"):**
+  - Indices SPY/QQQ/IWM keep startup L2 (regime read).
+  - Wait — that's 3 already at the IB cap. If we want to route L2
+    dynamically to top-3 EVAL alerts, we need to give up the index L2
+    OR negotiate the cap higher (IB account upgrade). **Decision point
+    for next session.** Two clean paths:
+    - **A.** Keep startup index L2; dynamic L2 is layered on top of
+      a separate IB session (clientId 16) — adds complexity but
+      guarantees both pools.
+    - **B.** Give up index L2 entirely; dynamic L2 only flows to top-3
+      EVAL alerts; indices use top-of-book quotes only.
+  - Either way: pusher gets new endpoints `/rpc/subscribe-l2`,
+    `/rpc/unsubscribe-l2`; DGX backend tracks top-3 EVAL alerts and
+    sends sub/unsub deltas as alerts enter/leave EVAL.
+
+### P1 — ⭐ Live tick → Mongo bar persistence (architectural)
+- **Operator quote:** *"we shouldn't need to be constantly
+  backfilling. there has to be a better way to get a cache live data."*
+- **Why:** Today's bars only exist if `smart-backfill` was run today
+  for that symbol. The chart's "PARTIAL · 50% COVERAGE" badge is the
+  visible symptom. Root cause: the pusher's live tick stream isn't
+  being persisted into `ib_historical_data` — it's only used in-memory.
+- **Design:**
+  - As pusher streams ticks → DGX backend builds 1m/5m/15m/1h bars
+    in a rolling window per symbol.
+  - On bar-close (e.g. when a 5m bar's window ends), `upsert` it into
+    `ib_historical_data` keyed on `(symbol, bar_size, date)`.
+  - Existing `smart-backfill` reduced to: (i) initial seed for new
+    symbols, (ii) gap-filling for symbols not currently subscribed.
+  - Result: for any pusher-subscribed symbol, the historical cache is
+    always 100% up-to-date through "right now" — chart never shows
+    PARTIAL again on subscribed symbols.
+- **Scope:** ~45-60 min done right. Touches `enhanced_scanner` /
+  `realtime_bar_builder` / `ib_historical_collector`. New service
+  `tick_to_bar_persister.py` is probably the cleanest seam.
+- **Test plan:** subscribe pusher to SPY (already), wait 5 min,
+  query Mongo for SPY 1m bars created in the last 5 min — should
+  see them appear without any backfill being run.
+
+### P0 — Pusher RPC latency partially recovered
+- After backend restart at ~3:06 PM ET, RPC latency dropped from 350s
+  to 546ms (last sample). Avg/p95 still skewed high (11.4s / 17.9s,
+  n=50) but normalising as good samples accumulate. Tentatively
+  resolved by the restart.
+- If it spikes again, investigate: IB pacing, DGX RPC handler
+  profile (synchronous Mongo writes?), network Windows ↔ DGX.
+
+### P0 — Wave-scanner background loop never started
+- `/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.
+  Distinct producer from `enhanced_scanner` (which is now happily
+  producing alerts post-fix). Diagnose:
+  - `grep -rn "wave_scanner\|run_scan_cycle\|start_scan" backend/server.py`
+  - Check `@app.on_event('startup')` hooks for missing wave-scanner
+    kickoff.
+
+### P1 — Briefings content gaps (operator flagged 2026-04-27)
+- **Morning Prep auto-gameplan** is silent — investigate
+  `/api/assistant/coach/morning-briefing` + the journal-write step.
+- **Mid-Day Recap empty-state** — when no fills, card should still
+  show regime/scanner-hit count/top-mover deltas.
+- **Power Hour empty-state** — show top movers + suggested setups for
+  the close.
+
+### P1 — Setup-found bot text (operator flagged 2026-04-27)
+- Operator says "RS LEADER NVDA +6.8% vs SPY - Outperforming market —
+  TQS 51 (C)" copy is wrong but didn't specify how. **Action:** ask
+  operator what the copy *should* say, then fix the server-side
+  bot-narrative template.
+
+### P1 — `/api/scanner/daily-alerts` returns 0 despite alerts existing
+- Endpoint filters on field `timestamp` but `live_alerts` writes use
+  `created_at`. Quick fix in `routers/scanner.py` (or wherever the
+  route is defined).
+
+### P1 — Mongo aggregation index for `rebuild-adv-from-ib`
+- Add compound `{bar_size: 1, date: -1}` on `ib_historical_data`.
+  Without it, the rebuild aggregation full-scans 13.5M docs and spills
+  to disk (5+ min). With it: seconds.
+- Run on DGX:
+  ```
+  ~/venv/bin/python -c "
+  from pymongo import MongoClient; import os
+  db = MongoClient(os.environ.get('MONGO_URL', 'mongodb://localhost:27017'))[os.environ.get('DB_NAME', 'tradecommand')]
+  db.ib_historical_data.create_index([('bar_size', 1), ('date', -1)], background=True, name='bar_size_1_date_-1')
+  print('index created')
+  "
+  ```
+
+### P1 — Live Data Phase 4: retire Alpaca fallback
+- Set `ENABLE_ALPACA_FALLBACK=false`, run smoke for 1 trading day,
+  then remove the Alpaca client + fixtures entirely.
+
+### P1 — User-verification pending
+- Visually confirm new ET 12-hour formatting on DGX after frontend
+  hot-reload (chart x-axis, alerts row, S.O.C., briefings).
+- Confirm chart x-axis now shows "Apr 27" labels at day boundaries
+  instead of looping `9:30 AM → 1:00 PM → 4:00 AM`.
+- Confirm Pusher RPC tile headline now reads `last 335ms` instead of
+  the misleading `avg 1117ms`.
+
+### P2 — SEC EDGAR 8-K integration
+- Material-events feed for the Briefings panel.
+
+### P3 — Quick wins
+- ⌘K palette: `>flatten all`, `>purge stale gaps`, `>reload glossary`.
+- "Dismissible forever" tooltip option on Help System.
+- Retry the 222 historical `qualify_failed` items via
+  `/api/ib-collector/retry-failed` (click the red `222 DLQ` badge).
+- Auto-strategy-weighting (parked — see CHANGELOG `2026-02 — DEFERRED`).
+- Refactor monolithic `server.py` → routers/, models/, tests/ (defer
+  until pipeline is 100% stable).
+- Build the Agent Brain memory system (Option C scope agreed
+  2026-04-27 — see chat history; user pinned for later).
+- Add a "scanner-health canary" pytest that asserts every default in
+  `_enabled_setups` is reachable end-to-end (would have caught both
+  scanner regressions today).
 
 ### P0 — Wave-scanner background loop never started
 `/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.

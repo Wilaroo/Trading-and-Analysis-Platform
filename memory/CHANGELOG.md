@@ -2,6 +2,41 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-27 — End-of-session verified state — HEALTHY
+
+After today's fixes, operator's screenshot confirmed system is green:
+
+| Metric | Status |
+|---|---|
+| Pusher | GREEN, 4 pushes/min |
+| RPC last | 546ms (down from 350,000ms earlier) |
+| Quotes tracked | 45 |
+| Scanner | 6 hits / 7 cards shown |
+| Bot filter | `✅ passed filter` for ORCL/GOOGL/AMZN/GOOG/SMH/TSM/AMD |
+| Chart | Live with full SPY history |
+| Top Movers | All 5 indices populated |
+| Account | Paper DUN615665 connected, $100,000 (paper default) |
+| Models | 44 (35 healthy / 4 mode-C / 5 missing) |
+| Phase | MARKET OPEN |
+
+**4 separate bugs fixed in this session** (chronologically):
+1. App-wide ET 12-hour time format (8 frontend files)
+2. Chart day-boundary tick labels + RPC latency headline
+3. Scanner header counting + P(win) duplication + Stream `scan` filter
+4. Scanner regression (`_adv_cache` rename) — restored 11 detector types
+5. Bot persistence override — 7 strategies were invisible due to stale Mongo
+
+**Operator items deferred to next session** (see ROADMAP "🔴 Now"):
+- Pusher L2 limit 5→3 + dynamic L2 routing for top-3 EVAL alerts
+- Backend skip RPC for unsubscribed symbols (HD/ARKK/COP/SHOP noise)
+- Live tick → Mongo bar persistence (architectural — kills "always
+  backfilling" pain operator flagged)
+- Wave-scanner background loop never started
+- daily-alerts field-name mismatch
+- Mongo compound index for fast rebuild
+
+---
+
 ## 2026-04-27 — Bot persistence overrides defaults — 7 strategies invisible — SHIPPED
 
 ### Why
