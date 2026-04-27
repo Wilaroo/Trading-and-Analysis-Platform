@@ -1,171 +1,145 @@
-<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, and models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Recent goals: always-on live data across the entire application using an RPC server on the Windows Pusher. Immediate Goal: Resolve massive dataset staleness, optimize data readiness checks, and implement a canonical universe to ensure AI training processes the correct slice of data without 68-hour runtimes.
+<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Immediate goals for this session were fixing app-wide time formats to US EST 12-hour (no military time), diagnosing scanner diversity issues (only finding relative strength hits), splitting monolithic memory files to prevent context bloat, and fixing UI bugs (chart x-axis boundaries, scanner hit counts).
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform natively running on DGX Spark (Linux) and Windows PC. The Canonical Universe Refactor is completely implemented across the backend ()—unifying the symbol list across , , and the AI . A new UI component  gives real-time visibility into the training data slice. The Windows PC  has been updated with an RPC Server listening on port 8765. However, DGX is currently blocked by Windows Firewall from accessing this new RPC port.
+**what currently exists?**: A full-stack AI trading platform natively running on DGX Spark (Linux) and Windows PC. Live Data Architecture is running via a Windows IB Pusher RPC. The UI features Live Alerts, Top Movers, Pusher Heartbeat, and a Strategy Mix Card. In this session, critical backend regressions were fixed:  is successfully scanning the full canonical universe (~9,400 symbols) and  correctly merges enabled strategies. Memory documentation is now structured into  (static),  (history), and  (backlog). The system is currently GREEN and healthy.
 
 **Last working item**:
-    - Last item agent was working: Troubleshooting network/firewall connectivity for Live Data Architecture (Phase 1). The RPC server on the Windows Pusher is successfully running on  and responds to  calls on Windows. However, the DGX machine () gets connection timeouts when reaching out to  despite the  command succeeding. Agent provided commands to determine if the Windows Public profile is overriding the allow rule or if 3rd-party AV is blocking the port.
-    - Status: BLOCKED (Waiting for user to run firewall diagnostics on Windows/DGX)
-    - Agent Testing Done: N (Requires user to run commands on physical machine)
-    - Which testing method agent to use? manual testing by curl/bash
-    - User Testing Done: N
+    - Last item agent was working: Wrapping up the session and preparing for a fork. Updated the  with the user's latest feature requests: L2 dynamic routing (limit to 3, route only for top 3 EVAL setups), stopping RPC noise for unsubscribed symbols, and building a live tick-to-Mongo persistence service.
+    - Status: NONE
+    - Agent Testing Done: Y
+    - Which testing method agent to use? manual testing by bash / screenshot tool (Hardware-bound to DGX/Windows PC, automated testing agents will time out/fail).
+    - User Testing Done: Y
 
 **All Pending/In progress Issue list**:
-  Issue 1: 🔴 (P0) Windows Firewall blocking Live Data RPC Port 8765
-     - Attempted fixes: Created an inbound firewall rule for port 8765 set to . Verified  is bound to . Verified routing is working because port 4002 is reachable from DGX.
-     - Next debug checklist: Await user output for: 1)  to check  on Public profile. 2) Temporarily disabling Public firewall profile to see if  succeeds. 3) Asking user to check system tray for 3rd-party Antivirus (Norton, McAfee, etc.). Once unblocked, set  and  in  and restart DGX backend.
-     - Why fix this issue and what will be achieved with the fix? It is the core prerequisite for Phase 1 of the Live Data Architecture.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? backend (via curl)
-     - Blocked on other issue: User providing diagnostic output.
-
-  Issue 2: 🟡 (P1) P5 Sector-Relative phase trained 0 models & Phase 8  failure
-     - Attempted fixes: Implemented Canonical Universe to ensure identical train/collect symbol lists.
-     - Next debug checklist: Await historical queue to fully drain (currently at ~9,889 requests). Once readiness is completely green, instruct user to click  in the NIA panel and monitor the Phase 5 / Phase 8 logs.
-     - Why fix this issue and what will be achieved with the fix? Core model generation pipeline requires this to succeed.
-     - Status: USER VERIFICATION PENDING
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: Historical data queue draining.
-
-  Issue 3: 🟡 (P3) Startup script  path bug
-     - Attempted fixes: None yet.
-     - Next debug checklist: Check  or  and fix the path validation logic that causes the false warning on startup.
-     - Why fix this issue and what will be achieved with the fix? Cleans up CLI startup output.
+  Issue 1: 🟡 (P1) IB Error 309 & RPC Noise (latest-bars failed)
+     - Attempted fixes: Investigated logs. Diagnosed that pusher requests 5 L2 symbols but IB only allows 3. Backend also asks for historical bars () for symbols pusher isn't subscribed to (e.g., HD, ARKK, COP, SHOP).
+     - Next debug checklist: 1. Lower  from 5 to 3 in . 2. Update DGX backend to skip RPC  calls for symbols not in the pusher's active subscriptions list.
+     - Why fix this issue and what will be achieved with the fix? Stops IB error 309 spam and cleans up noisy  warnings in pusher logs, saving RPC bandwidth.
      - Status: NOT STARTED
      - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? manual testing by bash
-     - Blocked on other issue: None.
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 2: 🟡 (P2) Chart PARTIAL coverage (MongoDB Indexing & Backfill)
+     - Attempted fixes: Diagnosed that  is extremely slow (takes >5 mins) due to a missing compound index.
+     - Next debug checklist: Run Mongo command on DGX to add index  on  collection. (Code provided in chat history).
+     - Why fix this issue and what will be achieved with the fix? Drops cache rebuild times from minutes to seconds, improving backend efficiency.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: 🟡 (P1) Live Data Architecture - Phase 1 (Foundation)
-     - Where to resume: Once the firewall (Issue 1) is resolved, finalize wiring DGX client () and  using the new .
-     - What will be achieved with this? Allows DGX backend to pull live/extended-hours data directly from IB Gateway via the Windows pusher.
-     - Status: BLOCKED
-     - Should Test frontend/backend/both after fix? both
-     - Blocked on something: Issue 1 (Firewall blocking port 8765).
+  *None. All in-progress bugs were resolved before the fork.*
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🟡 (P1) Integrate AURA UI concepts (wordmark, gauges) into V5 production UI.
-    - 🟡 (P1) Live Data Architecture - Phase 2: Live subscription layer (dynamic watchlist, ).
-    - 🟡 (P1) Live Data Architecture - Phase 3: Wire remaining surfaces (Scanner, Briefings, AI Chat) to .
+    - 🔴 (P0) L2 dynamic routing: Create  &  on Windows pusher. Have DGX backend dynamically route L2 requests *only* for the top 3 setups currently in EVAL stage.
+    - 🔴 (P1) Live tick → Mongo bar persistence: Write a new backend service so that as the pusher streams ticks, DGX assembles 1m/5m/15m/1h bars in memory and appends them to  on bar-close (eliminates the need for constant daily backfilling).
+    - 🟡 (P1) Add automated canary tests (pytest) to assert  defaults are reachable and  returns >= 100 symbols to protect against regressions.
     - 🟡 (P1) Live Data Architecture - Phase 4: Safely retire Alpaca fallback ().
-    - 🟡 (P2) Add SEC EDGAR 8-K integration for material events.
-    - 🟡 (P3) Add , ,  actions to ⌘K palette.
-    - 🟡 (P3) Add dismissible forever option to Help System tooltips.
     
     Future Tasks:
-    - 🟡 (P3) Retry the 204 historical  items via .
-    - 🟡 (P3)  breakup -> routers/, models/, tests/ (Wait until system is stable).
+    - 🟡 (P2) Add SEC EDGAR 8-K integration for material events.
+    - 🟡 (P3) Add , ,  actions to ⌘K palette.
+    - 🟡 (P3) Break up monolithic  (Wait until pipeline is 100% stable).
 
 **Completed work in this session**
-- Created  as the unified source of truth for symbol tiering (DONE).
-- Wired Canonical Universe into ,  collector, and AI  (DONE).
-- Created  and added it to the Freshness Inspector (DONE).
-- Updated IB date format default to hyphen to resolve Warning 2174 (DONE).
-- Updated  endpoint to set  in cache on repeated No security definition errors (DONE).
-- Created and passed contract tests for Canonical Universe () (DONE).
+- App-wide military time to 12-hour EST across all panels () (DONE)
+- Split monolithic  into , , and  (DONE)
+- Chart x-axis day boundary ticks fixed in UI (DONE)
+- Scanner UI counting bug and P(win)/conf duplication fixed (DONE)
+- Unified stream  filter classification fixed (DONE)
+- Fixed critical scanner diversity bug: Reverted  back to  in  (DONE)
+- Fixed trading bot persistence bug: Merged default setups with saved Mongo setups in  so non-RS setups aren't silently filtered out (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   Issue 1: Alpaca string hardcoded in 
-   - Debug checklist: Remove the  block in .
-   - Why to solve this issue and what will be achieved with this? User requested a strict IB-only architecture.
+   Issue 1: Morning briefing No game plan filed
+   - Debug checklist: Investigate  + gameplan generator to see why it didn't auto-generate for the current session.
+   - Why to solve this issue and what will be achieved with this? Fills content gap; Operator expects a morning gameplan.
    - Should Test frontend/backend/both after fix: backend
-   - Is recurring issue? N
-
-   Issue 2: ACCOUNT MISMATCH UI Chip / IB.reqAccountUpdates() error
-   - Debug checklist: Remove the unexpected keyword argument  from  in the pusher script due to  API drift.
-   - Why to solve this issue and what will be achieved with this? Resolves harmless race condition/error log on startup.
-   - Should Test frontend/backend/both after fix: manual python -c
-   - Is recurring issue? Y (on startup)
+   - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Phase 8 ensemble  failure, P5 0-models failure.
-  - Recurrence count: 3
-  - Status: TESTING PENDING (Wait for queue to drain -> trigger Train All).
+  - Issue recurrence in previous fork: Scanner diversity (scanner falling back to a hardcoded 14-symbol list).
+  - Recurrence count: 2
+  - Status: RESOLVED (Was caused by an incorrect variable reference introduced in commit  on 2026-04-17).
 
 **Code Architecture**
 DGX Spark (Linux) runs Backend (FastAPI on :8001), MongoDB, Frontend (React on :3000). 
 Windows PC runs IB Gateway (:4002) + IB Data Pusher (:8765) + 4 Turbo Collectors.
+Memory files restructured to , , .
 
 **Key Technical Concepts**
-FastAPI, React, MongoDB, Interactive Brokers API (), Pytest, Uvicorn, Windows Defender Firewall routing.
+FastAPI, React, MongoDB, Lightweight-Charts, ib_insync (Interactive Brokers), RPC (Remote Procedure Call between DGX and Windows PC).
 
 **key DB schema**
+  - : Canonical universe cache (Working correctly, ~9,412 rows).
+  - : Stores bot configuration, including .
   - : 
   - : 
 
 **changes in tech stack**
-  - To use the fastapi command, please install "fastapi[standard]":
-
-	pip install "fastapi[standard]" and  added to the Windows PC environment for the new RPC Server.
+  - None.
 
 **All files of reference**
-  -  (Created - Core logic for canonical symbols)
-  -  (Updated to use canonical universe)
-  -  (Updated to use canonical universe)
-  -  (Updated to use canonical universe)
-  -  (Created)
-  -  (Created)
-  -  (Running on Windows PC - contains the RPC Server)
+  - , ,  (Split and updated)
+  -  (Updated for US EST format)
+  -  (Updated)
+  -  (Updated)
+  -  (Updated)
+  -  (Fixed cache variable rename regression)
+  -  (Fixed state overwriting bug)
 
 **Areas that need refactoring**:
-  -  is highly monolithic (defer for now).
+  -  is highly monolithic. (Parked for now).
 
 **key api endpoints**
-  -  (Added)
   - 
-  -  (Updated)
+  - 
+  - 
+  - ,  (Windows PC RPC Server)
 
 **Critical Info for New Agent**
-- **HARDWARE WARNING:** The code executes on a physical DGX Spark and Windows PC. Standard AI testing agents running E2E tests against live IB/GPU endpoints will time out or fail. Validate via manual bash/curl commands with the user.
-- **DO NOT TRIGGER AI TRAINING:** The historical data queue (~9,889 requests) is currently draining on the Windows PC. You must wait for it to hit 0 pending/claimed and overall freshness to hit green before instructing the user to run .
-- **FIREWALL STATUS:** DGX can reach the Windows PC on port 4002, but port 8765 is timing out. The agent was in the middle of diagnosing whether the Windows Public profile defaults or a 3rd party antivirus is dropping packets. Await the user's latest terminal outputs to conclude diagnosis.
+- **MEMORY FILES PROTOCOL:**  is now purely a static spec. **ALWAYS** append completed work to . Manage priorities and upcoming tasks in  (especially the 🔴 Now / Near-term section).
+- **HARDWARE ENVIRONMENT:** The application spans a physical DGX Spark and Windows PC. Automated E2E test agents will fail. Use / directly on the container/server and rely on the user to provide screenshots and verify Windows-side pusher behavior.
+- **SYSTEM HEALTH:** The system is currently GREEN. The scanner is correctly finding diverse setups, the trading bot is evaluating them, and the pusher RPC latency is healthy (~546ms). Do not assume bugs exist in the scanner/pusher without checking logs first. 
 
 **documents and test reports created in this job**
-  - 
-  -  (Updated)
+  -  (Created/Split)
+  -  (Created/Split)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - *Agent*: Created and wired Canonical Universe across the backend, updated PRD, and verified components with tests.
- - *User*: Restarted services, verified collectors are healthy, and confirmed the Canonical Universe UI matches predictions perfectly. Asked to proceed with Live Data RPC.
- - *Agent*: Guided user to install  on Windows and run the Pusher.
- - *User*: Pusher failed to run initially due to missing  flag.
- - *Agent*: Advised running with the  file or explicitly passing flags.
- - *User*: Ran successfully. Logs showed .
- - *Agent*: Instructed user to test reachability from DGX via .
- - *User*:  returned empty/timeout from DGX. Verified  test on Windows PC works.
- - *Agent*: Realized firewall is blocking. Found that Windows  is set to Public network. Advised making the firewall rule .
- - *User*: Made rule . Tested  (Success) and  (Timeout).
- - *Agent*: Sent final diagnostic commands to find blocking Public profile rules or check for 3rd-party Antivirus.
- - *Pending HUMAN message*: Awaiting user to execute diagnostic commands on Windows PowerShell and DGX shell to unblock Port 8765. 
+ - *Agent*: Hot-fixed the MongoDB bot state to include missing setups, told user to restart backend.
+ - *User*: Provided logs showing pusher RED and asked why bot was skipping setups. Restarted backend.
+ - *Agent*: Diagnosed that the  was overwriting defaults. Saw pusher was timing out on RPC calls.
+ - *User*: Restarted again. Shared screenshot/logs showing GREEN pusher, healthy RPC (546ms), 45 quotes, 6 scans, and 5 active evaluations. Asked to limit L2 to 3 symbols (dynamic routing), fix noisy RPC logs, and append live ticks directly to Mongo.
+ - *Agent*: Explained RPC and cache differences. Proposed a plan (L2 dynamic routing, skip unsubscribed RPC calls, build tick-to-Mongo service).
+ - *Pending HUMAN message*: User requested to prepare for fork. Agent wrapped up and updated . No pending tasks require immediate troubleshooting, proceed directly to Roadmap P0s.
 
 **Project Health Check:**
-Broken (Connectivity: DGX cannot reach Windows Pusher RPC on port 8765).
+Stable (Pusher is GREEN, live data is streaming, scanner is identifying multiple setup types, and the bot is successfully evaluating alerts).
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution - Requires User credentials via Windows IB Gateway)
-  - HuggingFace (Local Execution)
+  - HuggingFace/Ollama (Local LLM Execution)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Hardware constraints). Used Pytest instead.
+  - Testing agent used after significant changes: NO (Due to hardware dependency on DGX/Windows).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
+  - Test files created: None
   - Known regressions: None
 
 **Credentials to test flow:** N/A
 
 **What agent forgot to execute**
-The agent did not forget anything, but was interrupted by the context limit while waiting for the user's network diagnostic results.
+The agent addressed all issues successfully and staged the final feature requests into the  as requested by the user before wrapping up the session for a clean fork.
 
 **Debugging checklist for current issue**
-    Issue: Live Data RPC Port 8765 blocked by Windows
-    Backend files to check: N/A (OS-level network issue)
+    Issue: L2 dynamic routing & RPC Noise Cleanup
+    Backend files to check:  (Windows PC side),  or where RPC calls originate.
     Checklist for next action:
-    - Review user's output for  and the DGX  after temporarily disabling the Public profile.
-    - If it succeeds, advise the user to leave the Public firewall off for that adapter, or change the adapter to Private.
-    - If it still fails, instruct the user to check system tray for McAfee/Norton/Bitdefender overriding Windows Defender.
-    - Once  passes, immediately add the env vars and restart the DGX backend to conclude Phase 1 setup.</analysis>
+    - Edit  to change  from 5 to 3.
+    - Add  and  endpoints to the pusher RPC server.
+    - Update DGX backend logic to skip calling  for symbols that the pusher is not currently subscribed to.</analysis>
