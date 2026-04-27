@@ -17,17 +17,11 @@ Open priorities, deferred ideas, and backlog. Move items to
   subscription. Resolved long-term by item below ("Live tick → Mongo
   bar persistence") — see ROADMAP.
 
-### P0 — Pusher cleanup (small, contained, batch in next session)
-- **Lower L2 sub limit from 5 → 3** in `/app/documents/scripts/ib_data_pusher.py`
-  to silence the `Error 309 Max number (3) of market depth requests`
-  spam (IB caps L2 at 3 simultaneous subs).
-- **Backend: skip `/rpc/latest-bars` for symbols not in pusher's
-  subscription** — currently `enhanced_scanner` / `wave_scanner` ask the
-  pusher for bars on HD/ARKK/COP/SHOP that pusher isn't tracking →
-  pusher tries `reqHistoricalData` → IB times out → noisy warnings.
-  Fix: hit `/rpc/subscriptions` once at startup (and on subscribe
-  events), cache the set, gate `/rpc/latest-bars` calls on
-  membership. Symbols not in the set fall through to Mongo-only.
+### P0 — Pusher cleanup ✅ SHIPPED 2026-04-28 (see CHANGELOG)
+- ~~Lower L2 sub limit 5 → 3~~ ✅ Done.
+- ~~Backend: skip `/rpc/latest-bars` for symbols not in pusher's
+  subscription~~ ✅ Done — new `subscriptions()` cache + gate in
+  `services/ib_pusher_rpc.py` + 7 regression tests.
 
 ### P1 — L2 dynamic routing for top-3 EVAL alerts (operator-requested)
 - **Why:** L2 is currently fixed at startup (SPY/QQQ/IWM/DIA/XOM
@@ -82,13 +76,12 @@ Open priorities, deferred ideas, and backlog. Move items to
 - If it spikes again, investigate: IB pacing, DGX RPC handler
   profile (synchronous Mongo writes?), network Windows ↔ DGX.
 
-### P0 — Wave-scanner background loop never started
-- `/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.
-  Distinct producer from `enhanced_scanner` (which is now happily
-  producing alerts post-fix). Diagnose:
-  - `grep -rn "wave_scanner\|run_scan_cycle\|start_scan" backend/server.py`
-  - Check `@app.on_event('startup')` hooks for missing wave-scanner
-    kickoff.
+### P0 — Wave-scanner background loop never started ✅ FIXED 2026-04-28
+- `/api/wave-scanner/stats` now reports real `total_scans` /
+  `last_full_scan` / `last_scan_duration`. Root cause was that
+  `enhanced_scanner._scan_loop` produced wave batches but never called
+  `wave_scanner.record_scan_complete()` to roll the counters forward.
+  Fix wires the callback after every successful scan cycle.
 
 ### P1 — Briefings content gaps (operator flagged 2026-04-27)
 - **Morning Prep auto-gameplan** is silent — investigate
@@ -104,10 +97,11 @@ Open priorities, deferred ideas, and backlog. Move items to
   operator what the copy *should* say, then fix the server-side
   bot-narrative template.
 
-### P1 — `/api/scanner/daily-alerts` returns 0 despite alerts existing
-- Endpoint filters on field `timestamp` but `live_alerts` writes use
-  `created_at`. Quick fix in `routers/scanner.py` (or wherever the
-  route is defined).
+### P1 — `/api/scanner/daily-alerts` returns 0 ❌ NOT A BUG (closed 2026-04-28)
+- Diagnosed: endpoint reads `_live_alerts.values()` in-memory and
+  filters by `setup_type ∈ DAILY_SETUPS`. No Mongo `timestamp` filter
+  exists. Returns 0 simply because no daily setups have fired this
+  session. No code change required.
 
 ### P1 — Mongo aggregation index for `rebuild-adv-from-ib`
 - Add compound `{bar_size: 1, date: -1}` on `ib_historical_data`.
@@ -152,16 +146,7 @@ Open priorities, deferred ideas, and backlog. Move items to
   `_enabled_setups` is reachable end-to-end (would have caught both
   scanner regressions today).
 
-### P0 — Wave-scanner background loop never started
-`/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.
-The `_wave_scanner` is loaded with universe + watchlist + tier2 pool,
-but its scan loop is never invoked. Either the schedule isn't wired in
-`server.py`, or the start hook crashed silently, or it's gated behind a
-feature flag. **Diagnose:**
-- `grep -rn "wave_scanner\|run_scan_cycle\|start_scan" backend/server.py`
-- Check `@app.on_event('startup')` hooks for missing wave-scanner kickoff.
-Less critical now that `enhanced_scanner` is fixed — but should still
-be wired. Distinct producers feed different surfaces.
+### P0 — Wave-scanner: ✅ SHIPPED — see CHANGELOG 2026-04-28.
 
 ### P1 — Briefings content gaps (operator flagged 2026-04-27)
 - **Morning Prep auto-gameplan** is silent — investigate
@@ -180,11 +165,7 @@ be wired. Distinct producers feed different surfaces.
   **Action:** ask operator what the copy *should* say, then fix the
   server-side bot-narrative template.
 
-### P1 — `/api/scanner/daily-alerts` returns 0 despite alerts existing
-- Endpoint filters on field `timestamp` but `live_alerts` writes use
-  `created_at` (the `LiveAlert` dataclass auto-default). Fix: align the
-  filter field name in `routers/scanner.py` (or wherever the route is
-  defined) to use `created_at`. Quick fix.
+### P1 — `/api/scanner/daily-alerts`: ❌ closed (not a bug) — see CHANGELOG 2026-04-28.
 
 ### P1 — Mongo aggregation index for `rebuild-adv-from-ib` is missing
 - Add compound index `{bar_size: 1, date: -1}` on `ib_historical_data`.

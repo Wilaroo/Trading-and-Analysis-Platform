@@ -2,6 +2,57 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — Pusher cleanup + Wave-scanner stats + RPC subscription gate
+
+P0 + P1 batch from operator's end-of-day request list. All shipped with
+regression tests; system stays GREEN, no behaviour change for happy path.
+
+### 1. L2 subscription cap lowered 5 → 3 (`ib_data_pusher.py`)
+- `subscribe_level2()` now matches `update_level2_subscriptions()` at
+  `MAX_L2_SUBSCRIPTIONS = 3` — IB paper-mode hard cap. Was 5, which
+  triggered IB Error 309 on every pusher startup as the 4th/5th of
+  SPY/QQQ/IWM/DIA/<inplay> got rejected.
+- Docstring + inline comments updated to flag the paper-mode ceiling
+  and rationale.
+
+### 2. RPC `/rpc/latest-bars` subscription gate (`services/ib_pusher_rpc.py`)
+- New `subscriptions()` method on `_PusherRPCClient` — TTL-cached
+  (30s) snapshot of `/rpc/subscriptions`. Tri-state: returns set when
+  pusher reachable, None when pusher down/older endpoint missing.
+- New `is_pusher_subscribed(symbol)` helper exposing the tri-state to
+  callers (`True` / `False` / `None`).
+- `latest_bars()` and `latest_bars_batch()` now gate calls on
+  membership: unsubscribed symbols short-circuit to None / are filtered
+  out of the batch. Pusher unreachable → no gating (preserves
+  backward-compat with older pushers).
+- Cache busted automatically when backend POSTs to `/rpc/subscribe` or
+  `/rpc/unsubscribe` so the next gate sees the fresh set without
+  waiting for TTL expiry.
+- Eliminates the IB pacing storm where DGX would ask the pusher for
+  reqHistoricalData on HD/ARKK/COP/SHOP every scan cycle (~10s timeout
+  each) — pusher logs were polluted with `Read timed out` warnings.
+- Regression coverage: `tests/test_pusher_rpc_subscription_gate.py`
+  (7 tests, all passing) — locks subscriptions+caching, tri-state,
+  per-symbol short-circuit, batch filtering, cache invalidation on
+  subscribe/unsubscribe, and that unrelated calls don't bust the cache.
+
+### 3. Wave-scanner stats wired up (`services/enhanced_scanner.py`)
+- `_scan_loop` now calls `wave_scanner.record_scan_complete(...)` after
+  every successful intraday scan (passing symbols-scanned, alert delta,
+  and duration) and stamps `_last_full_scan_complete`.
+- `/api/wave-scanner/stats` now reports real `total_scans` /
+  `last_full_scan` / `last_scan_duration` instead of the permanent
+  zero that confused the operator (wave scanner was producing batches
+  but nothing ever called back to record completion).
+
+### Items diagnosed but NOT shipped (not real bugs)
+- **`/api/scanner/daily-alerts` returns 0 despite alerts existing**:
+  the handoff diagnosed this as a `timestamp` vs `created_at` field
+  mismatch, but the actual implementation reads `_live_alerts.values()`
+  in-memory and filters by `setup_type ∈ DAILY_SETUPS` — no Mongo
+  query at all. Returns 0 simply because no daily setups have fired
+  this session. No code change needed; closed.
+
 ## 2026-04-27 — End-of-session verified state — HEALTHY
 
 After today's fixes, operator's screenshot confirmed system is green:

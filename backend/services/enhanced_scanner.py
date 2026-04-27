@@ -1911,11 +1911,30 @@ class EnhancedBackgroundScanner:
                 
                 # Run optimized scan
                 scan_start = datetime.now()
+                alerts_before = len(self._live_alerts)
                 await self._run_optimized_scan()
                 scan_duration = (datetime.now() - scan_start).total_seconds()
-                
+                alerts_delta = max(0, len(self._live_alerts) - alerts_before)
+
                 self._last_scan_time = datetime.now(timezone.utc)
                 self._scan_count += 1
+
+                # Roll the wave scanner's stats forward so /api/wave-scanner/stats
+                # exposes accurate `total_scans` / `last_full_scan` / alerts
+                # counters instead of a permanent zero (was the case before
+                # 2026-04-28 — wave_scanner produced batches but nothing ever
+                # called back to record completion).
+                try:
+                    from services.wave_scanner import get_wave_scanner
+                    _ws = get_wave_scanner()
+                    _ws.record_scan_complete(
+                        symbols_scanned=int(self._symbols_scanned_last or 0),
+                        alerts=int(alerts_delta),
+                        duration_ms=int(scan_duration * 1000),
+                    )
+                    _ws._last_full_scan_complete = self._last_scan_time
+                except Exception as _ws_exc:
+                    logger.debug(f"wave_scanner.record_scan_complete failed: {_ws_exc}")
                 
                 logger.info(
                     f"📊 Scan #{self._scan_count} in {scan_duration:.1f}s | "

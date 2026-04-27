@@ -602,17 +602,22 @@ class IBDataPusher:
         - NASDAQ stocks -> ISLAND (NASDAQ's ECN)
         - NYSE stocks -> NYSE
         
-        IB LIMIT: Maximum 5 market depth subscriptions at a time!
-        
+        IB LIMIT: Paper trading caps market depth at 3 simultaneous subscriptions
+        (live accounts can be higher, but 3 is the safe paper-mode ceiling and
+        matches `update_level2_subscriptions` below). Going above this triggers
+        IB Error 309 spam and silently drops L2 for whatever doesn't fit.
+
         Args:
             symbols: List of stock symbols
             num_rows: Number of price levels to track (default 5)
         """
         # Known ETFs that trade on ARCA
         arca_symbols = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "XLF", "XLE", "XLK", "VXX", "TQQQ", "SQQQ"}
-        
-        # IB limits to 5 market depth subscriptions - prioritize major ETFs
-        MAX_L2_SUBSCRIPTIONS = 5
+
+        # IB paper-mode hard cap: 3 simultaneous L2 subs. (Was 5 — was triggering
+        # IB Error 309 every startup because pusher would attempt to subscribe 5
+        # of SPY/QQQ/IWM/DIA/<inplay> and IB would reject the last 2.)
+        MAX_L2_SUBSCRIPTIONS = 3
         current_count = len(self.depth_subscriptions)
         
         # Prioritize these symbols for L2 (most liquid ETFs)

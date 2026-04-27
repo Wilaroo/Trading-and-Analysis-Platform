@@ -51,6 +51,12 @@ def _base_url() -> Optional[str]:
 
 
 class _PusherRPCClient:
+    # Subscription-set TTL. Pusher subscriptions change rarely (operator
+    # adds a watchlist symbol, scanner promotes a Tier-2 stock, etc.), so
+    # 30s is a reasonable freshness bound that still keeps us from
+    # hammering /rpc/subscriptions on every latest_bars call.
+    _SUBSCRIPTIONS_TTL_SEC: float = 30.0
+
     def __init__(self) -> None:
         self._session = requests.Session()
         self._lock = threading.Lock()
@@ -64,6 +70,12 @@ class _PusherRPCClient:
         self._latency_ms_window: deque = deque(maxlen=50)
         self._call_count_total: int = 0
         self._success_count_total: int = 0
+        # Subscription-set cache: lets `latest_bars` short-circuit calls
+        # for symbols the pusher isn't tracking (avoids noisy IB
+        # reqHistoricalData timeouts on the Windows side). None = unknown,
+        # empty set = pusher reachable but tracking nothing.
+        self._subs_cache: Optional[set] = None
+        self._subs_cache_ts: float = 0.0
 
     # ---- public latency stats ----------------------------------------------
     def latency_stats(self) -> Dict[str, Any]:
@@ -131,6 +143,12 @@ class _PusherRPCClient:
             self._success_count_total += 1
             # Record latency for the heartbeat tile.
             self._latency_ms_window.append((_t.time() - _start) * 1000.0)
+            # Bust the subscription-set cache on any subscribe/unsubscribe
+            # call so the next latest_bars gate sees the fresh set
+            # immediately (instead of waiting up to TTL seconds).
+            if path in ("/rpc/subscribe", "/rpc/unsubscribe"):
+                self._subs_cache = None
+                self._subs_cache_ts = 0.0
             return resp.json()
         except (requests.Timeout, requests.ConnectionError) as exc:
             if self._consecutive_failures < 3:
@@ -147,6 +165,49 @@ class _PusherRPCClient:
     def health(self) -> Optional[Dict[str, Any]]:
         return self._request("GET", "/rpc/health", timeout=3.0)
 
+    def subscriptions(self, force_refresh: bool = False) -> Optional[set]:
+        """
+        Return the set of symbols currently subscribed on the pusher.
+
+        Cached for `_SUBSCRIPTIONS_TTL_SEC` (30s) so we don't hit
+        /rpc/subscriptions on every per-symbol latest_bars call. Returns
+        None on RPC failure (callers should treat that as "unknown" and
+        NOT gate, to preserve current behaviour when the pusher is down).
+        """
+        import time as _t
+        now = _t.time()
+        if (
+            not force_refresh
+            and self._subs_cache is not None
+            and (now - self._subs_cache_ts) < self._SUBSCRIPTIONS_TTL_SEC
+        ):
+            return self._subs_cache
+
+        resp = self._request("GET", "/rpc/subscriptions", timeout=3.0)
+        if not resp or not resp.get("success"):
+            return None
+        symbols = resp.get("symbols") or []
+        try:
+            subs = {str(s).upper().strip() for s in symbols if s}
+        except Exception:
+            return None
+        self._subs_cache = subs
+        self._subs_cache_ts = now
+        return subs
+
+    def is_pusher_subscribed(self, symbol: str) -> Optional[bool]:
+        """
+        Tri-state membership check:
+            True  = symbol is currently subscribed on the pusher
+            False = pusher reachable, symbol is NOT subscribed
+            None  = pusher unreachable or older endpoint missing
+                    (callers should NOT gate; preserves prior behaviour)
+        """
+        subs = self.subscriptions()
+        if subs is None:
+            return None
+        return symbol.upper().strip() in subs
+
     def latest_bars(
         self,
         symbol: str,
@@ -158,10 +219,27 @@ class _PusherRPCClient:
         """
         Ask the pusher to run reqHistoricalData with endDateTime="" (i.e.
         "give me the current / latest-session slice"). Returns bars list
-        or None on failure.
+        or None on failure / when the pusher isn't tracking the symbol.
+
+        Subscription gate (added 2026-04-28): if the pusher is reachable
+        and the symbol is NOT in `/rpc/subscriptions`, return None
+        immediately. This avoids the IB Gateway pacing storm we'd
+        otherwise trigger by asking the pusher to reqHistoricalData on
+        symbols it isn't streaming (HD/ARKK/COP/SHOP would time out
+        every scan cycle, ~10s each, polluting the pusher's loop).
+        Callers already treat None as "fall back to Mongo cache", so the
+        contract is preserved.
         """
+        sym_u = symbol.upper().strip()
+        gate = self.is_pusher_subscribed(sym_u)
+        if gate is False:
+            logger.debug(
+                "pusher RPC skipping latest_bars(%s): not in pusher subscription set",
+                sym_u,
+            )
+            return None
         body = {
-            "symbol": symbol.upper(),
+            "symbol": sym_u,
             "bar_size": bar_size,
             "duration": duration,
             "use_rth": bool(use_rth),
@@ -197,6 +275,26 @@ class _PusherRPCClient:
         cleaned = [s.upper().strip() for s in (symbols or []) if s]
         if not cleaned:
             return {}
+
+        # Subscription gate (added 2026-04-28). Filter the batch down to
+        # symbols the pusher is actually tracking. Unsubscribed symbols
+        # would otherwise trigger reqHistoricalData → IB pacing timeouts
+        # → Read timed out warnings on the Windows side. If the
+        # subscription set is unknown (older pusher / RPC down), fall
+        # through to the original behaviour to preserve compatibility.
+        subs = self.subscriptions()
+        if subs is not None:
+            filtered = [s for s in cleaned if s in subs]
+            if len(filtered) != len(cleaned):
+                skipped = [s for s in cleaned if s not in subs]
+                logger.debug(
+                    "pusher RPC latest_bars_batch skipping %d unsubscribed symbols: %s",
+                    len(skipped), skipped[:8],
+                )
+            cleaned = filtered
+            if not cleaned:
+                return {}
+
         body = {
             "symbols": cleaned,
             "bar_size": bar_size,
