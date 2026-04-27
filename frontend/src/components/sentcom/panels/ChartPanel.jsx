@@ -63,6 +63,10 @@ export const ChartPanel = ({
   const markersPluginRef = useRef(null); // createSeriesMarkers() plugin api
   const priceLinesRef = useRef([]); // IPriceLine[] — Stage 2d-B (entry/SL/PT overlays)
   const srLinesRef = useRef([]);    // Stage 2e — PDH/PDL/PML support/resistance lines
+  // Tracks whether we've performed the initial `fitContent()` call so that
+  // subsequent re-renders (auto-refresh, lazy-load backfill) don't reset
+  // the user's pan/zoom position.
+  const hasFittedRef = useRef(false);
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
   const [showSrLevels, setShowSrLevels] = useState(true);
   const resizeObsRef = useRef(null);
@@ -74,6 +78,15 @@ export const ChartPanel = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  // How many days of history are currently loaded. Starts at the timeframe
+  // default and grows when the user scrolls/zooms past the leftmost bar so
+  // older context is fetched on demand (lazy-load).
+  const [daysLoaded, setDaysLoaded] = useState(null);
+  // Internal flag: true while a backfill (older-history) fetch is in flight.
+  // Prevents duplicate fetches when the user keeps scrolling left.
+  const backfillInFlightRef = useRef(false);
+  // Hard ceiling on how far back we will lazy-load (matches backend cap).
+  const MAX_DAYS_BACK = 365;
   // Freshness flags from backend — surface when the chart is rendering stale
   // cache or partial coverage so the user doesn't mistake old bars for live.
   const [staleInfo, setStaleInfo] = useState(null);  // { stale, reason, latest, partial, coverage }
@@ -202,15 +215,29 @@ export const ChartPanel = ({
     };
   }, [height]);
 
-  // Fetch bars for current symbol + timeframe
+  // Reset the lazy-load window whenever the timeframe changes — each
+  // timeframe has its own sensible default. Also reset the "fit" flag so
+  // the new dataset gets framed once before lazy-loading takes over.
+  useEffect(() => {
+    setDaysLoaded(active.daysBack);
+    hasFittedRef.current = false;
+  }, [active.daysBack]);
+
+  // Reset the fit flag when the symbol changes too — otherwise switching
+  // symbols would inherit the previous symbol's pan position.
+  useEffect(() => { hasFittedRef.current = false; }, [symbol]);
+
+  // Fetch bars for current symbol + timeframe. Honours the lazy-loaded
+  // `daysLoaded` window so subsequent refetches keep older bars on screen.
   const fetchBars = useCallback(async () => {
     if (!symbol) return;
+    const days = daysLoaded || active.daysBack;
     setLoading(true);
     setError(null);
     try {
       const resp = await safeGet(
         `/api/sentcom/chart?symbol=${encodeURIComponent(symbol)}` +
-        `&timeframe=${encodeURIComponent(active.value)}&days=${active.daysBack}`
+        `&timeframe=${encodeURIComponent(active.value)}&days=${days}`
       );
       if (!resp) {
         setError('Bar fetch failed');
@@ -239,8 +266,9 @@ export const ChartPanel = ({
       setError(err?.message || 'Failed to fetch bars');
     } finally {
       setLoading(false);
+      backfillInFlightRef.current = false;
     }
-  }, [symbol, active]);
+  }, [symbol, active, daysLoaded]);
 
   // Refetch whenever symbol / timeframe changes
   useEffect(() => { fetchBars(); }, [fetchBars]);
@@ -303,9 +331,52 @@ export const ChartPanel = ({
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    // Fit the newly loaded range on first load; leave panning intact afterwards.
-    try { chartRef.current?.timeScale().fitContent(); } catch (_) { /* noop */ }
+    // Fit the newly loaded range only on the first load. Subsequent
+    // re-fetches (auto-refresh, lazy-load backfill) preserve whatever
+    // pan/zoom the user already has so the chart doesn't snap back.
+    if (!hasFittedRef.current) {
+      try { chartRef.current?.timeScale().fitContent(); } catch (_) { /* noop */ }
+      hasFittedRef.current = true;
+    }
   }, [bars]);
+
+  // Lazy-load older history when user scrolls/pans/zooms past the leftmost
+  // loaded bar. Uses lightweight-charts `subscribeVisibleLogicalRangeChange`
+  // which fires on every pan + scroll-wheel zoom. When the visible logical
+  // range's `from` index goes below a small threshold (i.e. user is near
+  // the leftmost bar), we double the loaded window (capped at MAX_DAYS_BACK)
+  // and refetch — preserving on-screen position via the unchanged time
+  // scale visible range.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return undefined;
+
+    const handleRangeChange = (range) => {
+      if (!range) return;
+      if (backfillInFlightRef.current) return;
+      if (loading) return;
+      // `from` is a fractional logical index. Negative means the user has
+      // panned past the leftmost loaded bar. Anything within the first
+      // 5 bars also triggers a backfill so the chart never feels capped.
+      const threshold = 5;
+      if (range.from > threshold) return;
+      if (!daysLoaded) return;
+      if (daysLoaded >= MAX_DAYS_BACK) return;
+      const next = Math.min(MAX_DAYS_BACK, daysLoaded * 2);
+      if (next === daysLoaded) return;
+      backfillInFlightRef.current = true;
+      setDaysLoaded(next);
+    };
+
+    try {
+      chart.timeScale().subscribeVisibleLogicalRangeChange(handleRangeChange);
+    } catch (_) { /* noop */ }
+    return () => {
+      try {
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRangeChange);
+      } catch (_) { /* noop */ }
+    };
+  }, [daysLoaded, loading]);
 
   // Push indicator series data whenever `indicators` changes.
   useEffect(() => {

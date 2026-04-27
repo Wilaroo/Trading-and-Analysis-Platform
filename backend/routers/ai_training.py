@@ -1674,10 +1674,31 @@ async def get_last_trophy_run(only_trophy: bool = True):
                     ph_remapped[short] = v
                 trained = sum((ph.get("models") or 0) for ph in ph_remapped.values())
                 failed = sum((ph.get("failed") or 0) for ph in ph_remapped.values())
-                # Build a flat list of completed models from the live
-                # `recently_completed` — only available for the very last
-                # few; combined with phase counts above for the totals.
-                recent = list(live.get("recently_completed") or [])
+                # Phase history can be wiped to {} when the next training
+                # subprocess starts (TrainingPipelineStatus.__init__ writes
+                # a fresh empty dict). Fall back to the durable counters we
+                # persist at run-completion: `models_trained_count` and
+                # `models_completed` are both monotonic per-run and survive
+                # across status updates within the same run.
+                if trained == 0:
+                    trained = int(
+                        live.get("models_trained_count")
+                        or live.get("models_completed")
+                        or 0
+                    )
+                if failed == 0:
+                    failed = int(live.get("models_failed_count") or 0)
+                # Use `completed_models` (always-incremented per model) as a
+                # secondary recovery source if recently_completed is short.
+                completed_models = list(live.get("completed_models") or [])
+                recent = list(live.get("recently_completed") or completed_models)
+                # Pull total_samples from durable terminal counter saved at
+                # pipeline-end (added 2026-02). Falls back to any earlier key.
+                total_samples = int(
+                    live.get("total_samples_final")
+                    or live.get("total_samples")
+                    or 0
+                )
                 start = live.get("started_at")
                 end = live.get("updated_at") or live.get("completed_at")
                 elapsed = 0.0
@@ -1695,12 +1716,39 @@ async def get_last_trophy_run(only_trophy: bool = True):
                     "models_trained_count": trained,
                     "models_failed_count": failed,
                     "errors": int(live.get("errors") or 0),
-                    "total_samples": 0,
+                    "total_samples": total_samples,
                     "models_trained": recent,
                     "phase_breakdown": ph_remapped,
                     "is_trophy": failed == 0 and int(live.get("errors") or 0) == 0,
                     "_synthesized_from_live": True,
                 }
+
+                # Auto-promote synthesized snapshot to archive so subsequent
+                # calls hit the durable doc directly. Only promote runs with
+                # real signal (trained > 0) to avoid polluting the archive.
+                if trained > 0 and start:
+                    try:
+                        promote = {
+                            **{k: v for k, v in doc.items()
+                               if k != "_synthesized_from_live"},
+                            "_id": start,
+                            "archived_at": datetime.now(timezone.utc).isoformat(),
+                            "_recovered_from_live": True,
+                        }
+                        db["training_runs_archive"].update_one(
+                            {"_id": promote["_id"]},
+                            {"$setOnInsert": promote},
+                            upsert=True,
+                        )
+                        logger.info(
+                            f"[TROPHY] Recovered live status into archive "
+                            f"({trained} models, started_at={start})"
+                        )
+                    except Exception as promote_err:
+                        logger.warning(
+                            f"[TROPHY] Could not auto-promote synthesized "
+                            f"trophy doc: {promote_err}"
+                        )
 
         if not doc:
             return {"success": True, "found": False}

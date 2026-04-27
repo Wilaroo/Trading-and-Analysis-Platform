@@ -134,3 +134,73 @@ def test_headline_accuracies_top_n_caps():
     assert len(out) == 3
     # Highest 3 are m9, m8, m7 (accuracies 0.9, 0.8, 0.7)
     assert [m["model"] for m in out] == ["m9", "m8", "m7"]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Synthesizer fallback — `phase_history` wiped to {} on next run start.
+# Regression test for the 2026-02 trophy-card-shows-0 bug where the
+# `run_training_pipeline` archive write referenced `self._db` (NameError
+# in a module-level function) and silently failed, leaving the live
+# `phase_history` as the only source — itself wiped on next-run init.
+# ──────────────────────────────────────────────────────────────────────
+
+def _synthesize_count(live_doc: dict) -> int:
+    """Mirror of the durable-counter fallback added to /last-trophy-run."""
+    ph_hist = live_doc.get("phase_history") or {}
+    if not isinstance(ph_hist, dict):
+        ph_hist = {}
+    trained = sum((ph.get("models") or 0) for ph in ph_hist.values())
+    if trained == 0:
+        trained = int(
+            live_doc.get("models_trained_count")
+            or live_doc.get("models_completed")
+            or 0
+        )
+    return trained
+
+
+def test_synthesizer_uses_phase_history_when_present():
+    live = {
+        "phase": "completed",
+        "phase_history": {
+            "P1": {"models": 7, "failed": 0},
+            "P5": {"models": 3, "failed": 0},
+        },
+        "models_completed": 999,  # should be ignored — phase_history wins
+    }
+    assert _synthesize_count(live) == 10
+
+
+def test_synthesizer_falls_back_to_models_trained_count():
+    live = {
+        "phase": "completed",
+        "phase_history": {},          # wiped by next-run init
+        "models_trained_count": 173,  # durable terminal counter
+        "models_completed": 173,
+    }
+    assert _synthesize_count(live) == 173
+
+
+def test_synthesizer_falls_back_to_models_completed():
+    live = {
+        "phase": "completed",
+        "phase_history": {},
+        "models_completed": 173,
+    }
+    assert _synthesize_count(live) == 173
+
+
+def test_synthesizer_handles_list_shaped_phase_history():
+    """User curl returned `phase_history: []` (empty list, not dict).
+    Synthesizer must coerce to {} and still pull from models_completed."""
+    live = {
+        "phase": "completed",
+        "phase_history": [],
+        "models_completed": 173,
+    }
+    assert _synthesize_count(live) == 173
+
+
+def test_synthesizer_returns_zero_when_nothing_available():
+    live = {"phase": "completed", "phase_history": {}}
+    assert _synthesize_count(live) == 0

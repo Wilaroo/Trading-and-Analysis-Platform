@@ -3834,3 +3834,37 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - **Verification**: 26/26 account_guard + pushed_account_id tests pass on Spark. Live `/api/safety/status` returns `match: true, reason: "ok (paper: matched 'dun615665')"`.
 - **User action required for Issue 2 (chart blank)**: Pusher must backfill `historical_bars`. Trigger via `POST /api/ib-collector/execute-backfill` — now safe to run since guard is green.
 
+
+## 2026-02-01 — Trophy Run Card "0 models trained" + Chart Lazy-Load (P0+P1)
+
+### Issue 1 (P0): Trophy Run tile always reported `models_trained_count: 0`
+- **Root cause**: `run_training_pipeline()` in `services/ai_modules/training_pipeline.py` is a module-level `async` function — it does NOT have `self`. The trophy-archive write block at line 3815/3839 referenced `self._db` and `self._status`, which raised `NameError` and was swallowed by a bare `except Exception`. Result: the `training_runs_archive` collection was never written to, so `/api/ai-training/last-trophy-run` always fell back to synthesizing from the live `training_pipeline_status` doc — whose `phase_history` gets wiped to `{}` whenever the next training run starts (`TrainingPipelineStatus.__init__` writes a fresh empty dict).
+- **Fix**:
+  1. `training_pipeline.py:3815` — Replaced `self._db` → `db` (the function parameter) and `self._status` → `status.get_status()`. Archive write now actually executes.
+  2. `training_pipeline.py:3789` — At pipeline completion, `status.update(...)` now also persists durable terminal counters: `models_trained_count`, `models_failed_count`, `total_samples_final`, `completed_at`. These survive `phase_history` wipes on next-run init.
+  3. `routers/ai_training.py:1675` — Synthesizer fallback in `/last-trophy-run` now prefers `live.get("models_trained_count")` → `live.get("models_completed")` when phase_history is empty/wiped.
+  4. `routers/ai_training.py:1718` — When the synthesizer recovers a non-zero run from the live doc, it auto-promotes the snapshot to `training_runs_archive` via `$setOnInsert` so future calls hit the durable doc directly. This auto-recovers the user's prior 173-model run on first hit.
+- **Verification**: `tests/test_trophy_run_archive.py` extended from 8→13 tests (5 new regression tests covering models_completed fallback, models_trained_count fallback, list-shaped phase_history, all-empty fallback). All 13 pass locally. User must hit `GET /api/ai-training/last-trophy-run` once on Spark to recover the 173-model count.
+
+### Issue 2 (P1): Chart scroll-wheel doesn't fetch older history
+- **Root cause**: `ChartPanel.jsx` fetched a fixed `daysBack` window per timeframe (1d for 1m bars, 365d for 1d bars) and never re-fetched. lightweight-charts v5 supports panning beyond the loaded data but there was no listener to react to it.
+- **Fix** (`frontend/src/components/sentcom/panels/ChartPanel.jsx`):
+  1. Added `daysLoaded` state (initial = `active.daysBack`, max = 365).
+  2. New `useEffect` subscribes to `chart.timeScale().subscribeVisibleLogicalRangeChange(handleRangeChange)`. When `range.from` drops below 5 (i.e. user scroll/zooms past the leftmost loaded bar), `daysLoaded` doubles (capped at 365) and `fetchBars` re-fires.
+  3. `backfillInFlightRef` prevents duplicate fetches while user keeps scrolling.
+  4. Added `hasFittedRef` so `fitContent()` only runs on first symbol-render, preserving the user's pan/zoom position across auto-refresh + lazy-load fetches.
+  5. Reset both refs/state on symbol/timeframe change.
+- **Verification**: Frontend compiled successfully (no new lint warnings). User must verify on Spark by scrolling left in the SentCom chart workspace.
+
+### Files changed this session
+- `backend/services/ai_modules/training_pipeline.py` (fix `self._db` NameError, persist durable counters)
+- `backend/routers/ai_training.py` (synthesizer durable-counter fallback + auto-promote)
+- `backend/tests/test_trophy_run_archive.py` (5 new regression tests)
+- `frontend/src/components/sentcom/panels/ChartPanel.jsx` (lazy-load older history on scroll/pan/zoom)
+
+### Next session priorities
+- 🟡 P1 Live Data Architecture — Phase 4: `ENABLE_ALPACA_FALLBACK=false` cleanup
+- 🟡 P1 AURA UI integration (wordmark, gauges) into V5
+- 🟡 P2 SEC EDGAR 8-K integration
+- 🟡 P3 ⌘K palette additions, Help-System "dismissible forever" tooltips
+- 🟡 P3 Retry 204 historical `qualify_failed` items

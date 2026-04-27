@@ -3786,7 +3786,18 @@ async def run_training_pipeline(
             "models_failed": len(results["models_failed"]),
             "total_samples": results["total_samples"],
         }
-        status.update(phase="completed", current_model="")
+        # Persist durable final counts on the live status doc so the trophy
+        # tile can recover them even if `phase_history` gets wiped on the
+        # next training-run start (the doc is overwritten with a fresh
+        # `phase_history: {}` by TrainingPipelineStatus.__init__ + _persist).
+        status.update(
+            phase="completed",
+            current_model="",
+            models_trained_count=len(results["models_trained"]),
+            models_failed_count=len(results["models_failed"]),
+            total_samples_final=results["total_samples"],
+            completed_at=results["completed_at"],
+        )
         _total_elapsed = _time.monotonic() - _pipeline_start
         _total_hrs = int(_total_elapsed // 3600)
         _total_min = int((_total_elapsed % 3600) // 60)
@@ -3801,7 +3812,7 @@ async def run_training_pipeline(
         # can show the last successful run as a permanent SLA badge that
         # survives starting a new training run.
         try:
-            if self._db is not None:
+            if db is not None:
                 from copy import deepcopy
                 snap = {
                     "_id": results.get("started_at") or results["completed_at"],
@@ -3817,7 +3828,7 @@ async def run_training_pipeline(
                          "samples": m.get("samples")}
                         for m in (results.get("models_trained") or [])
                     ],
-                    "phase_breakdown": deepcopy(self._status.get("phase_history") or {}),
+                    "phase_breakdown": deepcopy(status.get_status().get("phase_history") or {}),
                     "total_samples": results.get("total_samples", 0),
                     "errors": results.get("errors", 0),
                     "validation_summary": results.get("validation_summary", {}),
@@ -3825,7 +3836,7 @@ async def run_training_pipeline(
                                   and results.get("errors", 0) == 0),
                     "archived_at": datetime.now(timezone.utc).isoformat(),
                 }
-                self._db["training_runs_archive"].update_one(
+                db["training_runs_archive"].update_one(
                     {"_id": snap["_id"]}, {"$set": snap}, upsert=True,
                 )
                 logger.info(
@@ -3835,7 +3846,7 @@ async def run_training_pipeline(
                     f"is_trophy={snap['is_trophy']}"
                 )
         except Exception as exc:
-            logger.warning(f"[TROPHY] Failed to archive run snapshot: {exc}")
+            logger.warning(f"[TROPHY] Failed to archive run snapshot: {exc}", exc_info=True)
 
     except Exception as e:
         logger.error(f"Training pipeline error: {e}")
