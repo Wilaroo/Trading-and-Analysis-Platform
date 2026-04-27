@@ -2662,7 +2662,7 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         from pydantic import BaseModel
         import uvicorn
         import threading as _threading
-        from ib_insync import util as _ibu, Stock as _Stock
+        from ib_insync import util as _ibu, Stock as _Stock, Index as _Index
     except Exception as exc:
         logger.warning("[RPC] dependencies missing (fastapi/uvicorn/ib_insync): %s", exc)
         logger.warning("[RPC] run `pip install fastapi uvicorn` on Windows to enable RPC mode")
@@ -2751,7 +2751,23 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         if not symbol:
             raise HTTPException(status_code=400, detail="symbol required")
         try:
-            contract = _Stock(symbol, "SMART", "USD")
+            # CBOE Indices need an `Index` contract, not `Stock` — otherwise
+            # IB returns Error 200 "No security definition has been found".
+            # Keep the list explicit so we don't accidentally promote
+            # tickers that *are* stocks but share a name with an index.
+            INDEX_SYMBOLS = {
+                "VIX":  ("VIX",  "CBOE"),
+                "SPX":  ("SPX",  "CBOE"),
+                "NDX":  ("NDX",  "NASDAQ"),
+                "RUT":  ("RUT",  "RUSSELL"),
+                "DJX":  ("DJX",  "CBOE"),
+                "VVIX": ("VVIX", "CBOE"),
+            }
+            if symbol in INDEX_SYMBOLS:
+                idx_sym, idx_exch = INDEX_SYMBOLS[symbol]
+                contract = _Index(idx_sym, idx_exch, "USD")
+            else:
+                contract = _Stock(symbol, "SMART", "USD")
 
             async def _fetch():
                 await pusher.ib.qualifyContractsAsync(contract)

@@ -1,5 +1,38 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher RPC: Index Contract Support — SHIPPED
+
+### Why
+After the RPC event-loop fix landed, the next pusher run surfaced:
+```
+Error 200, reqId 927: No security definition has been found for the
+request, contract: Stock(symbol='VIX', exchange='SMART', currency='USD')
+```
+That's IB rejecting the contract shape — VIX is a CBOE Index, not a
+Stock. The old `rpc_latest_bars` handler always built `Stock(...)` which
+fails for any cash index (VIX, SPX, NDX, etc).
+
+### Fix (`documents/scripts/ib_data_pusher.py`)
+Added an explicit `INDEX_SYMBOLS` lookup in `rpc_latest_bars`:
+```python
+INDEX_SYMBOLS = {
+    "VIX": ("VIX", "CBOE"), "SPX": ("SPX", "CBOE"),
+    "NDX": ("NDX", "NASDAQ"), "RUT": ("RUT", "RUSSELL"),
+    "DJX": ("DJX", "CBOE"), "VVIX": ("VVIX", "CBOE"),
+}
+```
+When the requested symbol is one of these, build an `Index(...)`
+contract; otherwise fall back to the existing `Stock(symbol, "SMART",
+"USD")` path. Whitelist is explicit so we don't accidentally promote a
+ticker that shares a name with an index.
+
+### Status of "last push never" diagnostic
+Diagnostic line `[PUSH] Skipping push — all buffers empty (...)` was
+added to `push_data_to_cloud()` but didn't appear in the operator's
+latest pusher log — most likely they restarted before pulling, or
+truncated logs. Awaiting fresh log to determine root cause.
+
+
 ## 2026-02 — Pusher RPC Bug Fix + Push Diagnostic — SHIPPED
 
 ### Symptoms (from user's pusher terminal logs after restart)
