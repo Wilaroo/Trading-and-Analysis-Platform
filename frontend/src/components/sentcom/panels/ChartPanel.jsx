@@ -12,6 +12,11 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { RefreshCw, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { safeGet } from '../../../utils/api';
+import {
+  fmtET12Sec,
+  chartTickMarkFormatterET,
+  chartCrosshairFormatterET,
+} from '../../../utils/timeET';
 import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
@@ -129,10 +134,19 @@ export const ChartPanel = ({
         borderColor: 'rgba(82, 82, 91, 0.4)',
         scaleMargins: { top: 0.08, bottom: 0.25 },
       },
+      // localization.timeFormatter — controls the crosshair date/time
+      // label. We force US Eastern Time, 12-hour clock so the operator
+      // sees "9:30 AM" / "1:55 PM" everywhere — never 24-hour military.
+      localization: {
+        timeFormatter: chartCrosshairFormatterET,
+      },
       timeScale: {
         borderColor: 'rgba(82, 82, 91, 0.4)',
         timeVisible: true,
         secondsVisible: false,
+        // tickMarkFormatter — the labels stamped along the x-axis.
+        // Same ET-12h normalization as the crosshair.
+        tickMarkFormatter: chartTickMarkFormatterET,
       },
       crosshair: {
         mode: 1,
@@ -579,7 +593,7 @@ export const ChartPanel = ({
           </span>
           {lastUpdated && !loading && (
             <span className="text-[10px] text-zinc-600 truncate">
-              · updated {new Date(lastUpdated).toLocaleTimeString('en-US', { hour12: false })}
+              · updated {fmtET12Sec(lastUpdated)} ET
             </span>
           )}
         </div>

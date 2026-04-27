@@ -53,7 +53,7 @@ const formatTimestamp = (iso) => {
   if (!iso) return '';
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
   } catch {
     return '';
   }
