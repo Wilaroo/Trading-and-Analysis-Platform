@@ -12,6 +12,24 @@ Open priorities, deferred ideas, and backlog. Move items to
 - Goal: fix "only relative-strength setups" — wave scanner falls back to
   14-symbol hardcoded list when `symbol_adv_cache` is empty.
 
+### P1 — Briefings content gaps (operator flagged 2026-04-27)
+- **Morning Prep auto-gameplan** is silent — investigate
+  `/api/assistant/coach/morning-briefing` + the journal-write step.
+  Cards correctly say "No game plan filed" because nothing wrote one.
+- **Mid-Day Recap empty-state** — when no fills, card should still show
+  *something* (regime, scanner-hit count, top-mover deltas). Add a
+  fallback row that pulls from `useMorningBriefing` data.
+- **Power Hour empty-state** — when no open positions, show top movers
+  + suggested setups for the close (read existing `/api/scanner/top-movers`
+  + `/api/scanner/wave-scan` rather than waiting for a fill).
+
+### P1 — Setup-found bot text (operator flagged 2026-04-27)
+- Operator says the "RS LEADER NVDA +6.8% vs SPY - Outperforming
+  market — TQS 51 (C)" copy is wrong but didn't specify how.
+  **Action:** ask operator what the copy *should* say, then fix the
+  server-side bot-narrative template (likely in
+  `backend/services/wave_scanner.py` or `enhanced_scanner.py`).
+
 ### P1 — Live Data Phase 4: retire Alpaca fallback
 - Set `ENABLE_ALPACA_FALLBACK=false`, run smoke for 1 trading day, then
   remove the Alpaca client + fixtures entirely.
@@ -20,6 +38,10 @@ Open priorities, deferred ideas, and backlog. Move items to
 - Visually confirm new ET 12-hour formatting on DGX after frontend
   hot-reload (chart x-axis, alerts row, S.O.C., briefings — see
   CHANGELOG `2026-04-27 — App-wide ET 12-Hour Time Format`).
+- Confirm chart x-axis now shows "Apr 27" labels at day boundaries
+  instead of looping `9:30 AM → 1:00 PM → 4:00 AM`.
+- Confirm Pusher RPC tile headline now reads `last 335ms` instead of
+  the misleading `avg 1117ms`.
 
 ### P2 — SEC EDGAR 8-K integration
 - Material-events feed for the Briefings panel.
@@ -27,10 +49,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 ### P3 — Quick wins
 - ⌘K palette: `>flatten all`, `>purge stale gaps`, `>reload glossary`.
 - "Dismissible forever" tooltip option on Help System.
-- Retry the 204 historical `qualify_failed` items via `/api/ib-collector/retry-failed`.
+- Retry the 222 historical `qualify_failed` items via `/api/ib-collector/retry-failed`
+  (click the red `222 DLQ` badge in the V5 header → opens NIA panel).
 - Auto-strategy-weighting (parked — see CHANGELOG `2026-02 — DEFERRED`).
 - Refactor monolithic `server.py` → routers/, models/, tests/ (defer
   until pipeline is 100% stable).
+- Build the Agent Brain memory system (Option A/C, scoped 2026-04-27 —
+  see chat history "Brain memory pinned for later").
 
 ---
 

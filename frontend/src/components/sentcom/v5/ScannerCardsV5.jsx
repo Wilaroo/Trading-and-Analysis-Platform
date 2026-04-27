@@ -85,6 +85,12 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
     if (!sym) return;
     const stage = s.gate_score != null || s.confidence != null ? 'eval' : 'scan';
     const existing = bySymbol.get(sym);
+    // Only treat p_win as a separate metric when the backend actually
+    // supplies it. Falling back to `confidence` here caused operators to
+    // see the same number twice ("conf 51% / P(win) 51%") which was
+    // misleading. Leave null so the metrics chip is hidden when only
+    // confidence is known.
+    const pWin = s.p_win ?? null;
     const card = {
       symbol: sym,
       stage,
@@ -93,7 +99,7 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       bot_text: s.bot_note || s.narrative || `${s.setup_type || 'setup'} flagged${s.confidence ? ` · conf ${formatPct(s.confidence)}` : ''}${s.relative_volume ? ` · RVol ${formatNum(s.relative_volume, 1)}×` : ''}.`,
       metrics: {
         gate: s.gate_score,
-        p_win: s.p_win ?? s.confidence,
+        p_win: pWin,
         sharpe: s.sharpe,
       },
       timestamp: s.timestamp || s.detected_at || s.created_at,

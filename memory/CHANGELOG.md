@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-27 — Scanner header count + P(win) duplication + Stream `scan` filter — SHIPPED
+
+### Why
+Operator screenshot showed "SCANNER · LIVE · 2 hits" with only 1 visible
+NVDA card, "P(win) 51%" identical to "conf 51%" in the same card, and
+the unified stream's `scan` filter chip was effectively dead. Three
+different bugs, all visible at once.
+
+### Scope
+- `components/sentcom/SentComV5View.jsx` — header now counts unique
+  symbols across `setups + alerts + positions` (matches the deduped
+  card list below). 1 NVDA setup + 1 NVDA alert = `1 hit`, not `2`.
+  Switched to singular/plural label ("1 hit" / "n hits").
+- `components/sentcom/v5/ScannerCardsV5.jsx` — `p_win` no longer falls
+  back to `confidence`. Card metrics chip is hidden when only confidence
+  is known, so operators stop seeing the same number twice.
+- `components/sentcom/v5/UnifiedStreamV5.jsx · classifyMessage()` —
+  added `scan` severity bucket matching `scanning`, `setup_found`,
+  `entry_zone`, `relative_strength`, `breakout`, `reversal`, plus text
+  fallbacks (`text.includes('scanning' | 'setup found')`). Without it
+  the `scan` filter chip matched zero events. Added matching
+  `text-violet-300` colour tokens to `TIME_COLOR_BY_SEV` and
+  `BOT_TAG_COLOR_BY_SEV`.
+
+### Verification
+- ESLint: clean across all 3 files.
+- Counting fix: trivially observable — the body always matches the header.
+- Filter fix: `scan` chip now matches scanner heartbeat and setup-found
+  events that previously fell through to `info`.
+
+### Operator notes (issues found in same screenshot but parked)
+
+These are not bugs, they're content-gap features that need backend
+work:
+
+- **Morning Prep "No game plan filed"** — gameplan auto-generation isn't
+  running, OR `/api/assistant/coach/morning-briefing` returns empty. Need
+  backend investigation: who is supposed to write into the journal
+  before 09:30 ET? (Logged to ROADMAP.)
+- **Mid-Day Recap with no fills shows nothing** — card has no fallback
+  for empty-state. Should pull regime / scanner hits / top movers when
+  positions are empty. (Logged to ROADMAP.)
+- **Power Hour with no positions shows nothing** — same — needs pre-
+  position thoughts (top movers + watchlist scan results). (Logged.)
+- **Setup-found bot text** — operator says it's "wrong" but didn't
+  specify how. Awaiting clarification before changing server-side
+  copy generation.
+
+The `222 DLQ` red badge is **working as designed** — it's
+`DeadLetterBadge.jsx` surfacing 222 historical-data requests that
+failed qualification. Click it to open NIA Data Collection and run
+`/api/ib-collector/retry-failed` to reattempt them.
+
+---
+
 ## 2026-04-27 — Chart day-boundary tick labels + RPC latency headline — SHIPPED
 
 ### Why

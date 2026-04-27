@@ -306,8 +306,18 @@ export const SentComV5View = ({
               <div className="v5-panel-title">Scanner · Live</div>
               <LiveDataChip compact />
             </div>
-            <div className="text-[9px] v5-mono text-zinc-500">
-              {(setups?.length ?? 0) + (alerts?.length ?? 0) + (positions?.length ?? 0)} hits
+            <div className="text-[9px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
+              {(() => {
+                // Count unique symbols across setups/alerts/positions so the
+                // header matches the deduped card list below (a single
+                // NVDA setup + NVDA alert collapses into 1 card, not 2).
+                const syms = new Set();
+                (setups || []).forEach(s => s?.symbol && syms.add(String(s.symbol).toUpperCase()));
+                (alerts || []).forEach(a => a?.symbol && syms.add(String(a.symbol).toUpperCase()));
+                (positions || []).forEach(p => p?.symbol && syms.add(String(p.symbol).toUpperCase()));
+                const n = syms.size;
+                return `${n} ${n === 1 ? 'hit' : 'hits'}`;
+              })()}
             </div>
           </div>
           <div className="overflow-y-auto flex-1 v5-scroll">

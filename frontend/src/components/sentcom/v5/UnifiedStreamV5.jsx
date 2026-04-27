@@ -13,6 +13,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 
 const TIME_COLOR_BY_SEV = {
+  scan:  'text-violet-300',
   order: 'text-yellow-400',
   fill:  'text-blue-400',
   win:   'text-emerald-400',
@@ -23,6 +24,7 @@ const TIME_COLOR_BY_SEV = {
 };
 
 const BOT_TAG_COLOR_BY_SEV = {
+  scan:  'text-violet-300',
   order: 'text-yellow-400',
   fill:  'text-blue-400',
   win:   'text-emerald-400',
@@ -38,14 +40,30 @@ const classifyMessage = (msg) => {
   // so severity classification matches what the backend actually decided.
   const kind = (msg.action_type || msg.event || msg.kind || msg.type || msg.severity || '').toLowerCase();
   const text = (msg.text || msg.message || msg.summary || msg.content || '').toLowerCase();
+  // Order matters — most-specific buckets first. Scanner/setup events used
+  // to fall through to "info", which made the `scan` filter chip dead and
+  // hid every scanner heartbeat behind the slate fallback.
   if (kind.includes('order') || kind.includes('queued') || kind.includes('bracket')) return 'order';
   if (kind.includes('fill') || kind.includes('trail') || kind.includes('stop_moved')) return 'fill';
   if (kind.includes('win') || (kind.includes('close') && (text.includes('pt') || text.includes('+$') || text.includes('+r')))) return 'win';
   if (kind.includes('loss') || (kind.includes('close') && (text.includes('sl') || text.includes('-$') || text.includes('stopped')))) return 'loss';
   if (kind.includes('skip') || kind.includes('veto') || kind.includes('block')) return 'skip';
   if (kind.includes('gate') || kind.includes('brain') || kind.includes('ai_') || kind.includes('decision')) return 'brain';
+  // Scanner family — `scanning`, `setup_found`, `scan_tick`, `entry_zone`,
+  // `relative_strength_leader`, etc. Match before the text fallbacks so
+  // even untyped scanner pings get the right severity colour.
+  if (
+    kind.includes('scan') ||
+    kind.includes('setup') ||
+    kind.includes('found') ||
+    kind.includes('entry_zone') ||
+    kind.includes('relative_strength') ||
+    kind.includes('breakout') ||
+    kind.includes('reversal')
+  ) return 'scan';
   if (text.includes('skip')) return 'skip';
   if (text.includes('gate') || text.includes('consensus')) return 'brain';
+  if (text.includes('scanning') || text.includes('setup found')) return 'scan';
   return 'info';
 };
 
