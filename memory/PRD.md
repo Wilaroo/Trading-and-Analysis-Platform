@@ -1,5 +1,48 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Strategy Mix Card — SHIPPED
+
+### Why
+The "only relative_strength fires" bug ran for multiple sessions before
+being noticed. A concentration metric on the dashboard would have
+surfaced it within the first 20 alerts.
+
+### Backend (`routers/scanner.py`)
+New endpoint `GET /api/scanner/strategy-mix?n=100`:
+- Aggregates the last N rows of `live_alerts` by `setup_type`.
+- Strips `_long` / `_short` suffix so paired strategies pool into one
+  bucket (e.g. `orb_long` + `orb_short` → `orb`).
+- Counts `STRONG_EDGE` alerts per bucket as a quality multiplier
+  ("this strategy fires often AND the AI agrees").
+- Returns `concentration_warning: true` when one strategy ≥ 70% of
+  total — operator sees a red flag without thinking.
+- `n` clamps to `[10, 500]`.
+
+### Frontend (`v5/StrategyMixCard.jsx`)
+- Mounted in V5 below the heartbeat tile (`PanelErrorBoundary`-wrapped).
+- Polls every 30s.
+- Renders horizontal-bar chart per setup_type with %, count, and
+  STRONG_EDGE count when present.
+- Shows a `XX% CONCENTRATION` warning chip when `concentration_warning`
+  is true.
+- Graceful empty state: `Strategy mix · waiting for first alerts`.
+- Test IDs on every interactive element: `strategy-mix-card`,
+  `strategy-mix-bucket-{setup_type}`, `strategy-mix-strong-edge-{...}`,
+  `strategy-mix-concentration-warning`, `strategy-mix-hidden-count`.
+
+### Tests
+7 new tests in `tests/test_strategy_mix.py` — all PASS:
+- empty alerts → empty buckets
+- `_long` / `_short` collapse into single bucket
+- 80/20 split → concentration_warning=true with top_strategy_pct=80
+- 25/25/25/25 split → concentration_warning=false
+- STRONG_EDGE counted separately per bucket
+- `n` param clamps cleanly across edge inputs
+- missing scanner service returns empty (no crash)
+
+53/53 across all related backend regression suites pass.
+
+
 ## 2026-02 — Adaptive RPC Fanout + Wave Auto-Subscription — SHIPPED
 
 ### Why

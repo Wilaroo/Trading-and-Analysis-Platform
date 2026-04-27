@@ -333,6 +333,83 @@ def get_available_setup_types():
     return {"success": True, "setup_types": types}
 
 
+@router.get("/strategy-mix")
+def get_strategy_mix(n: int = 100):
+    """Distribution of `setup_type` across the last N alerts.
+
+    Surfaces silent biases in the scanner — e.g. "85% of last 100 alerts
+    were `relative_strength_leader`" indicates the bot is overfit to one
+    regime/strategy. Used by the V5 StrategyMixCard so the operator (and
+    eventually the self-improving loop) can spot single-strategy
+    domination at a glance.
+    """
+    n = max(10, min(500, int(n or 100)))
+    if not _scanner_service:
+        return {"success": True, "n": 0, "buckets": [], "total": 0}
+
+    db = getattr(_scanner_service, "db", None)
+    if db is None:
+        return {"success": True, "n": 0, "buckets": [], "total": 0}
+
+    try:
+        cursor = db["live_alerts"].find(
+            {},
+            {"_id": 0, "setup_type": 1, "direction": 1, "created_at": 1, "ai_edge_label": 1},
+        ).sort("created_at", -1).limit(n)
+        rows = list(cursor)
+    except Exception as e:
+        logger.warning(f"strategy-mix aggregate failed: {e}")
+        return {"success": True, "n": 0, "buckets": [], "total": 0, "error": str(e)[:120]}
+
+    if not rows:
+        return {"success": True, "n": 0, "buckets": [], "total": 0}
+
+    # Count by `setup_type`. Strip _long / _short suffix so paired strategies
+    # are aggregated together (e.g. orb_long + orb_short → orb).
+    from collections import Counter
+    def _base(setup: str) -> str:
+        if not setup:
+            return "unknown"
+        s = str(setup)
+        for suf in ("_long", "_short"):
+            if s.endswith(suf):
+                return s[: -len(suf)]
+        return s
+
+    counts = Counter(_base(r.get("setup_type", "")) for r in rows)
+    total = sum(counts.values())
+    # STRONG_EDGE counts per bucket — surfaces "this strategy fires often
+    # AND has high AI edge" as a quality multiplier.
+    strong_edge_counts: dict = {}
+    for r in rows:
+        if r.get("ai_edge_label") == "STRONG_EDGE":
+            base = _base(r.get("setup_type", ""))
+            strong_edge_counts[base] = strong_edge_counts.get(base, 0) + 1
+
+    buckets = []
+    for setup_type, c in counts.most_common():
+        buckets.append({
+            "setup_type": setup_type,
+            "label": setup_type.replace("_", " ").title(),
+            "count": c,
+            "pct": round((c / total) * 100, 1),
+            "strong_edge_count": strong_edge_counts.get(setup_type, 0),
+        })
+
+    # Concentration metric: % of total taken by the single most common
+    # strategy. A red flag when ≥70%.
+    top_pct = buckets[0]["pct"] if buckets else 0
+    return {
+        "success": True,
+        "n": total,
+        "window": "last_n_alerts",
+        "buckets": buckets,
+        "total": total,
+        "top_strategy_pct": top_pct,
+        "concentration_warning": top_pct >= 70.0,
+    }
+
+
 @router.get("/summary")
 def get_scanner_summary():
     """

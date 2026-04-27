@@ -36,6 +36,7 @@ import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
+import { StrategyMixCard } from './v5/StrategyMixCard';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
@@ -280,6 +281,13 @@ export const SentComV5View = ({
           Reuses the shared usePusherHealth() hook (no extra polling). */}
       <PanelErrorBoundary label="pusher-heartbeat" compact>
         <PusherHeartbeatTile />
+      </PanelErrorBoundary>
+
+      {/* Strategy Mix — top setup_types across the last 100 alerts. Surfaces
+          single-strategy concentration ≥70% as a red flag (helped diagnose
+          the relative_strength domination bug in Feb-2026). */}
+      <PanelErrorBoundary label="strategy-mix" compact>
+        <StrategyMixCard />
       </PanelErrorBoundary>
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
