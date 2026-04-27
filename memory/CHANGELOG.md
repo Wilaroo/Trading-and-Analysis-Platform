@@ -2,6 +2,97 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — P1 batch: Live tick→Mongo, L2 dynamic routing, Briefings empty-states, Mongo index script
+
+Big lift in one batch — addresses the 4 P1s the operator specifically
+asked for. All shipped with regression tests; backend stays GREEN, all
+67 tests passing (26 new + 41 pre-existing).
+
+### 1. Live tick → ib_historical_data persister (architectural)
+- New service `services/tick_to_bar_persister.py` — hooks the
+  `/api/ib/push-data` ingest path. For every quote update from the
+  Windows pusher, samples (last_price, cumulative_volume) into rolling
+  1m / 5m / 15m / 1h buckets per symbol. On bucket-close, finalises an
+  OHLCV bar and upserts into `ib_historical_data` with
+  `source="live_tick"`.
+- Eliminates the operator's pain point (quote: *"we shouldn't need to be
+  constantly backfilling. there has to be a better way"*). For any
+  pusher-subscribed symbol, the historical cache is now always 100%
+  up-to-date through "right now" — chart's "PARTIAL · 50% COVERAGE"
+  badge will resolve naturally.
+- Volume math: per-bar = end_volume − start_volume (IB cumulative
+  semantics). Negative deltas (rare IB glitches) clamp to 0.
+- Wired into `routers/ib.py::receive_pushed_ib_data` (non-fatal — never
+  breaks the push hot path) and initialised in `server.py::_init_all_services`.
+- New endpoint `GET /api/ib/tick-persister-stats` for operator/agent
+  introspection (active builders, bars persisted, ticks observed).
+- Regression coverage: `tests/test_tick_to_bar_persister.py` (8 tests).
+
+### 2. L2 dynamic routing — Path B (top-3 EVAL → 3 paper-mode L2 slots)
+- **Pusher** (`documents/scripts/ib_data_pusher.py`):
+  - 3 new endpoints: `POST /rpc/subscribe-l2`, `POST /rpc/unsubscribe-l2`,
+    `GET /rpc/l2-subscriptions`. Reuse the existing `subscribe_level2` /
+    `unsubscribe_level2` helpers so the IB-cap check (3 slots) stays in
+    one place.
+  - Startup index-L2 disabled by default — slots reserved for dynamic
+    routing. Set `IB_PUSHER_STARTUP_L2=true` to revert.
+  - In-play auto-L2 disabled by default. Set `IB_PUSHER_AUTO_INPLAY_L2=true`
+    to revert to legacy in-play auto-subscribe.
+- **DGX backend** (`services/l2_router.py`): new background task that
+  every 15s computes the desired top-3 from `_live_alerts`
+  (priority DESC, TQS DESC, recency DESC, dedupe-by-symbol, freshness
+  ≤10 min, status=active), diffs against the pusher's current L2 set,
+  and sends sub/unsub deltas. Audit ring buffer of last-50 routing
+  decisions exposed via `GET /api/ib/l2-router-status`.
+- Disable with `ENABLE_L2_DYNAMIC_ROUTING=false`. The pusher endpoints
+  remain available for manual operator control.
+- Operator's path B reasoning ratified in implementation: regime engine
+  reads price (not L2 imbalance), so giving up startup index L2 is
+  safe. One IB clientId only — no second-session complexity.
+- Regression coverage: `tests/test_l2_router.py` (11 tests).
+
+### 3. Briefings empty-states (operator-flagged 2026-04-27)
+- **Backend** `services/gameplan_service.py::_auto_populate_game_plan`:
+  fetches current `MarketRegimeEngine` state + recommendation and
+  surfaces them as top-level `regime` / `bias` / `thesis` fields on the
+  game plan doc (also mirrored into `big_picture.market_regime` for
+  canonical home). Operator no longer has to hand-file a plan to see
+  the morning prep card hydrate.
+  - Verified live: `/api/journal/gameplan/today` now returns
+    `regime: "CONFIRMED_DOWN"`, `bias: "Bearish"`,
+    `thesis: "Correction mode. Reduce exposure..."` after delete+recreate.
+- **Frontend** `components/sentcom/v5/BriefingsV5.jsx`:
+  - **Morning Prep**: reads `gp.big_picture?.market_regime` as a
+    fallback so it hydrates from either shape; also derives a watchlist
+    from `stocks_in_play` when `gp.watchlist` is missing.
+  - **Mid-Day Recap**: when no fills/positions, shows regime + scanner
+    hits ("No fills yet · CONFIRMED_DOWN · scanner 6 hits") instead of
+    silent "No fills yet today"; expanded view surfaces watchlist
+    symbols.
+  - **Power Hour**: when no open positions, shows scanner hits + top-3
+    watchlist symbols ("Flat into close · scanner 6 hits · watch
+    NVDA, AAPL, AMZN") instead of "No open positions heading into
+    close"; expanded view shows full watchlist as setup ideas.
+
+### 4. Mongo index helper (operator-side)
+- New `backend/scripts/create_ib_historical_indexes.py` —
+  idempotent script that creates the compound index
+  `{bar_size: 1, date: -1}` (and `{symbol: 1, bar_size: 1, date: -1}`
+  if missing) on `ib_historical_data`. Drops `rebuild-adv-from-ib`
+  from 5+ minutes to seconds.
+- **Operator action required on DGX:**
+  ```
+  PYTHONPATH=backend /home/spark-1a60/venv/bin/python \\
+      backend/scripts/create_ib_historical_indexes.py
+  ```
+
+### Verification status
+- 67/67 backend tests passing.
+- `/api/ib/l2-router-status` live (running, 2 ticks, 0 errors).
+- `/api/ib/tick-persister-stats` live (waiting for pusher quotes).
+- `/api/journal/gameplan/today` live (returns regime + bias + thesis).
+- Frontend `BriefingsV5.jsx` lint clean.
+
 ## 2026-04-28 — Pusher cleanup + Wave-scanner stats + RPC subscription gate
 
 P0 + P1 batch from operator's end-of-day request list. All shipped with

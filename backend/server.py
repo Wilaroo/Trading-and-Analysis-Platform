@@ -586,6 +586,13 @@ def _init_all_services():
     index_universe = get_index_universe()
     wave_scanner = init_wave_scanner(watchlist_service=smart_watchlist, db=db)
 
+    # 2026-04-28: live tick → ib_historical_data persister. Hooks the
+    # /api/ib/push-data path so every quote contributes to rolling
+    # 1m/5m/15m/1h bars, upserted on bar-close. See
+    # services/tick_to_bar_persister.py for the rationale.
+    from services.tick_to_bar_persister import init_tick_to_bar_persister
+    init_tick_to_bar_persister(db)
+
     # Initialize market intel service (moved here to wire smart_watchlist)
     market_intel_service = get_market_intel_service()
     market_intel_service._db = db
@@ -3860,6 +3867,16 @@ async def startup_event():
     # Start weekly ADV cache recalculation (Sunday 10 PM ET)
     asyncio.create_task(_weekly_adv_recalc_loop())
     print("Weekly ADV cache recalc scheduler started (Sunday 10 PM ET)")
+
+    # 2026-04-28: Start L2 dynamic router (path B). Routes the 3
+    # paper-mode L2 slots to the top-3 EVAL-stage alerts every 15s.
+    try:
+        from services.l2_router import init_l2_router
+        _l2_router = init_l2_router(background_scanner)
+        _l2_router.start()
+        print("L2 dynamic router started (top-3 EVAL → 3 paper-mode L2 slots, 15s tick)")
+    except Exception as _l2_exc:
+        print(f"L2 dynamic router failed to start: {_l2_exc}")
     
     # --- Heavy initialization (non-blocking) ---
     # All heavy operations run in background tasks so the server accepts

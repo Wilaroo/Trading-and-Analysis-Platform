@@ -222,7 +222,60 @@ class GamePlanService:
                     "notes": "Day 2 continuation play"
                 }
                 game_plan["day_2_names"].append(day2_entry)
-        
+
+        # 2026-04-28: pull current market regime + bias so the V5
+        # MorningPrep card has something to show even when the operator
+        # hasn't filed a manual game plan yet. Both top-level (read by
+        # frontend `gp.regime || gp.market_regime`) AND inside
+        # `big_picture` (canonical home) so neither shape goes stale.
+        try:
+            from services.market_regime_engine import get_market_regime_engine
+            engine = get_market_regime_engine()
+            if engine is not None:
+                regime_dict = await engine.get_current_regime()
+                if regime_dict:
+                    # MarketRegimeEngine canonical key is `state`
+                    # ("CONFIRMED_UP" / "CONFIRMED_DOWN" / "HOLD" / etc).
+                    # Older callers used overall_regime / regime — read all
+                    # 3 so we work with any future shape change.
+                    regime_label = (
+                        regime_dict.get("state")
+                        or regime_dict.get("overall_regime")
+                        or regime_dict.get("regime")
+                    )
+                    # Bias derived from state (no separate bias field on
+                    # the engine output today).
+                    bias_label = None
+                    if isinstance(regime_label, str):
+                        if "UP" in regime_label.upper():
+                            bias_label = "Bullish"
+                        elif "DOWN" in regime_label.upper():
+                            bias_label = "Bearish"
+                        elif regime_label.upper() in ("HOLD", "NEUTRAL", "CHOPPY"):
+                            bias_label = "Neutral"
+                    if regime_label:
+                        game_plan["big_picture"]["market_regime"] = str(regime_label)
+                        game_plan["regime"] = str(regime_label)  # top-level for FE
+                        game_plan["market_regime"] = str(regime_label)
+                    if bias_label:
+                        game_plan["big_picture"]["bias"] = str(bias_label)
+                        game_plan["bias"] = str(bias_label)
+                    rec = regime_dict.get("recommendation")
+                    if rec:
+                        # Surface the engine's recommendation as the
+                        # gameplan thesis when operator hasn't filed one.
+                        game_plan["thesis"] = rec
+                    # Surface the watchlist as `watchlist` for V5 frontend.
+                    watchlist = [
+                        s.get("symbol") for s in game_plan.get("stocks_in_play", [])
+                        if s.get("symbol")
+                    ]
+                    if watchlist:
+                        game_plan["watchlist"] = watchlist
+        except Exception as e:
+            # Non-fatal — gameplan still saves with stocks_in_play / day_2.
+            print(f"gameplan auto-populate: regime fetch skipped: {e}")
+
         return game_plan
     
     async def _create_stock_in_play_entry(self, alert: Dict) -> Dict:

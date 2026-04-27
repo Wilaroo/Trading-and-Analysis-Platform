@@ -1091,7 +1091,15 @@ class IBDataPusher:
         return []
     
     def update_level2_subscriptions(self):
-        """Dynamically update L2 subscriptions based on in-play stocks"""
+        """Dynamically update L2 subscriptions based on in-play stocks.
+
+        Path B (2026-04-28): default OFF. The DGX backend's
+        l2_router.py owns L2 routing now (top-3 EVAL setups). Set
+        IB_PUSHER_AUTO_INPLAY_L2=true to revert to the legacy in-play
+        auto-subscribe behaviour.
+        """
+        if os.environ.get("IB_PUSHER_AUTO_INPLAY_L2", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
         # Paper trading has a limit of 3 market depth subscriptions
         # We keep SPY, QQQ, IWM as our core L2 symbols
         # Skip dynamic updates to avoid hitting the limit
@@ -1158,10 +1166,18 @@ class IBDataPusher:
         logger.info("Subscribing to market data...")
         self.subscribe_market_data(symbols)
         
-        # Subscribe to Level 2 for core symbols (only if enabled and supported)
+        # Subscribe to Level 2 for core symbols (only if enabled and supported).
+        # Path B (2026-04-28): all 3 paper-mode L2 slots are reserved for
+        # dynamic top-3 EVAL routing by the DGX backend (services/l2_router.py).
+        # Set IB_PUSHER_STARTUP_L2=true to revert to startup index L2 instead.
         if enable_level2 and self.level2_enabled:
-            core_l2 = [s for s in symbols if s != "VIX"]
-            self.subscribe_level2(core_l2)
+            startup_l2 = os.environ.get("IB_PUSHER_STARTUP_L2", "false").strip().lower() in {"1", "true", "yes", "on"}
+            if startup_l2:
+                core_l2 = [s for s in symbols if s != "VIX"]
+                logger.info(f"[L2] Startup L2 ENABLED via IB_PUSHER_STARTUP_L2 — subscribing {core_l2}")
+                self.subscribe_level2(core_l2)
+            else:
+                logger.info("[L2] Startup index L2 DISABLED — slots reserved for dynamic top-3 EVAL routing (set IB_PUSHER_STARTUP_L2=true to revert).")
         
         # Request account updates (fire and forget - don't wait)
         logger.info("Requesting account updates...")
@@ -3153,6 +3169,104 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
             "timestamp": datetime.now().isoformat(),
         }
 
+    # ----- L2 dynamic routing (added 2026-04-28, path B) ---------------
+    # Operator goal: route the 3 paper-mode L2 slots dynamically to the
+    # top-3 setups currently in EVAL stage, instead of locking them on
+    # SPY/QQQ/IWM at startup. Path B = give up startup index L2 entirely;
+    # the regime engine reads price (not depth-of-book imbalance) so this
+    # is safe. DGX backend (services/l2_router.py) computes the desired
+    # set every N seconds and sends sub/unsub deltas.
+    @app.post("/rpc/subscribe-l2")
+    def rpc_subscribe_l2(req: SymbolsRequest):
+        """Add symbols to L2 (market depth) subscriptions. Idempotent —
+        already-subscribed symbols are returned in `already_subscribed`.
+        Calls the same `subscribe_level2` helper used at startup so the
+        IB-cap check (3 simultaneous) stays in one place."""
+        if not pusher.ib.isConnected():
+            raise HTTPException(status_code=503, detail="IB Gateway not connected")
+        syms_in = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        if not syms_in:
+            return {"success": True, "added": [], "already_subscribed": [], "skipped_capped": []}
+
+        already = [s for s in syms_in if s in pusher.depth_subscriptions]
+        new_syms = [s for s in syms_in if s not in pusher.depth_subscriptions]
+        added: list = []
+        skipped_capped: list = []
+
+        if new_syms:
+            async def _do_subscribe_l2():
+                slots_used_before = len(pusher.depth_subscriptions)
+                # subscribe_level2 enforces MAX_L2_SUBSCRIPTIONS=3 itself,
+                # so anything that doesn't make it landed because of the
+                # cap (or qualify failure).
+                pusher.subscribe_level2(new_syms)
+                for s in new_syms:
+                    if s in pusher.depth_subscriptions:
+                        added.append(s)
+                    else:
+                        skipped_capped.append(s)
+                logger.info(
+                    "[RPC] /rpc/subscribe-l2: requested=%s added=%s skipped=%s "
+                    "(slots %d → %d / %d)",
+                    new_syms, added, skipped_capped,
+                    slots_used_before, len(pusher.depth_subscriptions), 3,
+                )
+
+            try:
+                _run_on_ib_loop(_do_subscribe_l2, timeout=20.0)
+            except Exception as exc:
+                logger.warning("[RPC] /rpc/subscribe-l2 error: %s", exc)
+                for s in new_syms:
+                    if s not in added and s not in skipped_capped:
+                        skipped_capped.append(s)
+
+        return {
+            "success": True,
+            "added": added,
+            "already_subscribed": already,
+            "skipped_capped": skipped_capped,
+            "total_l2_subscribed": len(pusher.depth_subscriptions),
+            "max_l2_slots": 3,
+        }
+
+    @app.post("/rpc/unsubscribe-l2")
+    def rpc_unsubscribe_l2(req: SymbolsRequest):
+        """Remove symbols from L2. Frees slots so the next /rpc/subscribe-l2
+        call can land. Idempotent — unknown symbols are a no-op."""
+        syms_in = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        if not syms_in:
+            return {"success": True, "removed": [], "not_found": []}
+
+        targets = [s for s in syms_in if s in pusher.depth_subscriptions]
+        not_found = [s for s in syms_in if s not in pusher.depth_subscriptions]
+
+        if targets:
+            async def _do_unsubscribe_l2():
+                pusher.unsubscribe_level2(targets)
+
+            try:
+                _run_on_ib_loop(_do_unsubscribe_l2, timeout=10.0)
+            except Exception as exc:
+                logger.warning("[RPC] /rpc/unsubscribe-l2 error: %s", exc)
+
+        return {
+            "success": True,
+            "removed": targets,
+            "not_found": not_found,
+            "total_l2_subscribed": len(pusher.depth_subscriptions),
+        }
+
+    @app.get("/rpc/l2-subscriptions")
+    def rpc_l2_subscriptions():
+        """Report the current L2 subscription set (symbols + count)."""
+        return {
+            "success": True,
+            "symbols": sorted(pusher.depth_subscriptions.keys()),
+            "total": len(pusher.depth_subscriptions),
+            "max_slots": 3,
+            "timestamp": datetime.now().isoformat(),
+        }
+
     def _run_uvicorn():
         try:
             uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
@@ -3164,7 +3278,8 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
     logger.info("=" * 55)
     logger.info(f"  [RPC] Server listening on http://{host}:{port}")
     logger.info(f"  [RPC] Endpoints: /rpc/health, /rpc/latest-bars, /rpc/quote-snapshot,")
-    logger.info(f"  [RPC]            /rpc/subscribe, /rpc/unsubscribe, /rpc/subscriptions")
+    logger.info(f"  [RPC]            /rpc/subscribe, /rpc/unsubscribe, /rpc/subscriptions,")
+    logger.info(f"  [RPC]            /rpc/subscribe-l2, /rpc/unsubscribe-l2, /rpc/l2-subscriptions")
     logger.info("=" * 55)
     return True
 

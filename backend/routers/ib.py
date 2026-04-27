@@ -444,6 +444,22 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
         # Merge quotes
         if request.quotes:
             _pushed_ib_data["quotes"].update(request.quotes)
+            # 2026-04-28: feed live ticks into the bar persister so we
+            # build 1m/5m/15m/1h OHLCV bars in real-time and upsert them
+            # into ib_historical_data on bar-close. Eliminates the chart's
+            # "PARTIAL coverage" badge for symbols the pusher is streaming.
+            try:
+                from services.tick_to_bar_persister import (
+                    get_tick_to_bar_persister,
+                )
+                _bars_finalized = get_tick_to_bar_persister().on_push(request.quotes)
+                if _bars_finalized:
+                    logger.debug(
+                        f"tick_to_bar: {_bars_finalized} bars finalized & upserted"
+                    )
+            except Exception as _tb_exc:
+                # Non-fatal: never break the push hot path.
+                logger.debug(f"tick_to_bar persister failed: {_tb_exc}")
         
         # Update account data
         if request.account:
@@ -5714,6 +5730,39 @@ def get_historical_data_queue_stats():
     except Exception as e:
         logger.error(f"Error getting queue stats: {e}")
         return {"pending": 0, "completed": 0, "failed": 0, "total": 0, "progress_pct": 0}
+
+
+@router.get("/tick-persister-stats")
+def get_tick_persister_stats():
+    """
+    Introspection for the live tick → ib_historical_data persister.
+
+    Operator/agent uses this to verify that subscribed symbols are
+    being persisted into `ib_historical_data` in real time (and that
+    the chart's "PARTIAL coverage" badge is genuinely going away because
+    bars are landing, not because someone ran smart-backfill again).
+    """
+    try:
+        from services.tick_to_bar_persister import get_tick_to_bar_persister
+        return {"success": True, **get_tick_to_bar_persister().stats()}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)[:200]}
+
+
+@router.get("/l2-router-status")
+def get_l2_router_status():
+    """
+    Introspection for the L2 dynamic router (top-3 EVAL → paper-mode L2).
+
+    Surfaces tick count, last-routed timestamp, current desired set, and
+    a ring buffer of the last 10 routing decisions so the operator can
+    verify which symbols are getting depth-of-book in real time.
+    """
+    try:
+        from services.l2_router import get_l2_router
+        return {"success": True, **get_l2_router().status()}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)[:200]}
 
 
 @router.get("/pusher-health")

@@ -23,50 +23,22 @@ Open priorities, deferred ideas, and backlog. Move items to
   subscription~~ ✅ Done — new `subscriptions()` cache + gate in
   `services/ib_pusher_rpc.py` + 7 regression tests.
 
-### P1 — L2 dynamic routing for top-3 EVAL alerts (operator-requested)
-- **Why:** L2 is currently fixed at startup (SPY/QQQ/IWM/DIA/XOM
-  attempted, only 3 succeed due to IB cap). Operator wants L2 used
-  surgically: only request L2 for the **top 3 setups currently in
-  EVAL stage** so depth-of-book is fresh on the alerts being
-  evaluated, not wasted on indices that don't change strategy.
-- **Design (operator approved "use my judgment"):**
-  - Indices SPY/QQQ/IWM keep startup L2 (regime read).
-  - Wait — that's 3 already at the IB cap. If we want to route L2
-    dynamically to top-3 EVAL alerts, we need to give up the index L2
-    OR negotiate the cap higher (IB account upgrade). **Decision point
-    for next session.** Two clean paths:
-    - **A.** Keep startup index L2; dynamic L2 is layered on top of
-      a separate IB session (clientId 16) — adds complexity but
-      guarantees both pools.
-    - **B.** Give up index L2 entirely; dynamic L2 only flows to top-3
-      EVAL alerts; indices use top-of-book quotes only.
-  - Either way: pusher gets new endpoints `/rpc/subscribe-l2`,
-    `/rpc/unsubscribe-l2`; DGX backend tracks top-3 EVAL alerts and
-    sends sub/unsub deltas as alerts enter/leave EVAL.
+### P1 — L2 dynamic routing for top-3 EVAL alerts ✅ SHIPPED 2026-04-28 (Path B)
+- Pusher: `/rpc/subscribe-l2`, `/rpc/unsubscribe-l2`, `/rpc/l2-subscriptions`.
+- Backend: `services/l2_router.py` (15s tick, top-3 EVAL diff routing).
+- Path B chosen — startup index L2 disabled (set
+  `IB_PUSHER_STARTUP_L2=true` to revert). One IB clientId, no second
+  session needed.
+- Disable globally with `ENABLE_L2_DYNAMIC_ROUTING=false`.
+- Status endpoint: `GET /api/ib/l2-router-status`.
+- See CHANGELOG 2026-04-28 entry #2 for full details.
 
-### P1 — ⭐ Live tick → Mongo bar persistence (architectural)
-- **Operator quote:** *"we shouldn't need to be constantly
-  backfilling. there has to be a better way to get a cache live data."*
-- **Why:** Today's bars only exist if `smart-backfill` was run today
-  for that symbol. The chart's "PARTIAL · 50% COVERAGE" badge is the
-  visible symptom. Root cause: the pusher's live tick stream isn't
-  being persisted into `ib_historical_data` — it's only used in-memory.
-- **Design:**
-  - As pusher streams ticks → DGX backend builds 1m/5m/15m/1h bars
-    in a rolling window per symbol.
-  - On bar-close (e.g. when a 5m bar's window ends), `upsert` it into
-    `ib_historical_data` keyed on `(symbol, bar_size, date)`.
-  - Existing `smart-backfill` reduced to: (i) initial seed for new
-    symbols, (ii) gap-filling for symbols not currently subscribed.
-  - Result: for any pusher-subscribed symbol, the historical cache is
-    always 100% up-to-date through "right now" — chart never shows
-    PARTIAL again on subscribed symbols.
-- **Scope:** ~45-60 min done right. Touches `enhanced_scanner` /
-  `realtime_bar_builder` / `ib_historical_collector`. New service
-  `tick_to_bar_persister.py` is probably the cleanest seam.
-- **Test plan:** subscribe pusher to SPY (already), wait 5 min,
-  query Mongo for SPY 1m bars created in the last 5 min — should
-  see them appear without any backfill being run.
+### P1 — ⭐ Live tick → Mongo bar persistence ✅ SHIPPED 2026-04-28
+- New `services/tick_to_bar_persister.py` builds 1m/5m/15m/1h bars
+  from `/api/ib/push-data` quote stream and upserts to
+  `ib_historical_data` with `source="live_tick"`.
+- Status endpoint: `GET /api/ib/tick-persister-stats`.
+- See CHANGELOG 2026-04-28 entry #1 for full details.
 
 ### P0 — Pusher RPC latency partially recovered
 - After backend restart at ~3:06 PM ET, RPC latency dropped from 350s
@@ -83,13 +55,14 @@ Open priorities, deferred ideas, and backlog. Move items to
   `wave_scanner.record_scan_complete()` to roll the counters forward.
   Fix wires the callback after every successful scan cycle.
 
-### P1 — Briefings content gaps (operator flagged 2026-04-27)
-- **Morning Prep auto-gameplan** is silent — investigate
-  `/api/assistant/coach/morning-briefing` + the journal-write step.
-- **Mid-Day Recap empty-state** — when no fills, card should still
-  show regime/scanner-hit count/top-mover deltas.
-- **Power Hour empty-state** — show top movers + suggested setups for
-  the close.
+### P1 — Briefings content gaps ✅ SHIPPED 2026-04-28 (frontend + backend)
+- Backend: `_auto_populate_game_plan` now fetches MarketRegimeEngine
+  state + recommendation; surfaces `regime` / `bias` / `thesis` at
+  top-level of the gameplan doc.
+- Frontend: Morning Prep / Mid-Day Recap / Power Hour cards all read
+  the new shape with fallbacks (no more "No game plan filed" silence;
+  empty-state recap + power hour show regime + scanner hits + watchlist).
+- See CHANGELOG 2026-04-28 entry #3.
 
 ### P1 — Setup-found bot text (operator flagged 2026-04-27)
 - Operator says "RS LEADER NVDA +6.8% vs SPY - Outperforming market —
@@ -103,18 +76,14 @@ Open priorities, deferred ideas, and backlog. Move items to
   exists. Returns 0 simply because no daily setups have fired this
   session. No code change required.
 
-### P1 — Mongo aggregation index for `rebuild-adv-from-ib`
-- Add compound `{bar_size: 1, date: -1}` on `ib_historical_data`.
-  Without it, the rebuild aggregation full-scans 13.5M docs and spills
-  to disk (5+ min). With it: seconds.
+### P1 — Mongo aggregation index for `rebuild-adv-from-ib` ✅ SCRIPT SHIPPED 2026-04-28
+- Operator-side script: `backend/scripts/create_ib_historical_indexes.py`.
+  Idempotent. Creates `{bar_size: 1, date: -1}` and
+  `{symbol: 1, bar_size: 1, date: -1}` if missing.
 - Run on DGX:
   ```
-  ~/venv/bin/python -c "
-  from pymongo import MongoClient; import os
-  db = MongoClient(os.environ.get('MONGO_URL', 'mongodb://localhost:27017'))[os.environ.get('DB_NAME', 'tradecommand')]
-  db.ib_historical_data.create_index([('bar_size', 1), ('date', -1)], background=True, name='bar_size_1_date_-1')
-  print('index created')
-  "
+  PYTHONPATH=backend /home/spark-1a60/venv/bin/python \\
+      backend/scripts/create_ib_historical_indexes.py
   ```
 
 ### P1 — Live Data Phase 4: retire Alpaca fallback
@@ -148,16 +117,7 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ### P0 — Wave-scanner: ✅ SHIPPED — see CHANGELOG 2026-04-28.
 
-### P1 — Briefings content gaps (operator flagged 2026-04-27)
-- **Morning Prep auto-gameplan** is silent — investigate
-  `/api/assistant/coach/morning-briefing` + the journal-write step.
-  Cards correctly say "No game plan filed" because nothing wrote one.
-- **Mid-Day Recap empty-state** — when no fills, card should still show
-  *something* (regime, scanner-hit count, top-mover deltas). Add a
-  fallback row that pulls from `useMorningBriefing` data.
-- **Power Hour empty-state** — when no open positions, show top movers
-  + suggested setups for the close (read existing `/api/scanner/top-movers`
-  + `/api/scanner/wave-scan` rather than waiting for a fill).
+### P1 — Briefings: ✅ shipped — see CHANGELOG 2026-04-28 entry #3.
 
 ### P1 — Setup-found bot text (operator flagged 2026-04-27)
 - Operator says the "RS LEADER NVDA +6.8% vs SPY - Outperforming
@@ -167,19 +127,7 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ### P1 — `/api/scanner/daily-alerts`: ❌ closed (not a bug) — see CHANGELOG 2026-04-28.
 
-### P1 — Mongo aggregation index for `rebuild-adv-from-ib` is missing
-- Add compound index `{bar_size: 1, date: -1}` on `ib_historical_data`.
-  Without it, the rebuild aggregation full-scans 13.5M docs and spills
-  to disk. With it, expect rebuild in seconds instead of 5+ min.
-- Run on DGX:
-  ```
-  ~/venv/bin/python -c "
-  from pymongo import MongoClient; import os
-  db = MongoClient(os.environ.get('MONGO_URL', 'mongodb://localhost:27017'))[os.environ.get('DB_NAME', 'tradecommand')]
-  db.ib_historical_data.create_index([('bar_size', 1), ('date', -1)], background=True, name='bar_size_1_date_-1')
-  print('index created')
-  "
-  ```
+### P1 — Mongo index: ✅ script shipped — see CHANGELOG 2026-04-28 entry #4.
 
 ### P1 — Live Data Phase 4: retire Alpaca fallback
 - Set `ENABLE_ALPACA_FALLBACK=false`, run smoke for 1 trading day, then

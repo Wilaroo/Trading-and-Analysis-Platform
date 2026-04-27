@@ -83,9 +83,11 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onO
   // Window: 08:00 ET → 09:30 ET (pre-market prep)
   const state = statusFor(8 * 60, 9.5 * 60);
 
-  const regime = gp?.regime || gp?.market_regime || scanner?.regime;
-  const bias = gp?.bias || gp?.market_bias;
-  const watch = gp?.watchlist || gp?.symbols || [];
+  // Fallback: backend gameplan service stores regime in big_picture.market_regime
+  // — read both shapes so the card hydrates even when only one is populated.
+  const regime = gp?.regime || gp?.market_regime || gp?.big_picture?.market_regime || scanner?.regime;
+  const bias = gp?.bias || gp?.market_bias || gp?.big_picture?.bias;
+  const watch = gp?.watchlist || gp?.symbols || (Array.isArray(gp?.stocks_in_play) ? gp.stocks_in_play.map(s => s?.symbol).filter(Boolean) : []);
   const maxRisk = drc?.max_daily_risk ?? drc?.max_daily_r;
   const drcHealth = drc?.status || drc?.health;
   const scannerHits = scanner?.total_hits ?? scanner?.active_setups ?? 0;
@@ -173,13 +175,20 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onO
 };
 
 
-const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
+const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick }) => {
   const state = statusFor(11.5 * 60, 13 * 60);   // 11:30 → 13:00 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
   const open = useMemo(() => (positions || []).filter(p => p?.status !== 'closed'), [positions]);
   const wins = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
   const losses = closed.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
+
+  // 2026-04-28 fallback — when no fills/positions, show scanner + regime
+  // pulse instead of "No fills yet today" silence (operator-flagged).
+  const scanner = briefing?.scanner;
+  const gp = briefing?.game_plan;
+  const regime = gp?.regime || gp?.market_regime || gp?.big_picture?.market_regime || scanner?.regime;
+  const scannerHits = scanner?.total_hits ?? scanner?.active_setups ?? 0;
 
   return (
     <div
@@ -197,7 +206,17 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClic
       </div>
       <div className="v5-why mt-1">
         {(closed.length === 0 && open.length === 0) ? (
-          <span className="text-zinc-500">No fills yet today.</span>
+          // Fallback content — regime + scanner pulse so the card is never
+          // empty during the lunch lull.
+          (regime || scannerHits > 0) ? (
+            <>
+              <span className="text-zinc-500">No fills yet · </span>
+              {regime && <span className="text-zinc-200 font-semibold">{regime}</span>}
+              {scannerHits > 0 && <span>{regime ? ' · ' : ''}scanner {scannerHits} hits</span>}
+            </>
+          ) : (
+            <span className="text-zinc-500">No fills yet today.</span>
+          )
         ) : (
           <>
             <span className={wins >= losses ? 'v5-up' : 'v5-down'}>{wins}W · {losses}L</span>
@@ -222,16 +241,40 @@ const MidDayRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClic
           })}
         </div>
       )}
+      {/* Empty-state expand: surface scanner watchlist so operator has
+          something actionable to skim mid-day. */}
+      {expanded && closed.length === 0 && open.length === 0 && Array.isArray(gp?.watchlist) && gp.watchlist.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+          <div>
+            <span className="text-zinc-500">Watchlist: </span>
+            {gp.watchlist.slice(0, 8).map((sym, i) => (
+              <React.Fragment key={sym + i}>
+                {i > 0 && <span className="text-zinc-600">, </span>}
+                <ClickableSymbol symbol={sym} onSymbolClick={onSymbolClick} className="text-zinc-300 font-semibold" />
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 
-const PowerHourCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
+const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick }) => {
   const state = statusFor(15 * 60, 15.75 * 60); // 15:00 → 15:45 ET
 
   const open = (positions || []).filter(p => p?.status !== 'closed');
   const atRiskCount = open.filter(p => (p.unrealized_pnl ?? p.pnl ?? 0) < 0).length;
+
+  // 2026-04-28 fallback — when no open positions, surface the top scanner
+  // watchlist names so the operator has setups to skim for the close
+  // (operator-flagged: "show top movers + suggested setups").
+  const gp = briefing?.game_plan;
+  const scanner = briefing?.scanner;
+  const fallbackWatch = (Array.isArray(gp?.watchlist) ? gp.watchlist : [])
+    .filter(Boolean).slice(0, 5);
+  const scannerHits = scanner?.total_hits ?? scanner?.active_setups ?? 0;
 
   return (
     <div
@@ -249,7 +292,24 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick 
       </div>
       <div className="v5-why mt-1">
         {open.length === 0 ? (
-          <span className="text-zinc-500">No open positions heading into close.</span>
+          fallbackWatch.length > 0 || scannerHits > 0 ? (
+            <>
+              <span className="text-zinc-500">Flat into close · </span>
+              {scannerHits > 0 && <span>scanner {scannerHits} hits</span>}
+              {fallbackWatch.length > 0 && (
+                <span>{scannerHits > 0 ? ' · watch ' : 'watch '}
+                  {fallbackWatch.slice(0, 3).map((sym, i) => (
+                    <React.Fragment key={sym + i}>
+                      {i > 0 && <span className="text-zinc-600">, </span>}
+                      <ClickableSymbol symbol={sym} onSymbolClick={onSymbolClick} className="text-zinc-300 font-semibold" />
+                    </React.Fragment>
+                  ))}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-zinc-500">No open positions heading into close.</span>
+          )
         ) : (
           <>
             <span>{open.length} open</span>
@@ -271,6 +331,20 @@ const PowerHourCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick 
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Empty-state expand: full watchlist for the close. */}
+      {expanded && open.length === 0 && fallbackWatch.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+          <div>
+            <span className="text-zinc-500">Setups for the close: </span>
+            {fallbackWatch.map((sym, i) => (
+              <React.Fragment key={sym + i}>
+                {i > 0 && <span className="text-zinc-600">, </span>}
+                <ClickableSymbol symbol={sym} onSymbolClick={onSymbolClick} className="text-zinc-300 font-semibold" />
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -365,6 +439,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
       <MidDayRecapCard
         positions={positions}
         totalPnl={totalPnl}
+        briefing={briefing}
         expanded={expandedKey === 'midday'}
         onToggle={() => toggle('midday')}
         onSymbolClick={onSymbolClick}
@@ -372,6 +447,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
       <PowerHourCard
         positions={positions}
         totalPnl={totalPnl}
+        briefing={briefing}
         expanded={expandedKey === 'powerhour'}
         onToggle={() => toggle('powerhour')}
         onSymbolClick={onSymbolClick}
