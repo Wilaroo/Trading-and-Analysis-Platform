@@ -816,23 +816,52 @@ class IBDataPusher:
             logger.debug(f"Error parsing fundamental XML for {symbol}: {e}")
     
     def fetch_news_providers(self):
-        """Fetch available news providers from IB"""
-        try:
-            providers = self.ib.reqNewsProviders()
-            self.ib.sleep(0.5)
-            
-            if providers:
-                self.news_providers = []
-                for p in providers:
-                    self.news_providers.append({
-                        "code": p.providerCode if hasattr(p, 'providerCode') else str(p),
-                        "name": p.providerName if hasattr(p, 'providerName') else str(p)
-                    })
-                logger.info(f"News providers: {[p['code'] for p in self.news_providers]}")
+        """Fetch available news providers from IB (5s watchdog).
+
+        Same hang-defense rationale as `request_account_updates`: when the
+        RPC server's uvicorn thread is contending with ib_insync's loop,
+        any sync IB call can deadlock. We run this in a worker with a
+        5-second timeout. Without news providers we just push an empty
+        list — non-critical.
+        """
+        import threading as _threading
+        result_holder: dict = {"done": False, "providers": [], "error": None}
+
+        def _do_fetch():
+            try:
+                providers = self.ib.reqNewsProviders()
+                self.ib.sleep(0.5)
+                if providers:
+                    result_holder["providers"] = [
+                        {
+                            "code": p.providerCode if hasattr(p, "providerCode") else str(p),
+                            "name": p.providerName if hasattr(p, "providerName") else str(p),
+                        }
+                        for p in providers
+                    ]
+                result_holder["done"] = True
+            except Exception as e:
+                result_holder["error"] = e
+
+        worker = _threading.Thread(
+            target=_do_fetch, name="ib-news-providers", daemon=True
+        )
+        worker.start()
+        worker.join(timeout=5.0)
+
+        if worker.is_alive():
+            logger.warning(
+                "  reqNewsProviders() did not return in 5s — proceeding without news. "
+                "Push loop will start with empty news_providers."
+            )
+            return self.news_providers  # whatever it was (likely [])
+        if result_holder["error"]:
+            logger.warning(f"Could not fetch news providers: {result_holder['error']}")
             return self.news_providers
-        except Exception as e:
-            logger.warning(f"Could not fetch news providers: {e}")
-            return []
+        if result_holder["providers"]:
+            self.news_providers = result_holder["providers"]
+            logger.info(f"News providers: {[p['code'] for p in self.news_providers]}")
+        return self.news_providers
     
     def fetch_news_for_symbols(self, symbols: List[str], max_results: int = 5):
         """
@@ -993,18 +1022,58 @@ class IBDataPusher:
                 logger.warning(f"Multiple push failures - slowing to {self.push_interval:.1f}s interval")
     
     def request_account_updates(self):
-        """Request account and position updates (non-blocking)"""
+        """Request account and position updates.
+
+        IMPORTANT: ib_insync's `IB.reqAccountUpdates(account=...)` looks
+        non-blocking on paper, but in practice it can hang when the IB
+        event loop is contended by another thread (e.g. our RPC server's
+        uvicorn thread). When it hangs, the push loop never starts and
+        the DGX backend's "last push never" banner stays red forever.
+
+        Fix: run the call inside a worker thread with a 5-second hard
+        timeout. If it doesn't return in time we just give up and proceed
+        — the rest of the pipeline (positions polled on demand, account
+        values pulled via `accountValues()` later) doesn't depend on the
+        streaming subscription.
+        """
+        import threading as _threading
+        accounts = []
         try:
-            accounts = self.ib.managedAccounts()
-            if accounts:
+            accounts = self.ib.managedAccounts() or []
+        except Exception as e:
+            logger.error(f"  managedAccounts() failed: {e}")
+            return
+        if not accounts:
+            logger.warning("  No managed accounts found — skipping account updates")
+            return
+
+        result_holder = {"done": False, "error": None}
+
+        def _do_request():
+            try:
                 # ib_insync's IB.reqAccountUpdates only accepts `account` —
                 # the underlying `subscribe` toggle lives on ib.client.
-                # Calling with just `account` subscribes by default.
                 self.ib.reqAccountUpdates(account=accounts[0])
-                logger.info(f"  Requested account updates for {accounts[0]}")
-        except Exception as e:
-            logger.error(f"Account update request error: {e}")
-        logger.info("  Account update request sent (non-blocking)")
+                result_holder["done"] = True
+            except Exception as e:
+                result_holder["error"] = e
+
+        worker = _threading.Thread(
+            target=_do_request, name="ib-acct-updates", daemon=True
+        )
+        worker.start()
+        worker.join(timeout=5.0)
+
+        if worker.is_alive():
+            logger.warning(
+                "  reqAccountUpdates() did not return in 5s — proceeding anyway. "
+                "Account streaming may be delayed; positions will be polled on demand."
+            )
+            return
+        if result_holder["error"]:
+            logger.error(f"  Account update request error: {result_holder['error']}")
+            return
+        logger.info(f"  Requested account updates for {accounts[0]}")
     
     def fetch_inplay_stocks(self) -> List[str]:
         """Fetch current in-play stocks from cloud backend for L2 subscription"""

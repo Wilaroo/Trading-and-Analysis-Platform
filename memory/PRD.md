@@ -1,5 +1,50 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher Hang Diagnosis & Fix: `reqAccountUpdates` Watchdog — SHIPPED
+
+### Root cause (FOUND)
+With the operator's pusher logs cut off at exactly:
+```
+10:36:02 [INFO] Requesting account updates...
+```
+followed by total silence (no `Account updates requested`, no `Skipping
+fundamental data`, no `News providers:`, no `STARTING PUSH LOOP`, no
+`Pushing:`), the pusher was clearly **hanging inside
+`request_account_updates()`** — meaning `self.ib.reqAccountUpdates()` was
+deadlocking. Confirmed by the DGX heartbeat showing `push_count_total=0`
++ `rpc_call_count_total=73` (RPC works, push doesn't).
+
+The likely deadlock cause: ib_insync is not thread-safe, and after the
+RPC server's uvicorn thread joined the process, sync IB calls on the
+main thread can race with coroutine dispatches from the FastAPI thread.
+`reqAccountUpdates()` waits for the first account-value event and never
+gets it.
+
+### Fix (`documents/scripts/ib_data_pusher.py`)
+Layered defense — both blocking sync IB calls between "subscriptions
+done" and "push loop start" now have a 5-second worker-thread watchdog:
+
+1. **`request_account_updates()`** — runs `IB.reqAccountUpdates(account=...)`
+   in a daemon thread with a 5s join. If it hangs, log a clear warning
+   and proceed. Position data still flows via on-demand `IB.positions()`
+   so we lose nothing critical.
+
+2. **`fetch_news_providers()`** — same worker-thread + 5s timeout pattern.
+   News providers are non-essential; empty list is fine.
+
+Both watchdog patterns log explicit "did not return in 5s — proceeding
+anyway" messages so future hangs are obvious in the log.
+
+### Expected behavior after operator pulls
+After git pull on Windows + restart:
+1. Logs reach `==> STARTING PUSH LOOP (TRADING ONLY)` (proves push loop
+   actually started).
+2. Within 10s: first `Pushing: N quotes …` line.
+3. Within 10s: `Push OK! Cloud received: …`.
+4. DGX `/api/ib/pusher-health → heartbeat.push_count_total` becomes > 0.
+5. UI's red "IB PUSHER DEAD · last push never" banner DISAPPEARS.
+
+
 ## 2026-02 — Pusher Heartbeat Tile — SHIPPED
 
 ### Why
