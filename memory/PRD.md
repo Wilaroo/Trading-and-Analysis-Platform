@@ -1,5 +1,40 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — "Top Edge" Filter Chip on Live Alerts Panel — SHIPPED
+
+### Why
+Now that every alert ships with `ai_edge_label`, the panel can be turned
+into a curated "the AI is unusually confident here, look closely" feed
+instead of a chronological dump.
+
+### What
+**`LiveAlertsPanel.jsx`** got a 3-chip filter row above the alerts list:
+  * **All** (default) — every alert, including INSUFFICIENT_DATA
+  * **Above baseline** — `STRONG_EDGE` + `ABOVE_BASELINE` (delta ≥ +5pp)
+  * **Top edge** — `STRONG_EDGE` only (delta ≥ +15pp), Zap icon, fuchsia pill
+
+The choice is **persisted in `localStorage`** (`liveAlerts.edgeFilter`)
+so the operator's preference survives page reload.
+
+When a non-ALL filter hides everything, the empty state explains how
+many alerts were filtered out and shows a "switch to All" link
+(`data-testid="ai-edge-filter-clear-link"`).
+
+When a filter is active and at least one alert is hidden, a counter pill
+appears on the right of the chip row
+(`data-testid="ai-edge-filter-hidden-count"`).
+
+### Test IDs
+  * `ai-edge-filter-row`, `ai-edge-filter-all`, `ai-edge-filter-above`,
+    `ai-edge-filter-top`
+  * `ai-edge-filter-empty-state`, `ai-edge-filter-clear-link`
+  * `ai-edge-filter-hidden-count`
+
+### Validation
+Frontend lint clean. 39/39 backend regression tests still green
+(no backend touched).
+
+
 ## 2026-02 — AI Confidence Delta + Live-Bar Overlay — SHIPPED
 
 ### Why

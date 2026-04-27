@@ -619,6 +619,18 @@ const LiveAlertsPanel = ({
   const [connected, setConnected] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  // AI Edge filter — persisted across sessions so the operator's choice
+  // sticks. Three values: 'ALL' (default), 'ABOVE' (delta >= +5pp), and
+  // 'TOP_EDGE' (delta >= +15pp). Alerts with INSUFFICIENT_DATA are
+  // included under ALL but excluded once a filter is applied.
+  const [edgeFilter, setEdgeFilter] = useState(() => {
+    try {
+      return localStorage.getItem('liveAlerts.edgeFilter') || 'ALL';
+    } catch { return 'ALL'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('liveAlerts.edgeFilter', edgeFilter); } catch (_) { /* noop */ }
+  }, [edgeFilter]);
   const eventSourceRef = useRef(null);
   const alertsContainerRef = useRef(null);
   
@@ -811,10 +823,22 @@ const LiveAlertsPanel = ({
     };
   }, [fetchStatus, fetchAlerts, fetchWatchlist, connectToStream]);
   
+  // Apply AI Edge filter before grouping by priority. STRONG_EDGE is the
+  // tightest filter; ABOVE_BASELINE is a wider net that also includes
+  // STRONG. ALL shows everything (default).
+  const passesEdgeFilter = (a) => {
+    if (edgeFilter === 'ALL') return true;
+    if (edgeFilter === 'TOP_EDGE') return a.ai_edge_label === 'STRONG_EDGE';
+    if (edgeFilter === 'ABOVE') return a.ai_edge_label === 'STRONG_EDGE' || a.ai_edge_label === 'ABOVE_BASELINE';
+    return true;
+  };
+  const filteredAlerts = alerts.filter(passesEdgeFilter);
+  const filteredOutCount = alerts.length - filteredAlerts.length;
+
   // Group alerts by priority
-  const criticalAlerts = alerts.filter(a => a.priority === 'critical');
-  const highAlerts = alerts.filter(a => a.priority === 'high');
-  const otherAlerts = alerts.filter(a => !['critical', 'high'].includes(a.priority));
+  const criticalAlerts = filteredAlerts.filter(a => a.priority === 'critical');
+  const highAlerts = filteredAlerts.filter(a => a.priority === 'high');
+  const otherAlerts = filteredAlerts.filter(a => !['critical', 'high'].includes(a.priority));
   
   // Format interval for display
   const formatInterval = (seconds) => {
@@ -934,6 +958,48 @@ const LiveAlertsPanel = ({
         )}
       </AnimatePresence>
       
+      {/* AI Edge Filter Chips — show only alerts where the AI is unusually
+          confident vs its rolling 30-day baseline for that symbol. */}
+      <div
+        className="px-4 py-2 border-b border-zinc-700/50 flex items-center gap-2 flex-wrap"
+        data-testid="ai-edge-filter-row"
+      >
+        <span className="text-xs text-zinc-500 mr-1">AI edge:</span>
+        {[
+          { id: 'ALL', label: 'All', testid: 'ai-edge-filter-all' },
+          { id: 'ABOVE', label: 'Above baseline', testid: 'ai-edge-filter-above' },
+          { id: 'TOP_EDGE', label: 'Top edge', testid: 'ai-edge-filter-top' },
+        ].map((chip) => (
+          <button
+            key={chip.id}
+            onClick={() => setEdgeFilter(chip.id)}
+            data-testid={chip.testid}
+            className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors border ${
+              edgeFilter === chip.id
+                ? chip.id === 'TOP_EDGE'
+                  ? 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40'
+                  : chip.id === 'ABOVE'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-zinc-700 text-white border-zinc-600'
+                : 'bg-transparent text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600'
+            }`}
+          >
+            {chip.id === 'TOP_EDGE' && (
+              <Zap className="inline w-3 h-3 mr-1 -mt-0.5" />
+            )}
+            {chip.label}
+          </button>
+        ))}
+        {edgeFilter !== 'ALL' && filteredOutCount > 0 && (
+          <span
+            className="text-xs text-zinc-500 ml-auto"
+            data-testid="ai-edge-filter-hidden-count"
+          >
+            {filteredOutCount} alert{filteredOutCount === 1 ? '' : 's'} hidden by filter
+          </span>
+        )}
+      </div>
+
       {/* Market Simulator Control */}
       <div className="px-4 py-3 border-b border-zinc-700/50">
         <SimulatorControl 
@@ -956,6 +1022,23 @@ const LiveAlertsPanel = ({
             <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">No active alerts</p>
             <p className="text-xs mt-1">The scanner is analyzing the market...</p>
+          </div>
+        ) : filteredAlerts.length === 0 ? (
+          <div
+            className="text-center py-8 text-zinc-500"
+            data-testid="ai-edge-filter-empty-state"
+          >
+            <Zap className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">
+              No alerts match the {edgeFilter === 'TOP_EDGE' ? 'Top Edge' : 'Above baseline'} filter
+            </p>
+            <p className="text-xs mt-1">
+              {alerts.length} alert{alerts.length === 1 ? '' : 's'} hidden — switch to <button
+                onClick={() => setEdgeFilter('ALL')}
+                data-testid="ai-edge-filter-clear-link"
+                className="underline text-zinc-300 hover:text-white"
+              >All</button> to see everything.
+            </p>
           </div>
         ) : (
           <>
