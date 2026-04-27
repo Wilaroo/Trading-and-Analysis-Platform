@@ -111,19 +111,22 @@ Open priorities, deferred ideas, and backlog. Move items to
   until pipeline is 100% stable).
 - Build the Agent Brain memory system (Option C scope agreed
   2026-04-27 — see chat history; user pinned for later).
-- Add a "scanner-health canary" pytest that asserts every default in
-  `_enabled_setups` is reachable end-to-end (would have caught both
-  scanner regressions today).
+- ~~Add a "scanner-health canary" pytest~~ ✅ SHIPPED 2026-04-28 —
+  `tests/test_scanner_canary.py` (10 tests). See CHANGELOG batch #2
+  entry #2.
 
 ### P0 — Wave-scanner: ✅ SHIPPED — see CHANGELOG 2026-04-28.
 
 ### P1 — Briefings: ✅ shipped — see CHANGELOG 2026-04-28 entry #3.
 
-### P1 — Setup-found bot text (operator flagged 2026-04-27)
-- Operator says the "RS LEADER NVDA +6.8% vs SPY - Outperforming
-  market — TQS 51 (C)" copy is wrong but didn't specify how.
-  **Action:** ask operator what the copy *should* say, then fix the
-  server-side bot-narrative template.
+### P1 — Setup-found bot text ✅ SHIPPED 2026-04-28
+- Operator preference: wordy / conversational. Now renders 2-3
+  sentences (saw + quality call + plan) instead of one terse line.
+- See CHANGELOG 2026-04-28 batch #2 entry #1.
+
+### P1 — Phase 4 Alpaca retirement ✅ LOCKED 2026-04-28
+- `ENABLE_ALPACA_FALLBACK=false` is the default. Canary tests
+  prevent silent rollback. See CHANGELOG 2026-04-28 batch #2 entry #3.
 
 ### P1 — `/api/scanner/daily-alerts`: ❌ closed (not a bug) — see CHANGELOG 2026-04-28.
 

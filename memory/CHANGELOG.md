@@ -2,6 +2,72 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — P1 batch #2: Bot copy + Canary tests + Phase 4 lockdown
+
+Three more P1s shipped, all in the same session as the morning's
+big-batch (live tick→Mongo, L2 dynamic routing, briefings, Mongo
+index). Test suite now at **97 passing** (45 new + 52 prior).
+
+### 1. Setup-found bot copy — wordy / conversational rewrite
+- Operator preference 2026-04-28: *"I really want to know what the bot
+  is thinking and doing at all times."*
+- New helper `SentComService._compose_conversational_setup_narrative`
+  replaces the terse one-liner
+  `"RS LEADER NVDA +6.8% vs SPY - Outperforming market — TQS 51 (C)"`
+  with a 2-3 sentence story:
+  - Sentence 1 — what the bot saw (📡 + setup name + headline tell + why)
+  - Sentence 2 — quality assessment (TQS + grade + plain-English
+    interpretation: high-conviction / solid / middling / borderline /
+    weak; track record: win-rate + profit factor + edge call)
+  - Sentence 3 — the trade plan (💡 entry / stop / target / R:R +
+    hold horizon "intraday / multi-day swing / multi-week position" +
+    timeframe being read off)
+- Wired into both setup-found alert path in `services/sentcom_service.py`.
+- Regression coverage: `tests/test_setup_narrative.py` (9 tests).
+- Example output (NVDA RS leader, TQS 51, $480.50 entry):
+  > "📡 NVDA — spotted a Relative Strength Leader setup. RS LEADER
+  > NVDA +6.8% vs SPY - Outperforming market. Why: Outperforming SPY
+  > by 6.8% today. Quality call: TQS 51/100 (grade C) — quality is
+  > borderline — proceed cautiously, we'd rather wait for a 70+.
+  > Recent stats on this setup: 58% win rate, profit factor 1.5 — edge.
+  > 💡 Plan: long entry around $480.50, stop at $475.20, target $495.00,
+  > 1.7R potential, holding it as a day trade, reading off the 5min chart."
+
+### 2. Scanner & bot canary tests
+- New `tests/test_scanner_canary.py` (10 tests). Locks the
+  *vital signs* contract of the scanner/bot pipeline so the two
+  silent-regression patterns we hit this quarter can't recur:
+  - 2026-04-17: `_symbol_adv_cache` → `_adv_cache` rename collapsed
+    universe to 14 ETFs (caught here by
+    `test_canary_canonical_universe_returns_100_plus_when_cache_seeded`).
+  - 2026-04-27: `bot_persistence.restore_state` overwrote defaults
+    instead of merging (caught here by
+    `test_canary_bot_persistence_merges_defaults_and_saved`).
+- Asserts: scanner enabled-setups ≥15, pillar setups have checkers,
+  bot enabled-setups ≥20 + must include 14 critical scanner bases
+  (rubber_band/vwap_*/reversal_*/squeeze/etc), safety watchlist ≥10
+  with SPY/QQQ/IWM, canonical-universe path returns ≥100 when seeded,
+  fallback-to-safety when canonical empty, wave-scanner batch
+  non-empty, bot-persistence merges default+saved, Phase-4
+  ENABLE_ALPACA_FALLBACK defaults to "false", consumers tolerate
+  alpaca_service=None.
+- Run as part of the standard pytest invocation. Fast (~0.2s for
+  the whole file).
+
+### 3. Phase 4 — Alpaca retirement lockdown
+- Confirmed: `ENABLE_ALPACA_FALLBACK=false` is the default in
+  server.py (verified via canary `test_canary_alpaca_fallback_default_is_false`).
+  When false, `alpaca_service = None` is wired into every consumer.
+- All `set_alpaca_service` consumers are deprecation stubs (no-op);
+  legacy Alpaca SDK path is dead. The shim `services/alpaca_service.py`
+  delegates to IBDataProvider when manually re-enabled.
+- Canary lock prevents future PRs from accidentally re-enabling
+  Alpaca-by-default. Operator can still flip the env var manually
+  for emergency rollback if IB ever has a multi-day outage.
+- **No code change required** — already shipped 2026-04-23 (the
+  "Alpaca nuke") but the retirement was never officially marked
+  complete. This locks it.
+
 ## 2026-04-28 — P1 batch: Live tick→Mongo, L2 dynamic routing, Briefings empty-states, Mongo index script
 
 Big lift in one batch — addresses the 4 P1s the operator specifically

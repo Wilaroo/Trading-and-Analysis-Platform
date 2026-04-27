@@ -288,7 +288,134 @@ class SentComService:
         """Generate unique message ID"""
         self._message_counter += 1
         return f"sentcom_{int(datetime.now(timezone.utc).timestamp())}_{self._message_counter}"
-    
+
+    def _compose_conversational_setup_narrative(
+        self,
+        *,
+        symbol: str,
+        setup_display: str,
+        setup_name: str,
+        headline: str,
+        direction: str,
+        score: float,
+        tqs_grade: str,
+        entry_price,
+        stop_price,
+        target_price,
+        risk_reward: float,
+        win_rate: float,
+        profit_factor: float,
+        trade_type: str,
+        timeframe: str,
+        reasoning_list,
+    ) -> str:
+        """
+        Build a wordy, conversational setup-found narrative — operator
+        preference (2026-04-28): "I really want to know what the bot
+        is thinking and doing at all times."
+
+        Replaces the terse one-liner
+            "RS LEADER NVDA +6.8% vs SPY - Outperforming market — TQS 51 (C)"
+        with a 2-3 sentence story:
+
+            Sentence 1 — what the bot saw (setup + symbol + key tell)
+            Sentence 2 — quality assessment (TQS + grade + interpretation,
+                         win-rate + profit-factor history if available)
+            Sentence 3 — the trade plan if the bot has prices
+                         (entry / stop / target / R:R / hold horizon)
+
+        Designed to never throw — every input is optional. Falls back
+        to setup-only sentence if no prices/scores are available.
+        """
+        dir_word = (direction or "").lower()
+        dir_phrase = (
+            "long" if dir_word in ("long", "buy") else
+            "short" if dir_word in ("short", "sell") else
+            "directional"
+        )
+
+        # ---------- Sentence 1: what we saw ----------
+        # Use the existing scanner headline (e.g. "RS LEADER NVDA +6.8%
+        # vs SPY - Outperforming market") if available — it already
+        # carries the setup-specific tell and the operator's familiar
+        # with the format. Otherwise build from setup_display.
+        if headline:
+            saw_clause = f"📡 {symbol} — spotted a {setup_display} setup. {headline.strip()}."
+        else:
+            saw_clause = f"📡 {symbol} — spotted a {setup_display} setup."
+
+        # First reasoning line tends to be the strongest tell — surface
+        # it as a "why" if the headline didn't already say it.
+        why = ""
+        if isinstance(reasoning_list, (list, tuple)) and reasoning_list:
+            first = str(reasoning_list[0]).strip()
+            if first and (not headline or first.lower()[:25] not in headline.lower()):
+                why = f" Why: {first}."
+
+        # ---------- Sentence 2: quality assessment ----------
+        quality = ""
+        if score and score > 0:
+            grade_label = ""
+            if tqs_grade:
+                grade_label = f" (grade {tqs_grade})"
+            # Plain-English interpretation of TQS bands.
+            if score >= 80:
+                interp = "this is a high-conviction read — the setup is firing on most quality dimensions"
+            elif score >= 70:
+                interp = "this is a solid setup, comfortably above our 70+ preferred quality bar"
+            elif score >= 60:
+                interp = "the setup is acceptable but middling — wants more confluence to be exciting"
+            elif score >= 50:
+                interp = "quality is borderline — proceed cautiously, we'd rather wait for a 70+"
+            else:
+                interp = "quality is weak — we'd usually skip and wait for something cleaner"
+            quality = f" Quality call: TQS {score:.0f}/100{grade_label} — {interp}."
+
+        # Win-rate / profit-factor color from the strategy's recent track
+        # record. Only adds a sentence when we actually have history.
+        track_record = ""
+        if win_rate and win_rate > 0:
+            wr_pct = win_rate * 100 if win_rate <= 1 else win_rate
+            edge_word = "edge" if wr_pct >= 55 else "thin edge" if wr_pct >= 50 else "no edge"
+            track_record = f" Recent stats on this setup: {wr_pct:.0f}% win rate"
+            if profit_factor and profit_factor > 0:
+                track_record += f", profit factor {profit_factor:.1f}"
+            track_record += f" — {edge_word}."
+
+        # ---------- Sentence 3: the trade plan ----------
+        plan = ""
+        try:
+            if entry_price and entry_price > 0:
+                ep = float(entry_price)
+                plan_parts = [f"💡 Plan: {dir_phrase} entry around ${ep:.2f}"]
+                if stop_price and stop_price > 0:
+                    plan_parts.append(f"stop at ${float(stop_price):.2f}")
+                if target_price and target_price > 0:
+                    plan_parts.append(f"target ${float(target_price):.2f}")
+                if risk_reward and risk_reward > 0:
+                    plan_parts.append(f"{float(risk_reward):.1f}R potential")
+                hold = "intraday" if (trade_type or "").lower() == "scalp" else (
+                    "multi-day swing" if (trade_type or "").lower() == "swing" else
+                    "multi-week position" if (trade_type or "").lower() == "position" else
+                    f"{trade_type.lower()}" if trade_type else ""
+                )
+                if hold:
+                    # Grammar: "intraday" is adverbial ("holding intraday")
+                    # while "multi-day swing" / "day trade" are nouns
+                    # ("holding it as a multi-day swing").
+                    if hold in ("intraday",):
+                        plan_parts.append(f"holding {hold}")
+                    else:
+                        plan_parts.append(f"holding it as a {hold}")
+                if timeframe:
+                    plan_parts.append(f"reading off the {timeframe} chart")
+                plan = " " + ", ".join(plan_parts) + "."
+        except Exception:
+            plan = ""
+
+        narrative = f"{saw_clause}{why}{quality}{track_record}{plan}".strip()
+        return narrative
+
     def _get_trading_bot(self):
         """Get trading bot service"""
         return self._services.get("trading_bot")
@@ -555,19 +682,31 @@ class SentComService:
                     
                     # Format setup name for display
                     setup_display = setup_name.replace('_', ' ').title()
-                    
-                    # Use headline if available, else build content
-                    if headline:
-                        content = headline
-                    else:
-                        content = f"Found setup: {symbol} {setup_display}"
-                        if entry_price:
-                            content += f" @ ${entry_price:.2f}"
-                    
-                    # Append score to content if significant
-                    if score > 0:
-                        grade_str = f" ({tqs_grade})" if tqs_grade else ""
-                        content += f" — TQS {score:.0f}{grade_str}"
+
+                    # 2026-04-28 — operator preference: more wordy / more
+                    # conversational copy so it's clear what the bot is
+                    # thinking and doing. Replaces the terse single-line
+                    # "RS LEADER NVDA +6.8% vs SPY - Outperforming market — TQS 51 (C)"
+                    # with a 2-3 sentence narrative that surfaces what
+                    # the bot saw, why it cares, and the trade plan.
+                    content = self._compose_conversational_setup_narrative(
+                        symbol=symbol,
+                        setup_display=setup_display,
+                        setup_name=setup_name,
+                        headline=headline,
+                        direction=direction,
+                        score=score,
+                        tqs_grade=tqs_grade,
+                        entry_price=entry_price,
+                        stop_price=stop_price,
+                        target_price=target_price,
+                        risk_reward=risk_reward,
+                        win_rate=win_rate,
+                        profit_factor=profit_factor,
+                        trade_type=trade_type,
+                        timeframe=timeframe,
+                        reasoning_list=reasoning_list,
+                    )
                     
                     # Build reasoning from actual alert data
                     if reasoning_list:
