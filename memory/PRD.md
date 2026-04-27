@@ -4053,3 +4053,12 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
   6. **`userHasFocused` gate is unchanged** — the moment the operator clicks any ticker the carousel becomes a no-op for the rest of the session.
 - **Visual marker** in `WeekendBriefingCard.GameplanBlock` automatically follows the carousel: the cyan border + LIVE chip move to whichever watch the chart is currently framed on, since they read from the same localStorage key.
 - **Verification**: Lint clean, frontend compiles green. No backend changes.
+
+## 2026-02-01 — Carousel countdown chip in V5 chart header
+- **Where**: `frontend/src/hooks/useCarouselStatus.js` (NEW), `components/sentcom/v5/CarouselCountdownChip.jsx` (NEW), wired into `V5ChartHeader` in `SentComV5View.jsx`.
+- **What**:
+  1. **`useCarouselStatus()`** mirrors the autoload hook's window/slot math but is read-only — returns `{active, currentSymbol, nextSymbol, secondsUntilNext, totalWatches}`. Briefing fetched once + cached for 10 min inside the window. 1Hz heartbeat ticks the countdown but ONLY runs while the chip is visible (not all day).
+  2. **`<CarouselCountdownChip />`** renders `LIVE · {current} · MM:SS → {next}` in cyan as a pill in the V5 chart header. Hidden outside the Monday 09:10-09:50 ET window. Animated radio icon. `data-testid` on every dynamic part for QA.
+  3. Wired into `V5ChartHeader` next to the existing `LiveDataChip` so it sits inline with the symbol input + LONG/SHORT badge.
+- **Result**: Operator sees `LIVE · AAPL · 02:14 → MSFT` and knows exactly how long the chart will stay on the current watch before rotating. Combined with the LIVE chip on the matching watch card in the Weekend Briefing's gameplan section, the auto-frame feels intentional rather than mysterious.
+- **Verification**: Lint clean, frontend compiles green.

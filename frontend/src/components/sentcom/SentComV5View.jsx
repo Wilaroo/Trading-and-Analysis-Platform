@@ -39,6 +39,7 @@ import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { LiveDataChip } from './v5/LiveDataChip';
+import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
 import { useMondayMorningAutoLoad } from '../../hooks/useMondayMorningAutoLoad';
 
@@ -440,6 +441,7 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
           />
         )}
         <LiveDataChip />
+        <CarouselCountdownChip />
         {focusedSymbolIsPosition && (
           <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
             {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}
