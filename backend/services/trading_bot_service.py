@@ -960,6 +960,201 @@ class TradingBotService:
     def get_filter_thoughts(self, limit: int = 10) -> List[Dict]:
         """Get recent strategy filter thoughts for Bot's Brain display"""
         return self._smart_filter.get_thoughts(limit)
+
+    # ============================================================
+    # Rejection narrative composer (added 2026-04-28)
+    # ------------------------------------------------------------
+    # Operator preference: "I really want to know what the bot is
+    # thinking and doing at all times." Setup-found narrative lives
+    # in sentcom_service. THIS composes the symmetrical
+    # "why didn't I take this trade?" line for every rejection gate
+    # (dedup, position-exists, pending, setup-disabled, confidence
+    # gate, account guard, EOD, regime mismatch, …).
+    # ============================================================
+    def record_rejection(
+        self,
+        symbol: str,
+        setup_type: str,
+        direction: str,
+        reason_code: str,
+        context: Optional[Dict] = None,
+    ) -> str:
+        """
+        Compose a wordy 1-2 sentence rejection narrative and push it
+        into the same `_strategy_filter_thoughts` buffer the UI's
+        Bot's Brain panel already streams. Returns the narrative
+        string for caller-side logging too.
+
+        `reason_code` is a stable enum-like key
+        (e.g. "dedup_open_position"); `context` carries setup-specific
+        details the composer can weave into the sentence (cooldown
+        seconds left, existing position symbol, etc.). Future PRs
+        adding a new gate just need a new reason_code branch in
+        `_compose_rejection_narrative` — the buffer / streaming path
+        is already wired.
+        """
+        ctx = context or {}
+        narrative = self._compose_rejection_narrative(
+            symbol=symbol, setup_type=setup_type, direction=direction,
+            reason_code=reason_code, ctx=ctx,
+        )
+        thought = {
+            "text": narrative,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "symbol": symbol,
+            "setup_type": setup_type,
+            "direction": direction,
+            "reason_code": reason_code,
+            "action": "rejected",
+        }
+        try:
+            self._smart_filter.add_thought(thought)
+            self._strategy_filter_thoughts = self._smart_filter.get_thoughts(self._max_filter_thoughts)
+        except Exception as exc:
+            # Buffer add must never break the rejection hot path.
+            logger.debug(f"record_rejection: buffer add failed: {exc}")
+        return narrative
+
+    def _compose_rejection_narrative(
+        self,
+        *,
+        symbol: str,
+        setup_type: str,
+        direction: str,
+        reason_code: str,
+        ctx: Dict,
+    ) -> str:
+        """Build the 1-2 sentence "why I passed" narrative."""
+        setup_display = (setup_type or "setup").replace("_", " ").title()
+        dir_word = (direction or "").lower()
+        dir_phrase = "long" if dir_word in ("long", "buy") else (
+            "short" if dir_word in ("short", "sell") else "directional"
+        )
+
+        if reason_code == "dedup_open_position":
+            existing = ctx.get("existing_position", symbol)
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — already have an "
+                f"open {existing} position from earlier and I'm not stacking "
+                f"another lot on the same name. Will re-look once that one's "
+                f"closed."
+            )
+        if reason_code == "dedup_cooldown":
+            cooldown_left = ctx.get("cooldown_seconds_left")
+            cooldown_phrase = (
+                f" Cooldown clears in {int(cooldown_left)}s."
+                if cooldown_left else ""
+            )
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — I just fired this "
+                f"exact {dir_phrase} setup on {symbol} a few minutes ago and "
+                f"the dedup cooldown is still active. Letting it clear before "
+                f"another shot.{cooldown_phrase}"
+            )
+        if reason_code == "position_exists":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — already in {symbol} "
+                f"from a prior fill. Won't double up on the same name in the "
+                f"same direction."
+            )
+        if reason_code == "pending_trade_exists":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — there's already a "
+                f"pending {symbol} trade waiting on confirmation. Holding off "
+                f"until that decision lands."
+            )
+        if reason_code == "setup_disabled":
+            return (
+                f"⏭️ Skipping {symbol} {setup_display} — this strategy is "
+                f"currently OFF in my enabled list. Either you turned it off "
+                f"in Bot Setup, or it's still in SIMULATION while we collect "
+                f"shadow data. Re-enable it in Bot Setup if you want me to "
+                f"trade it."
+            )
+        if reason_code == "max_open_positions":
+            cap = ctx.get("cap")
+            cap_phrase = f" (cap: {cap})" if cap else ""
+            # Gate-level rejection — symbol is usually a placeholder so
+            # don't lead with "Passing on —".
+            return (
+                f"⏸️ Skipping the whole scan cycle — already at my "
+                f"max-open-positions cap{cap_phrase}. New ideas have to "
+                f"wait for one of the current trades to close before I "
+                f"evaluate anything else."
+            )
+        if reason_code == "tqs_too_low":
+            tqs = ctx.get("tqs", 0)
+            min_tqs = ctx.get("min_tqs", 60)
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — TQS came back at "
+                f"{tqs:.0f}/100, below my {min_tqs:.0f} minimum. Quality's "
+                f"not there; I'd rather wait for a cleaner read."
+            )
+        if reason_code == "confidence_gate_veto":
+            confidence = ctx.get("confidence")
+            min_confidence = ctx.get("min_confidence")
+            why = ctx.get("why", "model consensus or regime check failed")
+            conf_phrase = (
+                f" ({confidence:.0%} vs {min_confidence:.0%} required)"
+                if confidence is not None and min_confidence is not None
+                else ""
+            )
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — pre-trade "
+                f"confidence gate vetoed it{conf_phrase}: {why}. I want my "
+                f"models AND the regime to agree before I commit."
+            )
+        if reason_code == "regime_mismatch":
+            regime = ctx.get("regime", "current")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — {dir_phrase} "
+                f"setups don't fit a {regime} regime in my book. Trading "
+                f"against the tape is how losses compound; I'd rather sit out."
+            )
+        if reason_code == "account_guard_veto":
+            why = ctx.get("why", "guardrail tripped")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — account guard "
+                f"vetoed: {why}. Not risking a margin call or a max-daily-"
+                f"loss breach for one alert."
+            )
+        if reason_code == "eod_blackout":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — too close to the "
+                f"close to open a new {dir_phrase}. EOD blackout is on; I'm "
+                f"in flatten-only mode now."
+            )
+        if reason_code == "evaluator_veto":
+            why = ctx.get("why", "evaluator didn't see edge")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — opportunity "
+                f"evaluator returned no trade: {why}. Either entry/stop "
+                f"math didn't work or I couldn't size it within risk caps."
+            )
+        if reason_code == "tight_stop":
+            stop_dist = ctx.get("stop_distance_pct")
+            phrase = (
+                f" (stop only {stop_dist:.2f}% away)"
+                if stop_dist is not None else ""
+            )
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — stop is too tight "
+                f"to absorb normal noise{phrase}. Would just get wicked out "
+                f"and rebooked at a worse price."
+            )
+        if reason_code == "oversized_notional":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — required position "
+                f"size would blow past my max-notional-per-trade cap. Setup "
+                f"is fine, but the trade plan doesn't fit."
+            )
+
+        # Generic fallback — never throw, never produce empty text.
+        why = ctx.get("why", "did not meet criteria")
+        return (
+            f"⏭️ Passing on {symbol} {setup_display} — {why}. Reason code: "
+            f"{reason_code}."
+        )
     
     def get_smart_filter_config(self) -> Dict:
         """Get current smart filter configuration"""
@@ -1483,6 +1678,15 @@ class TradingBotService:
         
         # Check max open positions
         if len(self._open_trades) >= self.risk_params.max_open_positions:
+            # 2026-04-28: was a silent return — now logs into Bot's Brain
+            # so operator sees the cap is what's gating new entries.
+            self.record_rejection(
+                symbol="—",
+                setup_type="any",
+                direction="",
+                reason_code="max_open_positions",
+                context={"cap": self.risk_params.max_open_positions},
+            )
             return
         
         try:
@@ -1511,14 +1715,40 @@ class TradingBotService:
                 )
                 if dedup_result.skip:
                     print(f"🛑 [TradingBot] Dedup skip {symbol} {setup} {direction}: {dedup_result.reason}")
+                    # 2026-04-28: surface a wordy "why I passed" narrative
+                    # in Bot's Brain so operator sees the full reasoning,
+                    # not just the silent skip.
+                    reason_lower = (dedup_result.reason or "").lower()
+                    if "cooldown" in reason_lower:
+                        rcode = "dedup_cooldown"
+                    elif "open" in reason_lower or "position" in reason_lower:
+                        rcode = "dedup_open_position"
+                    else:
+                        rcode = "dedup_open_position"
+                    self.record_rejection(
+                        symbol=symbol, setup_type=setup, direction=direction,
+                        reason_code=rcode,
+                        context={
+                            "why": dedup_result.reason,
+                            "cooldown_seconds_left": getattr(dedup_result, "cooldown_seconds_left", None),
+                        },
+                    )
                     continue
 
                 # Skip if already have position in this symbol (safety net)
                 if any(t.symbol == alert.get('symbol') for t in self._open_trades.values()):
+                    self.record_rejection(
+                        symbol=symbol, setup_type=setup, direction=direction,
+                        reason_code="position_exists", context={},
+                    )
                     continue
 
                 # Skip if pending trade exists
                 if any(t.symbol == alert.get('symbol') for t in self._pending_trades.values()):
+                    self.record_rejection(
+                        symbol=symbol, setup_type=setup, direction=direction,
+                        reason_code="pending_trade_exists", context={},
+                    )
                     continue
 
                 # Mark alert as fired (starts cooldown) BEFORE heavy evaluation
@@ -1544,6 +1774,17 @@ class TradingBotService:
                         print(f"⏸️ [TradingBot] Added {symbol} to pending trades")
                 else:
                     print(f"❌ [TradingBot] {symbol} {setup} did not meet criteria")
+                    # 2026-04-28: capture the post-evaluation rejection
+                    # so operator sees a narrative, not just the bare
+                    # "did not meet criteria" log line. The opportunity
+                    # evaluator already logs its specific reason via the
+                    # smart_filter; this is the catch-all narrative for
+                    # any path that doesn't.
+                    self.record_rejection(
+                        symbol=symbol, setup_type=setup, direction=direction,
+                        reason_code="evaluator_veto",
+                        context={"why": "evaluator returned no trade"},
+                    )
                     
         except Exception as e:
             print(f"❌ [TradingBot] Scan error: {e}")
@@ -1594,6 +1835,17 @@ class TradingBotService:
                     print(f"   ✅ {alert.symbol} {alert.setup_type} passed filter")
                 else:
                     print(f"   ⏭️ {alert.symbol} {alert.setup_type} not in enabled setups")
+                    # 2026-04-28: surface the silent setup-disabled skip
+                    # in Bot's Brain. Operator's biggest "what is the bot
+                    # thinking?" gap was right here — alerts arriving but
+                    # never even reaching evaluation, with no UI breadcrumb.
+                    self.record_rejection(
+                        symbol=alert.symbol,
+                        setup_type=alert.setup_type,
+                        direction=alert.direction or "long",
+                        reason_code="setup_disabled",
+                        context={"base_setup": base_setup},
+                    )
             
         except Exception as e:
             print(f"❌ [TradingBot] Error getting alerts: {e}")

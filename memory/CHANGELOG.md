@@ -2,6 +2,75 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — P1 batch #3: Rejection narrative ("why didn't I take this trade?")
+
+Closes the operator's feedback loop — every rejection gate now
+produces a wordy 1-2 sentence narrative streamed into Bot's Brain.
+
+### What shipped
+- New `TradingBotService.record_rejection(symbol, setup, direction, reason_code, ctx)`.
+  Composes a conversational 1-2 sentence "why I passed" line and pushes
+  it into the `_strategy_filter_thoughts` buffer the UI's Bot's Brain
+  panel already streams (no new WS wiring needed — auto-flows through
+  the existing `filter_thoughts` cache + 10s broadcast cycle).
+- New helper `_compose_rejection_narrative` covering 13 distinct
+  rejection reasons:
+  - `dedup_open_position` — already long/short same name
+  - `dedup_cooldown` — same setup just fired N seconds ago
+  - `position_exists` / `pending_trade_exists` — duplicate avoidance
+  - `setup_disabled` — strategy is OFF in operator's enabled list
+  - `max_open_positions` — at the cap
+  - `tqs_too_low` — quality below minimum
+  - `confidence_gate_veto` — model split / regime-model disagreement
+  - `regime_mismatch` — long in down-regime, short in up-regime, etc.
+  - `account_guard_veto` — would breach risk caps
+  - `eod_blackout` — too close to close
+  - `evaluator_veto` — entry/stop math didn't work
+  - `tight_stop` — would get wicked out
+  - `oversized_notional` — size exceeds per-trade cap
+  - generic fallback — never produces empty text or raises
+- Wired at 5 silent-skip gates in `trading_bot_service._scan_for_alerts`
+  + `_get_trade_alerts`:
+  - dedup skip (was print-only)
+  - position-exists safety net (was silent)
+  - pending-trade exists (was silent)
+  - setup-not-in-enabled (was print-only)
+  - max-open-positions cap (was silent return)
+  - post-evaluation "did not meet criteria" (was print-only)
+- 17 regression tests in `tests/test_bot_rejection_narrative.py`.
+
+### Example output (operator-facing UI)
+```
+⏭️ Skipping NVDA Squeeze — this strategy is currently OFF in my
+enabled list. Either you turned it off in Bot Setup, or it's still in
+SIMULATION while we collect shadow data. Re-enable it in Bot Setup if
+you want me to trade it.
+
+⏭️ Passing on AAPL Vwap Bounce — I just fired this exact long setup on
+AAPL a few minutes ago and the dedup cooldown is still active. Letting
+it clear before another shot. Cooldown clears in 87s.
+
+⏭️ Passing on SPY Breakout — long setups don't fit a CONFIRMED_DOWN
+regime in my book. Trading against the tape is how losses compound;
+I'd rather sit out.
+
+⏭️ Passing on AMD Opening Drive — pre-trade confidence gate vetoed it
+(42% vs 60% required): XGB and CatBoost disagreed on direction. I want
+my models AND the regime to agree before I commit.
+
+⏸️ Skipping the whole scan cycle — already at my max-open-positions
+cap (cap: 5). New ideas have to wait for one of the current trades to
+close before I evaluate anything else.
+```
+
+### Verification
+- 62 new tests passing across this session's 6 new test files (rejection
+  narratives, setup narratives, scanner canaries, tick→bar, L2 router,
+  pusher RPC gate).
+- End-to-end smoke test confirmed: `bot.record_rejection(...)` →
+  `bot.get_filter_thoughts()` returns the new thought with full
+  narrative text, ready for the existing filter_thoughts WS broadcaster.
+
 ## 2026-04-28 — P1 batch #2: Bot copy + Canary tests + Phase 4 lockdown
 
 Three more P1s shipped, all in the same session as the morning's
