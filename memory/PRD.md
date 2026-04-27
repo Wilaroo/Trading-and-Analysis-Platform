@@ -2,8 +2,16 @@
 
 > Lean, static spec. Dated work history lives in `CHANGELOG.md`.
 > Open priorities and backlog live in `ROADMAP.md`.
-> Update PRD.md only when the problem statement, architecture, or
-> system contracts change.
+>
+> **Rules for the agent (keep these docs alive):**
+>   - Ship something → prepend a `## YYYY-MM-DD — <title> — SHIPPED`
+>     section to **CHANGELOG.md** (Why / Scope / Verification).
+>   - Priority shifts → reorder **ROADMAP.md**; promoted item moves up,
+>     completed item is removed and recorded in CHANGELOG.
+>   - Architecture / API contract / hardware topology changes → edit
+>     **PRD.md** (this file).
+>   - Never silently drop history; never let `🔴 Now / Near-term` go
+>     stale across more than one task.
 
 ## Original problem statement
 AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). Goal: stable massive training pipeline, real-time responsive UI, SentCom chat aware of live portfolio status without hanging the backend, and a bot that can go live for automated trading with accurate dashboards.
