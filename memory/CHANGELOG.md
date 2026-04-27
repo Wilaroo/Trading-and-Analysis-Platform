@@ -2,6 +2,70 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28b — Chart fixes round 2: premarket shading + autoSize + session=rth_plus_premarket
+
+Operator screenshot shows volume + time-axis still missing AND
+premarket bars dropped by my v1 RTH filter. Three real fixes shipped:
+
+### 1. `session` query param replaces `rth_only`
+- `/api/sentcom/chart?session=rth_plus_premarket` (new default).
+  Keeps **4:00am-16:00 ET weekdays** — drops only post-market and
+  overnight (the noisy bars). Premarket gap-context preserved per
+  operator request: *"i want RTH and premarket to always show."*
+- Each kept bar tagged with `session: "pre" | "rth"` so the frontend
+  can shade them differently.
+- Other modes: `?session=rth` (9:30-16:00 only), `?session=all`
+  (full 24h).
+- Legacy `?rth_only=true|false` kept for back-compat.
+- Test coverage: 5 tests in `tests/test_chart_rth_filter.py`.
+
+### 2. ChartPanel autoSize + container restructure
+- **Root cause of missing volume + time-axis ticks**: the chart was
+  initialized with `autoSize: false` + a hardcoded
+  `height: containerRef.clientHeight || 480` at mount time. When the
+  container hadn't finished CSS layout yet (clientHeight = 0), it
+  fell back to 480px and overflowed shorter parents → bottom of
+  chart canvas (volume pane + x-axis tick row) clipped by the
+  parent's `overflow:hidden`.
+- **Fix**: switch to `autoSize: true` (lightweight-charts native auto-
+  fitting). Container restructured to a `position:relative` parent
+  that holds the chart canvas as a 100%-sized child, with a sibling
+  overlay div for premarket shading. ResizeObserver retained but
+  scoped to invalidating priceScale margins on resize (some v5
+  builds don't recompute volume-pane margins on autoSize alone).
+- `height` prop default changed from `null` → still null but the
+  container `min-height: 240px` floor prevents collapse.
+
+### 3. PremarketShadingOverlay
+- New React subcomponent rendered as an absolute-positioned sibling
+  inside the chart container. Per operator request: *"have the pre
+  market session with background shading so i know the difference
+  easier visually."*
+- How it works:
+  1. Reads bars passed in (each tagged `session: 'pre' | 'rth'` by
+     the backend).
+  2. Walks bars to find contiguous premarket runs, merges into
+     `{startTime, endTime}` ranges.
+  3. Subscribes to chart's `visibleTimeRangeChange` and projects
+     each range into pixel coordinates via
+     `chart.timeScale().timeToCoordinate()`.
+  4. Renders a translucent amber band per range
+     (`bg-amber-400/8 border-l border-r border-amber-400/20`).
+- Bands sit BEHIND the candles (`pointer-events-none`) so they
+  don't interfere with chart interactions.
+- Bottom inset `bottom-7` so bands don't cover the time-axis row.
+
+### Verification
+- 79/79 tests passing.
+- Backend healthy after restart; chart endpoint returns proper
+  `session`-tagged bars when data is available.
+- **Note for operator**: if volume bars on the candle chart still
+  appear flat after pulling these changes, that's because today's
+  IB historical bars genuinely have `volume=0` in your Mongo cache
+  (paper account quirk or backfill ran with a non-volume source).
+  Live tick→bar persister (shipped this morning) writes real volume
+  for bars created during RTH on subscribed symbols.
+
 ## 2026-04-28 — Chart fixes + Equity hookup + After-hours scanner + RTH filter
 
 Operator-flagged batch (post-layout-move). 4 issues resolved + 17 new

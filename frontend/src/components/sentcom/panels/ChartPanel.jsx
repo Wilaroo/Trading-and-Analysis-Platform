@@ -78,6 +78,11 @@ export const ChartPanel = ({
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
   const [showSrLevels, setShowSrLevels] = useState(true);
   const resizeObsRef = useRef(null);
+  // 2026-04-28b: cache the most recent normalized bars (with `session`
+  // tag) so the PremarketShadingOverlay can compute pixel positions
+  // without re-fetching. Stored as a ref to avoid re-renders on every
+  // bar tick.
+  const lastBarsRef = useRef([]);
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
   const [bars, setBars] = useState([]);
@@ -156,12 +161,7 @@ export const ChartPanel = ({
         vertLine:  { color: '#06b6d4', width: 1, style: 3, labelBackgroundColor: '#0e7490' },
         horzLine:  { color: '#06b6d4', width: 1, style: 3, labelBackgroundColor: '#0e7490' },
       },
-      autoSize: false,
-      width: containerRef.current.clientWidth,
-      // When `height` prop is null (V5 default), use the container's
-      // current clientHeight; otherwise honour the prop value.
-      // ResizeObserver below will continue to track height changes.
-      height: height || containerRef.current.clientHeight || 480,
+      autoSize: true,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -216,21 +216,18 @@ export const ChartPanel = ({
       markersPluginRef.current = null;
     }
 
-    // Resize with container — observe BOTH width AND height so the
-    // chart fits the new flex parent on every layout change. Before
-    // 2026-04-28 this only forwarded `width` and the chart kept the
-    // hardcoded `height={600}` from the prop, which clipped the
-    // volume pane + x-axis tick row when the parent was shorter than
-    // 600px (regressed after the V5 layout move that put the Unified
-    // Stream below the chart).
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height: ch } = entry.contentRect;
-        // Floor at 240 so a collapsed parent doesn't crush the chart
-        // into an unreadable strip; ceil is the natural container size.
-        const nextH = Math.max(240, Math.floor(ch || height));
-        chart.applyOptions({ width, height: nextH });
-      }
+    // Resize tracking is handled by `autoSize: true` on the chart
+    // (lightweight-charts >= v4.4) — no manual ResizeObserver needed.
+    // We still create one purely to invalidate priceScale margins on
+    // height changes, since some v5 builds don't recompute the volume
+    // pane on auto-resize.
+    const ro = new ResizeObserver(() => {
+      try {
+        const candleScale = candleSeries.priceScale();
+        candleScale.applyOptions({ scaleMargins: { top: 0.08, bottom: 0.22 } });
+        const volScale = volumeSeries.priceScale();
+        volScale.applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      } catch (_) { /* noop */ }
     });
     ro.observe(containerRef.current);
     resizeObsRef.current = ro;
@@ -360,6 +357,10 @@ export const ChartPanel = ({
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
+    // 2026-04-28b: stash bars (with `session` tag from backend) so the
+    // PremarketShadingOverlay can compute the contiguous premarket
+    // pixel ranges without a separate API call.
+    lastBarsRef.current = rows;
     // Fit the newly loaded range only on the first load. Subsequent
     // re-fetches (auto-refresh, lazy-load backfill) preserve whatever
     // pan/zoom the user already has so the chart doesn't snap back.
@@ -692,20 +693,36 @@ export const ChartPanel = ({
       </div>
 
       {/* Chart container.
-          2026-04-28: when `height` prop is omitted (the default in V5
-          where the flex parent dictates height), use `flex-1` + `100%`
-          so the container fills the available slot. The internal
-          ResizeObserver re-fits the chart canvas on every height
-          change, so the volume pane + x-axis ticks stay visible no
-          matter the slot size.
-          When an explicit `height` IS passed (legacy callers), honour
-          it inline. */}
+          2026-04-28b: the chart uses `autoSize: true` and reads its
+          dimensions from this container's bounding box. Container MUST
+          have an explicit min-height (160px) and `position: relative`
+          so the premarket-shading overlay (drawn as an absolute-
+          positioned sibling) lines up correctly.
+          When `height` prop is omitted (V5 default), `flex-1 min-h-0`
+          fills the parent. When passed (legacy), it's honoured inline. */}
       <div
         data-testid="chart-container"
-        ref={containerRef}
-        className={height ? '' : 'flex-1 min-h-0'}
-        style={height ? { height, width: '100%' } : { width: '100%' }}
-      />
+        className={height ? 'relative' : 'flex-1 min-h-0 relative'}
+        style={
+          height
+            ? { height, width: '100%', minHeight: 240 }
+            : { width: '100%', minHeight: 240 }
+        }
+      >
+        <div
+          ref={containerRef}
+          style={{ width: '100%', height: '100%' }}
+        />
+        {/* Premarket session shading overlay (added 2026-04-28b).
+            Operator request: pre-market bars must be visually
+            distinct from RTH bars. We render a translucent strip
+            absolutely positioned over the chart canvas, computing
+            x-coordinates from the chart's time scale. */}
+        <PremarketShadingOverlay
+          chartRef={chartRef}
+          bars={lastBarsRef.current}
+        />
+      </div>
 
       {/* Overlays: loading / empty / error states */}
       {loading && !bars.length && (
@@ -761,3 +778,113 @@ export const ChartPanel = ({
 };
 
 export default ChartPanel;
+
+
+/**
+ * PremarketShadingOverlay
+ * ------------------------
+ * Renders translucent vertical bands over premarket bars (4:00am-9:30am
+ * ET) so the operator can visually distinguish premarket prints from
+ * regular-hours prints. Added 2026-04-28 per operator request:
+ *   "have the pre market session with background shading so i know
+ *    the difference easier visually."
+ *
+ * How it works:
+ *   1. Reads the bars passed in (each tagged `session: 'pre' | 'rth'`
+ *      by the backend `/api/sentcom/chart` endpoint).
+ *   2. Walks the bar list to find contiguous runs of session='pre'
+ *      and merges each run into a {start, end} range.
+ *   3. On every visible-time-range change (pan/zoom) it re-projects
+ *      each range into pixel coordinates via
+ *      `chart.timeScale().timeToCoordinate()` and draws an absolutely-
+ *      positioned <div> band per range.
+ *
+ * Returns null if the chart isn't ready yet — safe to render even
+ * before chartRef.current is wired.
+ */
+const PremarketShadingOverlay = ({ chartRef, bars }) => {
+  const [bands, setBands] = React.useState([]);
+
+  React.useEffect(() => {
+    const chart = chartRef?.current;
+    if (!chart) return undefined;
+    if (!Array.isArray(bars) || bars.length === 0) {
+      setBands([]);
+      return undefined;
+    }
+
+    // Build {startTime, endTime} ranges from contiguous premarket runs.
+    const ranges = [];
+    let runStart = null;
+    let runEnd = null;
+    for (const b of bars) {
+      if (b?.session === 'pre' && b.time != null) {
+        if (runStart == null) runStart = b.time;
+        runEnd = b.time;
+      } else if (runStart != null) {
+        ranges.push({ startTime: runStart, endTime: runEnd });
+        runStart = null;
+        runEnd = null;
+      }
+    }
+    if (runStart != null) ranges.push({ startTime: runStart, endTime: runEnd });
+
+    if (ranges.length === 0) {
+      setBands([]);
+      return undefined;
+    }
+
+    const recompute = () => {
+      try {
+        const ts = chart.timeScale();
+        const next = [];
+        for (const r of ranges) {
+          const x1 = ts.timeToCoordinate(r.startTime);
+          const x2 = ts.timeToCoordinate(r.endTime);
+          if (x1 == null || x2 == null) continue;
+          // Pad ±1.5px so the band visually wraps the candle wicks.
+          const left = Math.min(x1, x2) - 1.5;
+          const width = Math.abs(x2 - x1) + 3;
+          if (width <= 0) continue;
+          next.push({ left, width });
+        }
+        setBands(next);
+      } catch (_) { /* chart torn down */ }
+    };
+
+    recompute();
+    let unsub = null;
+    try {
+      const ts = chart.timeScale();
+      const handler = () => recompute();
+      ts.subscribeVisibleTimeRangeChange(handler);
+      unsub = () => {
+        try { ts.unsubscribeVisibleTimeRangeChange(handler); } catch (_) { /* noop */ }
+      };
+    } catch (_) { /* noop */ }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [chartRef, bars]);
+
+  if (!bands.length) return null;
+  return (
+    <div
+      data-testid="chart-premarket-shading"
+      className="pointer-events-none absolute inset-0"
+      // Container must NOT cover the time-axis row at the bottom — the
+      // chart leaves ~28px there. We bound the overlay to the candle
+      // pane only by leaving the bottom inset on `inset-0` defaults.
+    >
+      {bands.map((b, i) => (
+        <div
+          key={i}
+          className="absolute top-0 bottom-7 bg-amber-400/8 border-l border-r border-amber-400/20"
+          style={{ left: `${b.left}px`, width: `${b.width}px` }}
+          title="Premarket session (4:00am-9:30am ET)"
+        />
+      ))}
+    </div>
+  );
+};

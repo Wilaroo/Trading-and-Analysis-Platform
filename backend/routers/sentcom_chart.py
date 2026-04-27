@@ -413,24 +413,38 @@ async def get_chart_bars(
     symbol: str = Query(..., min_length=1, max_length=10),
     timeframe: str = Query("5min"),
     days: int = Query(5, ge=1, le=365),
-    rth_only: bool = Query(
-        True,
+    session: str = Query(
+        "rth_plus_premarket",
         description=(
-            "When true (default for intraday), filter bars to RTH "
-            "(9:30-16:00 ET, weekdays only). Closes the visual gaps "
-            "between sessions and during weekends. Pass false to "
-            "include pre/post-market and overnight bars."
+            "Which trading session(s) to include for intraday timeframes:\n"
+            "  • `rth_plus_premarket` (default) — 4:00am-16:00 ET, weekdays. "
+            "Drops post-market and overnight; includes premarket so gap "
+            "context survives. Each bar is tagged with `session: 'pre'|'rth'`.\n"
+            "  • `rth` — 9:30-16:00 ET only.\n"
+            "  • `all` — full 24h, no filter (legacy)."
         ),
     ),
+    # Legacy alias kept for back-compat. When provided, overrides `session`:
+    #   rth_only=true  → session='rth'
+    #   rth_only=false → session='all'
+    rth_only: bool = Query(None),
 ) -> Dict[str, Any]:
     """Return OHLCV bars + overlay indicator series for `symbol`/`timeframe`.
 
-    `rth_only` (added 2026-04-28) removes the visual gaps the operator
-    flagged: overnight (4pm → 9:30am next day) + weekend (Fri 4pm → Mon
-    9:30am) + sparse pre/post-market bars. Daily/weekly timeframes
-    don't need this filter (their bars are already 1-per-session)."""
+    `session` (added 2026-04-28, expanded 2026-04-28-b) controls which
+    trading window the chart includes. Default `rth_plus_premarket`
+    keeps the gap context the operator wanted (4am-9:30am ET premarket
+    + 9:30-16:00 ET RTH) while still dropping the noisy overnight /
+    post-market bars that produce the "lots of time gaps" complaint.
+    """
     if _hybrid_data_service is None:
         raise HTTPException(status_code=503, detail="hybrid_data_service not initialised")
+
+    # Legacy `rth_only` shim.
+    if rth_only is True:
+        session = "rth"
+    elif rth_only is False:
+        session = "all"
 
     tf = timeframe.lower()
     if tf not in _SUPPORTED_TFS:
@@ -529,30 +543,38 @@ async def get_chart_bars(
             "error": "no parseable bars",
         }
 
-    # 2026-04-28: RTH-only filter for intraday timeframes. Closes the
-    # visual gaps the operator flagged (overnight, weekend, pre/post-
-    # market sparseness) without changing the underlying cache. Daily
-    # and weekly bars are already 1-per-session so we never filter them.
-    if rth_only and tf in {"1min", "5min", "15min", "1hour"}:
+    # 2026-04-28: session filter for intraday timeframes. Closes the
+    # visual overnight/weekend/post-market gaps while preserving
+    # premarket (operator-flagged: gap context matters). Each kept bar
+    # is tagged with `session: "pre" | "rth"` so the frontend can shade
+    # the premarket strip differently. Daily/weekly timeframes are
+    # already 1-bar-per-session so we don't filter them.
+    if tf in {"1min", "5min", "15min", "1hour"} and session != "all":
         from zoneinfo import ZoneInfo
         et = ZoneInfo("America/New_York")
-        rth_open_min = 9 * 60 + 30   # 9:30 ET
-        rth_close_min = 16 * 60      # 16:00 ET
+        # Window in minutes-of-day, ET.
+        if session == "rth_plus_premarket":
+            window_open = 4 * 60          # 4:00 AM ET
+            window_close = 16 * 60        # 4:00 PM ET
+        else:  # session == "rth"
+            window_open = 9 * 60 + 30
+            window_close = 16 * 60
+
         before = len(normalised)
-        normalised = [
-            r for r in normalised
-            if (
-                # Convert UTC seconds to ET minute-of-day; weekends excluded.
-                (lambda dt: (
-                    dt.weekday() < 5
-                    and rth_open_min <= dt.hour * 60 + dt.minute < rth_close_min
-                ))(datetime.fromtimestamp(r["time"], tz=et))
-            )
-        ]
-        if not normalised:
-            # Fall back to original set if RTH filter wiped everything
-            # (e.g., test data is purely after-hours). Better to show
-            # gappy data than no data.
+        kept: List[Dict[str, Any]] = []
+        for r in normalised:
+            dt = datetime.fromtimestamp(r["time"], tz=et)
+            if dt.weekday() >= 5:
+                continue
+            mod = dt.hour * 60 + dt.minute
+            if not (window_open <= mod < window_close):
+                continue
+            r["session"] = "pre" if mod < (9 * 60 + 30) else "rth"
+            kept.append(r)
+        if not kept:
+            # Fall back to unfiltered if the filter wipes everything
+            # (e.g., test data is purely overnight). Better gappy data
+            # than empty chart.
             return {
                 "success": False,
                 "symbol": symbol.upper(),
@@ -560,9 +582,15 @@ async def get_chart_bars(
                 "bar_count": 0,
                 "bars": [],
                 "indicators": {},
-                "error": "no RTH bars in window",
-                "rth_filter_dropped": before,
+                "error": f"no bars in session={session}",
+                "session_filter_dropped": before,
             }
+        normalised = kept
+    else:
+        # session == "all" or daily/weekly — annotate everything as RTH
+        # so the frontend's session-shading code has a stable contract.
+        for r in normalised:
+            r.setdefault("session", "rth")
 
     times = [r["time"] for r in normalised]
     closes = [r["close"] for r in normalised]
