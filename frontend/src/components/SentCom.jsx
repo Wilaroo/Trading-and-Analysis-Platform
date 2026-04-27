@@ -20,7 +20,7 @@ import {
   ChevronDown, DollarSign, Gauge, Wifi, Eye, Crosshair,
   MessageSquare, RefreshCw, Bell, Circle, Flame, Radio,
   BarChart3, Newspaper, Sunrise, BookOpen, Sparkles, ChevronRight,
-  Play, Pause, Settings, Bot, Sliders, WifiOff, Star, Search
+  Play, Pause, Settings, Bot, Sliders, WifiOff, Star, Search, Moon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { safePolling } from '../utils/safePolling';
@@ -50,6 +50,7 @@ import { PulsingDot } from './sentcom/primitives/PulsingDot';
 // Extracted hooks (Stage 1 SentCom refactor — Batch 2, 2026-04-23)
 import { useAIInsights } from './sentcom/hooks/useAIInsights';
 import { useMarketSession } from './sentcom/hooks/useMarketSession';
+import { useMarketState } from '../hooks/useMarketState';
 import { useSentComStatus } from './sentcom/hooks/useSentComStatus';
 import { useSentComStream } from './sentcom/hooks/useSentComStream';
 import { useSentComPositions } from './sentcom/hooks/useSentComPositions';
@@ -100,6 +101,10 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { botStatus, actionLoading, toggleBot, changeMode, updateRiskParams } = useTradingBotControl();
   const { ibConnected } = useIBConnectionStatus();
   const { session: marketSession } = useMarketSession();
+  // Canonical market-state snapshot — flips the wordmark moon ON during
+  // weekend + overnight so the entire dashboard is visibly distinct on
+  // non-trading days. Single source of truth (services/market_state.py).
+  const marketStateSnap = useMarketState();
   const { chatHistory, loading: historyLoading } = useChatHistory();
   const { 
     status: aiModulesStatus, 
@@ -398,7 +403,30 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 </div>
               </div>
               <div>
-                <h2 className="text-base font-bold text-white tracking-tight">SENTCOM</h2>
+                <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-1.5">
+                  SENTCOM
+                  {/* Weekend / overnight wordmark moon — single-glance "we're
+                      not pretending it's a trading day" cue. Stays silent
+                      during RTH + extended hours. Sourced from the same
+                      /api/market-state endpoint that drives the
+                      DataFreshnessBadge moon and FreshnessInspector banner. */}
+                  <AnimatePresence>
+                    {marketStateSnap?.is_market_closed && (
+                      <motion.span
+                        key="wordmark-moon"
+                        data-testid="sentcom-wordmark-moon"
+                        title={marketStateSnap.label || 'Market closed'}
+                        initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
+                        animate={{ opacity: 0.4, scale: 1, rotate: 0 }}
+                        exit={{ opacity: 0, scale: 0.6, rotate: 20 }}
+                        transition={{ duration: 0.4, ease: 'easeOut' }}
+                        className="inline-flex"
+                      >
+                        <Moon className="w-3.5 h-3.5 text-zinc-300" />
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </h2>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="flex items-center gap-1">
                     <StatusDot service="quotesStream" size="sm" />

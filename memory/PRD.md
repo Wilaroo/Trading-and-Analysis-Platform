@@ -3910,3 +3910,12 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
   2. Renders a `lucide-react` `<Moon />` icon next to the status dot ONLY when `is_market_closed=true` (weekend OR overnight). Hidden during RTH + extended hours so the normal tone signal stays uncluttered.
   3. The `mkt` variable now flows from the canonical snapshot — single source of truth across the entire app.
 - **Verification**: Frontend compiles clean. Lint OK. The chip now shows the moon at-a-glance without requiring the operator to open the FreshnessInspector.
+
+## 2026-02-01 — V5 Wordmark Moon (Weekend/Overnight Mood Shift)
+- **Where**: `frontend/src/components/SentCom.jsx` (main V5 header line ~401).
+- **What**:
+  1. New shared hook `frontend/src/hooks/useMarketState.js` — thin React wrapper around `/api/market-state` (canonical snapshot, 60s slow-poll). Returns `null` until first fetch resolves so consumers can render nothing instead of guessing a default.
+  2. Imported `Moon` from `lucide-react` and the new hook into `SentCom.jsx`.
+  3. Added a **`<motion.span>` AnimatePresence-wrapped moon** next to the SENTCOM wordmark — fades + scales in on `marketStateSnap.is_market_closed=true` (weekend OR overnight). Hidden during RTH + extended hours so the header stays normal during trading.
+  4. `data-testid="sentcom-wordmark-moon"` for QA. Tooltip shows the `state.label` ("Weekend" / "Overnight (closed)").
+- **Result**: Three places now visibly signal "market is closed" — `DataFreshnessBadge` chip moon, `FreshnessInspector` banner, and now the V5 wordmark moon. All drive off the same `/api/market-state` snapshot. Verification: frontend compiles clean, no new lint warnings.
