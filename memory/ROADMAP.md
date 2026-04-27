@@ -5,12 +5,21 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (2026-04-27)
 
-### P0 — Unblock scanner diversity
-- Run `curl -X POST http://localhost:8001/api/ib-collector/rebuild-adv-from-ib` on DGX.
-  - If it returns `{"success": false, "error": "No daily bar data found"}`,
-    seed dailies via `/api/ib-collector/smart-backfill` first, then retry.
-- Goal: fix "only relative-strength setups" — wave scanner falls back to
-  14-symbol hardcoded list when `symbol_adv_cache` is empty.
+### P0 — RESOLVED 2026-04-27 (this session) — Scanner regression
+~~Wave scanner only producing relative-strength alerts~~ — root cause was
+commit `80cf8501` renaming `self._symbol_adv_cache` → `self._adv_cache`
+(two different things). Fix shipped — see CHANGELOG.
+
+### P0 — Wave-scanner background loop never started
+`/api/wave-scanner/stats` shows `total_scans: 0`, `last_full_scan: null`.
+The `_wave_scanner` is loaded with universe + watchlist + tier2 pool,
+but its scan loop is never invoked. Either the schedule isn't wired in
+`server.py`, or the start hook crashed silently, or it's gated behind a
+feature flag. **Diagnose:**
+- `grep -rn "wave_scanner\|run_scan_cycle\|start_scan" backend/server.py`
+- Check `@app.on_event('startup')` hooks for missing wave-scanner kickoff.
+Less critical now that `enhanced_scanner` is fixed — but should still
+be wired. Distinct producers feed different surfaces.
 
 ### P1 — Briefings content gaps (operator flagged 2026-04-27)
 - **Morning Prep auto-gameplan** is silent — investigate
@@ -27,8 +36,27 @@ Open priorities, deferred ideas, and backlog. Move items to
 - Operator says the "RS LEADER NVDA +6.8% vs SPY - Outperforming
   market — TQS 51 (C)" copy is wrong but didn't specify how.
   **Action:** ask operator what the copy *should* say, then fix the
-  server-side bot-narrative template (likely in
-  `backend/services/wave_scanner.py` or `enhanced_scanner.py`).
+  server-side bot-narrative template.
+
+### P1 — `/api/scanner/daily-alerts` returns 0 despite alerts existing
+- Endpoint filters on field `timestamp` but `live_alerts` writes use
+  `created_at` (the `LiveAlert` dataclass auto-default). Fix: align the
+  filter field name in `routers/scanner.py` (or wherever the route is
+  defined) to use `created_at`. Quick fix.
+
+### P1 — Mongo aggregation index for `rebuild-adv-from-ib` is missing
+- Add compound index `{bar_size: 1, date: -1}` on `ib_historical_data`.
+  Without it, the rebuild aggregation full-scans 13.5M docs and spills
+  to disk. With it, expect rebuild in seconds instead of 5+ min.
+- Run on DGX:
+  ```
+  ~/venv/bin/python -c "
+  from pymongo import MongoClient; import os
+  db = MongoClient(os.environ.get('MONGO_URL', 'mongodb://localhost:27017'))[os.environ.get('DB_NAME', 'tradecommand')]
+  db.ib_historical_data.create_index([('bar_size', 1), ('date', -1)], background=True, name='bar_size_1_date_-1')
+  print('index created')
+  "
+  ```
 
 ### P1 — Live Data Phase 4: retire Alpaca fallback
 - Set `ENABLE_ALPACA_FALLBACK=false`, run smoke for 1 trading day, then
@@ -42,6 +70,8 @@ Open priorities, deferred ideas, and backlog. Move items to
   instead of looping `9:30 AM → 1:00 PM → 4:00 AM`.
 - Confirm Pusher RPC tile headline now reads `last 335ms` instead of
   the misleading `avg 1117ms`.
+- After scanner-regression fix is pulled to DGX, verify alert volume
+  recovers to ~1,000/day with multiple setup types.
 
 ### P2 — SEC EDGAR 8-K integration
 - Material-events feed for the Briefings panel.

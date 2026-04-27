@@ -4050,8 +4050,18 @@ class EnhancedBackgroundScanner:
             if not live_quotes:
                 logger.debug("Daily scan: no live quotes, using MongoDB bars only")
             
-            # Get symbols with daily data (use ADV cache for filtering)
-            symbols = list(self._adv_cache.keys())[:200]
+            # Get symbols with daily data — pull from the canonical Mongo
+            # `symbol_adv_cache` collection (the 9k+ universe), NOT from
+            # `self._adv_cache` (a 15-min TTL lookup cache that's normally
+            # empty on a cold scan). The 04-17 rename to `_adv_cache`
+            # collapsed the scanner to ~14 live-quote fallback symbols and
+            # killed every non-RS detector. Restore the canonical pull.
+            symbols = []
+            try:
+                from services.symbol_universe import get_universe
+                symbols = sorted(get_universe(self.db, tier="intraday"))[:200]
+            except Exception as e:
+                logger.warning(f"Daily scan: canonical universe lookup failed: {e}")
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
             if not symbols:
@@ -4148,8 +4158,17 @@ class EnhancedBackgroundScanner:
             except Exception:
                 pass
             
-            # Get symbols: use ADV cache first, then pushed quotes, then MongoDB
-            symbols = list(self._adv_cache.keys())[:300]
+            # Get symbols: pull from canonical Mongo `symbol_adv_cache`
+            # universe, then fall back to pushed quotes / MongoDB daily
+            # bars. `self._adv_cache` was a wrong-rename target (15-min
+            # TTL dict, normally empty); see the daily-scan branch above
+            # for the same fix.
+            symbols = []
+            try:
+                from services.symbol_universe import get_universe
+                symbols = sorted(get_universe(self.db, tier="intraday"))[:300]
+            except Exception as e:
+                logger.warning(f"Pre-market scan: canonical universe lookup failed: {e}")
             if not symbols:
                 symbols = list(live_quotes.keys())[:200]
             if not symbols:

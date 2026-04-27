@@ -2,6 +2,78 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-27 — Scanner regression — wrong attribute name killed 11 detectors — SHIPPED
+
+### Why
+Operator's screenshots showed the live scanner finding only 1 NVDA
+relative-strength setup. Mongo diagnostic confirmed it was systemic, not
+a quiet-tape artifact:
+
+| Date | Alerts | Non-RS types | RS% |
+|---|---|---|---|
+| 04-13 → 04-17 | 1,128 – 11,810 / day | 13–14 | 0% |
+| 04-18 → 04-20 | 11–37 / day | 2–3 | 0% |
+| 04-21 → 04-23 | 26–68 / day | 2–3 | 13–81% |
+| 04-25 | 10 | 1 | 0% |
+| 04-27 (today) | 17 | **0** | **100%** |
+
+Alert volume crashed ~99% on 2026-04-17. Variety collapsed from 14
+setup types to 0 non-RS over the next 9 days. RS-only alerts crept up
+to 100% of all alerts.
+
+### Root cause
+Commit `80cf8501` (2026-04-17 22:15 UTC) renamed two references in the
+scan-loop symbol selection from `self._symbol_adv_cache` to
+`self._adv_cache`. These are **two completely different things**:
+
+- `self._symbol_adv_cache` — was the canonical Mongo-loaded universe
+  dict (~9,400 symbols).
+- `self._adv_cache` — a 15-min TTL lookup cache (defined line 619),
+  populated lazily as individual ADV checks run, **normally empty on
+  cold scan**.
+
+The renamed code read symbols from the empty TTL dict, fell through to
+the `live_quotes.keys()` fallback (~14 symbols from the IB pusher),
+and only those 14 got scanned. Of the 14, only ones with a clear
+relative-strength signal vs SPY triggered an alert (RS being the one
+detector that doesn't need RVOL / EMA9 / RSI / ATR fields from a
+proper snapshot — every other detector's preconditions silently
+returned `None` because the snapshot pipeline wasn't running for these
+symbols).
+
+### Fix
+`backend/services/enhanced_scanner.py` — both broken sites (daily-scan
+path ~line 4054, pre-market-scan path ~line 4152) now pull from
+`services.symbol_universe.get_universe(self.db, tier="intraday")`
+(same canonical helper already used at line 1253 for the watchlist).
+Live-quote fallback retained as a 2nd-tier fallback; Mongo distinct
+retained as 3rd. Imports added at point-of-use to avoid circular-import
+risk.
+
+### Verification
+- `python -m ast` parse: clean
+- Existing pre-existing lint warnings unrelated (f-strings, unused vars)
+- Operator should observe alert volume jump back to ~1,000/day with
+  13+ setup types within one scan cycle of restart.
+
+### Operator action required
+1. Save to GitHub from this session.
+2. On DGX: `cd ~/Trading-and-Analysis-Platform && git pull`
+3. Restart backend: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &`
+4. Wait 60s, then run:
+   ```
+   ~/venv/bin/python -c "
+   from pymongo import MongoClient; import os, collections
+   db = MongoClient(os.environ.get('MONGO_URL', 'mongodb://localhost:27017'))[os.environ.get('DB_NAME', 'tradecommand')]
+   t = collections.Counter(a.get('setup_type') for a in db.live_alerts.find({'created_at': {'\$gte': '2026-04-27T19:00'}}, {'setup_type': 1}))
+   for s, n in t.most_common(): print(f'{s}: {n}')
+   "
+   ```
+   Should show multiple setup types (breakout, vwap_bounce, orb, …),
+   not just RS.
+
+---
+
 ## 2026-04-27 — Scanner header count + P(win) duplication + Stream `scan` filter — SHIPPED
 
 ### Why
