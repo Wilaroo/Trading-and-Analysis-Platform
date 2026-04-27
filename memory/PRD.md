@@ -1,5 +1,61 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Scanner Universe Alignment Audit & Refactor — SHIPPED
+
+### Symptom
+The predictive scanner could fire alerts on symbols the AI training pipeline
+had **no models for**, and conversely could miss $50M+ ADV symbols that
+weren't in any of the legacy ETF constituent lists. This was caused by
+three independent symbol-source layers — none of which matched
+`services/symbol_universe.py` (the AI training pipeline's canonical universe).
+
+### Audit findings
+| Layer | Old source | Aligned with AI? |
+|---|---|---|
+| `enhanced_scanner._get_expanded_watchlist()` | Hardcoded ~250 symbols | ❌ |
+| `wave_scanner` Tier 2 (high RVOL pool) | `alpaca_service.get_quotes_batch()` | ❌ (also Alpaca) |
+| `wave_scanner` Tier 3 (rotating waves) | `index_universe.py` (SPY/QQQ/IWM constituents) | ❌ |
+
+### Fix — Full alignment to `symbol_universe.py`
+1. **`services/wave_scanner.py`** rewritten as Canonical Universe Edition:
+   - Tier 2 = top-200 most-liquid intraday symbols (≥$50M ADV) sourced from
+     `symbol_adv_cache`, ADV-ranked desc, refreshed every 10 min.
+   - Tier 3 = full canonical swing-tier roster (≥$10M ADV) in 200-symbol
+     waves, ordered by ADV desc.
+   - Dropped `IndexUniverseManager` and `alpaca_service` dependencies entirely.
+   - Excludes any symbol with `unqualifiable=true`.
+2. **`services/enhanced_scanner.py`**:
+   - Replaced 250-line hardcoded `_get_expanded_watchlist()` with
+     `_refresh_watchlist_from_canonical_universe()`, which pulls intraday-tier
+     symbols from `symbol_universe.get_universe(db, tier='intraday')` whenever
+     `set_db()` runs.
+   - `_get_safety_watchlist()` (15 ETFs) used only as cold-boot fallback.
+3. **`server.py`**: `init_wave_scanner(smart_watchlist, index_universe)` →
+   `init_wave_scanner(watchlist_service=smart_watchlist, db=db)`.
+
+### Result
+The scanner watchlist, wave roster, and AI training pipeline now read from
+the **same** mongo collection (`symbol_adv_cache`) with the **same**
+thresholds. Universe drift is impossible — when an IPO crosses $50M ADV it
+becomes scannable AND trainable in the next refresh cycle.
+
+### Tests (5 new + 29 existing)
+- `tests/test_scanner_canonical_alignment.py` (5 tests):
+    * tier 2 ranks intraday symbols by ADV desc, excludes <$50M
+    * tier 3 includes swing-tier (≥$10M) but excludes <$10M
+    * unqualifiable symbols excluded from all tiers
+    * wave_scanner.py no longer imports `index_universe` or `alpaca_service`
+    * enhanced_scanner watchlist refreshes from canonical universe at set_db()
+    * empty universe falls back to ETF safety list (≤20 symbols), not the
+      old 250-symbol hardcoded roster
+- All `test_universe_canonical.py`, `test_no_alpaca_regressions.py`, and
+  `test_scanner_phase3_ib_only.py` regression suites still green (29 tests).
+
+### API surface unchanged
+`GET /api/wave-scanner/config` now reports
+`source: services/symbol_universe.py (canonical AI-training universe)`.
+
+
 ## 2026-04-26 (LATER) — Weekend/Overnight Awareness Sweep — SHIPPED
 
 ### Symptom: weekend false-positives across the UI

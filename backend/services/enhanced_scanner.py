@@ -696,8 +696,10 @@ class EnhancedBackgroundScanner:
             "orb", "hitchhiker", "spencer_scalp", "9_ema_scalp", "abc_scalp"
         }
         
-        # Watchlist - expanded to 200+ symbols
-        self._watchlist: List[str] = self._get_expanded_watchlist()
+        # Watchlist — sourced from the canonical AI-training universe at
+        # set_db() time. Until db is wired we keep a tiny ETF-only safety
+        # list so smoke tests / cold boots don't crash.
+        self._watchlist: List[str] = self._get_safety_watchlist()
         
         # All available setups
         self._enabled_setups: Set[str] = {
@@ -776,6 +778,9 @@ class EnhancedBackgroundScanner:
         self.stats_collection = db["strategy_stats"]
         self.alert_outcomes_collection = db["alert_outcomes"]
         self._load_strategy_stats()
+        # Refresh _watchlist from the canonical AI-training universe so the
+        # scanner only fires on symbols the AI has models for.
+        self._refresh_watchlist_from_canonical_universe()
     
     def set_db(self, db):
         """Set database connection and initialize collections (used for late binding)"""
@@ -1086,72 +1091,48 @@ class EnhancedBackgroundScanner:
             "vol_multiplier": vol_multiplier
         }
     
-    # ==================== EXPANDED WATCHLIST ====================
-    
-    def _get_expanded_watchlist(self) -> List[str]:
-        """Get expanded 200+ symbol watchlist"""
+    # ==================== CANONICAL UNIVERSE WATCHLIST ====================
+    # The scanner watchlist is now sourced from `services/symbol_universe.py`
+    # — the SAME universe the AI training pipeline trains on. This guarantees
+    # every alert the scanner fires is on a symbol the AI has models for.
+    # See the Scanner Universe Alignment audit (Feb 2026).
+
+    def _get_safety_watchlist(self) -> List[str]:
+        """Tiny ETF-only fallback used before db is wired (cold boot, tests)."""
         return [
-            # Mega Cap Tech (Most Active)
-            "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA",
-            # Large Cap Tech
-            "AMD", "INTC", "AVGO", "QCOM", "ADBE", "CRM", "ORCL", "CSCO",
-            "TXN", "MU", "AMAT", "LRCX", "KLAC", "MRVL", "SNPS", "CDNS",
-            # Growth Tech
-            "NFLX", "SHOP", "SQ", "COIN", "SNOW", "DDOG", "NET", "CRWD",
-            "ZS", "OKTA", "PANW", "FTNT", "PLTR", "RBLX", "U", "HOOD",
-            "SOFI", "UPST", "AFRM", "MELI", "SE", "GRAB", "BABA", "JD", "PDD",
-            # Financials
-            "JPM", "BAC", "WFC", "C", "GS", "MS", "SCHW", "BLK", "AXP",
-            "V", "MA", "PYPL", "COF", "DFS", "SYF",
-            # Healthcare/Biotech
-            "UNH", "JNJ", "PFE", "MRK", "ABBV", "LLY", "BMY", "AMGN",
-            "GILD", "BIIB", "MRNA", "BNTX", "REGN", "VRTX", "ISRG",
-            # Consumer
-            "HD", "LOW", "TGT", "WMT", "COST", "NKE", "SBUX",
-            "MCD", "DIS", "CMCSA", "ABNB", "BKNG", "MAR", "RCL",
-            # Energy
-            "XOM", "CVX", "COP", "SLB", "EOG", "PXD", "DVN", "OXY",
-            "MPC", "VLO", "PSX", "HAL", "BKR",
-            # Industrials
-            "BA", "CAT", "DE", "HON", "UPS", "FDX", "GE", "RTX", "LMT",
-            "NOC", "GD", "MMM", "EMR",
-            # Materials
-            "LIN", "APD", "FCX", "NEM", "NUE", "CLF", "X", "AA",
-            # ETFs (for market context and trading)
-            "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV", "XLI",
-            "XLY", "XLP", "XLU", "XLRE", "XLC", "XLB",
-            "ARKK", "ARKG", "ARKF", "SOXL", "SOXS", "TQQQ", "SQQQ",
-            # High Volume Movers (frequently in play)
-            "GME", "AMC", "CLOV", "WISH", "SPCE", "LCID", "RIVN",
-            "NIO", "XPEV", "LI", "F", "GM",
-            # Semiconductors (often trending)
-            "TSM", "ASML", "MCHP", "ADI", "ON", "SWKS", "QRVO", "WOLF",
-            # Software/Cloud
-            "NOW", "WDAY", "ZM", "DOCU", "TWLO", "TEAM", "MNDY", "HUBS",
-            "BILL", "PCTY", "PAYC", "VEEV", "SPLK", "ESTC",
-            # Cybersecurity
-            "S", "QLYS", "TENB",
-            # Social/Advertising
-            "SNAP", "PINS", "TTD", "MGNI", "PUBM",
-            # E-commerce/Payments
-            "TOST",
-            # Gaming/Entertainment
-            "EA", "TTWO", "DKNG", "PENN", "MGM", "WYNN", "LVS",
-            # Cannabis (high volatility)
-            "TLRY", "CGC", "ACB", "CRON",
-            # SPACs/Recent IPOs (high volatility)
-            "DWAC", "IONQ", "JOBY", "LILM",
-            # REITs
-            "AMT", "PLD", "EQIX", "DLR", "SPG", "O", "VICI",
-            # Airlines (volatile)
-            "DAL", "UAL", "AAL", "LUV", "JBLU",
-            # Auto
-            # Retail
-            "DLTR", "DG", "FIVE", "OLLI",
-            # Restaurants
-            "CMG", "YUM", "DPZ", "QSR",
+            "SPY", "QQQ", "IWM", "DIA",
+            "XLF", "XLE", "XLK", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLC", "XLB",
         ]
-    
+
+    def _refresh_watchlist_from_canonical_universe(self) -> None:
+        """Pull intraday-tier symbols from `symbol_adv_cache` and use them as
+        the scanner's canonical watchlist. Falls back to the safety list
+        (ETFs) if MongoDB is unavailable or returns nothing."""
+        if self.db is None:
+            self._watchlist = self._get_safety_watchlist()
+            return
+        try:
+            from services.symbol_universe import get_universe
+            symbols = sorted(get_universe(self.db, tier="intraday"))
+            if symbols:
+                self._watchlist = symbols
+                logger.info(
+                    f"📊 Scanner watchlist sourced from canonical universe: "
+                    f"{len(symbols)} intraday symbols (≥$50M ADV)."
+                )
+            else:
+                self._watchlist = self._get_safety_watchlist()
+                logger.warning(
+                    "Canonical universe returned 0 symbols; falling back to "
+                    "safety watchlist (ETFs)."
+                )
+        except Exception as e:
+            logger.warning(
+                f"Could not refresh watchlist from canonical universe: {e}; "
+                "using safety watchlist."
+            )
+            self._watchlist = self._get_safety_watchlist()
+
     # ==================== RVOL PRE-FILTERING & WAVE SCANNING ====================
     
     async def _get_active_symbols(self) -> List[str]:

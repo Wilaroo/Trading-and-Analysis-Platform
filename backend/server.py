@@ -577,10 +577,14 @@ def _init_all_services():
     calibration_log_col = db["calibration_log"]  # Threshold adjustment history
     trader_profile_col = db["trader_profile"]  # Trader patterns for RAG
 
-    # Initialize smart watchlist and wave scanner
+    # Initialize smart watchlist and wave scanner.
+    # Wave scanner now sources its tiers from the CANONICAL universe in
+    # `symbol_universe.py` (matches AI training), so we pass `db` instead of
+    # the legacy ETF-constituent `index_universe`. `index_universe` is still
+    # initialized below for legacy `/api/universe/*` dashboard endpoints.
     smart_watchlist = init_smart_watchlist(smart_watchlist_col)
     index_universe = get_index_universe()
-    wave_scanner = init_wave_scanner(smart_watchlist, index_universe)
+    wave_scanner = init_wave_scanner(watchlist_service=smart_watchlist, db=db)
 
     # Initialize market intel service (moved here to wire smart_watchlist)
     market_intel_service = get_market_intel_service()
