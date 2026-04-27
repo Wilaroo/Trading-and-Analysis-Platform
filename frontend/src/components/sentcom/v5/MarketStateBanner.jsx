@@ -11,11 +11,9 @@
  * Stays silent during RTH + extended hours — no banner = market is doing
  * its normal thing.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import { Moon, Coffee } from 'lucide-react';
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const POLL_MS = 60_000;  // 1m — state buckets only flip on hour boundaries
+import { useMarketState } from '../../../hooks/useMarketState';
 
 const BANNER_BY_STATE = {
   weekend: {
@@ -34,25 +32,11 @@ const BANNER_BY_STATE = {
   },
 };
 
-export const MarketStateBanner = ({ refreshToken = 0 }) => {
-  const [snap, setSnap] = useState(null);
-
-  const reload = useCallback(async () => {
-    try {
-      const resp = await fetch(`${BACKEND_URL}/api/market-state`);
-      if (!resp.ok) return;
-      const body = await resp.json();
-      setSnap(body);
-    } catch {
-      /* swallow — banner just won't render */
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-    const id = setInterval(reload, POLL_MS);
-    return () => clearInterval(id);
-  }, [reload, refreshToken]);
+export const MarketStateBanner = () => {
+  // Shared hook — same source as the SENTCOM wordmark moon and the
+  // DataFreshnessBadge chip moon. Single round-trip means all three
+  // surfaces flip in lock-step on state boundaries.
+  const snap = useMarketState();
 
   if (!snap || !snap.buffers_active) return null;
   const cfg = BANNER_BY_STATE[snap.state];

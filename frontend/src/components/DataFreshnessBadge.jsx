@@ -38,15 +38,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Moon } from 'lucide-react';
 import { FreshnessInspector } from './sentcom/v5/FreshnessInspector';
+import { useMarketState } from '../hooks/useMarketState';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const POLL_MS = 10_000;
-// Market-state polls less frequently — buckets only flip on hour boundaries.
-const MARKET_STATE_POLL_MS = 60_000;
 
-// Market state comes from the canonical /api/market-state endpoint
-// (services/market_state.py — single source of truth shared with
-// live_bar_cache TTLs, backfill_readiness, account_guard, scanner).
+// Market state comes from the canonical /api/market-state endpoint via
+// the shared `useMarketState` hook (services/market_state.py — single
+// source of truth shared with live_bar_cache TTLs, backfill_readiness,
+// account_guard, scanner, AND the V5 wordmark moon).
 // Returns one of: 'rth' | 'extended' | 'overnight' | 'weekend' | null.
 
 const formatAge = (secs) => {
@@ -62,9 +62,10 @@ export const DataFreshnessBadge = () => {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [err, setErr] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  // Canonical market-state snapshot (services/market_state.py via
-  // /api/market-state). Replaces the old local ET-hour math fn.
-  const [marketSnap, setMarketSnap] = useState(null);
+  // Canonical market-state snapshot via the shared hook — same source as
+  // the SENTCOM wordmark moon, so the chip can never drift out of sync
+  // with the header during state flips.
+  const marketSnap = useMarketState();
 
   useEffect(() => {
     let alive = true;
@@ -86,23 +87,6 @@ export const DataFreshnessBadge = () => {
     };
     poll();
     const id = setInterval(poll, POLL_MS);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-
-  // Separate slow-poll for market state — buckets only flip on hour
-  // boundaries so 60s is plenty.
-  useEffect(() => {
-    let alive = true;
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API}/api/market-state`);
-        if (!res.ok) return;
-        const j = await res.json();
-        if (alive) setMarketSnap(j);
-      } catch { /* leave stale snapshot — chip just won't update tone */ }
-    };
-    poll();
-    const id = setInterval(poll, MARKET_STATE_POLL_MS);
     return () => { alive = false; clearInterval(id); };
   }, []);
 

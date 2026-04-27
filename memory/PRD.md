@@ -3919,3 +3919,12 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
   3. Added a **`<motion.span>` AnimatePresence-wrapped moon** next to the SENTCOM wordmark — fades + scales in on `marketStateSnap.is_market_closed=true` (weekend OR overnight). Hidden during RTH + extended hours so the header stays normal during trading.
   4. `data-testid="sentcom-wordmark-moon"` for QA. Tooltip shows the `state.label` ("Weekend" / "Overnight (closed)").
 - **Result**: Three places now visibly signal "market is closed" — `DataFreshnessBadge` chip moon, `FreshnessInspector` banner, and now the V5 wordmark moon. All drive off the same `/api/market-state` snapshot. Verification: frontend compiles clean, no new lint warnings.
+
+## 2026-02-01 — Consolidate market-state polling under shared hook
+- **Where**: `frontend/src/hooks/useMarketState.js` (already existed), now consumed by all three "market closed" surfaces.
+- **Refactored to use the shared hook**:
+  1. `DataFreshnessBadge.jsx` — dropped its private 60s `/api/market-state` poller + `marketSnap` `useState`, replaced with `useMarketState()`. Net: -19 lines, no behaviour change.
+  2. `MarketStateBanner.jsx` — dropped its private poller (was using `useCallback`/`useEffect`/`refreshToken` prop), replaced with `useMarketState()`. Net: -22 lines, the `refreshToken` prop is now no-op since the hook polls on its own schedule.
+  3. `FreshnessInspector.jsx` — removed the now-unused `refreshToken` prop from the `MarketStateBanner` call site.
+- **Why**: All three surfaces (V5 wordmark moon, DataFreshnessBadge chip moon, FreshnessInspector banner) now flip in lock-step on state boundaries — no risk of one being amber while another is grey for up to 60s during RTH→extended transitions.
+- **Verification**: Lint clean, frontend compiles green, no new warnings.

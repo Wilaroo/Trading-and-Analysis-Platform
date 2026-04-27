@@ -128,8 +128,10 @@ export const FreshnessInspector = ({ isOpen, onClose }) => {
           <div className="p-4 space-y-4 max-h-[78vh] overflow-y-auto v5-scroll">
             {/* Weekend / Overnight banner — surfaces ONLY when buffers are
                 active so operators don't mistake softer freshness warnings
-                for a regression. Stays silent during RTH + extended hours. */}
-            <MarketStateBanner refreshToken={refreshCounter} />
+                for a regression. Stays silent during RTH + extended hours.
+                Drives off the same shared `useMarketState` hook as the
+                V5 wordmark moon + DataFreshnessBadge chip. */}
+            <MarketStateBanner />
 
             {/* Backfill readiness ("OK to train?") — surfaced first because
                 it's the single most actionable signal right now while the
