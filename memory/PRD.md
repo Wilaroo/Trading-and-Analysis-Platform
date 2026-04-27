@@ -1,5 +1,31 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — STRONG_EDGE Audio Cue — SHIPPED
+
+### Why
+The "Top Edge" filter chip surfaces STRONG_EDGE alerts visually, but the
+operator may not always be staring at the panel. A distinct sound cue
+turns these into ear-detectable events.
+
+### What
+**`LiveAlertsPanel.jsx`** got a new `playStrongEdgeSound()` helper —
+two-tone ascending chime (880Hz → 1320Hz, ~300ms) — and the SSE handler
+now picks it over the existing single-pulse "critical" sound when
+`newAlert.ai_edge_label === 'STRONG_EDGE'`.
+
+Precedence in the SSE alert handler:
+  1. Notifications disabled → no sound at all (operator toggle respected)
+  2. `ai_edge_label === 'STRONG_EDGE'` → ascending two-tone chime
+  3. `priority === 'critical'` → existing single 880Hz pulse
+  4. Otherwise → silent
+
+A STRONG_EDGE alert that is *also* critical plays only the STRONG_EDGE
+chime — more specific signal wins.
+
+### Validation
+Frontend lint clean, no backend touched.
+
+
 ## 2026-02 — "Top Edge" Filter Chip on Live Alerts Panel — SHIPPED
 
 ### Why

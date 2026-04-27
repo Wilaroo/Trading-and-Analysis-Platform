@@ -663,9 +663,15 @@ const LiveAlertsPanel = ({
             // Add new alert at the top
             const updated = [newAlert, ...prev].slice(0, 50); // Keep max 50
             
-            // Play notification sound if enabled
-            if (notificationsEnabled && newAlert.priority === 'critical') {
-              playNotificationSound();
+            // Play notification sound if enabled. STRONG_EDGE has its own
+            // ascending chime so the operator can ear-distinguish "AI is
+            // unusually confident" from "critical priority" alerts.
+            if (notificationsEnabled) {
+              if (newAlert.ai_edge_label === 'STRONG_EDGE') {
+                playStrongEdgeSound();
+              } else if (newAlert.priority === 'critical') {
+                playNotificationSound();
+              }
             }
             
             return updated;
@@ -801,6 +807,35 @@ const LiveAlertsPanel = ({
         gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
         setTimeout(() => oscillator.stop(), 100);
       }, 100);
+    } catch (err) {
+      // Ignore audio errors
+    }
+  };
+
+  // Distinct two-tone ascending chime for STRONG_EDGE alerts. Lets the
+  // operator instantly tell apart a "critical priority" ping (single 880Hz
+  // pulse, above) from a "the AI is unusually confident on this name"
+  // ping (880Hz → 1320Hz ascending fifth) without looking at the screen.
+  const playStrongEdgeSound = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const playTone = (freq, startOffset, duration) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.001, ctx.currentTime + startOffset);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + startOffset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + duration);
+        osc.start(ctx.currentTime + startOffset);
+        osc.stop(ctx.currentTime + startOffset + duration + 0.02);
+      };
+      // Two-tone ascending: 880Hz then 1320Hz (perfect fifth) — distinctly
+      // "good news" sounding, won't be confused with the critical ping.
+      playTone(880, 0, 0.12);
+      playTone(1320, 0.13, 0.18);
     } catch (err) {
       // Ignore audio errors
     }
