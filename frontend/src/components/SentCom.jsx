@@ -356,7 +356,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
           alertsLoading={alertsLoading}
           setups={setups}
           alerts={alerts}
-          messages={messages}
+          messages={allMessages}
           streamLoading={streamLoading}
           handleChat={handleChat}
           selectedPosition={selectedPosition}

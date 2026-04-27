@@ -71,9 +71,11 @@ export const DataFreshnessBadge = () => {
     let alive = true;
     const poll = async () => {
       try {
-        const res = await fetch(`${API}/api/ib/pusher-health`, {
-          credentials: 'include',
-        });
+        // No auth/cookies needed — drop `credentials: 'include'` which
+        // was triggering CORS rejection against `Access-Control-Allow-Origin: *`
+        // every poll cycle (visible in the browser console as a wall of
+        // CORS errors). The endpoint is read-only and idempotent.
+        const res = await fetch(`${API}/api/ib/pusher-health`);
         if (!res.ok) throw new Error('bad status');
         const j = await res.json();
         if (!alive) return;

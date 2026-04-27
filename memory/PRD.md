@@ -3965,3 +3965,10 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - **FreshnessInspector** updated to accept a `scrollToTestId` prop and `scrollIntoView` the matching element 120ms after open (gives the cards a frame to mount).
 - **Result**: Permanent at-a-glance "am I cleared to flip auto-execute?" signal in the header. Same source-of-truth context as the modal card, so they can never disagree. ~80 lines for the chip + 13 lines for the deep-link scroll.
 - **Verification**: Lint clean, frontend compiles green, no new warnings. Ready for visual confirmation on Spark.
+
+## 2026-02-01 — Bug Fix: V5 chat replies invisible (`localMessages` dropped)
+- **Symptom**: User types → ENTER → input clears → backend `/api/sentcom/chat` returns 200 OK with the AI reply → but nothing appears in the V5 conversation panel.
+- **Root cause**: `SentCom.jsx` stores user message + AI reply into `localMessages`. `SentComV5View` was being passed `messages={messages}` (the stream-only feed from `useSentComStream`), so `localMessages` was never rendered. The UI had no consumer for the local chat state — pre-existing latent bug masked while `<ChatInput disabled={!status?.connected} />` blocked weekend typing. Removing that gate (earlier in this session) unmasked the silent void.
+- **Fix**: One-line change in `SentCom.jsx` V5 dispatch — pass the already-computed `allMessages` memo (which dedups `localMessages` + stream `messages`, sorts by timestamp, takes last 30) instead of raw stream `messages`.
+- **Also fixed**: CORS spam in browser console — `DataFreshnessBadge.jsx:74` was sending `credentials: 'include'` on `/api/ib/pusher-health` which clashed with the backend's `Access-Control-Allow-Origin: *`. Dropped the unnecessary flag (endpoint is read-only, no auth needed).
+- **Verification**: Lint clean, frontend compiles green. User can now confirm the AI reply appears in the V5 unified stream.
