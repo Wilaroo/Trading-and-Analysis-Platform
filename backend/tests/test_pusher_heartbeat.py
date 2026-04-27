@@ -122,16 +122,18 @@ def test_pushes_per_min_count_60s_window():
 
 
 def test_push_rate_health_thresholds():
-    """healthy ≥ 30, degraded ≥ 5, stalled > 0, else no_pushes."""
+    """healthy ≥ 4, degraded ≥ 2, stalled > 0, else no_pushes.
+    Calibrated against the pusher's default 10s push interval
+    (= 6 pushes/min when fully healthy)."""
     import asyncio
     from routers import ib as ib_router
 
     ib_router._pushed_ib_data["last_update"] = None
 
     cases = [
-        (35, "healthy"),
-        (10, "degraded"),
-        (2, "stalled"),
+        (8, "healthy"),    # well above 4/min
+        (3, "degraded"),   # 2..3/min
+        (1, "stalled"),    # one push in window
         (0, "no_pushes"),
     ]
     for n_pushes, expected in cases:

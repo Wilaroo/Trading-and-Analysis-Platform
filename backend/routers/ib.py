@@ -5823,10 +5823,16 @@ async def get_pusher_health():
         _now_ts = _t.time()
         _recent_pushes = [t for t in _push_timestamps if _now_ts - t <= 60.0]
         pushes_per_min = len(_recent_pushes)
-        # Last-60s push rate as a fraction of expected (1/sec) → 1.0 = healthy
+        # Calibrated against the pusher's default 10s push interval
+        # (= 6 pushes/min when fully healthy). Thresholds allow a small
+        # amount of jitter:
+        #   healthy   ≥ 4/min   (pusher hitting its 10s cadence)
+        #   degraded  ≥ 2/min   (pushes happening but rate dropping)
+        #   stalled   > 0/min   (occasional push, mostly silent)
+        #   no_pushes  no recent pushes at all
         push_rate_health = (
-            "healthy" if pushes_per_min >= 30 else
-            "degraded" if pushes_per_min >= 5 else
+            "healthy" if pushes_per_min >= 4 else
+            "degraded" if pushes_per_min >= 2 else
             "stalled" if pushes_per_min > 0 else
             "no_pushes"
         )

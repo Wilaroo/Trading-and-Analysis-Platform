@@ -2908,22 +2908,47 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
 
         already = [s for s in syms_in if s in pusher.subscribed_contracts]
         new_syms = [s for s in syms_in if s not in pusher.subscribed_contracts]
-
+        added: list = []
         failed: list = []
-        try:
-            if new_syms:
-                # subscribe_market_data handles SMART routing, fundamentals
-                # ticks, and qualifyContracts. Any per-symbol failures are
-                # logged but do not stop the rest.
-                pusher.subscribe_market_data(new_syms, include_fundamentals=False)
-        except Exception as exc:
-            logger.warning("[RPC] /rpc/subscribe error: %s", exc)
-            failed = list(new_syms)
-            new_syms = []
+
+        if new_syms:
+            # Dispatch onto the IB event loop — ib_insync isn't thread-safe
+            # and `qualifyContracts` from the FastAPI worker thread errors
+            # with "no current event loop". Mirrors the pattern used by
+            # /rpc/latest-bars.
+            from ib_insync import Index as _Index2
+
+            async def _do_subscribe():
+                for symbol in new_syms:
+                    try:
+                        if symbol == "VIX":
+                            contract = _Index2("VIX", "CBOE")
+                        else:
+                            contract = _Stock(symbol, "SMART", "USD")
+                        qualified = await pusher.ib.qualifyContractsAsync(contract)
+                        if not qualified:
+                            failed.append(symbol)
+                            continue
+                        # reqMktData is fire-and-forget (no await needed)
+                        pusher.ib.reqMktData(contract, "", False, False)
+                        pusher.subscribed_contracts[symbol] = contract
+                        added.append(symbol)
+                    except Exception as inner_exc:
+                        logger.error(f"  [RPC] Failed to subscribe {symbol}: {inner_exc}")
+                        failed.append(symbol)
+
+            try:
+                _run_on_ib_loop(_do_subscribe, timeout=20.0)
+            except Exception as exc:
+                logger.warning("[RPC] /rpc/subscribe error: %s", exc)
+                # Anything not yet added/failed at this point is a hard failure
+                for s in new_syms:
+                    if s not in added and s not in failed:
+                        failed.append(s)
 
         return {
             "success": True,
-            "added": new_syms,
+            "added": added,
             "already_subscribed": already,
             "failed": failed,
             "total_subscribed": len(pusher.subscribed_contracts),
@@ -2936,19 +2961,33 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         syms_in = [str(s).upper().strip() for s in (req.symbols or []) if s]
         removed: list = []
         not_found: list = []
+        targets: list = []
         for sym in syms_in:
             contract = pusher.subscribed_contracts.get(sym)
             if contract is None:
                 not_found.append(sym)
                 continue
+            targets.append((sym, contract))
+
+        if targets:
+            # cancelMktData is sync but ib_insync internally schedules onto
+            # its loop; calling from the FastAPI worker thread errors. Wrap
+            # in a coroutine and dispatch onto the IB loop.
+            async def _do_cancel():
+                for sym, contract in targets:
+                    try:
+                        pusher.ib.cancelMktData(contract)
+                    except Exception as exc:
+                        logger.debug("[RPC] cancelMktData %s error: %s", sym, exc)
+                    pusher.subscribed_contracts.pop(sym, None)
+                    pusher.quotes_buffer.pop(sym, None)
+                    pusher.fundamentals_buffer.pop(sym, None)
+                    removed.append(sym)
+
             try:
-                pusher.ib.cancelMktData(contract)
+                _run_on_ib_loop(_do_cancel, timeout=10.0)
             except Exception as exc:
-                logger.debug("[RPC] cancelMktData %s error: %s", sym, exc)
-            pusher.subscribed_contracts.pop(sym, None)
-            pusher.quotes_buffer.pop(sym, None)
-            pusher.fundamentals_buffer.pop(sym, None)
-            removed.append(sym)
+                logger.warning("[RPC] /rpc/unsubscribe error: %s", exc)
 
         return {
             "success": True,

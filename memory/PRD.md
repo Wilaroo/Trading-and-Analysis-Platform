@@ -1,5 +1,55 @@
 # TradeCommand / SentCom — Product Requirements
 
+## 2026-02 — Pusher End-to-End Healthy! + Polish — SHIPPED
+
+### Status as of operator's latest pull
+🎉 **The full pusher → DGX pipeline is now alive.** Operator's UI shows
+`PUSHER GREEN · push rate 6/min · RPC 1274ms avg · tracking 14 quotes
+0 pos 3 L2 · MARKET OPEN`. Scanner has 2 hits (NVDA EVAL, conf 55%).
+End-to-end: live quotes, dynamic scanner alerts, live chart bars, live
+heartbeat — all flowing.
+
+### Three small polish items shipped after first-light
+1. **Push-rate thresholds recalibrated** — old thresholds were wrong
+   (`healthy ≥ 30/min`) because they assumed 1 push/sec. The pusher's
+   default interval is 10s → 6/min is fully healthy. New thresholds:
+   `healthy ≥ 4`, `degraded ≥ 2`, `stalled > 0`, `no_pushes` otherwise.
+   The `slowing` chip on the heartbeat tile will no longer fire false
+   positives. Test updated accordingly.
+
+2. **`/rpc/subscribe` and `/rpc/unsubscribe` event-loop fix** — operator
+   logs showed `Failed to subscribe SQQQ: There is no current event loop
+   in thread 'AnyIO worker thread'` followed by `RuntimeWarning:
+   coroutine 'IB.qualifyContractsAsync' was never awaited`. Both
+   handlers were calling sync `ib_insync` methods from the FastAPI
+   threadpool worker, hitting the same root cause as the original
+   `/rpc/latest-bars` bug. Fix: dispatch onto the IB loop via
+   `_run_on_ib_loop()` (same pattern). `/rpc/subscribe` now uses
+   `qualifyContractsAsync` inside an inline async block; `reqMktData` is
+   fire-and-forget so it stays sync. `/rpc/unsubscribe` wraps
+   `cancelMktData` in an async block and dispatches.
+
+3. **Watchdog event-loop errors are harmless and remain** — the
+   `request_account_updates()` and `fetch_news_providers()` watchdog
+   threads now error fast with `There is no current event loop in
+   thread 'ib-acct-updates'` instead of hanging. The pipeline works
+   without account streaming (positions polled on demand) and without
+   news providers (non-essential). These two log lines are noisy but
+   non-blocking — the pusher reaches `STARTING PUSH LOOP` and starts
+   pushing within seconds either way. Quieting them is a P3 cosmetic.
+
+### Tests
+46/46 pass across `test_pusher_heartbeat.py`, `test_ai_edge_and_live_bars.py`,
+`test_scanner_canonical_alignment.py`, `test_universe_canonical.py`, and
+`test_no_alpaca_regressions.py`.
+
+### Observation: RPC latency 1.27s avg
+The RPC `latest-bars` round-trip averages 1.27s (p95 1.25s, last 292ms).
+Each call does `qualifyContractsAsync` + `reqHistoricalDataAsync` from
+scratch — qualified contract caching would knock this down significantly
+but it's an optimization, not a correctness issue. Filed as future P2.
+
+
 ## 2026-02 — Pusher Hang Diagnosis & Fix: `reqAccountUpdates` Watchdog — SHIPPED
 
 ### Root cause (FOUND)
