@@ -4031,3 +4031,13 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
   - Watches render as a grid of clickable cards: bold ticker symbol (clickable → existing enhanced ticker modal), key level on the right (cyan tabular-nums), thesis below, invalidation in rose-400/80. Hover effect: cyan border. `data-testid="gameplan-watch-{SYMBOL}"` for QA.
 - **Tests**: 10 new pytest cases pin the parser's resilience guarantees — strict JSON, markdown fences, prose+JSON sandwich, pure prose, empty input, watches cap (5), missing symbol, oversized fields, lowercase symbol, oversized symbol. All 36 weekend-briefing tests pass.
 - **Verification**: Live curl confirms `gameplan: {text: "", watches: []}` (empty in preview pod due to no LLM/Finnhub key). On Spark with Ollama+Finnhub wired, you'll see populated watches as a card grid in the Bot's Gameplan section.
+
+## 2026-02-01 — Monday-morning auto-load: top watch → V5 chart
+- **Where**: `frontend/src/hooks/useMondayMorningAutoLoad.js` (NEW), wired into `SentComV5View.jsx`. Visual marker in `WeekendBriefingCard.jsx`.
+- **What**:
+  1. **Hook fires on Mon 09:25 → 09:40 ET**, fetches `/api/briefings/weekend/latest`, reads `briefing.gameplan.watches[0].symbol`, calls `setFocusedSymbol(symbol)` so the V5 chart frames on the bot's #1 idea before the open.
+  2. **Idempotent per ISO week** via localStorage flag (`wb-autoload-{ISO_WEEK}`). Reloads inside the window won't re-fire. Browser caches the auto-loaded symbol under `wb-autoloaded-symbol-{ISO_WEEK}` for the UI marker.
+  3. **Respects manual focus** — `userHasFocusedRef` flips to `true` whenever the operator clicks any ticker (via `handleOpenTicker` or `V5ChartHeader.onChangeSymbol`). When set, the hook becomes a no-op so the auto-load NEVER overrides an explicit user choice.
+  4. **`SentComV5View.jsx`** introduces `setFocusedSymbolUserDriven` — wraps `setFocusedSymbol` with the user-flag bookkeeping. The auto-load hook still calls the raw setter so its own action doesn't lock itself out.
+  5. **Visual marker**: `WeekendBriefingCard.GameplanBlock` reads `readAutoLoadedSymbol(isoWeek)` and stamps the matching watch card with a cyan border + `LIVE` chip. Operators see at a glance which watch is currently on the chart.
+- **Verification**: Lint clean. Frontend hot-reloads green. The hook is purely additive — no other behaviour touched, manual ticker clicks still work identically.

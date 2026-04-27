@@ -16,7 +16,7 @@
  * All V5 components live in `./v5/`. Existing panels are left untouched so
  * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo, useRef } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
 import { ModelHealthScorecard } from './panels/ModelHealthScorecard';
@@ -40,6 +40,7 @@ import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
+import { useMondayMorningAutoLoad } from '../../hooks/useMondayMorningAutoLoad';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -131,6 +132,14 @@ export const SentComV5View = ({
   const [focusedSymbol, setFocusedSymbol] = useState(() =>
     selectedPosition?.symbol || positions?.[0]?.symbol || null
   );
+  // Tracks whether the operator has clicked anything this session — used
+  // by the Monday-morning auto-load hook so it never overrides an
+  // explicit manual choice.
+  const userHasFocusedRef = useRef(false);
+  const setFocusedSymbolUserDriven = useCallback((sym) => {
+    userHasFocusedRef.current = true;
+    setFocusedSymbol(sym);
+  }, []);
 
   // Keep focus in sync when the external selectedPosition changes from
   // elsewhere in the app.
@@ -158,9 +167,18 @@ export const SentComV5View = ({
   const handleOpenTicker = useCallback((symbol) => {
     if (!symbol) return;
     const sym = String(symbol).toUpperCase();
-    setFocusedSymbol(sym);
+    setFocusedSymbolUserDriven(sym);
     openTickerModal(sym);
-  }, [openTickerModal]);
+  }, [openTickerModal, setFocusedSymbolUserDriven]);
+
+  // Monday 09:25-09:40 ET — auto-frame the chart on the Weekend
+  // Briefing's #1 watch. Idempotent per ISO week (localStorage flag).
+  // Skipped entirely if the operator has already manually focused
+  // anything since page load — explicit user choice always wins.
+  useMondayMorningAutoLoad({
+    setFocusedSymbol,
+    userHasFocused: userHasFocusedRef.current,
+  });
 
   // Phase 5 stability bundle — freshness inspector modal visibility.
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -287,7 +305,7 @@ export const SentComV5View = ({
             position={positions?.find(p => p.symbol === effectiveSymbol)}
             focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
             onSymbolClick={handleOpenTicker}
-            onChangeSymbol={setFocusedSymbol}
+            onChangeSymbol={setFocusedSymbolUserDriven}
           />
 
           <div className="flex-1 min-h-0 overflow-hidden">

@@ -23,6 +23,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Calendar, AlertTriangle, RefreshCw, Newspaper, TrendingUp, Trophy } from 'lucide-react';
+import { readAutoLoadedSymbol } from '../../../hooks/useMondayMorningAutoLoad';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -284,7 +285,7 @@ const Catalysts = ({ items }) => {
  * enhanced ticker modal (same `onSymbolClick` handler that flows in
  * from `SentComV5View`).
  */
-const GameplanBlock = ({ gameplan, onSymbolClick }) => {
+const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
   // Empty state: nothing returned from the backend at all.
   if (!gameplan || (typeof gameplan === 'string' && !gameplan.trim())) {
     return <div className="text-zinc-600">Gameplan synthesis skipped (LLM unavailable).</div>;
@@ -300,6 +301,11 @@ const GameplanBlock = ({ gameplan, onSymbolClick }) => {
 
   const text = gameplan.text || '';
   const watches = Array.isArray(gameplan.watches) ? gameplan.watches : [];
+  // Symbol that the Monday-morning auto-load fired on for this ISO week
+  // (set by `useMondayMorningAutoLoad`). Used to render a "live now"
+  // border around the matching watch card so the operator can see at a
+  // glance which watch is on the chart right now.
+  const autoLoadedSymbol = readAutoLoadedSymbol(isoWeek);
 
   return (
     <div className="space-y-3">
@@ -309,37 +315,55 @@ const GameplanBlock = ({ gameplan, onSymbolClick }) => {
             top {watches.length} watch{watches.length === 1 ? '' : 'es'}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-            {watches.map((w, i) => (
-              <div
-                key={`${w.symbol}-${i}`}
-                data-testid={`gameplan-watch-${w.symbol}`}
-                className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 hover:border-cyan-500/40 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-0.5">
-                  <ClickableSymbol
-                    symbol={w.symbol}
-                    onSymbolClick={onSymbolClick}
-                    className="text-zinc-100 font-bold text-[11px]"
-                  />
-                  {w.key_level && (
-                    <span
-                      className="text-cyan-400 text-[9px] tabular-nums truncate max-w-[60%]"
-                      title={w.key_level}
-                    >
-                      {w.key_level}
-                    </span>
+            {watches.map((w, i) => {
+              const isLive = autoLoadedSymbol && w.symbol === autoLoadedSymbol;
+              return (
+                <div
+                  key={`${w.symbol}-${i}`}
+                  data-testid={`gameplan-watch-${w.symbol}`}
+                  data-live={isLive ? 'true' : 'false'}
+                  className={`rounded border px-2 py-1.5 transition-colors ${
+                    isLive
+                      ? 'border-cyan-400/60 bg-cyan-900/10 hover:border-cyan-300'
+                      : 'border-zinc-800 bg-zinc-900/40 hover:border-cyan-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <ClickableSymbol
+                        symbol={w.symbol}
+                        onSymbolClick={onSymbolClick}
+                        className="text-zinc-100 font-bold text-[11px]"
+                      />
+                      {isLive && (
+                        <span
+                          className="v5-mono text-[8px] uppercase tracking-wider text-cyan-300 px-1 rounded bg-cyan-500/15 border border-cyan-500/30"
+                          title="Auto-framed on the chart by the Monday 09:25 ET hook"
+                        >
+                          LIVE
+                        </span>
+                      )}
+                    </div>
+                    {w.key_level && (
+                      <span
+                        className="text-cyan-400 text-[9px] tabular-nums truncate max-w-[60%]"
+                        title={w.key_level}
+                      >
+                        {w.key_level}
+                      </span>
+                    )}
+                  </div>
+                  {w.thesis && (
+                    <div className="text-zinc-300 text-[10px] leading-snug">{w.thesis}</div>
+                  )}
+                  {w.invalidation && (
+                    <div className="text-rose-400/80 text-[9px] leading-snug mt-0.5">
+                      × {w.invalidation}
+                    </div>
                   )}
                 </div>
-                {w.thesis && (
-                  <div className="text-zinc-300 text-[10px] leading-snug">{w.thesis}</div>
-                )}
-                {w.invalidation && (
-                  <div className="text-rose-400/80 text-[9px] leading-snug mt-0.5">
-                    × {w.invalidation}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -481,7 +505,11 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
               ({text, watches[]}) or a legacy string (older cache). We
               normalise here so both render. */}
           <Section title="Bot's Gameplan" icon={TrendingUp} defaultOpen>
-            <GameplanBlock gameplan={briefing.gameplan} onSymbolClick={onSymbolClick} />
+            <GameplanBlock
+              gameplan={briefing.gameplan}
+              onSymbolClick={onSymbolClick}
+              isoWeek={isoWeek}
+            />
           </Section>
 
           <Section title="Risk Map" icon={AlertTriangle} count={briefing.risk_map?.length}>
