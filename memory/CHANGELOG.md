@@ -2,6 +2,53 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28 — Layout move + Briefing CTAs + System health audit script
+
+### 1. V5 layout — Unified Stream moved to center below chart
+- Operator request: *"move the unified stream to the center below the
+  chart to give it some more space."*
+- New center-section layout in `SentComV5View.jsx`:
+  - Chart takes top ~60% (was: full height)
+  - Unified Stream + chat input take bottom ~40% with their own
+    panel header. Wider than the old right-sidebar location, giving
+    bot narratives + rejection thoughts more horizontal space.
+- Right sidebar simplified: Briefings (top half, flex-1) + Open
+  Positions (bottom half, flex-1). The previous fixed `28vh`/`24vh`
+  caps removed since the stream-in-sidebar slot is gone.
+- New `data-testid="sentcom-v5-stream-center"` for QA selectors.
+
+### 2. Briefing "full briefing ↗" CTAs on Mid-Day / Power Hour / Close Recap
+- Operator request: *"the briefings except for Morning prep are not
+  clickable or show a full briefing button to click."*
+- Added the same `onOpenDeepDive` button (matching Morning Prep) to
+  Mid-Day Recap, Power Hour, and Close Recap cards.
+- Cards already toggled inline-expand on click; this adds the
+  explicit "open the full briefing modal" affordance the operator
+  expected. Button only shows when the briefing window is `active`
+  or `passed` (not `pending` — would be confusing on a future
+  briefing the operator can't yet open).
+- Each button passes a `kind` arg ("midday" / "powerhour" / "close")
+  to `onOpenDeepDive` so future PRs can route to a kind-specific
+  modal; current handler ignores the arg (opens the existing
+  MorningBriefingModal) — back-compat preserved.
+
+### 3. System Health Audit script
+- New `backend/scripts/system_health_audit.py` — operator-runnable
+  end-to-end diagnostic of the entire trading pipeline:
+  scanner → evaluator → sizing → decisions → management → data.
+- For each stage: ✓ green / ~ yellow / ✗ red rows with concrete
+  numbers (total_scans, enabled_setups, max_risk_per_trade, open
+  positions with stops, pusher latency, etc.)
+- Verified live on the preview env — all 6 stages reachable, system
+  green except for IB-offline yellows (expected when no Gateway
+  connection).
+- Run on DGX with:
+  ```
+  PYTHONPATH=backend /home/spark-1a60/venv/bin/python \\
+      backend/scripts/system_health_audit.py
+  ```
+- Exits non-zero on any red so it can be piped into a cron / CI alert.
+
 ## 2026-04-28 — P1 batch #3: Rejection narrative ("why didn't I take this trade?")
 
 Closes the operator's feedback loop — every rejection gate now

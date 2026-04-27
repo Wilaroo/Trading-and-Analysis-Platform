@@ -175,7 +175,7 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onO
 };
 
 
-const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick }) => {
+const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(11.5 * 60, 13 * 60);   // 11:30 → 13:00 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
@@ -202,7 +202,20 @@ const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, on
           {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowETDisplay()}</span>
+        <div className="flex items-center gap-2">
+          {onOpenDeepDive && state !== 'pending' && (
+            <button
+              type="button"
+              data-testid="briefing-midday-open-deep-dive"
+              onClick={(e) => { e.stopPropagation(); onOpenDeepDive('midday'); }}
+              className="v5-mono text-[9px] text-zinc-500 hover:text-amber-400 transition-colors uppercase tracking-wide"
+              title="Open full mid-day briefing (closed trades, open P&L, regime drift)"
+            >
+              full briefing ↗
+            </button>
+          )}
+          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowETDisplay()}</span>
+        </div>
       </div>
       <div className="v5-why mt-1">
         {(closed.length === 0 && open.length === 0) ? (
@@ -261,7 +274,7 @@ const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, on
 };
 
 
-const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick }) => {
+const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(15 * 60, 15.75 * 60); // 15:00 → 15:45 ET
 
   const open = (positions || []).filter(p => p?.status !== 'closed');
@@ -288,7 +301,20 @@ const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSy
           {state === 'active' && <span className="v5-new-badge">NEW</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">PASSED</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowETDisplay()}</span>
+        <div className="flex items-center gap-2">
+          {onOpenDeepDive && state !== 'pending' && (
+            <button
+              type="button"
+              data-testid="briefing-powerhour-open-deep-dive"
+              onClick={(e) => { e.stopPropagation(); onOpenDeepDive('powerhour'); }}
+              className="v5-mono text-[9px] text-zinc-500 hover:text-orange-400 transition-colors uppercase tracking-wide"
+              title="Open full power-hour briefing (open positions + setups for the close)"
+            >
+              full briefing ↗
+            </button>
+          )}
+          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowETDisplay()}</span>
+        </div>
       </div>
       <div className="v5-why mt-1">
         {open.length === 0 ? (
@@ -352,7 +378,7 @@ const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSy
 };
 
 
-const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick }) => {
+const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(16 * 60, 16.5 * 60); // 16:00 → 16:30 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
@@ -372,7 +398,20 @@ const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick
           {state === 'active' && <span className="v5-chip v5-chip-manage">LIVE</span>}
           {state === 'passed' && <span className="v5-chip v5-chip-close">DONE</span>}
         </div>
-        <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowETDisplay()}</span>
+        <div className="flex items-center gap-2">
+          {onOpenDeepDive && state !== 'pending' && (
+            <button
+              type="button"
+              data-testid="briefing-close-open-deep-dive"
+              onClick={(e) => { e.stopPropagation(); onOpenDeepDive('close'); }}
+              className="v5-mono text-[9px] text-zinc-500 hover:text-slate-300 transition-colors uppercase tracking-wide"
+              title="Open full close recap (every fill, win-rate, day P&L breakdown)"
+            >
+              full briefing ↗
+            </button>
+          )}
+          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowETDisplay()}</span>
+        </div>
       </div>
       <div className="v5-why mt-1">
         {closed.length === 0 ? (
@@ -443,6 +482,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
         expanded={expandedKey === 'midday'}
         onToggle={() => toggle('midday')}
         onSymbolClick={onSymbolClick}
+        onOpenDeepDive={onOpenDeepDive}
       />
       <PowerHourCard
         positions={positions}
@@ -451,6 +491,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
         expanded={expandedKey === 'powerhour'}
         onToggle={() => toggle('powerhour')}
         onSymbolClick={onSymbolClick}
+        onOpenDeepDive={onOpenDeepDive}
       />
       <CloseRecapCard
         positions={positions}
@@ -458,6 +499,7 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
         expanded={expandedKey === 'close'}
         onToggle={() => toggle('close')}
         onSymbolClick={onSymbolClick}
+        onOpenDeepDive={onOpenDeepDive}
       />
     </div>
   );

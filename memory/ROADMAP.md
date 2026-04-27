@@ -5,6 +5,22 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-27 EOD)
 
+### 🟣 Saved improvements (operator pinned 2026-04-28)
+- **Live cache freshness pulse on chart x-axis** — turn the most
+  recent x-axis tick green when its bar was written by
+  `source="live_tick"` within the last 60s. Visual confirmation the
+  symbol is "self-healing" on live ticks (no PARTIAL coverage anxiety).
+  ~30 min of work; touches `ChartPanel.jsx` + a new tiny
+  `/api/ib/tick-persister-symbol-freshness?symbol=X` endpoint.
+- **EOD narrative rejection summary** — at 16:00 ET, compose a
+  single end-of-day summary line from the rejection-narrative buffer:
+  *"Today I passed on 47 alerts: 18 setup_disabled (most: bella_fade),
+  12 dedup_cooldown, 9 regime_mismatch, 5 tqs_too_low,
+  3 max_open_positions."* Tells operator at a glance whether filters
+  are too tight or scanner's spamming. ~20 min of work; group by
+  reason_code in a new `/api/trading-bot/eod-rejection-summary`
+  endpoint, render as the Close Recap card subtitle.
+
 ### Operator user-noted issues at end of session
 - **Paper account shows $100,000** instead of operator's expected balance
   → Not a code bug. Operator is logged into IB paper account `DUN615665`.

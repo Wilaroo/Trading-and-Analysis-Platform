@@ -334,7 +334,12 @@ export const SentComV5View = ({
           </div>
         </section>
 
-        {/* CENTER — Chart (primary visual surface) */}
+        {/* CENTER — Chart (top) + Unified Stream + chat (bottom).
+            2026-04-28 layout move: stream pulled out of the right
+            sidebar and given more horizontal real estate here. The
+            right sidebar keeps the at-a-glance panels (briefings +
+            positions); the wider stream is where the operator now
+            reads the bot's narrative thoughts. */}
         <section
           data-testid="sentcom-v5-center"
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
@@ -345,12 +350,13 @@ export const SentComV5View = ({
             position={positions?.find(p => p.symbol === effectiveSymbol)}
             focusedSymbolIsPosition={positions?.some(p => p.symbol === effectiveSymbol)}
             onSymbolClick={handleOpenTicker}
-            onChangeSymbol={setFocusedSymbolUserDriven}
             onCarouselPick={setFocusedSymbolUserDriven}
+            onChangeSymbol={setFocusedSymbolUserDriven}
             userHasFocused={userHasFocused}
           />
 
-          <div className="flex-1 min-h-0 overflow-hidden">
+          {/* Chart (~60% of center) */}
+          <div className="flex-1 min-h-0 overflow-hidden" style={{ flexBasis: '60%' }}>
             <PanelErrorBoundary label="chart">
               <ChartPanel
                 symbol={effectiveSymbol}
@@ -360,15 +366,40 @@ export const SentComV5View = ({
               />
             </PanelErrorBoundary>
           </div>
+
+          {/* Unified Stream + chat (~40% of center) — wider than the
+              old right-sidebar location so bot narratives + rejection
+              thoughts have room to breathe. */}
+          <div
+            data-testid="sentcom-v5-stream-center"
+            className="border-t border-zinc-800 flex flex-col min-h-0"
+            style={{ flexBasis: '40%' }}
+          >
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <div className="v5-panel-title">Unified Stream</div>
+              <span className="v5-chip v5-chip-manage">live</span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
+              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
+            </div>
+            <div className="border-t border-zinc-800">
+              {/* Chat is independent of IB Gateway — chat_server (port
+                  8002) is always reachable. Previously this was tied
+                  to status?.connected which falsely disabled chat
+                  every weekend / overnight when IB was offline. */}
+              <ChatInput onSend={handleChat} />
+            </div>
+          </div>
         </section>
 
-        {/* RIGHT — stacked: Briefings · Open Positions · Stream+Chat */}
+        {/* RIGHT — stacked: Briefings · Open Positions (stream moved
+            to center 2026-04-28) */}
         <aside
           data-testid="sentcom-v5-right"
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
-          {/* Briefings (~28vh) */}
-          <div className="border-b border-zinc-800 flex flex-col" style={{ maxHeight: '28vh' }}>
+          {/* Briefings (top half) */}
+          <div className="border-b border-zinc-800 flex flex-col flex-1 min-h-0">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Briefings</div>
               <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
@@ -380,8 +411,8 @@ export const SentComV5View = ({
             </div>
           </div>
 
-          {/* Open positions (~24vh) */}
-          <div className="border-b border-zinc-800 flex flex-col" style={{ maxHeight: '24vh' }}>
+          {/* Open positions (bottom half) */}
+          <div className="flex flex-col flex-1 min-h-0">
             <OpenPositionsV5
               positions={positions}
               totalPnl={totalPnl}
@@ -391,24 +422,6 @@ export const SentComV5View = ({
                 handleOpenTicker(p.symbol);
               }}
             />
-          </div>
-
-          {/* Stream + chat input anchored at the bottom */}
-          <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <div className="v5-panel-title">Unified Stream</div>
-              <span className="v5-chip v5-chip-manage">live</span>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
-              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
-            </div>
-            <div className="border-t border-zinc-800">
-              {/* Chat is independent of IB Gateway — chat_server (port
-                  8002) is always reachable. Previously this was tied to
-                  status?.connected which falsely disabled chat every
-                  weekend / overnight when IB was offline. */}
-              <ChatInput onSend={handleChat} />
-            </div>
           </div>
         </aside>
       </div>
