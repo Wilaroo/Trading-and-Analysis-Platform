@@ -4073,3 +4073,15 @@ A comprehensive Sunday-afternoon weekly briefing surface that auto-generates at 
   3. **State migration in `SentComV5View`**: `userHasFocusedRef` → `useState(userHasFocused)`. The ref version didn't trigger re-renders, so the chip wouldn't flip into PAUSED mode immediately when the operator clicked. State trigger fixes the snap-into-pause UX.
   4. New `onCarouselPick` + `userHasFocused` props threaded through `V5ChartHeader` → `<CarouselCountdownChip>`.
 - **Verification**: Lint clean, frontend compiles green.
+
+## 2026-02-01 — Persist carousel pause flag across page reloads
+- **Where**: `frontend/src/hooks/useMondayMorningAutoLoad.js` (new helpers + ISO-week util), `components/sentcom/SentComV5View.jsx` (seed + persist).
+- **What**:
+  1. New helpers exported from `useMondayMorningAutoLoad.js`:
+     - `isoWeekFromBrowser()` — computes `2026-W18` style key from browser local time, ET-bucketed (mirrors backend `_iso_week()`).
+     - `readPausedFlag(iso_week)` / `writePausedFlag(iso_week)` — `localStorage[wb-paused-{ISO_WEEK}]` get/set.
+  2. `SentComV5View.jsx`:
+     - `useState(userHasFocused)` initializer reads from localStorage so a refresh inside the carousel window doesn't reset the override.
+     - `setFocusedSymbolUserDriven` writes the paused flag the moment the operator takes over.
+- **Result**: Once the operator clicks a ticker, arrow, or search box, the carousel is paused for that ISO week. Reloading the page during 09:10-09:50 ET keeps the chip in PAUSED mode + leaves the chart on the operator's choice.
+- **Verification**: Lint clean, frontend compiles green.

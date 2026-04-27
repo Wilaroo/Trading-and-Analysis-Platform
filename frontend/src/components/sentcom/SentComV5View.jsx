@@ -41,7 +41,12 @@ import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
-import { useMondayMorningAutoLoad } from '../../hooks/useMondayMorningAutoLoad';
+import {
+  useMondayMorningAutoLoad,
+  isoWeekFromBrowser,
+  readPausedFlag,
+  writePausedFlag,
+} from '../../hooks/useMondayMorningAutoLoad';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
@@ -137,9 +142,17 @@ export const SentComV5View = ({
   // by the Monday-morning auto-load hook so it never overrides an
   // explicit manual choice. State (not ref) so the carousel chip
   // re-renders into PAUSED mode the moment the operator takes over.
-  const [userHasFocused, setUserHasFocused] = useState(false);
+  // Seeded from localStorage so a page reload after an explicit
+  // override doesn't silently re-enable the carousel before the
+  // operator places their order.
+  const [userHasFocused, setUserHasFocused] = useState(() => {
+    const wid = isoWeekFromBrowser();
+    return readPausedFlag(wid);
+  });
   const setFocusedSymbolUserDriven = useCallback((sym) => {
     setUserHasFocused(true);
+    const wid = isoWeekFromBrowser();
+    if (wid) writePausedFlag(wid);
     setFocusedSymbol(sym);
   }, []);
 

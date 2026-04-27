@@ -37,6 +37,30 @@ const CAROUSEL_CLOSE_HHMM = 9 * 60 + 50;  // 09:50 ET
 const SLOT_MINUTES = 5;
 
 const lsSymKey = (iso_week) => `wb-autoloaded-symbol-${iso_week}`;
+const lsPausedKey = (iso_week) => `wb-paused-${iso_week}`;
+
+/**
+ * Compute the ISO week id from browser local time, ET-bucketed.
+ * Mirrors the backend's `_iso_week()` so the localStorage keys line up
+ * across the autoload + carousel + manual-pause surfaces.
+ */
+const isoWeekFromBrowser = () => {
+  try {
+    // Convert local time → ET wall clock so Mon 23:00 ET (Tue 04:00 UTC)
+    // still bucketed into the Mon-Fri trading week.
+    const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const target = new Date(Date.UTC(et.getFullYear(), et.getMonth(), et.getDate()));
+    const dayNum = target.getUTCDay() || 7;          // Mon=1..Sun=7
+    target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil(((target - yearStart) / 86_400_000 + 1) / 7);
+    return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  } catch {
+    return null;
+  }
+};
+
+export { isoWeekFromBrowser };
 
 export const useMondayMorningAutoLoad = ({
   setFocusedSymbol,
@@ -118,6 +142,28 @@ export const readAutoLoadedSymbol = (iso_week) => {
   } catch {
     return null;
   }
+};
+
+/**
+ * Persist + read the "operator has overridden the carousel" flag for
+ * the current ISO week. Mirrors `lsSymKey` so the manual pause survives
+ * page reloads — once the operator clicks anything, the carousel won't
+ * silently steal focus on a refresh before the order is placed.
+ */
+export const readPausedFlag = (iso_week) => {
+  if (typeof window === 'undefined' || !iso_week) return false;
+  try {
+    return !!window.localStorage.getItem(lsPausedKey(iso_week));
+  } catch {
+    return false;
+  }
+};
+
+export const writePausedFlag = (iso_week) => {
+  if (typeof window === 'undefined' || !iso_week) return;
+  try {
+    window.localStorage.setItem(lsPausedKey(iso_week), new Date().toISOString());
+  } catch { /* ignore */ }
 };
 
 export default useMondayMorningAutoLoad;
