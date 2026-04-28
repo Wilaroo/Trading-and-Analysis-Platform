@@ -86,53 +86,78 @@ class TapeSignal(Enum):
     NEUTRAL = "neutral"
 
 
-# Strategy time windows - when each strategy is valid
+# Strategy time windows - when each strategy is valid.
+#
+# 2026-04-29 (afternoon-15d): operator reclassified the following based
+# on real trading edge, not naming convention:
+#   - ALL-DAY scalps (work any time during RTH 9:30-16:00 ET): big_dog,
+#     puppy_dog, spencer_scalp, backside, hitchhiker, fashionably_late,
+#     abc_scalp, first_vwap_pullback, time_of_day_fade, vwap_reclaim,
+#     vwap_rejection, bella_fade, breaking_news.
+#   - MORNING-ONLY (only edge before ~11am ET): 9_ema_scalp,
+#     opening_drive, orb, gap_give_go, first_move_up, first_move_down,
+#     back_through_open, gap_pick_roll, up_through_open.
+#
+# `_RTH_ALL_DAY` and `_MORNING_ONLY` keep the dict declarative — to
+# move a setup between profiles, change ONE line here, no big diff.
+
+_RTH_ALL_DAY = [
+    TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE,
+    TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION,
+    TimeWindow.LATE_MORNING,    TimeWindow.MIDDAY,
+    TimeWindow.AFTERNOON,       TimeWindow.CLOSE,
+]
+
+_MORNING_ONLY = [
+    # Through ~11:30 ET (covers the "usually before 11am" rule with a
+    # small buffer through the LATE_MORNING window).
+    TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE,
+    TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION,
+    TimeWindow.LATE_MORNING,
+]
+
 STRATEGY_TIME_WINDOWS = {
-    # Opening Auction (9:30-9:35)
-    "first_vwap_pullback": [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE],
-    "first_move_up": [TimeWindow.OPENING_AUCTION],
-    "first_move_down": [TimeWindow.OPENING_AUCTION],
-    "bella_fade": [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE],
-    "back_through_open": [TimeWindow.OPENING_AUCTION],
-    "up_through_open": [TimeWindow.OPENING_AUCTION],
-    "opening_drive": [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE],
-    
-    # Morning Momentum (9:35-10:00)
-    "orb": [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION],
-    "hitchhiker": [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM],
-    "gap_give_go": [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM],
-    "gap_pick_roll": [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM],
-    
-    # Core Session (10:00-13:30)
-    "spencer_scalp": [TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    "second_chance": [TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "backside": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    "off_sides": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    "fashionably_late": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    
-    # Mean Reversion (All day)
-    "rubber_band": [TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "vwap_bounce": [TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "vwap_fade": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "tidal_wave": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    
-    # Consolidation (Mid-session)
-    "big_dog": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    "puppy_dog": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    "9_ema_scalp": [TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING],
-    "abc_scalp": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY],
-    
-    # Afternoon (13:30-16:00)
-    "hod_breakout": [TimeWindow.AFTERNOON, TimeWindow.CLOSE],
-    "time_of_day_fade": [TimeWindow.CLOSE],
-    
-    # Special (Context dependent)
-    "breaking_news": [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM, 
-                      TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, 
-                      TimeWindow.AFTERNOON, TimeWindow.CLOSE],
-    "volume_capitulation": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "range_break": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
-    "breakout": [TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON],
+    # ─── Morning-only (before ~11am ET) ──────────────────────────────
+    "first_move_up":      _MORNING_ONLY,
+    "first_move_down":    _MORNING_ONLY,
+    "back_through_open":  _MORNING_ONLY,
+    "up_through_open":    _MORNING_ONLY,
+    "opening_drive":      _MORNING_ONLY,
+    "orb":                _MORNING_ONLY,
+    "gap_give_go":        _MORNING_ONLY,
+    "gap_pick_roll":      _MORNING_ONLY,
+    "9_ema_scalp":        _MORNING_ONLY,
+
+    # ─── All-day RTH scalps ──────────────────────────────────────────
+    "first_vwap_pullback": _RTH_ALL_DAY,
+    "bella_fade":          _RTH_ALL_DAY,
+    "spencer_scalp":       _RTH_ALL_DAY,
+    "second_chance":       _RTH_ALL_DAY,
+    "backside":            _RTH_ALL_DAY,
+    "off_sides":           _RTH_ALL_DAY,
+    "fashionably_late":    _RTH_ALL_DAY,
+    "hitchhiker":          _RTH_ALL_DAY,
+    "abc_scalp":           _RTH_ALL_DAY,
+    "big_dog":             _RTH_ALL_DAY,
+    "puppy_dog":           _RTH_ALL_DAY,
+    "time_of_day_fade":    _RTH_ALL_DAY,
+    "vwap_reclaim":        _RTH_ALL_DAY,  # orphan today, classified for when checker is added
+    "vwap_rejection":      _RTH_ALL_DAY,  # orphan today, classified for when checker is added
+    "breaking_news":       _RTH_ALL_DAY,
+
+    # ─── Mean Reversion (all day RTH) ────────────────────────────────
+    "rubber_band":         _RTH_ALL_DAY,
+    "vwap_bounce":         _RTH_ALL_DAY,
+    "vwap_fade":           _RTH_ALL_DAY,
+    "tidal_wave":          _RTH_ALL_DAY,
+
+    # ─── Afternoon-skewed but operator may want broader coverage ────
+    "hod_breakout":  [TimeWindow.AFTERNOON, TimeWindow.CLOSE],
+
+    # ─── Other (regime/condition gated, not strict time gated) ──────
+    "volume_capitulation": _RTH_ALL_DAY,
+    "range_break":         _RTH_ALL_DAY,
+    "breakout":            _RTH_ALL_DAY,
 }
 
 # Strategy market regime preferences

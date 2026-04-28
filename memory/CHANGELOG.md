@@ -2,9 +2,9 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch + setup-coverage diagnostic + threshold-proximity audit + bucket disambiguation (P0)
+## 2026-04-29 (afternoon-15) — Scanner audit (all five passes)
 
-### Four issues fixed in this round
+### Five issues fixed in this round (instance fix → coverage → proximity → bucket disambiguation → reclassification)
 
 #### 1. Scanner-router instance mismatch (the diagnostic was lying)
 Operator hit `POST /api/live-scanner/start` and got back `running:
@@ -160,6 +160,35 @@ of time-filtered setups as orphans.**
 
 ### Verification (final)
 - 14/14 passing across all afternoon-12/13/14/15 suites.
+
+#### 5. Operator-driven strategy time-window reclassification (afternoon-15d)
+Operator reviewed the original `STRATEGY_TIME_WINDOWS` and explicitly
+reclassified 22 setups based on real trading edge (NOT naming
+convention). Many setups previously locked to OPENING_AUCTION /
+OPENING_DRIVE / morning windows actually have all-day edge per
+operator's experience.
+
+**ALL-DAY** (RTH 9:30-16:00 ET):
+`big_dog`, `puppy_dog`, `spencer_scalp`, `backside`, `hitchhiker`,
+`fashionably_late`, `abc_scalp`, `first_vwap_pullback`,
+`time_of_day_fade`, `vwap_reclaim`, `vwap_rejection`, `bella_fade`,
+`breaking_news` (13 setups).
+
+**MORNING-ONLY** (before ~11:30 ET buffer):
+`9_ema_scalp`, `opening_drive`, `orb`, `gap_give_go`, `first_move_up`,
+`first_move_down`, `back_through_open`, `gap_pick_roll`,
+`up_through_open` (9 setups).
+
+**Refactor**: introduced `_RTH_ALL_DAY` and `_MORNING_ONLY` named
+constants (lists of TimeWindow values) so the dict is declarative.
+Moving a setup between profiles is now a one-line change.
+
+**Regression guard**: 5 new tests in
+`test_strategy_time_window_reclassification.py` lock both the named
+profiles AND each operator-classified setup's mapping.
+
+### Verification (final)
+- 19/19 passing across all afternoon-12/13/14/15 suites.
 
 ### Operator action on DGX
 1. Save to GitHub, `git pull` on DGX (backend hot-reloads).
