@@ -384,3 +384,128 @@ async def test_drain_with_mongo_fallback_actually_updates_outcomes():
     assert result["updated"] == 50
     assert result["pending_checked"] == 50
     assert len(bucket) == 0  # All decisions now have outcomes
+
+
+# ───────────────────────── Per-module accuracy ────────────────────────────
+
+
+def _make_outcome_doc(idx: int, pnl: float, recommendation: str = "",
+                      was_executed: bool = True, modules=("debate_agents",),
+                      r: float = 0.0):
+    """Build a tracked-outcome doc for `get_module_performance` tests."""
+    return {
+        "id": f"sd_{idx:04d}",
+        "modules_used": list(modules),
+        "outcome_tracked": True,
+        "was_executed": was_executed,
+        "would_have_pnl": pnl,
+        "would_have_r": r,
+        "combined_recommendation": recommendation,
+        "confidence_score": 0.65,
+        "created_at": "2026-04-29T00:00:00+00:00",
+    }
+
+
+def _wire_tracker_with_outcomes(outcome_docs):
+    """ShadowTracker whose `_decisions_col.find()` returns the given
+    tracked-outcome docs (no pagination — used by get_module_performance)."""
+    tracker = ShadowTracker()
+    tracker._db = MagicMock()
+    tracker._decisions_col = MagicMock()
+    tracker._decisions_col.find.return_value = outcome_docs
+    return tracker
+
+
+@pytest.mark.asyncio
+async def test_module_accuracy_uses_pnl_when_recommendation_empty():
+    """Pre-fix bug: every 'PROCEED_HIGH_CONFIDENCE' / non-exact match
+    to "proceed" was scored as 0% accuracy because the matcher used
+    `==`. Post-fix: empty-or-non-matching recommendations fall back
+    to PnL-based correctness (same semantic as global win rate)."""
+    docs = [
+        # 6 wins, 4 losses, all with empty recommendation strings.
+        _make_outcome_doc(i, pnl=10.0) for i in range(6)
+    ] + [
+        _make_outcome_doc(i + 6, pnl=-5.0) for i in range(4)
+    ]
+    tracker = _wire_tracker_with_outcomes(docs)
+
+    perf = await tracker.get_module_performance("debate_agents", days=30)
+
+    assert perf.total_decisions == 10
+    assert perf.decisions_correct == 6  # PnL > 0
+    assert perf.accuracy_rate == 0.6     # 60% — matches global semantic
+
+
+@pytest.mark.asyncio
+async def test_module_accuracy_recognises_proceed_variants():
+    """`combined_recommendation` strings like
+    `PROCEED_HIGH_CONFIDENCE`, `approve_long`, `trade` all classify
+    as proceed-intent and score correct iff trade was profitable."""
+    docs = [
+        _make_outcome_doc(0, pnl=20.0, recommendation="PROCEED_HIGH_CONFIDENCE"),
+        _make_outcome_doc(1, pnl=15.0, recommendation="approve_long"),
+        _make_outcome_doc(2, pnl=-10.0, recommendation="PROCEED_LOW_CONFIDENCE"),  # WRONG
+        _make_outcome_doc(3, pnl=5.0, recommendation="trade"),
+    ]
+    tracker = _wire_tracker_with_outcomes(docs)
+
+    perf = await tracker.get_module_performance("debate_agents", days=30)
+
+    assert perf.total_decisions == 4
+    # 3 proceed-and-profitable, 1 proceed-but-loss
+    assert perf.decisions_correct == 3
+    assert perf.accuracy_rate == 0.75
+
+
+@pytest.mark.asyncio
+async def test_module_accuracy_recognises_pass_variants_correct_when_loss():
+    """A `pass`/`reject`/`block` recommendation is "correct" when the
+    outcome was a loss — module successfully steered AWAY from a bad
+    trade. Mirror of the proceed case."""
+    docs = [
+        # Module said "block" — outcome is a loss → CORRECT (avoided bad trade)
+        _make_outcome_doc(0, pnl=-20.0, recommendation="BLOCK_RISK_TOO_HIGH"),
+        # Module said "skip" — outcome is a profit → WRONG (would have been good)
+        _make_outcome_doc(1, pnl=10.0, recommendation="SKIP"),
+        _make_outcome_doc(2, pnl=-15.0, recommendation="reject"),
+        _make_outcome_doc(3, pnl=-5.0, recommendation="no_trade"),
+    ]
+    tracker = _wire_tracker_with_outcomes(docs)
+
+    perf = await tracker.get_module_performance("ai_risk_manager", days=30)
+
+    assert perf.total_decisions == 4
+    assert perf.decisions_correct == 3  # Three correct skips, one bad skip
+
+
+@pytest.mark.asyncio
+async def test_module_accuracy_avg_pnl_metrics_populated():
+    """Ensure `avg_pnl_when_followed` / `avg_pnl_when_ignored` are
+    populated even when R-multiple is zero (backlog scenario)."""
+    docs = [
+        _make_outcome_doc(0, pnl=10.0, was_executed=True, r=0),
+        _make_outcome_doc(1, pnl=20.0, was_executed=True, r=0),
+        _make_outcome_doc(2, pnl=-5.0, was_executed=False, r=0),
+    ]
+    tracker = _wire_tracker_with_outcomes(docs)
+
+    perf = await tracker.get_module_performance("debate_agents", days=30)
+
+    assert perf.avg_pnl_when_followed == 15.0  # (10 + 20) / 2
+    assert perf.avg_pnl_when_ignored == -5.0
+    # R-based metrics safely zero when no R data available
+    assert perf.avg_r_when_followed == 0
+    assert perf.avg_r_when_ignored == 0
+
+
+@pytest.mark.asyncio
+async def test_module_accuracy_returns_zero_when_no_outcomes():
+    """No tracked decisions → return zeros without raising."""
+    tracker = _wire_tracker_with_outcomes([])
+
+    perf = await tracker.get_module_performance("debate_agents", days=30)
+
+    assert perf.total_decisions == 0
+    assert perf.accuracy_rate == 0.0
+    assert perf.avg_pnl_when_followed == 0.0

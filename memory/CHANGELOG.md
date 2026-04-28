@@ -2,6 +2,78 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (later 2) — Per-module accuracy fix (PnL-based + recommendation-aware)
+
+### Why
+After the morning's drain landed 6,715 outcomes (73.5% global win rate),
+operator pulled `/api/ai-modules/shadow/performance` and saw:
+```
+debate_agents:      1482 decisions, 0.0% accuracy
+ai_risk_manager:    2191 decisions, 0.0% accuracy
+institutional_flow: 2191 decisions, 0.0% accuracy
+```
+Mathematically impossible vs the 73.5% global win rate → bug in
+`get_module_performance`.
+
+### Root cause
+Two issues, both in `services/ai_modules/shadow_tracker.py::get_module_performance`:
+
+1. **Used `would_have_r` instead of `would_have_pnl`** as the win/loss
+   signal. R-multiple is computed from `(outcome_price - entry) / abs(entry - stop_price)`,
+   but `stop_price` isn't stored on `ShadowDecision` — so for every
+   backlogged decision, R was `0`, never `> 0`, never "correct".
+2. **Strict equality matching on `recommendation`** — only counted
+   `recommendation == "proceed"` or `== "pass"`. Production values are
+   richer (e.g. `"PROCEED_HIGH_CONFIDENCE"`, `"BLOCK_RISK_TOO_HIGH"`,
+   `"approve_long"`, `"REDUCE_SIZE"`).
+
+### Fix
+- **PnL-based correctness**: `correct += 1` when `would_have_pnl > 0`
+  for proceed-intent recommendations OR `< 0` for pass-intent. This
+  matches the global `wins / total` semantic in `get_stats`.
+- **Permissive recommendation matching** with substring keywords
+  (lowercased):
+  - PROCEED: `proceed`, `approve`, `execute`, `buy_long`, `go_long`,
+    `trade_yes`, `long_ok`
+  - PASS: `pass`, `skip`, `reject`, `block`, `avoid`, `no_trade`,
+    `no_go`, `trade_no`
+  - Pass takes precedence over proceed when both match (handles
+    `no_trade` containing `trade` cleanly).
+  - Empty/unrecognised recommendation → fall back to direction-
+    agnostic `pnl > 0` (same as global win rate).
+- **New PnL fields** on `ModulePerformance`: `avg_pnl_when_followed`
+  and `avg_pnl_when_ignored`. Always populated even when R is
+  uncomputable (backlog scenario). Existing R fields stay (will
+  populate naturally for live trades where stop_price IS known).
+
+### Regression coverage (5 new tests, 20 total in the file)
+`tests/test_shadow_tracker_drain.py` adds:
+- Empty recommendation → falls back to PnL-based correctness
+- Recognises proceed variants (`PROCEED_HIGH_CONFIDENCE`, `approve_long`,
+  `trade`)
+- Recognises pass variants (`BLOCK_RISK_TOO_HIGH`, `SKIP`, `reject`,
+  `no_trade`)
+- `avg_pnl_when_followed` populated when R is zero
+- Empty outcome list returns clean zeros
+
+### Operator action on DGX after pull + restart
+```
+curl -s 'http://localhost:8001/api/ai-modules/shadow/performance?days=30' \
+  | python3 -m json.tool
+```
+Expected: per-module `accuracy_rate` now in the 0.65-0.80 range
+(matches global 73.5%), `decisions_correct` populated, new
+`avg_pnl_when_followed` field shows average PnL per trade. Modules
+should NOT show 0.0% accuracy anymore.
+
+```
+curl -s 'http://localhost:8001/api/ai-modules/shadow/report?days=30' \
+  | python3 -m json.tool
+```
+Expected: `recommendations` no longer says "consider disabling" for
+every module. `value_analysis` may still be empty since all decisions
+were executed (no ignored sample for differential analysis).
+
 ## 2026-04-29 (later) — Shadow tracker Mongo historical price fallback
 
 ### Why

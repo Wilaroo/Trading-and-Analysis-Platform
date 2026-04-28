@@ -78,12 +78,18 @@ class ModulePerformance:
     module_name: str = ""
     total_decisions: int = 0
     decisions_followed: int = 0  # Recommendation was followed
-    decisions_correct: int = 0  # Outcome matched recommendation
+    decisions_correct: int = 0  # Outcome was profitable (PnL > 0)
     accuracy_rate: float = 0.0
     avg_confidence: float = 0.0
     avg_r_when_followed: float = 0.0
     avg_r_when_ignored: float = 0.0
-    
+    # 2026-04-29: PnL-based metrics. R-multiple requires `stop_price`
+    # at decision time (not always known for backlogged shadow
+    # decisions). PnL is always computable, so these fields stay
+    # populated even when R can't be calculated.
+    avg_pnl_when_followed: float = 0.0
+    avg_pnl_when_ignored: float = 0.0
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -448,31 +454,76 @@ class ShadowTracker:
             
         total = len(decisions)
         followed = sum(1 for d in decisions if d.get("was_executed"))
-        
-        # Calculate accuracy based on whether recommendation was correct
+
+        # Correctness signal: profitable PnL is the universal,
+        # always-computable metric (R-multiple requires stop_price
+        # which isn't logged on shadow decisions). This makes per-
+        # module accuracy match the global `wins / total` semantic
+        # that `get_stats` already uses.
+        #
+        # Direction-aware bonus: when `combined_recommendation`
+        # contains a clear "proceed"/"pass" intent, we honour it —
+        # a "pass" recommendation followed by a losing trade still
+        # counts as correct (the module correctly steered AWAY from
+        # a bad setup). Substring matching (lowercased) handles
+        # production variants like "PROCEED_HIGH_CONFIDENCE",
+        # "REDUCE_SIZE", "BLOCK_RISK_TOO_HIGH", "approve_long".
+        #
+        # Keywords intentionally avoid common substrings (e.g.
+        # bare "trade", "go") that would cross-match (`no_trade`
+        # contains `trade`). Pass is checked first so phrases like
+        # "no_trade" / "no_go" classify as pass intent even though
+        # they contain proceed-like substrings.
+        _PROCEED_KEYWORDS = ("proceed", "approve", "execute", "buy_long",
+                             "go_long", "trade_yes", "long_ok")
+        _PASS_KEYWORDS = ("pass", "skip", "reject", "block", "avoid",
+                          "no_trade", "no_go", "trade_no")
         correct = 0
         r_when_followed = []
         r_when_ignored = []
+        pnl_when_followed = []
+        pnl_when_ignored = []
         confidences = []
-        
+
         for d in decisions:
-            recommendation = d.get("combined_recommendation", "")
-            outcome_r = d.get("would_have_r", 0)
-            
-            # Determine if recommendation was correct
-            if recommendation == "proceed" and outcome_r > 0:
-                correct += 1
-            elif recommendation == "pass" and outcome_r < 0:
-                correct += 1
-                
-            # Track R by execution status
+            recommendation = (d.get("combined_recommendation") or "").lower()
+            outcome_r = d.get("would_have_r", 0) or 0
+            outcome_pnl = d.get("would_have_pnl", 0) or 0
+
+            # Classify recommendation intent — pass takes precedence
+            # over proceed when both match (handles "no_trade" /
+            # "no_go" edge cases cleanly).
+            is_pass = any(kw in recommendation for kw in _PASS_KEYWORDS)
+            is_proceed = (not is_pass) and any(
+                kw in recommendation for kw in _PROCEED_KEYWORDS
+            )
+
+            if is_pass:
+                # Module said "skip" → correct iff outcome was bad
+                # (the module steered the operator away from a loss)
+                if outcome_pnl < 0:
+                    correct += 1
+            elif is_proceed:
+                # Module said "take it" → correct iff trade was profitable
+                if outcome_pnl > 0:
+                    correct += 1
+            else:
+                # No clear directional intent — treat profitable
+                # outcome as the win signal. This is the same
+                # semantic as the global win-rate metric.
+                if outcome_pnl > 0:
+                    correct += 1
+
+            # Track PnL + R by execution status
             if d.get("was_executed"):
                 r_when_followed.append(outcome_r)
+                pnl_when_followed.append(outcome_pnl)
             else:
                 r_when_ignored.append(outcome_r)
-                
+                pnl_when_ignored.append(outcome_pnl)
+
             confidences.append(d.get("confidence_score", 0))
-            
+
         return ModulePerformance(
             module_name=module,
             total_decisions=total,
@@ -481,7 +532,9 @@ class ShadowTracker:
             accuracy_rate=correct / total if total > 0 else 0,
             avg_confidence=sum(confidences) / len(confidences) if confidences else 0,
             avg_r_when_followed=sum(r_when_followed) / len(r_when_followed) if r_when_followed else 0,
-            avg_r_when_ignored=sum(r_when_ignored) / len(r_when_ignored) if r_when_ignored else 0
+            avg_r_when_ignored=sum(r_when_ignored) / len(r_when_ignored) if r_when_ignored else 0,
+            avg_pnl_when_followed=round(sum(pnl_when_followed) / len(pnl_when_followed), 4) if pnl_when_followed else 0,
+            avg_pnl_when_ignored=round(sum(pnl_when_ignored) / len(pnl_when_ignored), 4) if pnl_when_ignored else 0,
         )
         
     async def get_all_performance(self, days: int = 30) -> Dict[str, ModulePerformance]:
