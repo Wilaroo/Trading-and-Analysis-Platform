@@ -2,6 +2,89 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (evening) — 9 new detector functions (orphans + playbook setups)
+
+Operator's last `/api/scanner/setup-coverage` showed 8 orphans (setups
+declared in `_enabled_setups` but with no registered checker function).
+Plus the operator provided 3 new playbook screenshots (VWAP Continuation,
+Premarket High Break, Bouncy Ball Trade) for setups not yet covered.
+
+### Shipped — 6 orphan detectors (semantic intent confirmed by operator)
+- `_check_first_move_up`     — SHORT (fade first morning push to HOD).
+  Trigger: ≥1.5% push above open, within 0.5% of HOD, RSI ≥68, ≥1.0%
+  above VWAP, RVOL ≥1.5. Stop above HOD + 0.25×ATR. Target: VWAP/open.
+- `_check_first_move_down`   — LONG  (fade first morning flush to LOD).
+  Mirror of above. Stop below LOD − 0.25×ATR. Target: VWAP/open.
+- `_check_back_through_open` — SHORT. Stock pushed ≥0.5% above open
+  earlier, now crossed BACK below it; RVOL ≥1.2, lost 9-EMA, R:R ≥1.2.
+  Stop above open + 0.3×ATR. Target: LOD or VWAP-low.
+- `_check_up_through_open`   — LONG (mirror of back_through_open).
+- `_check_gap_pick_roll`     — LONG continuation off gap. Gap ≥1%
+  holding, riding 9-EMA (−0.5% to +1.0% off), RSI 50-72, RVOL ≥1.5.
+  Stop below 9-EMA. Target: +2×ATR.
+- `_check_bella_fade`        — SHORT parabolic fade. Distinct from
+  vwap_fade: requires extension from BOTH VWAP (≥2%) AND 9-EMA (≥1.5%),
+  RSI ≥75. Stop above HOD. Target: VWAP.
+
+### Shipped — 3 new playbook setups from operator screenshots
+- `_check_vwap_continuation` — LONG playbook: morning push ≥1.5% from
+  open, pullback into VWAP (−0.6% to +0.4%), uptrend + above 9-EMA,
+  RVOL ≥1.3, RSI ≥45. Distinct from `vwap_bounce` (which fires on any
+  uptrend pullback) by requiring the prior morning-strength signature.
+  Time window: late morning + midday + afternoon (10am-2pm-ish).
+- `_check_premarket_high_break` — LONG playbook: opening drive only,
+  OR-breakout above + gap ≥1% + holding gap + RVOL ≥2.0 + above VWAP.
+  Distinct from `opening_drive` (which requires 3% gap) by firing on
+  weaker gaps as long as the OR break confirms strength. Stop below
+  LOD − $0.02. Target: +2.5×ATR.
+- `_check_bouncy_ball`       — SHORT playbook: late morning + midday
+  + power hour. ≥1.5% down move from open, below 9-EMA + below VWAP
+  (−1% to −3% — avoids overextended caps), RSI ≤48, near LOD,
+  RVOL ≥1.3. Distinct from `vwap_fade_short` by requiring the
+  failed-bounce + support-break structure.
+
+### Wiring
+- All 9 detectors registered in the `checkers` dict in `_check_setup`.
+- All 9 added to class-level `REGISTERED_SETUP_TYPES` frozenset (so
+  the source-level drift guard test
+  `test_registered_set_matches_checkers_dict` keeps the dict and the
+  frozenset in lockstep).
+- 3 new playbook setups added to `_enabled_setups` and to
+  `STRATEGY_TIME_WINDOWS` (`vwap_continuation`: late-morning/midday/
+  afternoon; `premarket_high_break`: opening auction/drive only;
+  `bouncy_ball`: late-morning through close).
+
+### Verification
+- 17 new tests in `tests/test_orphan_setup_detectors.py` cover:
+  registration in checkers dict + frozenset, presence in
+  `_enabled_setups`, presence in `STRATEGY_TIME_WINDOWS`, positive
+  firing cases for each detector, and key negative cases (RSI not
+  overbought, no prior morning push, outside opening window for
+  premarket_high_break, overextended-from-VWAP skip for bouncy_ball).
+- 37/37 passing across `test_orphan_setup_detectors`,
+  `test_scanner_setup_coverage`, `test_strategy_time_window_reclassification`,
+  and `test_scanner_canary`.
+- Live `/api/scanner/setup-coverage` after backend restart:
+  - `orphan_count: 8 → 2` (only `breaking_news` and `time_of_day_fade`
+    remain — operator deferred those for a later session).
+  - `registered_checkers: 28 → 37`.
+
+### Operator action on DGX
+1. Save to GitHub, `git pull` on DGX (backend hot-reloads).
+2. Verify orphan count dropped:
+   ```
+   curl -s http://localhost:8001/api/scanner/setup-coverage \
+     | python3 -c "import sys,json; d=json.load(sys.stdin); print('orphans:', d['totals'].get('orphan_count'))"
+   ```
+   Should print `orphans: 2`.
+3. Watch `/api/scanner/detector-stats` over the next session — the new
+   detectors will start showing under `silent_detectors` until they
+   fire their first hit, then graduate to `active_detectors`. If any
+   stay silent for several sessions, dial down their thresholds via
+   the proximity-audit story (see CHANGELOG 2026-04-29 afternoon-15b).
+
+
+
 ## 2026-04-29 (afternoon-15) — Scanner audit (all five passes)
 
 ### Five issues fixed in this round (instance fix → coverage → proximity → bucket disambiguation → reclassification)

@@ -3,9 +3,50 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (handoff to next session — 2026-04-29 EOD)
+## 🔴 Now / Near-term (handoff to next session — 2026-04-29 evening)
 
-### 🟢 Just shipped this session (2026-04-29 afternoon-3) — see CHANGELOG
+### 🟢 Just shipped this session (2026-04-29 evening) — see CHANGELOG
+- ✅ **9 new detector functions**: 6 orphans (`first_move_up`,
+  `first_move_down`, `back_through_open`, `up_through_open`,
+  `gap_pick_roll`, `bella_fade`) + 3 playbook setups
+  (`vwap_continuation`, `premarket_high_break`, `bouncy_ball`).
+  Orphan count dropped 8→2 (only `breaking_news` and
+  `time_of_day_fade` remain, operator deferred). 17 regression tests
+  passing; 37/37 across related suites.
+
+### 🟠 P1 — Outstanding orphans (operator deferred)
+- `breaking_news` — operator wants to define rules separately later.
+- `time_of_day_fade` — operator explicitly skipping for now.
+
+### 🟠 Operator-prioritized follow-ups (next session candidates)
+- **Tighten Tier 2/3 freshness via smarter collector dispatch**: have
+  the 4 turbo collectors lazily refresh the most recently scanned
+  symbols on cache miss, instead of relying on the nightly batch job.
+- **Mean-reversion timing metric (Q2)** (~2-3 hours)
+  No half-life / Hurst exponent calculation anywhere today. The bot
+  detects "mean_reversion" as a setup type but can't answer "this
+  symbol typically reverts in X bars". Plan: new
+  `services/mean_reversion_metrics_service.py` computes per-symbol
+  Hurst exponent + Ornstein-Uhlenbeck half-life nightly from daily
+  bars and caches `mean_reversion_stats` on `symbol_adv_cache`.
+  Evaluator can then prefer/avoid mean-revert setups based on the
+  symbol's intrinsic reversion speed. ~2-3 hours, real differentiator
+  vs typical setup scanners.
+- **Realtime stop-guard re-check** in `stop_manager.py` (liquidity-aware trail).
+- **EOD Rejection Summary** narrative line.
+- **Chart Pulse** (live cache freshness tick).
+
+### 🟢 Earlier this session (2026-04-29 afternoon-12 → afternoon-15) — see CHANGELOG
+- Scanner-router instance fix + `setup-coverage` diagnostic.
+- Threshold-proximity audit for 12 silent detectors.
+- Bucket disambiguation (orphans vs time-filtered).
+- Operator-driven strategy time-window reclassification (22 setups).
+- Pusher push-loop hang fix (account_data $— → live equity).
+- Pusher subscription gate (RPC noise elimination).
+- Evaluator-veto specific reason codes + NameError fix.
+- Risk caps unified at `max_positions=25` and `min_risk_reward=1.5`.
+
+### 🟢 Just shipped earlier (2026-04-29 afternoon-3) — see CHANGELOG
 - ✅ **Round 1 backend fixes** — `/api/trading-bot/status` now reads IB
   pushed account (was `$—`), `/api/scanner/strategy-mix` falls back to
   in-memory alerts when Mongo empty (was `total: 0`), SPY change_pct now

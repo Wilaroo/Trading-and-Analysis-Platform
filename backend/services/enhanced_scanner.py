@@ -158,6 +158,21 @@ STRATEGY_TIME_WINDOWS = {
     "volume_capitulation": _RTH_ALL_DAY,
     "range_break":         _RTH_ALL_DAY,
     "breakout":            _RTH_ALL_DAY,
+
+    # ─── Operator playbook setups (2026-04-29 evening) ──────────────
+    # vwap_continuation: late-morning + midday + afternoon (10am-2pm sweet spot)
+    "vwap_continuation":   [
+        TimeWindow.LATE_MORNING, TimeWindow.MIDDAY, TimeWindow.AFTERNOON,
+    ],
+    # premarket_high_break: first 5 min of trading day only
+    "premarket_high_break": [
+        TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE,
+    ],
+    # bouncy_ball: late-morning, midday, power hour (avoid first 30 min)
+    "bouncy_ball":         [
+        TimeWindow.LATE_MORNING, TimeWindow.MIDDAY,
+        TimeWindow.AFTERNOON,    TimeWindow.CLOSE,
+    ],
 }
 
 # Strategy market regime preferences
@@ -776,6 +791,10 @@ class EnhancedBackgroundScanner:
             "gap_fade",  # Fade failing gaps
             # Chart patterns
             "chart_pattern",  # Flags, pennants, triangles, H&S, wedges
+            # Operator playbook setups (2026-04-29 evening)
+            "vwap_continuation",     # Long re-entry near VWAP after morning trend
+            "premarket_high_break",  # Long on first-5min OR break with strong gap
+            "bouncy_ball",           # Short on support break after failed bounce
         }
         
         # Alert management
@@ -2661,6 +2680,19 @@ class EnhancedBackgroundScanner:
             "relative_strength": self._check_relative_strength,
             "gap_fade": self._check_gap_fade,
             "chart_pattern": self._check_chart_pattern,
+
+            # Orphan-setup detectors (added 2026-04-29 evening)
+            "first_move_up": self._check_first_move_up,
+            "first_move_down": self._check_first_move_down,
+            "back_through_open": self._check_back_through_open,
+            "up_through_open": self._check_up_through_open,
+            "gap_pick_roll": self._check_gap_pick_roll,
+            "bella_fade": self._check_bella_fade,
+
+            # Operator playbook setups (added 2026-04-29 evening)
+            "vwap_continuation": self._check_vwap_continuation,
+            "premarket_high_break": self._check_premarket_high_break,
+            "bouncy_ball": self._check_bouncy_ball,
         }
         
         checker = checkers.get(setup_type)
@@ -2703,6 +2735,11 @@ class EnhancedBackgroundScanner:
         "volume_capitulation", "range_break", "breakout",
         # NEW setups
         "squeeze", "mean_reversion", "relative_strength", "gap_fade", "chart_pattern",
+        # Orphan-setup detectors (2026-04-29 evening)
+        "first_move_up", "first_move_down", "back_through_open",
+        "up_through_open", "gap_pick_roll", "bella_fade",
+        # Operator playbook setups (2026-04-29 evening)
+        "vwap_continuation", "premarket_high_break", "bouncy_ball",
     })
 
     # ==================== THRESHOLD PROXIMITY SAMPLER (afternoon-15b) ====================
@@ -4324,7 +4361,506 @@ class EnhancedBackgroundScanner:
                 expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
             )
         return None
+
+    # ==================== ORPHAN-SETUP DETECTORS (added 2026-04-29 evening) ====================
+    # Operator-defined morning-session intraday plays that previously had
+    # no checker function (showed up as `orphan_enabled_setups` in
+    # `/api/scanner/setup-coverage`). Each setup is morning-only — the
+    # `_is_setup_valid_now` gate enforces that via STRATEGY_TIME_WINDOWS
+    # so we don't repeat the time check inside each detector.
+    #
+    # Direction semantics (operator-confirmed):
+    #   first_move_up      = SHORT — fade the first morning push to HOD
+    #   first_move_down    = LONG  — fade the first morning flush to LOD
+    #   back_through_open  = SHORT — price drove above open, then crossed back
+    #                                 BELOW open → trend exhaustion, fade lower
+    #   up_through_open    = LONG  — price drove below open, then crossed back
+    #                                 ABOVE open → reversal long
+    #   gap_pick_roll      = LONG  — gap-up holding, riding 9-EMA, picking up
+    #                                 momentum into the morning roll
+    #   bella_fade         = SHORT — extended above VWAP, RSI overbought,
+    #                                 fade-the-parabolic-push play
+    # Targets/stops use the same VWAP / HOD / LOD / EMA-9 / ATR primitives the
+    # existing detectors share. Risk-reward sized for intraday scalps (≥1.5).
     
+    async def _check_first_move_up(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """First Move Up — SHORT (fade first morning push to HOD).
+
+        Trigger: price has pushed up making a fresh HOD off the open, RSI is
+        overbought, tape shows exhaustion / strong-ask, ready to fade back to
+        VWAP or the open.
+        """
+        if snapshot.high_of_day <= 0 or snapshot.atr <= 0:
+            return None
+        # Push must be meaningful: > 1.5% from open AND price within 0.5% of HOD
+        push_pct = ((snapshot.high_of_day - snapshot.open) / snapshot.open) * 100 if snapshot.open > 0 else 0
+        dist_from_hod_pct = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
+        if (push_pct >= 1.5 and
+            dist_from_hod_pct <= 0.5 and
+            snapshot.rsi_14 >= 68 and
+            snapshot.dist_from_vwap >= 1.0 and
+            snapshot.rvol >= 1.5):
+            target_price = max(snapshot.vwap, snapshot.open)
+            stop = round(snapshot.high_of_day + (snapshot.atr * 0.25), 2)
+            risk = abs(stop - snapshot.current_price)
+            reward = abs(snapshot.current_price - target_price)
+            rr = (reward / risk) if risk > 0 else 1.5
+            return LiveAlert(
+                id=f"first_move_up_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="first_move_up",
+                strategy_name="First Move Up Fade (MORN-01)",
+                direction="short",
+                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.current_price,
+                stop_loss=stop,
+                target=round(target_price, 2),
+                risk_reward=round(rr, 2),
+                trigger_probability=0.55,
+                win_probability=0.55,
+                minutes_to_trigger=10,
+                headline=f"🪂 {symbol} First-Move-Up Fade — HOD push +{push_pct:.1f}%",
+                reasoning=[
+                    f"Push from open: +{push_pct:.1f}% to HOD ${snapshot.high_of_day:.2f}",
+                    f"Within {dist_from_hod_pct:.2f}% of HOD",
+                    f"RSI overbought: {snapshot.rsi_14:.0f}",
+                    f"{snapshot.dist_from_vwap:+.1f}% extended above VWAP",
+                    f"Target: VWAP/open ${target_price:.2f}",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    async def _check_first_move_down(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """First Move Down — LONG (fade first morning flush to LOD)."""
+        if snapshot.low_of_day <= 0 or snapshot.atr <= 0:
+            return None
+        flush_pct = ((snapshot.open - snapshot.low_of_day) / snapshot.open) * 100 if snapshot.open > 0 else 0
+        dist_from_lod_pct = ((snapshot.current_price - snapshot.low_of_day) / snapshot.current_price) * 100
+        if (flush_pct >= 1.5 and
+            dist_from_lod_pct <= 0.5 and
+            snapshot.rsi_14 <= 32 and
+            snapshot.dist_from_vwap <= -1.0 and
+            snapshot.rvol >= 1.5):
+            target_price = min(snapshot.vwap, snapshot.open)
+            stop = round(snapshot.low_of_day - (snapshot.atr * 0.25), 2)
+            risk = abs(snapshot.current_price - stop)
+            reward = abs(target_price - snapshot.current_price)
+            rr = (reward / risk) if risk > 0 else 1.5
+            return LiveAlert(
+                id=f"first_move_down_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="first_move_down",
+                strategy_name="First Move Down Reversal (MORN-02)",
+                direction="long",
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.current_price,
+                stop_loss=stop,
+                target=round(target_price, 2),
+                risk_reward=round(rr, 2),
+                trigger_probability=0.55,
+                win_probability=0.55,
+                minutes_to_trigger=10,
+                headline=f"🪃 {symbol} First-Move-Down Reversal — LOD flush −{flush_pct:.1f}%",
+                reasoning=[
+                    f"Flush from open: −{flush_pct:.1f}% to LOD ${snapshot.low_of_day:.2f}",
+                    f"Within {dist_from_lod_pct:.2f}% of LOD",
+                    f"RSI oversold: {snapshot.rsi_14:.0f}",
+                    f"{snapshot.dist_from_vwap:+.1f}% below VWAP",
+                    f"Target: VWAP/open ${target_price:.2f}",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    async def _check_back_through_open(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Back Through Open — SHORT.
+
+        Stock drove above open early, then crossed back BELOW it. Failed
+        morning strength → fade to LOD or VWAP-low. Stop above the open.
+        """
+        if snapshot.open <= 0 or snapshot.atr <= 0:
+            return None
+        # We must have evidence of an earlier push above open (HOD > open)
+        # AND current price is now back below open.
+        push_above_open_pct = ((snapshot.high_of_day - snapshot.open) / snapshot.open) * 100
+        dist_below_open_pct = ((snapshot.open - snapshot.current_price) / snapshot.open) * 100
+        if (push_above_open_pct >= 0.5 and
+            snapshot.current_price < snapshot.open and
+            dist_below_open_pct >= 0.05 and  # actually crossed, not just touched
+            snapshot.dist_from_vwap <= 0.0 and
+            not snapshot.above_ema9 and
+            snapshot.rvol >= 1.2):
+            target_price = min(snapshot.low_of_day, snapshot.vwap - snapshot.atr * 0.5)
+            stop = round(snapshot.open + (snapshot.atr * 0.3), 2)
+            risk = abs(stop - snapshot.current_price)
+            reward = abs(snapshot.current_price - target_price)
+            rr = (reward / risk) if risk > 0 else 1.5
+            if rr < 1.2:
+                return None
+            return LiveAlert(
+                id=f"back_through_open_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="back_through_open",
+                strategy_name="Back Through Open (MORN-03)",
+                direction="short",
+                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.open,
+                stop_loss=stop,
+                target=round(target_price, 2),
+                risk_reward=round(rr, 2),
+                trigger_probability=0.52,
+                win_probability=0.55,
+                minutes_to_trigger=10,
+                headline=f"🔻 {symbol} Back-Through-Open SHORT — failed morning push",
+                reasoning=[
+                    f"HOD ${snapshot.high_of_day:.2f} pushed +{push_above_open_pct:.1f}% above open",
+                    f"Now {dist_below_open_pct:.2f}% back below open ${snapshot.open:.2f}",
+                    f"Lost 9-EMA",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    async def _check_up_through_open(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Up Through Open — LONG (mirror of back_through_open)."""
+        if snapshot.open <= 0 or snapshot.atr <= 0:
+            return None
+        flush_below_open_pct = ((snapshot.open - snapshot.low_of_day) / snapshot.open) * 100
+        dist_above_open_pct = ((snapshot.current_price - snapshot.open) / snapshot.open) * 100
+        if (flush_below_open_pct >= 0.5 and
+            snapshot.current_price > snapshot.open and
+            dist_above_open_pct >= 0.05 and
+            snapshot.dist_from_vwap >= 0.0 and
+            snapshot.above_ema9 and
+            snapshot.rvol >= 1.2):
+            target_price = max(snapshot.high_of_day, snapshot.vwap + snapshot.atr * 0.5)
+            stop = round(snapshot.open - (snapshot.atr * 0.3), 2)
+            risk = abs(snapshot.current_price - stop)
+            reward = abs(target_price - snapshot.current_price)
+            rr = (reward / risk) if risk > 0 else 1.5
+            if rr < 1.2:
+                return None
+            return LiveAlert(
+                id=f"up_through_open_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="up_through_open",
+                strategy_name="Up Through Open (MORN-04)",
+                direction="long",
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.open,
+                stop_loss=stop,
+                target=round(target_price, 2),
+                risk_reward=round(rr, 2),
+                trigger_probability=0.52,
+                win_probability=0.55,
+                minutes_to_trigger=10,
+                headline=f"🔺 {symbol} Up-Through-Open LONG — recovered from morning flush",
+                reasoning=[
+                    f"LOD ${snapshot.low_of_day:.2f} flushed −{flush_below_open_pct:.1f}% below open",
+                    f"Now {dist_above_open_pct:.2f}% back above open ${snapshot.open:.2f}",
+                    f"Reclaimed 9-EMA",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    async def _check_gap_pick_roll(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Gap & Pick & Roll — LONG continuation off gap.
+
+        Gap up holding, riding the 9-EMA, building momentum in the morning
+        roll. Less aggressive than opening_drive (no 3% gap requirement),
+        more about controlled continuation.
+        """
+        if snapshot.atr <= 0:
+            return None
+        if (snapshot.gap_pct >= 1.0 and
+            snapshot.holding_gap and
+            snapshot.above_ema9 and
+            snapshot.above_vwap and
+            -0.5 < snapshot.dist_from_ema9 < 1.0 and
+            snapshot.rsi_14 >= 50 and snapshot.rsi_14 <= 72 and
+            snapshot.rvol >= 1.5):
+            stop = round(snapshot.ema_9 - (snapshot.atr * 0.3), 2)
+            target = round(snapshot.current_price + (snapshot.atr * 2.0), 2)
+            risk = abs(snapshot.current_price - stop)
+            reward = abs(target - snapshot.current_price)
+            rr = (reward / risk) if risk > 0 else 2.0
+            return LiveAlert(
+                id=f"gap_pick_roll_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="gap_pick_roll",
+                strategy_name="Gap Pick & Roll (MORN-05)",
+                direction="long",
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.current_price,
+                stop_loss=stop,
+                target=target,
+                risk_reward=round(rr, 2),
+                trigger_probability=0.58,
+                win_probability=0.58,
+                minutes_to_trigger=10,
+                headline=f"🎢 {symbol} Gap Pick & Roll — gap +{snapshot.gap_pct:.1f}% holding",
+                reasoning=[
+                    f"Gap up {snapshot.gap_pct:.1f}% — holding above open",
+                    f"Riding 9-EMA ({snapshot.dist_from_ema9:+.2f}% off)",
+                    f"Above VWAP ({snapshot.dist_from_vwap:+.1f}%)",
+                    f"RSI healthy: {snapshot.rsi_14:.0f}",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    async def _check_bella_fade(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Bella Fade — SHORT fade of overextended push.
+
+        Named after SMB Capital's Bella-style fade. Distinct from vwap_fade
+        in that it requires (a) a parabolic move (extension from 9-EMA, not
+        just VWAP), and (b) RSI deeper into overbought (≥75). Tighter risk
+        because we're picking the top of a momentum push.
+        """
+        if snapshot.atr <= 0 or snapshot.high_of_day <= 0:
+            return None
+        if (snapshot.dist_from_vwap >= 2.0 and
+            snapshot.dist_from_ema9 >= 1.5 and
+            snapshot.rsi_14 >= 75 and
+            snapshot.rvol >= 1.5):
+            stop = round(snapshot.high_of_day + (snapshot.atr * 0.3), 2)
+            target = round(snapshot.vwap, 2)
+            risk = abs(stop - snapshot.current_price)
+            reward = abs(snapshot.current_price - target)
+            rr = (reward / risk) if risk > 0 else 1.5
+            if rr < 1.2:
+                return None
+            return LiveAlert(
+                id=f"bella_fade_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="bella_fade",
+                strategy_name="Bella Fade (SMB-Style SHORT)",
+                direction="short",
+                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.current_price,
+                stop_loss=stop,
+                target=target,
+                risk_reward=round(rr, 2),
+                trigger_probability=0.50,
+                win_probability=0.55,
+                minutes_to_trigger=10,
+                headline=f"🪂 {symbol} Bella Fade — parabolic +{snapshot.dist_from_vwap:.1f}% above VWAP",
+                reasoning=[
+                    f"Extended {snapshot.dist_from_vwap:+.1f}% above VWAP",
+                    f"Extended {snapshot.dist_from_ema9:+.1f}% above 9-EMA (parabolic)",
+                    f"RSI deeply overbought: {snapshot.rsi_14:.0f}",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    f"Target: VWAP ${snapshot.vwap:.2f}",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
+            )
+        return None
+
+    # ==================== NEW SETUPS FROM OPERATOR PLAYBOOK SCREENSHOTS (2026-04-29 evening) ====================
+    # Screenshots provided rules for three additional plays:
+    #   1. VWAP Continuation — long re-entry near VWAP after morning trend
+    #      established (10am-2pm). Distinct from `vwap_bounce` because it
+    #      requires a prior trendline/range break ABOVE vwap before pullback,
+    #      not just a generic uptrend pullback.
+    #   2. Premarket High Break — long on first 5 min OR breakout in opening
+    #      drive when stock opens in upper 1/4 of premarket range. Distinct
+    #      from `opening_drive` (which requires 3% gap); this fires on weaker
+    #      gaps as long as the OR break confirms strength.
+    #   3. Bouncy Ball Trade — short after support break following a failed
+    #      bounce (lower-high). Distinct from `backside` (long recovery) and
+    #      from `vwap_fade_short` (requires support-level break + failed
+    #      bounce, not just over-extension).
+
+    async def _check_vwap_continuation(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """VWAP Continuation — LONG (operator playbook).
+
+        Morning move established → pullback into VWAP → look to ride the
+        morning strength's continuation. Wider time window than
+        first_vwap_pullback (covers late-morning + midday).
+        """
+        if snapshot.atr <= 0:
+            return None
+        # Morning trend signature: HOD comfortably above open AND price
+        # currently pulled back to VWAP from above.
+        morning_strength_pct = ((snapshot.high_of_day - snapshot.open) / snapshot.open) * 100 if snapshot.open > 0 else 0
+        if (morning_strength_pct >= 1.5 and
+            snapshot.trend == "uptrend" and
+            -0.6 <= snapshot.dist_from_vwap <= 0.4 and
+            snapshot.above_ema9 and
+            snapshot.rvol >= 1.3 and
+            snapshot.rsi_14 >= 45):
+            stop = round(snapshot.vwap - (snapshot.atr * 0.5), 2)
+            target = round(max(snapshot.high_of_day, snapshot.current_price + snapshot.atr * 1.5), 2)
+            risk = abs(snapshot.current_price - stop)
+            reward = abs(target - snapshot.current_price)
+            rr = (reward / risk) if risk > 0 else 2.0
+            if rr < 1.5:
+                return None
+            return LiveAlert(
+                id=f"vwap_continuation_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="vwap_continuation",
+                strategy_name="VWAP Continuation (Playbook)",
+                direction="long",
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.vwap,
+                stop_loss=stop,
+                target=target,
+                risk_reward=round(rr, 2),
+                trigger_probability=0.58,
+                win_probability=0.58,
+                minutes_to_trigger=15,
+                headline=f"📍 {symbol} VWAP Continuation — morning strength +{morning_strength_pct:.1f}%",
+                reasoning=[
+                    f"Morning push: +{morning_strength_pct:.1f}% from open",
+                    f"Pulled back to VWAP ({snapshot.dist_from_vwap:+.2f}%)",
+                    f"Trend: uptrend, above 9-EMA",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    f"Exit half at HOD ${snapshot.high_of_day:.2f}, trail rest with 21-EMA",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+        return None
+
+    async def _check_premarket_high_break(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Premarket High Break — LONG (operator playbook).
+
+        First 5 min of trading day, stock opens in upper 1/4 of premarket
+        range, breaks the OR-high aggressively. Stop $0.01 below LOD.
+        """
+        current_window = self._get_current_time_window()
+        if current_window not in [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE]:
+            return None
+        if snapshot.atr <= 0 or snapshot.or_high <= 0:
+            return None
+        # OR breakout to the upside, RVOL hot, holding gap (proxy for "opened
+        # in upper 1/4 of premarket range" — gap_pct + holding_gap captures
+        # most of that semantics without needing a dedicated premarket-range
+        # field on TechnicalSnapshot).
+        if (snapshot.or_breakout == "above" and
+            snapshot.gap_pct >= 1.0 and
+            snapshot.holding_gap and
+            snapshot.current_price >= snapshot.or_high and
+            snapshot.above_vwap and
+            snapshot.rvol >= 2.0):
+            stop = round(snapshot.low_of_day - 0.02, 2)
+            target = round(snapshot.current_price + (snapshot.atr * 2.5), 2)
+            risk = abs(snapshot.current_price - stop)
+            reward = abs(target - snapshot.current_price)
+            rr = (reward / risk) if risk > 0 else 2.0
+            if rr < 1.5:
+                return None
+            return LiveAlert(
+                id=f"premarket_high_break_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="premarket_high_break",
+                strategy_name="Premarket High Break (Playbook)",
+                direction="long",
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.or_high,
+                stop_loss=stop,
+                target=target,
+                risk_reward=round(rr, 2),
+                trigger_probability=0.55,
+                win_probability=0.55,
+                minutes_to_trigger=5,
+                headline=f"🏁 {symbol} Premarket High Break — gap +{snapshot.gap_pct:.1f}%",
+                reasoning=[
+                    f"Broke OR-high ${snapshot.or_high:.2f} on RVOL {snapshot.rvol:.1f}x",
+                    f"Gap up {snapshot.gap_pct:.1f}% holding",
+                    f"Above VWAP ({snapshot.dist_from_vwap:+.1f}%)",
+                    f"Stop: $0.01 below LOD ${snapshot.low_of_day:.2f}",
+                    f"Exit on first close below 9-EMA",
+                ],
+                time_window=current_window.value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+            )
+        return None
+
+    async def _check_bouncy_ball(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Bouncy Ball Trade — SHORT (operator playbook).
+
+        After a significant down move, the stock attempts a bounce that
+        fails (lower-high). Enter aggressively when support breaks. Time
+        windows: late-morning, midday, power hour. Avoid if opening drop
+        is overextended from VWAP (we want a structured failure, not a
+        capitulation reversal).
+        """
+        if snapshot.atr <= 0 or snapshot.low_of_day <= 0:
+            return None
+        # Significant down move signature
+        down_move_pct = ((snapshot.open - snapshot.low_of_day) / snapshot.open) * 100 if snapshot.open > 0 else 0
+        # Failed bounce: price below 9-EMA, weak RSI, dist below VWAP but not extreme
+        if (down_move_pct >= 1.5 and
+            not snapshot.above_ema9 and
+            not snapshot.above_vwap and
+            -3.0 <= snapshot.dist_from_vwap <= -1.0 and  # below VWAP but NOT >3% (avoid overextended)
+            snapshot.rsi_14 <= 48 and
+            snapshot.current_price <= snapshot.low_of_day * 1.005 and  # near LOD (within 0.5%)
+            snapshot.rvol >= 1.3):
+            stop = round(snapshot.ema_9 + (snapshot.atr * 0.2), 2)  # just above the lower-high bounce
+            target = round(snapshot.low_of_day - (snapshot.atr * 1.5), 2)
+            risk = abs(stop - snapshot.current_price)
+            reward = abs(snapshot.current_price - target)
+            rr = (reward / risk) if risk > 0 else 1.5
+            if rr < 1.3:
+                return None
+            return LiveAlert(
+                id=f"bouncy_ball_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="bouncy_ball",
+                strategy_name="Bouncy Ball SHORT (Playbook)",
+                direction="short",
+                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.low_of_day,
+                stop_loss=stop,
+                target=target,
+                risk_reward=round(rr, 2),
+                trigger_probability=0.55,
+                win_probability=0.55,
+                minutes_to_trigger=15,
+                headline=f"🏀 {symbol} Bouncy Ball SHORT — failed bounce, support break",
+                reasoning=[
+                    f"Down move from open: −{down_move_pct:.1f}%",
+                    f"Below 9-EMA + below VWAP ({snapshot.dist_from_vwap:+.1f}%)",
+                    f"RSI weak: {snapshot.rsi_14:.0f}",
+                    f"Near LOD ${snapshot.low_of_day:.2f} → support break",
+                    f"Exit: new 2-min high or reclaim of 9-EMA",
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+        return None
 
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB
