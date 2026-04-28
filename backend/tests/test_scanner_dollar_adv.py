@@ -21,11 +21,13 @@ from services.enhanced_scanner import EnhancedBackgroundScanner
 
 
 def _make_scanner_minimal() -> EnhancedBackgroundScanner:
-    """Build a scanner without running its full network/DB init."""
+    """Build a scanner without running its full network/DB init.
+    Thresholds match the canonical definition in
+    `services.symbol_universe`."""
     s = EnhancedBackgroundScanner.__new__(EnhancedBackgroundScanner)
-    s._min_adv_general    =  5_000_000
-    s._min_adv_intraday   = 25_000_000
-    s._min_adv_investment =  1_000_000
+    s._min_adv_general    = 10_000_000   # swing      ≥ $10M
+    s._min_adv_intraday   = 50_000_000   # intraday   ≥ $50M
+    s._min_adv_investment =  2_000_000   # investment ≥ $2M
     s._adv_cache = {}
     s._known_liquid_symbols = set()
     s._known_liquid_adv = {}
@@ -35,33 +37,36 @@ def _make_scanner_minimal() -> EnhancedBackgroundScanner:
 
 # ─── default thresholds ─────────────────────────────────────────────────
 
-def test_default_adv_thresholds_are_dollar_amounts():
-    s = EnhancedBackgroundScanner.__new__(EnhancedBackgroundScanner)
-    # Just call __init__ enough to set the thresholds — full init is heavy.
-    # Instead, check the class-level defaults via _make_scanner_minimal.
+def test_default_adv_thresholds_match_canonical_dollar_volumes():
+    """Scanner thresholds must equal `symbol_universe.{INTRADAY,SWING,
+    INVESTMENT}_THRESHOLD` exactly — single source of truth across the
+    app."""
+    from services.symbol_universe import (
+        INTRADAY_THRESHOLD, SWING_THRESHOLD, INVESTMENT_THRESHOLD,
+    )
     s2 = _make_scanner_minimal()
-    assert s2._min_adv_intraday   == 25_000_000
-    assert s2._min_adv_general    ==  5_000_000
-    assert s2._min_adv_investment ==  1_000_000
+    assert s2._min_adv_intraday   == INTRADAY_THRESHOLD   == 50_000_000
+    assert s2._min_adv_general    == SWING_THRESHOLD      == 10_000_000
+    assert s2._min_adv_investment == INVESTMENT_THRESHOLD ==  2_000_000
 
 
 # ─── _classify_symbol_tier ──────────────────────────────────────────────
 
-def test_classify_tier_intraday_at_25M_dollar_volume():
+def test_classify_tier_intraday_at_50M_dollar_volume():
     s = _make_scanner_minimal()
     s._adv_cache["SPY"] = (35_000_000_000, datetime.now(timezone.utc))
     assert s._classify_symbol_tier("SPY") == "intraday"
 
 
-def test_classify_tier_swing_between_5M_and_25M():
+def test_classify_tier_swing_between_10M_and_50M():
     s = _make_scanner_minimal()
-    s._adv_cache["MID"] = (10_000_000, datetime.now(timezone.utc))
+    s._adv_cache["MID"] = (25_000_000, datetime.now(timezone.utc))
     assert s._classify_symbol_tier("MID") == "swing"
 
 
-def test_classify_tier_investment_below_5M():
+def test_classify_tier_investment_below_10M():
     s = _make_scanner_minimal()
-    s._adv_cache["SMALL"] = (2_500_000, datetime.now(timezone.utc))
+    s._adv_cache["SMALL"] = (5_000_000, datetime.now(timezone.utc))
     assert s._classify_symbol_tier("SMALL") == "investment"
 
 

@@ -607,18 +607,24 @@ class EnhancedBackgroundScanner:
         self._rvol_cache_ttl = 300  # 5 minutes
         
         # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
-        # 2026-04-28e: SCANNER ADV GATES are now DOLLAR-volume not share-
-        # volume. Share-based gates (e.g. "≥500K shares") created bad
-        # asymmetries: a $5 stock with 500K shares ADV is illiquid for
-        # intraday scalping ($2.5M dollar volume) while a $500 stock
-        # with 50K shares ADV is perfectly tradable ($25M dollar volume).
-        # The newer `wave_scanner` already uses dollar volume; we now
-        # align `enhanced_scanner` with that contract. Cache field used:
-        # `symbol_adv_cache.avg_dollar_volume` (computed by the IB
-        # historical collector as `avg_volume × latest_close`).
-        self._min_adv_general    =  5_000_000   # ≥ $5M  daily — swing/general setups
-        self._min_adv_intraday   = 25_000_000   # ≥ $25M daily — intraday/scalp setups
-        self._min_adv_investment =  1_000_000   # ≥ $1M  daily — long-tail/investment
+        # 2026-04-28e/f: SCANNER ADV GATES are DOLLAR-volume not share-
+        # volume, and now PULLED FROM THE CANONICAL SOURCE
+        # (`services.symbol_universe`) so the scanner can never drift
+        # from the rest of the app. The single source of truth is:
+        #   intraday   ≥ $50M/day
+        #   swing      ≥ $10M/day  (super-set of intraday)
+        #   investment ≥ $2M/day   (super-set of swing)
+        # Cache field used: `symbol_adv_cache.avg_dollar_volume`,
+        # computed by IBHistoricalCollector.rebuild_adv_from_ib() as
+        # `avg_volume × latest_close`.
+        from services.symbol_universe import (
+            INTRADAY_THRESHOLD,
+            SWING_THRESHOLD,
+            INVESTMENT_THRESHOLD,
+        )
+        self._min_adv_intraday   = INTRADAY_THRESHOLD     # $50M/day
+        self._min_adv_general    = SWING_THRESHOLD        # $10M/day (= "swing")
+        self._min_adv_investment = INVESTMENT_THRESHOLD   # $2M/day
         # Dollar volume thresholds (preferred over share volume)
         self._min_dollar_vol_intraday = 50_000_000   # $50M for scalps/intraday
         self._min_dollar_vol_general = 10_000_000    # $10M for swing/day trades

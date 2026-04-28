@@ -38,9 +38,18 @@ MIN_BACKTEST_BARS = {
 }
 
 ADV_TIERS = {
-    "intraday":   {"min_adv": 500_000, "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]},
-    "swing":      {"min_adv": 100_000, "max_adv": 500_000, "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"]},
-    "investment": {"min_adv": 50_000,  "max_adv": 100_000, "timeframes": ["1 hour", "1 day", "1 week"]},
+    # 2026-04-28f: thresholds + ADV field UNIFIED with the canonical
+    # source of truth in `services.symbol_universe`. We use exclusive
+    # ranges here (each symbol slots into ONE tier = its highest
+    # qualifying tier) which is semantically equivalent to the
+    # "super-set" model in symbol_universe.py.
+    #   ≥$50M       → intraday   (full intraday TF stack)
+    #   $10M-$50M   → swing      (5m/30m/1h/1d only)
+    #   $2M-$10M    → investment (1h/1d/1w only)
+    # Field used: `symbol_adv_cache.avg_dollar_volume`.
+    "intraday":   {"min_adv": 50_000_000, "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]},
+    "swing":      {"min_adv": 10_000_000, "max_adv": 50_000_000, "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"]},
+    "investment": {"min_adv":  2_000_000, "max_adv": 10_000_000, "timeframes": ["1 hour", "1 day", "1 week"]},
 }
 
 DEPTH_CATEGORIES = {
@@ -391,9 +400,13 @@ def run_deep_gap_analysis(db, tier_filter: str = None) -> Dict[str, Any]:
         if tier_filter and tier_filter != tier_name:
             continue
 
-        adv_query = {"avg_volume": {"$gte": tier_cfg["min_adv"]}}
+        # 2026-04-28f: query DOLLAR volume to match the canonical tier
+        # definition in services.symbol_universe (was querying
+        # `avg_volume` shares, which silently never matched the new
+        # dollar-volume thresholds and produced empty tier_symbols).
+        adv_query = {"avg_dollar_volume": {"$gte": tier_cfg["min_adv"]}}
         if "max_adv" in tier_cfg:
-            adv_query["avg_volume"]["$lt"] = tier_cfg["max_adv"]
+            adv_query["avg_dollar_volume"]["$lt"] = tier_cfg["max_adv"]
 
         tier_symbols = [d["symbol"] for d in adv_col.find(adv_query, {"_id": 0, "symbol": 1})]
         if not tier_symbols:
