@@ -999,6 +999,12 @@ class TradingBotService:
         is already wired.
         """
         ctx = context or {}
+        # 2026-04-29 (afternoon-14): mark that *some* rejection was
+        # recorded for the current evaluation cycle so the catch-all
+        # `evaluator_veto_unknown` in `_scan_for_setups` doesn't double-
+        # count when the evaluator already pinpointed a specific reason.
+        # Reset to False at the top of each evaluation iteration.
+        self._last_evaluator_rejection_recorded = True
         narrative = self._compose_rejection_narrative(
             symbol=symbol, setup_type=setup_type, direction=direction,
             reason_code=reason_code, ctx=ctx,
@@ -1158,6 +1164,69 @@ class TradingBotService:
                 f"⏭️ Passing on {symbol} {setup_display} — opportunity "
                 f"evaluator returned no trade: {why}. Either entry/stop "
                 f"math didn't work or I couldn't size it within risk caps."
+            )
+        # 2026-04-29 (afternoon-14) — split the generic `evaluator_veto`
+        # into specific reason codes so the rejection-analytics dashboard
+        # tells operator exactly which gate dropped the trade.
+        if reason_code == "no_price":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — couldn't get a "
+                f"current price from the IB pusher OR Alpaca. Likely a "
+                f"subscription gap; can't size a trade without a quote."
+            )
+        if reason_code == "smart_filter_skip":
+            why = ctx.get("why", "smart filter rejected this setup")
+            wr = ctx.get("win_rate")
+            wr_phrase = f" (historical win rate {wr:.0%})" if wr else ""
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — smart strategy "
+                f"filter said SKIP{wr_phrase}: {why}."
+            )
+        if reason_code == "gate_skip":
+            conf = ctx.get("confidence_score")
+            mode = ctx.get("trading_mode", "normal")
+            why = ctx.get("why", "gate veto")
+            conf_phrase = f" ({conf}% confidence)" if conf is not None else ""
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — confidence gate "
+                f"voted SKIP{conf_phrase} in {mode} mode. {why}"
+            )
+        if reason_code == "position_size_zero":
+            entry = ctx.get("entry_price")
+            stop = ctx.get("stop_price")
+            risk = ctx.get("risk_amount")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — position sizer "
+                f"returned 0 shares (entry=${entry:.2f}, stop=${stop:.2f}, "
+                f"risk=${risk:.2f}). Equity may be unavailable, or risk caps "
+                f"are tighter than the entry/stop distance allows."
+            )
+        if reason_code == "rr_below_min":
+            rr = ctx.get("rr_ratio")
+            min_rr = ctx.get("min_required")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — risk:reward "
+                f"{rr:.2f} below my {min_rr} minimum. Either the target "
+                f"is too close or the stop is too far. Lower min_risk_reward "
+                f"in risk_params if you want more setups to qualify."
+            )
+        if reason_code == "ai_consultation_block":
+            why = ctx.get("why", "AI veto")
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — AI consultation "
+                f"blocked the trade: {why}"
+            )
+        if reason_code == "evaluator_exception":
+            err = ctx.get("error", "unknown error")
+            return (
+                f"⚠️ Skipping {symbol} {setup_display} — evaluator threw an "
+                f"exception: {err}. This is a code bug, not a market signal."
+            )
+        if reason_code == "evaluator_veto_unknown":
+            return (
+                f"⏭️ Passing on {symbol} {setup_display} — evaluator returned "
+                f"no trade without recording a specific reason. New return-"
+                f"None path that needs a reason_code added."
             )
         if reason_code == "tight_stop":
             stop_dist = ctx.get("stop_distance_pct")
@@ -1819,6 +1888,15 @@ class TradingBotService:
                 # Mark alert as fired (starts cooldown) BEFORE heavy evaluation
                 _dedup.mark_fired(symbol, setup, direction)
 
+                # Reset the evaluator's specific-rejection flag. The evaluator
+                # sets this flag to True whenever it records a specific
+                # reason_code (no_price / smart_filter_skip / gate_skip /
+                # position_size_zero / rr_below_min / ai_consultation_block /
+                # evaluator_exception). The catch-all below only fires when
+                # this flag is still False, preventing double-recording.
+                # 2026-04-29 (afternoon-14).
+                self._last_evaluator_rejection_recorded = False
+
                 # Evaluate and create trade opportunity
                 print(f"🔍 [TradingBot] Evaluating {symbol} {setup}...")
                 trade = await self._evaluate_opportunity(alert)
@@ -1841,15 +1919,19 @@ class TradingBotService:
                     print(f"❌ [TradingBot] {symbol} {setup} did not meet criteria")
                     # 2026-04-28: capture the post-evaluation rejection
                     # so operator sees a narrative, not just the bare
-                    # "did not meet criteria" log line. The opportunity
-                    # evaluator already logs its specific reason via the
-                    # smart_filter; this is the catch-all narrative for
-                    # any path that doesn't.
-                    self.record_rejection(
-                        symbol=symbol, setup_type=setup, direction=direction,
-                        reason_code="evaluator_veto",
-                        context={"why": "evaluator returned no trade"},
-                    )
+                    # "did not meet criteria" log line.
+                    # 2026-04-29 (afternoon-14): only fires the generic
+                    # `evaluator_veto_unknown` if the evaluator did NOT
+                    # already record a specific reason_code. Otherwise
+                    # we'd double-count rejections in the analytics.
+                    if not getattr(self, "_last_evaluator_rejection_recorded", False):
+                        self.record_rejection(
+                            symbol=symbol, setup_type=setup, direction=direction,
+                            reason_code="evaluator_veto_unknown",
+                            context={
+                                "why": "evaluator returned no trade without recording a specific reason — likely a new return-None path",
+                            },
+                        )
                     
         except Exception as e:
             print(f"❌ [TradingBot] Scan error: {e}")

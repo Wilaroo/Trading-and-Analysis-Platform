@@ -2,6 +2,86 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-14) — Trade pipeline veto audit (P0)
+
+Operator's `/api/trading-bot/rejection-analytics` showed 18
+`evaluator_veto` rejections + 0 orders queued today despite 50
+evaluations running. Backend log grep revealed the generic label was
+hiding **two real bugs**:
+
+1. **Python NameError**: `cannot access local variable
+   'ai_consultation_result' where it is not associated with a value`
+   — `ai_consultation_result` was referenced by `build_entry_context`
+   on line ~473 but only assigned on line ~498. Every evaluation that
+   reached the trade-build stage threw the NameError, vetoed as
+   `evaluator_veto`. INTC backside hit this every cycle.
+
+2. **R:R cap too tight**: many vetoes were `R:R 1.95 / 1.99 / 2.00 <
+   2.5 min required`. The 2.5 min_risk_reward setting in
+   `risk_params` is too aggressive for intraday scalps that target
+   1.5-2× risk by design.
+
+### Fix
+- `services/opportunity_evaluator.py`:
+  - Initialise `ai_consultation_result: Optional[Dict[str, Any]] = None`
+    early (alongside `confidence_gate_result = None`) so it's safely
+    in scope before `build_entry_context` reads it.
+  - Replaced the catch-all `evaluator_veto` with **specific reason
+    codes** at every `return None` path: `no_price`,
+    `smart_filter_skip`, `gate_skip`, `position_size_zero`,
+    `rr_below_min`, `ai_consultation_block`, `evaluator_exception`.
+    Each carries rich `context` (rr ratio, entry/stop, confidence
+    score, etc.) for the dashboard.
+- `services/trading_bot_service.py`:
+  - `record_rejection` now sets
+    `self._last_evaluator_rejection_recorded = True` as a side-effect.
+  - `_scan_for_setups` resets the flag before each evaluation and
+    only fires the catch-all `evaluator_veto_unknown` if the flag is
+    still False — preventing double-counting in the analytics.
+  - Added narrative branches in `_compose_rejection_narrative` for
+    every new reason code so V5 Bot's Brain panel shows wordy,
+    operator-friendly explanations instead of generic fallback text.
+
+### What this enables
+- `/api/trading-bot/rejection-analytics?days=1` will now break down
+  the 18 rejections into `rr_below_min: 12, position_size_zero: 4,
+  evaluator_exception: 2` (or similar) — operator can finally see
+  which gate is the actual bottleneck, then tune that specific dial
+  instead of guessing.
+- The `evaluator_exception` count immediately surfaces code bugs in
+  the future (any new NameError / KeyError will register clearly
+  instead of silently masquerading as `evaluator_veto`).
+
+### NOT changed
+- `risk_params.min_risk_reward = 2.5` deliberately left at 2.5 for
+  this round. After ~30 min of fresh data with the new specific
+  codes, operator can decide whether to lower it (likely 1.8) based
+  on the precise distribution. Tuning before the diagnostic split
+  would be guessing.
+
+### Verification
+- 5 new tests in `tests/test_evaluator_rejection_codes.py`:
+  early-init contract, specific-reason coverage at every return None,
+  flag set in record_rejection, flag reset+check in scan loop,
+  narrative branches present.
+- 14/14 passing across all evaluator + pusher suites.
+
+### Operator action on DGX
+1. `git pull` on DGX. Backend hot-reloads.
+2. Wait 30 minutes for fresh evaluations.
+3. Run:
+   ```
+   curl -s "http://localhost:8001/api/trading-bot/rejection-analytics?days=1&min_count=1" | python3 -m json.tool
+   ```
+4. The `by_reason_code` array will now show the specific bottleneck.
+   Most likely `rr_below_min` will dominate — if so, lower
+   `min_risk_reward` from 2.5 → 1.8 (operator-side, via Mongo
+   `bot_state.risk_params` or whatever the existing operator UI is).
+5. The INTC backside `evaluator_exception` should drop to 0 — that
+   was a Python bug, not a market signal.
+
+
+
 ## 2026-04-29 (afternoon-13) — Pusher-side subscription gate (P0)
 
 Operator post-restart logs showed a storm of unsubscribed-symbol RPC

@@ -84,6 +84,11 @@ class OpportunityEvaluator:
 
             if not current_price:
                 print(f"   ❌ No price available for {symbol}")
+                bot.record_rejection(
+                    symbol=symbol, setup_type=setup_type, direction=direction_str,
+                    reason_code="no_price",
+                    context={"why": "Neither IB pusher nor Alpaca returned a price"},
+                )
                 return None
 
             print(f"   📈 {symbol}: price=${current_price:.2f}")
@@ -112,11 +117,28 @@ class OpportunityEvaluator:
 
             if filter_action == "SKIP":
                 print(f"   📊 [SMART FILTER] {filter_reasoning}")
+                bot.record_rejection(
+                    symbol=symbol, setup_type=setup_type, direction=direction_str,
+                    reason_code="smart_filter_skip",
+                    context={
+                        "why": filter_reasoning,
+                        "win_rate": filter_win_rate,
+                        "stats": strategy_filter.get("stats", {}),
+                    },
+                )
                 return None
 
             # ==================== AI CONFIDENCE GATE ====================
             confidence_gate_result = None
             confidence_multiplier = 1.0
+            # Init early — referenced by build_entry_context() before the
+            # AI consultation block that assigns it. Without this, INTC /
+            # AAPL / MSFT etc trigger
+            #   `cannot access local variable 'ai_consultation_result'
+            #    where it is not associated with a value`
+            # on every scan cycle, vetoing the trade as `evaluator_veto`.
+            # 2026-04-29 (afternoon-14).
+            ai_consultation_result: Optional[Dict[str, Any]] = None
 
             if hasattr(bot, '_confidence_gate') and bot._confidence_gate is not None:
                 try:
@@ -153,6 +175,15 @@ class OpportunityEvaluator:
 
                     if gate_decision == "SKIP":
                         print(f"   🧠 [CONFIDENCE GATE] SKIP ({gate_confidence}% conf) — {reasoning_summary}")
+                        bot.record_rejection(
+                            symbol=symbol, setup_type=setup_type, direction=direction_str,
+                            reason_code="gate_skip",
+                            context={
+                                "why": reasoning_summary,
+                                "confidence_score": gate_confidence,
+                                "trading_mode": gate_mode,
+                            },
+                        )
                         return None
                     elif gate_decision == "REDUCE":
                         print(f"   🧠 [CONFIDENCE GATE] REDUCE ({gate_confidence}% conf, {confidence_multiplier:.0%} size) — {reasoning_summary}")
@@ -377,6 +408,16 @@ class OpportunityEvaluator:
 
             if shares <= 0:
                 print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
+                bot.record_rejection(
+                    symbol=symbol, setup_type=setup_type, direction=direction_str,
+                    reason_code="position_size_zero",
+                    context={
+                        "entry_price": float(entry_price),
+                        "stop_price": float(stop_price),
+                        "risk_amount": float(risk_amount),
+                        "why": "Position sizer returned 0 shares — usually means equity unavailable or risk caps too tight for this entry/stop distance",
+                    },
+                )
                 return None
 
             print(f"   📊 {symbol}: {shares} shares, entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f}")
@@ -388,6 +429,18 @@ class OpportunityEvaluator:
 
             if risk_reward_ratio < bot.risk_params.min_risk_reward:
                 print(f"   ❌ R:R {risk_reward_ratio:.2f} < {bot.risk_params.min_risk_reward} min required")
+                bot.record_rejection(
+                    symbol=symbol, setup_type=setup_type, direction=direction_str,
+                    reason_code="rr_below_min",
+                    context={
+                        "rr_ratio": round(risk_reward_ratio, 2),
+                        "min_required": bot.risk_params.min_risk_reward,
+                        "entry_price": float(entry_price),
+                        "stop_price": float(stop_price),
+                        "primary_target": float(primary_target),
+                        "shares": int(shares),
+                    },
+                )
                 return None
 
             print(f"   ✅ {symbol}: R:R={risk_reward_ratio:.2f}, target=${primary_target:.2f}, reward=${potential_reward:.2f}")
@@ -533,6 +586,14 @@ class OpportunityEvaluator:
                             logger.info(f"AI Consultation BLOCKED trade {symbol}: {consult_rec}")
                             if shadow_mode and decision_id:
                                 trade.explanation.ai_shadow_decision_id = decision_id
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type, direction=direction_str,
+                                reason_code="ai_consultation_block",
+                                context={
+                                    "why": consult_rec[:300],
+                                    "shadow_decision_id": decision_id,
+                                },
+                            )
                             return None
 
                         size_adj = ai_consultation_result.get("size_adjustment", 1.0)
@@ -607,6 +668,16 @@ class OpportunityEvaluator:
             logger.error(f"Error evaluating opportunity: {e}")
             import traceback
             traceback.print_exc()
+            try:
+                bot.record_rejection(
+                    symbol=symbol if "symbol" in locals() else "?",
+                    setup_type=setup_type if "setup_type" in locals() else "?",
+                    direction=direction_str if "direction_str" in locals() else "long",
+                    reason_code="evaluator_exception",
+                    context={"error": str(e)[:300]},
+                )
+            except Exception:
+                pass
             return None
 
     # ==================== HELPERS ====================
