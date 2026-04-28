@@ -538,8 +538,21 @@ def get_detector_stats():
       - `evaluations`: how many times the checker was invoked
       - `hits`: how many times it returned a non-None LiveAlert
       - `hit_rate_pct`: hits / evaluations × 100
+
+    2026-04-29 (afternoon-15): the `_scanner_service` singleton injected
+    by `init_scanner_router` is the *predictive* scanner — a different
+    instance than the live `enhanced_scanner` which actually owns the
+    `_detector_evals` counters. Read from `get_enhanced_scanner()`
+    directly so this endpoint reflects the live scanner that's
+    generating today's alerts.
     """
-    if not _scanner_service:
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        live_scanner = get_enhanced_scanner()
+    except Exception:
+        live_scanner = None
+
+    if not live_scanner:
         return {
             "success": True,
             "running": False,
@@ -548,10 +561,10 @@ def get_detector_stats():
             "cumulative": {"detectors": [], "total_evals": 0, "total_hits": 0},
         }
 
-    last_evals = getattr(_scanner_service, "_detector_evals", {}) or {}
-    last_hits = getattr(_scanner_service, "_detector_hits", {}) or {}
-    cum_evals = getattr(_scanner_service, "_detector_evals_total", {}) or {}
-    cum_hits = getattr(_scanner_service, "_detector_hits_total", {}) or {}
+    last_evals = getattr(live_scanner, "_detector_evals", {}) or {}
+    last_hits = getattr(live_scanner, "_detector_hits", {}) or {}
+    cum_evals = getattr(live_scanner, "_detector_evals_total", {}) or {}
+    cum_hits = getattr(live_scanner, "_detector_hits_total", {}) or {}
 
     def _build(evals: dict, hits: dict) -> dict:
         rows = []
@@ -574,11 +587,11 @@ def get_detector_stats():
 
     return {
         "success": True,
-        "running": bool(getattr(_scanner_service, "_running", False)),
-        "scan_count": int(getattr(_scanner_service, "_scan_count", 0)),
-        "symbols_scanned_last": int(getattr(_scanner_service, "_symbols_scanned_last", 0)),
-        "symbols_skipped_adv": int(getattr(_scanner_service, "_symbols_skipped_adv", 0)),
-        "symbols_skipped_rvol": int(getattr(_scanner_service, "_symbols_skipped_rvol", 0)),
+        "running": bool(getattr(live_scanner, "_running", False)),
+        "scan_count": int(getattr(live_scanner, "_scan_count", 0)),
+        "symbols_scanned_last": int(getattr(live_scanner, "_symbols_scanned_last", 0)),
+        "symbols_skipped_adv": int(getattr(live_scanner, "_symbols_skipped_adv", 0)),
+        "symbols_skipped_rvol": int(getattr(live_scanner, "_symbols_skipped_rvol", 0)),
         "last_cycle": _build(last_evals, last_hits),
         "cumulative": _build(cum_evals, cum_hits),
         "timestamp": datetime.now(timezone.utc).isoformat(),

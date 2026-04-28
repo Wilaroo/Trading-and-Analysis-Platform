@@ -2,6 +2,55 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch (P0 diagnostic)
+
+Operator hit `POST /api/live-scanner/start` and got back a response
+showing `running: true, scan_count: 32, alerts_generated: 7`, then
+immediately curled `/api/scanner/detector-stats` and got back
+`running: false, scan_count: 0`. Two endpoints reading wildly
+different state from what should be the same scanner.
+
+### Root cause
+`routers/scanner.py:_scanner_service` is initialised in
+`server.py:443` via `init_scanner_router(predictive_scanner)` —
+that's the *predictive* scanner, a totally different singleton from
+the live `enhanced_scanner` (`background_scanner` in server.py).
+The `detector-stats` endpoint reads attributes like
+`_detector_evals`, `_detector_hits`, `_running`, `_scan_count` which
+**only exist on the enhanced scanner**. Reading them off the
+predictive scanner gives all-zero defaults via `getattr(..., 0)`.
+
+So the entire diagnostic surface for the afternoon-13 audit was
+silently broken — operator was looking at the wrong scanner all
+along. The live scanner WAS running and generating alerts; the
+dashboard just couldn't see it.
+
+### Fix
+- `routers/scanner.py::get_detector_stats`: now imports
+  `get_enhanced_scanner()` directly and reads telemetry off the
+  resulting `live_scanner` instance. The legacy `_scanner_service`
+  injection is left untouched (it still serves the predictive
+  endpoints — `/scan`, `/forming-setups`, `/summary`, etc.) but
+  `detector-stats` is now wired to the live source of truth.
+
+### Verification
+- 1 new test in `tests/test_scanner_router_instance_fix.py`:
+  asserts the import path and that no telemetry attribute is read
+  off the wrong (`_scanner_service`) singleton.
+- 15/15 passing across afternoon-12 / 13 / 14 / 15 suites.
+
+### Operator action on DGX
+1. Use "Save to Github" in Emergent panel.
+2. `git pull` on DGX. Backend hot-reloads.
+3. Re-run:
+   ```
+   curl -s http://localhost:8001/api/scanner/detector-stats | python3 -m json.tool
+   ```
+4. Should now show `running: true`, real `scan_count`, and a
+   populated `cumulative.detectors` list with per-setup hit rates.
+
+
+
 ## 2026-04-29 (afternoon-14) — Trade pipeline veto audit (P0)
 
 Operator's `/api/trading-bot/rejection-analytics` showed 18
