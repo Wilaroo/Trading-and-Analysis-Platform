@@ -215,8 +215,16 @@ class OpportunityEvaluator:
                 else:
                     target_prices = [entry_price - risk * 1.5, entry_price - risk * 2.5, entry_price - risk * 4]
 
-            # Calculate position size with volatility adjustment
-            shares, risk_amount = self.calculate_position_size(entry_price, stop_price, direction, bot, atr, atr_percent)
+            # Calculate position size with volatility adjustment + Volume-Profile path multiplier (2026-04-28e)
+            symbol_for_vp = alert.get("symbol") if isinstance(alert, dict) else None
+            if isinstance(alert, dict):
+                scanner_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
+            else:
+                scanner_bs = "5 mins"
+            shares, risk_amount = self.calculate_position_size(
+                entry_price, stop_price, direction, bot, atr, atr_percent,
+                symbol=symbol_for_vp, bar_size=scanner_bs,
+            )
 
             # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
             if filter_action == "REDUCE_SIZE" and filter_adjustment < 1.0:
@@ -500,8 +508,15 @@ class OpportunityEvaluator:
 
     # ==================== HELPERS ====================
 
-    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None) -> Tuple[int, float]:
-        """Calculate position size based on risk management rules with volatility and market regime adjustment."""
+    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins") -> Tuple[int, float]:
+        """Calculate position size based on risk management rules with volatility and market regime adjustment.
+
+        2026-04-28e: also applies a Volume-Profile path multiplier — if the
+        price corridor between entry and stop is sitting in a thick HVN
+        cluster, the trade is downsized (chop-through risk). Skipped
+        silently when `symbol` is None (legacy callers) or the profile
+        can't be computed.
+        """
         from services.trading_bot_service import TradeDirection
 
         risk_per_share = abs(entry_price - stop_price)
@@ -534,6 +549,32 @@ class OpportunityEvaluator:
             adjusted_max_risk *= regime_multiplier
             if regime_multiplier < 1.0:
                 logger.debug(f"Position size adjusted by regime ({bot._current_regime}): {regime_multiplier:.0%}")
+
+        # ── Volume-Profile path multiplier (2026-04-28e) ──
+        # Asks: how thick is the price corridor between entry and stop?
+        # Thick HVN cluster → likely chop through stop → downsize.
+        # Clean LVN airpocket → fast move on either side → full size.
+        vp_path_multiplier = 1.0
+        try:
+            db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+            if symbol and db is not None:
+                from services.smart_levels_service import compute_path_multiplier
+                dir_str = "long" if direction == TradeDirection.LONG else "short"
+                vpr = compute_path_multiplier(
+                    db, symbol.upper(), bar_size,
+                    float(entry_price), float(stop_price), dir_str,
+                )
+                vp_path_multiplier = float(vpr.get("multiplier", 1.0))
+                if vp_path_multiplier < 1.0:
+                    adjusted_max_risk *= vp_path_multiplier
+                    logger.debug(
+                        f"Position size adjusted by VP path ({vpr.get('reason')}, "
+                        f"vol_pct={vpr.get('vol_pct')}): {vp_path_multiplier:.0%}"
+                    )
+        except Exception as exc:
+            # Non-fatal: never let the profile lookup block trade execution.
+            logger.debug(f"VP path multiplier skipped for {symbol}: {exc}")
+
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
         max_shares_by_capital = int(max_position_value / entry_price)

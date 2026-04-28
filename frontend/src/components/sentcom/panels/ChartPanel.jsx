@@ -78,6 +78,9 @@ export const ChartPanel = ({
   const hasFittedRef = useRef(false);
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
   const [showSrLevels, setShowSrLevels] = useState(true);
+  const [smartLevels, setSmartLevels] = useState(null); // { support, resistance, sources }
+  const [showSmartLevels, setShowSmartLevels] = useState(true);
+  const smartLinesRef = useRef([]);                     // IPriceLine[] managed by smart-S/R effect
   const [showVolumeProfile, setShowVolumeProfile] = useState(true);
   // 2026-04-28e: Point-of-Control price from the volume profile —
   // surfaced from VolumeProfileOverlay as a horizontal price line on
@@ -569,6 +572,31 @@ export const ChartPanel = ({
     return () => { cancelled = true; };
   }, [symbol]);
 
+  // 2026-04-28e — Smart S/R: timeframe-aware fused levels (volume
+  // profile + swing pivots + floor pivots). Re-fetched on symbol OR
+  // timeframe change so the chart shows daily-anchored pivots when
+  // viewing 1m/5m and weekly-anchored pivots when viewing 1d.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSmart = async () => {
+      if (!symbol) return;
+      try {
+        const resp = await safeGet(
+          `/api/sentcom/chart/smart-levels?symbol=${encodeURIComponent(symbol)}` +
+          `&timeframe=${encodeURIComponent(active.value)}`,
+          { timeout: 6000 },
+        );
+        if (!cancelled) {
+          setSmartLevels(resp?.success ? resp : null);
+        }
+      } catch (_) {
+        if (!cancelled) setSmartLevels(null);
+      }
+    };
+    fetchSmart();
+    return () => { cancelled = true; };
+  }, [symbol, active.value]);
+
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return undefined;
@@ -612,6 +640,67 @@ export const ChartPanel = ({
       srLinesRef.current = [];
     };
   }, [srLevels, showSrLevels]);
+
+  // 2026-04-28e — paint Smart S/R levels (Volume Profile + swing
+  // pivots + floor pivots, all clustered + ranked server-side).
+  // Distinct color/style per `kind` so the operator can read at a
+  // glance which source each level came from. Auto-refreshes on
+  // symbol AND timeframe change because the underlying fetch effect
+  // is keyed on `[symbol, active.value]`.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return undefined;
+    // Tear down previous lines
+    for (const line of smartLinesRef.current) {
+      try { series.removePriceLine(line); } catch (_) { /* noop */ }
+    }
+    smartLinesRef.current = [];
+    if (!showSmartLevels || !smartLevels) return undefined;
+
+    const KIND_STYLE = {
+      VP_POC:     { color: 'rgba(251, 191, 36, 0.95)', style: 2 },
+      HVN:        { color: 'rgba(6, 182, 212, 0.55)',  style: 3 },
+      SWING_HIGH: { color: 'rgba(244, 63, 94, 0.55)',  style: 3 },
+      SWING_LOW:  { color: 'rgba(34, 197, 94, 0.55)',  style: 3 },
+      PP:         { color: 'rgba(168, 85, 247, 0.85)', style: 1 },
+      R1:         { color: 'rgba(244, 63, 94, 0.75)',  style: 2 },
+      S1:         { color: 'rgba(34, 197, 94, 0.75)',  style: 2 },
+      R2:         { color: 'rgba(244, 63, 94, 0.55)',  style: 2 },
+      S2:         { color: 'rgba(34, 197, 94, 0.55)',  style: 2 },
+      R3:         { color: 'rgba(244, 63, 94, 0.35)',  style: 3 },
+      S3:         { color: 'rgba(34, 197, 94, 0.35)',  style: 3 },
+    };
+
+    const all = [
+      ...(smartLevels.support    || []),
+      ...(smartLevels.resistance || []),
+    ];
+    for (const lv of all) {
+      const sty = KIND_STYLE[lv.kind] || { color: 'rgba(148, 163, 184, 0.5)', style: 3 };
+      const px  = Number(lv.price);
+      if (!Number.isFinite(px) || px <= 0) continue;
+      try {
+        const line = series.createPriceLine({
+          price: px,
+          color: sty.color,
+          // strength ∈ [0, 1] modulates line width subtly so HVN/POC
+          // always read heavier than SWING/floor-pivot R3/S3.
+          lineWidth: lv.strength >= 0.7 ? 2 : 1,
+          lineStyle: sty.style,
+          axisLabelVisible: true,
+          title: `${lv.kind} ${px.toFixed(2)}`,
+        });
+        smartLinesRef.current.push(line);
+      } catch (_) { /* noop */ }
+    }
+
+    return () => {
+      for (const line of smartLinesRef.current) {
+        try { series.removePriceLine(line); } catch (_) { /* noop */ }
+      }
+      smartLinesRef.current = [];
+    };
+  }, [smartLevels, showSmartLevels]);
 
   // 2026-04-28e — paint the volume-profile Point-of-Control as a
   // horizontal price line on the candle pane (amber, matches the VP
@@ -747,6 +836,26 @@ export const ChartPanel = ({
               />
               <span>VP</span>
               {showVolumeProfile
+                ? <Eye className="w-3 h-3 opacity-60" />
+                : <EyeOff className="w-3 h-3 opacity-40" />}
+            </button>
+            {/* 2026-04-28e — Smart S/R toggle (VP + swings + pivots) */}
+            <button
+              data-testid="chart-smart-sr-toggle"
+              onClick={() => setShowSmartLevels((v) => !v)}
+              title="Toggle Smart Support/Resistance (Volume Profile + swing pivots + floor pivots)"
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+                showSmartLevels
+                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: '#a855f7', opacity: showSmartLevels ? 1 : 0.4 }}
+              />
+              <span>SR+</span>
+              {showSmartLevels
                 ? <Eye className="w-3 h-3 opacity-60" />
                 : <EyeOff className="w-3 h-3 opacity-40" />}
             </button>

@@ -329,6 +329,28 @@ async def get_chart_levels_endpoint(
         return {"success": False, "error": str(e), "levels": {}}
 
 
+@router.get("/chart/smart-levels")
+async def get_smart_levels_endpoint(
+    symbol: str = Query(..., min_length=1, max_length=12),
+    timeframe: str = Query("5min"),
+):
+    """Fused, ranked Smart S/R levels for `(symbol, timeframe)` —
+    combines Volume Profile (POC + HVN), swing pivots, and floor pivots
+    (PP/S1/S2/R1/R2/S3/R3) into a single clustered output. The frontend
+    chart uses this to draw timeframe-appropriate S/R lines that
+    automatically refresh when the user toggles 1m → 5m → 1d.
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    try:
+        from services.smart_levels_service import compute_smart_levels
+        result = compute_smart_levels(_db, symbol.upper(), timeframe.lower())
+        return {"success": True, "symbol": symbol.upper(), **result}
+    except Exception as e:
+        logger.error(f"smart levels failed for {symbol} {timeframe}: {e}")
+        return {"success": False, "error": str(e), "support": [], "resistance": []}
+
+
 
 @router.get("/model-health")
 async def get_model_health() -> Dict[str, Any]:
