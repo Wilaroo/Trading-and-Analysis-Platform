@@ -592,9 +592,27 @@ async def get_chart_bars(
         for r in normalised:
             r.setdefault("session", "rth")
 
+    # 2026-04-28d: For daily timeframes, normalize each bar's `time` to
+    # midnight UTC of its calendar day. IB returns daily bars with the
+    # session-open timestamp (e.g. "2026-03-25T13:30:00Z" = 9:30am ET),
+    # which lightweight-charts then treats as an intraday tick and
+    # emits "1:30 PM" labels on the x-axis. By snapping to midnight UTC,
+    # the chart sees one bar per calendar day and only emits DayOfMonth
+    # / Month / Year tick types — exactly what the operator expects.
+    if tf == "1day":
+        seen_days = set()
+        snapped: List[Dict[str, Any]] = []
+        for r in normalised:
+            day_ts = (r["time"] // 86400) * 86400
+            if day_ts in seen_days:
+                continue   # de-dupe if two bars collapse onto the same day
+            seen_days.add(day_ts)
+            r["time"] = day_ts
+            snapped.append(r)
+        normalised = snapped
+
     times = [r["time"] for r in normalised]
     closes = [r["close"] for r in normalised]
-
     # Compute indicator arrays
     ema_20 = _ema(closes, 20)
     ema_50 = _ema(closes, 50)

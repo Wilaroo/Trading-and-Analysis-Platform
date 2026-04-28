@@ -18,6 +18,7 @@ import {
   chartCrosshairFormatterET,
 } from '../../../utils/timeET';
 import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
+import { VolumeProfileOverlay } from './VolumeProfileOverlay';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
 const TIMEFRAMES = [
@@ -77,12 +78,14 @@ export const ChartPanel = ({
   const hasFittedRef = useRef(false);
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
   const [showSrLevels, setShowSrLevels] = useState(true);
+  const [showVolumeProfile, setShowVolumeProfile] = useState(true);
   const resizeObsRef = useRef(null);
-  // 2026-04-28b: cache the most recent normalized bars (with `session`
-  // tag) so the PremarketShadingOverlay can compute pixel positions
-  // without re-fetching. State (not ref) so the overlay re-runs its
-  // effect when bars actually change.
-  const [shadingBars, setShadingBars] = useState([]);
+  // 2026-04-28b/c: cache the most recent normalized bars (with `session`
+  // tag and OHLCV) so overlays (PremarketShadingOverlay,
+  // VolumeProfileOverlay) can read time + session + price/volume
+  // without re-fetching. State (not ref) so overlays' useEffects
+  // actually re-run when bars change.
+  const [normalizedBars, setNormalizedBars] = useState([]);
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
   const [bars, setBars] = useState([]);
@@ -186,6 +189,12 @@ export const ChartPanel = ({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    // Expose the candle series on the chart instance so sibling
+    // overlay components (e.g. VolumeProfileOverlay) can call
+    // priceToCoordinate without us having to drill the ref through
+    // multiple levels of props.
+    // eslint-disable-next-line no-underscore-dangle
+    chart.__candleSeriesForVolumeProfile = candleSeries;
 
     // Create one LineSeries per indicator overlay up front. Visibility is
     // toggled later via `applyOptions({ visible })` rather than add/remove,
@@ -357,17 +366,22 @@ export const ChartPanel = ({
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    // 2026-04-28c: stash bars with their `session` tag so the
-    // PremarketShadingOverlay can map (time → 'pre'|'rth') and draw
-    // the amber bands. We use state (not a ref) so the overlay's
-    // useEffect actually re-runs when this changes.
-    setShadingBars(
+    // 2026-04-28c: stash full normalized bars (time + session + OHLCV)
+    // so overlays (PremarketShadingOverlay + VolumeProfileOverlay) can
+    // read what they need without a separate fetch. State (not ref)
+    // so each overlay's useEffect actually re-runs when this changes.
+    setNormalizedBars(
       bars
         .map(b => ({
           time: toUtcTimestamp(b.timestamp ?? b.date ?? b.time),
           session: b.session,
+          open: Number(b.open),
+          high: Number(b.high),
+          low: Number(b.low),
+          close: Number(b.close),
+          volume: Number(b.volume ?? 0),
         }))
-        .filter(r => r.time != null)
+        .filter(r => r.time != null && Number.isFinite(r.high) && Number.isFinite(r.low))
     );
     // Fit the newly loaded range only on the first load. Subsequent
     // re-fetches (auto-refresh, lazy-load backfill) preserve whatever
@@ -677,6 +691,26 @@ export const ChartPanel = ({
                 ? <Eye className="w-3 h-3 opacity-60" />
                 : <EyeOff className="w-3 h-3 opacity-40" />}
             </button>
+            {/* 2026-04-28d — Side Volume Profile toggle */}
+            <button
+              data-testid="chart-volprof-toggle"
+              onClick={() => setShowVolumeProfile((v) => !v)}
+              title="Toggle Side Volume Profile (Volume-at-Price histogram)"
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+                showVolumeProfile
+                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: '#06b6d4', opacity: showVolumeProfile ? 1 : 0.4 }}
+              />
+              <span>VP</span>
+              {showVolumeProfile
+                ? <Eye className="w-3 h-3 opacity-60" />
+                : <EyeOff className="w-3 h-3 opacity-40" />}
+            </button>
           </div>
 
           {/* Timeframe + refresh */}
@@ -735,7 +769,12 @@ export const ChartPanel = ({
             x-coordinates from the chart's time scale. */}
         <PremarketShadingOverlay
           chartRef={chartRef}
-          bars={shadingBars}
+          bars={normalizedBars}
+        />
+        <VolumeProfileOverlay
+          chartRef={chartRef}
+          bars={normalizedBars}
+          visible={showVolumeProfile}
         />
       </div>
 
