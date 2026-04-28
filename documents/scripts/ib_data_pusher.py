@@ -2964,11 +2964,18 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         scan from ~25 × 250ms = 6.3s sequential → ~300-500ms parallel.
 
         Returns one entry per requested symbol — successes carry their
-        bars, failures carry an error string. Order matches input."""
+        bars, failures carry an error string. Order matches input.
+
+        Server-side subscription gate (added 2026-04-29 afternoon-13):
+        unsubscribed symbols are rejected upfront with `not_subscribed`
+        so they never trigger qualifyContracts / reqHistoricalData. This
+        defends against DGX-side gate failures (transient
+        /rpc/subscriptions timeouts, cache None states) that would
+        otherwise burn IB pacing budget. Index symbols are exempt."""
         if not pusher.ib.isConnected():
             raise HTTPException(status_code=503, detail="IB Gateway not connected")
-        symbols = [str(s).upper().strip() for s in (req.symbols or []) if s]
-        if not symbols:
+        all_symbols = [str(s).upper().strip() for s in (req.symbols or []) if s]
+        if not all_symbols:
             return {"success": True, "count": 0, "results": []}
 
         INDEX_SYMBOLS = {
@@ -2979,6 +2986,30 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
             "DJX":  ("DJX",  "CBOE"),
             "VVIX": ("VVIX", "CBOE"),
         }
+
+        # Filter out unsubscribed symbols — return them as fast failures
+        # so the caller's order is preserved and they fall back to Mongo.
+        symbols = []
+        rejected_results = []
+        for sym in all_symbols:
+            if sym in pusher.subscribed_contracts or sym in INDEX_SYMBOLS:
+                symbols.append(sym)
+            else:
+                rejected_results.append({
+                    "symbol": sym,
+                    "success": False,
+                    "error": "not_subscribed",
+                    "bars": [],
+                })
+        if not symbols:
+            # All inputs rejected — return failures without hitting IB.
+            return {
+                "success": True,
+                "count": len(rejected_results),
+                "fetched_at": datetime.now().isoformat(),
+                "results": rejected_results,
+                "subscribed_count": len(pusher.subscribed_contracts),
+            }
 
         async def _fetch_one(sym: str):
             try:
@@ -3028,11 +3059,16 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
             logger.warning("[RPC] /rpc/latest-bars-batch failed: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)[:200])
 
+        # Merge IB-fetched results with the upfront-rejected entries so
+        # the caller receives one entry per requested symbol regardless
+        # of subscription state.
+        merged = list(results) + rejected_results
         return {
             "success": True,
-            "count": len(results),
+            "count": len(merged),
             "fetched_at": datetime.now().isoformat(),
-            "results": results,
+            "results": merged,
+            "rejected_unsubscribed": len(rejected_results),
         }
 
     @app.post("/rpc/latest-bars")
@@ -3042,19 +3078,41 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         symbol = req.symbol.upper().strip()
         if not symbol:
             raise HTTPException(status_code=400, detail="symbol required")
+
+        # Server-side subscription gate (added 2026-04-29 afternoon-13).
+        # The DGX-side gate in services/ib_pusher_rpc.py::latest_bars
+        # short-circuits when /rpc/subscriptions is reachable, but the
+        # gate falls through if /rpc/subscriptions cache returns None
+        # (transient timeout, backend hot-reload, etc). When that happens
+        # DGX hits us for unsubscribed symbols (TQQQ, SQQQ, PLTR, META,
+        # SOXL, AVGO…) and we burn 18s per symbol on
+        # qualifyContracts + reqHistoricalData. Server-side defense:
+        # refuse unsubscribed symbols immediately so DGX's slow path
+        # (Mongo cache fallback) takes over without IB pacing damage.
+        # Index symbols are exempt because they're commonly requested
+        # for regime reference and may not be in subscribed_contracts.
+        INDEX_SYMBOLS = {
+            "VIX":  ("VIX",  "CBOE"),
+            "SPX":  ("SPX",  "CBOE"),
+            "NDX":  ("NDX",  "NASDAQ"),
+            "RUT":  ("RUT",  "RUSSELL"),
+            "DJX":  ("DJX",  "CBOE"),
+            "VVIX": ("VVIX", "CBOE"),
+        }
+        if symbol not in pusher.subscribed_contracts and symbol not in INDEX_SYMBOLS:
+            return {
+                "success": False,
+                "symbol": symbol,
+                "error": "not_subscribed",
+                "bars": [],
+                "subscribed_count": len(pusher.subscribed_contracts),
+            }
+
         try:
             # CBOE Indices need an `Index` contract, not `Stock` — otherwise
             # IB returns Error 200 "No security definition has been found".
             # Keep the list explicit so we don't accidentally promote
             # tickers that *are* stocks but share a name with an index.
-            INDEX_SYMBOLS = {
-                "VIX":  ("VIX",  "CBOE"),
-                "SPX":  ("SPX",  "CBOE"),
-                "NDX":  ("NDX",  "NASDAQ"),
-                "RUT":  ("RUT",  "RUSSELL"),
-                "DJX":  ("DJX",  "CBOE"),
-                "VVIX": ("VVIX", "CBOE"),
-            }
             if symbol in INDEX_SYMBOLS:
                 idx_sym, idx_exch = INDEX_SYMBOLS[symbol]
                 contract = _Index(idx_sym, idx_exch, "USD")

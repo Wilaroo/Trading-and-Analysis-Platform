@@ -192,7 +192,14 @@ class _PusherRPCClient:
         ):
             return self._subs_cache
 
-        resp = self._request("GET", "/rpc/subscriptions", timeout=3.0)
+        # Bumped from 3.0s → 8.0s (2026-04-29 afternoon-13). Under load
+        # the pusher's RPC server can take >3s to answer when it's
+        # simultaneously qualifying contracts for unsubscribed symbols,
+        # which caused the gate to fall through and DGX to fire MORE
+        # latest-bars requests for unsubscribed symbols, compounding the
+        # problem. 8s gives the pusher headroom while staying well under
+        # the 18s latest-bars timeout.
+        resp = self._request("GET", "/rpc/subscriptions", timeout=8.0)
         if not resp or not resp.get("success"):
             return None
         symbols = resp.get("symbols") or []

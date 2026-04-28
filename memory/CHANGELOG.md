@@ -2,6 +2,83 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-13) — Pusher-side subscription gate (P0)
+
+Operator post-restart logs showed a storm of unsubscribed-symbol RPC
+failures clogging the IB event loop:
+
+```
+12:52:20 [WARNING] [RPC] latest-bars TQQQ failed:
+12:52:38 [WARNING] [RPC] latest-bars SQQQ failed:
+12:52:56 [WARNING] [RPC] latest-bars PLTR failed:
+... 17 more, including XLE, GLD, HOOD, NFLX, VOO, SMH ...
+12:54:03 [WARNING] Connection error on post. Retry 1/3 in 5.2s:
+         HTTPConnectionPool(host='192.168.50.2', port=8001):
+         Read timed out. (read timeout=120)
+```
+
+DGX was hammering the pusher with `/rpc/latest-bars` calls for
+symbols not in the 14-symbol L1 subscription list. Each unsubscribed
+symbol burned 18s in `qualifyContracts + reqHistoricalData` before
+timing out, blocking the IB event loop and starving the push handler
+→ 120s+ DGX response times → `Read timed out`.
+
+### Root cause
+The DGX-side gate in `services/ib_pusher_rpc.py::latest_bars` was the
+only defense and it falls through when `subscriptions()` returns
+None. That happens whenever:
+- `/rpc/subscriptions` times out (3s was too tight under pusher load)
+- DGX backend just hot-reloaded and `_subs_cache` is empty
+- Network blip between Windows and DGX
+
+When DGX-side gate falls through, the pusher had no defense against
+unsubscribed-symbol requests and would happily try to fetch them
+synchronously.
+
+### Fix — defense in depth
+1. **Pusher-side gate** in `documents/scripts/ib_data_pusher.py`:
+   - `/rpc/latest-bars`: rejects unsubscribed symbols upfront with
+     `success: False, error: "not_subscribed"` — never calls
+     `qualifyContracts` / `reqHistoricalDataAsync` for them.
+   - `/rpc/latest-bars-batch`: partitions input into subscribed
+     (sent to IB) + unsubscribed (returned as fast `not_subscribed`
+     failures). Symbol order preserved in the response.
+   - Index symbols (VIX, SPX, NDX, RUT, DJX, VVIX) are exempted
+     because they're commonly requested for regime reference and
+     may not be in `subscribed_contracts`.
+2. **DGX-side timeout bump** in `services/ib_pusher_rpc.py`:
+   - `/rpc/subscriptions` GET timeout 3.0s → 8.0s. Gives the pusher
+     headroom under load while staying well under the 18s
+     latest-bars timeout. Reduces fallthrough rate.
+
+### Why two layers
+The DGX-side gate is the primary path — it short-circuits BEFORE any
+HTTP round-trip. The pusher-side gate is the safety net for when the
+DGX-side gate fails open. Even with both gates, the response is
+~5ms (one HTTP round-trip + dict lookup) instead of 18s (full IB
+qualify + reqHistoricalData + timeout).
+
+### Verification
+- 4 new tests in `tests/test_pusher_server_side_subs_gate.py`:
+  single-handler gate, batch-handler partition, DGX-side timeout
+  bump, DGX-side gate unchanged for subscribed symbols.
+- 13/13 passing across all pusher-gate-related suites
+  (test_pusher_subs_gate, test_pusher_account_updates_no_block,
+  test_pusher_server_side_subs_gate).
+
+### Operator action on Windows
+1. `git pull` on Windows.
+2. Restart `ib_data_pusher.py`.
+3. Watch the console — the storm of `[RPC] latest-bars XXX failed:`
+   warnings should DISAPPEAR for unsubscribed symbols. Instead, you
+   may see fewer log lines because rejections are silent (success:
+   False, no warning). `Pushing: ...` lines should flow steadily
+   without the `Read timed out` retries.
+4. DGX backend should respond to pushes in <1s (vs the >120s timeouts
+   before this fix).
+
+
+
 ## 2026-04-29 (afternoon-12) — Pusher push loop hang fix (P0)
 
 Operator post-pull/restart screenshot: `IB PUSHER DEAD · last push
