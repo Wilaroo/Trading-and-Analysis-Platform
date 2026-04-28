@@ -36,6 +36,34 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+            # V5 Unified Stream — surface "I'm thinking about this one now"
+            # so the operator sees the bot's reasoning trail in real time
+            # instead of having to grep logs. Fires once per evaluation
+            # (dedup happens inside emit_stream_event), kept under 80 chars
+            # so it doesn't dominate the stream visually.
+            try:
+                from services.sentcom_service import emit_stream_event
+                tqs = alert.get('tqs_score') or alert.get('score') or 0
+                grade = alert.get('tqs_grade') or alert.get('trade_grade') or ''
+                grade_part = f" {grade}" if grade else ""
+                await emit_stream_event({
+                    "kind": "evaluation",
+                    "event": "evaluating_setup",
+                    "symbol": symbol,
+                    "text": (
+                        f"🤔 Evaluating {symbol} {setup_type} {direction_str.upper()} "
+                        f"(TQS {tqs:.0f}{grade_part})"
+                    ),
+                    "metadata": {
+                        "setup_type": setup_type,
+                        "direction": direction_str,
+                        "tqs_score": tqs,
+                        "alert_priority": alert.get("priority"),
+                    },
+                })
+            except Exception:
+                pass
+
             # Get current price - try IB pushed data first, then Alpaca
             current_price = alert.get('current_price', 0)
             if not current_price:

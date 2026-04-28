@@ -1018,6 +1018,29 @@ class TradingBotService:
         except Exception as exc:
             # Buffer add must never break the rejection hot path.
             logger.debug(f"record_rejection: buffer add failed: {exc}")
+        # Persist into the SentCom unified stream (also writes to
+        # `sentcom_thoughts` Mongo collection — survives restarts +
+        # available for chat context recall via /api/sentcom/thoughts).
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                from services.sentcom_service import emit_stream_event
+                loop.create_task(emit_stream_event({
+                    "kind": "rejection",
+                    "event": f"rejection_{reason_code}",
+                    "symbol": symbol,
+                    "text": narrative,
+                    "metadata": {
+                        "setup_type": setup_type,
+                        "direction": direction,
+                        "reason_code": reason_code,
+                    },
+                }))
+        except Exception as exc:
+            logger.debug(f"record_rejection: stream emit failed: {exc}")
         return narrative
 
     def _compose_rejection_narrative(

@@ -222,6 +222,36 @@ def get_chat_history(limit: int = Query(50, ge=1, le=100)):
         }
 
 
+@router.get("/thoughts")
+def get_thoughts(
+    symbol: Optional[str] = Query(None, description="Filter to a single ticker"),
+    kind: Optional[str] = Query(None, description="Filter to one event kind (evaluation / fill / skip / brain / etc.)"),
+    minutes: int = Query(240, ge=1, le=20160, description="How far back to look. Default 4h, max 14d."),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Recall persisted bot thoughts / decisions / fills from
+    `sentcom_thoughts` (TTL 7d). Survives backend restarts — operator's V4
+    "brain memory" carry-over.
+
+    Use cases:
+      - "What was the bot thinking about NVDA this morning?" — pass
+        `?symbol=NVDA`
+      - "Show me every safety block today" — pass `?kind=skip&minutes=480`
+      - "Live feed of recent evaluations" — `?kind=evaluation&minutes=30`
+    """
+    from services.sentcom_service import get_recent_thoughts
+    rows = get_recent_thoughts(
+        symbol=symbol, kind=kind, minutes=minutes, limit=limit
+    )
+    return {
+        "success": True,
+        "count": len(rows),
+        "filter": {"symbol": symbol, "kind": kind, "minutes": minutes},
+        "thoughts": rows,
+    }
+
+
+
 @router.get("/context")
 async def get_context():
     """

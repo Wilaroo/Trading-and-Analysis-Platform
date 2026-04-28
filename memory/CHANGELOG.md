@@ -2,7 +2,88 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-04-29 (afternoon-3) — Round 1 backend fixes + Round 2 detector telemetry + Stream emitter
+## 2026-04-29 (afternoon-4) — Bot evaluation thoughts in stream + AI brain memory persistence
+
+Two operator follow-ups shipped together (continuation of afternoon-3):
+"add the evaluation emit improvement" + "make sure our chat bot/ai is
+retaining its thoughts, decisions, etc for future recall and learning
+and growth — V4 had it, not sure it carried over". 7 new tests.
+
+### 1. Bot evaluation events in V5 Unified Stream
+- `services/opportunity_evaluator.py::evaluate_opportunity` now emits a
+  `kind: "evaluation"` event at the top of every call. Operator can
+  watch the bot's reasoning trail in real-time without grepping logs:
+  > 🤔 Evaluating NVDA orb_long LONG (TQS 72 B)
+- Added `"brain"` to `_VALID_KINDS` in sentcom_service so the
+  evaluation events render with the same tone as confidence-gate /
+  AI-decision events.
+- Frontend `UnifiedStreamV5.jsx::classifyMessage` gains an `evaluat`
+  substring match so the new events colour-code as `brain` (cyan/blue)
+  alongside other AI-decision types.
+
+### 2. SentCom AI Brain Memory — `sentcom_thoughts` collection
+- **The audit finding**: V4 had a brain-memory layer; V5 only persisted
+  chat (`sentcom_chat_history`) and AI module decisions
+  (`shadow_decisions`). The unified stream's `_stream_buffer` (bot
+  evaluations / fills / safety blocks / rejections) was in-memory only
+  — every backend restart wiped the bot's recent "thinking trail".
+- **Fix** — every `emit_stream_event` call now also writes to a new
+  Mongo collection `sentcom_thoughts` with:
+  - Indexed by `symbol` and `kind` for fast recall
+  - 7-day TTL on `created_at` (auto-prunes — no operator action needed)
+  - Idempotent index initialisation (`_ensure_thoughts_indexes`)
+  - Best-effort persistence — fire-and-forget, never blocks the caller
+- **Restart resilience** — `SentComService._load_recent_thoughts`
+  hydrates `_stream_buffer` from the past 24h on init. Operator's V4
+  muscle memory ("what was the bot thinking before I restarted?") is
+  now restored.
+- **Chat context recall** — when the user sends a chat message, the
+  SentCom service now injects up to 12 recent thoughts (last 4h) as a
+  `system`-role entry in the orchestrator's `chat_history`. Lets the AI
+  answer "what did we see on SPY this morning?" with grounded context
+  instead of hallucinating.
+- **Public recall API**:
+  - `services/sentcom_service.py::get_recent_thoughts(symbol, kind,
+    minutes, limit)` — Python helper for any backend caller
+  - `GET /api/sentcom/thoughts?symbol=&kind=&minutes=&limit=` — HTTP
+    endpoint for frontend / external consumers / debugging
+
+### 3. Rejection narratives now persist
+- `TradingBotService.record_rejection` already pushed wordy
+  conversational narratives ("⏭️ Skipping NVDA Squeeze — this strategy
+  is currently OFF in my enabled list…") into the in-memory
+  `_strategy_filter_thoughts` buffer (2026-04-28). Now ALSO published
+  via `emit_stream_event(kind: "rejection")` → lands in
+  `sentcom_thoughts` and the V5 Unified Stream. The bot's rejection
+  reasoning is now recallable via chat context too.
+
+### Verification
+- 7 new tests in `tests/test_sentcom_thoughts_memory.py`:
+  emit-persistence, symbol-filter, kind-filter, newest-first ordering,
+  minutes-window cutoff, restart-rehydration, end-to-end router.
+- `tests/test_emit_stream_event.py` updated to patch `_get_db` so the
+  buffer is isolated per test.
+- 32 passing total across new + carryover suites in this batch.
+- Live curl smoke: `/api/sentcom/thoughts?minutes=60&limit=5` returns
+  fill events from prior test runs — persistence end-to-end confirmed.
+- Lint clean (no new warnings; 6 pre-existing carry over).
+
+### Operator action on DGX after pull + restart
+1. Restart backend — TTL index will be created automatically on first
+   `emit_stream_event` call.
+2. Watch V5 Unified Stream during the next scan cycle: every
+   evaluated opportunity will produce a `🤔 Evaluating SYMBOL
+   setup_type DIRECTION (TQS xx)` line. Fills, safety blocks, and
+   rejections continue to surface as before.
+3. After restart, run:
+   `curl http://localhost:8001/api/sentcom/thoughts?minutes=240&limit=20 | jq`
+   Should return all bot activity since process start, surviving
+   future restarts (TTL keeps 7 days).
+4. Test chat recall: ask SentCom *"what did we see on NVDA this
+   morning?"* — the orchestrator now has access to recent evaluations,
+   fills, and rejections for NVDA in its system context.
+
+
 
 Closes the Round 1 audit findings (operator UI broken at market open) and
 ships the Round 2 diagnostic infrastructure operator asked for. 22 new

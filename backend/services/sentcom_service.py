@@ -130,7 +130,16 @@ class SentComService:
         
         # Load recent chat messages (current day only, for continuity)
         self._load_recent_chat_history()
-        logger.info(f"SentCom session {self._session_id}: loaded {len(self._chat_history)} recent messages")
+        # Load recent thoughts/decisions from MongoDB so the unified
+        # stream survives backend restarts (operator's V4 muscle memory:
+        # "what was the bot thinking before I restarted?"). Persistent
+        # store is `sentcom_thoughts` (TTL 7d) — see emit_stream_event.
+        self._load_recent_thoughts()
+        logger.info(
+            f"SentCom session {self._session_id}: loaded "
+            f"{len(self._chat_history)} chat msgs · "
+            f"{len(self._stream_buffer)} thoughts from disk"
+        )
     
     def _load_recent_chat_history(self):
         """Load recent chat messages from MongoDB (last 24 hours, any session).
@@ -161,6 +170,46 @@ class SentComService:
         except Exception as e:
             logger.error(f"Error loading chat history: {e}")
             self._chat_history = []
+
+    def _load_recent_thoughts(self):
+        """Hydrate `_stream_buffer` from `sentcom_thoughts` so the unified
+        stream survives a backend restart. Loads up to `_stream_max_size`
+        most-recent thoughts from the last 24h. Sync — runs once at init."""
+        try:
+            db = _get_db()
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            cursor = (
+                db[THOUGHTS_COLLECTION]
+                .find({"created_at": {"$gte": cutoff}}, {"_id": 0})
+                .sort("created_at", DESCENDING)
+                .limit(self._stream_max_size)
+            )
+            for row in cursor:
+                try:
+                    msg = SentComMessage(
+                        id=row.get("id") or self._generate_message_id(),
+                        type=row.get("kind") or "thought",
+                        content=row.get("content") or "",
+                        timestamp=row.get("timestamp")
+                            or (row.get("created_at").isoformat()
+                                if isinstance(row.get("created_at"), datetime)
+                                else datetime.now(timezone.utc).isoformat()),
+                        confidence=row.get("confidence"),
+                        symbol=row.get("symbol"),
+                        action_type=row.get("action_type"),
+                        metadata=row.get("metadata") or {},
+                    )
+                except Exception:
+                    continue
+                key = f"{msg.type}:{msg.symbol or ''}:{msg.content[:40]}"
+                if key in self._stream_seen_keys:
+                    continue
+                self._stream_seen_keys.add(key)
+                self._stream_buffer.append(msg)
+            # Newest first.
+            self._stream_buffer.sort(key=lambda m: m.timestamp, reverse=True)
+        except Exception as e:
+            logger.debug(f"Could not hydrate sentcom_thoughts on startup: {e}")
 
     async def _enrich_setup_with_llm(self, symbol: str, setup_type: str, raw_reasoning: str, direction: str = "") -> str:
         """
@@ -1644,7 +1693,38 @@ class SentComService:
                     "content": chat_msg.get("content", ""),
                     "timestamp": chat_msg.get("timestamp")
                 })
-            
+
+            # Inject recent bot thoughts/decisions so the AI can recall
+            # "what we were doing" — bridges the gap between the user's
+            # question and the bot's recent activity. Pulls top 12 thoughts
+            # from the last 4 hours (covers a full RTH session). The
+            # orchestrator's chat_history accepts arbitrary role values;
+            # we use "system" so the LLM treats it as background context.
+            try:
+                recent_thoughts = get_recent_thoughts(minutes=240, limit=12)
+                if recent_thoughts:
+                    summary_lines = []
+                    for t in reversed(recent_thoughts):  # chronological
+                        sym = t.get("symbol") or ""
+                        kind = t.get("kind") or "thought"
+                        text = (t.get("content") or "").strip()
+                        if not text:
+                            continue
+                        prefix = f"[{kind}{' ' + sym if sym else ''}]"
+                        summary_lines.append(f"{prefix} {text}")
+                    if summary_lines:
+                        recent_history.insert(0, {
+                            "role": "system",
+                            "content": (
+                                "Recent bot activity (most recent last) — use this "
+                                "to ground answers about what we were thinking / "
+                                "doing:\n" + "\n".join(summary_lines[-12:])
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+            except Exception as _e:
+                logger.debug(f"recent-thoughts injection skipped: {_e}")
+
             # Process through orchestrator with timeout to prevent hanging
             import asyncio
             result = await asyncio.wait_for(
@@ -2316,12 +2396,67 @@ def init_sentcom_service(services: Dict[str, Any]) -> SentComService:
 # pull-based `get_unified_stream` poller, which meant safety-blocks, fills,
 # and bot-evaluation events were silently dropped (the import existed but
 # the function did not, and callers wrapped it in try/except → silent).
+#
+# 2026-04-29 (afternoon-4): events ALSO persist to the `sentcom_thoughts`
+# collection (TTL 7 days). The bot's "thinking trail" — evaluations,
+# fills, safety blocks, rejection narratives — survives backend restarts
+# AND is queryable for chat context recall ("what did we see on SPY this
+# morning?") + future ML training (decision-vs-outcome alignment).
 # ----------------------------------------------------------------------------
 
 _VALID_KINDS = {
     "thought", "alert", "filter", "skip", "fill", "rejection",
-    "evaluation", "system", "scan", "info",
+    "evaluation", "system", "scan", "info", "brain",
 }
+
+THOUGHTS_COLLECTION = "sentcom_thoughts"
+_THOUGHTS_TTL_DAYS = 7
+_thoughts_index_initialised = False
+
+
+def _ensure_thoughts_indexes():
+    """Create indexes on `sentcom_thoughts` once per process. Idempotent.
+    `created_at` TTL prunes 7+ day old rows automatically."""
+    global _thoughts_index_initialised
+    if _thoughts_index_initialised:
+        return
+    try:
+        db = _get_db()
+        col = db[THOUGHTS_COLLECTION]
+        col.create_index(
+            "created_at",
+            expireAfterSeconds=_THOUGHTS_TTL_DAYS * 86400,
+            name="created_at_ttl",
+        )
+        col.create_index([("symbol", 1), ("created_at", -1)], name="symbol_recent")
+        col.create_index([("kind", 1), ("created_at", -1)], name="kind_recent")
+        _thoughts_index_initialised = True
+    except Exception as e:
+        logger.debug(f"sentcom_thoughts index init skipped: {e}")
+
+
+async def _persist_thought(msg: "SentComMessage") -> None:
+    """Append a thought to `sentcom_thoughts`. Best-effort, never raises."""
+    try:
+        _ensure_thoughts_indexes()
+        db = _get_db()
+
+        def _insert():
+            db[THOUGHTS_COLLECTION].insert_one({
+                "id": msg.id,
+                "kind": msg.type,
+                "content": msg.content,
+                "symbol": msg.symbol,
+                "action_type": msg.action_type,
+                "confidence": msg.confidence,
+                "metadata": msg.metadata or {},
+                "timestamp": msg.timestamp,
+                "created_at": datetime.now(timezone.utc),
+            })
+
+        await asyncio.to_thread(_insert)
+    except Exception as e:
+        logger.debug(f"_persist_thought failed: {e}")
 
 
 async def emit_stream_event(payload: Dict[str, Any]) -> bool:
@@ -2388,7 +2523,62 @@ async def emit_stream_event(payload: Dict[str, Any]) -> bool:
                 key = f"{r.type}:{r.symbol or ''}:{r.content[:40]}"
                 svc._stream_seen_keys.discard(key)
 
+        # Persist to MongoDB so thoughts/decisions survive restarts and
+        # can be recalled for chat context + ML training. Fire-and-forget
+        # — never blocks the caller, never raises.
+        try:
+            asyncio.create_task(_persist_thought(msg))
+        except RuntimeError:
+            # No running loop (called from sync context) — skip persistence
+            # quietly. The in-memory buffer still has it.
+            pass
+
         return True
     except Exception as e:
         logger.debug(f"emit_stream_event failed: {e}")
         return False
+
+
+def get_recent_thoughts(
+    *,
+    symbol: Optional[str] = None,
+    kind: Optional[str] = None,
+    minutes: int = 240,
+    limit: int = 30,
+) -> List[Dict[str, Any]]:
+    """Recall recent persisted thoughts for chat context / ML training.
+
+    Args:
+        symbol: filter to a specific ticker (optional)
+        kind: filter to a specific event kind (optional, e.g. "evaluation",
+            "fill", "skip")
+        minutes: how far back to look. Default 4h covers a full RTH session.
+        limit: max rows returned.
+
+    Returns rows newest-first, with `_id` excluded.
+    Never raises — returns [] on any failure.
+    """
+    try:
+        db = _get_db()
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(minutes or 240))
+        q: Dict[str, Any] = {"created_at": {"$gte": cutoff}}
+        if symbol:
+            q["symbol"] = str(symbol).upper()
+        if kind:
+            q["kind"] = str(kind).lower()
+        cursor = (
+            db[THOUGHTS_COLLECTION]
+            .find(q, {"_id": 0})
+            .sort("created_at", DESCENDING)
+            .limit(int(limit or 30))
+        )
+        rows = list(cursor)
+        # Convert datetime to ISO so the caller can JSON-serialise freely.
+        for r in rows:
+            ca = r.get("created_at")
+            if isinstance(ca, datetime):
+                r["created_at"] = ca.isoformat()
+        return rows
+    except Exception as e:
+        logger.debug(f"get_recent_thoughts failed: {e}")
+        return []

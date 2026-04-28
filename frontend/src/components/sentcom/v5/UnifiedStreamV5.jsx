@@ -48,7 +48,7 @@ const classifyMessage = (msg) => {
   if (kind.includes('win') || (kind.includes('close') && (text.includes('pt') || text.includes('+$') || text.includes('+r')))) return 'win';
   if (kind.includes('loss') || (kind.includes('close') && (text.includes('sl') || text.includes('-$') || text.includes('stopped')))) return 'loss';
   if (kind.includes('skip') || kind.includes('veto') || kind.includes('block')) return 'skip';
-  if (kind.includes('gate') || kind.includes('brain') || kind.includes('ai_') || kind.includes('decision')) return 'brain';
+  if (kind.includes('gate') || kind.includes('brain') || kind.includes('ai_') || kind.includes('decision') || kind.includes('evaluat')) return 'brain';
   // Scanner family — `scanning`, `setup_found`, `scan_tick`, `entry_zone`,
   // `relative_strength_leader`, etc. Match before the text fallbacks so
   // even untyped scanner pings get the right severity colour.

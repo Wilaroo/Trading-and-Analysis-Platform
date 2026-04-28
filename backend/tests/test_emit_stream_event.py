@@ -9,7 +9,10 @@ try/except → ImportError → no events ever reached the V5 stream.
 from __future__ import annotations
 
 import asyncio
+
+import mongomock
 import pytest
+from unittest.mock import patch
 
 from services.sentcom_service import (
     SentComService,
@@ -20,11 +23,17 @@ from services.sentcom_service import (
 
 @pytest.fixture(autouse=True)
 def _reset_singleton():
-    """Reset the singleton between tests so buffer state doesn't leak."""
+    """Reset the singleton between tests so buffer state doesn't leak.
+    Also patches _get_db to a fresh mongomock so persistence doesn't
+    contaminate the in-memory buffer via the startup hydrator."""
     import services.sentcom_service as mod
-    mod._sentcom_service = SentComService()
-    yield
-    mod._sentcom_service = None
+    db = mongomock.MongoClient().db
+    with patch.object(mod, "_get_db", lambda: db):
+        mod._thoughts_index_initialised = True  # mongomock has no TTL
+        mod._sentcom_service = SentComService()
+        yield
+        mod._sentcom_service = None
+        mod._thoughts_index_initialised = False
 
 
 def _run(coro):
