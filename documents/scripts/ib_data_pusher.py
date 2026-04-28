@@ -1046,17 +1046,19 @@ class IBDataPusher:
         ib_insync's event loop already lives).
 
         2026-04-29 (afternoon-12): the high-level `IB.reqAccountUpdates`
-        is actually `_run(reqAccountUpdatesAsync())` which awaits the
-        initial `accountDownloadEnd` event. If IB Gateway stalls that
-        event (observed in the wild — Gateway green, but stream never
+        is `_run(reqAccountUpdatesAsync())` which awaits the initial
+        `accountDownloadEnd` event. If IB Gateway stalls that event
+        (observed in the wild — Gateway green, but stream never
         completes the initial dump), the entire push loop never starts
         and the operator sees `IB PUSHER DEAD · last push never`.
 
-        Fix: call the raw `client.reqAccountUpdates(True, account)`
-        directly. That's a synchronous wire-protocol send — returns
-        immediately. `accountValueEvent` is already wired to
-        `on_account_value` (see __init__) so values populate
-        `self.account_data` as they stream in, with no blocking await.
+        Fix: wrap `reqAccountUpdatesAsync()` in `asyncio.wait_for(...)`
+        with a 10s timeout. On timeout, log a warning and continue —
+        the request was already sent to IB by `reqAccountUpdatesAsync`
+        BEFORE awaiting `accountDownloadEnd`, so account values will
+        still stream in via `accountValueEvent` once IB delivers them.
+        This preserves the wrapper's request registration (so messages
+        get routed correctly) AND prevents the push loop from hanging.
         """
         accounts = []
         try:
@@ -1067,17 +1069,25 @@ class IBDataPusher:
         if not accounts:
             logger.warning("  No managed accounts found — skipping account updates")
             return
+        account = accounts[0]
         try:
-            # Raw client send — fire-and-forget, no await of accountDownloadEnd.
-            # Falls through to the high-level call only if the raw client
-            # method is missing in some odd ib_insync build.
-            client = getattr(self.ib, "client", None)
-            raw_req = getattr(client, "reqAccountUpdates", None) if client else None
-            if callable(raw_req):
-                raw_req(True, accounts[0])
-            else:
-                self.ib.reqAccountUpdates(account=accounts[0])
-            logger.info(f"  Requested account updates for {accounts[0]} (fire-and-forget)")
+            import asyncio as _asyncio
+            try:
+                async def _request_with_timeout():
+                    return await _asyncio.wait_for(
+                        self.ib.reqAccountUpdatesAsync(account), timeout=10.0
+                    )
+                self.ib.run(_request_with_timeout())
+                logger.info(f"  Requested account updates for {account}")
+            except _asyncio.TimeoutError:
+                logger.warning(
+                    f"  reqAccountUpdates timed out after 10s for {account} — "
+                    f"continuing anyway, accountValueEvent will populate as IB streams"
+                )
+            except AttributeError:
+                # Older ib_insync without reqAccountUpdatesAsync — fall back to sync.
+                self.ib.reqAccountUpdates(account=account)
+                logger.info(f"  Requested account updates for {account} (sync fallback)")
         except Exception as e:
             logger.error(f"  Account update request error: {e}")
     

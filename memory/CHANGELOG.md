@@ -21,39 +21,52 @@ now hangs the entire pusher startup. The same pattern affected
 was also at risk.
 
 ### Fix
-- `request_account_updates` now uses the **raw client wire-protocol
-  send** `self.ib.client.reqAccountUpdates(True, accounts[0])`. That's
-  a synchronous send that returns immediately — no await of
-  `accountDownloadEnd`. The existing `accountValueEvent` handler
-  (wired in `__init__`) populates `self.account_data` as values
-  stream in. Falls back to the high-level call only if the raw client
-  method is missing in some odd ib_insync build.
+- `request_account_updates` now wraps `reqAccountUpdatesAsync(account)`
+  in `asyncio.wait_for(..., timeout=10.0)`. Critical: the async
+  version sends the IB API request to the wire BEFORE awaiting
+  `accountDownloadEnd`, so even on timeout the subscription is
+  active and `accountValueEvent` continues to fire as IB streams
+  values. This preserves ib_insync's wrapper request-registration
+  (so messages route correctly to fire events) AND prevents the push
+  loop from hanging.
 - `fetch_news_providers` wraps `reqNewsProvidersAsync()` in
   `asyncio.wait_for(..., timeout=8.0)`. On `TimeoutError`, logs a
   warning and proceeds with empty providers list (non-critical).
   Falls back to the legacy sync call if `reqNewsProvidersAsync` is
   missing on older ib_insync builds.
 
+### Why this fix is more robust than the initial raw-client attempt
+The first attempt used the raw `client.reqAccountUpdates(True, ...)`
+to skip the await entirely. That worked for unblocking the loop but
+bypassed ib_insync's wrapper request-registration step. Without
+that registration, the wrapper may not route incoming
+`updateAccountValue` messages to fire `accountValueEvent` cleanly
+(observed empirically: pusher reported GREEN with quotes + positions
+flowing, but `account_data` stayed empty → `Equity: $—`). The
+async-with-timeout approach fires the wrapper's `startReq` first,
+guaranteeing event routing.
+
 ### Verification
-- 4 new tests in `tests/test_pusher_account_updates_no_block.py`:
-  raw-client-send is primary, high-level call gated to fallback,
-  news providers wrapped in `wait_for(timeout=8)`, sync fallback for
-  older ib_insync preserved.
-- All 4 passing.
+- 5 new tests in `tests/test_pusher_account_updates_no_block.py`:
+  async-with-timeout primary path, TimeoutError handled gracefully,
+  sync fallback for older ib_insync, news-provider timeout, news
+  provider sync fallback.
+- All 5 passing.
 
 ### Operator action on Windows
 1. `git pull` on Windows.
 2. Restart `ib_data_pusher.py`.
-3. Watch the console — should see within ~3s of "Requesting account
+3. Watch the console — should see within ~10s of "Requesting account
    updates...":
-   - `Requested account updates for DUN615665 (fire-and-forget)`
+   - `Requested account updates for DUN615665` (or
+     `... timed out after 10s ... continuing anyway` if IB is slow)
    - `Skipping fundamental data...`
    - `Fetching news providers...`
-   - Either `News providers: [...]` or `reqNewsProviders timed out
-     after 8s — proceeding with empty list`
+   - Either `News providers: [...]` or `reqNewsProviders timed out`
    - `==> STARTING PUSH LOOP (TRADING ONLY)`
-   - Push lines starting to flow.
-4. DGX dashboard `IB PUSHER DEAD` banner should clear within ~10s.
+   - Push lines: `Pushing: N quotes, M positions, K account fields, ...`
+4. DGX dashboard `Equity: $—` should resolve to live NetLiquidation
+   within ~30s as account values stream in.
 
 
 

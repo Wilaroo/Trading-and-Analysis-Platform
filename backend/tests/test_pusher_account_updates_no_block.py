@@ -1,6 +1,6 @@
 """
 Regression tests for the pusher's `request_account_updates` and
-`fetch_news_providers` fire-and-forget contract added 2026-04-29
+`fetch_news_providers` timeout-protected contract added 2026-04-29
 (afternoon-12).
 
 Background: 2026-04-29 (afternoon-12) the pusher hung on
@@ -10,12 +10,13 @@ Gateway was green, but `IB.reqAccountUpdates` (which calls
 `accountDownloadEnd` event) never returned. The push loop never
 started → operator dashboard stuck on `IB PUSHER DEAD · last push never`.
 
-Fix: `request_account_updates` now uses the raw `client.reqAccountUpdates`
-sync wire-protocol send (no await of `accountDownloadEnd`).
-`fetch_news_providers` now wraps the async call in `asyncio.wait_for`
-with an 8s timeout. Either way, the push loop gets to start.
+Fix: both `request_account_updates` and `fetch_news_providers` wrap
+their async ib_insync calls in `asyncio.wait_for(...)` with finite
+timeouts. On timeout, the push loop continues and the data populates
+naturally as IB streams it (`accountValueEvent` is wired in
+__init__).
 
-These tests assert both behaviours via direct source inspection, since
+These tests assert the behaviour via direct source inspection, since
 running the actual pusher requires Windows + IB Gateway + ib_insync.
 """
 
@@ -42,39 +43,44 @@ def _slice(src: str, start_pat: str, end_pat: str) -> str:
     raise AssertionError(f"end pattern not found: {end_pat}")
 
 
-def test_request_account_updates_uses_raw_client_send():
-    """The raw `client.reqAccountUpdates(True, account)` MUST be the
-    primary code path. The high-level `IB.reqAccountUpdates` is allowed
-    only as a fallback when the raw client method is missing.
+def test_request_account_updates_uses_async_with_timeout():
+    """`request_account_updates` MUST wrap the async ib_insync call in
+    `asyncio.wait_for(...)` with a finite timeout. The high-level
+    sync call (which is `_run(reqAccountUpdatesAsync())` and would
+    block forever waiting for `accountDownloadEnd`) is forbidden as
+    the primary path.
     """
     body = _slice(_read(), r"def request_account_updates", r"^    def [a-z_]+\(")
-    assert "client = getattr(self.ib, \"client\", None)" in body, (
-        "Raw client lookup missing — fix may have regressed"
+    assert "wait_for" in body, "Missing asyncio.wait_for guard"
+    assert "reqAccountUpdatesAsync" in body, (
+        "Must use async ib_insync call (so wrapper request-registration runs)"
     )
-    assert "raw_req = getattr(client, \"reqAccountUpdates\"" in body
-    assert "raw_req(True, accounts[0])" in body, (
-        "Raw client send not present — pusher will hang on IB stalls"
+    # Explicit timeout
+    assert "timeout=10.0" in body or "timeout=10" in body, (
+        "Expected 10s timeout on reqAccountUpdatesAsync"
     )
 
 
-def test_request_account_updates_does_not_block_on_high_level_call():
-    """The high-level `self.ib.reqAccountUpdates(account=...)` call —
-    which is `_run(reqAccountUpdatesAsync())` and awaits
-    `accountDownloadEnd` — must NOT be the primary path. It's only
-    reachable as the fallback when `client.reqAccountUpdates` is
-    callable check fails.
+def test_request_account_updates_handles_timeout_gracefully():
+    """On `asyncio.TimeoutError`, the function must log a warning and
+    return — not raise — so the push loop can still start.
     """
     body = _slice(_read(), r"def request_account_updates", r"^    def [a-z_]+\(")
-    # Confirm the high-level call is gated behind the callable check.
-    assert "if callable(raw_req):" in body
-    # Confirm the high-level call lives in the `else` branch only.
-    high_level_lines = [ln for ln in body.splitlines() if "self.ib.reqAccountUpdates(account=" in ln]
-    assert len(high_level_lines) == 1, "Expected exactly one high-level call (in fallback else)"
-    # Lines before it must include the `else:` branch marker.
-    idx = body.index(high_level_lines[0])
-    preceding = body[:idx]
-    assert "else:" in preceding.splitlines()[-3:][0] or "else:" in preceding, (
-        "High-level call must be inside the fallback else branch"
+    assert "TimeoutError" in body, "Missing TimeoutError handler"
+    assert "logger.warning" in body, (
+        "Must log a warning (not error) so the push loop continues"
+    )
+
+
+def test_request_account_updates_falls_back_when_async_missing():
+    """Older ib_insync builds may not expose `reqAccountUpdatesAsync`.
+    The fallback to the sync `reqAccountUpdates(account=...)` call
+    MUST be preserved for backwards-compatibility.
+    """
+    body = _slice(_read(), r"def request_account_updates", r"^    def [a-z_]+\(")
+    assert "AttributeError" in body, "AttributeError fallback missing"
+    assert "self.ib.reqAccountUpdates(account=" in body, (
+        "Sync fallback for older ib_insync builds missing"
     )
 
 
