@@ -9,12 +9,51 @@ Open priorities, deferred ideas, and backlog. Move items to
 - ✅ **Shadow tracker drain mode** — `?drain=true` clears 6,715-deep
   backlog in one curl; yields to event loop between batches; stats
   cache busted on drain.
+- ✅ **Mongo historical price fallback** for shadow tracker — drain
+  now actually updates outcomes for symbols not in the IB pusher
+  subscription. Operator's 6,715 backlog cleared 100%.
+- ✅ **Per-module accuracy fix** — PnL-based correctness +
+  recommendation keyword matching. Modules now show real 70-73%
+  accuracy instead of perpetual 0%.
 - ✅ **Liquidity-aware realtime stop trail (Q1)** — new
   `compute_trailing_stop_snap` + `StopManager.set_db()` so Target 1
   / Target 2 / trail ticks all anchor to HVN clusters when available
   (clean fallback to legacy ATR/% trail otherwise). 11 regression tests.
+- ✅ **Mongo compound indexes** — `bar_size_1_date_-1` and
+  `symbol_1_bar_size_1_date_-1` shipped on DGX. `rebuild-adv-from-ib`
+  dropped from 5+ min → 44s.
+
+### 🔴 P0 OPTIMIZATION SURFACED 2026-04-29 OVERNIGHT BACKFILL
+**Pre-flight contract validation in `ib_historical_collector.py`**
+- **Symptom**: During the 2026-04-29 overnight backfill, 3 of 4
+  collectors burned their entire 60-req/10-min IB pacing quota on
+  bad symbols (PSTG, HOLX, CHAC, AL, GLDD, DAWN…). Each bad symbol
+  consumes 9 IB requests (one per bar_size) before being pruned.
+  ~1,000-1,500 bad symbols in the queue = ~9,000-13,500 wasted IB
+  requests across the run, slowing total backfill ~3-5×.
+- **Fix**:
+  1. In `ib_historical_collector.py` (Windows PC), before queuing 9
+     bar_sizes for a symbol, do **one** `reqContractDetails()` call.
+     If it errors with "No security definition", **immediately**
+     mark the symbol unqualifiable and skip all 9 bar_size tasks.
+  2. Lower the strike threshold for "No security definition" from
+     3 → 1 in `services/symbol_universe.py::mark_unqualifiable`. The
+     error is deterministic, not transient — no point waiting for
+     more failures.
+- **Expected impact**: ~75% reduction in IB quota burn during backfills.
+  Overnight runs that currently take 6-10 hours should drop to 2-4 hours.
+- **Effort**: ~30 min code change, no risk to existing logic.
+- **Test plan**: Pick 3 known-bad symbols (PSTG, HOLX, CHAC), trigger
+  smart-backfill, verify each consumes only 1 IB request and
+  immediately gets `unqualifiable: true`.
 
 ### 🟠 Operator-prioritized follow-ups (2026-04-28f)
+- **timeseries_ai shadow tracking gap** (~30 min) — `/shadow/performance`
+  shows `timeseries_ai: 0 decisions` because the TS forecast result
+  isn't being passed into `shadow_tracker.log_decision()` from the
+  consultation pipeline. Wire it through the same way debate /
+  risk / institutional are. Quick fix once you find the consultation
+  glue.
 - **AI Decision Audit Card (V5 dashboard)**
   Now that AI module results land in `entry_context.ai_modules`,
   add a small `AIDecisionAuditCard.jsx` to the V5 dashboard showing
