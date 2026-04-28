@@ -68,7 +68,7 @@ export const PusherHeartbeatTile = () => {
   return (
     <div
       data-testid="pusher-heartbeat-tile"
-      className="flex items-center gap-4 px-4 py-1 border-b border-zinc-800 bg-zinc-950/60"
+      className="flex items-center gap-4 px-4 py-1 bg-zinc-950/60"
     >
       {/* Pulse dot + label */}
       <div className="flex items-center gap-2 min-w-[140px]">

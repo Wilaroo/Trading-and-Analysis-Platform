@@ -59,7 +59,7 @@ export const StrategyMixCard = () => {
     return (
       <div
         data-testid="strategy-mix-card-error"
-        className="px-4 py-1 border-b border-zinc-800 bg-zinc-950/40 text-xs text-zinc-500"
+        className="px-4 py-1 bg-zinc-950/40 text-xs text-zinc-500"
       >
         Strategy mix unavailable
       </div>
@@ -70,7 +70,7 @@ export const StrategyMixCard = () => {
     return (
       <div
         data-testid="strategy-mix-card-loading"
-        className="px-4 py-1 border-b border-zinc-800 bg-zinc-950/40 text-xs text-zinc-500"
+        className="px-4 py-1 bg-zinc-950/40 text-xs text-zinc-500"
       >
         Strategy mix loading…
       </div>
@@ -81,7 +81,7 @@ export const StrategyMixCard = () => {
     return (
       <div
         data-testid="strategy-mix-card-empty"
-        className="px-4 py-1 border-b border-zinc-800 bg-zinc-950/40"
+        className="px-4 py-1 bg-zinc-950/40"
       >
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <BarChart3 className="w-3.5 h-3.5" />
@@ -97,7 +97,7 @@ export const StrategyMixCard = () => {
   return (
     <div
       data-testid="strategy-mix-card"
-      className="px-4 py-3 border-b border-zinc-800 bg-zinc-950/40 space-y-2"
+      className="px-4 py-3 bg-zinc-950/40 space-y-2"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs">

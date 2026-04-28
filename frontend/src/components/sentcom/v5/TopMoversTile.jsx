@@ -74,7 +74,7 @@ export const TopMoversTile = ({
     <div
       data-testid="top-movers-tile"
       data-help-id="top-movers-tile"
-      className={`v5-panel flex items-center gap-3 px-3 py-1.5 text-[11px] bg-zinc-950 border-b border-zinc-800 ${className}`}
+      className={`v5-panel flex items-center gap-3 px-3 py-1 text-[11px] bg-zinc-950 ${className}`}
     >
       <div className="flex items-center gap-2 min-w-fit">
         <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide">

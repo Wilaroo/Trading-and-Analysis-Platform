@@ -272,23 +272,26 @@ export const SentComV5View = ({
         onClose={() => setInspectorOpen(false)}
       />
 
-      {/* Phase 3 TopMoversTile — reads /api/live/briefing-snapshot. */}
-      <PanelErrorBoundary label="top-movers" compact>
-        <TopMoversTile onSelectSymbol={handleOpenTicker} />
-      </PanelErrorBoundary>
-
-      {/* Pusher Heartbeat — positive proof-of-life: pushes/min + RPC latency.
-          Reuses the shared usePusherHealth() hook (no extra polling). */}
-      <PanelErrorBoundary label="pusher-heartbeat" compact>
-        <PusherHeartbeatTile />
-      </PanelErrorBoundary>
-
-      {/* Strategy Mix — top setup_types across the last 100 alerts. Surfaces
-          single-strategy concentration ≥70% as a red flag (helped diagnose
-          the relative_strength domination bug in Feb-2026). */}
-      <PanelErrorBoundary label="strategy-mix" compact>
-        <StrategyMixCard />
-      </PanelErrorBoundary>
+      {/* Phase 3 TopMoversTile + Pusher Heartbeat + Strategy Mix —
+          collapsed into a single horizontal status strip 2026-04-28c
+          to give the chart + Unified Stream more vertical real estate.
+          Each tile renders without its own border-b; the wrapper
+          carries the bottom border + dividers between tiles. On
+          smaller widths the row wraps automatically (flex-wrap). */}
+      <div
+        data-testid="sentcom-v5-status-strip"
+        className="flex items-stretch flex-wrap border-b border-zinc-800 divide-x divide-zinc-800"
+      >
+        <PanelErrorBoundary label="top-movers" compact>
+          <TopMoversTile onSelectSymbol={handleOpenTicker} className="flex-1 min-w-[420px]" />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="pusher-heartbeat" compact>
+          <PusherHeartbeatTile />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="strategy-mix" compact>
+          <StrategyMixCard />
+        </PanelErrorBoundary>
+      </div>
 
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
       <div
