@@ -6,6 +6,15 @@ Open priorities, deferred ideas, and backlog. Move items to
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-27 EOD)
 
 ### 🟠 Operator-prioritized follow-ups (2026-04-28f)
+- **AI Decision Audit Card (V5 dashboard)**
+  Now that AI module results land in `entry_context.ai_modules`,
+  add a small `AIDecisionAuditCard.jsx` to the V5 dashboard showing
+  per-trade columns: setup_type | debate verdict | risk approval |
+  institutional flow | TS forecast | win/loss. Lets the operator
+  spot-check whether the AI is actually steering trades vs just
+  rubber-stamping the scanner. Pairs with `SmartLevelsAnalyticsCard`
+  for full provenance visibility. ~30 min. Endpoint already exists
+  via `/api/trading-bot/trades` — just needs a frontend card.
 - **Liquidity-aware realtime stop trail (Q1)**
   Currently the realtime trail in `stop_manager.py` is purely ATR-based:
   Target 1 hit → stop moves to entry, Target 2 hit → trailing engages.
