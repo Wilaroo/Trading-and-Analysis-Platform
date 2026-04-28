@@ -2,7 +2,66 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-04-29 (afternoon-10) — Command Center / NIA panel re-org
+## 2026-04-29 (afternoon-11) — Drawer split handle (operator-resizable bottom drawer)
+
+Operator approved: vertical drag-handle between SentCom Intelligence
+(left) and Stream Deep Feed (right) in the V5 bottom drawer. Replaces
+the static 60/40 grid with a flex layout the operator can rebalance
+on the fly depending on whether they're in "watching the bot decide"
+mode (favour Intelligence) or "reading the narrative trail" mode
+(favour Stream).
+
+### New component
+- `frontend/src/components/sentcom/v5/DrawerSplitHandle.jsx`
+  - `useDrawerSplit()` hook — manages `leftPct` state, persists to
+    `localStorage["v5_drawer_left_pct"]`, exposes
+    `setLeftPct` (clamped to 25-80%) and `resetToDefault` (60%).
+  - `<DrawerSplitHandle>` component — 4px vertical bar with a 3-dot
+    grip accent. Hover/active state in emerald. `cursor-col-resize`.
+    `role="separator"`, `aria-orientation="vertical"` for a11y.
+  - Mouse-down → window-level `mousemove` listener computes
+    `(clientX - container.left) / container.width × 100` per move,
+    feeds clamped value to `setLeftPct`. `mouseup` releases.
+  - Double-click resets to default 60%.
+
+### Wired into V5
+- `SentComV5View.jsx`:
+  - Replaced `grid-template-columns: 60% 40%` with a flex layout
+    using inline widths driven by `leftPct` state.
+  - `drawerContainerRef` ref → passed to handle so it can read its
+    parent's `getBoundingClientRect()` for the percent math.
+  - Three-row drawer: left panel (Intelligence, `width: leftPct%`),
+    handle, right panel (Stream Deep Feed, `width: (100-leftPct)%`).
+
+### Persistence + safety
+- `localStorage` key `v5_drawer_left_pct` survives refresh.
+- Read on mount with bounds check (25-80) + isFinite guard.
+- localStorage write wrapped in try/catch — no breakage in private/
+  incognito mode where storage may be disabled.
+- Double-click handler is on the handle itself, so a stuck split
+  is always recoverable without DevTools.
+
+### Verification
+- Lint clean across both files.
+- Playwright screenshot confirms the layout renders with the handle
+  positioned correctly between the two drawer panels at the default
+  60/40 split. SentCom Intelligence shows live decisions (MSFT/AAPL
+  skips with score breakdown), Stream Deep Feed on the right.
+- Programmatic drag in Playwright doesn't fire all the synthetic
+  events the hook relies on (Playwright limitation, not a bug) —
+  real browsers handle the `mousemove`/`mouseup` window listeners
+  natively.
+
+### Operator action
+- Pull on DGX. Browser auto-reloads.
+- Hover over the thin column between SentCom Intelligence and
+  Stream Deep Feed in the bottom drawer — cursor changes to
+  `col-resize`, handle lights up in emerald.
+- Drag horizontally to rebalance. Choice persists across
+  refreshes / sessions.
+- Double-click handle to reset to 60/40.
+
+
 
 Operator approved option B + briefings restyle:
 1. Bottom drawer becomes "twin live panels" — SentCom Intelligence (60%)

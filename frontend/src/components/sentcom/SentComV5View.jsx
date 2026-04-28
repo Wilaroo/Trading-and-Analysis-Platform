@@ -16,7 +16,7 @@
  * All V5 components live in `./v5/`. Existing panels are left untouched so
  * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
 import { ChatInput } from './panels/ChatInput';
@@ -36,6 +36,7 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
+import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
 import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
@@ -170,6 +171,11 @@ export const SentComV5View = ({
   }, [focusedSymbol, selectedPosition, positions]);
 
   const counts = derivePipelineCounts({ status, setups, positions, alerts, messages });
+
+  // Bottom-drawer split state — operator-resizable via DrawerSplitHandle.
+  // Persisted to localStorage so the chosen split survives refresh.
+  const drawerContainerRef = useRef(null);
+  const { leftPct, setLeftPct, resetToDefault } = useDrawerSplit();
 
   const equity = status?.account_equity ?? status?.equity ?? context?.account_equity;
   const latencySeconds = status?.order_latency_seconds ?? status?.latency_seconds;
@@ -456,15 +462,27 @@ export const SentComV5View = ({
         data-testid="sentcom-v5-bottom-drawer"
       >
         <div
-          className="grid gap-px bg-zinc-900 h-full"
-          style={{ gridTemplateColumns: '60% 40%' }}
+          ref={drawerContainerRef}
+          className="flex h-full bg-zinc-900"
+          data-testid="sentcom-v5-drawer-split"
         >
-          <div className="bg-zinc-950 h-full overflow-hidden">
+          <div
+            className="bg-zinc-950 h-full overflow-hidden"
+            style={{ width: `calc(${leftPct}% - 2px)` }}
+          >
             <PanelErrorBoundary label="sentcom-intelligence-compact">
               <SentComIntelligencePanel compact />
             </PanelErrorBoundary>
           </div>
-          <div className="bg-zinc-950 flex flex-col overflow-hidden h-full">
+          <DrawerSplitHandle
+            containerRef={drawerContainerRef}
+            onChange={setLeftPct}
+            onReset={resetToDefault}
+          />
+          <div
+            className="bg-zinc-950 flex flex-col overflow-hidden h-full"
+            style={{ width: `calc(${100 - leftPct}% - 2px)` }}
+          >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Stream · Deep Feed</div>
               <span className="v5-chip v5-chip-manage">history</span>
