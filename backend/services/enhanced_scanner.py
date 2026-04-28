@@ -177,7 +177,15 @@ STRATEGY_TIME_WINDOWS = {
     "the_3_30_trade":      [TimeWindow.CLOSE],
 }
 
-# Strategy market regime preferences
+# Strategy market regime preferences.
+#
+# 2026-04-29 architectural decision (post Setup-landscape v3): this map
+# is METADATA ONLY — it documents the operator's mental model of which
+# trades thrive in which regimes, but the scanner does NOT hard-gate
+# on it. Hard gates live only at Time-window / In-Play / Confidence
+# (see PRD.md "Pipeline architecture"). Regime/Setup signals are SOFT
+# gates (priority downgrades + ML features via composite_label_features)
+# so the per-Trade ML models keep getting full training-data flow.
 STRATEGY_REGIME_PREFERENCES = {
     # Works in trending markets
     "spencer_scalp": [MarketRegime.STRONG_UPTREND, MarketRegime.STRONG_DOWNTREND, MarketRegime.MOMENTUM],
@@ -501,6 +509,16 @@ class LiveAlert:
     is_countertrend: bool = False
     out_of_context_warning: bool = False
     experimental: bool = False  # Trades not in the operator playbook matrix
+
+    # NEW: Multi-index regime tag (Feb 2026)
+    # Composite label derived from SPY/QQQ/IWM/DIA daily-bar trends so
+    # downstream consumers (briefings, ML features, dashboards) see one
+    # human-readable bin instead of 24 numerical regime features.
+    # Possible values mirror `MultiIndexRegime.value`:
+    # risk_on_broad / risk_on_growth / risk_on_smallcap /
+    # risk_off_broad / risk_off_defensive / bullish_divergence /
+    # bearish_divergence / mixed / unknown.
+    multi_index_regime: str = "unknown"
     
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
@@ -4985,7 +5003,11 @@ class EnhancedBackgroundScanner:
     # ──────────── Bellafiore Setup × Trade matrix gating ────────────
     async def _apply_setup_context(self, alert: "LiveAlert", symbol: str, snapshot) -> None:
         """Tag the alert with daily-Setup context + downgrade priority on
-        out-of-context fires (operator chose soft-gate option B)."""
+        out-of-context fires (operator chose soft-gate option B).
+
+        Also stamps the multi-index regime label (`risk_on_broad`,
+        `bullish_divergence`, …) so AI briefings + per-Trade ML models
+        can use it as either narrative context or one-hot feature."""
         try:
             from services.market_setup_classifier import (
                 get_market_setup_classifier, lookup_trade_context,
@@ -5023,6 +5045,18 @@ class EnhancedBackgroundScanner:
                 pass
         except Exception as e:
             logger.debug(f"_apply_setup_context({symbol}, {alert.setup_type}) failed: {e}")
+
+        # Multi-index regime tag — market-wide, soft (no priority change),
+        # stamped purely as metadata + feature signal. Never blocks alerts.
+        try:
+            from services.multi_index_regime_classifier import (
+                get_multi_index_regime_classifier,
+            )
+            regime_classifier = get_multi_index_regime_classifier(db=self.db)
+            regime_res = await regime_classifier.classify()
+            alert.multi_index_regime = regime_res.label.value
+        except Exception as e:
+            logger.debug(f"_apply_regime_context({symbol}) failed: {e}")
 
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB

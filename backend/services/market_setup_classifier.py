@@ -291,6 +291,33 @@ class MarketSetupClassifier:
         else:
             self._cache.pop(symbol, None)
 
+    @classmethod
+    def _sync_classify_window(cls, bars: List[Dict]) -> MarketSetup:
+        """Synchronous, lightweight classification used during training.
+
+        Skips the cache + intraday-snapshot logic — just runs the seven
+        detectors against the supplied window (oldest-first) and returns
+        the winning Setup, or NEUTRAL if none clears the threshold.
+        Returns NEUTRAL on insufficient data.
+        """
+        if not bars or len(bars) < 5:
+            return MarketSetup.NEUTRAL
+        tmp = cls(db=None)
+        scores: List[Tuple[MarketSetup, float, List[str]]] = [
+            (MarketSetup.GAP_AND_GO,             *tmp._detect_gap_and_go(bars, None)),
+            (MarketSetup.RANGE_BREAK,            *tmp._detect_range_break(bars)),
+            (MarketSetup.DAY_2,                  *tmp._detect_day_2(bars, None)),
+            (MarketSetup.GAP_DOWN_INTO_SUPPORT,  *tmp._detect_gap_down_into_support(bars, None)),
+            (MarketSetup.GAP_UP_INTO_RESISTANCE, *tmp._detect_gap_up_into_resistance(bars, None)),
+            (MarketSetup.OVEREXTENSION,          *tmp._detect_overextension(bars)),
+            (MarketSetup.VOLATILITY_IN_RANGE,    *tmp._detect_volatility_in_range(bars)),
+        ]
+        scores.sort(key=lambda s: s[1], reverse=True)
+        best_setup, best_conf, _ = scores[0]
+        if best_conf < cls.MIN_CONFIDENCE:
+            return MarketSetup.NEUTRAL
+        return best_setup
+
     # ───────── Detection methods (each returns (confidence_0_to_1, [reasons])) ─────────
 
     def _detect_gap_and_go(self, bars: List[Dict], snap=None) -> Tuple[float, List[str]]:

@@ -3002,6 +3002,9 @@ Please provide:
                     ],
                     "sample_size": snap.sample_size,
                     "classified": snap.classified,
+                    "multi_index_regime": snap.multi_index_regime,
+                    "regime_confidence": snap.regime_confidence,
+                    "regime_reasoning": snap.regime_reasoning,
                 }
         except Exception as e:
             logger.debug(f"setup landscape injection skipped: {e}")

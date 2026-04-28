@@ -107,6 +107,9 @@ class LandscapeSnapshot:
     groups: List[SetupGroup]            # sorted by count desc
     narrative: str                      # 1st-person paragraph for the briefing
     headline: str                       # 1-line teaser for chat / cards
+    multi_index_regime: str = "unknown"  # composite regime label (Feb-2026)
+    regime_confidence: float = 0.0
+    regime_reasoning: List[str] = field(default_factory=list)
 
 
 class SetupLandscapeService:
@@ -140,7 +143,13 @@ class SetupLandscapeService:
 
         symbols = await self._pull_top_symbols(sample_size)
         groups = await self._classify_batch(symbols)
-        narrative, headline = self._render_narrative(groups, len(symbols), context)
+        # Multi-index regime context — single market-wide classification
+        regime_label, regime_conf, regime_reasoning = await self._classify_multi_index_regime()
+        narrative, headline = self._render_narrative(
+            groups, len(symbols), context,
+            regime_label=regime_label,
+            regime_reasoning=regime_reasoning,
+        )
         snap = LandscapeSnapshot(
             timestamp=now.isoformat(),
             sample_size=len(symbols),
@@ -148,6 +157,9 @@ class SetupLandscapeService:
             groups=groups,
             narrative=narrative,
             headline=headline,
+            multi_index_regime=regime_label,
+            regime_confidence=regime_conf,
+            regime_reasoning=regime_reasoning,
         )
         self._snapshot = snap
         self._snapshot_at = now
@@ -209,13 +221,36 @@ class SetupLandscapeService:
         groups.sort(key=lambda g: (g.setup != "neutral", g.count), reverse=True)
         return groups
 
+    async def _classify_multi_index_regime(self) -> Tuple[str, float, List[str]]:
+        """Run the multi-index regime classifier (SPY/QQQ/IWM/DIA).
+
+        Returns (label_str, confidence, reasoning_list). Label defaults
+        to 'unknown' on any failure so the briefing degrades gracefully.
+        """
+        try:
+            from services.multi_index_regime_classifier import (
+                get_multi_index_regime_classifier,
+            )
+            classifier = get_multi_index_regime_classifier(db=self.db)
+            res = await classifier.classify()
+            return res.label.value, res.confidence, list(res.reasoning)
+        except Exception as e:
+            logger.debug(f"_classify_multi_index_regime failed: {e}")
+            return "unknown", 0.0, []
+
     # ───────── Narrative renderer ─────────
 
     def _render_narrative(self, groups: List[SetupGroup], sample_n: int,
-                          context: str) -> Tuple[str, str]:
+                          context: str,
+                          regime_label: str = "unknown",
+                          regime_reasoning: Optional[List[str]] = None,
+                          ) -> Tuple[str, str]:
         non_neutral = [g for g in groups if g.setup != "neutral" and g.count > 0]
+        regime_line = self._regime_line(regime_label, regime_reasoning, context)
         if not non_neutral:
-            return self._fallback_narrative(sample_n, context), \
+            base = self._fallback_narrative(sample_n, context)
+            full = f"{regime_line}\n\n{base}" if regime_line else base
+            return full, \
                 f"I screened {sample_n} names but couldn't pin any to a clear daily Setup."
 
         # Headline: top group only, 1-liner.
@@ -229,7 +264,11 @@ class SetupLandscapeService:
 
         # Full narrative paragraph.
         intro = self._intro_for_context(context, sample_n)
-        lines = [intro]
+        lines: List[str] = []
+        if regime_line:
+            lines.append(regime_line)
+            lines.append("")
+        lines.append(intro)
         # List up to top 4 setup groups
         for g in non_neutral[:4]:
             ex = ", ".join(s for s, _ in g.examples[:5])
@@ -268,6 +307,50 @@ class SetupLandscapeService:
             "volatility_in_range":    "Volatility In Range",
             "neutral":                "no clear Setup",
         }.get(setup, setup.replace("_", " ").title())
+
+    @staticmethod
+    def _regime_line(regime_label: str, reasoning: Optional[List[str]],
+                     context: str) -> str:
+        """Render a 1-line multi-index regime preface.
+
+        Returns "" if regime is unknown — silent fallback so older
+        operator-side flows that don't care about the regime are unaffected.
+        """
+        if not regime_label or regime_label == "unknown":
+            return ""
+        # 1st-person voice mirroring the rest of the narrative.
+        verb_pre = {
+            "morning": "Heading into the open",
+            "midday":  "Mid-session",
+            "eod":     "Today",
+            "weekend": "Heading into next week",
+        }.get(context, "Right now")
+        regime_text = {
+            "risk_on_broad":
+                "I'm reading the multi-index tape as **risk-on broad** — SPY/QQQ/IWM/DIA all bid",
+            "risk_on_growth":
+                "I'm reading the tape as **risk-on, growth-led** — QQQ leading, SPY/IWM following",
+            "risk_on_smallcap":
+                "I'm reading the tape as **risk-on, small-cap leading** — IWM out front of SPY/QQQ",
+            "risk_off_broad":
+                "I'm reading the tape as **risk-off broad** — SPY/QQQ/IWM/DIA all under pressure",
+            "risk_off_defensive":
+                "I'm reading the tape as **risk-off defensive** — DIA holding while QQQ/IWM bleed",
+            "bullish_divergence":
+                "I'm seeing a **bullish small-cap divergence** — IWM leading higher while SPY lags",
+            "bearish_divergence":
+                "I'm seeing a **bearish breadth divergence** — SPY firm but IWM rolling over",
+            "mixed":
+                "The multi-index tape is **mixed** — no clear leadership across SPY/QQQ/IWM/DIA",
+        }.get(regime_label, f"Multi-index regime: {regime_label.replace('_', ' ')}")
+        # Lift one rationale bullet if available
+        detail = ""
+        if reasoning:
+            for r in reasoning:
+                if r.startswith(("SPY:", "QQQ:", "IWM:", "DIA:")):
+                    detail = f" ({r})"
+                    break
+        return f"{verb_pre}, {regime_text}{detail}."
 
     @staticmethod
     def _intro_for_context(context: str, n: int) -> str:

@@ -824,6 +824,9 @@ async def get_setup_landscape(
         "classified": snap.classified,
         "headline": snap.headline,
         "narrative": snap.narrative,
+        "multi_index_regime": snap.multi_index_regime,
+        "regime_confidence": snap.regime_confidence,
+        "regime_reasoning": snap.regime_reasoning,
         "groups": [
             {
                 "setup": g.setup,

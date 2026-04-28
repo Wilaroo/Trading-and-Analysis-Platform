@@ -2367,6 +2367,13 @@ class TimeSeriesAIService:
             from services.ai_modules.multi_timeframe_features import (
                 MultiTimeframeFeatureProvider, MTF_FEATURE_NAMES
             )
+            from services.ai_modules.composite_label_features import (
+                ALL_LABEL_FEATURE_NAMES, build_label_features,
+            )
+            from services.multi_index_regime_classifier import (
+                derive_regime_label_from_features, MultiIndexRegime,
+            )
+            from services.market_setup_classifier import MarketSetup, MarketSetupClassifier
             
             # Create a dedicated GBM model
             model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
@@ -2421,11 +2428,16 @@ class TimeSeriesAIService:
             setup_feature_names = get_setup_feature_names(setup_type)
             regime_feat_names = REGIME_FEATURE_NAMES if regime_available else []
             mtf_feat_names = MTF_FEATURE_NAMES if mtf_available else []
+            # Categorical label features: setup_label_* + regime_label_*
+            # Always emitted (cheap one-hots), zeros when classifier can't
+            # produce a label for this sample.
+            label_feat_names = list(ALL_LABEL_FEATURE_NAMES)
             combined_feature_names = (
                 base_feature_names
                 + [f"setup_{n}" for n in setup_feature_names]
                 + regime_feat_names
                 + mtf_feat_names
+                + label_feat_names
             )
             
             loaded = 0
@@ -2527,8 +2539,34 @@ class TimeSeriesAIService:
                         mtf_vector = np.array([mtf_feats.get(f, 0.0) for f in MTF_FEATURE_NAMES], dtype=np.float32)
                     else:
                         mtf_vector = np.array([], dtype=np.float32)
-                    
-                    combined = np.concatenate([base_vector, setup_vector, regime_vector, mtf_vector])
+
+                    # Layer 3: Categorical label features
+                    # - regime_label_* derived from already-loaded regime_feats (cheap)
+                    # - setup_label_* derived from `bars` window when this is a daily-bar
+                    #   training profile (cheap). For intraday profiles we leave it as
+                    #   zeros for now; that gap is tracked in ROADMAP P1.
+                    if regime_available:
+                        regime_label = derive_regime_label_from_features(regime_feats)
+                    else:
+                        regime_label = MultiIndexRegime.UNKNOWN
+                    setup_label_for_sample: MarketSetup = MarketSetup.NEUTRAL
+                    if bar_size == "1 day" and i + 49 - 30 >= 0:
+                        try:
+                            window = bars[max(0, i + 49 - 30): i + 50]
+                            setup_res = MarketSetupClassifier._sync_classify_window(window)
+                            setup_label_for_sample = setup_res
+                        except Exception:
+                            pass
+                    label_feats = build_label_features(
+                        market_setup=setup_label_for_sample,
+                        multi_index_regime=regime_label,
+                    )
+                    label_vector = np.array(
+                        [label_feats.get(f, 0.0) for f in label_feat_names],
+                        dtype=np.float32,
+                    )
+
+                    combined = np.concatenate([base_vector, setup_vector, regime_vector, mtf_vector, label_vector])
                     all_feature_chunks.append(combined)
                     all_target_list.append(target)
                     total_samples += 1
@@ -2603,6 +2641,7 @@ class TimeSeriesAIService:
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
                         "regime_features": regime_feat_names,
                         "regime_enabled": regime_available,
+                        "label_features": label_feat_names,
                         "total_features": len(combined_feature_names),
                         "num_classes": num_classes,
                         "profile": profile,
@@ -2945,7 +2984,49 @@ class TimeSeriesAIService:
                                     combined.update(mtf_feats)
                         except Exception as e:
                             logger.debug(f"MTF features for prediction failed: {e}")
-                    
+
+                    # Layer 3: Add categorical label features (Bellafiore Setup
+                    # one-hot + multi-index regime one-hot) if the model
+                    # expects them. These are CHEAP — purely lookups against
+                    # already-cached classifier results.
+                    try:
+                        from .composite_label_features import (
+                            ALL_LABEL_FEATURE_NAMES, build_label_features,
+                        )
+                        model_expects_labels = any(
+                            f in model._feature_names for f in ALL_LABEL_FEATURE_NAMES
+                        )
+                        if model_expects_labels:
+                            # Read cached labels populated by
+                            # `_apply_setup_context` upstream in the scanner
+                            # path. Prediction is sync; the classifiers'
+                            # async classify() already ran when the alert
+                            # was generated, so the cache is hot.
+                            from services.market_setup_classifier import (
+                                get_market_setup_classifier, MarketSetup,
+                            )
+                            from services.multi_index_regime_classifier import (
+                                get_multi_index_regime_classifier, MultiIndexRegime,
+                            )
+                            setup_label = MarketSetup.NEUTRAL
+                            regime_label = MultiIndexRegime.UNKNOWN
+                            try:
+                                cached = get_market_setup_classifier()._cache.get(symbol)
+                                if cached is not None:
+                                    setup_label = cached[0].setup
+                                cached_regime = get_multi_index_regime_classifier()._cached_result
+                                if cached_regime is not None:
+                                    regime_label = cached_regime.label
+                            except Exception:
+                                pass
+                            label_feats = build_label_features(
+                                market_setup=setup_label,
+                                multi_index_regime=regime_label,
+                            )
+                            combined.update(label_feats)
+                    except Exception as e:
+                        logger.debug(f"Label features for prediction failed: {e}")
+
                     # Build feature vector matching model's expected feature order
                     feature_vector = np.array([[
                         combined.get(f, 0.0) for f in model._feature_names

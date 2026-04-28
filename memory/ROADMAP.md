@@ -3,9 +3,9 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-29 evening fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 fork)
 
-### 🎯 NEXT-SESSION PLAN — Regime → Setup → Trade pipeline (6-item rollout)
+### 🎯 NEXT-SESSION PLAN — Regime → Setup → Trade pipeline (6-item rollout — STATUS UPDATE)
 
 This is the agreed plan after the operator's architectural question
 about the pipeline `Market Regime (SPY/QQQ/IWM/DIA) → Sector Regime →
@@ -15,18 +15,17 @@ hard gates** (compounding rejection rate would starve the ML pipeline).
 Instead, hard-gate only in 3 places (Time, In-Play, Confidence) and
 encode every other layer as a feature into the per-Trade ML models.
 
-| # | Item | Effort | Impact |
-|---|---|---|---|
-| 1 | **`MultiIndexRegimeClassifier`** — read SPY+QQQ+IWM+DIA, return richer regime tags (incl. divergence/breadth). Stamp on alert metadata. | ~3h | **High** |
-| 2 | **Plumb `market_setup` + new `multi_index_regime` into per-Trade ML feature vector** so the models actually train on them | ~2h | **High** |
-| 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium |
-| 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) |
-| 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high |
-| 6 | **Drop the "regime as hard gate" idea** that earlier-fork ROADMAP suggested (`STRATEGY_REGIME_PREFERENCES` enforcement). Replace with feature-based learning per items #1-2. Document the decision. | ~30min | (cleanup) |
+| # | Item | Effort | Impact | Status |
+|---|---|---|---|---|
+| 1 | **`MultiIndexRegimeClassifier`** — read SPY+QQQ+IWM+DIA, return richer regime tags (incl. divergence/breadth). Stamp on alert metadata. | ~3h | **High** | ✅ **SHIPPED 2026-04-30** |
+| 2 | **Plumb `market_setup` + new `multi_index_regime` into per-Trade ML feature vector** so the models actually train on them | ~2h | **High** | ✅ **SHIPPED 2026-04-30** |
+| 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium | 🔴 next |
+| 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) | 🔴 next |
+| 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high | 🟡 parallel quick-win |
+| 6 | **Drop the "regime as hard gate" idea** that earlier-fork ROADMAP suggested (`STRATEGY_REGIME_PREFERENCES` enforcement). Replace with feature-based learning per items #1-2. Document the decision. | ~30min | (cleanup) | ✅ **SHIPPED 2026-04-30** |
 
-**Recommended commit ordering**: #1 → #2 ship together. Then #5 as a
-parallel quick win. Then #3 → #4 ship together. #6 is documentation
-cleanup that can land with #1.
+**Recommended commit ordering**: ~~#1 → #2 ship together~~ ✅ done.
+Next: **#5 as quick parallel win**, then **#3 → #4 ship together**.
 
 **Hard gates after this work:**
 1. **Time-window** (`_is_setup_valid_now`) — opening_drive can't fire midday
@@ -35,15 +34,35 @@ cleanup that can land with #1.
 
 Everything else (regime, sector, setup, intraday tape) → features.
 
-### 🧪 What to verify after #1 + #2 ship
-- LiveAlert payload includes `multi_index_regime` (string), `sector_regime`
-  (string), `market_setup` (already there), `is_countertrend` (already there).
-- Per-Trade model retraining picks up the new features. Sample query:
-  `db.setup_type_models.findOne({setup_type: "9_ema_scalp"}).feature_names`
-  should include the new fields.
-- Morning briefing narrative references the multi-index regime
-  ("today SPY is up but IWM is leading — I'm tilting toward IWM-
-  correlated names").
+### 🧪 What to verify after the next retrain on Spark
+After items #1 + #2 shipped (2026-04-30), the next full retrain on the
+DGX should produce setup-specific models whose feature vector grew
+from N → N+15 (7 setup-label one-hots + 8 regime-label one-hots). Run
+the verification suite on Spark:
+```
+PYTHONPATH=backend python -m pytest tests/test_multi_index_regime_classifier.py -v
+```
+Live-side spot checks:
+- `db.timeseries_models.findOne({setup_type:"9_ema_scalp"}).meta.label_features`
+  → should list the 15 new feature names.
+- LiveAlert payloads include both `market_setup` and
+  `multi_index_regime` (curl `/api/scanner/live-alerts`).
+- Morning briefing narrative leads with a 1st-person regime line
+  like "Heading into the open, I'm reading the tape as risk-on broad…"
+  via `GET /api/scanner/setup-landscape?context=morning` →
+  `narrative` field.
+
+### 🟢 Just shipped 2026-04-30 — see CHANGELOG
+- ✅ **Item #1**: `MultiIndexRegimeClassifier` (SPY/QQQ/IWM/DIA → 8
+  regime labels) + 5-min market-wide cache. Stamps
+  `LiveAlert.multi_index_regime`.
+- ✅ **Item #2**: `composite_label_features` module + plumbing into
+  `_train_single_setup_profile` AND `predict_for_setup`. 15 new
+  one-hot features (`setup_label_*`, `regime_label_*`).
+- ✅ **Item #6**: `STRATEGY_REGIME_PREFERENCES` re-documented as
+  metadata-only (not an active hard gate). Architecture notes locked
+  into PRD.md "Pipeline architecture" section.
+- 28 new tests; 79/79 across the related suites still green.
 
 ### 🟢 Just shipped 2026-04-29 evening (3 commits) — see CHANGELOG
 - ✅ **v1**: 9 new detector functions (6 orphans + 3 playbook setups)

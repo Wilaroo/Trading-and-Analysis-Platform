@@ -2,6 +2,141 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (next-session pickup) — Multi-Index Regime Classifier + Categorical Label Features
+
+### Concept
+Closed the architectural loop the operator agreed on at the previous
+fork: the `Market Regime → Sector Regime → Setup → Time → Trade`
+hierarchy is the right *human mental model* but the wrong *runtime
+hard-gate stack* (compounding rejection rate would starve the per-Trade
+ML pipeline of training data). So this session shipped two of the
+three "feature-not-gate" pieces:
+
+  1. **Multi-index regime label** (SPY/QQQ/IWM/DIA) — categorical bin
+     for AI briefings + ML one-hot.
+  2. **Plumbed both the daily Setup label and the multi-index regime
+     label into the per-Trade ML feature vector** so the next retrain
+     learns from them.
+
+The third piece (Sector Regime classifier) is still upcoming — see
+`ROADMAP.md` Step 4 in the next-session plan.
+
+### Shipped
+
+#### 1. `services/multi_index_regime_classifier.py` (NEW)
+- `MultiIndexRegime` enum with 9 buckets (8 active + UNKNOWN):
+  `risk_on_broad`, `risk_on_growth`, `risk_on_smallcap`,
+  `risk_off_broad`, `risk_off_defensive`, `bullish_divergence`,
+  `bearish_divergence`, `mixed`, `unknown`.
+- `MultiIndexRegimeClassifier`:
+  - Reads ~25 daily bars per index (SPY/QQQ/IWM/DIA) from
+    `ib_historical_data` — no extra IB calls.
+  - Computes per-index trend vs 20SMA, 5d momentum, 10d breadth.
+  - Rule-based label assignment that fires **divergences first** (more
+    specific) before falling through to broad / majority / mixed.
+  - 5-minute market-wide cache (the regime is a daily-bar derived
+    label; one classification per scan cycle is enough).
+  - Singleton accessor `get_multi_index_regime_classifier(db=...)`.
+- Helper `derive_regime_label_from_features(regime_feats)` — used at
+  training time so each historical sample gets a categorical label
+  derived from already-loaded numerical regime features (no extra IO).
+- Helper `build_regime_label_features(label)` returns the one-hot dict
+  (`regime_label_<name>` for each active bucket; UNKNOWN → all zeros).
+
+#### 2. `services/ai_modules/composite_label_features.py` (NEW)
+- `SETUP_LABEL_FEATURE_NAMES` (7 one-hots, NEUTRAL is the all-zero baseline).
+- `REGIME_LABEL_FEATURE_NAMES` (8 one-hots, UNKNOWN is the all-zero baseline).
+- `ALL_LABEL_FEATURE_NAMES` (15 total).
+- `build_label_features(market_setup, multi_index_regime)` returns the
+  combined feature dict ready to merge into the model's input vector.
+
+#### 3. Scanner integration (`services/enhanced_scanner.py`)
+- `LiveAlert` gained `multi_index_regime: str = "unknown"` alongside the
+  existing `market_setup`, `is_countertrend`, `out_of_context_warning`,
+  `experimental` fields.
+- `_apply_setup_context` now also calls the multi-index regime
+  classifier and stamps `alert.multi_index_regime`. The regime label is
+  metadata + ML feature only — never modifies `alert.priority`.
+- `STRATEGY_REGIME_PREFERENCES` map kept but explicitly re-documented as
+  metadata-only (not an active hard gate). This closes the "drop hard-
+  gate idea" item from the next-session plan.
+
+#### 4. ML feature plumbing (`services/ai_modules/timeseries_service.py`)
+- **Training side** (`_train_single_setup_profile`):
+  - Imports `ALL_LABEL_FEATURE_NAMES`, `build_label_features`, and the
+    derive-from-features helper.
+  - `combined_feature_names` now includes the 15 label slots.
+  - Per training sample: derives `regime_label` from the already-loaded
+    `regime_feats`. For daily-bar profiles (`bar_size == "1 day"`),
+    also derives `setup_label` from a 30-bar window of `bars` via the
+    new sync helper `MarketSetupClassifier._sync_classify_window`.
+  - Label vector concatenated to base + setup + regime + MTF feature
+    vectors so newly-trained models pick up the labels automatically.
+  - Saves `label_features` to model metadata for traceability.
+- **Prediction side** (`predict_for_setup`):
+  - Gate-checks `model._feature_names` for any of the 15 label feature
+    names; only computes labels when the model expects them (so older
+    models keep working unchanged).
+  - Reads cached classifier results (the alert pipeline calls
+    `_apply_setup_context` upstream, so the cache is hot) — no async/
+    sync mismatch.
+
+#### 5. Briefings (`services/setup_landscape_service.py`)
+- `LandscapeSnapshot` now exposes `multi_index_regime`,
+  `regime_confidence`, `regime_reasoning`.
+- New private `_classify_multi_index_regime` runs the classifier
+  during snapshot generation.
+- New private `_regime_line` renders a 1st-person regime preface for
+  each context (morning / midday / eod / weekend); silent when the
+  regime is unknown so older flows are unaffected.
+- Each non-fallback narrative now leads with a regime line like:
+  `"Heading into the open, I'm seeing a bullish small-cap divergence —
+  IWM leading higher while SPY lags (IWM: +1.5% vs 20SMA)."`
+- `ai_assistant_service.get_coaching_alert` returns the regime fields
+  in the `setup_landscape` payload so the UI can render them
+  separately if it wants.
+
+### Tests
+`backend/tests/test_multi_index_regime_classifier.py` — **28 new tests**
+covering one-hot helper edge cases, classifier label assignment for
+all 8 active labels (synthetic SPY/QQQ/IWM/DIA bars), cache TTL +
+invalidate, the sync derive-from-features helper, scanner integration
+(`LiveAlert.multi_index_regime` + `_apply_setup_context` stamping),
+training & prediction source-level guards, briefings narrative
+integration (regime line included when known, silent on unknown,
+non-empty for every active label).
+
+Total related-suite count after this session:
+- `test_multi_index_regime_classifier.py`: 28 ✅
+- `test_market_setup_matrix.py`: 21 ✅
+- `test_orphan_setup_detectors.py`: 17 ✅
+- `test_setup_landscape_service.py`: 13 ✅
+- = **79/79 passing**
+
+### Architectural decision documented
+PRD.md "Pipeline architecture" section already locked in the
+hard-gate-only-at-Time/InPlay/Confidence rule. This session adds two
+matching artifacts (#3 + #5 above) and stops short of any code path
+that could rebroadcast a regime/setup hard gate.
+
+### Files touched
+- NEW `backend/services/multi_index_regime_classifier.py`
+- NEW `backend/services/ai_modules/composite_label_features.py`
+- NEW `backend/tests/test_multi_index_regime_classifier.py`
+- `backend/services/enhanced_scanner.py` (LiveAlert field +
+  `_apply_setup_context` regime stamping +
+  `STRATEGY_REGIME_PREFERENCES` doc clarification)
+- `backend/services/market_setup_classifier.py`
+  (`_sync_classify_window` helper)
+- `backend/services/ai_modules/timeseries_service.py` (label features
+  in training + prediction paths)
+- `backend/services/setup_landscape_service.py` (regime line in
+  narrative + extended snapshot dataclass)
+- `backend/services/ai_assistant_service.py` (regime fields in
+  briefing payload)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+
 ## 2026-04-29 (evening, v3) — Setup-landscape briefings + 1st-person voice
 
 ### Concept
