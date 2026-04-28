@@ -205,7 +205,7 @@ export const SentComV5View = ({
   return (
     <div
       data-testid="sentcom-v5-root"
-      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
+      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-y-auto v5-root v5-scroll"
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
@@ -298,7 +298,7 @@ export const SentComV5View = ({
       {/* 2. Main 3-col grid — 20% / 55% / 25% — fills remaining viewport */}
       <div
         data-testid="sentcom-v5-grid"
-        className="grid gap-px bg-zinc-900 flex-1 min-h-0"
+        className="grid gap-px bg-zinc-900 flex-shrink-0 min-h-[800px]"
         style={{ gridTemplateColumns: '20% 55% 25%' }}
       >
         {/* LEFT — Scanner · Live */}
@@ -444,7 +444,7 @@ export const SentComV5View = ({
           space from the main grid. The analytics + audit cards
           render compact one-liner stubs when no qualifying trades
           exist in the lookback window. */}
-      <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto v5-scroll bg-zinc-950">
+      <div className="border-t border-zinc-800 min-h-[400px] flex-shrink-0 bg-zinc-950">
         <div className="grid gap-px bg-zinc-900" style={{ gridTemplateColumns: '50% 25% 25%' }}>
           <div className="bg-zinc-950">
             <PanelErrorBoundary label="model-health" compact>

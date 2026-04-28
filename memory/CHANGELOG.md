@@ -2,6 +2,98 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-2) — V5 layout vertical expansion + audit findings
+
+### Layout fix shipped
+`SentComV5View.jsx`:
+- Root container `overflow-hidden` → `overflow-y-auto v5-scroll` (page now scrolls)
+- Main 3-column grid `flex-1 min-h-0` → `min-h-[800px] flex-shrink-0` (gives panes real vertical room)
+- Bottom drawer `max-h-[22vh] overflow-y-auto` → `min-h-[400px] flex-shrink-0`
+  (Model Health / Smart Levels / AI Audit cards no longer fight for space)
+
+Total page now expands beyond viewport height with natural scroll —
+operator can scroll to see every panel at proper proportions.
+
+### Audit findings (no code changes — diagnostics for next session)
+
+**Account equity = `$—`** — root cause confirmed:
+`/api/ib/account/summary` returns `connected: false, net_liquidation: 0`
+even though pusher is healthy. The pusher is pushing quotes + positions
+but NOT account snapshot data, so the bot status's `account_equity`
+field stays None. Frontend renders the empty pill as `$—`. Fix
+requires either (a) Windows pusher to also push account data, or (b)
+backend to fetch account on RPC call. Parked for next session.
+
+**Scanner producing too few ideas (3 alerts, all RS_laggard, after
+20 min open)** — likely root cause: most setup detectors gate on
+N-bars-since-open or minimum volume profiles that don't develop in
+the first 20 minutes. RS detectors fire fastest because they only
+need a price comparison. Need to log per-detector firing/skip counts
+to confirm. Parked.
+
+**Unified stream too quiet (2 messages)** — needs investigation of the
+event publisher pipeline. Currently the only events landing are scan
+hits; bot evaluations / fills / EOD events likely aren't being fed
+into the same stream collection. Parked.
+
+**`/api/scanner/strategy-mix` returns `total=0`** — endpoint queries
+`db["live_alerts"]` collection (Mongo persisted) while
+`/api/live-scanner/alerts` returns from in-memory `_scanner` state.
+Two probable causes:
+  1. `_save_alert_to_db` may not be writing all alerts (only critical/high?)
+  2. The Mongo collection may have different field names for the
+     `created_at` sort key
+DGX-side query needed: `db.live_alerts.count_documents({})`.
+
+**SPY missing % change in top-movers strip** — likely a backfill gap
+for SPY's prev-close. Top-movers calls `/api/live/briefing-snapshot`
+which reads `prev_close` from `ib_historical_data.1 day` bars. If
+SPY's most recent daily bar wasn't included in the briefing window,
+`change_pct` returns null. Auto-resolves once SPY backfill is fresh.
+
+### SentCom Intelligence / promotion / live-vs-paper pipeline audit
+
+**Strategy phases: ALL 44 strategies in `live` phase**
+- `StrategyPromotionService._paper_account_mode = True` (default,
+  hardcoded line 180) means *every* strategy is auto-flipped to LIVE
+  because the IB account is paper. SIMULATION → PAPER → LIVE staging
+  is essentially bypassed.
+- This is *intentional* per the comment in code, but means the
+  promotion-rate dashboard is meaningless on this account
+  (validation_summary shows 0 promoted in all windows).
+- **Implication**: operator gets no validation gates between
+  simulation and live. Every newly-trained strategy goes straight
+  to LIVE on paper money. Risk if/when account flips to real.
+
+**Validation summary**: 0 promoted, 0 rejected, 0 records over 24h,
+7d, 30d. Either:
+  - Training pipeline isn't running on a schedule
+  - Or it runs but doesn't trigger validation
+  - Or validation runs but skips logging because of `_paper_account_mode`
+
+**TimeSeries model status** (cloud preview):
+  - `trained: false`
+  - `version: v0.0.0`
+  - `accuracy: 0.0`, all metrics 0
+  Cloud preview has no IB data, so this is expected here. **On DGX,
+  operator must verify the model is actually trained.**
+
+**Model Health Card** showed `35 healthy · 4 mode C · 5 missing`.
+The 5 missing models are setup-specific gradient boosting models
+that haven't been trained yet for those setups. Need a
+`/api/ai-training/setup-coverage` style endpoint to identify which
+5 are missing.
+
+### Next-session task list (in priority order)
+1. Account equity wiring — pusher push account snapshot OR backend
+   RPC fetch
+2. Scanner per-detector firing counts diagnostic + adjustment
+3. Unified stream event publisher audit
+4. Strategy-mix Mongo persistence verification
+5. SentCom Intelligence audit Phase 2: identify 5 missing models,
+   verify training cron, decide on `_paper_account_mode` policy
+   (keep auto-promote OR enforce gates even on paper)
+
 ## 2026-04-29 (afternoon) — Risk-caps unification (Option B)
 
 ### Why
