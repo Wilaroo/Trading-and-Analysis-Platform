@@ -3331,6 +3331,58 @@ def main():
                              "Symbols are hash-distributed across instances.")
     
     args = parser.parse_args()
+
+    # Symbol selection — three sources, in priority order:
+    #   1. `IB_PUSHER_L1_SYMBOLS` env var — explicit override (comma sep)
+    #      e.g. IB_PUSHER_L1_SYMBOLS="SPY,QQQ,NVDA,..."
+    #   2. `IB_PUSHER_L1_AUTO_TOP_N` env var — fetch the recommended L1
+    #      list from the cloud backend (top-N by ADV + always-on ETFs).
+    #      Set to e.g. "60" to enable; pusher hits
+    #      /api/backfill/pusher-l1-recommendations and adopts the result.
+    #   3. `--symbols` CLI arg — backwards-compatible default.
+    #
+    # Always capped at 80 to leave headroom under IB Gateway's 100-line
+    # ceiling for the dynamic L2 routing path.
+    L1_HARD_CAP = 80
+    env_symbols = os.environ.get("IB_PUSHER_L1_SYMBOLS", "").strip()
+    auto_top_n = os.environ.get("IB_PUSHER_L1_AUTO_TOP_N", "").strip()
+    resolved_symbols = list(args.symbols)
+    if env_symbols:
+        parsed = [s.strip().upper() for s in env_symbols.split(",") if s.strip()]
+        if parsed:
+            resolved_symbols = parsed[:L1_HARD_CAP]
+            print(f"  [L1] Using IB_PUSHER_L1_SYMBOLS env var "
+                  f"({len(resolved_symbols)} symbols)")
+    elif auto_top_n.isdigit() and int(auto_top_n) > 0:
+        try:
+            import requests as _req  # noqa: WPS433 (local import to avoid hard dep)
+            n = min(int(auto_top_n), L1_HARD_CAP)
+            url = (
+                args.cloud_url.rstrip("/")
+                + f"/api/backfill/pusher-l1-recommendations"
+                + f"?top_n={n}&max_total={L1_HARD_CAP}"
+            )
+            r = _req.get(url, timeout=10)
+            if r.ok:
+                payload = r.json() or {}
+                fetched = payload.get("symbols") or []
+                if fetched:
+                    resolved_symbols = [
+                        str(s).upper().strip() for s in fetched if s
+                    ][:L1_HARD_CAP]
+                    print(f"  [L1] Auto-fetched {len(resolved_symbols)} symbols "
+                          f"from {url}")
+                else:
+                    print(f"  [L1] Auto-fetch returned empty list — "
+                          f"falling back to --symbols")
+            else:
+                print(f"  [L1] Auto-fetch HTTP {r.status_code} — "
+                      f"falling back to --symbols")
+        except Exception as e:
+            print(f"  [L1] Auto-fetch failed: {e} — "
+                  f"falling back to --symbols")
+
+    args.symbols = resolved_symbols
     
     print("=" * 60)
     print("  IB Data Pusher - LIVE TRADING MODE")

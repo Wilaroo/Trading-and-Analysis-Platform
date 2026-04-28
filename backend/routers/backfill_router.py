@@ -13,11 +13,12 @@ FreshnessInspector / Health Dashboard) and by any pre-train automation.
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from services.backfill_readiness_service import compute_readiness
 from services.ib_historical_collector import get_ib_collector
 from services.symbol_universe import (
+    get_pusher_l1_recommendations,
     get_universe,
     get_universe_stats,
     reset_unqualifiable,
@@ -127,3 +128,39 @@ async def backfill_universe_reset(symbol: str):
     except Exception as e:
         logger.error(f"backfill/universe/reset-unqualifiable failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pusher-l1-recommendations")
+async def backfill_pusher_l1_recommendations(
+    top_n: int = Query(60, ge=1, le=100,
+                       description="Top-N symbols by avg_dollar_volume "
+                                   "to pin into the L1 list."),
+    max_total: int = Query(80, ge=1, le=100,
+                           description="Hard cap on the returned list "
+                                       "(IB Gateway paper has a 100-line "
+                                       "ceiling — keep ≤80 to leave "
+                                       "headroom for dynamic L2 routing)."),
+):
+    """Recommended Level-1 subscription list for the IB pusher.
+
+    The pusher reads this on startup (when `IB_PUSHER_L1_AUTO_TOP_N` env
+    var is set) to decide which symbols to stream live. Symbols off this
+    list still scan against the Mongo `ib_historical_data` cache via the
+    tiered scanner — they just won't have sub-second freshness.
+
+    See afternoon-7 RPC gate in `HybridDataService.fetch_latest_session_bars`
+    — only symbols on the pusher's active subs list go through the live
+    RPC path.
+    """
+    collector = get_ib_collector()
+    db = collector._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+    rec = await asyncio.to_thread(
+        get_pusher_l1_recommendations, db,
+        top_n=top_n, max_total=max_total,
+    )
+    if not rec.get("success"):
+        raise HTTPException(status_code=500, detail=rec.get("error") or "failed")
+    return rec
+

@@ -2,6 +2,105 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-8) — L1 subscription expansion (env-var-driven)
+
+Operator approved (option A): expand pusher's hardcoded 14 quote-subs
+to up to 80, giving live freshness to a wider intraday tier without
+requiring code changes on Windows once shipped.
+
+### Why this is safe NOW
+The afternoon-7 RPC gate already short-circuits cache-misses for
+symbols not on the pusher's subs list, so anything off the L1 list
+falls back to Mongo. Expanding L1 from 14 → 80 just promotes 66 more
+symbols from "Mongo-stale freshness" to "live RPC freshness" with no
+other code changes.
+
+IB Gateway paper has a 100-line streaming ceiling. We cap the L1 list
+at 80 to leave 20 slots for the dynamic L2 routing (top-3 EVAL setups)
+already in place.
+
+### Backend
+- New helper `services.symbol_universe.get_pusher_l1_recommendations`:
+  pulls the top-N symbols by `avg_dollar_volume` from `symbol_adv_cache`
+  (excluding `unqualifiable=True`), composes them with an always-on
+  ETF reference set (SPY, QQQ, IWM, DIA, VIX, 11 SPDR sectors, size +
+  style + volatility/credit references), honors operator-pinned
+  `extra_priority` overrides, and caps at `max_total`.
+- New endpoint `GET /api/backfill/pusher-l1-recommendations?top_n=60&max_total=80`
+  surfaces the recommendation. Read by the pusher on startup.
+
+### Pusher
+- `documents/scripts/ib_data_pusher.py::main` now resolves symbols
+  from three sources, in priority:
+  1. **`IB_PUSHER_L1_SYMBOLS`** env var — explicit list, comma-
+     separated. e.g. `"SPY,QQQ,NVDA,..."`. Use this when you want
+     full control.
+  2. **`IB_PUSHER_L1_AUTO_TOP_N`** env var — set to a positive int
+     (e.g. `"60"`) to fetch the recommendation list from the cloud
+     backend. Pusher hits `/api/backfill/pusher-l1-recommendations`
+     and adopts the result.
+  3. **`--symbols` CLI arg** — backwards-compatible default
+     (the old hardcoded 14).
+- Fail-safe: any auto-fetch failure logs cleanly and falls back to
+  the CLI default. No silent breakage.
+- Hard cap: 80 regardless of source (safety net under IB's 100-line
+  ceiling).
+
+### What this changes operationally
+
+| Before | After (with `IB_PUSHER_L1_AUTO_TOP_N=60`) |
+|---|---|
+| 14 live-RPC symbols | ~80 live-RPC symbols (60 by ADV + ~20 ETF context tape) |
+| 14 → tick_to_bar_persister Mongo bars | 80 → tick_to_bar_persister Mongo bars |
+| ~200-400 "intraday tier" symbols on stale Mongo | ~120-320 "intraday tier" symbols on stale Mongo |
+| Tier 2/3 unchanged | Tier 2/3 unchanged |
+
+The scanner's tiered architecture is unchanged. Tier 1 just has more
+"truly live" symbols and fewer "stale-by-classification" ones.
+
+### Verification
+- 9 new tests in `tests/test_pusher_l1_recommendations.py`:
+  top-N driver, ETF inclusion, unqualifiable exclusion, priority pin
+  override, max_total cap, dedup across sources, empty-DB graceful,
+  None-db safe, router endpoint shape.
+- 172/172 tests passing across all related suites.
+- Lint clean.
+- Live curl on cloud preview returns 24 symbols (only ETFs since
+  empty cache). On DGX with the full ~9,400 symbol_adv_cache, will
+  return the full 80.
+
+### Operator action on Windows
+Two options after `git pull`:
+1. **Auto** (recommended): set `IB_PUSHER_L1_AUTO_TOP_N=60` in the
+   pusher launch env. Pusher fetches the recommended list from DGX
+   on every restart — list automatically follows whatever the
+   `symbol_adv_cache` ranks highest each night.
+2. **Manual**: set `IB_PUSHER_L1_SYMBOLS="SPY,QQQ,IWM,...,NVDA,..."`
+   to a fixed list. Useful if you want stability across restarts
+   regardless of cache changes.
+
+Then restart `ib_data_pusher.py`. Pusher logs will show:
+```
+  [L1] Auto-fetched 80 symbols from http://192.168.50.2:8001/...
+```
+or
+```
+  [L1] Using IB_PUSHER_L1_SYMBOLS env var (XX symbols)
+```
+
+### Next: option C (dynamic heat-based promotion)
+Once the operator confirms 80-symbol L1 is healthy (no IB pacing errors,
+RPC latency stays sane, scanner gets quieter only on truly slow tape):
+- Add a `/rpc/replace-l1` endpoint to the pusher (mirrors L2 routing)
+- DGX backend tracks scanner "heat" (recently-evaluated + alert-firing
+  symbols) and rotates the pusher's 80 slots every ~10 min to follow
+  the heat
+- Symbols off the heat list roll out, symbols catching scanner
+  attention roll in
+- Prevents the "always-stale tail of Tier 1" problem permanently
+
+
+
 ## 2026-04-29 (afternoon-7) — Pusher threading bug fix + un-subscribed RPC gate + tiered scanner doc
 
 Operator's post-restart screenshot revealed two real bugs masked by

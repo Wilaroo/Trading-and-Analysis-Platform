@@ -194,6 +194,117 @@ def get_symbol_tier(db, symbol: str) -> Optional[str]:
     return classify_tier(doc.get("avg_dollar_volume"))
 
 
+def get_pusher_l1_recommendations(
+    db,
+    *,
+    top_n: int = 60,
+    extra_etfs: Optional[List[str]] = None,
+    extra_priority: Optional[List[str]] = None,
+    max_total: int = 80,
+) -> Dict[str, Any]:
+    """Recommend which symbols the IB pusher should subscribe to as
+    Level-1 quote streams.
+
+    Why: IB Gateway (paper) caps streaming Level-1 lines at 100. Today
+    the pusher subscribes to a hardcoded 14 symbols, which leaves
+    intraday-tier symbols (≥$50M ADV) running on minute-stale Mongo
+    bars instead of live ticks. This helper picks the top-N symbols
+    by `avg_dollar_volume` from `symbol_adv_cache`, plus a small set
+    of always-on sector / size / volatility ETFs, and returns a
+    deduped + capped list.
+
+    Args:
+        db: Mongo handle.
+        top_n: how many ADV-ranked symbols to include (default 60).
+        extra_etfs: explicit ETF list. Defaults to the 11 SPDR sector
+            ETFs + size + style + key volatility/credit references.
+        extra_priority: caller-pinned symbols (always included if
+            present, e.g. operator's most-evaluated tickers from
+            sentcom_thoughts).
+        max_total: hard cap on the returned list size (default 80).
+            Leaves headroom under IB's 100-line ceiling for the
+            dynamic L2 routing path (top-3 EVAL setups).
+
+    Returns:
+        {
+          "success": True,
+          "symbols": [...],            # the recommended L1 list
+          "count": int,
+          "top_n_by_adv": [...],       # the ADV-ranked subset
+          "etfs_included": [...],      # the always-on ETFs
+          "priority_included": [...],  # caller-pinned overrides
+          "max_total": int,
+          "iso_ts": str,
+        }
+    """
+    if db is None:
+        return {"success": False, "error": "db_unavailable", "symbols": []}
+
+    if extra_etfs is None:
+        # Always-on ETF reference set — sector rotation + size/style +
+        # volatility/credit. These are the "context tape" for the bot's
+        # macro reads, regardless of where the operator's universe
+        # happens to rank them on dollar volume.
+        extra_etfs = [
+            # Indices & key ETFs
+            "SPY", "QQQ", "IWM", "DIA", "VIX",
+            # SPDR sector ETFs (11)
+            "XLK", "XLE", "XLF", "XLV", "XLI", "XLP",
+            "XLY", "XLU", "XLB", "XLRE", "XLC",
+            # Size / style
+            "VTV", "VUG", "MDY", "SLY",
+            # Volatility / credit
+            "TLT", "HYG", "GLD", "USO",
+        ]
+
+    extra_priority = extra_priority or []
+
+    # Pull top-N by avg_dollar_volume (qualified + non-unqualifiable only)
+    top_by_adv: List[str] = []
+    try:
+        cursor = (
+            db["symbol_adv_cache"]
+            .find(
+                {"unqualifiable": {"$ne": True},
+                 "avg_dollar_volume": {"$gt": 0}},
+                {"_id": 0, "symbol": 1, "avg_dollar_volume": 1},
+            )
+            .sort("avg_dollar_volume", -1)
+            .limit(int(top_n))
+        )
+        top_by_adv = [d["symbol"] for d in cursor if d.get("symbol")]
+    except Exception as e:
+        return {"success": False, "error": str(e)[:120], "symbols": []}
+
+    # Compose: priority pins → top-by-ADV → ETFs (in that order)
+    seen: Set[str] = set()
+    out: List[str] = []
+    for src in (extra_priority, top_by_adv, extra_etfs):
+        for s in src:
+            if not s:
+                continue
+            su = str(s).upper().strip()
+            if su in seen:
+                continue
+            seen.add(su)
+            out.append(su)
+            if len(out) >= max_total:
+                break
+        if len(out) >= max_total:
+            break
+
+    return {
+        "success": True,
+        "symbols": out,
+        "count": len(out),
+        "top_n_by_adv": top_by_adv,
+        "etfs_included": [e for e in extra_etfs if e in seen],
+        "priority_included": [p.upper() for p in extra_priority if p.upper() in seen],
+        "max_total": max_total,
+        "iso_ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def get_universe_stats(db) -> Dict[str, Any]:
     """Diagnostic snapshot — counts per tier + unqualifiable counts +
     per-bar-size training-universe projection.
