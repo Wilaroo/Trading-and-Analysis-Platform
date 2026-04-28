@@ -2,6 +2,54 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (later) — Shadow tracker Mongo historical price fallback
+
+### Why
+After shipping drain mode earlier today, operator ran a single drain
+on DGX and saw `updated: 0` despite 50,000 decisions checked. Root
+cause surfaced via live diagnostic: `_get_current_price(symbol)` only
+asked the IB pusher for a quote, but the pusher subscribes to ~3-14
+hot symbols at any moment. The shadow backlog spans every symbol the
+bot has ever evaluated (~thousands), so `_get_quote` returned `None`
+for the long tail and `update_outcome` got skipped.
+
+### Fix
+`services/ai_modules/shadow_tracker.py` — `_get_current_price` now
+tries 3 sources in order:
+  1. IB pusher live quote (preferred, ~14 hot symbols)
+  2. **NEW** — `ib_historical_data` most-recent close (covers ~9,400
+     backfilled symbols). Prefers daily bars; falls through to any
+     bar_size if no daily exists. Uses the
+     `symbol_1_bar_size_1_date_-1` compound index shipped earlier
+     today, so per-lookup is 1-5ms.
+  3. Legacy Alpaca path (dead post Phase 4).
+
+For backlog outcomes (decisions ≥1h old), the most recent close is a
+better proxy than a real-time tick anyway — captures actual price
+evolution since the decision was logged.
+
+### Regression coverage (7 new tests, 15 total in the file)
+`tests/test_shadow_tracker_drain.py` adds:
+- `_get_historical_close` prefers daily bars
+- Falls back to any bar_size when no daily
+- Returns None when symbol absent / DB unwired
+- `_get_current_price` uses Mongo fallback when IB quote missing
+- IB quote takes precedence over Mongo when fresh
+- **End-to-end**: drain of 50 backlogged decisions for unsubscribed
+  symbols now updates all 50 (vs 0 pre-fix). Replicates operator's
+  exact production scenario.
+
+### Operator action on DGX after pull + restart
+```
+curl -s -X POST 'http://localhost:8001/api/ai-modules/shadow/track-outcomes?drain=true' \
+  | python3 -m json.tool
+curl -s http://localhost:8001/api/ai-modules/shadow/stats \
+  | python3 -m json.tool
+```
+Expected: `updated` jumps from 0 → ~6,700 (or however many
+backlogged decisions have a backfilled symbol). `outcomes_pending`
+drops from 6,715 to near-zero. `wins` + `win_rate` repopulate.
+
 ## 2026-04-29 — Shadow tracker drain mode + Liquidity-aware stop trail (Q1)
 
 Two ROADMAP P1 items shipped in one session. 19/19 new tests passing.

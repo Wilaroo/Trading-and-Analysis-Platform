@@ -215,3 +215,172 @@ async def test_stats_cache_invalidated_after_drain():
     # Drain must have reset _stats_cache_time so the next get_stats
     # call won't return the stale value.
     assert tracker._stats_cache_time == 0
+
+
+# ───────────────────────── Mongo historical fallback ──────────────────────
+
+
+def _make_db_with_historical(symbol_prices: dict, prefer_daily: bool = True):
+    """
+    Build a mock DB whose `ib_historical_data` collection serves the
+    most-recent close for each symbol from `symbol_prices`.
+
+    `symbol_prices` maps symbol → {"daily": float, "any": float}.
+    Querying with `bar_size: '1 day'` returns the daily price; querying
+    without bar_size returns the "any" price.
+    """
+    db = MagicMock()
+    col = MagicMock()
+    db.__getitem__.side_effect = lambda key: col if key == "ib_historical_data" else MagicMock()
+
+    def _find_one(query, **kwargs):
+        symbol = query.get("symbol")
+        prices = symbol_prices.get(symbol)
+        if not prices:
+            return None
+        if query.get("bar_size") == "1 day":
+            close = prices.get("daily")
+        else:
+            close = prices.get("any") or prices.get("daily")
+        if close is None:
+            return None
+        return {"close": close}
+
+    col.find_one.side_effect = _find_one
+    return db, col
+
+
+def test_get_historical_close_prefers_daily():
+    """`_get_historical_close` returns the daily close when available."""
+    tracker = ShadowTracker()
+    db, col = _make_db_with_historical({
+        "AAPL": {"daily": 175.50, "any": 175.30},
+    })
+    tracker._db = db
+
+    price = tracker._get_historical_close("AAPL")
+    assert price == 175.50
+    # First call must have asked for daily explicitly.
+    first_call_query = col.find_one.call_args_list[0][0][0]
+    assert first_call_query == {"symbol": "AAPL", "bar_size": "1 day"}
+
+
+def test_get_historical_close_falls_back_to_any_bar_size():
+    """If no daily bar exists, falls through to any-bar-size lookup."""
+    tracker = ShadowTracker()
+    db, col = _make_db_with_historical({
+        "PENNY": {"daily": None, "any": 0.42},
+    })
+    tracker._db = db
+
+    price = tracker._get_historical_close("PENNY")
+    assert price == 0.42
+    # Two calls: first daily (returned None), then any-bar-size.
+    assert col.find_one.call_count == 2
+
+
+def test_get_historical_close_returns_none_when_no_data():
+    """Symbol without any historical data returns None cleanly."""
+    tracker = ShadowTracker()
+    db, _ = _make_db_with_historical({})
+    tracker._db = db
+
+    assert tracker._get_historical_close("DELISTED") is None
+
+
+def test_get_historical_close_returns_none_when_db_unset():
+    """`_db=None` returns None without raising — caller can fall through."""
+    tracker = ShadowTracker()
+    # No set_db call.
+    assert tracker._get_historical_close("AAPL") is None
+
+
+@pytest.mark.asyncio
+async def test_get_current_price_uses_mongo_fallback_when_ib_quote_missing():
+    """
+    Drain scenario: pusher returns no quote (symbol not subscribed)
+    but Mongo has historical data → outcome tracker uses Mongo close.
+    This is the fix for the operator's 6,715-deep backlog where IB
+    pusher only covered ~14 hot symbols.
+    """
+    tracker = ShadowTracker()
+
+    # IB provider returns None (symbol not in pusher subscription).
+    ib_provider = MagicMock()
+    ib_provider.get_quote = AsyncMock(return_value=None)
+    tracker.set_ib_data_provider(ib_provider)
+
+    # Mongo has a daily close for AAPL.
+    db, _ = _make_db_with_historical({"AAPL": {"daily": 175.50}})
+    tracker._db = db
+
+    price = await tracker._get_current_price("AAPL")
+    assert price == 175.50  # Mongo fallback kicked in
+
+
+@pytest.mark.asyncio
+async def test_get_current_price_prefers_ib_quote_when_available():
+    """When pusher has a fresh quote, Mongo fallback is NOT consulted
+    (live quote is more accurate than yesterday's close)."""
+    tracker = ShadowTracker()
+
+    ib_provider = MagicMock()
+    ib_provider.get_quote = AsyncMock(return_value={"price": 180.00})
+    tracker.set_ib_data_provider(ib_provider)
+
+    # Mongo would return a stale value, but IB takes precedence.
+    db, col = _make_db_with_historical({"AAPL": {"daily": 175.50}})
+    tracker._db = db
+
+    price = await tracker._get_current_price("AAPL")
+    assert price == 180.00
+    # Mongo collection was never touched.
+    assert col.find_one.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_drain_with_mongo_fallback_actually_updates_outcomes():
+    """End-to-end: 50 backlogged decisions for symbols NOT in the IB
+    pusher subscription should now be tracked via Mongo close.
+
+    Pre-fix on the operator's DGX: 6,715 pending → drain processed
+    50,000 → updated 0. Post-fix: every backlogged symbol with
+    historical data updates.
+    """
+    docs = [_make_pending_doc(i) for i in range(50)]
+    tracker, bucket = _wire_tracker_with_pending(docs)
+
+    # Override IB provider to simulate "symbol not subscribed" — quote
+    # returns None for every call, mimicking the production gap.
+    ib_provider = MagicMock()
+    ib_provider.get_quote = AsyncMock(return_value=None)
+    tracker.set_ib_data_provider(ib_provider)
+
+    # Wire Mongo historical lookup to return a price for AAPL (the
+    # synthetic symbol used by all _make_pending_doc fixtures).
+    db, _ = _make_db_with_historical({"AAPL": {"daily": 175.50}})
+    # Don't overwrite _decisions_col — it's already mocked. Inject the
+    # historical lookup into the existing mock DB.
+    tracker._db = db
+
+    # Re-wire _decisions_col on the new db so the drain still finds
+    # pending docs. Easiest: re-attach the original collection mock.
+    original_col = tracker._decisions_col
+
+    def _getitem(key):
+        if key == "ib_historical_data":
+            mock_col = MagicMock()
+            mock_col.find_one.side_effect = lambda q, **kw: (
+                {"close": 175.50} if q.get("symbol") == "AAPL" else None
+            )
+            return mock_col
+        return original_col
+
+    db.__getitem__.side_effect = _getitem
+
+    result = await tracker.track_pending_outcomes(batch_size=50, max_batches=1)
+
+    # Pre-fix: 0 updated. Post-fix: all 50 updated via Mongo fallback.
+    assert result["updated"] == 50
+    assert result["pending_checked"] == 50
+    assert len(bucket) == 0  # All decisions now have outcomes

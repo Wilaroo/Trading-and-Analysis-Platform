@@ -323,12 +323,23 @@ class ShadowTracker:
         }
         
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for a symbol. Prefers IB pusher quote
-        (post Phase-4); falls back to Alpaca legacy path if IB
-        provider isn't injected."""
-        # 2026-04-28f: IB pusher path — primary source after Phase 4
-        # retired Alpaca. Without this the outcome tracker silently
-        # never updated 6,751 shadow decisions on DGX.
+        """Resolve a price for outcome tracking. Tries 3 sources in order:
+
+          1. IB pusher live quote (preferred, sub-second freshness)
+             — only ~3-14 symbols are subscribed at any moment, so
+             this fails for the long tail.
+          2. Mongo `ib_historical_data` most-recent close (NEW
+             2026-04-29) — the drain backlog has thousands of
+             historical decisions for symbols not in the live
+             subscription. The most recent close in Mongo is a valid
+             "what happened since the decision" proxy and works for
+             every symbol with backfilled data (~9,400). Uses the
+             compound index `symbol_1_bar_size_1_date_-1` shipped same
+             day, so per-symbol lookups are 1-5ms.
+          3. Legacy Alpaca path — dead post Phase 4 unless explicitly
+             re-enabled.
+        """
+        # 1. IB pusher path — primary source for hot symbols.
         if self._ib_data_provider is not None:
             try:
                 quote = await self._ib_data_provider.get_quote(symbol)
@@ -339,7 +350,12 @@ class ShadowTracker:
             except Exception as e:
                 logger.warning(f"Shadow: IB pusher price fetch failed for {symbol}: {e}")
 
-        # Legacy Alpaca path
+        # 2. Mongo historical fallback — works for any backfilled symbol.
+        historical = self._get_historical_close(symbol)
+        if historical:
+            return historical
+
+        # 3. Legacy Alpaca path
         if self._alpaca_service is None:
             return None
         try:
@@ -348,6 +364,36 @@ class ShadowTracker:
                 return quote.get("last_price") or quote.get("close", 0)
         except Exception as e:
             logger.warning(f"Shadow: Could not get price for {symbol}: {e}")
+        return None
+
+    def _get_historical_close(self, symbol: str) -> Optional[float]:
+        """Return the most recent close for `symbol` from
+        `ib_historical_data`. Prefers daily bars (most reliable for
+        backlog outcomes), falls back to any bar_size if no daily is
+        available. Returns None on any error or missing data."""
+        if self._db is None:
+            return None
+        try:
+            # Prefer daily bars — they're the most reliable backstop and
+            # avoid intraday noise on already-stale decisions.
+            doc = self._db["ib_historical_data"].find_one(
+                {"symbol": symbol, "bar_size": "1 day"},
+                sort=[("date", -1)],
+                projection={"_id": 0, "close": 1},
+            )
+            if doc and doc.get("close") and float(doc["close"]) > 0:
+                return float(doc["close"])
+            # Fallback: any bar_size's most recent close. Useful for
+            # symbols backfilled at intraday granularity only.
+            doc = self._db["ib_historical_data"].find_one(
+                {"symbol": symbol},
+                sort=[("date", -1)],
+                projection={"_id": 0, "close": 1},
+            )
+            if doc and doc.get("close") and float(doc["close"]) > 0:
+                return float(doc["close"])
+        except Exception as e:
+            logger.warning(f"Shadow: historical close lookup failed for {symbol}: {e}")
         return None
         
     async def get_decisions(
