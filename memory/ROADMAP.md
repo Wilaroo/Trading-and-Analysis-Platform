@@ -3,7 +3,16 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (handoff to next session — 2026-04-27 EOD)
+## 🔴 Now / Near-term (handoff to next session — 2026-04-29 EOD)
+
+### 🟢 Just shipped this session (2026-04-29) — see CHANGELOG
+- ✅ **Shadow tracker drain mode** — `?drain=true` clears 6,715-deep
+  backlog in one curl; yields to event loop between batches; stats
+  cache busted on drain.
+- ✅ **Liquidity-aware realtime stop trail (Q1)** — new
+  `compute_trailing_stop_snap` + `StopManager.set_db()` so Target 1
+  / Target 2 / trail ticks all anchor to HVN clusters when available
+  (clean fallback to legacy ATR/% trail otherwise). 11 regression tests.
 
 ### 🟠 Operator-prioritized follow-ups (2026-04-28f)
 - **AI Decision Audit Card (V5 dashboard)**
@@ -15,16 +24,6 @@ Open priorities, deferred ideas, and backlog. Move items to
   rubber-stamping the scanner. Pairs with `SmartLevelsAnalyticsCard`
   for full provenance visibility. ~30 min. Endpoint already exists
   via `/api/trading-bot/trades` — just needs a frontend card.
-- **Liquidity-aware realtime stop trail (Q1)**
-  Currently the realtime trail in `stop_manager.py` is purely ATR-based:
-  Target 1 hit → stop moves to entry, Target 2 hit → trailing engages.
-  The new `compute_stop_guard` from `smart_levels_service` only fires
-  at trade ENTRY. Plan: when Target 1 hits and stop is about to move
-  to breakeven, re-call `compute_stop_guard` to snap the stop to the
-  nearest HVN below entry instead of exact entry. Same logic on
-  trailing — snap each trail update to the next-lower HVN cluster
-  rather than a fixed % below price. ~1 hour. Keeps the bot's
-  realtime stop trail liquidity-aware end-to-end.
 - **Mean-reversion timing metric (Q2)**
   No half-life / Hurst exponent calculation anywhere today. The bot
   detects "mean_reversion" as a setup type but can't answer "this

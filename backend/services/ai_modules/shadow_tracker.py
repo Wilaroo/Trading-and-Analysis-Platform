@@ -11,6 +11,7 @@ This is the persistence layer that logs:
 All decisions are logged whether or not they result in actual trades.
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
@@ -256,9 +257,24 @@ class ShadowTracker:
         `max_batches` (default 1) so an operator can drain a backlog
         with a single curl. Old behaviour preserved when called with
         no args.
+
+        2026-04-29 (drain mode): yields to the event loop between
+        batches via `await asyncio.sleep(0)` so a multi-batch drain
+        can't starve other endpoints. `batch_size` clamped to [1,
+        500]; `max_batches` clamped to [1, 1000] (hard safety cap —
+        500 batches × 50 = 25k outcomes per call, more than enough
+        for the operator's 6,715-deep backlog without a runaway).
         """
         if self._decisions_col is None:
             return {"updated": 0, "pending_checked": 0, "batches": 0}
+
+        # Hard safety clamps — never trust raw API params.
+        # Note: explicit None check (not `or 50`) so that 0 clamps up
+        # to 1 instead of silently expanding to the default 50.
+        bs = 50 if batch_size is None else int(batch_size)
+        mb = 1 if max_batches is None else int(max_batches)
+        batch_size = max(1, min(bs, 500))
+        max_batches = max(1, min(mb, 1000))
 
         total_updated = 0
         total_checked = 0
@@ -266,7 +282,7 @@ class ShadowTracker:
         # Find decisions that haven't been tracked yet and are at least 1 hour old
         cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
 
-        for _batch_idx in range(max_batches):
+        for batch_idx in range(max_batches):
             pending = list(self._decisions_col.find({
                 "outcome_tracked": False,
                 "trigger_time": {"$lt": cutoff.isoformat()}
@@ -289,6 +305,16 @@ class ShadowTracker:
                 except Exception as e:
                     logger.warning(f"Shadow: Failed to track outcome for {doc.get('id')}: {e}")
             total_checked += len(pending)
+
+            # Yield to event loop between batches so other endpoints
+            # (e.g. /pusher-health, scanner heartbeat) don't stall
+            # while a 6k-deep drain runs. Skip on the final batch.
+            if batch_idx < max_batches - 1:
+                await asyncio.sleep(0)
+
+        # Bust the cached stats so the next /shadow/stats call reflects the drain.
+        if hasattr(self, "_stats_cache_time"):
+            self._stats_cache_time = 0
 
         return {
             "updated": total_updated,

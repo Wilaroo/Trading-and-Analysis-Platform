@@ -804,6 +804,11 @@ class TradingBotService:
         self._alpaca_service = alpaca_service
         self._trade_executor = trade_executor
         self._db = db
+        # 2026-04-29: liquidity-aware stop trail (Q1) — give the
+        # extracted StopManager DB access so it can call into
+        # smart_levels_service.compute_trailing_stop_snap.
+        if hasattr(self._stop_manager, "set_db"):
+            self._stop_manager.set_db(db)
         logger.info("TradingBotService services configured")
     
     def set_market_regime_engine(self, regime_engine):

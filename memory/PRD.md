@@ -34,6 +34,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `POST /api/ib/push-data` — receive pusher snapshot
 - `GET /api/ib/orders/pending` — pusher polls this
 - `POST /api/ib/orders/claim/{id}`, `POST /api/ib/orders/result` — claim/complete hooks pusher should use but may not
+- `POST /api/ai-modules/shadow/track-outcomes?drain=true&batch_size=50` — drain shadow-decision backlog (added 2026-04-29). Yields to event loop between batches.
 
 
 ## Key files
@@ -43,6 +44,8 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `frontend/src/components/MorningBriefingModal.jsx` — briefing UI + Flatten button
 - `backend/services/ai_modules/post_training_validator.py` — 9 fail-closed gates
 - `backend/scripts/revalidate_all.py` — Phase 13 revalidation script
+- `backend/services/smart_levels_service.py` — `compute_smart_levels`, `compute_stop_guard`, `compute_target_snap`, `compute_trailing_stop_snap` (added 2026-04-29 — liquidity-aware trail)
+- `backend/services/stop_manager.py` — `set_db(db)` injection enables HVN-anchored breakeven + trail (2026-04-29)
 
 
 ## Hardware runtime notes

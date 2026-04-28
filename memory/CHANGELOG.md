@@ -2,6 +2,95 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 — Shadow tracker drain mode + Liquidity-aware stop trail (Q1)
+
+Two ROADMAP P1 items shipped in one session. 19/19 new tests passing.
+All 39 existing smart_levels + chart_levels tests still green.
+
+### 1. Shadow Tracker drain mode (operator's 6,715-deep backlog)
+- **Why**: operator's DGX had 6,715 shadow decisions sitting in
+  `outcome_tracked: false`. The legacy `POST /api/ai-modules/shadow/track-outcomes`
+  endpoint processed exactly 50 per call → required ~135 manual curls
+  to clear. Service-layer `track_pending_outcomes(batch_size, max_batches)`
+  already supported multi-batch processing (added 2026-04-28f) but the
+  router exposed neither parameter.
+- **Scope**:
+  - `routers/ai_modules.py` — endpoint now accepts `?batch_size=` (50,
+    1-500), `?max_batches=` (1, 1-1000), and `?drain=true` (sets
+    `max_batches=1000` for a single-curl backlog drain).
+  - `services/ai_modules/shadow_tracker.py::track_pending_outcomes`:
+    * Hard safety clamps applied after the API layer (defense in
+      depth — explicit None checks so `batch_size=0` clamps up to 1
+      instead of silently expanding to default 50).
+    * `await asyncio.sleep(0)` between batches so a 1k-batch drain
+      doesn't starve other endpoints (`/pusher-health`, scanner
+      heartbeat, etc.).
+    * Stats cache (30s TTL) busted at end of drain so the next
+      `/shadow/stats` reflects updated outcome counts.
+- **Operator action on DGX after pull**: replace any prior repeated
+  curl loops with a single `curl -X POST "http://localhost:8001/api/ai-modules/shadow/track-outcomes?drain=true"`.
+- **Regression coverage**: `tests/test_shadow_tracker_drain.py` (8 tests)
+  — legacy default, multi-batch, early exit, safety clamps,
+  zero/negative inputs, no-DB safety, event-loop yielding,
+  stats-cache invalidation.
+
+### 2. Liquidity-aware realtime stop trail (Q1 from operator backlog)
+- **Why**: pre-fix realtime trail in `stop_manager.py` was purely
+  ATR-/percent-based. Target 1 hit → stop moves to *exact* entry
+  (vulnerable to wicks). Target 2 hit → trail by fixed 2% of price
+  (ignores liquidity). The new `compute_stop_guard` from
+  `smart_levels_service` only fired at trade entry. Operator wanted
+  the stop manager to be liquidity-aware end-to-end: anchor every
+  ratchet to a meaningful HVN cluster.
+- **New helper** `services/smart_levels_service.compute_trailing_stop_snap`:
+  - Searches a 2%-wide window on the protected side of the trade for
+    supports (long) / resistances (short) above the active min-strength
+    threshold.
+  - LONG → highest support below `current_price` (closest to price =
+    tightest liquidity-anchored trail).
+  - SHORT → lowest resistance above `current_price`.
+  - `new_stop = level_price ± epsilon` (just past the cluster).
+  - Defensive: never loosens an existing stop (`new_stop >= proposed_stop`
+    for longs, ≤ for shorts).
+  - Returns `{stop, snapped, reason, level_kind, level_price,
+    level_strength, original_stop}` — same shape as `compute_stop_guard`
+    so consumers can branch on `snapped` cleanly.
+- **`StopManager` rewired** (`services/stop_manager.py`):
+  - New `set_db(db)` injection; called from
+    `TradingBotService.set_services` so smart-levels has Mongo access.
+  - `_move_stop_to_breakeven` — Target 1 hit: try snap first; if a
+    qualifying HVN sits in range, anchor stop to `HVN - epsilon`
+    instead of exact entry. Records `breakeven_hvn_snap` reason +
+    `breakeven_snap_level: {kind, price, strength}` on the trade for
+    audit.
+  - `_activate_trailing_stop` — Target 2 hit: snap the *initial*
+    trailing stop to nearest HVN below price; falls through to
+    fixed-% trail if no HVN qualifies.
+  - `_update_trail_position` — every trail tick: snap to nearest HVN;
+    fall through to ATR/%-trail when no qualifying level exists.
+  - **Fail-safe**: any exception inside `compute_trailing_stop_snap`
+    is caught + logged at WARNING, and the manager falls back to
+    legacy behaviour. Operator's stops never get stuck because of a
+    smart-levels bug.
+- **Regression coverage**: `tests/test_liquidity_aware_stop_trail.py`
+  (11 tests) — pure-helper tests (highest support pick, weak-level
+  filter, would-loosen guard, short mirror, no-levels fallback,
+  invalid inputs) + StopManager wiring tests (DB-not-wired fallback,
+  snap-when-DB-wired, no-snap-falls-through-to-ATR, snap-trail,
+  exception-swallow).
+
+### Verified live
+- 39/39 existing `smart_levels` + `chart_levels` tests green (no
+  regressions).
+- Curl smoke against the cloud preview returns the new drain payload:
+  ```
+  $ curl -X POST 'http://localhost:8001/api/ai-modules/shadow/track-outcomes?drain=true'
+  {"success":true,"updated":0,"checked":0,"batches":0,
+   "drain":true,"batch_size":50,"max_batches":1000}
+  ```
+- StopManager `set_db()` + `_snap_to_liquidity()` reachable from a
+  freshly imported instance.
+
 ## 2026-04-28c — Chart fixes round 3: ChartPanel root made flex-flex-col (fixes empty chart)
 
 Operator screenshot post-pull showed chart canvas completely empty

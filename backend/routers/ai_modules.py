@@ -698,17 +698,35 @@ async def get_learning_report(
 
 
 @router.post("/shadow/track-outcomes")
-async def track_pending_outcomes():
-    """Trigger outcome tracking for pending decisions"""
+async def track_pending_outcomes(
+    batch_size: int = Query(50, ge=1, le=500, description="Outcomes processed per batch"),
+    max_batches: int = Query(1, ge=1, le=1000, description="Max batches per call (1=legacy)"),
+    drain: bool = Query(False, description="If true, override max_batches to 1000 to drain the entire backlog in one call"),
+):
+    """Trigger outcome tracking for pending decisions.
+
+    Defaults preserve legacy behaviour (1 batch of 50). Pass
+    `?drain=true` (or `?max_batches=N`) to bulk-process a backlog —
+    yields to the event loop between batches so other endpoints stay
+    responsive during the drain.
+    """
     if not _shadow_tracker:
         raise HTTPException(status_code=503, detail="Shadow tracker not initialized")
-    
-    result = await _shadow_tracker.track_pending_outcomes()
-    
+
+    effective_max_batches = 1000 if drain else max_batches
+    result = await _shadow_tracker.track_pending_outcomes(
+        batch_size=batch_size,
+        max_batches=effective_max_batches,
+    )
+
     return {
         "success": True,
         "updated": result.get("updated", 0),
-        "checked": result.get("pending_checked", 0)
+        "checked": result.get("pending_checked", 0),
+        "batches": result.get("batches", 0),
+        "drain": drain,
+        "batch_size": batch_size,
+        "max_batches": effective_max_batches,
     }
 
 

@@ -619,6 +619,129 @@ def compute_stop_guard(
     return {**out_default, "reason": "unknown_direction"}
 
 
+# ─── Trailing-stop snap (liquidity-aware breakeven + trail updates) ──────
+
+# Max distance (as fraction of price) from `current_price` we'll search
+# for a liquidity-anchored stop. Wider than `_STOP_SNAP_BUFFER_PCT`
+# because at trail-time the move is already underway and we want the
+# nearest *meaningful* HVN, not just one within stop-placement
+# walking distance.
+_TRAIL_SNAP_SEARCH_PCT = 0.02   # 2% — covers a typical day's range
+
+
+def compute_trailing_stop_snap(
+    db,
+    symbol: str,
+    bar_size: str,
+    entry: float,
+    current_price: float,
+    proposed_stop: float,
+    direction: str,
+    floor_at_breakeven: bool = True,
+) -> Dict[str, Any]:
+    """Snap a trailing stop to the nearest strong S/R level on the
+    *protected* side of the trade — liquidity-aware replacement for
+    fixed-% trail / breakeven-at-entry behaviour.
+
+    LONG (mirror for SHORT):
+      1. Pull supports BELOW `current_price` whose strength meets the
+         active min threshold and that sit within
+         `_TRAIL_SNAP_SEARCH_PCT` below `current_price`.
+      2. Take the *highest* such support (closest to price → tightest
+         trail backed by real liquidity).
+      3. `new_stop = support_price - epsilon` (just past the cluster).
+      4. Constraints:
+         - `new_stop >= proposed_stop` (only ratchet UP, never give back)
+         - if `floor_at_breakeven`, `new_stop >= entry` is NOT enforced;
+           the operator's spec calls for snapping *below* entry to the
+           HVN. But we still floor at `proposed_stop` so we never
+           regress mid-trade.
+         - `new_stop < current_price - epsilon` (defensive — never
+           place stop above the price it's protecting).
+
+    Always returns a well-formed dict; defaults to
+    `{stop: proposed_stop, snapped: False, reason: ...}` when no
+    suitable level is found.
+    """
+    out_default = {
+        "stop": float(proposed_stop),
+        "snapped": False,
+        "reason": "no_levels_in_range",
+        "original_stop": float(proposed_stop),
+    }
+
+    if not entry or not current_price or not proposed_stop:
+        return {**out_default, "reason": "invalid_inputs"}
+
+    # Accept either the historical-collector bar_size string ("5 mins")
+    # or the frontend timeframe code ("5min").
+    tf = _BAR_SIZE_TO_TF.get(bar_size, bar_size if bar_size in _BAR_SIZE else "5min")
+    levels = compute_smart_levels(db, symbol, tf)
+    if levels.get("error"):
+        return {**out_default, "reason": "no_levels"}
+
+    direction_norm = (direction or "").lower()
+    epsilon = max(0.01, float(current_price) * 0.0005)
+    search_floor = float(current_price) * (1 - _TRAIL_SNAP_SEARCH_PCT)
+    search_ceiling = float(current_price) * (1 + _TRAIL_SNAP_SEARCH_PCT)
+    active_min_strength = _get_active_thresholds(db)["stop_min_level_strength"]
+
+    if direction_norm in {"long", "buy", "up"}:
+        supports = levels.get("support") or []
+        # Levels strictly below `current_price` and within the search
+        # window. Strength gate keeps noise pivots out.
+        candidates = [
+            s for s in supports
+            if s.get("strength", 0) >= active_min_strength
+            and search_floor <= s["price"] < (current_price - epsilon)
+        ]
+        if not candidates:
+            return out_default
+        # Highest support below price = tightest trail backed by liquidity.
+        target = max(candidates, key=lambda s: s["price"])
+        new_stop = round(target["price"] - epsilon, 4)
+        if new_stop < proposed_stop:
+            # Don't loosen — only ratchet up.
+            return {**out_default, "reason": "would_loosen_stop"}
+        return {
+            "stop": new_stop,
+            "snapped": True,
+            "reason": "snapped_to_hvn_below",
+            "level_kind": target["kind"],
+            "level_price": target["price"],
+            "level_strength": target.get("strength"),
+            "original_stop": float(proposed_stop),
+        }
+
+    if direction_norm in {"short", "sell", "down"}:
+        resistances = levels.get("resistance") or []
+        candidates = [
+            r for r in resistances
+            if r.get("strength", 0) >= active_min_strength
+            and (current_price + epsilon) < r["price"] <= search_ceiling
+        ]
+        if not candidates:
+            return out_default
+        # Lowest resistance above price = tightest trail backed by liquidity.
+        target = min(candidates, key=lambda r: r["price"])
+        new_stop = round(target["price"] + epsilon, 4)
+        if new_stop > proposed_stop:
+            # For shorts, "ratchet" means stops move DOWN (closer to
+            # entry from above). Reject moves that would loosen.
+            return {**out_default, "reason": "would_loosen_stop"}
+        return {
+            "stop": new_stop,
+            "snapped": True,
+            "reason": "snapped_to_hvn_above",
+            "level_kind": target["kind"],
+            "level_price": target["price"],
+            "level_strength": target.get("strength"),
+            "original_stop": float(proposed_stop),
+        }
+
+    return {**out_default, "reason": "unknown_direction"}
+
+
 # ─── Target-snap (mirror of stop_guard, for take-profit prices) ────────────
 
 # How wide of a window around each proposed target do we search for a
