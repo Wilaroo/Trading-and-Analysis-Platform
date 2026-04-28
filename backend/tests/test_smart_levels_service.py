@@ -325,3 +325,130 @@ def test_stop_guard_unknown_direction(monkeypatch):
     )
     assert out["snapped"] is False
     assert out["reason"] == "unknown_direction"
+
+
+# ─── compute_target_snap ───────────────────────────────────────────────
+
+def test_target_snap_pulls_long_target_below_nearby_resistance(monkeypatch):
+    """Long entry 100, target 102.50, R1 at 102.40 → snap to 102.34."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[
+            {"price": 102.40, "kind": "R1", "strength": 0.7},
+        ],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[102.50], direction="long",
+    )
+    assert out["any_snapped"] is True
+    assert out["targets"][0] < 102.40
+    d0 = out["details"][0]
+    assert d0["snapped"] is True and d0["level_kind"] == "R1"
+
+
+def test_target_snap_extends_long_target_when_resistance_just_above(monkeypatch):
+    """Long entry 100, target 102.00, HVN at 102.30 (just above) →
+    extend target to 102.24 (just before HVN)."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[{"price": 102.30, "kind": "HVN", "strength": 0.8}],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[102.00], direction="long",
+    )
+    assert out["any_snapped"] is True
+    # Should be EXTENDED (further from entry, i.e. > 102.00) and just below 102.30
+    assert out["targets"][0] > 102.00
+    assert out["targets"][0] < 102.30
+
+
+def test_target_snap_leaves_targets_alone_when_no_levels_nearby(monkeypatch):
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[{"price": 110.00, "kind": "HVN", "strength": 0.8}],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[101.50, 102.50, 104.00], direction="long",
+    )
+    assert out["any_snapped"] is False
+    assert out["targets"] == [101.50, 102.50, 104.00]
+
+
+def test_target_snap_dedupes_collapsed_targets(monkeypatch):
+    """If two pre-snap targets get pulled onto the same resistance,
+    the second is nudged ε past the first to preserve TP1<TP2 ordering."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[{"price": 102.00, "kind": "R1", "strength": 0.8}],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[102.10, 102.20], direction="long",
+    )
+    assert out["targets"][0] != out["targets"][1]
+    assert out["targets"][0] < out["targets"][1]
+    # Second target gets `deduped` flag in its detail
+    assert out["details"][1].get("deduped") is True
+
+
+def test_target_snap_filters_weak_levels(monkeypatch):
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[{"price": 102.40, "kind": "SWING_HIGH", "strength": 0.30}],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[102.50], direction="long",
+    )
+    assert out["any_snapped"] is False
+
+
+def test_target_snap_caps_excessive_pull(monkeypatch):
+    """Snap shouldn't tighten target by more than 30% of original
+    distance even when a strong level sits in the buffer."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        # Original: entry=100, target=110 (10 distance). Resistance at
+        # 100.50 → would tighten to 100.44, which is -95% (way past
+        # the 30% pull cap). Must refuse.
+        support_levels=[],
+        resistance_levels=[{"price": 100.50, "kind": "HVN", "strength": 0.9}],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[110.0], direction="long",
+    )
+    assert out["any_snapped"] is False
+    assert out["details"][0]["reason"] in {"would_exceed_target_caps", "no_nearby_level"}
+
+
+def test_target_snap_pulls_short_target_above_nearby_support(monkeypatch):
+    """Short entry 100, target 97.50, S1 at 97.60 → snap above 97.60."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[{"price": 97.60, "kind": "S1", "strength": 0.7}],
+        resistance_levels=[],
+    )
+    out = sls.compute_target_snap(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_targets=[97.50], direction="short",
+    )
+    assert out["any_snapped"] is True
+    assert out["targets"][0] > 97.60
+    assert out["details"][0]["level_kind"] == "S1"
+
+
+def test_target_snap_empty_targets_returns_empty():
+    out = sls.compute_target_snap(
+        MagicMock(), "TEST", "5 mins",
+        entry=100.0, proposed_targets=[], direction="long",
+    )
+    assert out == {"targets": [], "details": [], "any_snapped": False}

@@ -248,6 +248,35 @@ class OpportunityEvaluator:
                 else:
                     target_prices = [entry_price - risk * 1.5, entry_price - risk * 2.5, entry_price - risk * 4]
 
+            # ── Target snap (2026-04-28e) ──
+            # For each computed target, snap to just before the nearest
+            # strong S/R cluster on the move side. Catches the "2.5R
+            # target sits 40 cents short of a thick HVN" failure mode.
+            target_snap_meta = None
+            try:
+                sym_for_targets = alert.get("symbol") if isinstance(alert, dict) else None
+                tgt_bs = "5 mins"
+                if isinstance(alert, dict):
+                    tgt_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
+                db_for_targets = getattr(bot, "_db", None) or getattr(bot, "db", None)
+                if sym_for_targets and db_for_targets is not None and target_prices:
+                    from services.smart_levels_service import compute_target_snap
+                    dir_str = "long" if direction == TradeDirection.LONG else "short"
+                    snap = compute_target_snap(
+                        db_for_targets, sym_for_targets.upper(), tgt_bs,
+                        float(entry_price), [float(t) for t in target_prices], dir_str,
+                    )
+                    if snap.get("any_snapped"):
+                        logger.info(
+                            f"Target-snap {sym_for_targets} {dir_str.upper()} "
+                            f"targets {[round(t, 2) for t in target_prices]} → "
+                            f"{[round(t, 2) for t in snap['targets']]}"
+                        )
+                        target_prices = snap["targets"]
+                    target_snap_meta = snap.get("details")
+            except Exception as exc:
+                logger.debug(f"target-snap skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
+
             # Calculate position size with volatility adjustment + Volume-Profile path multiplier (2026-04-28e)
             symbol_for_vp = alert.get("symbol") if isinstance(alert, dict) else None
             if isinstance(alert, dict):

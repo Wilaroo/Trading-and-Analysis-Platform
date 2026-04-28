@@ -554,6 +554,188 @@ def compute_stop_guard(
     return {**out_default, "reason": "unknown_direction"}
 
 
+# ─── Target-snap (mirror of stop_guard, for take-profit prices) ────────────
+
+# How wide of a window around each proposed target do we search for a
+# liquidity level? Asymmetric — bias toward levels just past the
+# target (where the actual liquidity sits), with a small inside buffer.
+_TARGET_SNAP_INSIDE_PCT  = 0.005   # 50 bps before the target
+_TARGET_SNAP_OUTSIDE_PCT = 0.012   # 120 bps past the target
+
+# Caps on target adjustment vs original distance from entry. Pulling
+# in (taking profit earlier) is usually fine; extending must be small
+# so risk:reward math doesn't drift.
+_TARGET_MAX_PULL_PCT   = 0.30   # max -30% of original distance
+_TARGET_MAX_EXTEND_PCT = 0.15   # max +15% of original distance
+
+# Min level strength required to trigger a snap.
+_TARGET_MIN_LEVEL_STRENGTH = 0.50
+
+
+def _snap_one_target(
+    proposed_target: float,
+    entry: float,
+    direction_norm: str,
+    levels: Dict[str, Any],
+    epsilon: float,
+) -> Dict[str, Any]:
+    """Compute a possibly-snapped variant of a single target. Returns
+    `{target, snapped, ...}`. `direction_norm` is already lowered."""
+    out_default = {
+        "target": float(proposed_target),
+        "snapped": False,
+        "reason": "no_nearby_level",
+        "original_target": float(proposed_target),
+    }
+    if not entry or not proposed_target:
+        return {**out_default, "reason": "invalid_inputs"}
+
+    original_distance = abs(proposed_target - entry)
+    inside_buf  = float(entry) * _TARGET_SNAP_INSIDE_PCT
+    outside_buf = float(entry) * _TARGET_SNAP_OUTSIDE_PCT
+    min_dist = original_distance * (1 - _TARGET_MAX_PULL_PCT)
+    max_dist = original_distance * (1 + _TARGET_MAX_EXTEND_PCT)
+
+    if direction_norm in {"long", "buy", "up"}:
+        resistances = levels.get("resistance") or []
+        # Search window: [target - inside, target + outside]
+        nearby = [
+            r for r in resistances
+            if r.get("strength", 0) >= _TARGET_MIN_LEVEL_STRENGTH
+            and (proposed_target - inside_buf) <= r["price"] <= (proposed_target + outside_buf)
+        ]
+        if not nearby:
+            return out_default
+        # Choose the LOWEST nearby resistance — taking profits before
+        # the first liquidity wall is more reliable than waiting for a
+        # second.
+        target_level = min(nearby, key=lambda r: r["price"])
+        new_target = target_level["price"] - epsilon
+        new_distance = abs(new_target - entry)
+        if new_distance < min_dist or new_distance > max_dist:
+            return {
+                **out_default,
+                "reason": "would_exceed_target_caps",
+                "level_price": target_level["price"],
+                "level_kind": target_level["kind"],
+            }
+        if new_target <= entry:    # never let a long target slip below entry
+            return out_default
+        return {
+            "target": round(new_target, 4),
+            "snapped": True,
+            "reason": "snapped_below_resistance",
+            "level_kind": target_level["kind"],
+            "level_price": target_level["price"],
+            "level_strength": target_level.get("strength"),
+            "original_target": float(proposed_target),
+            "shift_pct": round((new_distance / original_distance) - 1.0, 3),
+        }
+
+    if direction_norm in {"short", "sell", "down"}:
+        supports = levels.get("support") or []
+        nearby = [
+            s for s in supports
+            if s.get("strength", 0) >= _TARGET_MIN_LEVEL_STRENGTH
+            and (proposed_target - outside_buf) <= s["price"] <= (proposed_target + inside_buf)
+        ]
+        if not nearby:
+            return out_default
+        target_level = max(nearby, key=lambda s: s["price"])
+        new_target = target_level["price"] + epsilon
+        new_distance = abs(new_target - entry)
+        if new_distance < min_dist or new_distance > max_dist:
+            return {
+                **out_default,
+                "reason": "would_exceed_target_caps",
+                "level_price": target_level["price"],
+                "level_kind": target_level["kind"],
+            }
+        if new_target >= entry:    # never let a short target slip above entry
+            return out_default
+        return {
+            "target": round(new_target, 4),
+            "snapped": True,
+            "reason": "snapped_above_support",
+            "level_kind": target_level["kind"],
+            "level_price": target_level["price"],
+            "level_strength": target_level.get("strength"),
+            "original_target": float(proposed_target),
+            "shift_pct": round((new_distance / original_distance) - 1.0, 3),
+        }
+
+    return {**out_default, "reason": "unknown_direction"}
+
+
+def compute_target_snap(
+    db,
+    symbol: str,
+    bar_size: str,
+    entry: float,
+    proposed_targets: List[float],
+    direction: str,
+) -> Dict[str, Any]:
+    """Snap each proposed target to just before the nearest strong S/R
+    cluster on the move side.
+
+    Returns:
+      {
+        "targets": [t1, t2, t3, ...],   # adjusted prices, length-preserved
+        "details": [{...per-target meta...}, ...],
+        "any_snapped": bool,
+      }
+
+    The output's `targets` list always has the same length as the input,
+    so the evaluator can drop it in without restructuring downstream
+    code (TP1/TP2/TP3 stay positional). Targets that collapse onto each
+    other (e.g. two pre-snap targets land on the same resistance) get
+    nudged ε apart so order-management logic doesn't see duplicates.
+    """
+    out_targets: List[float] = []
+    out_details: List[Dict[str, Any]] = []
+    any_snapped = False
+
+    if not proposed_targets:
+        return {"targets": [], "details": [], "any_snapped": False}
+
+    direction_norm = (direction or "").lower()
+    levels = compute_smart_levels(db, symbol, _BAR_SIZE_TO_TF.get(bar_size, "5min"))
+    if levels.get("error"):
+        # Fallback: pass through unchanged
+        return {
+            "targets": [float(t) for t in proposed_targets],
+            "details": [{"target": float(t), "snapped": False, "reason": "no_levels"}
+                        for t in proposed_targets],
+            "any_snapped": False,
+        }
+
+    epsilon = max(0.01, float(entry) * 0.0005)
+    for t in proposed_targets:
+        det = _snap_one_target(float(t), float(entry), direction_norm, levels, epsilon)
+        if det["snapped"]:
+            any_snapped = True
+        out_targets.append(det["target"])
+        out_details.append(det)
+
+    # Dedup collapsed targets (preserve ordering).
+    if direction_norm in {"long", "buy", "up"}:
+        for i in range(1, len(out_targets)):
+            if out_targets[i] <= out_targets[i - 1]:
+                out_targets[i] = round(out_targets[i - 1] + epsilon, 4)
+                out_details[i] = {**out_details[i], "deduped": True}
+    elif direction_norm in {"short", "sell", "down"}:
+        for i in range(1, len(out_targets)):
+            if out_targets[i] >= out_targets[i - 1]:
+                out_targets[i] = round(out_targets[i - 1] - epsilon, 4)
+                out_details[i] = {**out_details[i], "deduped": True}
+
+    return {
+        "targets": out_targets,
+        "details": out_details,
+        "any_snapped": any_snapped,
+    }
+
+
 # ─── Path multiplier (for opportunity_evaluator) ───────────────────────────
 
 # How much volume in the (entry → stop) zone is "thick"?  Tuned against
