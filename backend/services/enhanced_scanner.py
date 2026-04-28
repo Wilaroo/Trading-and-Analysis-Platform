@@ -1888,8 +1888,16 @@ class EnhancedBackgroundScanner:
                     # 1. Scan daily charts for swing/position setups
                     # 2. Re-rank today's intraday alerts as tomorrow-open
                     #    carry-forward candidates (added 2026-04-28).
-                    if self._scan_count % 20 == 0 or self._scan_count == 0:
-                        logger.info("Market closed — running daily chart scan + tomorrow-open carry-forward ranker")
+                    #
+                    # 2026-04-28e: Cadence dropped from `% 20` (100 min)
+                    # to `% 4` (20 min). Old cadence meant operators saw
+                    # an empty "tomorrow's open" list for 1.67 hours
+                    # between refreshes during overnight prep.
+                    if self._scan_count % 4 == 0 or self._scan_count == 0:
+                        logger.info(
+                            f"After-hours sweep #{self._scan_count // 4 + 1} — "
+                            f"daily chart scan + tomorrow-open carry-forward ranker"
+                        )
                         try:
                             await self._scan_daily_setups()
                             await self._rank_carry_forward_setups_for_tomorrow()
@@ -4284,7 +4292,7 @@ class EnhancedBackgroundScanner:
                     "halfback_reversal", "reversal", "rs_laggard",
                     "relative_strength_laggard",
                 }
-                if a["setup_type"] in cont_setups and score >= 60:
+                if a["setup_type"] in cont_setups and score >= 50:
                     tag = "day_2_continuation"
                     why = (
                         f"Today's {a['setup_type'].replace('_', ' ')} fired with "
@@ -4292,7 +4300,7 @@ class EnhancedBackgroundScanner:
                         f"if {a['symbol']} opens above today's close."
                     )
                     score += 5  # small carry-forward bonus
-                elif a["setup_type"] in fade_setups and score >= 60:
+                elif a["setup_type"] in fade_setups and score >= 50:
                     tag = "gap_fill_open"
                     why = (
                         f"Today's {a['setup_type'].replace('_', ' ')} (TQS "
@@ -4301,7 +4309,11 @@ class EnhancedBackgroundScanner:
                     )
                 else:
                     # Generic carry-forward for anything still high-quality.
-                    if score >= 70:
+                    # 2026-04-28e: lowered from 70 → 55 because operator
+                    # was seeing empty after-hours watchlists; the old
+                    # bar starved every B-grade setup that didn't slot
+                    # cleanly into cont_setups / fade_setups.
+                    if score >= 55:
                         tag = "carry_forward_watch"
                         why = (
                             f"Today's {a['setup_type'].replace('_', ' ')} graded "
@@ -4361,7 +4373,16 @@ class EnhancedBackgroundScanner:
                     f"@ {top[0]['carry_forward_score']:.0f})"
                 )
             else:
-                logger.info("📅 Carry-forward ranker: today's alerts all below quality bar (≥60 TQS)")
+                # 2026-04-28e: more informative empty-state log so the
+                # operator can tell *why* the watchlist is empty instead
+                # of just seeing nothing. Was a generic one-liner before.
+                considered = len(todays_alerts)
+                top_n = sorted((a["tqs_score"] for a in todays_alerts), reverse=True)[:3]
+                logger.info(
+                    f"📅 Carry-forward ranker: 0 of {considered} today's alerts "
+                    f"made the cut (top-3 TQS: {top_n}; need ≥50 cont/fade "
+                    f"or ≥55 catch-all)"
+                )
         except Exception as e:
             logger.error(f"Carry-forward scan error: {e}")
 

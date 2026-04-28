@@ -294,6 +294,37 @@ def get_daily_swing_alerts():
 
 # ===================== WAVE SCANNER =====================
 
+@router.post("/api/scanner/trigger-after-hours-sweep")
+async def trigger_after_hours_sweep():
+    """Force-run the after-hours daily-chart scan + tomorrow-open
+    carry-forward ranker on demand. Returns the count of newly
+    promoted carry-forward alerts.
+
+    Useful when the operator just restarted the backend during
+    overnight hours and doesn't want to wait the 20-min cycle for
+    the next automated sweep, or when they want to re-rank after
+    today's intraday alerts have been finalised.
+    """
+    if not _background_scanner:
+        return {"success": False, "error": "Scanner not initialized"}
+    try:
+        from datetime import datetime, timezone
+        before = len(getattr(_background_scanner, "_live_alerts", {}) or {})
+        await _background_scanner._scan_daily_setups()
+        await _background_scanner._rank_carry_forward_setups_for_tomorrow()
+        _background_scanner._cleanup_expired_alerts()
+        after = len(getattr(_background_scanner, "_live_alerts", {}) or {})
+        return {
+            "success": True,
+            "alerts_before": before,
+            "alerts_after": after,
+            "delta": after - before,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/api/wave-scanner/batch")
 async def get_wave_scanner_batch():
     """
