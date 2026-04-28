@@ -407,6 +407,68 @@ def compute_smart_levels(db, symbol: str, timeframe: str) -> Dict[str, Any]:
     }
 
 
+# ─── Runtime threshold overrides ───────────────────────────────────────────
+#
+# 2026-04-28e: the nightly `multiplier_threshold_optimizer` writes
+# adjusted thresholds into `multiplier_threshold_history`. The snap
+# functions below read overrides via `_get_active_thresholds(db)` —
+# cached for 5 min so we don't hit Mongo on every call.
+import time as _time
+
+_THRESHOLD_CACHE: Dict[str, Any] = {"ts": 0.0, "values": None}
+_THRESHOLD_CACHE_TTL_SEC = 300
+
+
+def invalidate_threshold_cache() -> None:
+    """Force the next `_get_active_thresholds` call to re-read from
+    Mongo. Called by the optimizer immediately after persisting new
+    values so live trading picks them up within seconds."""
+    _THRESHOLD_CACHE["ts"] = 0.0
+    _THRESHOLD_CACHE["values"] = None
+
+
+def _get_active_thresholds(db) -> Dict[str, float]:
+    """Return `{stop_min_level_strength, target_snap_outside_pct,
+    path_vol_fat_pct}` — the most recent applied optimizer values, or
+    the module defaults if no override exists. Cached `_THRESHOLD_CACHE_TTL_SEC`."""
+    now = _time.time()
+    if _THRESHOLD_CACHE["values"] is not None and (now - _THRESHOLD_CACHE["ts"]) < _THRESHOLD_CACHE_TTL_SEC:
+        return _THRESHOLD_CACHE["values"]
+
+    defaults = {
+        "stop_min_level_strength": _STOP_MIN_LEVEL_STRENGTH,
+        "target_snap_outside_pct": _TARGET_SNAP_OUTSIDE_PCT,
+        "path_vol_fat_pct":        _PATH_VOL_FAT_PCT,
+    }
+    values = dict(defaults)
+
+    if db is None:
+        _THRESHOLD_CACHE.update({"ts": now, "values": values})
+        return values
+
+    try:
+        doc = db["multiplier_threshold_history"].find_one(
+            {"applied": True},
+            sort=[("ran_at", -1)],
+            projection={"_id": 0, "thresholds_after": 1},
+        )
+        if doc and isinstance(doc.get("thresholds_after"), dict):
+            for k in defaults:
+                v = doc["thresholds_after"].get(k)
+                if v is None:
+                    continue
+                try:
+                    values[k] = float(v)
+                except (TypeError, ValueError):
+                    continue
+    except Exception:
+        # Fail-open: caller still gets module defaults.
+        pass
+
+    _THRESHOLD_CACHE.update({"ts": now, "values": values})
+    return values
+
+
 # ─── Stop-placement guard (for opportunity_evaluator) ──────────────────────
 
 # Bar-size ↔ frontend-timeframe mapping used when the bot calls into us
@@ -481,6 +543,9 @@ def compute_stop_guard(
     original_distance = abs(entry - proposed_stop)
     max_distance = original_distance * (1 + _STOP_MAX_WIDEN_PCT)
     buffer = float(entry) * _STOP_SNAP_BUFFER_PCT
+    # Pull the currently-active min-strength threshold (may be tuned
+    # nightly by `multiplier_threshold_optimizer`).
+    active_min_strength = _get_active_thresholds(db)["stop_min_level_strength"]
 
     if direction_norm in {"long", "buy", "up"}:
         supports = levels.get("support") or []
@@ -491,7 +556,7 @@ def compute_stop_guard(
         # below.
         nearby = [
             s for s in supports
-            if s.get("strength", 0) >= _STOP_MIN_LEVEL_STRENGTH
+            if s.get("strength", 0) >= active_min_strength
             and (s["price"] - buffer) <= proposed_stop <= (s["price"] + 2 * buffer)
         ]
         if not nearby:
@@ -523,7 +588,7 @@ def compute_stop_guard(
         resistances = levels.get("resistance") or []
         nearby = [
             r for r in resistances
-            if r.get("strength", 0) >= _STOP_MIN_LEVEL_STRENGTH
+            if r.get("strength", 0) >= active_min_strength
             and (r["price"] - 2 * buffer) <= proposed_stop <= (r["price"] + buffer)
         ]
         if not nearby:
@@ -578,9 +643,12 @@ def _snap_one_target(
     direction_norm: str,
     levels: Dict[str, Any],
     epsilon: float,
+    outside_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Compute a possibly-snapped variant of a single target. Returns
-    `{target, snapped, ...}`. `direction_norm` is already lowered."""
+    `{target, snapped, ...}`. `direction_norm` is already lowered.
+    `outside_pct` overrides the module-default `_TARGET_SNAP_OUTSIDE_PCT`
+    when supplied (used by the live tuning path)."""
     out_default = {
         "target": float(proposed_target),
         "snapped": False,
@@ -592,7 +660,7 @@ def _snap_one_target(
 
     original_distance = abs(proposed_target - entry)
     inside_buf  = float(entry) * _TARGET_SNAP_INSIDE_PCT
-    outside_buf = float(entry) * _TARGET_SNAP_OUTSIDE_PCT
+    outside_buf = float(entry) * (outside_pct if outside_pct is not None else _TARGET_SNAP_OUTSIDE_PCT)
     min_dist = original_distance * (1 - _TARGET_MAX_PULL_PCT)
     max_dist = original_distance * (1 + _TARGET_MAX_EXTEND_PCT)
 
@@ -708,10 +776,12 @@ def compute_target_snap(
                         for t in proposed_targets],
             "any_snapped": False,
         }
+    # Pull active thresholds (optimizer may tune `outside_pct`).
+    active_outside_pct = _get_active_thresholds(db)["target_snap_outside_pct"]
 
     epsilon = max(0.01, float(entry) * 0.0005)
     for t in proposed_targets:
-        det = _snap_one_target(float(t), float(entry), direction_norm, levels, epsilon)
+        det = _snap_one_target(float(t), float(entry), direction_norm, levels, epsilon, active_outside_pct)
         if det["snapped"]:
             any_snapped = True
         out_targets.append(det["target"])
@@ -819,8 +889,10 @@ def compute_path_multiplier(
         return out_default
     path_vol = sum(volumes[si:ei + 1])
     vol_pct = path_vol / total_vol
+    # Active fat-pct threshold (optimizer may tune nightly).
+    active_fat_pct = _get_active_thresholds(db)["path_vol_fat_pct"]
 
-    if vol_pct >= _PATH_VOL_FAT_PCT:
+    if vol_pct >= active_fat_pct:
         mult, reason = _PATH_MULT_FAT,    "thick_hvn_in_stop_zone"
     elif vol_pct <= _PATH_VOL_LEAN_PCT:
         mult, reason = _PATH_MULT_LEAN,   "clean_lvn_to_stop"

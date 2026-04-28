@@ -100,6 +100,49 @@ async def get_multiplier_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/multiplier-thresholds/optimize")
+async def run_multiplier_threshold_optimizer(
+    days_back: int = Query(default=30, ge=7, le=120),
+    dry_run: bool = Query(default=False),
+):
+    """Run the nightly self-tuning job that adjusts smart-levels
+    thresholds (`stop_min_level_strength`, `target_snap_outside_pct`,
+    `path_vol_fat_pct`) toward the values that maximise mean-R lift
+    in `bot_trades` over the last `days_back` days.
+
+    Returns the full decision payload — proposed thresholds, lifts per
+    layer, cohort sizes, and notes. When `dry_run=False`, the result is
+    persisted in `multiplier_threshold_history` and live trading picks
+    up the new values within ~5 min (cache TTL).
+    """
+    if _trading_bot is None or getattr(_trading_bot, "_db", None) is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+    try:
+        from services.multiplier_threshold_optimizer import run_optimization
+        return run_optimization(_trading_bot._db, days_back=days_back, dry_run=dry_run)
+    except Exception as e:
+        logger.error(f"multiplier threshold optimizer failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/multiplier-thresholds/history")
+async def get_multiplier_threshold_history(limit: int = Query(default=20, ge=1, le=200)):
+    """Return the last N optimizer runs with their proposed/applied
+    threshold deltas. Used by the operator to audit the auto-tuning
+    loop and roll back if it drifts somewhere unexpected.
+    """
+    if _trading_bot is None or getattr(_trading_bot, "_db", None) is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+    try:
+        cursor = _trading_bot._db["multiplier_threshold_history"].find(
+            {}, {"_id": 0},
+        ).sort("ran_at", -1).limit(int(limit))
+        return {"runs": list(cursor)}
+    except Exception as e:
+        logger.error(f"multiplier threshold history failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== BOT CONTROL ====================
 
 @router.get("/status")

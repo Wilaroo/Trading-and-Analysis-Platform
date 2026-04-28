@@ -9,10 +9,13 @@ Runs at:
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 import asyncio
+import logging
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+
+logger = logging.getLogger(__name__)
 
 
 class EndOfDayGenerationService:
@@ -99,6 +102,29 @@ class EndOfDayGenerationService:
                 CronTrigger(hour=16, minute=1, day_of_week='fri', timezone=self.et_timezone),
                 id='auto_snapshot_friday_close',
                 replace_existing=True
+            )
+
+            # 2026-04-28e — Multiplier-threshold optimizer. Runs every
+            # weekday at 18:00 ET (after EOD/playbook/reflection jobs
+            # have finalised the day's bot_trades). Reads the last 30d
+            # of cohort lift, proposes small (≤5% per night) bounded
+            # adjustments to the smart-levels thresholds, and persists
+            # them. Live trading picks up new values within ~5 min.
+            def _run_threshold_optimizer():
+                try:
+                    from services.multiplier_threshold_optimizer import run_optimization
+                    result = run_optimization(self.db, days_back=30, dry_run=False)
+                    logger.info(
+                        f"multiplier_threshold_optimizer: applied={result.get('applied')}, "
+                        f"lifts={result.get('lifts')}, notes={result.get('notes')}"
+                    )
+                except Exception as e:
+                    logger.error(f"multiplier_threshold_optimizer job failed: {e}")
+            self.scheduler.add_job(
+                _run_threshold_optimizer,
+                CronTrigger(hour=18, minute=0, day_of_week='mon-fri', timezone=self.et_timezone),
+                id='auto_multiplier_threshold_optimizer',
+                replace_existing=True,
             )
             
             self.scheduler.start()
