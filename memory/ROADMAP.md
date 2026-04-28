@@ -32,6 +32,19 @@ Open priorities, deferred ideas, and backlog. Move items to
   (b) bumping `_MIN_COHORT_N_V2` (default 25) once cohort sizes stabilize,
   (c) running v1 + v2 in dry-run alongside each other for ~2 weeks
       to compare proposal stability before flipping.
+- **Catalyst-aware carry-forward ranker**
+  (sketched 2026-04-28e at `services/catalyst_aware_carry_forward.py`,
+  not yet wired). Filters today's intraday alerts by overnight news /
+  EPS catalyst presence before the carry-forward TQS gate, so a
+  B-grade setup on a stock with a fresh 8-K filing or post-market
+  earnings beats the same setup on a quiet stock. Components
+  scored: 8-K (+35), earnings within 5d (+25), material news within
+  24h (+20), analyst action within 48h (+10), overnight gap >2%
+  (+25). Activate by calling `enrich_with_catalyst(alert, db)` in
+  `enhanced_scanner._rank_carry_forward_setups_for_tomorrow` and
+  sorting by `(catalyst_score, tqs_score)` so news-driven candidates
+  surface first. Pairs naturally with the SEC EDGAR 8-K integration
+  (also on the roadmap as P2).
 
 ### Operator user-noted issues at end of session
 - **Paper account shows $100,000** instead of operator's expected balance
