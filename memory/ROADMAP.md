@@ -20,6 +20,18 @@ Open priorities, deferred ideas, and backlog. Move items to
   are too tight or scanner's spamming. ~20 min of work; group by
   reason_code in a new `/api/trading-bot/eod-rejection-summary`
   endpoint, render as the Close Recap card subtitle.
+- **Multiplier-threshold optimizer v2 — held-out validation slice**
+  (sketched 2026-04-28e at `services/multiplier_threshold_optimizer_v2.py`,
+  not yet wired). Splits the trade window 80/20 train/holdout and
+  only persists threshold changes whose direction is confirmed on
+  the held-out slice. Defends against the v1 optimizer chasing a
+  lucky 30-day regime window. Activate by:
+  (a) swapping `from .multiplier_threshold_optimizer import run_optimization`
+      → `from .multiplier_threshold_optimizer_v2 import run_optimization_v2`
+      in `eod_generation_service.py` and `routers/trading_bot.py`,
+  (b) bumping `_MIN_COHORT_N_V2` (default 25) once cohort sizes stabilize,
+  (c) running v1 + v2 in dry-run alongside each other for ~2 weeks
+      to compare proposal stability before flipping.
 
 ### Operator user-noted issues at end of session
 - **Paper account shows $100,000** instead of operator's expected balance
