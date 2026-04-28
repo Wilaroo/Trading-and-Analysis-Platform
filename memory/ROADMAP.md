@@ -33,6 +33,20 @@ Open priorities, deferred ideas, and backlog. Move items to
   `/api/trading-bot/ai-decision-audit` endpoint + AIDecisionAuditCard
   rendering per-trade module verdicts + outcome alignment. 15
   regression tests.
+- ✅ **Risk-caps unification (Option B — read-only)** — new
+  `/api/safety/effective-risk-caps` surfaces the actual binding
+  cap across 6 conflicting sources + human-readable conflict
+  diagnostics. 12 regression tests.
+
+### 🟠 Backlog (next session candidates)
+- **Risk-caps unification — Option A (full refactor, ~2-3 hours)**:
+  Make `RiskParameters` (Mongo `bot_state.risk_params`) the single
+  source of truth. `SafetyGuardrailConfig.from_env()` becomes
+  `from_bot_state(db)`. PositionSizer + DynamicRiskEngine + gameplan +
+  debate all read the same config. One UI panel to edit → all
+  subsystems update. Touches 6 files. Worth doing once the
+  intermediate Option B has been live for a session and proven the
+  effective-cap resolution logic is sound.
 
 ### 🔴 P0 OPTIMIZATION — DEFERRED (was 2026-04-29 morning's top item, now shipped above)
 **Pre-flight contract validation in `ib_historical_collector.py`**

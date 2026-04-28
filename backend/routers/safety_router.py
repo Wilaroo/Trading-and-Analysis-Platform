@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.safety_guardrails import get_safety_guardrails
+from services.risk_caps_service import compute_effective_risk_caps
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,33 @@ async def safety_status() -> Dict[str, Any]:
         resp["account_guard"] = {"match": True, "reason": "unavailable"}
 
     return resp
+
+
+@router.get("/effective-risk-caps")
+async def effective_risk_caps() -> Dict[str, Any]:
+    """Resolve overlapping risk caps to the effective (most-restrictive)
+    binding values across bot config, kill switch, position sizer, and
+    dynamic risk engine.
+
+    Single read-only operation — never mutates any source. Returns:
+
+      - `sources`    — raw per-source values for inspection / audit
+      - `effective`  — the resolved cap that actually binds live trades
+      - `conflicts`  — human-readable diagnostics when sources disagree
+
+    Used by the V5 dashboard's risk-card to surface the truth behind
+    the freshness inspector's "Risk params WARN" pill.
+    """
+    db = None
+    try:
+        from services.trading_bot_service import get_trading_bot
+        bot = get_trading_bot()
+        db = getattr(bot, "_db", None) if bot else None
+    except Exception:
+        db = None
+
+    payload = compute_effective_risk_caps(db)
+    return {"success": True, **payload}
 
 
 @router.put("/config")

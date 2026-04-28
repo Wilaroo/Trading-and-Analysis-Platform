@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon) — Risk-caps unification (Option B)
+
+### Why
+Operator's freshness inspector flagged a `Risk params WARN`:
+- `bot.max_open_positions=7` vs `kill_switch.max_positions=5`
+- `bot.max_daily_loss=0` (unset) — only kill switch ($500) protected
+- `bot.max_position_pct=50%` vs `sizer.max_position_pct=10%`
+
+A 2026-04-29 audit found risk parameters scattered across **6 files**
+(`bot_state.risk_params`, `safety_guardrails`, `position_sizer`,
+`dynamic_risk_engine`, `gameplan_service`, `debate_agents`) with
+conflicting defaults that had drifted out of sync.
+
+### Fix (Option B from the proposal — pragmatic)
+- New `services/risk_caps_service.py` exposes
+  `compute_effective_risk_caps(db)` — a thin read-only resolver that
+  surfaces:
+  - `sources`     — raw values from each subsystem (bot / safety /
+                    sizer / dynamic_risk)
+  - `effective`   — most-restrictive resolved value per cap
+  - `conflicts`   — human-readable diagnostics for the UI
+- New endpoint: `GET /api/safety/effective-risk-caps`
+- Treats `0` and `None` as "unset" (not "0 cap") to match operator
+  intent — a daily_loss=0 in Mongo means "use safety's value", not
+  "trade until $0 is left".
+- Diagnostic strings mirror the freshness inspector's WARN wording so
+  the operator can match them up: `"max_open_positions: bot=7 vs
+  safety=5 → 5 wins (kill switch stricter)"`.
+
+### What's NOT changed
+This is **read-only** — no enforcement changes today. Subsystems
+still read their own config independently. The endpoint just makes
+the *truth* visible. Option A (full single-source-of-truth refactor
+across all 6 files) is parked for a future session.
+
+### Regression coverage
+`tests/test_risk_caps_service.py` (12 tests):
+- Sources surface for all 4 categories
+- Safe-payload when db=None
+- Position cap: safety wins / bot wins / unset cases
+- Position pct: sizer wins when bot aggressive
+- Daily loss USD: bot pct→USD conversion + safety floor
+- Daily loss treated as unset when 0 (operator's exact config)
+- Daily loss pct picks strictest across bot/safety/dynamic_risk
+- Kill switch DISABLED emits ⚠️ diagnostic
+- End-to-end: replays operator's exact 2026-04-29 freshness-inspector
+  WARN and asserts diagnostic strings match
+
+### Operator action on DGX after pull + restart
+```
+curl -s http://localhost:8001/api/safety/effective-risk-caps | python3 -m json.tool
+```
+Expected: `effective.max_open_positions=5`, `effective.max_position_pct=10.0`,
+plus 3 conflict strings explaining each WARN.
+
 ## 2026-04-29 (mid-day) — Timeseries shadow gap + AI Decision Audit Card
 
 ### Two operator follow-ups shipped together (~1 hour total)
