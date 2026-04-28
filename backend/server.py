@@ -880,8 +880,16 @@ def _init_all_services():
             historical_data_service=historical_data_service
         )
 
-        # Initialize Shadow Mode Service
-        shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
+        # 2026-04-28f: Shadow Mode Service now also gets `ib_data_provider`
+        # so its `_get_current_price` can resolve quotes after Phase 4
+        # retired Alpaca. Without this the outcome tracker silently
+        # never updated 6,751 shadow decisions on DGX.
+        from services.ib_data_provider import get_live_data_service
+        _ib_provider = get_live_data_service()
+        shadow_mode_service = init_shadow_mode_service(
+            db=db, alpaca_service=alpaca_service,
+            ib_data_provider=_ib_provider,
+        )
 
         # Initialize Advanced Backtest Engine (new!)
         from services.slow_learning.advanced_backtest_engine import init_advanced_backtest_engine
@@ -990,7 +998,13 @@ def _init_all_services():
         ai_module_config = init_ai_module_config(db=db)
 
         # Initialize Shadow Tracker (logs all AI decisions for learning)
-        shadow_tracker = init_shadow_tracker(db=db, alpaca_service=alpaca_service)
+        # 2026-04-28f: Shadow Tracker also gets `ib_data_provider`
+        # (Phase 4 Alpaca retirement). Required for outcome updates.
+        from services.ib_data_provider import get_live_data_service
+        shadow_tracker = init_shadow_tracker(
+            db=db, alpaca_service=alpaca_service,
+            ib_data_provider=get_live_data_service(),
+        )
 
         # Initialize Debate Agents (Bull/Bear deliberation)
         # Get config dict from module settings

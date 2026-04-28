@@ -437,6 +437,12 @@ class OpportunityEvaluator:
                         "stop_guard": stop_guard_meta,
                         "target_snap": target_snap_meta,
                     },
+                    # 2026-04-28f: AI module results were previously
+                    # only landed under `explanation.ai_consultation`,
+                    # making them invisible to the analytics + the
+                    # Q3 verification curl. Now mirrored into
+                    # `entry_context.ai_modules` for unified inspection.
+                    ai_consultation_result=ai_consultation_result,
                 ),
                 scale_out_config={
                     "enabled": True,
@@ -709,6 +715,7 @@ class OpportunityEvaluator:
         regime_score: float, filter_action: str, filter_win_rate: float,
         atr: float, atr_percent: float, confidence_gate_result: Dict = None,
         multipliers_meta: Optional[Dict[str, Any]] = None,
+        ai_consultation_result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build rich entry context capturing WHY this trade was taken.
@@ -874,6 +881,30 @@ class OpportunityEvaluator:
 
             if mult_ctx:
                 ctx["multipliers"] = mult_ctx
+
+        # 11. AI module decisions (2026-04-28f) — Bear/Bull debate,
+        # AI risk manager, institutional flow, time series forecast.
+        # Surfaced HERE in entry_context so they're queryable from
+        # `bot_trades` and feed analytics + the Q3 verification curl.
+        # Was previously only landing under `explanation.ai_consultation`.
+        if ai_consultation_result and isinstance(ai_consultation_result, dict):
+            ai_ctx: Dict[str, Any] = {
+                "consulted":       True,
+                "proceed":         bool(ai_consultation_result.get("proceed", True)),
+                "size_adjustment": ai_consultation_result.get("size_adjustment"),
+                "summary":         ai_consultation_result.get("summary"),
+            }
+            # Fold in per-module results when present
+            for module_key, ec_key in (
+                ("debate",         "debate"),
+                ("risk_assessment","risk_manager"),
+                ("institutional",  "institutional_flow"),
+                ("time_series",    "time_series"),
+            ):
+                m = ai_consultation_result.get(module_key)
+                if m:
+                    ai_ctx[ec_key] = m
+            ctx["ai_modules"] = ai_ctx
 
         return ctx
 

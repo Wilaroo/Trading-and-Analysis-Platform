@@ -228,3 +228,57 @@ async def test_position_size_falls_back_safely_when_vp_lookup_errors(
     )
     assert shares > 0
     assert multi_out["vp_path"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_entry_context_surfaces_ai_module_results(evaluator, bot):
+    """2026-04-28f — AI consultation results MUST land under
+    `entry_context.ai_modules` so the Q3 verification curl + analytics
+    can see them. Bug found live: `bot_trades.entry_context.{debate,
+    institutional_flow, time_series}` were all null because the AI
+    chain was running but its results weren't being persisted."""
+    alert = {"symbol": "TEST", "setup_type": "breakout", "direction": "long"}
+    intelligence = {"score": 70, "rationale": "test"}
+    ai_result = {
+        "proceed": True,
+        "size_adjustment": 1.0,
+        "summary": "consult OK",
+        "reasoning": "B/B debate net long, risk OK",
+        "debate": {"verdict": "long", "bull_score": 0.7, "bear_score": 0.3},
+        "risk_assessment": {"approved": True, "risk_score": 0.4},
+        "institutional": {"net_flow": "buy", "score": 0.6},
+        "time_series": {"forecast_dir": "up", "confidence": 0.65},
+    }
+    ctx = evaluator.build_entry_context(
+        alert, intelligence, regime="neutral", regime_score=50,
+        filter_action="ALLOW", filter_win_rate=0.55,
+        atr=2.0, atr_percent=2.0,
+        confidence_gate_result=None,
+        multipliers_meta=None,
+        ai_consultation_result=ai_result,
+    )
+    assert "ai_modules" in ctx
+    am = ctx["ai_modules"]
+    assert am["consulted"] is True
+    assert am["proceed"] is True
+    assert am["debate"]["verdict"] == "long"
+    assert am["risk_manager"]["approved"] is True
+    assert am["institutional_flow"]["net_flow"] == "buy"
+    assert am["time_series"]["forecast_dir"] == "up"
+
+
+@pytest.mark.asyncio
+async def test_entry_context_ai_modules_absent_when_no_consultation(evaluator, bot):
+    """Bots without ai_consultation wired (legacy paths) should still
+    produce a clean entry_context — no `ai_modules` key, not crash."""
+    alert = {"symbol": "TEST", "setup_type": "breakout", "direction": "long"}
+    intelligence = {"score": 70, "rationale": "test"}
+    ctx = evaluator.build_entry_context(
+        alert, intelligence, regime="neutral", regime_score=50,
+        filter_action="ALLOW", filter_win_rate=0.55,
+        atr=2.0, atr_percent=2.0,
+        confidence_gate_result=None,
+        multipliers_meta=None,
+        ai_consultation_result=None,
+    )
+    assert "ai_modules" not in ctx

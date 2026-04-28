@@ -148,6 +148,8 @@ class ShadowModeService:
         self._shadow_signals_col = None
         self._shadow_filters_col = None
         self._alpaca_service = None
+        # 2026-04-28f: IB pusher quote source — primary post-Phase 4.
+        self._ib_data_provider = None
         
     def set_db(self, db):
         """Set database connection"""
@@ -161,8 +163,15 @@ class ShadowModeService:
             self._shadow_signals_col.create_index([("symbol", 1), ("signal_time", -1)])
             
     def set_alpaca_service(self, alpaca_service):
-        """Set Alpaca service for price updates"""
+        """Set Alpaca service for price updates (legacy — superseded
+        by IB pusher quotes after Phase 4. Kept for BC.)"""
         self._alpaca_service = alpaca_service
+
+    def set_ib_data_provider(self, ib_data_provider):
+        """Set the IB pusher quote source (preferred). Used by
+        `update_signal_outcomes` for shadow signal price tracking
+        after Phase 4 retired Alpaca."""
+        self._ib_data_provider = ib_data_provider
         
     async def create_filter(
         self,
@@ -318,17 +327,30 @@ class ShadowModeService:
         return {"updated": updated, "expired": expired_count, "pending_checked": len(pending)}
         
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for a symbol"""
+        """Get current price for a symbol. Prefers IB pusher quote
+        (post Phase-4); falls back to Alpaca legacy if not injected."""
+        # 2026-04-28f: IB pusher path. Without this `update_signal_outcomes`
+        # silently never updated any shadow signal — same root cause
+        # as the 6,751-decisions-with-0-outcomes tracker bug.
+        if self._ib_data_provider is not None:
+            try:
+                quote = await self._ib_data_provider.get_quote(symbol)
+                if quote:
+                    price = quote.get("price") or quote.get("last_price") or quote.get("close")
+                    if price and float(price) > 0:
+                        return float(price)
+            except Exception as e:
+                logger.warning(f"Shadow: IB pusher price fetch failed for {symbol}: {e}")
+
         if self._alpaca_service is None:
             return None
-            
         try:
             quote = await self._alpaca_service.get_quote(symbol)
             if quote:
                 return quote.get("last_price") or quote.get("close", 0)
         except Exception as e:
             logger.warning(f"Could not get price for {symbol}: {e}")
-            
+
         return None
         
     async def _update_filter_signal_count(self, filter_id: str):
@@ -580,10 +602,12 @@ def get_shadow_mode_service() -> ShadowModeService:
     return _shadow_mode_service
 
 
-def init_shadow_mode_service(db=None, alpaca_service=None) -> ShadowModeService:
+def init_shadow_mode_service(db=None, alpaca_service=None, ib_data_provider=None) -> ShadowModeService:
     service = get_shadow_mode_service()
     if db is not None:
         service.set_db(db)
     if alpaca_service is not None:
         service.set_alpaca_service(alpaca_service)
+    if ib_data_provider is not None:
+        service.set_ib_data_provider(ib_data_provider)
     return service

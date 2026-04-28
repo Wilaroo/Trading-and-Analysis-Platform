@@ -106,6 +106,11 @@ class ShadowTracker:
         self._decisions_col = None
         self._performance_col = None
         self._alpaca_service = None
+        # 2026-04-28f: IB pusher quote source. Phase 4 retired Alpaca,
+        # so without this the outcome tracker silently dies — every
+        # decision sits in `outcome_tracked: false` forever, which
+        # operator confirmed live (6,751 decisions / 0 outcomes).
+        self._ib_data_provider = None
         
     def set_db(self, db):
         """Set database connection"""
@@ -121,8 +126,15 @@ class ShadowTracker:
             self._decisions_col.create_index([("created_at", -1)])
             
     def set_alpaca_service(self, alpaca_service):
-        """Set Alpaca service for price tracking"""
+        """Set Alpaca service for price tracking (legacy — superseded
+        by IB pusher quotes after Phase 4. Kept for backward compat.)"""
         self._alpaca_service = alpaca_service
+
+    def set_ib_data_provider(self, ib_data_provider):
+        """Set the IB pusher quote source (preferred). Used by
+        `_get_current_price` for outcome tracking after Phase 4
+        retired Alpaca."""
+        self._ib_data_provider = ib_data_provider
         
     async def log_decision(
         self,
@@ -266,17 +278,31 @@ class ShadowTracker:
         return {"updated": updated, "pending_checked": len(pending)}
         
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for a symbol"""
+        """Get current price for a symbol. Prefers IB pusher quote
+        (post Phase-4); falls back to Alpaca legacy path if IB
+        provider isn't injected."""
+        # 2026-04-28f: IB pusher path — primary source after Phase 4
+        # retired Alpaca. Without this the outcome tracker silently
+        # never updated 6,751 shadow decisions on DGX.
+        if self._ib_data_provider is not None:
+            try:
+                quote = await self._ib_data_provider.get_quote(symbol)
+                if quote:
+                    price = quote.get("price") or quote.get("last_price") or quote.get("close")
+                    if price and float(price) > 0:
+                        return float(price)
+            except Exception as e:
+                logger.warning(f"Shadow: IB pusher price fetch failed for {symbol}: {e}")
+
+        # Legacy Alpaca path
         if self._alpaca_service is None:
             return None
-            
         try:
             quote = await self._alpaca_service.get_quote(symbol)
             if quote:
                 return quote.get("last_price") or quote.get("close", 0)
         except Exception as e:
             logger.warning(f"Shadow: Could not get price for {symbol}: {e}")
-            
         return None
         
     async def get_decisions(
@@ -497,11 +523,13 @@ def get_shadow_tracker() -> ShadowTracker:
     return _shadow_tracker
 
 
-def init_shadow_tracker(db=None, alpaca_service=None) -> ShadowTracker:
+def init_shadow_tracker(db=None, alpaca_service=None, ib_data_provider=None) -> ShadowTracker:
     """Initialize Shadow Tracker with dependencies"""
     tracker = get_shadow_tracker()
     if db is not None:
         tracker.set_db(db)
     if alpaca_service is not None:
         tracker.set_alpaca_service(alpaca_service)
+    if ib_data_provider is not None:
+        tracker.set_ib_data_provider(ib_data_provider)
     return tracker
