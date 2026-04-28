@@ -245,37 +245,56 @@ class ShadowTracker:
             "would_have_r": would_have_r
         }
         
-    async def track_pending_outcomes(self) -> Dict[str, Any]:
+    async def track_pending_outcomes(
+        self, batch_size: int = 50, max_batches: int = 1
+    ) -> Dict[str, Any]:
         """
         Check pending decisions and update outcomes.
         Call this periodically during market hours.
+
+        2026-04-28f: now supports `batch_size` (default 50) and
+        `max_batches` (default 1) so an operator can drain a backlog
+        with a single curl. Old behaviour preserved when called with
+        no args.
         """
         if self._decisions_col is None:
-            return {"updated": 0}
-            
+            return {"updated": 0, "pending_checked": 0, "batches": 0}
+
+        total_updated = 0
+        total_checked = 0
+        batches_run = 0
         # Find decisions that haven't been tracked yet and are at least 1 hour old
         cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-        pending = list(self._decisions_col.find({
-            "outcome_tracked": False,
-            "trigger_time": {"$lt": cutoff.isoformat()}
-        }).limit(50))
-        
-        updated = 0
-        for doc in pending:
-            try:
-                symbol = doc.get("symbol")
-                current_price = await self._get_current_price(symbol)
-                
-                if current_price:
-                    await self.update_outcome(
-                        decision_id=doc.get("id"),
-                        outcome_price=current_price
-                    )
-                    updated += 1
-            except Exception as e:
-                logger.warning(f"Shadow: Failed to track outcome for {doc.get('id')}: {e}")
-                
-        return {"updated": updated, "pending_checked": len(pending)}
+
+        for _batch_idx in range(max_batches):
+            pending = list(self._decisions_col.find({
+                "outcome_tracked": False,
+                "trigger_time": {"$lt": cutoff.isoformat()}
+            }).limit(batch_size))
+
+            if not pending:
+                break
+            batches_run += 1
+            for doc in pending:
+                try:
+                    symbol = doc.get("symbol")
+                    current_price = await self._get_current_price(symbol)
+
+                    if current_price:
+                        await self.update_outcome(
+                            decision_id=doc.get("id"),
+                            outcome_price=current_price
+                        )
+                        total_updated += 1
+                except Exception as e:
+                    logger.warning(f"Shadow: Failed to track outcome for {doc.get('id')}: {e}")
+            total_checked += len(pending)
+
+        return {
+            "updated": total_updated,
+            "pending_checked": total_checked,
+            "batches": batches_run,
+        }
         
     async def _get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for a symbol. Prefers IB pusher quote
