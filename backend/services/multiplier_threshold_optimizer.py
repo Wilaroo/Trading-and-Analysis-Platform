@@ -226,6 +226,37 @@ def run_optimization(
         "notes": notes,
     }
 
+    # Rejection-signal feedback (scaffolded 2026-04-29 afternoon-6) —
+    # OFF by default. When `ENABLE_REJECTION_SIGNAL_FEEDBACK=true` the
+    # optimizer reads the rejection-analytics signal and annotates each
+    # affected proposal with a "rejection-feedback" hint. Per the design,
+    # this stage observes-only (no tuning weight change) until the signal
+    # has 2+ weeks of data + verdict stability. Operator promotes a hint
+    # into actual tuning by manually adjusting the affected dial OR by
+    # promoting the consumer to take the hint as a tiebreaker (planned
+    # follow-up PR).
+    try:
+        from services.rejection_signal_provider import get_signal
+        signal = get_signal(db, target="smart_levels", days=14, min_count=5)
+        if signal.get("enabled"):
+            sl_hints = signal.get("by_target", {}).get("smart_levels", [])
+            if sl_hints:
+                payload["rejection_feedback"] = sl_hints
+                for h in sl_hints:
+                    if h.get("suggested_direction") in ("loosen", "tighten"):
+                        notes.append(
+                            f"[rejection-feedback] {h['reason_code']} → "
+                            f"{h['dial']} suggests {h['suggested_direction']} "
+                            f"(post-WR {h.get('post_rejection_win_rate_pct')}% "
+                            f"on {h.get('count')} rejections, "
+                            f"verdict={h.get('verdict')}). NOT auto-applied — "
+                            "review and promote manually."
+                        )
+        elif signal.get("enabled") is False and signal.get("note"):
+            payload["rejection_feedback_status"] = signal["note"]
+    except Exception as e:
+        logger.debug(f"rejection_signal_provider hook failed: {e}")
+
     if dry_run:
         return payload
 

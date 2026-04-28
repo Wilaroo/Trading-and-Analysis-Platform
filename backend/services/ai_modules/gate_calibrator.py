@@ -139,6 +139,44 @@ class GateCalibrator:
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+        # Rejection-signal feedback (scaffolded 2026-04-29 afternoon-6) —
+        # OFF by default. When `ENABLE_REJECTION_SIGNAL_FEEDBACK=true` the
+        # calibrator reads the rejection-analytics signal for the
+        # confidence_gate target and annotates the result with hints.
+        # Observe-only — calibrated thresholds above are NOT shifted.
+        # Operator promotes a hint into actual tuning by manually lowering
+        # the GO/REDUCE thresholds OR by promoting the consumer to weight
+        # the hint (planned follow-up PR).
+        try:
+            from services.rejection_signal_provider import get_signal
+            signal = get_signal(
+                self._db, target="confidence_gate", days=14, min_count=5
+            )
+            if signal.get("enabled"):
+                cg_hints = signal.get("by_target", {}).get("confidence_gate", [])
+                if cg_hints:
+                    result["rejection_feedback"] = cg_hints
+                    actionable = [
+                        h for h in cg_hints
+                        if h.get("suggested_direction") in ("loosen", "tighten")
+                    ]
+                    if actionable:
+                        result.setdefault("notes", []).extend([
+                            (
+                                f"[rejection-feedback] {h['reason_code']} → "
+                                f"min_score suggests {h['suggested_direction']} "
+                                f"(post-WR {h.get('post_rejection_win_rate_pct')}% "
+                                f"on {h.get('count')} rejections, "
+                                f"verdict={h.get('verdict')}). NOT auto-applied — "
+                                "review and promote manually."
+                            )
+                            for h in actionable
+                        ])
+            elif signal.get("enabled") is False and signal.get("note"):
+                result["rejection_feedback_status"] = signal["note"]
+        except Exception as e:
+            logger.debug(f"rejection_signal_provider hook failed: {e}")
+
         # Step 6: Persist to DB
         try:
             self._db["gate_calibration"].update_one(

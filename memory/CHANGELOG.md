@@ -2,6 +2,72 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-6) — Rejection signal provider scaffolding
+
+Operator follow-up: "scaffold that improvement" → wire rejection
+analytics into the existing optimizers as observe-only feedback.
+
+### Architecture
+- New module: `services/rejection_signal_provider.py`
+- Env flag: `ENABLE_REJECTION_SIGNAL_FEEDBACK` (default OFF)
+- Reason-code → target/dial routing table:
+  - TQS / confidence codes → `confidence_gate` (calibrator)
+  - Exposure / DD codes → `risk_caps` (manual review)
+  - Stop / target / path codes → `smart_levels` (optimizer)
+- Verdict → `suggested_direction`:
+  - `gate_potentially_overtight` → `loosen` (actionable)
+  - `gate_calibrated` → `hold` (gate is doing its job)
+  - `gate_borderline` / `insufficient_data` → `hold` (wait state)
+
+### Hooks (observe-only)
+- `services/multiplier_threshold_optimizer.py::run_optimization` reads
+  the signal for `target="smart_levels"` and adds:
+  - `payload["rejection_feedback"]` — the hint rows
+  - `payload["notes"]` entries flagged `[rejection-feedback]`
+  - **Does NOT** mutate any threshold proposal (verified by test).
+- `services/ai_modules/gate_calibrator.py::calibrate` reads the signal
+  for `target="confidence_gate"` and adds:
+  - `result["rejection_feedback"]` — the hint rows
+  - `result["notes"]` entries flagged `[rejection-feedback]`
+  - **Does NOT** shift calibrated GO/REDUCE thresholds (verified by test).
+- When flag OFF, both hooks short-circuit and emit a single
+  `rejection_feedback_status` note pointing at the env var.
+
+### Why observe-only (not auto-tuning)
+The rejection analytics need ~2 weeks of data + verdict stability before
+their signal is trustworthy enough to drive live tuning. The scaffolded
+hooks let the operator:
+  1. See exactly which reason codes the optimizers WOULD weight if the
+     flag were on
+  2. Compare the analytics' verdict against post-rejection trade
+     outcomes for ~2 weeks
+  3. Promote individual hints to live tuning by manually adjusting the
+     dial OR by following up with a small PR that lifts the
+     observe-only barrier per-target
+This keeps the blast radius small while still closing the data loop.
+
+### Verification
+- 20 new tests in `tests/test_rejection_signal_provider.py` covering:
+  flag default-off, flag truthy/falsy parsing, target filtering,
+  unmapped reason codes, optimizer hook (flag off + flag on with
+  observe-only assertion).
+- 136/136 passing across all related suites.
+- Lint clean.
+
+### Operator action
+Nothing required immediately. Scaffolding is dormant by design.
+
+After ~2 weeks of `/api/trading-bot/rejection-analytics` showing stable
+`gate_potentially_overtight` verdicts on a given reason code:
+  1. Set `ENABLE_REJECTION_SIGNAL_FEEDBACK=true` in `backend/.env`
+  2. Run `multiplier_threshold_optimizer` and/or `gate_calibrator` in
+     dry-run mode. Inspect `rejection_feedback` in the payload.
+  3. If a hint matches your manual reading of the data, manually
+     adjust the affected dial OR open a follow-up PR to promote that
+     specific reason-code → dial mapping into auto-tuning.
+
+
+
 ## 2026-04-29 (afternoon-5) — Equity RPC fallback + dual-scanner strategy-mix + rejection analytics
 
 Operator post-restart screenshot revealed 3 issues. All fixed.
