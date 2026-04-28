@@ -607,9 +607,18 @@ class EnhancedBackgroundScanner:
         self._rvol_cache_ttl = 300  # 5 minutes
         
         # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
-        self._min_adv_general = 100_000      # Min ADV for general/swing setups (share volume fallback)
-        self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups (share volume fallback)
-        self._min_adv_investment = 50_000    # Min ADV for investment tier (share volume fallback)
+        # 2026-04-28e: SCANNER ADV GATES are now DOLLAR-volume not share-
+        # volume. Share-based gates (e.g. "≥500K shares") created bad
+        # asymmetries: a $5 stock with 500K shares ADV is illiquid for
+        # intraday scalping ($2.5M dollar volume) while a $500 stock
+        # with 50K shares ADV is perfectly tradable ($25M dollar volume).
+        # The newer `wave_scanner` already uses dollar volume; we now
+        # align `enhanced_scanner` with that contract. Cache field used:
+        # `symbol_adv_cache.avg_dollar_volume` (computed by the IB
+        # historical collector as `avg_volume × latest_close`).
+        self._min_adv_general    =  5_000_000   # ≥ $5M  daily — swing/general setups
+        self._min_adv_intraday   = 25_000_000   # ≥ $25M daily — intraday/scalp setups
+        self._min_adv_investment =  1_000_000   # ≥ $1M  daily — long-tail/investment
         # Dollar volume thresholds (preferred over share volume)
         self._min_dollar_vol_intraday = 50_000_000   # $50M for scalps/intraday
         self._min_dollar_vol_general = 10_000_000    # $10M for swing/day trades
@@ -688,17 +697,24 @@ class EnhancedBackgroundScanner:
         
         # Estimated ADV for known liquid symbols (used when API fails)
         # These are conservative estimates - actual ADV is typically higher
+        # 2026-04-28e: Known-liquid ADV pre-fills now in DOLLAR volume
+        # (matches the new dollar-based gates). Approximate values:
+        # share-volume × typical price. Recomputed when the IB collector
+        # next runs against these symbols, so these are just the warm-up
+        # defaults for symbols that aren't yet in `symbol_adv_cache`.
         self._known_liquid_adv: Dict[str, int] = {
-            # ETFs - extremely high volume
-            "SPY": 80_000_000, "QQQ": 50_000_000, "IWM": 25_000_000,
-            "TQQQ": 30_000_000, "SQQQ": 20_000_000, "UVXY": 15_000_000,
+            # ETFs - extremely high dollar volume
+            "SPY":  35_000_000_000, "QQQ": 22_000_000_000, "IWM": 5_500_000_000,
+            "TQQQ":  1_800_000_000, "SQQQ":  600_000_000, "UVXY":   200_000_000,
             # Mega caps
-            "AAPL": 60_000_000, "MSFT": 25_000_000, "AMZN": 30_000_000,
-            "NVDA": 40_000_000, "TSLA": 80_000_000, "META": 15_000_000,
-            "GOOGL": 20_000_000, "AMD": 40_000_000,
+            "AAPL": 12_000_000_000, "MSFT": 10_000_000_000, "AMZN": 6_000_000_000,
+            "NVDA": 24_000_000_000, "TSLA": 18_000_000_000, "META":  9_000_000_000,
+            "GOOGL": 4_500_000_000, "AMD":  6_000_000_000,
         }
-        # Default for known liquid symbols not in the dict above
-        self._known_liquid_default_adv = 2_000_000  # 2M shares/day minimum assumption
+        # Default for known liquid symbols not in the dict above. Bumped
+        # from 2M shares to $100M dollar volume so the warm-up default
+        # comfortably clears all three new tier gates.
+        self._known_liquid_default_adv = 100_000_000  # $100M/day baseline
         
         # Intraday/scalp setups requiring higher volume
         self._intraday_setups = {
@@ -2249,8 +2265,14 @@ class EnhancedBackgroundScanner:
     
     async def _get_adv_from_cache(self, symbols: List[str]) -> Dict[str, int]:
         """
-        Get ADV from the pre-calculated symbol_adv_cache collection.
-        This is the fastest lookup — already computed from IB daily bars.
+        Get ADV (dollar volume) from the pre-calculated `symbol_adv_cache`
+        collection. Fastest lookup — `avg_dollar_volume` is pre-computed
+        by `IBHistoricalCollector` as `avg_volume × latest_close` so we
+        never have to multiply at scan time.
+
+        2026-04-28e: switched from `avg_volume` (shares) → `avg_dollar_volume`
+        to align with the newer `wave_scanner` and avoid the price-based
+        asymmetry baked into share-only ADV gates.
         """
         def _sync_lookup():
             adv_data = {}
@@ -2261,13 +2283,20 @@ class EnhancedBackgroundScanner:
                     return adv_data
                 cursor = db["symbol_adv_cache"].find(
                     {"symbol": {"$in": symbols}},
-                    {"_id": 0, "symbol": 1, "avg_volume": 1}
+                    {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "avg_volume": 1, "latest_close": 1}
                 )
                 for doc in cursor:
                     sym = doc.get("symbol", "")
-                    vol = doc.get("avg_volume", 0)
-                    if sym and vol > 0:
-                        adv_data[sym] = int(vol)
+                    # Prefer pre-computed dollar volume.
+                    dvol = doc.get("avg_dollar_volume") or 0
+                    if not dvol:
+                        # Backfill: compute on the fly if cache row is
+                        # old and missing the dollar field.
+                        share_vol = doc.get("avg_volume", 0)
+                        close     = doc.get("latest_close", 0) or 0
+                        dvol = int(share_vol * close) if share_vol and close else 0
+                    if sym and dvol > 0:
+                        adv_data[sym] = int(dvol)
             except Exception as e:
                 logger.debug(f"Error reading symbol_adv_cache: {e}")
             return adv_data
@@ -2276,9 +2305,12 @@ class EnhancedBackgroundScanner:
     
     async def _get_adv_from_ib_historical(self, symbols: List[str]) -> Dict[str, int]:
         """
-        Get ADV from our collected IB historical data in MongoDB.
-        This uses data we've already collected from IB Gateway.
-        Runs in a thread to avoid blocking the event loop.
+        Get ADV (dollar volume) from collected IB historical data in
+        MongoDB. Fallback path when `symbol_adv_cache` doesn't have the
+        symbol yet. Computes `avg_volume × avg_close` so the result is
+        comparable with the cache's `avg_dollar_volume` field.
+
+        2026-04-28e: returns dollar volume now, not share volume.
         """
         def _sync_lookup():
             adv_data = {}
@@ -2295,12 +2327,18 @@ class EnhancedBackgroundScanner:
                     try:
                         bars = list(bars_col.find(
                             {"symbol": symbol, "bar_size": "1 day", "date": {"$gte": cutoff}},
-                            {"volume": 1}
+                            {"volume": 1, "close": 1}
                         ).limit(20))
                         if bars and len(bars) >= 5:
-                            volumes = [b.get("volume", 0) for b in bars if b.get("volume", 0) > 0]
-                            if volumes:
-                                adv_data[symbol] = int(sum(volumes) / len(volumes))
+                            paired = [
+                                (float(b.get("volume", 0)), float(b.get("close", 0)))
+                                for b in bars
+                                if (b.get("volume") or 0) > 0 and (b.get("close") or 0) > 0
+                            ]
+                            if paired:
+                                avg_vol   = sum(v for v, _ in paired) / len(paired)
+                                avg_close = sum(c for _, c in paired) / len(paired)
+                                adv_data[symbol] = int(avg_vol * avg_close)
                     except Exception:
                         continue
             except Exception as e:

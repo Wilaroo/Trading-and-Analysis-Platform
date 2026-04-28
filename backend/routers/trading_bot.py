@@ -143,6 +143,25 @@ async def get_multiplier_threshold_history(limit: int = Query(default=20, ge=1, 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/smoke-run-report")
+async def post_smoke_run_report(hours_back: int = Query(default=24, ge=1, le=168)):
+    """Generate a paper-mode smoke-run go/no-go report covering the
+    last `hours_back` of bot activity. Returns a per-phase status
+    breakdown (SCAN / EVAL / ORDER / MANAGE / CLOSE / HEALTH) plus a
+    rolled-up `verdict ∈ {green, amber, red}` and a one-paragraph
+    operator-readable summary. Used by the operator before flipping
+    the bot from PAPER → LIVE.
+    """
+    if _trading_bot is None or getattr(_trading_bot, "_db", None) is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+    try:
+        from services.smoke_run_report_service import compute_smoke_run_report
+        return compute_smoke_run_report(_trading_bot._db, hours_back=hours_back)
+    except Exception as e:
+        logger.error(f"smoke run report failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== BOT CONTROL ====================
 
 @router.get("/status")
