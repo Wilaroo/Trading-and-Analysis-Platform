@@ -3339,11 +3339,41 @@ def main():
     #      list from the cloud backend (top-N by ADV + always-on ETFs).
     #      Set to e.g. "60" to enable; pusher hits
     #      /api/backfill/pusher-l1-recommendations and adopts the result.
-    #   3. `--symbols` CLI arg — backwards-compatible default.
+    #      Successful fetches are cached to `~/.ib_pusher_l1_cache.json`
+    #      so a subsequent restart can fall back to the last-known-good
+    #      list when the cloud backend is briefly unreachable.
+    #   3. Local cache file — fallback when (2) is set but unreachable.
+    #   4. `--symbols` CLI arg — backwards-compatible final default.
     #
     # Always capped at 80 to leave headroom under IB Gateway's 100-line
     # ceiling for the dynamic L2 routing path.
     L1_HARD_CAP = 80
+    L1_CACHE_PATH = os.path.expanduser("~/.ib_pusher_l1_cache.json")
+
+    def _save_l1_cache(symbols, source):
+        try:
+            with open(L1_CACHE_PATH, "w") as fh:
+                json.dump({
+                    "symbols": symbols,
+                    "source": source,
+                    "saved_at": datetime.now().isoformat(),
+                }, fh)
+        except Exception as e:
+            print(f"  [L1] cache write failed (non-fatal): {e}")
+
+    def _load_l1_cache():
+        try:
+            with open(L1_CACHE_PATH, "r") as fh:
+                cached = json.load(fh) or {}
+            syms = cached.get("symbols") or []
+            if syms:
+                return [str(s).upper().strip() for s in syms if s][:L1_HARD_CAP], cached
+        except FileNotFoundError:
+            return None, None
+        except Exception as e:
+            print(f"  [L1] cache read failed: {e}")
+        return None, None
+
     env_symbols = os.environ.get("IB_PUSHER_L1_SYMBOLS", "").strip()
     auto_top_n = os.environ.get("IB_PUSHER_L1_AUTO_TOP_N", "").strip()
     resolved_symbols = list(args.symbols)
@@ -3353,6 +3383,7 @@ def main():
             resolved_symbols = parsed[:L1_HARD_CAP]
             print(f"  [L1] Using IB_PUSHER_L1_SYMBOLS env var "
                   f"({len(resolved_symbols)} symbols)")
+            _save_l1_cache(resolved_symbols, "env_var")
     elif auto_top_n.isdigit() and int(auto_top_n) > 0:
         try:
             import requests as _req  # noqa: WPS433 (local import to avoid hard dep)
@@ -3372,15 +3403,25 @@ def main():
                     ][:L1_HARD_CAP]
                     print(f"  [L1] Auto-fetched {len(resolved_symbols)} symbols "
                           f"from {url}")
+                    _save_l1_cache(resolved_symbols, "auto_fetch")
                 else:
-                    print(f"  [L1] Auto-fetch returned empty list — "
-                          f"falling back to --symbols")
+                    raise RuntimeError("auto-fetch returned empty list")
             else:
-                print(f"  [L1] Auto-fetch HTTP {r.status_code} — "
-                      f"falling back to --symbols")
+                raise RuntimeError(f"HTTP {r.status_code}")
         except Exception as e:
-            print(f"  [L1] Auto-fetch failed: {e} — "
-                  f"falling back to --symbols")
+            # Cloud unreachable / DGX briefly down / network blip → try
+            # the local cache before falling back to the hardcoded
+            # CLI default. Keeps L1 stable across restarts that happen
+            # while the backend is mid-restart.
+            cached, meta = _load_l1_cache()
+            if cached:
+                resolved_symbols = cached
+                age = (meta or {}).get("saved_at", "unknown")
+                print(f"  [L1] Auto-fetch failed ({e}) — using cached list "
+                      f"({len(resolved_symbols)} symbols, saved at {age})")
+            else:
+                print(f"  [L1] Auto-fetch failed ({e}) and no local cache — "
+                      f"falling back to --symbols default")
 
     args.symbols = resolved_symbols
     

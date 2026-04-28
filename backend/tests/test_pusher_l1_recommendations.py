@@ -138,6 +138,68 @@ def test_handles_empty_db_gracefully():
     assert "XLE" in rec["symbols"]
 
 
+def test_persists_recommendation_to_pusher_config_cache(db_with_universe):
+    """Every successful call must write the result to
+    `pusher_config_cache._id="l1_recommendations"` so a subsequent
+    transient-state call (empty live ranking) can fall back to it."""
+    from services.symbol_universe import get_pusher_l1_recommendations
+    rec = get_pusher_l1_recommendations(db_with_universe, top_n=5, max_total=20)
+    assert rec["success"] is True
+    cached = db_with_universe["pusher_config_cache"].find_one(
+        {"_id": "l1_recommendations"}
+    )
+    assert cached is not None
+    assert cached["symbols"] == rec["symbols"]
+    assert cached["top_n"] == 5
+    assert cached["max_total"] == 20
+    assert "updated_at" in cached
+
+
+def test_falls_back_to_cached_list_when_live_ranking_empty():
+    """Operator's failure mode: DGX restarted, symbol_adv_cache is empty
+    (nightly rebuild not yet run), but `pusher_config_cache` has yesterday's
+    list. Must return the cached list, not just the static ETF set."""
+    from services.symbol_universe import get_pusher_l1_recommendations
+    db = mongomock.MongoClient().db
+    # Pre-seed the cache with yesterday's recommendation
+    yesterday_list = ["SPY", "QQQ", "NVDA", "AAPL", "TSLA",
+                      "AMZN", "META", "GOOGL", "AMD", "PLTR"]
+    db["pusher_config_cache"].insert_one({
+        "_id": "l1_recommendations",
+        "symbols": yesterday_list,
+        "top_n": 60,
+        "max_total": 80,
+        "updated_at": datetime.now(timezone.utc),
+    })
+
+    rec = get_pusher_l1_recommendations(db, top_n=60, max_total=80)
+    assert rec["success"] is True
+    assert rec["source"] == "cached_recommendation"
+    # All cached symbols come back
+    assert rec["symbols"] == yesterday_list
+    # cache_updated_at surfaced
+    assert "cache_updated_at" in rec
+
+
+def test_live_ranking_overrides_cache_when_both_present(db_with_universe):
+    """When `symbol_adv_cache` has data AND `pusher_config_cache` has a
+    stale list, the live ranking wins (gets the freshest data)."""
+    from services.symbol_universe import get_pusher_l1_recommendations
+    # Pre-seed a stale cache that should NOT be returned
+    db_with_universe["pusher_config_cache"].insert_one({
+        "_id": "l1_recommendations",
+        "symbols": ["STALE1", "STALE2"],
+        "updated_at": datetime.now(timezone.utc),
+    })
+
+    rec = get_pusher_l1_recommendations(db_with_universe, top_n=10)
+    assert rec["source"] == "live_ranking"
+    assert "STALE1" not in rec["symbols"]
+    assert "STALE2" not in rec["symbols"]
+    # Live ranking includes SPY (highest ADV in seed)
+    assert "SPY" in rec["symbols"]
+
+
 def test_handles_db_none_safely():
     from services.symbol_universe import get_pusher_l1_recommendations
     rec = get_pusher_l1_recommendations(None, top_n=60)

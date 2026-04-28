@@ -293,6 +293,59 @@ def get_pusher_l1_recommendations(
         if len(out) >= max_total:
             break
 
+    # If the live ranking returned NOTHING (empty cache, transient
+    # connection loss) check `pusher_config_cache` for a previous
+    # recommendation BEFORE we overwrite it. The cached list is closer
+    # to "what we'd want today" than the static ETF set.
+    if not top_by_adv:
+        try:
+            cached = db["pusher_config_cache"].find_one(
+                {"_id": "l1_recommendations"},
+                {"_id": 0, "symbols": 1, "updated_at": 1},
+            )
+            if cached and cached.get("symbols"):
+                return {
+                    "success": True,
+                    "symbols": list(cached["symbols"])[:max_total],
+                    "count": min(len(cached["symbols"]), max_total),
+                    "top_n_by_adv": [],
+                    "etfs_included": [
+                        e for e in extra_etfs if e in (cached["symbols"] or [])
+                    ],
+                    "priority_included": [],
+                    "max_total": max_total,
+                    "iso_ts": datetime.now(timezone.utc).isoformat(),
+                    "source": "cached_recommendation",
+                    "cache_updated_at": (
+                        cached["updated_at"].isoformat()
+                        if isinstance(cached.get("updated_at"), datetime)
+                        else cached.get("updated_at")
+                    ),
+                }
+        except Exception as e:
+            logger.debug(f"pusher_config_cache read failed: {e}")
+
+    # Persist to `pusher_config_cache` so a subsequent call from a
+    # transient state (empty `symbol_adv_cache` post-DGX-restart, before
+    # the nightly rebuild) still returns the last known-good list. Only
+    # writes when we have live ranking data — otherwise we'd overwrite
+    # a good cache with the ETF-only fallback.
+    if top_by_adv:
+        try:
+            db["pusher_config_cache"].update_one(
+                {"_id": "l1_recommendations"},
+                {"$set": {
+                    "_id": "l1_recommendations",
+                    "symbols": out,
+                    "top_n": int(top_n),
+                    "max_total": int(max_total),
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.debug(f"pusher_config_cache persist failed: {e}")
+
     return {
         "success": True,
         "symbols": out,
@@ -302,6 +355,7 @@ def get_pusher_l1_recommendations(
         "priority_included": [p.upper() for p in extra_priority if p.upper() in seen],
         "max_total": max_total,
         "iso_ts": datetime.now(timezone.utc).isoformat(),
+        "source": "live_ranking" if top_by_adv else "etf_fallback",
     }
 
 

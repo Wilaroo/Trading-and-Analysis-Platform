@@ -2,6 +2,74 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-9) — L1 list restart resilience (Mongo + local file)
+
+Operator follow-up: "yes make that improvement" → persist the pusher's
+L1 list so it survives pusher AND DGX restarts, even when the cloud
+backend is briefly unreachable.
+
+### Two layers of restart resilience
+
+#### 1. Backend cache: `pusher_config_cache._id="l1_recommendations"`
+- Every successful `get_pusher_l1_recommendations` call upserts the
+  resolved list to Mongo. Only writes when `top_by_adv` has data —
+  never overwrites a good cache with the ETF-only fallback.
+- When `symbol_adv_cache` is empty (DGX just restarted, before the
+  nightly rebuild), the helper now reads the cached recommendation
+  BEFORE falling back to ETF-only. Response includes
+  `source: "cached_recommendation"` + `cache_updated_at` so the
+  pusher can log the staleness.
+- New response field `source` clarifies origin every call:
+  - `"live_ranking"` — fresh from `symbol_adv_cache`
+  - `"cached_recommendation"` — Mongo fallback (DGX cache stale)
+  - `"etf_fallback"` — both empty, returning the always-on ETF
+    reference set only
+
+#### 2. Pusher local file: `~/.ib_pusher_l1_cache.json`
+- Every successful auto-fetch (or env-var override) writes the
+  resolved list + a timestamp to a local JSON file.
+- On next pusher restart, if the auto-fetch fails (cloud unreachable,
+  DGX mid-restart, network blip), the pusher reads from the local
+  cache BEFORE falling back to the hardcoded `--symbols` default.
+- Pusher logs explicitly indicate which path was taken:
+  - `[L1] Auto-fetched 80 symbols from http://...`
+  - `[L1] Auto-fetch failed (...) — using cached list (80 symbols, saved at 2026-04-29T10:30:00)`
+  - `[L1] Auto-fetch failed (...) and no local cache — falling back to --symbols default`
+
+### What this prevents
+The "what was I subscribed to?" failure mode across the IB Gateway
+daily logoff cycle:
+- **Before**: pusher restart → cloud backend mid-restart → auto-fetch
+  fails → falls back to hardcoded 14-symbol default. Operator wakes
+  up to a much narrower L1 list than they configured.
+- **After**: pusher restart → cloud unreachable → reads local file
+  cache → restores yesterday's 80-symbol list. Operator's
+  subscription state is stable across restarts that race with backend
+  unavailability.
+
+### Verification
+- 3 new tests in `tests/test_pusher_l1_recommendations.py`:
+  - `test_persists_recommendation_to_pusher_config_cache` — write path
+  - `test_falls_back_to_cached_list_when_live_ranking_empty` — DGX
+    restart fallback
+  - `test_live_ranking_overrides_cache_when_both_present` — fresh
+    data wins when available
+- 175/175 tests passing across all related suites.
+- Live curl on cloud preview: `source: "etf_fallback"` (no live ADV
+  data on this preview env). On DGX with the populated cache, will
+  return `source: "live_ranking"` on first call, then
+  `"cached_recommendation"` if the cache is ever queried in a
+  transient state.
+- Lint clean.
+
+### Operator action on Windows
+Already documented in afternoon-8: pull + add
+`IB_PUSHER_L1_AUTO_TOP_N=60` to pusher launch env, restart pusher.
+The new restart resilience is fully passive — local file cache writes
+on success, reads on failure. No additional configuration needed.
+
+
+
 ## 2026-04-29 (afternoon-8) — L1 subscription expansion (env-var-driven)
 
 Operator approved (option A): expand pusher's hardcoded 14 quote-subs
