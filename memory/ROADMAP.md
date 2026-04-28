@@ -3,50 +3,87 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (handoff to next session — 2026-04-29 evening)
+## 🔴 Now / Near-term (next session pickup — 2026-04-29 evening fork)
 
-### 🟢 Just shipped this session (2026-04-29 evening, v3) — see CHANGELOG
-- ✅ **Setup-landscape briefings + 1st-person voice enforcement**: new
-  `services/setup_landscape_service.py`, four narrative voices
-  (`morning`/`midday`/`eod`/`weekend`), wired into AI coaching alerts
-  for `market_open` / `market_close` / `weekend_prep`. Voice rules
-  ("I found …", "I'm favoring …", "I'll be looking to avoid …",
-  never 3rd-person about the bot) locked in by regression tests.
-  New endpoints: `/api/scanner/setup-landscape`,
-  `/api/assistant/coach/eod-briefing`,
-  `/api/assistant/coach/weekend-prep-briefing`. 61/61 tests passing.
+### 🎯 NEXT-SESSION PLAN — Regime → Setup → Trade pipeline (6-item rollout)
 
-### 🔴 P1 — Architectural gap surfaced 2026-04-29 evening
-**Market Regime is not currently a hard gate.** Today's flow is
-`Time-window → Trade → Setup (soft gate)`. The proper hierarchy per
-operator is `Market Regime → Setup → Trade`. Required changes:
-- Promote `_is_setup_valid_now` from time-only check to time + regime
-  gate. When `_market_regime == MOMENTUM`, suppress the four
-  reversal-flavored Setups (`overextension`, `volatility_in_range`,
-  `gap_down_into_support`, `gap_up_into_resistance`) entirely.
-- Promote `STRATEGY_REGIME_PREFERENCES` from informational metadata
-  to enforced gate (or document why it's intentionally soft).
-- Backfill regime preferences for the ~16 setups currently missing
-  one (low blast radius — already proposed).
-- Estimated effort: half-day. Tests + live verification additional.
+This is the agreed plan after the operator's architectural question
+about the pipeline `Market Regime (SPY/QQQ/IWM/DIA) → Sector Regime →
+Setup → Time / In-play → Trade`. The decision was: **the hierarchy is
+the right human mental model but the wrong runtime architecture for
+hard gates** (compounding rejection rate would starve the ML pipeline).
+Instead, hard-gate only in 3 places (Time, In-Play, Confidence) and
+encode every other layer as a feature into the per-Trade ML models.
 
-### 🟢 P2 — Setup-landscape self-grading prediction tracker (saved 2026-04-29 evening)
-Each morning snapshot the landscape into a new `landscape_predictions`
-Mongo collection with the `favoring` / `avoiding` clauses. At EOD
-compare against actual realized R-multiples per Setup family. Two
-cycles in we start producing self-grading briefing lines:
-*"my morning thesis (favor momentum on 47 Gap & Go names) realized
-+1.4R on average — top hits AAPL +2.1R, ORCL +1.8R; my
-mean-reversion-avoid call was correct on 9 of 12 names"*.
-- Schema: `{date, context, groups, favoring_phrase, avoiding_phrase,
-  realized_r_by_setup: {...}, accuracy_score, pnl_attribution}`.
-- New endpoint: `GET /api/assistant/coach/landscape-scorecard`.
-- Feeds the same data into the AI training pipeline as a
-  quality-of-judgment signal so the bot's morning prep gets sharper
-  over time.
-- Estimated effort: ~3 hours.
+| # | Item | Effort | Impact |
+|---|---|---|---|
+| 1 | **`MultiIndexRegimeClassifier`** — read SPY+QQQ+IWM+DIA, return richer regime tags (incl. divergence/breadth). Stamp on alert metadata. | ~3h | **High** |
+| 2 | **Plumb `market_setup` + new `multi_index_regime` into per-Trade ML feature vector** so the models actually train on them | ~2h | **High** |
+| 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium |
+| 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) |
+| 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high |
+| 6 | **Drop the "regime as hard gate" idea** that earlier-fork ROADMAP suggested (`STRATEGY_REGIME_PREFERENCES` enforcement). Replace with feature-based learning per items #1-2. Document the decision. | ~30min | (cleanup) |
 
-### 🟢 Just shipped earlier this session (2026-04-29 evening, v2) — see CHANGELOG
+**Recommended commit ordering**: #1 → #2 ship together. Then #5 as a
+parallel quick win. Then #3 → #4 ship together. #6 is documentation
+cleanup that can land with #1.
+
+**Hard gates after this work:**
+1. **Time-window** (`_is_setup_valid_now`) — opening_drive can't fire midday
+2. **In-Play / Universe** (ADV / spread / halt — already exists)
+3. **Confidence gate** (already exists — predicted_R + win_prob threshold)
+
+Everything else (regime, sector, setup, intraday tape) → features.
+
+### 🧪 What to verify after #1 + #2 ship
+- LiveAlert payload includes `multi_index_regime` (string), `sector_regime`
+  (string), `market_setup` (already there), `is_countertrend` (already there).
+- Per-Trade model retraining picks up the new features. Sample query:
+  `db.setup_type_models.findOne({setup_type: "9_ema_scalp"}).feature_names`
+  should include the new fields.
+- Morning briefing narrative references the multi-index regime
+  ("today SPY is up but IWM is leading — I'm tilting toward IWM-
+  correlated names").
+
+### 🟢 Just shipped 2026-04-29 evening (3 commits) — see CHANGELOG
+- ✅ **v1**: 9 new detector functions (6 orphans + 3 playbook setups)
+- ✅ **v2**: Bellafiore Setup × Trade matrix system (`MarketSetupClassifier`,
+  21-trade × 7-setup matrix, soft-gate, `_check_the_3_30_trade`,
+  `/api/scanner/setup-trade-matrix`)
+- ✅ **v3**: Setup-landscape briefings + 1st-person voice enforcement
+  (`SetupLandscapeService`, 4 narrative voices, `/api/scanner/setup-
+  landscape` + EOD/weekend coaching endpoints, voice-rule regression
+  tests). Q2 architectural gap (Regime → Setup → Trade) audited;
+  decision: handle via features not hard gates (see plan above).
+- 61/61 tests passing across the full Setup-related suite.
+
+### 🟠 Still-open items from earlier in session (not part of next-session plan)
+- 🟡 **P1** UI heat-grid rendering for the Setup × Trade matrix in the Scanner panel
+- 🟡 **P1** Auto-generate `SETUPS_AND_TRADES.md` from classifier constants on commit (currently hand-edited — drift risk)
+- 🟡 **P2** Threshold-tune `the_3_30_trade` after first session of live data
+- 🟡 **P2** Threshold-proximity sampler tuning for `bella_fade`, `bouncy_ball`, `vwap_continuation` (instrumented; needs live data + tuning)
+- 🟢 **Backlog** Define `breaking_news` + `time_of_day_fade` checkers (the 2 remaining orphans)
+
+### 🟠 Operator-prioritized follow-ups (parked)
+- **Detector backtest harness** (saved 2026-04-29 evening) — replay last
+  30d of `ib_historical_data` against each detector, compute per-setup
+  hit-rate + simulated R. Persist into `strategy_stats.r_outcomes`.
+- **Tighten Tier 2/3 freshness via smarter collector dispatch**.
+- **Mean-reversion timing metric** (Hurst + OU half-life cached on
+  `symbol_adv_cache`).
+- Realtime stop-guard re-check, EOD Rejection Summary, Chart Pulse.
+
+### 🟢 Earlier this session (2026-04-29 afternoon-12 → afternoon-15) — see CHANGELOG
+- Scanner-router instance fix + `setup-coverage` diagnostic.
+- Threshold-proximity audit for 12 silent detectors.
+- Bucket disambiguation (orphans vs time-filtered).
+- Operator-driven strategy time-window reclassification (22 setups).
+- Pusher push-loop hang fix (account_data $— → live equity).
+- Pusher subscription gate (RPC noise elimination).
+- Evaluator-veto specific reason codes + NameError fix.
+- Risk caps unified at `max_positions=25` and `min_risk_reward=1.5`.
+
+### 🟢 Just shipped earlier (2026-04-29 afternoon-3) — see CHANGELOG
 - ✅ **Bellafiore Setup × Trade matrix system**: new `MarketSetup` enum
   (7 setups), `MarketSetupClassifier` service with daily-bar-driven
   detectors, `TRADE_SETUP_MATRIX` (21 Trades × 7 Setups), 4 new
