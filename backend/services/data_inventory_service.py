@@ -37,20 +37,31 @@ MIN_BACKTEST_BARS = {
     "1 week": 52,     # ~1 year of weekly bars
 }
 
-ADV_TIERS = {
-    # 2026-04-28f: thresholds + ADV field UNIFIED with the canonical
-    # source of truth in `services.symbol_universe`. We use exclusive
-    # ranges here (each symbol slots into ONE tier = its highest
-    # qualifying tier) which is semantically equivalent to the
-    # "super-set" model in symbol_universe.py.
-    #   ≥$50M       → intraday   (full intraday TF stack)
-    #   $10M-$50M   → swing      (5m/30m/1h/1d only)
-    #   $2M-$10M    → investment (1h/1d/1w only)
-    # Field used: `symbol_adv_cache.avg_dollar_volume`.
-    "intraday":   {"min_adv": 50_000_000, "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]},
-    "swing":      {"min_adv": 10_000_000, "max_adv": 50_000_000, "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"]},
-    "investment": {"min_adv":  2_000_000, "max_adv": 10_000_000, "timeframes": ["1 hour", "1 day", "1 week"]},
-}
+def _build_adv_tiers() -> Dict[str, Any]:
+    """Build the per-tier ADV bucket config from the canonical
+    singleton in `services.symbol_universe.get_adv_thresholds()`.
+    Called once at module load — the resulting dict is read-only by
+    convention.
+    """
+    from services.symbol_universe import get_adv_thresholds
+    t = get_adv_thresholds()
+    return {
+        # ≥ intraday        → full intraday TF stack
+        "intraday":   {"min_adv": t["intraday"],
+                       "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]},
+        # [swing, intraday) → 5m/30m/1h/1d
+        "swing":      {"min_adv": t["swing"], "max_adv": t["intraday"],
+                       "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"]},
+        # [investment, swing) → 1h/1d/1w
+        "investment": {"min_adv": t["investment"], "max_adv": t["swing"],
+                       "timeframes": ["1 hour", "1 day", "1 week"]},
+    }
+
+
+# 2026-04-28f: ADV_TIERS UNIFIED with the canonical singleton in
+# `services.symbol_universe`. ALL ADV thresholds in the app now resolve
+# from one place. Field used: `symbol_adv_cache.avg_dollar_volume`.
+ADV_TIERS = _build_adv_tiers()
 
 DEPTH_CATEGORIES = {
     "deep":     lambda bars, bs: bars >= IB_MAX_LOOKBACK.get(bs, {}).get("bars_per_day", 1) * 252 * 2,  # 2+ years

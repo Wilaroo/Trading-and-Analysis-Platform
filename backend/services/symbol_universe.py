@@ -55,6 +55,23 @@ DOLLAR_VOL_THRESHOLDS: Dict[str, int] = {
     "investment": INVESTMENT_THRESHOLD,
 }
 
+
+# 2026-04-28f — single-source-of-truth accessor. ALL consumers that
+# need ADV tier thresholds (`enhanced_scanner`, `data_inventory_service`,
+# `ib_historical_collector`, future scaffolds) MUST call this function
+# instead of importing the module-level constants directly. That way a
+# future copy-paste mistake can't desynchronise tiers across the app —
+# there's only one place to change a threshold.
+def get_adv_thresholds() -> Dict[str, int]:
+    """Canonical ADV (dollar volume) tier thresholds, returned as a
+    fresh dict so callers can't mutate the module state. Single source
+    of truth for every consumer in the codebase."""
+    return {
+        "intraday":   INTRADAY_THRESHOLD,
+        "swing":      SWING_THRESHOLD,
+        "investment": INVESTMENT_THRESHOLD,
+    }
+
 # Per-bar-size → tier mapping. Used by every training entry point so a
 # 1-min model trains on the same universe smart-backfill is keeping
 # fresh, never on a wider/narrower one.

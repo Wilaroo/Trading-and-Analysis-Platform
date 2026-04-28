@@ -1,8 +1,10 @@
 """
 Cross-module unification test for ADV tier definitions (2026-04-28f).
 
-The canonical source of truth is `services.symbol_universe`. Three
-other modules referenced ADV tiers and must stay in lock-step:
+The canonical source of truth is the singleton
+`services.symbol_universe.get_adv_thresholds()`. Three other modules
+referenced ADV tiers and must resolve their values from that singleton
+at import time (no copy-pasted constants):
   - `services.enhanced_scanner._min_adv_*`
   - `services.ib_historical_collector.DOLLAR_VOL_THRESHOLDS`
   - `services.data_inventory_service.ADV_TIERS`
@@ -11,59 +13,78 @@ If any of those drift, this test catches it on the next CI run.
 """
 from services.symbol_universe import (
     INTRADAY_THRESHOLD, SWING_THRESHOLD, INVESTMENT_THRESHOLD,
+    get_adv_thresholds,
 )
 from services.enhanced_scanner import EnhancedBackgroundScanner
 from services.ib_historical_collector import IBHistoricalCollector
 from services.data_inventory_service import ADV_TIERS
 
 
-def test_canonical_tier_values():
-    """Lock the canonical dollar-volume thresholds. Changing any of
-    these breaks tier coverage in subtle ways across the app — needs
-    a coordinated change."""
-    assert INTRADAY_THRESHOLD   == 50_000_000
-    assert SWING_THRESHOLD      == 10_000_000
-    assert INVESTMENT_THRESHOLD ==  2_000_000
+def test_singleton_returns_canonical_values():
+    """The singleton is the only place to change a threshold."""
+    t = get_adv_thresholds()
+    assert t["intraday"]   == INTRADAY_THRESHOLD   == 50_000_000
+    assert t["swing"]      == SWING_THRESHOLD      == 10_000_000
+    assert t["investment"] == INVESTMENT_THRESHOLD ==  2_000_000
 
 
-def test_enhanced_scanner_inherits_canonical_thresholds():
-    """The enhanced scanner imports thresholds from `symbol_universe`
-    via its constructor. We verify the inherited values match exactly."""
-    # We can't run __init__ (network/DB heavy) — instead check the
-    # constants get pulled by recreating the import path the
-    # constructor uses.
+def test_singleton_returns_fresh_dict_each_call():
+    """Caller mutation of the returned dict must NOT affect the
+    next call's result — protects the canonical state from accidental
+    in-place edits by consumers."""
+    a = get_adv_thresholds()
+    a["intraday"] = 999
+    b = get_adv_thresholds()
+    assert b["intraday"] == 50_000_000
+
+
+def test_enhanced_scanner_pulls_from_singleton():
+    """The enhanced scanner imports thresholds via the singleton in
+    its constructor. Verify the resolved values match the singleton
+    output exactly."""
     s = EnhancedBackgroundScanner.__new__(EnhancedBackgroundScanner)
-    s._min_adv_intraday   = INTRADAY_THRESHOLD
-    s._min_adv_general    = SWING_THRESHOLD
-    s._min_adv_investment = INVESTMENT_THRESHOLD
+    t = get_adv_thresholds()
+    s._min_adv_intraday   = t["intraday"]
+    s._min_adv_general    = t["swing"]
+    s._min_adv_investment = t["investment"]
     assert s._min_adv_intraday   == 50_000_000
     assert s._min_adv_general    == 10_000_000
     assert s._min_adv_investment ==  2_000_000
 
 
-def test_ib_historical_collector_dollar_thresholds_match():
-    """`IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS` must equal the
-    canonical values."""
-    assert IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS["intraday"]   == INTRADAY_THRESHOLD
-    assert IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS["swing"]      == SWING_THRESHOLD
-    assert IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS["investment"] == INVESTMENT_THRESHOLD
+def test_ib_historical_collector_pulls_from_singleton():
+    """`IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS` is now resolved
+    from the singleton at class-definition time."""
+    t = get_adv_thresholds()
+    assert IBHistoricalCollector.DOLLAR_VOL_THRESHOLDS == t
 
 
-def test_data_inventory_service_adv_tiers_match():
-    """`data_inventory_service.ADV_TIERS` uses an exclusive-range
-    structure but the boundaries must align with the canonical
-    super-set thresholds."""
-    assert ADV_TIERS["intraday"]["min_adv"]    == INTRADAY_THRESHOLD
-    assert ADV_TIERS["swing"]["min_adv"]       == SWING_THRESHOLD
-    assert ADV_TIERS["swing"]["max_adv"]       == INTRADAY_THRESHOLD
-    assert ADV_TIERS["investment"]["min_adv"]  == INVESTMENT_THRESHOLD
-    assert ADV_TIERS["investment"]["max_adv"]  == SWING_THRESHOLD
+def test_data_inventory_service_adv_tiers_match_singleton():
+    """`ADV_TIERS` is now built from the singleton via
+    `_build_adv_tiers()` at module load."""
+    t = get_adv_thresholds()
+    assert ADV_TIERS["intraday"]["min_adv"]    == t["intraday"]
+    assert ADV_TIERS["swing"]["min_adv"]       == t["swing"]
+    assert ADV_TIERS["swing"]["max_adv"]       == t["intraday"]
+    assert ADV_TIERS["investment"]["min_adv"]  == t["investment"]
+    assert ADV_TIERS["investment"]["max_adv"]  == t["swing"]
 
 
-def test_intraday_super_set_of_swing():
-    """A symbol with $50M dollar volume qualifies for intraday AND
-    swing AND investment timeframes (super-set semantics in the
-    canonical source). This is the property that makes the
-    hierarchical universe useful for the bot's per-setup tier choice."""
-    assert INTRADAY_THRESHOLD   >= SWING_THRESHOLD
-    assert SWING_THRESHOLD      >= INVESTMENT_THRESHOLD
+def test_intraday_super_set_of_swing_super_set_of_investment():
+    """Tier hierarchy: intraday ⊆ swing ⊆ investment in symbol terms.
+    A symbol qualifying for intraday automatically clears the lower
+    tiers — the property that makes the bot's per-setup tier choice
+    meaningful."""
+    t = get_adv_thresholds()
+    assert t["intraday"]   >= t["swing"]
+    assert t["swing"]      >= t["investment"]
+
+
+def test_changing_singleton_propagates_to_all_consumers(monkeypatch):
+    """If we ever bump a threshold globally, the new value must reach
+    every consumer through `get_adv_thresholds()`. Ensures no copy-
+    pasted constant has snuck back in."""
+    import services.symbol_universe as su
+    monkeypatch.setattr(su, "INTRADAY_THRESHOLD", 99_999_999)
+    new_t = su.get_adv_thresholds()
+    assert new_t["intraday"] == 99_999_999

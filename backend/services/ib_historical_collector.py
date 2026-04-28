@@ -145,12 +145,14 @@ class IBHistoricalCollector:
         "investment": ["1 hour", "1 day", "1 week"],                         # $2M+ dollar vol/day
     }
     
-    # Dollar volume thresholds (avg_shares × price)
-    DOLLAR_VOL_THRESHOLDS = {
-        "intraday": 50_000_000,   # $50M/day
-        "swing": 10_000_000,      # $10M/day
-        "investment": 2_000_000,  # $2M/day
-    }
+    # 2026-04-28f: Dollar volume thresholds UNIFIED with the canonical
+    # singleton in `services.symbol_universe.get_adv_thresholds()`.
+    # Resolved at class-definition time from one source of truth so
+    # there's no risk of drift across enhanced_scanner /
+    # data_inventory_service / this collector.
+    DOLLAR_VOL_THRESHOLDS = (lambda: __import__(
+        "services.symbol_universe", fromlist=["get_adv_thresholds"]
+    ).get_adv_thresholds())()
     
     # ATR% thresholds (ATR/price as decimal)
     ATR_PCT_THRESHOLDS = {

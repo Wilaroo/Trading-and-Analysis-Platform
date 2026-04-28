@@ -608,23 +608,16 @@ class EnhancedBackgroundScanner:
         
         # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
         # 2026-04-28e/f: SCANNER ADV GATES are DOLLAR-volume not share-
-        # volume, and now PULLED FROM THE CANONICAL SOURCE
-        # (`services.symbol_universe`) so the scanner can never drift
-        # from the rest of the app. The single source of truth is:
-        #   intraday   ≥ $50M/day
-        #   swing      ≥ $10M/day  (super-set of intraday)
-        #   investment ≥ $2M/day   (super-set of swing)
-        # Cache field used: `symbol_adv_cache.avg_dollar_volume`,
-        # computed by IBHistoricalCollector.rebuild_adv_from_ib() as
-        # `avg_volume × latest_close`.
-        from services.symbol_universe import (
-            INTRADAY_THRESHOLD,
-            SWING_THRESHOLD,
-            INVESTMENT_THRESHOLD,
-        )
-        self._min_adv_intraday   = INTRADAY_THRESHOLD     # $50M/day
-        self._min_adv_general    = SWING_THRESHOLD        # $10M/day (= "swing")
-        self._min_adv_investment = INVESTMENT_THRESHOLD   # $2M/day
+        # volume, and PULLED FROM THE CANONICAL SINGLETON
+        # (`services.symbol_universe.get_adv_thresholds()`) so the
+        # scanner cannot drift from the rest of the app — single
+        # source of truth across enhanced_scanner, data_inventory_service,
+        # and ib_historical_collector.
+        from services.symbol_universe import get_adv_thresholds
+        _t = get_adv_thresholds()
+        self._min_adv_intraday   = _t["intraday"]     # $50M/day
+        self._min_adv_general    = _t["swing"]        # $10M/day
+        self._min_adv_investment = _t["investment"]   # $2M/day
         # Dollar volume thresholds (preferred over share volume)
         self._min_dollar_vol_intraday = 50_000_000   # $50M for scalps/intraday
         self._min_dollar_vol_general = 10_000_000    # $10M for swing/day trades
