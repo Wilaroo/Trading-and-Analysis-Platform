@@ -2,9 +2,9 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch + setup-coverage diagnostic + threshold-proximity audit (P0)
+## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch + setup-coverage diagnostic + threshold-proximity audit + bucket disambiguation (P0)
 
-### Three issues fixed in this round
+### Four issues fixed in this round
 
 #### 1. Scanner-router instance mismatch (the diagnostic was lying)
 Operator hit `POST /api/live-scanner/start` and got back `running:
@@ -122,6 +122,44 @@ deliberately omitted — they're already firing.
   `abs_gt` / `lt` / `gt` verdict semantics, no-samples short-circuit.
 - 11/11 passing across all afternoon-15 suites; **24/24 across all
   afternoon-12/13/14/15 fixes**.
+
+#### 4. Bucket disambiguation: orphans vs time-filtered (afternoon-15c)
+First live run of `setup-coverage` reported `orphan_count: 21`, but
+many of those (e.g. `9_ema_scalp`, `backside`, `opening_drive`,
+`orb`, `hitchhiker`, `puppy_dog`, `big_dog`) actually have working
+checker functions — they're just blocked by `_is_setup_valid_now`
+during afternoon (opening-only setups). The original logic used
+`cum_evals.keys()` as the "registered" set, which only contains
+setups whose checker was actually called — time-filtered setups
+look like orphans because their checker is never invoked.
+
+**Fix**: introduced class-level
+`EnhancedBackgroundScanner.REGISTERED_SETUP_TYPES: frozenset`
+listing every setup_type with a checker function. Now
+`setup-coverage` distinguishes:
+- `orphan_enabled_setups`: in enabled, NOT in `REGISTERED_SETUP_TYPES`
+  → no code at all.
+- `time_filtered_setups`: in enabled AND registered, but never
+  evaluated → blocked by time-window/regime gate; expected behaviour.
+- `silent_detectors`: registered + evaluated + 0 hits → threshold tuning needed.
+- `active_detectors`: registered + evaluated + ≥1 hit → working.
+- `unenabled_with_checkers`: registered but not enabled → unused code.
+
+Also updated `totals` to expose `registered_checkers`,
+`evaluated_at_least_once`, and `time_filtered_count` so operator can
+tell at a glance whether the small evaluation pool is due to
+time-window filtering vs missing checkers.
+
+**Regression guard**: new test
+`test_registered_set_matches_checkers_dict` extracts both the
+`checkers` dict keys and the `REGISTERED_SETUP_TYPES` frozenset via
+regex from the source, then asserts they're identical. Any future
+drift between adding/removing a checker and updating the frozenset
+will fail this test immediately. **No more silent mis-classification
+of time-filtered setups as orphans.**
+
+### Verification (final)
+- 14/14 passing across all afternoon-12/13/14/15 suites.
 
 ### Operator action on DGX
 1. Save to GitHub, `git pull` on DGX (backend hot-reloads).

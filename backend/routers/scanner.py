@@ -645,15 +645,26 @@ def get_setup_coverage():
     cum_hits: Dict[str, int] = getattr(scanner, "_detector_hits_total", {}) or {}
     enabled: set = set(getattr(scanner, "_enabled_setups", set()) or set())
 
-    registered = set(cum_evals.keys())
+    # `REGISTERED_SETUP_TYPES` is a class-level frozenset that lists
+    # every setup_type with a checker function in `_check_setup`.
+    # Distinguishes TRUE orphans (no code at all) from time-window-
+    # filtered setups (have code, blocked by `_is_setup_valid_now`).
+    registered: set = set(getattr(
+        type(scanner), "REGISTERED_SETUP_TYPES", frozenset()
+    ))
+    # `evaluated`: subset of registered that has actually been called
+    # at least once since startup. Setups in registered-but-not-
+    # evaluated are time-window/regime-filtered.
+    evaluated: set = set(cum_evals.keys())
 
     orphan_enabled = sorted(enabled - registered)
+    time_filtered = sorted((enabled & registered) - evaluated)
     silent = sorted(
-        [s for s in (enabled & registered) if cum_hits.get(s, 0) == 0],
+        [s for s in (enabled & evaluated) if cum_hits.get(s, 0) == 0],
         key=lambda s: -cum_evals.get(s, 0),
     )
     active = sorted(
-        [s for s in (enabled & registered) if cum_hits.get(s, 0) > 0],
+        [s for s in (enabled & evaluated) if cum_hits.get(s, 0) > 0],
         key=lambda s: -cum_hits.get(s, 0),
     )
     unenabled_with_checkers = sorted(registered - enabled)
@@ -685,8 +696,10 @@ def get_setup_coverage():
         "scan_count": int(getattr(scanner, "_scan_count", 0)),
         "totals": {
             "enabled_setups": len(enabled),
-            "registered_detectors_seen": len(registered),
+            "registered_checkers": len(registered),
+            "evaluated_at_least_once": len(evaluated),
             "orphan_count": len(orphan_enabled),
+            "time_filtered_count": len(time_filtered),
             "silent_count": len(silent),
             "active_count": len(active),
             "unenabled_count": len(unenabled_with_checkers),
@@ -697,6 +710,13 @@ def get_setup_coverage():
                 "issue": "in _enabled_setups but no registered checker function — silent no-op every scan",
             }
             for s in orphan_enabled
+        ],
+        "time_filtered_setups": [
+            {
+                "setup_type": s,
+                "issue": "checker exists but _is_setup_valid_now blocks it in current time-window/regime — expected for opening/morning-only setups during afternoon",
+            }
+            for s in time_filtered
         ],
         "silent_detectors": [_row(s) for s in silent],
         "active_detectors": [_row(s) for s in active],

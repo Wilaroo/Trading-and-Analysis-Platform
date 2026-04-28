@@ -2653,6 +2653,33 @@ class EnhancedBackgroundScanner:
             return result
         return None
 
+    # Class-level set of every setup_type that has a registered checker
+    # function in `_check_setup`. Used by `/api/scanner/setup-coverage` to
+    # distinguish TRUE orphans (no code at all) from time-window-filtered
+    # setups (have code, but `_is_setup_valid_now` blocks them in the
+    # current regime/time-window). MUST stay in lockstep with the
+    # `checkers` dict above — guarded by
+    # `tests/test_scanner_setup_coverage.py::test_registered_set_matches_dict`.
+    # Added 2026-04-29 (afternoon-15c).
+    REGISTERED_SETUP_TYPES: frozenset = frozenset({
+        # Opening strategies
+        "first_vwap_pullback", "opening_drive",
+        # Morning momentum
+        "orb", "hitchhiker", "gap_give_go",
+        # Core session
+        "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
+        # Mean reversion
+        "rubber_band", "vwap_bounce", "vwap_fade", "tidal_wave",
+        # Consolidation
+        "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp",
+        # Afternoon
+        "hod_breakout", "approaching_hod",
+        # Special
+        "volume_capitulation", "range_break", "breakout",
+        # NEW setups
+        "squeeze", "mean_reversion", "relative_strength", "gap_fade", "chart_pattern",
+    })
+
     # ==================== THRESHOLD PROXIMITY SAMPLER (afternoon-15b) ====================
 
     # Maps setup_type → list of (sample_label, snapshot_attr, threshold,

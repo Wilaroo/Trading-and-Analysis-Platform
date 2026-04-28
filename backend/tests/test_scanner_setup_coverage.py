@@ -73,6 +73,42 @@ def test_scanner_router_module_imports_cleanly():
         sys.path.pop(0)
 
 
+def test_registered_set_matches_checkers_dict():
+    """`EnhancedBackgroundScanner.REGISTERED_SETUP_TYPES` MUST contain
+    exactly the keys of the `checkers` dict in `_check_setup`. Any
+    drift causes `setup-coverage` to mis-classify time-window-filtered
+    setups as orphans (afternoon-15c hit this exact bug).
+
+    Source-level test — extracts the dict from the function body via
+    regex so we don't have to patch internals.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    # 1) Pull every `"setup_name": self._check_*` pair from `_check_setup`.
+    fn_idx = src.index("async def _check_setup(self,")
+    body_end = src.index("REGISTERED_SETUP_TYPES", fn_idx)
+    body = src[fn_idx:body_end]
+    pairs = set(re.findall(r'"([a-z0-9_]+)":\s*self\._check_', body))
+    assert len(pairs) >= 20, f"Sanity: expected ≥20 checker entries, got {len(pairs)}"
+
+    # 2) Pull the names listed in REGISTERED_SETUP_TYPES.
+    reg_idx = src.index("REGISTERED_SETUP_TYPES: frozenset = frozenset({")
+    reg_end = src.index("})", reg_idx)
+    reg_block = src[reg_idx:reg_end]
+    registered = set(re.findall(r'"([a-z0-9_]+)"', reg_block))
+
+    missing = pairs - registered
+    extra = registered - pairs
+    assert not missing, (
+        f"checkers dict has setups missing from REGISTERED_SETUP_TYPES: {sorted(missing)}"
+    )
+    assert not extra, (
+        f"REGISTERED_SETUP_TYPES has setups not in checkers dict: {sorted(extra)}"
+    )
+
+
 def test_setup_coverage_partitions_match_contract():
     """The four partition lists in the response MUST be present and
     have intuitive contracts:
