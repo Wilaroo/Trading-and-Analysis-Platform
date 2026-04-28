@@ -592,7 +592,14 @@ export const ChartPanel = ({
   return (
     <div
       data-testid="sentcom-chart-panel"
-      className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-950/90 via-zinc-950/80 to-zinc-900/80 backdrop-blur-xl ${className}`}
+      className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-zinc-950/90 via-zinc-950/80 to-zinc-900/80 backdrop-blur-xl ${
+        // 2026-04-28c: when no fixed `height` prop is passed (V5 default),
+        // the panel must be a flex column that fills its parent — otherwise
+        // the inner `chart-container` with `flex-1 min-h-0` collapses to 0px
+        // because the root isn't a flex parent. This caused the empty chart
+        // pane the operator screenshotted on 2026-04-28.
+        height ? '' : 'flex flex-col h-full'
+      } ${className}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 gap-4 flex-wrap">

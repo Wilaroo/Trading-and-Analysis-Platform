@@ -2,6 +2,27 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-28c — Chart fixes round 3: ChartPanel root made flex-flex-col (fixes empty chart)
+
+Operator screenshot post-pull showed chart canvas completely empty
+("1D BARS · updated 8:12:06 PM ET" header rendered, but black canvas
+underneath). Root cause was layout-only: my round-2 CSS restructure
+gave the inner `chart-container` div `flex-1 min-h-0` to fill its
+parent, but the ChartPanel root `<div>` itself was NOT a flex
+container — only `relative overflow-hidden …`. So `flex-1` on the
+child resolved against a non-flex parent → height: auto → child
+shrank to content (the inner ref div with `height: 100%` of an
+unsized parent) → 0px tall → lightweight-charts autoSize captured
+zero height → invisible chart.
+
+### Fix
+- `ChartPanel.jsx` root `<div>` now adds `flex flex-col h-full` when
+  the legacy `height` prop is omitted (V5 default). When `height` is
+  explicitly passed (legacy callers), the root stays non-flex and the
+  fixed pixel height continues to work as before.
+- One-line change. No backend changes. All 5 chart_rth_filter tests
+  still pass.
+
 ## 2026-04-28b — Chart fixes round 2: premarket shading + autoSize + session=rth_plus_premarket
 
 Operator screenshot shows volume + time-axis still missing AND
