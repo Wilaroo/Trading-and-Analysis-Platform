@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-12) — Pusher push loop hang fix (P0)
+
+Operator post-pull/restart screenshot: `IB PUSHER DEAD · last push
+never`. IB Gateway green, ib_data_pusher.py running, but pusher
+console stalled forever at `Requesting account updates...` — push
+loop never starts → `0 quotes`, `0 positions`, `Equity: $—`.
+
+### Root cause
+`IB.reqAccountUpdates(account)` is `_run(reqAccountUpdatesAsync())`,
+which awaits the IB Gateway's `accountDownloadEnd` event. In the
+wild, IB Gateway can stall that event indefinitely even while the
+Gateway window shows green. The afternoon-7 fix removed the worker-
+thread watchdog (because the watchdog itself broke things by missing
+an asyncio loop), but it did not add a timeout — so a stalled stream
+now hangs the entire pusher startup. The same pattern affected
+`fetch_news_providers` (which runs *before* the first push), so it
+was also at risk.
+
+### Fix
+- `request_account_updates` now uses the **raw client wire-protocol
+  send** `self.ib.client.reqAccountUpdates(True, accounts[0])`. That's
+  a synchronous send that returns immediately — no await of
+  `accountDownloadEnd`. The existing `accountValueEvent` handler
+  (wired in `__init__`) populates `self.account_data` as values
+  stream in. Falls back to the high-level call only if the raw client
+  method is missing in some odd ib_insync build.
+- `fetch_news_providers` wraps `reqNewsProvidersAsync()` in
+  `asyncio.wait_for(..., timeout=8.0)`. On `TimeoutError`, logs a
+  warning and proceeds with empty providers list (non-critical).
+  Falls back to the legacy sync call if `reqNewsProvidersAsync` is
+  missing on older ib_insync builds.
+
+### Verification
+- 4 new tests in `tests/test_pusher_account_updates_no_block.py`:
+  raw-client-send is primary, high-level call gated to fallback,
+  news providers wrapped in `wait_for(timeout=8)`, sync fallback for
+  older ib_insync preserved.
+- All 4 passing.
+
+### Operator action on Windows
+1. `git pull` on Windows.
+2. Restart `ib_data_pusher.py`.
+3. Watch the console — should see within ~3s of "Requesting account
+   updates...":
+   - `Requested account updates for DUN615665 (fire-and-forget)`
+   - `Skipping fundamental data...`
+   - `Fetching news providers...`
+   - Either `News providers: [...]` or `reqNewsProviders timed out
+     after 8s — proceeding with empty list`
+   - `==> STARTING PUSH LOOP (TRADING ONLY)`
+   - Push lines starting to flow.
+4. DGX dashboard `IB PUSHER DEAD` banner should clear within ~10s.
+
+
+
 ## 2026-04-29 (afternoon-11) — Drawer split handle (operator-resizable bottom drawer)
 
 Operator approved: vertical drag-handle between SentCom Intelligence

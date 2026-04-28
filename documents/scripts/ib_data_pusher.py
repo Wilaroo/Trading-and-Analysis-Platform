@@ -832,10 +832,28 @@ class IBDataPusher:
         Fix: call directly on the main thread. If it ever genuinely
         hangs, the push loop will be delayed once at startup — acceptable
         cost for actually working news data.
+
+        2026-04-29 (afternoon-12): added 8s timeout via asyncio.wait_for
+        so a stalled IB news service can no longer keep the push loop
+        from starting. News providers are non-critical — empty list is
+        a fine fallback.
         """
         try:
-            providers = self.ib.reqNewsProviders()
-            self.ib.sleep(0.5)
+            import asyncio as _asyncio
+            providers = None
+            try:
+                async def _fetch_with_timeout():
+                    return await _asyncio.wait_for(
+                        self.ib.reqNewsProvidersAsync(), timeout=8.0
+                    )
+                providers = self.ib.run(_fetch_with_timeout())
+            except _asyncio.TimeoutError:
+                logger.warning("reqNewsProviders timed out after 8s — proceeding with empty list")
+                providers = None
+            except AttributeError:
+                # Older ib_insync without reqNewsProvidersAsync — fall back to sync call.
+                providers = self.ib.reqNewsProviders()
+                self.ib.sleep(0.5)
             if providers:
                 self.news_providers = [
                     {
@@ -1025,9 +1043,20 @@ class IBDataPusher:
         pill at `$—`.
 
         Fix: call `reqAccountUpdates` directly on the main thread (where
-        ib_insync's event loop already lives). If it ever genuinely
-        hangs, IB connectivity is broken and we have bigger problems
-        than the push loop's timing.
+        ib_insync's event loop already lives).
+
+        2026-04-29 (afternoon-12): the high-level `IB.reqAccountUpdates`
+        is actually `_run(reqAccountUpdatesAsync())` which awaits the
+        initial `accountDownloadEnd` event. If IB Gateway stalls that
+        event (observed in the wild — Gateway green, but stream never
+        completes the initial dump), the entire push loop never starts
+        and the operator sees `IB PUSHER DEAD · last push never`.
+
+        Fix: call the raw `client.reqAccountUpdates(True, account)`
+        directly. That's a synchronous wire-protocol send — returns
+        immediately. `accountValueEvent` is already wired to
+        `on_account_value` (see __init__) so values populate
+        `self.account_data` as they stream in, with no blocking await.
         """
         accounts = []
         try:
@@ -1039,8 +1068,16 @@ class IBDataPusher:
             logger.warning("  No managed accounts found — skipping account updates")
             return
         try:
-            self.ib.reqAccountUpdates(account=accounts[0])
-            logger.info(f"  Requested account updates for {accounts[0]}")
+            # Raw client send — fire-and-forget, no await of accountDownloadEnd.
+            # Falls through to the high-level call only if the raw client
+            # method is missing in some odd ib_insync build.
+            client = getattr(self.ib, "client", None)
+            raw_req = getattr(client, "reqAccountUpdates", None) if client else None
+            if callable(raw_req):
+                raw_req(True, accounts[0])
+            else:
+                self.ib.reqAccountUpdates(account=accounts[0])
+            logger.info(f"  Requested account updates for {accounts[0]} (fire-and-forget)")
         except Exception as e:
             logger.error(f"  Account update request error: {e}")
     
