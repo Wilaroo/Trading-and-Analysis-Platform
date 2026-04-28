@@ -690,6 +690,8 @@ async def get_morning_coaching():
     - Current market regime
     - Best strategies for today
     - Key rule reminder
+    - Bellafiore Setup landscape ("I found 47 names in Gap & Go incl AAPL, ORCL …")
+      delivered in 1st-person voice, grounded in real classifier data.
     """
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
@@ -697,6 +699,30 @@ async def get_morning_coaching():
     result = await _assistant_service.get_coaching_alert("market_open", {})
     
     return result
+
+
+@router.get("/coach/eod-briefing")
+async def get_eod_coaching():
+    """
+    End-of-day briefing — retrospective Setup landscape framed in 1st
+    person ("today shaped up as …"). Useful for the journal / EOD review
+    flow before the user logs trades for the day.
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    return await _assistant_service.get_coaching_alert("market_close", {})
+
+
+@router.get("/coach/weekend-prep-briefing")
+async def get_weekend_prep_coaching():
+    """
+    Weekend prep briefing — Setup landscape with forward-looking voice
+    ("over the weekend I screened … heading into next week I'm preparing …").
+    Designed for Sunday-night planning sessions before Monday's open.
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    return await _assistant_service.get_coaching_alert("weekend_prep", {})
 
 
 @router.get("/coach/rule-reminder")

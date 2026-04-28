@@ -5,7 +5,32 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-29 evening)
 
-### 🟢 Just shipped this session (2026-04-29 evening, v2) — see CHANGELOG
+### 🟢 Just shipped this session (2026-04-29 evening, v3) — see CHANGELOG
+- ✅ **Setup-landscape briefings + 1st-person voice enforcement**: new
+  `services/setup_landscape_service.py`, four narrative voices
+  (`morning`/`midday`/`eod`/`weekend`), wired into AI coaching alerts
+  for `market_open` / `market_close` / `weekend_prep`. Voice rules
+  ("I found …", "I'm favoring …", "I'll be looking to avoid …",
+  never 3rd-person about the bot) locked in by regression tests.
+  New endpoints: `/api/scanner/setup-landscape`,
+  `/api/assistant/coach/eod-briefing`,
+  `/api/assistant/coach/weekend-prep-briefing`. 61/61 tests passing.
+
+### 🔴 P1 — Architectural gap surfaced 2026-04-29 evening
+**Market Regime is not currently a hard gate.** Today's flow is
+`Time-window → Trade → Setup (soft gate)`. The proper hierarchy per
+operator is `Market Regime → Setup → Trade`. Required changes:
+- Promote `_is_setup_valid_now` from time-only check to time + regime
+  gate. When `_market_regime == MOMENTUM`, suppress the four
+  reversal-flavored Setups (`overextension`, `volatility_in_range`,
+  `gap_down_into_support`, `gap_up_into_resistance`) entirely.
+- Promote `STRATEGY_REGIME_PREFERENCES` from informational metadata
+  to enforced gate (or document why it's intentionally soft).
+- Backfill regime preferences for the ~16 setups currently missing
+  one (low blast radius — already proposed).
+- Estimated effort: half-day. Tests + live verification additional.
+
+### 🟢 Just shipped earlier this session (2026-04-29 evening, v2) — see CHANGELOG
 - ✅ **Bellafiore Setup × Trade matrix system**: new `MarketSetup` enum
   (7 setups), `MarketSetupClassifier` service with daily-bar-driven
   detectors, `TRADE_SETUP_MATRIX` (21 Trades × 7 Setups), 4 new

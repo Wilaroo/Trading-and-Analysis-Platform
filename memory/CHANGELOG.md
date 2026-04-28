@@ -2,6 +2,103 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (evening, v3) — Setup-landscape briefings + 1st-person voice
+
+### Concept
+Operator's request: every briefing surface (morning, EOD, weekend prep)
+should pre-compute the daily Bellafiore-Setup landscape and inject it
+as concrete grounding for the AI coaching narrative. And the voice
+must always be 1st-person — "I found 47 stocks in Gap & Go, I'm
+favoring momentum trades, I'll be looking to avoid mean-reversion on
+overextended names" — never 3rd-person about the bot.
+
+### Shipped
+- New file `services/setup_landscape_service.py` (~280 lines):
+  - `SetupLandscapeService` with `get_snapshot(sample_size, context)`.
+  - Pulls top-N symbols by ADV from `symbol_adv_cache`, batch-classifies
+    via the existing `MarketSetupClassifier` (5-min cache makes back-to-
+    back briefings near-free), groups by Setup, picks top 5 examples per
+    Setup sorted by classifier confidence, renders 1st-person narrative.
+  - 60-second snapshot cache.
+  - Four narrative voices keyed off `context`: `morning` (forward-
+    looking, "I'm favoring …"), `midday` (in-progress, "I'm watching …"),
+    `eod` (retrospective, "today shaped up as …"), `weekend` (prep,
+    "over the weekend I screened … heading into next week I'm preparing
+    …").
+  - `_SETUP_TRADE_FAMILY` constant maps each Setup to its
+    (trade_family_label, favoring_phrase, avoiding_phrase) tuple —
+    hand-derived from the operator's "Best types of trades for this
+    setup" line on each Setup screenshot.
+- Wired the landscape into `ai_assistant_service.get_coaching_alert`:
+  - For `market_open`, `market_close`, `weekend_prep` context types,
+    pulls the landscape snapshot and injects the rendered narrative
+    into the AI prompt as concrete data.
+  - Adds an explicit voice-rules block to every prompt: "Speak as the
+    bot — first-person ('I found …', 'I'm favoring …', 'I'll be looking
+    to avoid …'). Do NOT refer to the bot in the third person."
+  - Returns the structured `setup_landscape` payload alongside the
+    coaching text so the UI can render the bullet structure separately.
+  - New prompt entries for `market_close` (EOD review) and
+    `weekend_prep` (Sunday-night planning).
+- New endpoints:
+  - `GET /api/scanner/setup-landscape?context=morning|midday|eod|weekend
+    &sample_size=200` — returns structured landscape + pre-rendered
+    1st-person narrative for direct UI rendering.
+  - `GET /api/assistant/coach/eod-briefing` — retrospective EOD coaching.
+  - `GET /api/assistant/coach/weekend-prep-briefing` — forward-looking
+    Sunday prep coaching.
+
+### Voice / 1st-person enforcement
+Tests in `tests/test_setup_landscape_service.py` lock in the voice rule:
+  - `test_morning_narrative_uses_first_person_voice` asserts the
+    narrative contains `I screened`, `I'm favoring`, `I'll be looking
+    to avoid` AND does NOT contain forbidden 3rd-person phrases like
+    `the bot`, `SentCom is`, `the system found`, `the scanner found`.
+  - `test_eod_narrative_uses_retrospective_voice` asserts `today shaped
+    up as` + `The day favored`.
+  - `test_weekend_narrative_uses_forward_looking_voice` asserts
+    `heading into next week`.
+  - `test_setup_trade_family_action_clauses_are_first_person_friendly`
+    asserts each `favoring`/`avoiding` phrase starts with a noun phrase
+    (so it chains naturally into "I'm favoring …" without grammar
+    errors).
+
+### Verification
+- 13 new tests in `test_setup_landscape_service.py`. 61/61 passing
+  across the full Setup-related suite (landscape, matrix, orphan
+  detectors, setup coverage, time-window reclassification).
+- Live endpoints all return 200:
+  - `/api/scanner/setup-landscape` — fallback narrative correctly
+    1st-person when ADV cache empty in container ("I screened 0 names
+    … I'll let the open's first 30 minutes confirm a daily structure
+    before I lean into any Trade family — until then, I'm staying
+    small and reactive").
+  - `/api/assistant/coach/morning-briefing` (now landscape-grounded).
+  - `/api/assistant/coach/eod-briefing` (new).
+  - `/api/assistant/coach/weekend-prep-briefing` (new).
+
+### Known architectural gap (operator surfaced this in same turn)
+The system currently flows **Time → Trade → Setup (soft gate)**, NOT
+the proper hierarchy **Market Regime → Setup → Trade**. `_market_regime`
+is computed every cycle from SPY but only stamped onto each alert as
+metadata — it does not gate anything. `STRATEGY_REGIME_PREFERENCES`
+exists but is purely informational. Logged to ROADMAP as P1 follow-up:
+make Regime a hard upstream gate so e.g. `MOMENTUM` regime suppresses
+the reversal-flavored Setups (Overextension, Volatility In Range)
+entirely and `RANGE_BOUND` regime suppresses the continuation Setups.
+
+### Operator action on DGX
+1. Save to GitHub → `git pull` on DGX (backend hot-reloads).
+2. Curl the new landscape endpoint after Mongo has data:
+   ```
+   curl -s "http://localhost:8001/api/scanner/setup-landscape?context=morning" \
+     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['headline']); print(d['narrative'])"
+   ```
+3. Trigger the morning briefing and verify the AI's reply is
+   1st-person and references real tickers from the landscape.
+
+
+
 ## 2026-04-29 (evening, v2) — Bellafiore Setup × Trade matrix system
 
 ### Concept

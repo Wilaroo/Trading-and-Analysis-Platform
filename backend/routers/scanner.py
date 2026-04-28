@@ -771,6 +771,71 @@ async def get_setup_trade_matrix():
     }
 
 
+@router.get("/setup-landscape")
+async def get_setup_landscape(
+    sample_size: int = 200,
+    context: str = "morning",
+):
+    """
+    Setup landscape snapshot — universe-wide Bellafiore Setup classification.
+
+    Powers the 1st-person Setup-aware narrative line in morning / EOD /
+    weekend briefings. Returns the structured groups + a pre-rendered
+    1st-person paragraph the operator UI can display verbatim.
+
+    Args:
+        sample_size: how many top-ADV symbols to classify (default 200,
+            cached for 60s so back-to-back calls are O(1)).
+        context: narrative voice — "morning" | "midday" | "eod" | "weekend".
+
+    Response shape:
+        {
+            "timestamp": ...,
+            "sample_size": 200,
+            "classified": 173,        # how many got non-NEUTRAL
+            "headline": "I'm seeing 47 names in Gap & Go (top: AAPL, ORCL, MSFT)…",
+            "narrative": "**Setup landscape — I screened 200 …",
+            "groups": [
+                { "setup": "gap_and_go", "count": 47,
+                  "examples": [{"symbol":"AAPL","confidence":0.78}, ...] },
+                ...
+            ],
+        }
+    """
+    try:
+        from services.setup_landscape_service import get_setup_landscape_service
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Landscape import failed: {e}")
+    if context not in ("morning", "midday", "eod", "weekend"):
+        raise HTTPException(status_code=400, detail="context must be morning|midday|eod|weekend")
+    # Read from the live scanner singleton (same path setup-coverage uses)
+    # so we share its already-bound MongoDB handle.
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+    except Exception:
+        db = None
+    svc = get_setup_landscape_service(db=db)
+    snap = await svc.get_snapshot(sample_size=sample_size, context=context)
+    return {
+        "timestamp": snap.timestamp,
+        "sample_size": snap.sample_size,
+        "classified": snap.classified,
+        "headline": snap.headline,
+        "narrative": snap.narrative,
+        "groups": [
+            {
+                "setup": g.setup,
+                "count": g.count,
+                "examples": [{"symbol": s, "confidence": round(c, 3)}
+                             for s, c in g.examples],
+            }
+            for g in snap.groups
+        ],
+    }
+
+
 @router.get("/summary")
 def get_scanner_summary():
     """

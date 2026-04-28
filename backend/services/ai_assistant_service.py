@@ -2967,13 +2967,63 @@ Please provide:
         - rule_reminder: Periodic rule reminders
         """
         data = data or {}
-        
+
+        # ─────── Setup landscape context (2026-04-29 evening v2) ───────
+        # Inject the live Bellafiore-Setup snapshot so the AI's morning /
+        # EOD / weekend coaching is grounded in real distribution data
+        # ("47 in Gap & Go incl AAPL, ORCL …") instead of pure
+        # hallucination from prompt vibes. Speaks first-person per the
+        # operator's voice rule.
+        landscape_block = ""
+        landscape_payload: Optional[Dict] = None
+        try:
+            from services.setup_landscape_service import get_setup_landscape_service
+            landscape_ctx = {
+                "market_open":  "morning",
+                "market_close": "eod",
+                "weekend_prep": "weekend",
+            }.get(context_type)
+            if landscape_ctx:
+                svc = get_setup_landscape_service(db=getattr(self, "db", None))
+                snap = await svc.get_snapshot(context=landscape_ctx)
+                landscape_block = (
+                    f"\n\n--- Live Setup landscape (use this directly in your reply, "
+                    f"do NOT paraphrase the bullets out of existence) ---\n"
+                    f"{snap.narrative}\n"
+                    f"--- end landscape ---\n"
+                )
+                landscape_payload = {
+                    "headline": snap.headline,
+                    "narrative": snap.narrative,
+                    "groups": [
+                        {"setup": g.setup, "count": g.count,
+                         "examples": [s for s, _ in g.examples]}
+                        for g in snap.groups
+                    ],
+                    "sample_size": snap.sample_size,
+                    "classified": snap.classified,
+                }
+        except Exception as e:
+            logger.debug(f"setup landscape injection skipped: {e}")
+
         coaching_prompts = {
             "market_open": """It's market open time. Based on my learned knowledge, provide a quick 3-point coaching reminder:
 1. What's the current market regime and how should I trade it?
 2. Which of my strategies are best suited for today?
 3. One key rule I should keep in mind.
 Keep it concise and actionable.""",
+
+            "market_close": """It's market close time. Walk me through an end-of-day review:
+1. How did the daily Setup landscape shape up vs what I planned this morning?
+2. Which Trade families had edge today and which would have been mistakes?
+3. One pattern from today I should remember tomorrow.
+Keep it tight — 4-6 sentences max.""",
+
+            "weekend_prep": """It's weekend prep time. Help me get ready for next week:
+1. What does the daily Setup landscape look like heading into Monday?
+2. Which Trade families am I prepared to deploy in that environment?
+3. One key risk theme I should be ready for.
+Keep it forward-looking and concrete.""",
             
             "market_regime_change": f"""ALERT: Market regime appears to have changed.
 Previous: {data.get('previous_regime', 'Unknown')}
@@ -3015,15 +3065,33 @@ Quick coaching: Is this a valid setup? Any concerns? Action: TAKE, WAIT, or PASS
         }
         
         prompt = coaching_prompts.get(context_type, f"Provide coaching guidance for: {context_type}")
+        # Append the live Setup landscape so the AI has concrete grounding.
+        # Voice rule: stay first-person ("I found / I'm favoring / I'll be
+        # looking to avoid") — never third-person about the bot.
+        if landscape_block:
+            prompt = (
+                prompt
+                + landscape_block
+                + "\nIMPORTANT VOICE RULES for your reply:\n"
+                + "  • Speak as the bot — first-person ('I found 47 stocks…', "
+                + "'I'm favoring momentum trades', 'I'll be looking to avoid…').\n"
+                + "  • Do NOT refer to the bot in the third person ('the bot found…', "
+                + "'SentCom is favoring…' is wrong).\n"
+                + "  • Reuse the example tickers from the landscape verbatim when "
+                + "relevant — don't invent new ones.\n"
+            )
         
         response = await self.chat(prompt, f"coach_{context_type}_{datetime.now().strftime('%H%M%S')}")
         
-        return {
+        out = {
             "alert_type": context_type,
             "context_data": data,
             "coaching": response.get("response", ""),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        if landscape_payload:
+            out["setup_landscape"] = landscape_payload
+        return out
     
     async def generate_scanner_coaching(self, alert_data: Dict) -> Dict:
         """
