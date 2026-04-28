@@ -21,11 +21,11 @@ encode every other layer as a feature into the per-Trade ML models.
 | 2 | **Plumb `market_setup` + new `multi_index_regime` into per-Trade ML feature vector** so the models actually train on them | ~2h | **High** | ✅ **SHIPPED 2026-04-30** |
 | 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium | 🔴 next |
 | 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) | 🔴 next |
-| 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high | 🟡 parallel quick-win |
+| 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high | ✅ **SHIPPED 2026-04-30** |
 | 6 | **Drop the "regime as hard gate" idea** that earlier-fork ROADMAP suggested (`STRATEGY_REGIME_PREFERENCES` enforcement). Replace with feature-based learning per items #1-2. Document the decision. | ~30min | (cleanup) | ✅ **SHIPPED 2026-04-30** |
 
 **Recommended commit ordering**: ~~#1 → #2 ship together~~ ✅ done.
-Next: **#5 as quick parallel win**, then **#3 → #4 ship together**.
+~~Next: #5 as quick parallel win~~ ✅ done. **Next: #3 → #4 ship together.**
 
 **Hard gates after this work:**
 1. **Time-window** (`_is_setup_valid_now`) — opening_drive can't fire midday
@@ -62,7 +62,14 @@ Live-side spot checks:
 - ✅ **Item #6**: `STRATEGY_REGIME_PREFERENCES` re-documented as
   metadata-only (not an active hard gate). Architecture notes locked
   into PRD.md "Pipeline architecture" section.
-- 28 new tests; 79/79 across the related suites still green.
+- ✅ **Item #5** (second commit, same day): Setup-landscape
+  self-grading tracker. New `landscape_predictions` collection +
+  `LandscapeGradingService` (record / grade / get_recent_grades),
+  EOD cron job at 16:50 ET, two new endpoints
+  (`/api/scanner/landscape-receipts`, `/api/scanner/landscape-grade`),
+  morning narrative now cites yesterday's grade via "Quick receipt"
+  / "Owning yesterday's miss" 1st-person line.
+- 51 new tests; 116/116 across the related suites still green.
 
 ### 🟢 Just shipped 2026-04-29 evening (3 commits) — see CHANGELOG
 - ✅ **v1**: 9 new detector functions (6 orphans + 3 playbook setups)

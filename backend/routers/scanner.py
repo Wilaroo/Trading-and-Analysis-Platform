@@ -900,6 +900,97 @@ def get_ai_context():
 
 
 
+@router.get("/landscape-receipts")
+async def get_landscape_receipts(days: int = 7, context: str = "morning"):
+    """
+    Recent graded Setup-landscape predictions — closes the AI feedback loop.
+
+    Each row is a prediction made by a past briefing + the EOD grade
+    (A-F based on whether the favored Setup family carried). Powers the
+    "yesterday I predicted X — it played +1.2R" line in subsequent
+    briefings, and a future receipts panel in the operator UI.
+
+    Args:
+        days: how many recent calendar days of grades to return (default 7).
+        context: 'morning' | 'midday' | 'eod' | 'weekend' (default morning).
+    """
+    if context not in ("morning", "midday", "eod", "weekend"):
+        raise HTTPException(status_code=400, detail="context must be morning|midday|eod|weekend")
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.landscape_grading_service import get_landscape_grading_service
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        svc = get_landscape_grading_service(db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Grading service init failed: {e}")
+    rows = await svc.get_recent_grades(n=days, context=context)
+    # Strip MongoDB _id and the bulky `narrative` field — receipts panel
+    # only needs the headline + verdict + grade.
+    out = []
+    for r in rows:
+        out.append({
+            "prediction_id": r.get("prediction_id"),
+            "trading_day":   r.get("trading_day"),
+            "context":       r.get("context"),
+            "predicted_at":  r.get("predicted_at"),
+            "graded_at":     r.get("graded_at"),
+            "grade":         r.get("grade"),
+            "grade_score":   r.get("grade_score"),
+            "verdict":       r.get("verdict"),
+            "headline":      r.get("headline"),
+            "top_setup":     r.get("top_setup"),
+            "favored_trade_family": r.get("favored_trade_family"),
+            "avoided_trade_family": r.get("avoided_trade_family"),
+            "multi_index_regime":   r.get("multi_index_regime"),
+            "realized_top_setup_avg_r": r.get("realized_top_setup_avg_r"),
+            "realized_top_setup_n":     r.get("realized_top_setup_n"),
+            "realized_avoided_avg_r":   r.get("realized_avoided_avg_r"),
+            "realized_avoided_n":       r.get("realized_avoided_n"),
+            "realized_avg_r_all":       r.get("realized_avg_r_all"),
+            "realized_total_alerts":    r.get("realized_total_alerts"),
+            "reasoning":   r.get("grade_reasoning"),
+        })
+    return {
+        "success": True,
+        "count": len(out),
+        "context": context,
+        "receipts": out,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/landscape-grade")
+async def trigger_landscape_grade(trading_day: Optional[str] = None):
+    """
+    Manually trigger Setup-landscape grading for a specific day.
+
+    The EOD scheduler runs this automatically at 16:50 ET, but this
+    endpoint exists for backfills, replays, and tests. ``trading_day``
+    defaults to the current ET date (YYYY-MM-DD).
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.landscape_grading_service import get_landscape_grading_service
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        svc = get_landscape_grading_service(db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Grading service init failed: {e}")
+    graded = await svc.grade_predictions_for_day(trading_day=trading_day)
+    return {
+        "success": True,
+        "trading_day": trading_day,
+        "count": len(graded),
+        "grades": [
+            {"prediction_id": g.prediction_id, "context": g.context,
+             "grade": g.grade, "verdict": g.verdict}
+            for g in graded
+        ],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/universe-stats")
 def get_universe_stats():
     """

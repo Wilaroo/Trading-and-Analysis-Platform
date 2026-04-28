@@ -145,10 +145,14 @@ class SetupLandscapeService:
         groups = await self._classify_batch(symbols)
         # Multi-index regime context — single market-wide classification
         regime_label, regime_conf, regime_reasoning = await self._classify_multi_index_regime()
+        # Yesterday's receipt — surfaced into the morning narrative as a
+        # 1st-person citation of how the prior session graded.
+        recent_grade = await self._most_recent_grade(context)
         narrative, headline = self._render_narrative(
             groups, len(symbols), context,
             regime_label=regime_label,
             regime_reasoning=regime_reasoning,
+            recent_grade=recent_grade,
         )
         snap = LandscapeSnapshot(
             timestamp=now.isoformat(),
@@ -163,6 +167,17 @@ class SetupLandscapeService:
         )
         self._snapshot = snap
         self._snapshot_at = now
+        # Persist this prediction so EOD grading can score it later. Best-
+        # effort, never blocks snapshot delivery on a DB hiccup.
+        try:
+            from services.landscape_grading_service import (
+                get_landscape_grading_service,
+            )
+            await get_landscape_grading_service(db=self.db).record_prediction(
+                snap, context,
+            )
+        except Exception as e:
+            logger.debug(f"record_prediction skipped: {e}")
         return snap
 
     def invalidate(self) -> None:
@@ -238,18 +253,42 @@ class SetupLandscapeService:
             logger.debug(f"_classify_multi_index_regime failed: {e}")
             return "unknown", 0.0, []
 
+    async def _most_recent_grade(self, context: str) -> Optional[Dict]:
+        """Fetch the single most-recent graded prediction so the
+        narrative can cite it. Returns ``None`` when DB is unavailable
+        or there's no graded history.
+        """
+        # Only the morning briefing currently cites yesterday's grade — the
+        # midday/eod/weekend voices have their own focus. Cheap to extend later.
+        if context != "morning":
+            return None
+        try:
+            from services.landscape_grading_service import (
+                get_landscape_grading_service,
+            )
+            recent = await get_landscape_grading_service(db=self.db).get_recent_grades(
+                n=1, context="morning",
+            )
+            return recent[0] if recent else None
+        except Exception as e:
+            logger.debug(f"_most_recent_grade failed: {e}")
+            return None
+
     # ───────── Narrative renderer ─────────
 
     def _render_narrative(self, groups: List[SetupGroup], sample_n: int,
                           context: str,
                           regime_label: str = "unknown",
                           regime_reasoning: Optional[List[str]] = None,
+                          recent_grade: Optional[Dict] = None,
                           ) -> Tuple[str, str]:
         non_neutral = [g for g in groups if g.setup != "neutral" and g.count > 0]
         regime_line = self._regime_line(regime_label, regime_reasoning, context)
+        receipt_line = self._receipt_line(recent_grade)
         if not non_neutral:
             base = self._fallback_narrative(sample_n, context)
-            full = f"{regime_line}\n\n{base}" if regime_line else base
+            parts = [p for p in (regime_line, receipt_line, base) if p]
+            full = "\n\n".join(parts)
             return full, \
                 f"I screened {sample_n} names but couldn't pin any to a clear daily Setup."
 
@@ -267,6 +306,9 @@ class SetupLandscapeService:
         lines: List[str] = []
         if regime_line:
             lines.append(regime_line)
+            lines.append("")
+        if receipt_line:
+            lines.append(receipt_line)
             lines.append("")
         lines.append(intro)
         # List up to top 4 setup groups
@@ -307,6 +349,30 @@ class SetupLandscapeService:
             "volatility_in_range":    "Volatility In Range",
             "neutral":                "no clear Setup",
         }.get(setup, setup.replace("_", " ").title())
+
+    @staticmethod
+    def _receipt_line(recent_grade: Optional[Dict]) -> str:
+        """Render a 1-line citation of yesterday's prediction outcome.
+
+        Returns "" when there's no graded prior briefing — first-day
+        operation degrades silently. Uses 1st-person voice so it slots
+        directly into the morning narrative.
+        """
+        if not recent_grade:
+            return ""
+        grade = recent_grade.get("grade", "")
+        if grade in (None, "", "INSUFFICIENT_DATA"):
+            return ""
+        verdict = recent_grade.get("verdict", "")
+        when = recent_grade.get("trading_day", "yesterday")
+        prefix = {
+            "A": f"Quick receipt — {when}: ",
+            "B": f"Quick receipt — {when}: ",
+            "C": f"Quick receipt — {when}: ",
+            "D": f"Owning yesterday's miss — {when}: ",
+            "F": f"Owning yesterday's miss — {when}: ",
+        }.get(grade, f"Yesterday's read ({when}): ")
+        return f"{prefix}{verdict}. Carrying that into today's call."
 
     @staticmethod
     def _regime_line(regime_label: str, reasoning: Optional[List[str]],

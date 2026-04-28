@@ -2,6 +2,132 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (next-session pickup, second commit) — Setup-Landscape Self-Grading Tracker
+
+### Concept
+Closes the AI-briefing feedback loop. Each morning briefing already
+predicts something concrete ("I'm seeing 47 names in Gap & Go — today
+I'm favoring momentum, avoiding fades on overextended names"). Until
+now those predictions evaporated at end-of-day. This service:
+
+  1. **Persists** every snapshot's prediction to a new
+     `landscape_predictions` Mongo collection (idempotent on
+     `(trading_day, context)` so re-firing the briefing within a day
+     updates rather than dupes).
+  2. **Grades** at EOD by walking `alert_outcomes` for the day,
+     bucketing realized R-multiples by Setup family
+     (gap_and_go / range_break / day_2 / etc.), and assigning each
+     prediction an A/B/C/D/F based on whether the favored family
+     carried *and* the avoided family stayed away.
+  3. **Cites** yesterday's grade in the next morning's narrative
+     ("Quick receipt — 2026-04-29: Nailed it — Gap & Go carried,
+     avg +1.20R across 14 alerts. Carrying that into today's call.")
+
+This is a passive, free training signal — the longer it runs, the more
+credible the briefings get. Not skipping it now (waiting until #3+#4)
+would have meant losing two weeks of grading data we can't backfill.
+
+### Shipped
+
+#### 1. `services/landscape_grading_service.py` (NEW)
+- `LandscapeGradingService` with three core methods:
+  - `record_prediction(snapshot, context)` — upserts on
+    `(trading_day, context)` so the same briefing re-firing within a
+    day updates the prediction. No-op when DB is None or snapshot is
+    all-NEUTRAL.
+  - `grade_predictions_for_day(trading_day)` — walks
+    `alert_outcomes` for the day, buckets realized R per Setup
+    family using the `_build_trade_to_setup_family()` map (built
+    from `TRADE_SETUP_MATRIX` so it stays in sync with the operator
+    playbook), grades each prediction A-F, writes grade fields back.
+    Idempotent — already-graded predictions are skipped on re-run.
+  - `get_recent_grades(n, context)` — most-recent N graded
+    predictions for the briefings to cite.
+- `_score_grade(top_avg, avoided_avg)` rubric:
+  - **A** (≥0.5R favored AND avoided ≤0): "Nailed it"
+  - **B** (≥0.2R favored): "Solid call"
+  - **C** (-0.2R to +0.2R): "Mixed day"
+  - **D** (≤-0.2R favored): "Wrong call"
+  - **F** (≤-0.2R favored AND avoided won big): "Fully backwards"
+  - **INSUFFICIENT_DATA** when <3 alerts in the predicted family
+- `_build_trade_to_setup_family()` derives Trade → home-Setup mapping
+  from `TRADE_SETUP_MATRIX` (each Trade's first WITH_TREND cell);
+  resolves through `TRADE_ALIASES` so legacy names also map.
+- `_AVOIDED_OPPOSITE` map specifies which Setup families are the
+  "opposite" of each top family (e.g., gap_and_go avoids
+  overextension + gap_up_into_resistance).
+- Singleton accessor `get_landscape_grading_service(db=...)` with
+  late-bind index creation on `(trading_day, context)`.
+
+#### 2. `services/setup_landscape_service.py` integration
+- `LandscapeSnapshot` now feeds itself into the grader: `get_snapshot`
+  awaits `record_prediction(snap, context)` after building the
+  snapshot. Best-effort, never blocks delivery on a DB hiccup.
+- New `_most_recent_grade(context)` helper fetches the prior graded
+  prediction (morning context only — midday/eod/weekend voices have
+  their own focus). Cheap to extend to other contexts later.
+- New `_receipt_line(recent_grade)` renders a 1st-person citation:
+  - "Quick receipt — 2026-04-29: Nailed it — Gap & Go carried..."
+    (A/B/C grades)
+  - "Owning yesterday's miss — 2026-04-29: Wrong call..." (D/F)
+  - Silent on INSUFFICIENT_DATA / unknown / first-day operation.
+
+#### 3. EOD scheduler (`services/eod_generation_service.py`)
+- New cron job `auto_landscape_grading` at **16:50 ET on weekdays**.
+  Runs after `auto_generate_drc` (16:30) and `auto_playbook_analysis`
+  (16:45) but before `auto_self_reflection` (17:00) so the reflection
+  step can cite the day's grade if needed.
+- Uses the same `_run_async` wrapper pattern as the other EOD jobs
+  (BackgroundScheduler thread → fresh asyncio loop → close).
+
+#### 4. API surface (`routers/scanner.py`)
+- `GET /api/scanner/landscape-receipts?days=7&context=morning` —
+  returns the most-recent graded predictions, projected down to the
+  fields a UI receipts panel needs (no bulky narrative). Powers a
+  future panel + the briefings narrative.
+- `POST /api/scanner/landscape-grade?trading_day=YYYY-MM-DD` —
+  manual trigger for backfills, replays, and tests. Defaults to
+  current ET date.
+
+### Tests
+`backend/tests/test_landscape_grading_service.py` — **23 new tests**:
+- `_build_trade_to_setup_family` covers every entry in
+  `TRADE_SETUP_MATRIX` + resolves aliases.
+- All 5 grade bands (A/B/C/D/F) fire for the correct
+  (top_avg_r, avoided_avg_r) combinations.
+- `record_prediction` upserts idempotently, no-ops on all-NEUTRAL,
+  no-ops when DB is None.
+- `grade_predictions_for_day` grades correctly, skips already-graded,
+  falls back to INSUFFICIENT_DATA when <3 alerts in predicted family.
+- `_trading_day_for` ET conversion handles UTC late-evening rollover.
+- LandscapeService integration: morning narrative cites recent grade
+  via "Quick receipt" / "Owning yesterday's miss"; silent on
+  INSUFFICIENT_DATA / None.
+- Source-level guards confirm `get_snapshot` calls into the grader
+  and the EOD scheduler registers the job at 16:50 ET.
+
+Total related-suite count after this commit: **116 tests** across:
+- `test_landscape_grading_service.py`: 23 ✅ (new)
+- `test_multi_index_regime_classifier.py`: 28 ✅
+- `test_market_setup_matrix.py`: 21 ✅
+- `test_orphan_setup_detectors.py`: 17 ✅
+- `test_setup_landscape_service.py`: 13 ✅
+- + 14 from smb_profiles + setup_models_load tests
+
+### Files touched
+- NEW `backend/services/landscape_grading_service.py`
+- NEW `backend/tests/test_landscape_grading_service.py`
+- `backend/services/setup_landscape_service.py` (record_prediction
+  call in `get_snapshot`, `_most_recent_grade` + `_receipt_line`
+  helpers, narrative threading)
+- `backend/services/eod_generation_service.py` (new
+  `auto_landscape_grading` cron job at 16:50 ET)
+- `backend/routers/scanner.py` (2 new endpoints:
+  `landscape-receipts`, `landscape-grade`)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+
+
 ## 2026-04-30 (next-session pickup) — Multi-Index Regime Classifier + Categorical Label Features
 
 ### Concept

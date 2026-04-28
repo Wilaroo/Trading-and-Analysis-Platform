@@ -126,7 +126,40 @@ class EndOfDayGenerationService:
                 id='auto_multiplier_threshold_optimizer',
                 replace_existing=True,
             )
-            
+
+            # 2026-04-30 — Setup-landscape self-grading. Runs every
+            # weekday at 16:50 ET, after `auto_generate_drc` (16:30) +
+            # `auto_playbook_analysis` (16:45) but before
+            # `auto_self_reflection` (17:00) so the reflection step can
+            # cite the day's grade. Walks `alert_outcomes` for today,
+            # joins to `landscape_predictions` (the morning briefing's
+            # call), and writes a grade A-F per prediction.
+            def _run_landscape_grading():
+                try:
+                    from services.landscape_grading_service import (
+                        get_landscape_grading_service,
+                    )
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        graded = loop.run_until_complete(
+                            get_landscape_grading_service(db=self.db)
+                            .grade_predictions_for_day()
+                        )
+                        logger.info(
+                            f"landscape_grading EOD: graded {len(graded)} predictions"
+                        )
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.error(f"landscape_grading EOD job failed: {e}")
+            self.scheduler.add_job(
+                _run_landscape_grading,
+                CronTrigger(hour=16, minute=50, day_of_week='mon-fri', timezone=self.et_timezone),
+                id='auto_landscape_grading',
+                replace_existing=True,
+            )
+
             self.scheduler.start()
             logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
     
