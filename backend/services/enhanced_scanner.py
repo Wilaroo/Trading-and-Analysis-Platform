@@ -2778,6 +2778,19 @@ class EnhancedBackgroundScanner:
         "volume_capitulation": [("rvol",                "rvol",            3.0, "gt"),
                                 ("rsi_14",              "rsi_14",          25,  "lt")],
         "chart_pattern":       [("rvol",                "rvol",            1.2, "gt")],
+        # 2026-04-29 evening: cover the 3 all-day playbook+orphan
+        # detectors so silent-but-evaluating cases surface in the
+        # threshold-proximity diagnostic.
+        "bella_fade":          [("dist_from_vwap",      "dist_from_vwap",  2.0, "gt"),
+                                ("dist_from_ema9",      "dist_from_ema9",  1.5, "gt"),
+                                ("rsi_14",              "rsi_14",          75,  "gt"),
+                                ("rvol",                "rvol",            1.5, "gt")],
+        "bouncy_ball":         [("dist_from_vwap",      "dist_from_vwap", -1.0, "lt"),
+                                ("rsi_14",              "rsi_14",          48,  "lt"),
+                                ("rvol",                "rvol",            1.3, "gt")],
+        "vwap_continuation":   [("abs_dist_from_vwap",  "dist_from_vwap",  0.6, "abs_gt"),
+                                ("rsi_14",              "rsi_14",          45,  "gt"),
+                                ("rvol",                "rvol",            1.3, "gt")],
     }
 
     def _sample_proximity_for_setup(self, setup_type: str, snapshot) -> None:
