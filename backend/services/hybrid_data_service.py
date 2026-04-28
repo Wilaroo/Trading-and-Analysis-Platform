@@ -660,6 +660,35 @@ class HybridDataService:
                 "error": "pusher_rpc_disabled_or_unconfigured",
             }
 
+        # Skip the RPC if this symbol isn't in the pusher's active
+        # subscription list. The pusher would otherwise have to qualify
+        # the contract + request historical bars on-demand — which is
+        # slow (5-10s), often fails ("[RPC] latest-bars XLE failed"),
+        # and clogs the RPC queue causing latency spikes for the symbols
+        # that ARE subscribed (RPC p95 was 4848ms in the 2026-04-29
+        # afternoon screenshot from this exact issue).
+        #
+        # Operator's intent: the scanner must still work for the full
+        # 1500-4000 symbol universe, but the LIVE RPC path is only for
+        # the 14 quote-subscribed symbols. Everything else uses the
+        # `ib_historical_data` Mongo cache (refreshed by the 4 turbo
+        # collectors on Windows). Caller falls back gracefully when we
+        # return `success=False, error="not_in_pusher_subscriptions"`.
+        try:
+            subs = rpc.subscriptions(force_refresh=False) or set()
+        except Exception:
+            subs = set()
+        if subs and symbol_u not in subs:
+            return {
+                "success": False,
+                "bars": [],
+                "source": "none",
+                "market_state": state,
+                "cache_hit": False,
+                "error": "not_in_pusher_subscriptions",
+                "pusher_subs_count": len(subs),
+            }
+
         duration = self._LATEST_SESSION_DURATION.get(bar_size, "1 D")
         bars = await asyncio.to_thread(
             rpc.latest_bars,

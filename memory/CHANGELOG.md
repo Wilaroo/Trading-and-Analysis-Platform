@@ -2,6 +2,110 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-7) — Pusher threading bug fix + un-subscribed RPC gate + tiered scanner doc
+
+Operator's post-restart screenshot revealed two real bugs masked by
+afternoon-5's "fixes". Both root-caused and shipped.
+
+### 1. Pusher account/news threading bug (P0 — fixes equity `$—`)
+- **Root cause**: `request_account_updates` and `fetch_news_providers`
+  in `documents/scripts/ib_data_pusher.py` wrapped the underlying
+  ib_insync calls in worker threads as a "hang defense". But on
+  Python 3.10+, worker threads don't have an asyncio event loop by
+  default, and ib_insync's `reqAccountUpdates` / `reqNewsProviders`
+  internally call `util.getLoop()` → `asyncio.get_event_loop()` → hard
+  fail with `"There is no current event loop in thread 'ib-acct-updates'"`.
+  The watchdog itself broke the thing it was guarding.
+- Symptoms in operator's logs:
+  - `[ERROR]   Account update request error: There is no current event
+    loop in thread 'ib-acct-updates'.`
+  - `[WARNING] Could not fetch news providers: There is no current
+    event loop in thread 'ib-news-providers'.`
+  - Push payload: `0 account fields` forever → V5 equity stuck at `$—`
+  - Afternoon-5's `/rpc/account-snapshot` slow path called
+    `accountValues()` which reads the (empty) cache → also useless
+- **Fix**: dropped both worker threads. Calls run directly on the main
+  thread (where ib_insync's event loop already lives). The original
+  hang concern was over-engineered — if `reqAccountUpdates` ever
+  genuinely hangs, IB connectivity is fundamentally broken.
+- **Operator action on Windows**: pull + restart `ib_data_pusher.py`.
+  Account data should populate within ~2s of pusher start.
+
+### 2. Un-subscribed-symbol RPC gate (P1 — fixes 4848ms RPC latency)
+- **Root cause**: `HybridDataService.fetch_latest_session_bars` called
+  `/rpc/latest-bars` for any cache-miss symbol. The pusher only
+  subscribes to 14 symbols (Level 1 + L2), so requests for XLE / GLD /
+  NFLX / etc forced the pusher to qualify the contract on-demand and
+  request bars synchronously — slow (5-10s), often failed, and clogged
+  the RPC queue causing latency spikes (4848ms p95 in the screenshot).
+- **Fix**: gated on `rpc.subscriptions()` membership. Symbols not in
+  the active list short-circuit with
+  `success: False, error: "not_in_pusher_subscriptions"`. Caller
+  (`realtime_technical_service._get_live_intraday_bars`) already
+  handles `success: False` by falling back to the Mongo
+  `ib_historical_data` path — which is exactly the right behaviour
+  for the 1500-4000+ universe (see architecture doc below).
+- Defensive: if `rpc.subscriptions()` returns None/empty (RPC
+  unreachable, startup race), the gate falls THROUGH to the existing
+  RPC path so we don't lose bars during transient pusher slowness.
+- Regression coverage: 4 new tests in `tests/test_pusher_subs_gate.py`.
+
+### 3. Tiered Scanner Architecture (clarification, not a code change)
+**Operator's question**: "we need to scan 1500-4000+ qualified symbols.
+How do we do that with IB as data provider? We had intraday/swing/
+investment scan priorities — does that still exist?"
+
+**Answer: yes, the 3-tier system is alive and active in
+`services/enhanced_scanner.py::_get_symbols_for_cycle`**:
+
+| Tier | ADV threshold | Scan frequency | Source |
+|---|---|---|---|
+| Tier 1 — Intraday | ≥ $50M / 500K shares | Every cycle (~15s) | Mongo + live RPC for the 14 pusher subs |
+| Tier 2 — Swing | ≥ $10M / 100K shares | Every 8th cycle (~2 min) | Mongo `ib_historical_data` only |
+| Tier 3 — Investment | ≥ $2M / 50K shares | 11:00 AM + 3:45 PM ET only | Mongo `ib_historical_data` only |
+
+The pusher's 14 quote-subscriptions are intentionally narrow — they're
+the operator's "active radar" for SPY/QQQ direction + L2 routing for
+the top 3 EVAL setups. The full universe (~9,400 in
+`symbol_adv_cache`, narrowed to active tiers per the table above)
+scans against the **historical Mongo cache** that the 4 turbo
+collectors keep fresh on Windows.
+
+The afternoon-7 RPC gate makes this story explicit: Tier 1 symbols on
+the pusher subs list go through live RPC; Tier 2 / Tier 3 symbols fall
+back to the Mongo cache automatically. No more spurious RPC calls for
+un-subscribed tickers.
+
+Does this still make sense? Yes — but two evolutions worth considering:
+1. **Tier 1 quote subscription expansion**: 14 symbols is small. We
+   could expand the pusher's L1 subscription list to ~100-200 symbols
+   (IB paper accounts allow up to 100 streaming Level 1 lines + 3 L2)
+   so more intraday-tier symbols get sub-second freshness.
+2. **Bar-close persistence**: the tick-to-Mongo persister (P1 from
+   previous handoff) would let Tier 1 RPC calls hit Mongo at 1-min
+   bar-close granularity instead of going to the pusher. That removes
+   the pusher from the hot path entirely for scan reads.
+
+### Verification
+- 4 new tests in `tests/test_pusher_subs_gate.py` (subs-gate, cache
+  hit short-circuit, defensive fall-through, subscribed pass-through)
+- 163/163 tests passing across all related suites
+- Lint clean
+
+### Operator action
+1. **Windows**: pull + restart `ib_data_pusher.py` — equity should
+   populate within seconds; pusher logs should NO LONGER show the
+   `'ib-acct-updates'` / `'ib-news-providers'` errors.
+2. **DGX**: backend hot-reloads. Verify (a) RPC latency drops back
+   below 1s now that un-subscribed symbols don't hit the pusher,
+   (b) `/api/scanner/detector-stats` shows the full universe being
+   scanned (intraday tier on every cycle), (c) operator's V5 equity
+   pill resolves from `$—` to live NetLiquidation.
+3. Watch the pusher for `[RPC] latest-bars XLE failed` — should be
+   gone (DGX no longer asks for un-subscribed symbols).
+
+
+
 ## 2026-04-29 (afternoon-6) — Rejection signal provider scaffolding
 
 Operator follow-up: "scaffold that improvement" → wire rejection
