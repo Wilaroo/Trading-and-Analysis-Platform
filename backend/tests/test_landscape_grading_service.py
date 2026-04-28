@@ -98,13 +98,40 @@ class _FakeColl:
     @staticmethod
     def _matches(doc, filt):
         for k, v in filt.items():
-            if isinstance(v, dict) and "$regex" in v:
-                import re
-                if not re.search(v["$regex"], str(doc.get(k, ""))):
-                    return False
-            elif isinstance(v, dict) and "$ne" in v:
-                if doc.get(k) == v["$ne"]:
-                    return False
+            if isinstance(v, dict):
+                # Range / comparison operators
+                doc_val = doc.get(k)
+                for op, op_val in v.items():
+                    if op == "$regex":
+                        import re
+                        if not re.search(op_val, str(doc_val or "")):
+                            return False
+                    elif op == "$ne":
+                        if doc_val == op_val:
+                            return False
+                    elif op == "$gte":
+                        if doc_val is None or doc_val < op_val:
+                            return False
+                    elif op == "$lte":
+                        if doc_val is None or doc_val > op_val:
+                            return False
+                    elif op == "$gt":
+                        if doc_val is None or doc_val <= op_val:
+                            return False
+                    elif op == "$lt":
+                        if doc_val is None or doc_val >= op_val:
+                            return False
+                    elif op == "$in":
+                        if doc_val not in op_val:
+                            return False
+                    elif op == "$exists":
+                        present = (k in doc) and (doc[k] is not None)
+                        if bool(op_val) != present:
+                            return False
+                    else:
+                        # Unknown operator → treat as literal equality (fail-safe)
+                        if doc_val != v:
+                            return False
             else:
                 if doc.get(k) != v:
                     return False
@@ -399,6 +426,184 @@ def test_render_narrative_silent_when_no_recent_grade():
     )
     assert "Quick receipt" not in narrative
     assert "Owning yesterday's miss" not in narrative
+    assert "Mid-session check" not in narrative
+    assert "Closing the loop" not in narrative
+    assert "Last week's record" not in narrative
+
+
+def test_render_narrative_midday_cites_morning_grade():
+    """Midday briefing now cites yesterday's morning grade with
+    'Mid-session check' framing instead of going silent."""
+    from services.setup_landscape_service import (
+        SetupLandscapeService, SetupGroup,
+    )
+    svc = SetupLandscapeService(db=None)
+    groups = [SetupGroup(setup="gap_and_go", count=12, examples=[("AAPL", 0.9)])]
+    grade = {
+        "trading_day": "2026-04-29",
+        "grade": "A",
+        "verdict": "Nailed it — Gap & Go carried: avg +1.20R across 14 alerts",
+    }
+    narrative, _ = svc._render_narrative(
+        groups, sample_n=200, context="midday",
+        regime_label="unknown", recent_grade=grade,
+    )
+    assert "Mid-session check" in narrative
+    assert "2026-04-29's open call" in narrative
+    assert "Adjusting from there" in narrative
+
+
+def test_render_narrative_midday_d_grade_owns_miss():
+    from services.setup_landscape_service import (
+        SetupLandscapeService, SetupGroup,
+    )
+    svc = SetupLandscapeService(db=None)
+    groups = [SetupGroup(setup="gap_and_go", count=12, examples=[("AAPL", 0.9)])]
+    grade = {
+        "trading_day": "2026-04-29",
+        "grade": "D",
+        "verdict": "Wrong call — Gap & Go faded: avg -0.40R across 9 alerts",
+    }
+    narrative, _ = svc._render_narrative(
+        groups, sample_n=200, context="midday",
+        regime_label="unknown", recent_grade=grade,
+    )
+    assert "yesterday's open call missed" in narrative
+
+
+def test_render_narrative_eod_closes_the_loop():
+    from services.setup_landscape_service import (
+        SetupLandscapeService, SetupGroup,
+    )
+    svc = SetupLandscapeService(db=None)
+    groups = [SetupGroup(setup="gap_and_go", count=12, examples=[("AAPL", 0.9)])]
+    grade = {
+        "trading_day": "2026-04-30",
+        "grade": "B",
+        "verdict": "Solid call — Gap & Go paid: avg +0.45R across 11 alerts",
+    }
+    narrative, _ = svc._render_narrative(
+        groups, sample_n=200, context="eod",
+        regime_label="unknown", recent_grade=grade,
+    )
+    assert "Closing the loop" in narrative
+    assert "Logging that for tomorrow's open" in narrative
+
+
+def test_render_narrative_weekend_cites_weekly_summary():
+    """Weekend voice gets a multi-day rollup, not a single-day verdict."""
+    from services.setup_landscape_service import (
+        SetupLandscapeService, SetupGroup,
+    )
+    svc = SetupLandscapeService(db=None)
+    groups = [SetupGroup(setup="gap_and_go", count=12, examples=[("AAPL", 0.9)])]
+    summary = {
+        "_weekly_summary": True,
+        "n_graded": 5,
+        "n_total_in_window": 5,
+        "grade_distribution": {"A": 3, "B": 1, "C": 1},
+        "avg_score": 0.78,
+        "avg_top_setup_r": 0.85,
+        "latest_grade": "A",
+        "latest_verdict": "Nailed it — Gap & Go carried: avg +1.20R",
+        "latest_trading_day": "2026-04-30",
+    }
+    narrative, _ = svc._render_narrative(
+        groups, sample_n=200, context="weekend",
+        regime_label="unknown", recent_grade=summary,
+    )
+    assert "Last week's record" in narrative
+    assert "3A" in narrative and "1B" in narrative and "1C" in narrative
+    assert "5 graded" in narrative
+    assert "+0.85R" in narrative
+    assert "strong directional read" in narrative
+
+
+def test_render_narrative_weekend_silent_on_empty_summary():
+    from services.setup_landscape_service import (
+        SetupLandscapeService, SetupGroup,
+    )
+    svc = SetupLandscapeService(db=None)
+    groups = [SetupGroup(setup="gap_and_go", count=12, examples=[("AAPL", 0.9)])]
+    narrative, _ = svc._render_narrative(
+        groups, sample_n=200, context="weekend",
+        regime_label="unknown",
+        recent_grade={"_weekly_summary": True, "n_graded": 0,
+                      "grade_distribution": {}},
+    )
+    assert "Last week's record" not in narrative
+
+
+def test_weekly_receipt_line_tone_buckets():
+    """Tone phrasing changes at score thresholds (0.75 / 0.55 / 0.40)."""
+    from services.setup_landscape_service import SetupLandscapeService
+    f = SetupLandscapeService._weekly_receipt_line
+    assert "strong directional read" in f({
+        "_weekly_summary": True, "n_graded": 5,
+        "grade_distribution": {"A": 4, "B": 1}, "avg_score": 0.80,
+        "avg_top_setup_r": 0.6, "latest_verdict": "x", "latest_trading_day": "d",
+    })
+    assert "mostly carried" in f({
+        "_weekly_summary": True, "n_graded": 5,
+        "grade_distribution": {"B": 3, "C": 2}, "avg_score": 0.60,
+        "avg_top_setup_r": 0.2, "latest_verdict": "x", "latest_trading_day": "d",
+    })
+    assert "mixed week" in f({
+        "_weekly_summary": True, "n_graded": 5,
+        "grade_distribution": {"C": 4, "D": 1}, "avg_score": 0.45,
+        "avg_top_setup_r": 0.0, "latest_verdict": "x", "latest_trading_day": "d",
+    })
+    assert "tough week" in f({
+        "_weekly_summary": True, "n_graded": 5,
+        "grade_distribution": {"D": 3, "F": 2}, "avg_score": 0.20,
+        "avg_top_setup_r": -0.5, "latest_verdict": "x", "latest_trading_day": "d",
+    })
+
+
+# ──────────────────────────── get_weekly_summary ────────────────────────────
+
+
+def test_get_weekly_summary_aggregates_grades():
+    db = _FakeDB()
+    svc = LandscapeGradingService(db=db)
+    # Seed 3 graded morning predictions across 3 days
+    for day in ("2026-04-28", "2026-04-29", "2026-04-30"):
+        snap = _make_snap(timestamp=f"{day}T13:30:00+00:00")
+        _run(svc.record_prediction(snap, "morning"))
+    # Seed alert outcomes per day so each grades to A
+    _seed_outcomes(db, "2026-04-28", {"9_ema_scalp": [1.0, 1.1, 1.2, 0.9]})
+    _seed_outcomes(db, "2026-04-29", {"9_ema_scalp": [0.8, 0.9, 1.0, 0.7]})
+    _seed_outcomes(db, "2026-04-30", {"9_ema_scalp": [0.3, 0.4, 0.5]})
+    _run(svc.grade_predictions_for_day("2026-04-28"))
+    _run(svc.grade_predictions_for_day("2026-04-29"))
+    _run(svc.grade_predictions_for_day("2026-04-30"))
+
+    summary = _run(svc.get_weekly_summary(end_date="2026-04-30"))
+    assert summary is not None
+    assert summary["n_graded"] == 3
+    # All three graded; record should sum to 3
+    total = sum(summary["grade_distribution"].values())
+    assert total == 3
+    assert summary["avg_score"] > 0
+    assert summary["latest_trading_day"] == "2026-04-30"
+
+
+def test_get_weekly_summary_returns_none_when_no_grades():
+    db = _FakeDB()
+    svc = LandscapeGradingService(db=db)
+    summary = _run(svc.get_weekly_summary(end_date="2026-04-30"))
+    assert summary is None
+
+
+def test_get_weekly_summary_excludes_insufficient_data():
+    """INSUFFICIENT_DATA grades shouldn't pollute the rollup."""
+    db = _FakeDB()
+    svc = LandscapeGradingService(db=db)
+    snap = _make_snap(timestamp="2026-04-30T13:30:00+00:00")
+    _run(svc.record_prediction(snap, "morning"))
+    _run(svc.grade_predictions_for_day("2026-04-30"))   # no outcomes → INSUFFICIENT
+    summary = _run(svc.get_weekly_summary(end_date="2026-04-30"))
+    assert summary is None  # filter eliminates the only row
 
 
 def test_render_narrative_silent_on_insufficient_grade():

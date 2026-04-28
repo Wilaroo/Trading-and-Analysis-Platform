@@ -281,6 +281,75 @@ class LandscapeGradingService:
             logger.debug(f"get_recent_grades failed: {e}")
             return []
 
+    async def get_weekly_summary(self, end_date: Optional[str] = None,
+                                 context: str = "morning") -> Optional[Dict]:
+        """Roll up the past ~7 calendar days of graded predictions into
+        a single summary so the Sunday weekend briefing can cite the
+        directional accuracy of the past week's calls.
+
+        Returns ``None`` when no graded predictions exist in the window
+        — first-week / first-month operation degrades silently.
+        """
+        if self.db is None:
+            return None
+        if end_date is None:
+            end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # 7-day window ending on `end_date` (inclusive)
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except Exception:
+            end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=7)
+        try:
+            rows = list(self.db["landscape_predictions"].find(
+                {
+                    "context": context,
+                    "graded_at": {"$ne": None},
+                    "trading_day": {
+                        "$gte": start_dt.strftime("%Y-%m-%d"),
+                        "$lte": end_dt.strftime("%Y-%m-%d"),
+                    },
+                },
+                {"_id": 0, "trading_day": 1, "grade": 1, "grade_score": 1,
+                 "verdict": 1, "top_setup": 1,
+                 "realized_top_setup_avg_r": 1, "realized_top_setup_n": 1},
+            ).sort("trading_day", -1))
+        except Exception as e:
+            logger.debug(f"get_weekly_summary failed: {e}")
+            return None
+        if not rows:
+            return None
+        # Filter out INSUFFICIENT_DATA — those don't tell us anything
+        graded = [r for r in rows if r.get("grade") not in (None, "INSUFFICIENT_DATA")]
+        if not graded:
+            return None
+        dist: Dict[str, int] = {}
+        scores: List[float] = []
+        for r in graded:
+            g = r.get("grade", "")
+            dist[g] = dist.get(g, 0) + 1
+            if r.get("grade_score") is not None:
+                scores.append(r["grade_score"])
+        avg_score = (sum(scores) / len(scores)) if scores else 0.0
+        latest = graded[0]
+        # Sum realized R only across the predicted-family realized R
+        # (lets us say "this week the bot's morning calls aggregated +X R")
+        rs = [r.get("realized_top_setup_avg_r")
+              for r in graded if r.get("realized_top_setup_avg_r") is not None]
+        avg_top_r = (sum(rs) / len(rs)) if rs else None
+        return {
+            "n_graded": len(graded),
+            "n_total_in_window": len(rows),
+            "window_start": start_dt.strftime("%Y-%m-%d"),
+            "window_end": end_dt.strftime("%Y-%m-%d"),
+            "grade_distribution": dist,
+            "avg_score": round(avg_score, 2),
+            "avg_top_setup_r": round(avg_top_r, 2) if avg_top_r is not None else None,
+            "latest_grade": latest.get("grade"),
+            "latest_verdict": latest.get("verdict"),
+            "latest_trading_day": latest.get("trading_day"),
+        }
+
     # ───────── Internals ─────────
 
     def _grade_prediction(self, pred: Dict, outcomes: List[Dict],

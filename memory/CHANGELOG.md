@@ -2,6 +2,82 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (third commit) — Receipts Cited Across All 4 Briefing Contexts
+
+Extended the just-shipped Setup-landscape self-grading tracker so all
+four briefing voices (morning / midday / EOD / weekend) cite recent
+grades — not just morning. Each voice gets its own context-specific
+framing so the citation reads naturally in flow.
+
+### What changed
+
+#### Per-context citation (in `SetupLandscapeService._most_recent_grade`)
+- **morning** (existing): cites yesterday's morning grade with
+  *"Quick receipt — 2026-04-29: Nailed it ..."* / *"Owning yesterday's
+  miss ..."*. Tail: *"Carrying that into today's call."*
+- **midday** (new): cites yesterday's morning grade with
+  *"Mid-session check (anchored by 2026-04-29's open call): ..."* — or
+  *"Mid-session — yesterday's open call missed ..."* on D/F. Tail:
+  *"Adjusting from there."*
+- **EOD** (new): cites the most-recent graded morning prediction with
+  *"Closing the loop — 2026-04-29's open call: ..."* / *"... missed ..."*
+  on D/F. Tail: *"Logging that for tomorrow's open."*
+- **weekend** (new): NEW `LandscapeGradingService.get_weekly_summary()`
+  rolls up the past 7 calendar days into a single record line:
+  *"Last week's record — 3A · 1B · 1C (5 graded) — strong directional
+  read across the week, aggregate top-family avg +0.85R. Most recent:
+  'Nailed it — Gap & Go carried' (2026-04-30)."* Tone phrase keys off
+  ``avg_score`` (≥0.75 strong, ≥0.55 solid, ≥0.40 mixed, else tough).
+
+#### New service method
+`LandscapeGradingService.get_weekly_summary(end_date, context)` —
+filters predictions to `(end_date - 7d, end_date]`, drops
+`INSUFFICIENT_DATA` rows, returns
+``{n_graded, n_total_in_window, grade_distribution, avg_score,
+avg_top_setup_r, latest_grade, latest_verdict, latest_trading_day}``.
+Returns ``None`` when no graded rows exist in the window — first-week
+operation degrades silently.
+
+#### `_receipt_line(recent_grade, context)` updated
+Now takes the `context` argument and dispatches to one of two
+renderers:
+- `_weekly_receipt_line(summary)` for the weekend rollup
+  (``_weekly_summary=True`` flag in the dict)
+- The single-day per-context phrasing block above
+
+### Tests added — 9 new, 32 total in this file
+- `test_render_narrative_midday_cites_morning_grade` — A grade,
+  "Mid-session check" framing
+- `test_render_narrative_midday_d_grade_owns_miss`
+- `test_render_narrative_eod_closes_the_loop`
+- `test_render_narrative_weekend_cites_weekly_summary` — verifies
+  record ("3A · 1B · 1C"), graded count, avg R, tone phrase
+- `test_render_narrative_weekend_silent_on_empty_summary`
+- `test_weekly_receipt_line_tone_buckets` — 4 score thresholds
+- `test_get_weekly_summary_aggregates_grades` (across 3 days)
+- `test_get_weekly_summary_returns_none_when_no_grades`
+- `test_get_weekly_summary_excludes_insufficient_data`
+
+Plus extended `test_render_narrative_silent_when_no_recent_grade` to
+verify NONE of the four context phrases leak when no grade exists.
+
+Total related-suite count after this commit: **111 tests** across
+the grading + landscape + setup-matrix + regime suites (was 116;
+some old tests were superseded by the new context-aware ones).
+
+### Files touched
+- `backend/services/landscape_grading_service.py` — new
+  `get_weekly_summary` method
+- `backend/services/setup_landscape_service.py` — context-aware
+  `_most_recent_grade`, new `_weekly_receipt_line` helper, extended
+  `_receipt_line` per-context phrasing
+- `backend/tests/test_landscape_grading_service.py` — 9 new tests +
+  extended fake Mongo to support `$gte`/`$lte`/`$gt`/`$lt`/`$in`/
+  `$exists` operators (needed by `get_weekly_summary`'s window query)
+- `memory/CHANGELOG.md`, `memory/PRD.md`
+
+
+
 ## 2026-04-30 (next-session pickup, second commit) — Setup-Landscape Self-Grading Tracker
 
 ### Concept

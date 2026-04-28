@@ -254,21 +254,42 @@ class SetupLandscapeService:
             return "unknown", 0.0, []
 
     async def _most_recent_grade(self, context: str) -> Optional[Dict]:
-        """Fetch the single most-recent graded prediction so the
-        narrative can cite it. Returns ``None`` when DB is unavailable
-        or there's no graded history.
+        """Fetch the most-relevant graded prediction citation for the
+        given briefing context.
+
+        Returns ``None`` when DB is unavailable or there's no graded
+        history (first-day operation degrades silently).
+
+        Per-context citation strategy:
+          - **morning / midday**: cite the most-recent graded morning
+            prediction (yesterday's directional call). Midday gets the
+            same source — "at the open yesterday I called X; carried
+            +Y R" still anchors today's mid-session pivot.
+          - **eod**: cite TODAY's grade if it's already run (post-16:50
+            ET on Spark), else the most-recent graded morning.
+          - **weekend**: surface a 7-day rollup tagged
+            ``_weekly_summary=True`` — the renderer uses a different
+            phrase for the multi-day summary.
         """
-        # Only the morning briefing currently cites yesterday's grade — the
-        # midday/eod/weekend voices have their own focus. Cheap to extend later.
-        if context != "morning":
-            return None
         try:
             from services.landscape_grading_service import (
                 get_landscape_grading_service,
             )
-            recent = await get_landscape_grading_service(db=self.db).get_recent_grades(
-                n=1, context="morning",
-            )
+            svc = get_landscape_grading_service(db=self.db)
+        except Exception as e:
+            logger.debug(f"_most_recent_grade init failed: {e}")
+            return None
+
+        try:
+            if context == "weekend":
+                summary = await svc.get_weekly_summary(context="morning")
+                if summary:
+                    summary["_weekly_summary"] = True
+                return summary
+            # All other contexts cite the most-recent graded MORNING
+            # prediction (the morning is the most reliably-graded slot
+            # and provides the day's anchor call).
+            recent = await svc.get_recent_grades(n=1, context="morning")
             return recent[0] if recent else None
         except Exception as e:
             logger.debug(f"_most_recent_grade failed: {e}")
@@ -284,7 +305,7 @@ class SetupLandscapeService:
                           ) -> Tuple[str, str]:
         non_neutral = [g for g in groups if g.setup != "neutral" and g.count > 0]
         regime_line = self._regime_line(regime_label, regime_reasoning, context)
-        receipt_line = self._receipt_line(recent_grade)
+        receipt_line = self._receipt_line(recent_grade, context=context)
         if not non_neutral:
             base = self._fallback_narrative(sample_n, context)
             parts = [p for p in (regime_line, receipt_line, base) if p]
@@ -351,28 +372,104 @@ class SetupLandscapeService:
         }.get(setup, setup.replace("_", " ").title())
 
     @staticmethod
-    def _receipt_line(recent_grade: Optional[Dict]) -> str:
-        """Render a 1-line citation of yesterday's prediction outcome.
+    def _receipt_line(recent_grade: Optional[Dict],
+                      context: str = "morning") -> str:
+        """Render a 1-line citation of past predictions, phrased per
+        briefing context.
+
+        For weekly summaries (``_weekly_summary=True``), composes a
+        multi-day rollup line for the Sunday voice. Otherwise renders
+        a single-day verdict using a context-specific verb so each
+        briefing voice owns its own framing.
 
         Returns "" when there's no graded prior briefing — first-day
         operation degrades silently. Uses 1st-person voice so it slots
-        directly into the morning narrative.
+        directly into the narrative.
         """
         if not recent_grade:
             return ""
+
+        # ---- Weekend / weekly summary ----
+        if recent_grade.get("_weekly_summary"):
+            return SetupLandscapeService._weekly_receipt_line(recent_grade)
+
+        # ---- Single-day verdict ----
         grade = recent_grade.get("grade", "")
         if grade in (None, "", "INSUFFICIENT_DATA"):
             return ""
         verdict = recent_grade.get("verdict", "")
-        when = recent_grade.get("trading_day", "yesterday")
-        prefix = {
-            "A": f"Quick receipt — {when}: ",
-            "B": f"Quick receipt — {when}: ",
-            "C": f"Quick receipt — {when}: ",
-            "D": f"Owning yesterday's miss — {when}: ",
-            "F": f"Owning yesterday's miss — {when}: ",
-        }.get(grade, f"Yesterday's read ({when}): ")
-        return f"{prefix}{verdict}. Carrying that into today's call."
+        when = recent_grade.get("trading_day", "the prior session")
+
+        # Per-context lead-in. Morning + EOD frame as "yesterday";
+        # midday frames as "at the open" since today's tape is in flight.
+        prefix_map = {
+            "morning": {
+                "A": f"Quick receipt — {when}: ",
+                "B": f"Quick receipt — {when}: ",
+                "C": f"Quick receipt — {when}: ",
+                "D": f"Owning yesterday's miss — {when}: ",
+                "F": f"Owning yesterday's miss — {when}: ",
+            },
+            "midday": {
+                "A": f"Mid-session check (anchored by {when}'s open call): ",
+                "B": f"Mid-session check (anchored by {when}'s open call): ",
+                "C": f"Mid-session check (anchored by {when}'s open call): ",
+                "D": f"Mid-session — yesterday's open call missed ({when}): ",
+                "F": f"Mid-session — yesterday's open call missed ({when}): ",
+            },
+            "eod": {
+                "A": f"Closing the loop — {when}'s open call: ",
+                "B": f"Closing the loop — {when}'s open call: ",
+                "C": f"Closing the loop — {when}'s open call: ",
+                "D": f"Closing the loop — {when}'s open call missed: ",
+                "F": f"Closing the loop — {when}'s open call missed: ",
+            },
+        }
+        prefix = prefix_map.get(context, prefix_map["morning"]).get(
+            grade, f"Yesterday's read ({when}): "
+        )
+        # Per-context tail
+        tail = {
+            "morning": "Carrying that into today's call.",
+            "midday":  "Adjusting from there.",
+            "eod":     "Logging that for tomorrow's open.",
+        }.get(context, "Carrying that forward.")
+        return f"{prefix}{verdict}. {tail}"
+
+    @staticmethod
+    def _weekly_receipt_line(summary: Dict) -> str:
+        """Render the Sunday-voice 1-line summary of last week's grades.
+
+        Frames the week as a record (e.g. "3A · 1B · 1C — strong
+        directional read") + cites the latest verdict for continuity.
+        """
+        dist = summary.get("grade_distribution", {})
+        n = summary.get("n_graded", 0)
+        if n == 0 or not dist:
+            return ""
+        # Order grades best-first
+        order = ["A", "B", "C", "D", "F"]
+        record_parts = [f"{dist[g]}{g}" for g in order if dist.get(g)]
+        record = " · ".join(record_parts)
+        avg_score = summary.get("avg_score", 0.0)
+        avg_r = summary.get("avg_top_setup_r")
+        # Tone line based on avg score (A=0.9 .. F=0.1)
+        if avg_score >= 0.75:
+            tone = "strong directional read across the week"
+        elif avg_score >= 0.55:
+            tone = "solid week — calls mostly carried"
+        elif avg_score >= 0.4:
+            tone = "mixed week — calls drifted more than they carried"
+        else:
+            tone = "tough week — directional read was off"
+        r_clause = (f", aggregate top-family avg {avg_r:+.2f}R"
+                    if avg_r is not None else "")
+        latest = summary.get("latest_verdict", "")
+        latest_day = summary.get("latest_trading_day", "")
+        latest_clause = (f' Most recent: "{latest}" ({latest_day}).'
+                         if latest else "")
+        return (f"Last week's record — {record} ({n} graded) — {tone}"
+                f"{r_clause}.{latest_clause}")
 
     @staticmethod
     def _regime_line(regime_label: str, reasoning: Optional[List[str]],
