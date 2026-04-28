@@ -362,21 +362,48 @@ def get_strategy_mix(n: int = 100):
         logger.warning(f"strategy-mix aggregate failed: {e}")
         rows = []
 
-    # Fallback to in-memory `_live_alerts` when Mongo persistence is empty
-    # or behind. Mirrors what `/api/live-scanner/alerts` reads, so the V5
-    # StrategyMixCard always populates if the scanner is producing alerts —
-    # even if `_save_alert_to_db` had a transient failure.
+    # Fallback to in-memory alerts when Mongo persistence is empty or
+    # behind. Checks BOTH the predictive_scanner (which is `_scanner_service`)
+    # AND the enhanced_scanner (which is what fires the live setup alerts the
+    # operator actually sees on the V5 dashboard). Without the
+    # enhanced_scanner branch, strategy-mix would render
+    # "waiting for first alerts" even when the V5 panel shows 6 hits
+    # (operator's 2026-04-29 afternoon-5 screenshot bug).
     if not rows:
+        in_mem_alerts = []
         try:
-            in_mem = list((getattr(_scanner_service, "_live_alerts", {}) or {}).values())
-            in_mem.sort(key=lambda a: getattr(a, "created_at", "") or "", reverse=True)
-            for a in in_mem[:n]:
+            in_mem_alerts.extend(
+                (getattr(_scanner_service, "_live_alerts", {}) or {}).values()
+            )
+        except Exception:
+            pass
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            es = get_enhanced_scanner()
+            if es is not None:
+                in_mem_alerts.extend(
+                    (getattr(es, "_live_alerts", {}) or {}).values()
+                )
+        except Exception as e:
+            logger.debug(f"strategy-mix enhanced_scanner fallback failed: {e}")
+        try:
+            in_mem_alerts.sort(
+                key=lambda a: getattr(a, "created_at", "") or "", reverse=True
+            )
+            seen_ids = set()
+            for a in in_mem_alerts[:n * 2]:
+                aid = getattr(a, "id", None) or id(a)
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
                 rows.append({
                     "setup_type": getattr(a, "setup_type", None),
                     "direction": getattr(a, "direction", None),
                     "created_at": getattr(a, "created_at", None),
                     "ai_edge_label": getattr(a, "ai_edge_label", None),
                 })
+                if len(rows) >= n:
+                    break
         except Exception as e:
             logger.debug(f"strategy-mix in-memory fallback failed: {e}")
 

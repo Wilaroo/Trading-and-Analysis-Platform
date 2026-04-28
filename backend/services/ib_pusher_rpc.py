@@ -165,6 +165,15 @@ class _PusherRPCClient:
     def health(self) -> Optional[Dict[str, Any]]:
         return self._request("GET", "/rpc/health", timeout=3.0)
 
+    def account_snapshot(self) -> Optional[Dict[str, Any]]:
+        """Fetch the pusher's latest account snapshot on demand.
+
+        Returns a dict like {success, source, account, timestamp} or None
+        if the RPC fails. Callers use this as a fallback for the V5
+        equity pill when the push-loop's account_data is stale/empty.
+        """
+        return self._request("GET", "/rpc/account-snapshot", timeout=5.0)
+
     def subscriptions(self, force_refresh: bool = False) -> Optional[set]:
         """
         Return the set of symbols currently subscribed on the pusher.
@@ -352,3 +361,11 @@ def is_live_bar_rpc_enabled() -> bool:
     realtime_technical_service) that want to skip a live RPC call when the
     operator has explicitly turned it off via `ENABLE_LIVE_BAR_RPC=false`."""
     return _is_enabled()
+
+
+def get_account_snapshot() -> Optional[Dict[str, Any]]:
+    """Module-level helper for backend services that need on-demand account
+    data when the push-loop's `_pushed_ib_data["account"]` is empty.
+    Returns None if the pusher RPC is disabled / unreachable.
+    """
+    return get_pusher_rpc_client().account_snapshot()

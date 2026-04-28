@@ -2,6 +2,95 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-5) — Equity RPC fallback + dual-scanner strategy-mix + rejection analytics
+
+Operator post-restart screenshot revealed 3 issues. All fixed.
+
+### 1. Equity `$—` despite PUSHER GREEN (P0)
+- **Root cause**: ib_insync's `accountValueEvent` sometimes stops firing
+  after pusher reconnects. Push-loop kept shipping but
+  `account_data` stayed empty. Backend fallback added afternoon-3 had
+  nothing to fall back ON.
+- **Fix** — new pusher RPC endpoint:
+  - `GET /rpc/account-snapshot` in `documents/scripts/ib_data_pusher.py`
+  - Fast path returns cached `account_data` (zero IB cost)
+  - Slow path calls `IB.accountValues()` synchronously, refreshes the
+    cache, returns the full account dict
+  - Backend `services/ib_pusher_rpc.py::get_account_snapshot()` helper
+  - Wired into `/api/ib/account/summary` AND `/api/trading-bot/status` —
+    both seed `_pushed_ib_data["account"]` on RPC hit so subsequent
+    reads stay fast
+- **Operator action on Windows after pull**: restart `ib_data_pusher.py`
+  to pick up the new endpoint. Backend changes alone won't help — the
+  RPC endpoint must exist on the pusher side.
+
+### 2. Strategy-mix "waiting for first alerts" with 6 scanner hits (P0)
+- **Root cause**: `_scanner_service` in the router is the
+  `predictive_scanner`, but the V5 scanner panel renders alerts from
+  the **enhanced_scanner**. Afternoon-3 fallback only checked
+  predictive_scanner's `_live_alerts` → empty when the enhanced
+  scanner had 6 RS hits.
+- **Fix**: `routers/scanner.py::get_strategy_mix` fallback now reads
+  from BOTH `predictive_scanner._live_alerts` AND
+  `get_enhanced_scanner()._live_alerts`. Dedup by `id` keeps the
+  count honest.
+- Regression coverage: 1 new test
+  (`test_strategy_mix_falls_back_to_enhanced_scanner_alerts`).
+
+### 3. Rejection analytics — closes the loop on `sentcom_thoughts` (P1)
+- **Operator question**: "now that thoughts persist, don't we already
+  have something that uses them?" Audit answer: *partially*. The
+  existing learners (`multiplier_threshold_optimizer`,
+  `gate_calibrator`) consume `bot_trades` and `confidence_gate_log` —
+  not the new rich rejection-narrative feed.
+- **Fix** — new read-only analytics service:
+  - `services/rejection_analytics.py::compute_rejection_analytics(db, days, min_count)`
+  - Aggregates `kind: rejection|skip` events from `sentcom_thoughts`
+    by `reason_code`
+  - Joins each rejection with subsequent `bot_trades` (same
+    symbol+setup_type, within 24h) — counts unique post-rejection
+    trades + computes post-rejection win rate
+  - Verdict per reason_code:
+    - `gate_potentially_overtight` (post-WR ≥ 65%) ⇒ emits a
+      calibration hint
+    - `gate_borderline` (45-65%)
+    - `gate_calibrated` (< 45%)
+    - `insufficient_data` (< 5 post-rejection trades or < min_count)
+- New endpoint: `GET /api/trading-bot/rejection-analytics?days=7&min_count=3`
+- Read-only by design — does NOT modify thresholds. Operator reviews
+  hints + manually feeds insights into existing optimizers. Live
+  auto-tuning waits for ~2 weeks of data + observation to confirm
+  signal stability.
+- Regression coverage: 7 new tests in
+  `tests/test_rejection_analytics.py`.
+
+### Verification
+- 116/116 tests passing across all related suites (8 new this batch
+  + 108 carryover).
+- All 3 new/changed endpoints verified live on cloud preview:
+  `/api/trading-bot/rejection-analytics`, `/api/scanner/strategy-mix`,
+  `/api/sentcom/thoughts`.
+- Lint clean (no new warnings).
+
+### Operator action on DGX + Windows after pull
+1. **Pull on Windows**: restart `ib_data_pusher.py` (new
+   `/rpc/account-snapshot` endpoint required for equity fix).
+2. **Pull on DGX**: backend hot-reloads. Verify:
+   - `/api/trading-bot/status` → `account_equity` populates within
+     30s if the IB pusher is healthy (RPC fallback fires once,
+     subsequent reads use the seeded cache).
+   - `/api/scanner/strategy-mix?n=50` → returns non-zero buckets
+     during scan cycles (dual-scanner fallback active).
+   - `/api/trading-bot/rejection-analytics?days=7` → starts populating
+     hints once rejection events accumulate (need ~3+ rejections
+     per code + 5+ post-rejection trades for a verdict).
+3. **Watch over the next week**: `calibration_hints` will surface
+   reason_codes worth manual review (likely candidates: `tqs_too_low`,
+   `exposure_cap`, `daily_dd_cap` if they fire often but the bot
+   later trades the same setup successfully).
+
+
+
 ## 2026-04-29 (afternoon-4) — Bot evaluation thoughts in stream + AI brain memory persistence
 
 Two operator follow-ups shipped together (continuation of afternoon-3):

@@ -2876,6 +2876,66 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         pusher._qualified_contract_cache.clear()
         return {"success": True, "cleared": cleared}
 
+    @app.get("/rpc/account-snapshot")
+    def rpc_account_snapshot():
+        """On-demand account snapshot.
+
+        Why this exists (2026-04-29 afternoon-5): the push-loop only ships
+        `account_data` if `accountValueEvent` has been firing — and after
+        certain pusher restarts (TWS auto-upgrade, reconnect, etc.)
+        ib_insync sometimes stops firing those events even though
+        `accountSummary()` still works on demand. The DGX dashboard's
+        equity pill renders `$—` whenever the push-loop's account_data
+        is empty.
+
+        This endpoint:
+          1. Returns the cached `account_data` if populated (zero IB cost).
+          2. Otherwise calls `IB.accountValues()` synchronously to refresh
+             the cache, then returns it.
+
+        Backend caller: `services.ib_pusher_rpc.get_account_snapshot()`.
+        Backend uses it as a fallback in `/api/ib/account/summary` and
+        `/api/trading-bot/status` so equity always resolves when the IB
+        gateway is connected.
+        """
+        # Fast path — push-loop's data is fresh
+        if pusher.account_data:
+            return {
+                "success": True,
+                "source": "cache",
+                "account": pusher.account_data,
+                "timestamp": datetime.now().isoformat(),
+            }
+        # Slow path — IB direct read
+        try:
+            if not pusher.ib.isConnected():
+                return {
+                    "success": False,
+                    "error": "ib_not_connected",
+                    "account": {},
+                }
+            values = pusher.ib.accountValues() or []
+            for v in values:
+                try:
+                    pusher.account_data[v.tag] = {
+                        "value": v.value,
+                        "currency": v.currency,
+                        "account": v.account,
+                    }
+                except Exception:
+                    continue
+            return {
+                "success": True,
+                "source": "ib_refresh",
+                "account": pusher.account_data,
+                "fields": len(pusher.account_data),
+                "timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"[RPC] /rpc/account-snapshot failed: {e}")
+            return {"success": False, "error": str(e)[:120], "account": {}}
+
+
     class LatestBarsBatchRequest(BaseModel):
         symbols: list
         bar_size: str = "5 mins"

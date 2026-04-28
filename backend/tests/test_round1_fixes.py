@@ -130,6 +130,44 @@ def test_strategy_mix_uses_mongo_when_populated():
     assert by_type.get("vwap_bounce") == 1
 
 
+def test_strategy_mix_falls_back_to_enhanced_scanner_alerts():
+    """Operator's screenshot bug (2026-04-29 afternoon-5): predictive_scanner
+    has no live_alerts but enhanced_scanner has 6 RS hits — strategy-mix
+    must read from BOTH so the card populates."""
+    from routers import scanner as scanner_router
+
+    db = mongomock.MongoClient().db  # empty live_alerts collection
+
+    es_alerts = {
+        "e1": SimpleNamespace(
+            id="e1",
+            setup_type="relative_strength_laggard",
+            direction="long",
+            created_at="2026-04-29T15:00:00Z",
+            ai_edge_label=None,
+        ),
+        "e2": SimpleNamespace(
+            id="e2",
+            setup_type="relative_strength_leader",
+            direction="long",
+            created_at="2026-04-29T14:50:00Z",
+            ai_edge_label=None,
+        ),
+    }
+    fake_es = SimpleNamespace(_live_alerts=es_alerts)
+    pred = SimpleNamespace(db=db, _live_alerts={})  # predictive scanner empty
+
+    import services.enhanced_scanner as es_mod
+    with patch.object(scanner_router, "_scanner_service", pred), \
+         patch.object(es_mod, "get_enhanced_scanner", lambda: fake_es):
+        resp = scanner_router.get_strategy_mix(n=100)
+
+    assert resp["total"] == 2
+    by_type = {b["setup_type"]: b["count"] for b in resp["buckets"]}
+    assert by_type.get("relative_strength_laggard") == 1
+    assert by_type.get("relative_strength_leader") == 1
+
+
 def test_strategy_mix_falls_back_to_in_memory_when_mongo_empty():
     """The audit case: scanner is firing, in-memory `_live_alerts` has
     items, but Mongo `live_alerts` is empty (persistence gap).
@@ -140,18 +178,21 @@ def test_strategy_mix_falls_back_to_in_memory_when_mongo_empty():
 
     in_mem = {
         "a1": SimpleNamespace(
+            id="a1",
             setup_type="relative_strength_leader",
             direction="long",
             created_at="2026-04-29T15:00:00Z",
             ai_edge_label=None,
         ),
         "a2": SimpleNamespace(
+            id="a2",
             setup_type="orb_long",
             direction="long",
             created_at="2026-04-29T14:55:00Z",
             ai_edge_label="STRONG_EDGE",
         ),
         "a3": SimpleNamespace(
+            id="a3",
             setup_type="orb_short",
             direction="short",
             created_at="2026-04-29T14:50:00Z",
@@ -159,7 +200,10 @@ def test_strategy_mix_falls_back_to_in_memory_when_mongo_empty():
         ),
     }
     svc = SimpleNamespace(db=db, _live_alerts=in_mem)
-    with patch.object(scanner_router, "_scanner_service", svc):
+    # Stub enhanced_scanner so we ONLY count predictive_scanner alerts
+    import services.enhanced_scanner as es_mod
+    with patch.object(scanner_router, "_scanner_service", svc), \
+         patch.object(es_mod, "get_enhanced_scanner", lambda: None):
         resp = scanner_router.get_strategy_mix(n=100)
 
     assert resp["total"] == 3
@@ -178,7 +222,9 @@ def test_strategy_mix_returns_empty_when_both_sources_empty():
 
     db = mongomock.MongoClient().db
     svc = SimpleNamespace(db=db, _live_alerts={})
-    with patch.object(scanner_router, "_scanner_service", svc):
+    import services.enhanced_scanner as es_mod
+    with patch.object(scanner_router, "_scanner_service", svc), \
+         patch.object(es_mod, "get_enhanced_scanner", lambda: None):
         resp = scanner_router.get_strategy_mix(n=100)
 
     assert resp == {"success": True, "n": 0, "buckets": [], "total": 0}

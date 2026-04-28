@@ -741,7 +741,22 @@ def get_account_summary():
     global _pushed_ib_data
     
     account = _pushed_ib_data.get("account", {})
-    
+
+    # Fallback: if push-loop's account data is empty (which happens after
+    # certain pusher restarts where ib_insync's accountValueEvent stops
+    # firing), fetch a fresh snapshot via the new /rpc/account-snapshot
+    # endpoint and seed `_pushed_ib_data["account"]` so subsequent reads
+    # are also fast.
+    if not account:
+        try:
+            from services.ib_pusher_rpc import get_account_snapshot
+            snap = get_account_snapshot() or {}
+            if snap.get("success") and snap.get("account"):
+                account = snap["account"]
+                _pushed_ib_data["account"] = account
+        except Exception as e:
+            logger.debug(f"account RPC fallback failed: {e}")
+
     # Extract key account values using helper that handles nested format
     net_liq = _extract_account_value(account, "NetLiquidation", 0)
     buying_power = _extract_account_value(account, "BuyingPower", 0)

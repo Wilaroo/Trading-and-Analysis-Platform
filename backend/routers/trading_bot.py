@@ -216,6 +216,19 @@ async def get_bot_status():
         try:
             from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
             ib_account = (_pushed_ib_data or {}).get("account") or {}
+            # If the push-loop's account_data is empty (which is the
+            # screenshot-bug scenario: PUSHER GREEN but no equity), fall
+            # back to the on-demand /rpc/account-snapshot RPC. Seeds
+            # `_pushed_ib_data` so the next call is fast.
+            if not ib_account:
+                try:
+                    from services.ib_pusher_rpc import get_account_snapshot
+                    snap = get_account_snapshot() or {}
+                    if snap.get("success") and snap.get("account"):
+                        ib_account = snap["account"]
+                        _pushed_ib_data["account"] = ib_account
+                except Exception as e:
+                    logger.debug(f"account RPC fallback failed: {e}")
             if ib_account:
                 net_liq = _extract_account_value(ib_account, "NetLiquidation", 0)
                 buying_power = _extract_account_value(ib_account, "BuyingPower", 0)
@@ -246,6 +259,39 @@ async def get_bot_status():
         status.setdefault("equity", account["equity"])
     
     return {"success": True, **status}
+
+
+@router.get("/rejection-analytics")
+async def get_rejection_analytics(
+    days: int = Query(7, ge=1, le=90,
+                      description="Lookback window in days. Default 7."),
+    min_count: int = Query(3, ge=1, le=100,
+                           description="Skip reason_codes that fired fewer "
+                                       "times than this. Default 3."),
+):
+    """Aggregate rejection events from `sentcom_thoughts` and join with
+    `bot_trades` to surface "which gates are over-tight?"
+
+    Closes the loop on the new rejection-narrative pipeline shipped
+    2026-04-29 afternoon-4. Read-only — does NOT modify thresholds.
+    Operator reviews and feeds insights into the existing
+    `multiplier_threshold_optimizer` / `gate_calibrator` tunings.
+
+    Verdicts:
+      - `gate_potentially_overtight` — post-rejection win rate ≥ 65%
+      - `gate_borderline`            — 45-65%
+      - `gate_calibrated`            — < 45%
+      - `insufficient_data`          — fewer than 5 post-rejection trades
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    db = _trading_bot._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from services.rejection_analytics import compute_rejection_analytics
+    return compute_rejection_analytics(db, days=days, min_count=min_count)
+
 
 
 @router.get("/execution-health")
