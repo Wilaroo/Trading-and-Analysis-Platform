@@ -30,6 +30,22 @@ operator is `Market Regime → Setup → Trade`. Required changes:
   one (low blast radius — already proposed).
 - Estimated effort: half-day. Tests + live verification additional.
 
+### 🟢 P2 — Setup-landscape self-grading prediction tracker (saved 2026-04-29 evening)
+Each morning snapshot the landscape into a new `landscape_predictions`
+Mongo collection with the `favoring` / `avoiding` clauses. At EOD
+compare against actual realized R-multiples per Setup family. Two
+cycles in we start producing self-grading briefing lines:
+*"my morning thesis (favor momentum on 47 Gap & Go names) realized
++1.4R on average — top hits AAPL +2.1R, ORCL +1.8R; my
+mean-reversion-avoid call was correct on 9 of 12 names"*.
+- Schema: `{date, context, groups, favoring_phrase, avoiding_phrase,
+  realized_r_by_setup: {...}, accuracy_score, pnl_attribution}`.
+- New endpoint: `GET /api/assistant/coach/landscape-scorecard`.
+- Feeds the same data into the AI training pipeline as a
+  quality-of-judgment signal so the bot's morning prep gets sharper
+  over time.
+- Estimated effort: ~3 hours.
+
 ### 🟢 Just shipped earlier this session (2026-04-29 evening, v2) — see CHANGELOG
 - ✅ **Bellafiore Setup × Trade matrix system**: new `MarketSetup` enum
   (7 setups), `MarketSetupClassifier` service with daily-bar-driven
