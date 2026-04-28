@@ -336,6 +336,40 @@ class IBHistoricalCollector:
             }
         return {"processed": 0, "bars_stored": 0}
     
+    def _notify_dead_symbol(self, symbol: str, reason: str) -> None:
+        """Tell DGX backend that `symbol` returned 'No security
+        definition' so it can:
+
+          1. Bulk-skip every pending queue row for this symbol
+             (saves the other 8 bar_size requests in this batch from
+             also burning IB pacing on a dead symbol).
+          2. Tick the unqualifiable strike counter on
+             `symbol_adv_cache` so after 3 strikes the symbol is
+             permanently dropped from future backfill / readiness
+             selections.
+
+        2026-04-29: added because `qualifyContracts` doesn't always
+        raise on dead symbols — newer ib_insync versions just log
+        Error 200 and leave conId=0. Without this notification path
+        the strike counter stayed at 0 forever (verified on DGX
+        2026-04-29 morning: 0 unqualifiable, 0 striking despite
+        thousands of Error 200 events overnight).
+
+        Best-effort: any failure is logged at DEBUG and the collector
+        keeps running. The next bad-symbol hit will retry the
+        notification. We never want this helper to block the data
+        pipeline.
+        """
+        try:
+            self.api.post(
+                "/api/ib/historical-data/skip-symbol",
+                {"symbol": symbol, "reason": reason},
+                timeout=10,
+            )
+            logger.info(f"      Notified backend: {symbol} marked dead/unqualifiable")
+        except Exception as e:
+            logger.debug(f"Notify dead symbol failed for {symbol}: {e}")
+
     def fetch_historical_data(self, request: dict) -> dict:
         """Fetch historical data from IB for a single request."""
         from ib_insync import Stock
@@ -344,7 +378,6 @@ class IBHistoricalCollector:
         symbol = request.get("symbol")
         bar_size = request.get("bar_size", "1 day")
         duration = request.get("duration", "1 Y")
-        
         result = {
             "request_id": request_id,
             "symbol": symbol,
@@ -393,11 +426,30 @@ class IBHistoricalCollector:
             try:
                 self.ib.qualifyContracts(contract)
             except Exception as e:
+                # 2026-04-29 fix: qualifyContracts raised — definitively
+                # a dead/unknown symbol. Notify backend so it can bulk-
+                # skip pending requests + tick the unqualifiable strike
+                # counter (3 strikes → permanent prune from universe).
+                self._notify_dead_symbol(symbol, f"Symbol not available: {e}")
                 result["success"] = True
                 result["status"] = "no_data"
                 result["error"] = f"Symbol not available: {e}"
                 return result
-            
+
+            # 2026-04-29 fix: newer ib_insync versions don't RAISE on
+            # "No security definition" — they log Error 200 + a warning
+            # and leave the contract unqualified (conId == 0). If we
+            # don't catch this, we proceed to call reqHistoricalData
+            # on an unqualified contract, get 0 bars back, and report
+            # `no_data` without ever telling the backend the symbol is
+            # dead. Result: same dead symbol re-queued every backfill.
+            if not getattr(contract, "conId", 0):
+                self._notify_dead_symbol(symbol, "No security definition has been found")
+                result["success"] = True
+                result["status"] = "no_data"
+                result["error"] = "No security definition has been found"
+                return result
+
             self.pacing.record_request(symbol, bar_size, duration, end_date)
             
             # CRITICAL: pass the chunk's end_date through to IB. Previously

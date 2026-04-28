@@ -2,6 +2,87 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (morning) — Unqualifiable strike-counter rescue (P0 from overnight backfill)
+
+### Why
+2026-04-29 morning diagnostic on DGX revealed the unqualifiable
+strike-counter system was completely dead:
+```
+Total symbols:        9412
+Unqualifiable (auto): 0     ← should be 500-1500
+Striking (1-2 fails): 0     ← should be hundreds
+Healthy:              9412
+```
+Despite hours of "Error 200: No security definition" failures during
+the overnight backfill (PSTG, HOLX, CHAC, AL, GLDD, DAWN, etc.), zero
+strikes were recorded. Root cause: the historical collector silently
+returns `no_data` on dead symbols without notifying the DGX backend.
+
+### Two-part fix
+
+**Part 1: Wire up the missing notification path**
+`documents/scripts/ib_historical_collector.py::fetch_historical_data`
+now calls a new `_notify_dead_symbol()` helper whenever it detects
+either:
+- `qualifyContracts()` raises (legacy ib_insync behaviour)
+- `qualifyContracts()` returns silently with `conId == 0` (newer
+  ib_insync versions just log Error 200 + a warning instead of
+  raising — this was the silent leak)
+
+The helper POSTs to `/api/ib/historical-data/skip-symbol` which:
+- bulk-skips all pending queue rows for the dead symbol (saves the
+  remaining 8 bar_size requests in the same batch from also burning
+  IB pacing)
+- ticks the `unqualifiable_failure_count` strike counter
+- promotes to `unqualifiable: true` once threshold reached
+
+Best-effort wiring — any failure is logged at DEBUG and the collector
+keeps running. The next bad-symbol hit will retry the notification.
+
+**Part 2: Lower strike threshold 3 → 1**
+`services/symbol_universe.py::UNQUALIFIABLE_FAILURE_THRESHOLD` reduced
+from `3` to `1`. The "No security definition" error is **deterministic**
+— the symbol either exists in IB's security master or it doesn't,
+there's no transient state. Waiting for 3 strikes before promotion
+just meant ~9k wasted IB requests over a single overnight backfill.
+
+### Expected impact on next overnight run
+- ~75% reduction in IB pacing waste (collectors don't repeatedly
+  hammer the same dead symbols across multiple cycles)
+- Overnight backfill estimate: 6-10 hours → 2-4 hours
+- DGX `unqualifiable` count: 0 → expected 500-1,500 within first
+  full backfill cycle
+- The chronic "Error 200" log spam on Windows collectors will drop
+  dramatically as bad symbols self-prune after one strike
+
+### Regression coverage
+- `tests/test_unqualifiable_pipeline.py` (9 tests):
+  - threshold=1 sanity check (regression guard if anyone bumps it back)
+  - first strike promotes immediately
+  - second strike is idempotent (no double-stamping `marked_at`)
+  - upsert creates doc if symbol not in cache
+  - uppercase normalisation
+  - safe-error returns for None db / empty symbol
+  - 3-consecutive strikes increment counter exactly once promoted
+  - `last_seen_at` refreshes per strike (debugging aid for selectors
+    that mistakenly re-queue unqualifiable symbols)
+
+### Operator action on DGX after pull + collector restart
+1. **Restart the Windows collectors** so they pick up the new
+   `_notify_dead_symbol` path. Backend hot-reload covers part 2.
+2. Wait 5-10 min, then re-run the diagnostic:
+```
+cd ~/Trading-and-Analysis-Platform && set -a && source backend/.env && set +a && \
+~/venv/bin/python -c "
+from pymongo import MongoClient; import os
+db = MongoClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+print('Unqualifiable:', db.symbol_adv_cache.count_documents({'unqualifiable': True}))
+print('Striking:    ', db.symbol_adv_cache.count_documents({'unqualifiable_failure_count': {'\$gte': 1}}))
+"
+```
+Expected: count climbs from 0 as collectors hit dead symbols. After
+1-2 hours of continued backfill, should be in the hundreds.
+
 ## 2026-04-29 (later 2) — Per-module accuracy fix (PnL-based + recommendation-aware)
 
 ### Why

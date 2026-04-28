@@ -22,8 +22,12 @@ Open priorities, deferred ideas, and backlog. Move items to
 - ✅ **Mongo compound indexes** — `bar_size_1_date_-1` and
   `symbol_1_bar_size_1_date_-1` shipped on DGX. `rebuild-adv-from-ib`
   dropped from 5+ min → 44s.
+- ✅ **Unqualifiable strike-counter rescue** — historical collector
+  now POSTs to `/api/ib/historical-data/skip-symbol` on Error 200,
+  and threshold lowered 3 → 1. Should drop overnight backfill time
+  ~3-5×. 9 regression tests.
 
-### 🔴 P0 OPTIMIZATION SURFACED 2026-04-29 OVERNIGHT BACKFILL
+### 🔴 P0 OPTIMIZATION — DEFERRED (was 2026-04-29 morning's top item, now shipped above)
 **Pre-flight contract validation in `ib_historical_collector.py`**
 - **Symptom**: During the 2026-04-29 overnight backfill, 3 of 4
   collectors burned their entire 60-req/10-min IB pacing quota on

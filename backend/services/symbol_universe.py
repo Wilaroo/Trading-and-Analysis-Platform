@@ -99,10 +99,19 @@ TIER_TIMEFRAMES: Dict[str, List[str]] = {
 }
 
 # Promote to `unqualifiable=true` after N "No security definition"
-# strikes from IB. 3 is conservative — gives the symbol a chance to
-# come back from a temporary IB Gateway hiccup before being skipped
-# permanently by the universe selectors.
-UNQUALIFIABLE_FAILURE_THRESHOLD = 3
+# strikes from IB.
+#
+# 2026-04-29: lowered 3 → 1 because "No security definition" is a
+# DETERMINISTIC error from IB (the symbol either exists in their
+# security master or it doesn't — there's no transient state). Waiting
+# for 3 strikes meant a single bad symbol burned 3 IB requests across
+# 3 separate backfill cycles before being pruned. Cumulative cost on
+# the 2026-04-29 overnight backfill: ~9000 wasted requests, 3-5×
+# slower than necessary. With strike=1, one bad batch = one strike =
+# one immediate promotion. Caller can pass a transient_error_reason
+# if they want the legacy 3-strike behaviour for retryable errors
+# like timeouts/disconnects.
+UNQUALIFIABLE_FAILURE_THRESHOLD = 1
 
 # Match-all sentinel for callers that want every tier in one query.
 ALL_TIERS = ("intraday", "swing", "investment")
