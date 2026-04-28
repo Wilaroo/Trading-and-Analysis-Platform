@@ -19,6 +19,12 @@ import DataBacktestingPanel from './DataBacktestingPanel';
 import StrategyPerformancePanel from './StrategyPerformancePanel';
 import TrainingPipelinePanel from './TrainingPipelinePanel';
 import SentComIntelligencePanel from './SentComIntelligencePanel';
+// Reflection & Audit panels — relocated from Command Center bottom drawer
+// (2026-04-29 afternoon-10) since they're static during market hours and
+// belong in NIA's "training & maintenance" surface.
+import { ModelHealthScorecard } from '../sentcom/panels/ModelHealthScorecard';
+import { SmartLevelsAnalyticsCard } from '../sentcom/v5/SmartLevelsAnalyticsCard';
+import { AIDecisionAuditCard } from '../sentcom/v5/AIDecisionAuditCard';
 
 const DEFAULT_DATA = {
   aiAccuracy: null,
@@ -375,6 +381,32 @@ const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
         onPromote={noopCallback}
         onDemote={noopCallback}
       />
+
+      {/* 5. Reflection & Audit — moved from Command Center bottom drawer
+          on 2026-04-29 afternoon-10. These three panels are all static
+          during market hours (model health changes only when retrained;
+          smart-levels analytics is a 30-day rolling A/B; AI decision
+          audit only updates when trades close). They belong in NIA's
+          "training & maintenance" surface, not in Command Center's
+          live-action drawer. */}
+      <div className="mt-8" data-testid="nia-reflection-audit-section">
+        <div className="flex items-center gap-2 mb-4">
+          <Brain className="w-5 h-5 text-amber-400" />
+          <h2 className="text-base font-semibold text-white">Reflection &amp; Audit</h2>
+          <span className="text-xs text-zinc-500">
+            Post-trade review · model health · execution-feature A/B
+          </span>
+        </div>
+        {/* Model Health takes the full row at top — its retrain controls
+            need real estate. Smart Levels + AI Audit share the row below. */}
+        <div className="mb-4">
+          <ModelHealthScorecard />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SmartLevelsAnalyticsCard />
+          <AIDecisionAuditCard />
+        </div>
+      </div>
 
       {/* Footer */}
       <div className="text-center text-xs text-zinc-600 mt-6">

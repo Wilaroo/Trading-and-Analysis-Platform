@@ -19,7 +19,6 @@
 import React, { useCallback, useState, useMemo } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
-import { ModelHealthScorecard } from './panels/ModelHealthScorecard';
 import { ChatInput } from './panels/ChatInput';
 import { PipelineHUDV5 } from './panels/PipelineHUDV5';
 
@@ -31,14 +30,13 @@ import { HealthChip } from './v5/HealthChip';
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
-import { BriefingsV5 } from './v5/BriefingsV5';
+import { BriefingsCompactStrip } from './v5/BriefingsCompactStrip';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
-import { SmartLevelsAnalyticsCard } from './v5/SmartLevelsAnalyticsCard';
-import { AIDecisionAuditCard } from './v5/AIDecisionAuditCard';
+import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
@@ -404,26 +402,32 @@ export const SentComV5View = ({
           </div>
         </section>
 
-        {/* RIGHT — stacked: Briefings · Open Positions (stream moved
-            to center 2026-04-28) */}
+        {/* RIGHT — Briefings strip on top + Open Positions filling rest.
+            Briefings collapsed to a compact pulse-button strip
+            (2026-04-29 afternoon-10) so positions get the bulk of the
+            sidebar height. Click any briefing button → modal with the
+            full card. Active-window briefings pulse green. */}
         <aside
           data-testid="sentcom-v5-right"
           className="bg-zinc-950 flex flex-col overflow-hidden min-w-0"
         >
-          {/* Briefings (top half) */}
-          <div className="border-b border-zinc-800 flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <div className="v5-panel-title">Briefings</div>
-              <div className="text-[9px] v5-mono v5-dim">auto · 4 scheduled</div>
-            </div>
-            <div className="overflow-y-auto flex-1 v5-scroll">
-              <PanelErrorBoundary label="briefings">
-                <BriefingsV5 context={context} positions={positions} totalPnl={totalPnl} onSymbolClick={handleOpenTicker} onOpenDeepDive={onOpenBriefingDeepDive} />
-              </PanelErrorBoundary>
-            </div>
+          {/* Briefings strip — collapsed, always visible at the top */}
+          <div
+            className="border-b border-zinc-800 px-2 py-2 flex-shrink-0"
+            data-testid="briefings-strip-container"
+          >
+            <PanelErrorBoundary label="briefings-strip">
+              <BriefingsCompactStrip
+                context={context}
+                positions={positions}
+                totalPnl={totalPnl}
+                onSymbolClick={handleOpenTicker}
+                onOpenDeepDive={onOpenBriefingDeepDive}
+              />
+            </PanelErrorBoundary>
           </div>
 
-          {/* Open positions (bottom half) */}
+          {/* Open positions — gets ALL remaining vertical room now */}
           <div className="flex flex-col flex-1 min-h-0">
             <OpenPositionsV5
               positions={positions}
@@ -438,28 +442,36 @@ export const SentComV5View = ({
         </aside>
       </div>
 
-      {/* Bottom drawer: Model Health (left) + Smart-levels analytics
-          (middle) + AI decision audit (right) — collapsible into the
-          same `max-h-[22vh]` envelope so they don't steal vertical
-          space from the main grid. The analytics + audit cards
-          render compact one-liner stubs when no qualifying trades
-          exist in the lookback window. */}
-      <div className="border-t border-zinc-800 min-h-[400px] flex-shrink-0 bg-zinc-950">
-        <div className="grid gap-px bg-zinc-900" style={{ gridTemplateColumns: '50% 25% 25%' }}>
-          <div className="bg-zinc-950">
-            <PanelErrorBoundary label="model-health" compact>
-              <ModelHealthScorecard className="rounded-none border-0" />
+      {/* Bottom drawer — TWIN LIVE PANELS (2026-04-29 afternoon-10).
+          Replaces the prior trio of reflection panels (Model Health,
+          Smart Levels Analytics, AI Decision Audit), all of which were
+          static during market hours and have been moved to NIA.
+          Now: 60% SentCom Intelligence (live confidence-gate decisions
+          + trading mode banner), 40% Unified Stream mirror (deeper
+          history view; the chart-side stream stays for action-context
+          reading). */}
+      <div
+        className="border-t border-zinc-800 flex-shrink-0 bg-zinc-950"
+        style={{ height: '32vh', minHeight: '320px' }}
+        data-testid="sentcom-v5-bottom-drawer"
+      >
+        <div
+          className="grid gap-px bg-zinc-900 h-full"
+          style={{ gridTemplateColumns: '60% 40%' }}
+        >
+          <div className="bg-zinc-950 h-full overflow-hidden">
+            <PanelErrorBoundary label="sentcom-intelligence-compact">
+              <SentComIntelligencePanel compact />
             </PanelErrorBoundary>
           </div>
-          <div className="bg-zinc-950 p-2">
-            <PanelErrorBoundary label="smart-levels-analytics" compact>
-              <SmartLevelsAnalyticsCard className="border-0 bg-transparent" />
-            </PanelErrorBoundary>
-          </div>
-          <div className="bg-zinc-950 p-2">
-            <PanelErrorBoundary label="ai-decision-audit" compact>
-              <AIDecisionAuditCard className="border-0 bg-transparent" />
-            </PanelErrorBoundary>
+          <div className="bg-zinc-950 flex flex-col overflow-hidden h-full">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <div className="v5-panel-title">Stream · Deep Feed</div>
+              <span className="v5-chip v5-chip-manage">history</span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
+              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
+            </div>
           </div>
         </div>
       </div>

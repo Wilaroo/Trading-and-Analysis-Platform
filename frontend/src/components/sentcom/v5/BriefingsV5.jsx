@@ -31,7 +31,7 @@ const minutesET = () => {
   return h * 60 + m;
 };
 
-const statusFor = (windowStart, windowEnd) => {
+export const statusFor = (windowStart, windowEnd) => {
   const n = minutesET();
   if (n < windowStart) return 'pending';
   if (n >= windowStart && n < windowEnd) return 'active';
@@ -56,7 +56,7 @@ const formatTimeRange = (startHH, startMM) => {
 /* ── Cards ────────────────────────────────────────────────────────────── */
 
 /** Inline clickable ticker symbol — used inside briefing detail rows. */
-const ClickableSymbol = ({ symbol, onSymbolClick, className = '' }) => {
+export const ClickableSymbol = ({ symbol, onSymbolClick, className = '' }) => {
   if (!symbol) return null;
   const sym = String(symbol).toUpperCase();
   if (!onSymbolClick) return <span className={className}>{sym}</span>;
@@ -74,7 +74,8 @@ const ClickableSymbol = ({ symbol, onSymbolClick, className = '' }) => {
 };
 
 
-const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
+/** Morning prep card. Exported so `BriefingsCompactStrip` can render it inside its modal. */
+export const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const gp = data?.game_plan;
   const drc = data?.drc;
   const scanner = data?.scanner;
@@ -175,7 +176,7 @@ const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolClick, onO
 };
 
 
-const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
+export const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(11.5 * 60, 13 * 60);   // 11:30 → 13:00 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);
@@ -274,7 +275,7 @@ const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onToggle, on
 };
 
 
-const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
+export const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(15 * 60, 15.75 * 60); // 15:00 → 15:45 ET
 
   const open = (positions || []).filter(p => p?.status !== 'closed');
@@ -378,7 +379,7 @@ const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggle, onSy
 };
 
 
-const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
+export const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymbolClick, onOpenDeepDive }) => {
   const state = statusFor(16 * 60, 16.5 * 60); // 16:00 → 16:30 ET
 
   const closed = useMemo(() => (positions || []).filter(p => p?.status === 'closed'), [positions]);

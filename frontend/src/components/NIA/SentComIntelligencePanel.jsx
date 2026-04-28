@@ -137,7 +137,7 @@ const DecisionRow = memo(({ decision }) => {
   );
 });
 
-const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate }) => {
+const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate, compact = false }) => {
   const [summary, setSummary] = useState(null);
   const [decisions, setDecisions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -183,13 +183,18 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate }) => {
   const today = summary?.today || { evaluated: 0, taken: 0, skipped: 0, take_rate: 0 };
 
   return (
-    <div className="mt-6" data-testid="sentcom-intelligence-panel">
+    <div
+      className={compact ? "h-full flex flex-col" : "mt-6"}
+      data-testid="sentcom-intelligence-panel"
+    >
       {/* Section Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className={`flex items-center justify-between ${compact ? 'mb-2 px-2 pt-2' : 'mb-4'}`}>
         <div className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-violet-400" />
-          <h2 className="text-base font-semibold text-white">SentCom Intelligence</h2>
-          <span className="text-xs text-zinc-500">Pre-trade confidence gate</span>
+          <Brain className={compact ? "w-4 h-4 text-violet-400" : "w-5 h-5 text-violet-400"} />
+          <h2 className={compact ? "text-sm font-semibold text-white" : "text-base font-semibold text-white"}>
+            SentCom Intelligence
+          </h2>
+          {!compact && <span className="text-xs text-zinc-500">Pre-trade confidence gate</span>}
         </div>
         <button
           onClick={fetchData}
@@ -200,8 +205,26 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate }) => {
         </button>
       </div>
 
-      {/* Trading Mode Banner */}
-      <div className={`p-4 rounded-xl border ${modeStyle.border} ${modeStyle.bg} mb-4`} data-testid="trading-mode-banner">
+      {/* Trading Mode Banner — compact mode collapses this to a thin pill */}
+      {compact ? (
+        <div className={`mx-2 px-3 py-1.5 rounded-md border ${modeStyle.border} ${modeStyle.bg} mb-2 flex items-center justify-between`} data-testid="trading-mode-banner">
+          <div className="flex items-center gap-2">
+            <ModeIcon className={`w-3.5 h-3.5 ${modeStyle.text}`} />
+            <span className={`text-xs font-bold ${modeStyle.text}`}>{modeStyle.label}</span>
+          </div>
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="text-white"><b>{today.evaluated}</b> eval</span>
+            <span className="text-emerald-400"><b>{today.taken}</b> taken</span>
+            <span className="text-red-400"><b>{today.skipped}</b> skip</span>
+            {today.evaluated > 0 && (
+              <span className={today.take_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400'}>
+                <b>{(today.take_rate * 100).toFixed(0)}%</b>
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className={`p-4 rounded-xl border ${modeStyle.border} ${modeStyle.bg} mb-4`} data-testid="trading-mode-banner">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${modeStyle.bg} border ${modeStyle.border}`}>
@@ -253,35 +276,52 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate }) => {
           </div>
         )}
       </div>
+      )}
 
-      {/* Decision Log */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
-        <button
-          onClick={() => setShowDecisions(!showDecisions)}
-          className="w-full flex items-center justify-between p-3 hover:bg-white/[0.02] transition-colors"
-          data-testid="toggle-decisions-btn"
+      {/* Decision Log — compact mode skips the toggle and always shows the list, fills remaining height */}
+      {compact ? (
+        <div
+          className="flex-1 mx-2 mb-2 rounded-md border border-white/5 bg-white/[0.02] overflow-y-auto v5-scroll px-2 py-2"
+          data-testid="compact-decision-feed"
         >
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-zinc-300">Recent Decisions</span>
-            <span className="text-[10px] text-zinc-600">({decisions.length})</span>
-          </div>
-          {showDecisions ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
-        </button>
+          {decisions.length === 0 ? (
+            <div className="text-center py-6">
+              <Brain className="w-6 h-6 text-zinc-700 mx-auto mb-2" />
+              <p className="text-xs text-zinc-500">No decisions yet today</p>
+            </div>
+          ) : (
+            decisions.map((d, i) => <DecisionRow key={`${d.symbol}-${d.timestamp}-${i}`} decision={d} />)
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
+          <button
+            onClick={() => setShowDecisions(!showDecisions)}
+            className="w-full flex items-center justify-between p-3 hover:bg-white/[0.02] transition-colors"
+            data-testid="toggle-decisions-btn"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-zinc-300">Recent Decisions</span>
+              <span className="text-[10px] text-zinc-600">({decisions.length})</span>
+            </div>
+            {showDecisions ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
+          </button>
 
-        {showDecisions && (
-          <div className="px-3 pb-3 max-h-80 overflow-auto">
-            {decisions.length === 0 ? (
-              <div className="text-center py-6">
-                <Brain className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-                <p className="text-xs text-zinc-500">No decisions yet today</p>
-                <p className="text-[10px] text-zinc-600 mt-1">SentCom will log each trade evaluation here</p>
-              </div>
-            ) : (
-              decisions.map((d, i) => <DecisionRow key={`${d.symbol}-${d.timestamp}-${i}`} decision={d} />)
-            )}
-          </div>
-        )}
-      </div>
+          {showDecisions && (
+            <div className="px-3 pb-3 max-h-80 overflow-auto">
+              {decisions.length === 0 ? (
+                <div className="text-center py-6">
+                  <Brain className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No decisions yet today</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">SentCom will log each trade evaluation here</p>
+                </div>
+              ) : (
+                decisions.map((d, i) => <DecisionRow key={`${d.symbol}-${d.timestamp}-${i}`} decision={d} />)
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 });

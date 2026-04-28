@@ -2,6 +2,99 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-10) — Command Center / NIA panel re-org
+
+Operator approved option B + briefings restyle:
+1. Bottom drawer becomes "twin live panels" — SentCom Intelligence (60%)
+   + Unified Stream mirror (40%). Drawer height 22vh → 32vh.
+2. ALL three reflection panels (Model Health, Smart Levels Analytics,
+   AI Decision Audit) → moved to NIA section "Reflection & Audit".
+3. Briefings panel collapsed into a 4-button pulse strip at the top of
+   the right sidebar. Active-window briefings pulse green; click any
+   button to open a modal with the full original card. Frees the
+   entire right sidebar for Open Positions.
+
+### Why this layout is more coherent
+- **Command Center = live action surface**: chart, scanner, stream,
+  positions, **live confidence-gate decisions**, briefings-on-demand.
+  Every visible panel updates during market hours.
+- **NIA = training & maintenance surface**: model health, A/B
+  analytics, post-trade audit, strategy promotion. Every visible
+  panel changes only EOD or operator-triggered.
+
+### New components
+- `frontend/src/components/sentcom/v5/BriefingsCompactStrip.jsx`
+  - 4 buttons: Morning Prep / Mid-Day Recap / Power Hour / EOD Recap
+  - `statusFor` math (lifted from BriefingsV5) decides
+    `pending` / `active` / `passed` per ET-time window
+  - Active state uses `animate-pulse-glow` + emerald shadow ring
+  - State indicator dot — emerald pulsing dot for active, amber for
+    pending, dim grey for passed
+  - Click → modal renders the matching original card
+    (`MorningPrepCard` / `MidDayRecapCard` / `PowerHourCard` /
+    `CloseRecapCard`) with `expanded={true}` so the operator sees the
+    full version — no compact re-implementation, no drift between
+    sidebar view and modal view
+  - Backdrop click + X button + opening another briefing all close
+    the current modal cleanly
+- `compact` prop added to `SentComIntelligencePanel` (NIA, also reused
+  in Command Center bottom drawer)
+  - Tighter banner (mode pill + inline stats)
+  - Decision feed always visible (no click-to-expand)
+  - Fills available column height
+
+### Files touched
+- `frontend/src/components/sentcom/SentComV5View.jsx` —
+  - Drops `BriefingsV5` (used `BriefingsCompactStrip` instead)
+  - Drops `ModelHealthScorecard`, `SmartLevelsAnalyticsCard`,
+    `AIDecisionAuditCard` from the bottom drawer
+  - Imports `SentComIntelligencePanel` from `../NIA/`
+  - Bottom drawer becomes `grid-template-columns: 60% 40%` with
+    SentCom Intelligence (compact) + Unified Stream mirror
+  - Right sidebar: briefings strip (auto-height) + Open Positions
+    (flex-1 — gets all remaining vertical space)
+- `frontend/src/components/NIA/index.jsx` —
+  - Added new "Reflection & Audit" section housing the 3 relocated
+    panels
+  - Model Health gets full row (retrain controls need real estate);
+    Smart Levels A/B + AI Decision Audit share the next row
+- `frontend/src/components/sentcom/v5/BriefingsV5.jsx` —
+  - Exported `MorningPrepCard`, `MidDayRecapCard`, `PowerHourCard`,
+    `CloseRecapCard`, `ClickableSymbol`, and `statusFor` so the new
+    compact strip can reuse the original rendering
+  - No behaviour change for any existing consumer
+
+### Verification
+- Playwright screenshot confirms full layout rendering on cloud preview:
+  - 4 briefing buttons in right sidebar with correct active-state
+    pulse (Mid-Day Recap + Power Hour green-active at the screenshot
+    time; Morning Prep + EOD Recap dim-passed/pending)
+  - Bottom drawer 60/40 split with SentCom Intelligence (compact)
+    showing CAUTIOUS mode banner + decision feed (MSFT INT-01 SKIP)
+    on the left, "Stream · Deep Feed" mirror on the right
+  - Right sidebar shows briefings strip + Open Positions (filling
+    the remaining height)
+- Lint clean across all 5 touched files (BriefingsCompactStrip,
+  SentComV5View, NIA/index, NIA/SentComIntelligencePanel, BriefingsV5)
+- Backend regression: 72/72 of the affected test suites still
+  passing (no backend code touched).
+
+### Operator action
+- Pull on DGX (frontend hot-reload picks it up automatically)
+- Refresh browser. Layout updates instantly:
+  - Bottom drawer now shows live SentCom Intelligence + deeper Stream
+    history instead of static Model Health / Smart Levels / AI Audit
+  - Right sidebar's briefings shrunk into a 4-button pulse row;
+    active briefings pulse green
+  - Click any briefing button (especially the pulsing ones) to see
+    the full briefing in a modal
+- NIA's new "Reflection & Audit" section at the bottom now hosts
+  Model Health (full retraining controls) + the two A/B analytics
+  cards. Operator's existing NIA muscle memory unchanged for sections
+  1-4; just look further down for the relocated panels.
+
+
+
 ## 2026-04-29 (afternoon-9) — L1 list restart resilience (Mongo + local file)
 
 Operator follow-up: "yes make that improvement" → persist the pusher's
