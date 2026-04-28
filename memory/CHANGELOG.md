@@ -2,6 +2,123 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (mid-day) — Timeseries shadow gap + AI Decision Audit Card
+
+### Two operator follow-ups shipped together (~1 hour total)
+
+### 1. timeseries_ai shadow-tracking gap (P1)
+
+**Why** — `/api/ai-modules/shadow/performance` showed
+`timeseries_ai: 0 decisions` despite the module firing on every
+consultation. Root cause in
+`services/ai_modules/trade_consultation.py::consult`: when
+`ai_forecast.usable=False` (low confidence) OR when the forecast was
+consumed by the debate path, `result["timeseries_forecast"]` was
+never set, so `log_decision` received `None` and didn't tag
+`timeseries_ai` in `modules_used`. The module was firing AND
+contributing — just never getting credit in the shadow stats.
+
+**Fix** — the consultation now builds a sentinel payload when the
+forecast was *fetched but unusable* OR *consumed by debate*:
+```python
+ts_payload = result.get("timeseries_forecast")
+if not ts_payload and ai_forecast:
+    ts_payload = {
+        "forecast": ai_forecast,
+        "context": None,
+        "consulted_but_unusable": not ai_forecast.get("usable", False),
+        "consumed_by_debate": "timeseries_ai_in_debate" in modules_used,
+    }
+```
+
+The sentinel is truthy → `log_decision` tags `timeseries_ai` →
+shadow stats finally show real decisions. The full payload is
+preserved so downstream analytics can distinguish "actively
+contributed" from "abstained low-confidence" from
+"consumed-by-debate".
+
+**Regression coverage**: `tests/test_timeseries_shadow_tracking.py`
+(5 tests):
+- usable forecast → tagged
+- unusable forecast → tagged with `consulted_but_unusable=True`
+- consumed-by-debate forecast → tagged with `consumed_by_debate=True`
+- absent forecast → NOT tagged
+- empty dict `{}` → NOT tagged (defensive)
+
+### 2. AI Decision Audit Card (V5 dashboard) (P1)
+
+**Why** — operator now has 6,751 shadow-tracked decisions (post drain
+mode + Mongo fallback fixes earlier today) but no UI to inspect them
+per-trade. The shadow performance endpoint shows 70-73% accuracy at
+the module level, but the operator can't see "for trade X, what did
+each module say, and was that aligned with the actual outcome?".
+
+**Backend** — new `services/ai_decision_audit_service.py` extracts
+audit data from `bot_trades.entry_context.ai_modules`. For each
+recent closed trade, returns:
+- per-module verdict (normalised to bullish/bearish/neutral/abstain)
+- alignment flag (bullish+win OR bearish+loss → aligned)
+- self-reported confidence (when surfaced — TS nests it inside `forecast`)
+- close reason + net P&L
+
+Plus a per-module summary aggregating `alignment_rate = aligned /
+consulted` (NOT aligned/total — modules don't get penalised for
+trades they abstained on).
+
+Verdict normalisation handles the rich strings the consultation
+pipeline emits: `PROCEED_HIGH_CONFIDENCE`, `BLOCK_RISK_TOO_HIGH`,
+`approve_long`, `bullish_flow`, `up`/`DOWN`. Pass takes precedence
+over proceed when both match (handles `no_trade` containing `trade`).
+
+New endpoint: `GET /api/trading-bot/ai-decision-audit?limit=30`.
+
+**Frontend** —
+`frontend/src/components/sentcom/v5/AIDecisionAuditCard.jsx` renders:
+- Header strip with per-module alignment-rate (color-coded:
+  emerald ≥60%, amber 40-60%, rose <40%; greyed when n<5)
+- Trade list with symbol / setup / PnL / 4 module pills
+  (✓ aligned / ✗ wrong / − abstained) / close reason
+- Expand-to-show-all toggle (default 8 visible)
+- 60-second auto-refresh
+
+Mounted in `SentComV5View.jsx` bottom drawer alongside the existing
+ModelHealthScorecard + SmartLevelsAnalyticsCard (3-column grid:
+50% / 25% / 25%).
+
+**Regression coverage**: `tests/test_ai_decision_audit_service.py`
+(15 tests):
+- Verdict normalisation (parametrized 17 cases)
+- Alignment math (8 truth-table cases)
+- Verdict-extraction priority order across the 8 known field names
+- Confidence extraction with TS nesting
+- Win-detection precedence (net_pnl > realized_pnl > pnl_pct)
+- End-to-end aggregation against mongomock with all 4 modules
+- Dissenting modules credited correctly on losses
+- Per-module alignment_rate uses consultation denominator
+- Missing `ai_modules` handled gracefully (legacy trades)
+- Sort + limit behaviour
+
+### Verified
+- 109 tests passing across the day's new suites (drain + Mongo
+  fallback + per-module fix + liquidity stop trail + unqualifiable
+  pipeline + timeseries gap + audit service).
+- Backend live: `curl /api/trading-bot/ai-decision-audit?limit=5`
+  returns clean empty payload (no closed trades in cloud preview's
+  trading_bot — full data will populate on DGX).
+- Frontend lint clean, backend lint clean.
+
+### Operator action on DGX after pull + restart
+1. Pull + restart backend (and Windows collectors so they pick up
+   the dead-symbol notification path from the morning fix).
+2. Open V5 dashboard → bottom drawer now shows 3 panels: Model
+   Health (50%) | Smart Levels (25%) | AI Audit (25%).
+3. The audit card will populate as new closed trades land. Existing
+   closed trades with `entry_context.ai_modules` populated will show
+   immediately.
+4. Re-check `/shadow/performance?days=30` — `timeseries_ai` should
+   now have decisions > 0 (will populate on the next consultation
+   that uses TS).
+
 ## 2026-04-29 (morning) — Unqualifiable strike-counter rescue (P0 from overnight backfill)
 
 ### Why

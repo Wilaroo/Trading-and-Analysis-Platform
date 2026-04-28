@@ -38,6 +38,7 @@ import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { SmartLevelsAnalyticsCard } from './v5/SmartLevelsAnalyticsCard';
+import { AIDecisionAuditCard } from './v5/AIDecisionAuditCard';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
@@ -438,13 +439,13 @@ export const SentComV5View = ({
       </div>
 
       {/* Bottom drawer: Model Health (left) + Smart-levels analytics
-          (right) — both collapsible into the same `max-h-[22vh]`
-          envelope so they don't steal vertical space from the main
-          grid. The analytics card is hidden when no closed trades
-          exist in the lookback window (its empty-state stub renders
-          as a compact one-liner). */}
+          (middle) + AI decision audit (right) — collapsible into the
+          same `max-h-[22vh]` envelope so they don't steal vertical
+          space from the main grid. The analytics + audit cards
+          render compact one-liner stubs when no qualifying trades
+          exist in the lookback window. */}
       <div className="border-t border-zinc-800 max-h-[22vh] overflow-y-auto v5-scroll bg-zinc-950">
-        <div className="grid gap-px bg-zinc-900" style={{ gridTemplateColumns: '60% 40%' }}>
+        <div className="grid gap-px bg-zinc-900" style={{ gridTemplateColumns: '50% 25% 25%' }}>
           <div className="bg-zinc-950">
             <PanelErrorBoundary label="model-health" compact>
               <ModelHealthScorecard className="rounded-none border-0" />
@@ -453,6 +454,11 @@ export const SentComV5View = ({
           <div className="bg-zinc-950 p-2">
             <PanelErrorBoundary label="smart-levels-analytics" compact>
               <SmartLevelsAnalyticsCard className="border-0 bg-transparent" />
+            </PanelErrorBoundary>
+          </div>
+          <div className="bg-zinc-950 p-2">
+            <PanelErrorBoundary label="ai-decision-audit" compact>
+              <AIDecisionAuditCard className="border-0 bg-transparent" />
             </PanelErrorBoundary>
           </div>
         </div>

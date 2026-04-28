@@ -332,7 +332,27 @@ class AITradeConsultation:
                     combined_rec = "reduce_size"
                 else:
                     combined_rec = "proceed"
-                    
+
+                # 2026-04-29 fix: timeseries_ai shadow-tracking gap.
+                # Previously, log_decision only got `timeseries_forecast`
+                # when ai_forecast.usable=True — meaning low-confidence
+                # forecasts (which are themselves a TS decision: "I
+                # abstain") and forecasts consumed by the debate path
+                # were never credited to the timeseries_ai bucket. As
+                # a result `/shadow/performance` showed
+                # `timeseries_ai: 0 decisions` despite the module
+                # firing on every consultation. We now pass the raw
+                # forecast in both cases so log_decision tags
+                # timeseries_ai in modules_used.
+                ts_payload = result.get("timeseries_forecast")
+                if not ts_payload and ai_forecast:
+                    ts_payload = {
+                        "forecast": ai_forecast,
+                        "context": None,
+                        "consulted_but_unusable": not ai_forecast.get("usable", False),
+                        "consumed_by_debate": "timeseries_ai_in_debate" in modules_used,
+                    }
+
                 decision = await self._shadow_tracker.log_decision(
                     symbol=symbol,
                     trigger_type="trade_opportunity",
@@ -342,19 +362,19 @@ class AITradeConsultation:
                     debate_result=result["debate_result"],
                     risk_assessment=result["risk_assessment"],
                     institutional_context=result["institutional_context"],
-                    timeseries_forecast=result.get("timeseries_forecast"),
+                    timeseries_forecast=ts_payload,
                     combined_recommendation=combined_rec,
                     confidence_score=self._calculate_combined_confidence(result),
                     reasoning=result["reasoning"],
                     was_executed=result["proceed"],  # Will be updated later
                     execution_reason="Pre-trade consultation"
                 )
-                
+
                 result["shadow_logged"] = True
                 result["shadow_decision_id"] = decision.id
-                
+
                 logger.info(f"Shadow logged {symbol}: {combined_rec} (modules: {', '.join(modules_used)})")
-                
+
             except Exception as e:
                 logger.warning(f"Shadow logging failed: {e}")
                 

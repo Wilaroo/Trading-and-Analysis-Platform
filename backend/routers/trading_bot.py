@@ -100,6 +100,33 @@ async def get_multiplier_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/ai-decision-audit")
+async def get_ai_decision_audit(
+    limit: int = Query(default=30, ge=1, le=200),
+):
+    """Per-trade AI module audit for the V5 AIDecisionAuditCard.
+
+    For each of the most recent `limit` closed trades, returns what
+    each AI module (debate / risk / institutional / time-series) said
+    at consultation time, plus whether that module's directional
+    verdict aligned with the actual P&L outcome. Aggregates a
+    per-module alignment-rate summary so the operator can spot which
+    modules are pulling weight vs which are noise.
+
+    Reads `bot_trades.entry_context.ai_modules` — that field is
+    populated by `opportunity_evaluator.build_entry_context` whenever
+    the consultation pipeline ran.
+    """
+    if _trading_bot is None or getattr(_trading_bot, "_db", None) is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+    try:
+        from services.ai_decision_audit_service import compute_ai_decision_audit
+        return compute_ai_decision_audit(_trading_bot._db, limit=limit)
+    except Exception as e:
+        logger.error(f"ai-decision-audit failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/multiplier-thresholds/optimize")
 async def run_multiplier_threshold_optimizer(
     days_back: int = Query(default=30, ge=7, le=120),

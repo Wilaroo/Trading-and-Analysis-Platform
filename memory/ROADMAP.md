@@ -26,6 +26,13 @@ Open priorities, deferred ideas, and backlog. Move items to
   now POSTs to `/api/ib/historical-data/skip-symbol` on Error 200,
   and threshold lowered 3 → 1. Should drop overnight backfill time
   ~3-5×. 9 regression tests.
+- ✅ **timeseries_ai shadow-tracking gap** — sentinel payload built
+  for unusable / debate-consumed forecasts so the module finally
+  gets credit in shadow stats. 5 regression tests.
+- ✅ **AI Decision Audit Card (V5 dashboard)** — new
+  `/api/trading-bot/ai-decision-audit` endpoint + AIDecisionAuditCard
+  rendering per-trade module verdicts + outcome alignment. 15
+  regression tests.
 
 ### 🔴 P0 OPTIMIZATION — DEFERRED (was 2026-04-29 morning's top item, now shipped above)
 **Pre-flight contract validation in `ib_historical_collector.py`**
@@ -51,23 +58,8 @@ Open priorities, deferred ideas, and backlog. Move items to
   smart-backfill, verify each consumes only 1 IB request and
   immediately gets `unqualifiable: true`.
 
-### 🟠 Operator-prioritized follow-ups (2026-04-28f)
-- **timeseries_ai shadow tracking gap** (~30 min) — `/shadow/performance`
-  shows `timeseries_ai: 0 decisions` because the TS forecast result
-  isn't being passed into `shadow_tracker.log_decision()` from the
-  consultation pipeline. Wire it through the same way debate /
-  risk / institutional are. Quick fix once you find the consultation
-  glue.
-- **AI Decision Audit Card (V5 dashboard)**
-  Now that AI module results land in `entry_context.ai_modules`,
-  add a small `AIDecisionAuditCard.jsx` to the V5 dashboard showing
-  per-trade columns: setup_type | debate verdict | risk approval |
-  institutional flow | TS forecast | win/loss. Lets the operator
-  spot-check whether the AI is actually steering trades vs just
-  rubber-stamping the scanner. Pairs with `SmartLevelsAnalyticsCard`
-  for full provenance visibility. ~30 min. Endpoint already exists
-  via `/api/trading-bot/trades` — just needs a frontend card.
-- **Mean-reversion timing metric (Q2)**
+### 🟠 Operator-prioritized follow-ups (next session candidates)
+- **Mean-reversion timing metric (Q2)** (~2-3 hours)
   No half-life / Hurst exponent calculation anywhere today. The bot
   detects "mean_reversion" as a setup type but can't answer "this
   symbol typically reverts in X bars". Plan: new
