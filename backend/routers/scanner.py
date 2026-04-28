@@ -661,12 +661,23 @@ def get_setup_coverage():
     def _row(s: str) -> Dict[str, Any]:
         e = int(cum_evals.get(s, 0))
         h = int(cum_hits.get(s, 0))
-        return {
+        proximity = None
+        try:
+            # Only silent detectors carry proximity data — keeps the
+            # response payload focused.
+            if h == 0 and hasattr(scanner, "get_proximity_audit"):
+                proximity = scanner.get_proximity_audit(s)
+        except Exception:
+            proximity = None
+        row = {
             "setup_type": s,
             "evaluations": e,
             "hits": h,
             "hit_rate_pct": round((h / e) * 100, 1) if e else 0.0,
         }
+        if proximity:
+            row["threshold_proximity"] = proximity
+        return row
 
     return {
         "success": True,

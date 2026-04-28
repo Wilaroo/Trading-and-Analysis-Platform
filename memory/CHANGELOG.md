@@ -2,9 +2,9 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch + setup-coverage diagnostic (P0)
+## 2026-04-29 (afternoon-15) — Scanner-router instance mismatch + setup-coverage diagnostic + threshold-proximity audit (P0)
 
-### Two issues fixed in this round
+### Three issues fixed in this round
 
 #### 1. Scanner-router instance mismatch (the diagnostic was lying)
 Operator hit `POST /api/live-scanner/start` and got back `running:
@@ -66,6 +66,62 @@ landing.
 - 3 new tests across `test_scanner_router_instance_fix.py` and
   `test_scanner_setup_coverage.py`
 - 16/16 passing across afternoon-12/13/14/15 suites.
+
+#### 3. Threshold-proximity audit (afternoon-15b)
+Once silent_detectors were identified, operator's natural next
+question was "how far off are these thresholds?". Code-reading the
+`_check_*` functions revealed each detector has 1-3 gating
+conditions (e.g. vwap_fade: `dist_from_vwap > 2.5%` AND `RSI < 35`).
+Without instrumentation, operator had to manually grep + reason
+about whether thresholds were unrealistic vs the actual market.
+
+**Fix**: scanner now records gating-value samples on every
+evaluation via `_sample_proximity_for_setup`. Each silent detector
+is registered in a `_PROXIMITY_FIELDS` table with `(label, attr,
+threshold, comparator)` tuples. Bounded 200-sample ring-buffer per
+setup keeps memory fixed.
+
+The `setup-coverage` endpoint's silent_detectors entries now carry
+a `threshold_proximity` block:
+```json
+{
+  "setup_type": "vwap_fade",
+  "evaluations": 101, "hits": 0,
+  "threshold_proximity": {
+    "samples": 101,
+    "fields": [
+      {
+        "label": "abs_dist_from_vwap", "comparator": "abs_gt",
+        "threshold": 2.5,
+        "min": 0.04, "max": 1.83, "mean": 0.62,
+        "samples_meeting": 0, "samples_total": 101,
+        "verdict": "threshold never reached — max 1.83 < 2.5 (shortfall 0.67)"
+      },
+      ...
+    ]
+  }
+}
+```
+
+The verdict string tells the operator EXACTLY how to retune. If
+`max < threshold` for an `abs_gt` comparator, lowering the threshold
+to ~75% of the max would start producing alerts. If `min > threshold`
+for an `lt` comparator, the symbol pool just isn't getting extreme
+enough — either rotate watchlist or relax the inequality.
+
+12 silent detectors covered:
+`vwap_fade`, `vwap_bounce`, `rubber_band`, `tidal_wave`,
+`mean_reversion`, `squeeze`, `breakout`, `gap_fade`, `hod_breakout`,
+`range_break`, `volume_capitulation`, `chart_pattern`.
+Active detectors (`relative_strength`, `second_chance`) are
+deliberately omitted — they're already firing.
+
+### Verification (final)
+- 8 new tests in `test_scanner_threshold_proximity.py`:
+  registry coverage, bounded ring-buffer, missing-attr handling,
+  `abs_gt` / `lt` / `gt` verdict semantics, no-samples short-circuit.
+- 11/11 passing across all afternoon-15 suites; **24/24 across all
+  afternoon-12/13/14/15 fixes**.
 
 ### Operator action on DGX
 1. Save to GitHub, `git pull` on DGX (backend hot-reloads).

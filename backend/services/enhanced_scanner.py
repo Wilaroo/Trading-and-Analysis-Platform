@@ -774,6 +774,17 @@ class EnhancedBackgroundScanner:
         # Cumulative since startup so the operator has a longer baseline too.
         self._detector_evals_total: Dict[str, int] = {}
         self._detector_hits_total: Dict[str, int] = {}
+
+        # Per-detector threshold proximity samples (afternoon-15 b).
+        # Each silent detector records the values of its gating
+        # conditions on every evaluation via `_record_proximity`. The
+        # `/api/scanner/setup-coverage` endpoint computes min/max/mean
+        # across these samples so the operator can answer "how far off
+        # are my thresholds vs reality?" without reading code.
+        # Bounded ring-buffer (max 200 samples per setup) keeps memory
+        # fixed and naturally drops stale samples.
+        self._detector_proximity: Dict[str, List[Dict[str, float]]] = {}
+        self._PROXIMITY_MAX_SAMPLES = 200
         
         # Market context
         self._market_regime: MarketRegime = MarketRegime.RANGE_BOUND
@@ -2571,6 +2582,16 @@ class EnhancedBackgroundScanner:
     
     async def _check_setup(self, setup_type: str, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Route to specific setup checker"""
+        # Record threshold proximity for the silent detectors before
+        # routing — captures what the gating values *actually* were
+        # vs the threshold. Surfaces via /api/scanner/setup-coverage
+        # so operator can see "max |dist_from_vwap| seen = 1.8% over
+        # 101 evals; threshold = 2.5%". 2026-04-29 (afternoon-15b).
+        try:
+            self._sample_proximity_for_setup(setup_type, snapshot)
+        except Exception:
+            pass  # diagnostic — never break a live scan
+
         checkers = {
             # Opening strategies
             "first_vwap_pullback": self._check_first_vwap_pullback,
@@ -2631,7 +2652,146 @@ class EnhancedBackgroundScanner:
                 self._detector_hits_total[setup_type] = self._detector_hits_total.get(setup_type, 0) + 1
             return result
         return None
-    
+
+    # ==================== THRESHOLD PROXIMITY SAMPLER (afternoon-15b) ====================
+
+    # Maps setup_type → list of (sample_label, snapshot_attr, threshold,
+    # comparator) tuples. Each tuple records ONE gating dimension. The
+    # operator-facing diagnostic groups samples by setup_type and
+    # computes min/max/mean of the recorded values vs the threshold,
+    # answering "how far off is reality from this threshold?".
+    #
+    # Comparator semantics:
+    #   "abs_gt"  → triggered when abs(value) > threshold (e.g. vwap_fade)
+    #   "lt"      → triggered when value < threshold       (e.g. RSI < 35)
+    #   "gt"      → triggered when value > threshold       (e.g. RVOL > 1.8)
+    #
+    # Only registered for the silent-12 detectors flagged in the
+    # afternoon-15 audit. Active detectors (`relative_strength`,
+    # `second_chance`) are skipped to keep the sample memory small.
+    _PROXIMITY_FIELDS: Dict[str, List[tuple]] = {
+        "vwap_fade":           [("abs_dist_from_vwap", "dist_from_vwap", 2.5, "abs_gt"),
+                                ("rsi_14",              "rsi_14",          35,  "lt")],
+        "vwap_bounce":         [("abs_dist_from_vwap", "dist_from_vwap", 1.5, "abs_gt"),
+                                ("rsi_14",              "rsi_14",          40,  "lt")],
+        "rubber_band":         [("abs_dist_from_ema9", "dist_from_ema9", 2.5, "abs_gt"),
+                                ("rsi_14",              "rsi_14",          38,  "lt"),
+                                ("rvol",                "rvol",            1.5, "gt")],
+        "tidal_wave":          [("rvol",                "rvol",            2.0, "gt")],
+        "mean_reversion":      [("rsi_14_oversold",     "rsi_14",          30,  "lt"),
+                                ("abs_dist_from_ema20", "dist_from_ema20", 3.0, "abs_gt")],
+        "squeeze":             [("rvol",                "rvol",            1.0, "gt")],
+        "breakout":            [("dist_to_resistance",  "dist_from_resistance", 1.5, "abs_gt"),
+                                ("rvol",                "rvol",            1.8, "gt")],
+        "gap_fade":            [("rvol",                "rvol",            1.0, "gt")],
+        "hod_breakout":        [("rvol",                "rvol",            1.5, "gt")],
+        "range_break":         [("rvol",                "rvol",            1.5, "gt")],
+        "volume_capitulation": [("rvol",                "rvol",            3.0, "gt"),
+                                ("rsi_14",              "rsi_14",          25,  "lt")],
+        "chart_pattern":       [("rvol",                "rvol",            1.2, "gt")],
+    }
+
+    def _sample_proximity_for_setup(self, setup_type: str, snapshot) -> None:
+        """Record ONE proximity sample per (setup_type, label) for this
+        evaluation. Bounded ring-buffer per setup, max 200 samples.
+        """
+        spec = self._PROXIMITY_FIELDS.get(setup_type)
+        if not spec or snapshot is None:
+            return
+        bucket = self._detector_proximity.setdefault(setup_type, [])
+        sample: Dict[str, float] = {}
+        for label, attr, threshold, _comparator in spec:
+            try:
+                # `dist_from_resistance` isn't a real snapshot attr, but
+                # we need it for the breakout proximity. Compute on the
+                # fly so the threshold spec stays declarative.
+                if attr == "dist_from_resistance":
+                    cp = float(getattr(snapshot, "current_price", 0) or 0)
+                    rs = float(getattr(snapshot, "resistance",     0) or 0)
+                    raw = ((rs - cp) / cp * 100) if cp > 0 else None
+                else:
+                    raw = getattr(snapshot, attr, None)
+                if raw is None:
+                    continue
+                sample[label] = float(raw)
+                sample[f"{label}_threshold"] = float(threshold)
+            except Exception:
+                continue
+        if sample:
+            bucket.append(sample)
+            if len(bucket) > self._PROXIMITY_MAX_SAMPLES:
+                # FIFO drop — keeps the latest 200, freshest signal.
+                del bucket[0:len(bucket) - self._PROXIMITY_MAX_SAMPLES]
+
+    def get_proximity_audit(self, setup_type: str) -> Optional[Dict[str, Any]]:
+        """Compute min/max/mean for each proximity label of `setup_type`.
+
+        Returns:
+            {
+              "samples": int,
+              "fields": [
+                {
+                  "label": "abs_dist_from_vwap",
+                  "comparator": "abs_gt",
+                  "threshold": 2.5,
+                  "min": 0.04, "max": 1.83, "mean": 0.62,
+                  "samples_meeting": 0,
+                  "samples_total": 101,
+                  "verdict": "threshold never reached — max 1.83 < 2.5",
+                },
+                ...
+              ]
+            }
+        Returns None if no samples have been recorded yet for this setup.
+        """
+        spec = self._PROXIMITY_FIELDS.get(setup_type)
+        bucket = self._detector_proximity.get(setup_type, [])
+        if not spec or not bucket:
+            return None
+        rows: List[Dict[str, Any]] = []
+        for label, attr, threshold, comparator in spec:
+            vals: List[float] = []
+            for s in bucket:
+                v = s.get(label)
+                if v is not None:
+                    if comparator == "abs_gt":
+                        vals.append(abs(float(v)))
+                    else:
+                        vals.append(float(v))
+            if not vals:
+                continue
+            mn, mx, avg = min(vals), max(vals), sum(vals) / len(vals)
+            if comparator == "abs_gt" or comparator == "gt":
+                meeting = sum(1 for v in vals if v > threshold)
+                shortfall = round(threshold - mx, 3)
+                if meeting:
+                    verdict = (f"threshold met {meeting}/{len(vals)} times "
+                               f"(max {round(mx, 3)} ≥ {threshold})")
+                else:
+                    verdict = (f"threshold never reached — max {round(mx, 3)} "
+                               f"< {threshold} (shortfall {shortfall})")
+            else:  # "lt"
+                meeting = sum(1 for v in vals if v < threshold)
+                shortfall = round(mn - threshold, 3)
+                if meeting:
+                    verdict = (f"threshold met {meeting}/{len(vals)} times "
+                               f"(min {round(mn, 3)} < {threshold})")
+                else:
+                    verdict = (f"threshold never reached — min {round(mn, 3)} "
+                               f"> {threshold} (shortfall {shortfall})")
+            rows.append({
+                "label": label,
+                "comparator": comparator,
+                "threshold": threshold,
+                "min": round(mn, 3),
+                "max": round(mx, 3),
+                "mean": round(avg, 3),
+                "samples_meeting": meeting,
+                "samples_total": len(vals),
+                "verdict": verdict,
+            })
+        return {"samples": len(bucket), "fields": rows}
+
     # ==================== SETUP CHECKERS (with tape reading) ====================
     
     async def _check_rubber_band(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
