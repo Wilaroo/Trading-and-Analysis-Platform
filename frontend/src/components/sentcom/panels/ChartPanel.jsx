@@ -80,9 +80,9 @@ export const ChartPanel = ({
   const resizeObsRef = useRef(null);
   // 2026-04-28b: cache the most recent normalized bars (with `session`
   // tag) so the PremarketShadingOverlay can compute pixel positions
-  // without re-fetching. Stored as a ref to avoid re-renders on every
-  // bar tick.
-  const lastBarsRef = useRef([]);
+  // without re-fetching. State (not ref) so the overlay re-runs its
+  // effect when bars actually change.
+  const [shadingBars, setShadingBars] = useState([]);
 
   const [timeframe, setTimeframe] = useState(initialTimeframe);
   const [bars, setBars] = useState([]);
@@ -357,10 +357,18 @@ export const ChartPanel = ({
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    // 2026-04-28b: stash bars (with `session` tag from backend) so the
-    // PremarketShadingOverlay can compute the contiguous premarket
-    // pixel ranges without a separate API call.
-    lastBarsRef.current = rows;
+    // 2026-04-28c: stash bars with their `session` tag so the
+    // PremarketShadingOverlay can map (time → 'pre'|'rth') and draw
+    // the amber bands. We use state (not a ref) so the overlay's
+    // useEffect actually re-runs when this changes.
+    setShadingBars(
+      bars
+        .map(b => ({
+          time: toUtcTimestamp(b.timestamp ?? b.date ?? b.time),
+          session: b.session,
+        }))
+        .filter(r => r.time != null)
+    );
     // Fit the newly loaded range only on the first load. Subsequent
     // re-fetches (auto-refresh, lazy-load backfill) preserve whatever
     // pan/zoom the user already has so the chart doesn't snap back.
@@ -727,7 +735,7 @@ export const ChartPanel = ({
             x-coordinates from the chart's time scale. */}
         <PremarketShadingOverlay
           chartRef={chartRef}
-          bars={lastBarsRef.current}
+          bars={shadingBars}
         />
       </div>
 
@@ -887,7 +895,7 @@ const PremarketShadingOverlay = ({ chartRef, bars }) => {
       {bands.map((b, i) => (
         <div
           key={i}
-          className="absolute top-0 bottom-7 bg-amber-400/8 border-l border-r border-amber-400/20"
+          className="absolute top-0 bottom-7 bg-amber-400/15 border-l border-r border-amber-400/40"
           style={{ left: `${b.left}px`, width: `${b.width}px` }}
           title="Premarket session (4:00am-9:30am ET)"
         />
