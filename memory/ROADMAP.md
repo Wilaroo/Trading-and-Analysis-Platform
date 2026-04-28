@@ -19,6 +19,19 @@ Open priorities, deferred ideas, and backlog. Move items to
 - `time_of_day_fade` — operator explicitly skipping for now.
 
 ### 🟠 Operator-prioritized follow-ups (next session candidates)
+- **🟢 Detector backtest harness (saved 2026-04-29 evening)** —
+  replay last 30d of `ib_historical_data` against each detector
+  (especially the 9 new ones) to compute per-setup hit-rate +
+  simulated R-multiples. Persist into `strategy_stats` so the SMB
+  A/B/C grade + `expected_value_r` fields populate within hours
+  instead of waiting weeks for live alerts to accumulate. Sketch:
+  `services/scanner_backtest_harness.py` walks each symbol's bars
+  forward in 5-min steps, builds a `TechnicalSnapshot` per step,
+  calls each `_check_*` detector, then simulates entry/stop/target
+  through subsequent bars to measure realized R. Endpoint
+  `POST /api/scanner/backtest-detectors?days=30&setups=...` triggers
+  the run; results land in `strategy_stats.r_outcomes` so the
+  existing EV machinery picks them up automatically.
 - **Tighten Tier 2/3 freshness via smarter collector dispatch**: have
   the 4 turbo collectors lazily refresh the most recently scanned
   symbols on cache miss, instead of relying on the nightly batch job.
