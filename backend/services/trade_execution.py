@@ -257,6 +257,33 @@ class TradeExecution:
                 sim_tag = " (SIMULATED)" if result.get('simulated') else ""
                 logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
 
+                # Surface to V5 Unified Stream so operators see fills land
+                # in the same place they see scanner / safety events.
+                try:
+                    from services.sentcom_service import emit_stream_event
+                    direction_label = (
+                        str(trade.direction.value).upper()
+                        if hasattr(trade.direction, "value")
+                        else str(trade.direction).upper()
+                    )
+                    await emit_stream_event({
+                        "kind": "fill",
+                        "event": "trade_filled",
+                        "symbol": trade.symbol,
+                        "text": (
+                            f"✅ Filled {direction_label} {trade.shares} {trade.symbol} "
+                            f"@ ${trade.fill_price:.2f}{sim_tag}"
+                        ),
+                        "metadata": {
+                            "trade_id": trade.id,
+                            "setup_type": getattr(trade, "setup_type", None),
+                            "shares": trade.shares,
+                            "fill_price": trade.fill_price,
+                        },
+                    })
+                except Exception:
+                    pass
+
             elif result.get('status') == 'timeout':
                 # TIMEOUT HANDLING: Order may still execute - save as pending for sync
                 trade.status = TradeStatus.OPEN  # Assume it went through

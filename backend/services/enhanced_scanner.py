@@ -765,6 +765,15 @@ class EnhancedBackgroundScanner:
         self._symbols_scanned_last = 0
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0  # Skipped due to low volume
+        # Per-detector firing telemetry — counts evaluations vs hits per setup_type
+        # so the operator can answer "why is the scanner only emitting RS hits?"
+        # without grep-walking logs. Surfaced via /api/scanner/detector-stats.
+        # Reset per scan cycle so the latest tick is the most actionable signal.
+        self._detector_evals: Dict[str, int] = {}
+        self._detector_hits: Dict[str, int] = {}
+        # Cumulative since startup so the operator has a longer baseline too.
+        self._detector_evals_total: Dict[str, int] = {}
+        self._detector_hits_total: Dict[str, int] = {}
         
         # Market context
         self._market_regime: MarketRegime = MarketRegime.RANGE_BOUND
@@ -2003,6 +2012,11 @@ class EnhancedBackgroundScanner:
         # Reset counters
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0
+        # Per-cycle detector telemetry resets so the operator sees the latest
+        # "why is this scan tick quiet?" signal in /api/scanner/detector-stats.
+        # Cumulative totals (`_detector_*_total`) persist across cycles.
+        self._detector_evals = {}
+        self._detector_hits = {}
         
         # Get candidate symbols from wave scanner
         all_candidates = await self._get_active_symbols()
@@ -2605,7 +2619,17 @@ class EnhancedBackgroundScanner:
         
         checker = checkers.get(setup_type)
         if checker:
-            return await checker(symbol, snapshot, tape)
+            # Telemetry: count every evaluation and every hit so the operator
+            # can diagnose "why is the scanner only emitting RS hits?" via
+            # /api/scanner/detector-stats. Resets per scan cycle in
+            # _run_optimized_scan; cumulative totals persist since startup.
+            self._detector_evals[setup_type] = self._detector_evals.get(setup_type, 0) + 1
+            self._detector_evals_total[setup_type] = self._detector_evals_total.get(setup_type, 0) + 1
+            result = await checker(symbol, snapshot, tape)
+            if result is not None:
+                self._detector_hits[setup_type] = self._detector_hits.get(setup_type, 0) + 1
+                self._detector_hits_total[setup_type] = self._detector_hits_total.get(setup_type, 0) + 1
+            return result
         return None
     
     # ==================== SETUP CHECKERS (with tape reading) ====================

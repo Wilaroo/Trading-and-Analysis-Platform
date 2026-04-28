@@ -199,10 +199,51 @@ async def get_bot_status():
     
     status = _trading_bot.get_status()
     
-    # Add account info if available
+    # Add account info if available — TradeExecutorService.get_account_info()
+    # only handles SIMULATED + Alpaca PAPER modes (returns {} for IB users).
+    # Fall back to the IB pusher snapshot in routers.ib._pushed_ib_data so
+    # operators on IB still see equity/buying_power on the V5 dashboard.
+    account: dict = {}
     if _trade_executor:
-        account = await _trade_executor.get_account_info()
-        status["account"] = account
+        try:
+            executor_account = await _trade_executor.get_account_info()
+            if isinstance(executor_account, dict):
+                account = executor_account
+        except Exception as e:
+            logger.debug(f"trade_executor.get_account_info failed: {e}")
+    
+    if not account or not (account.get("equity") or account.get("portfolio_value")):
+        try:
+            from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
+            ib_account = (_pushed_ib_data or {}).get("account") or {}
+            if ib_account:
+                net_liq = _extract_account_value(ib_account, "NetLiquidation", 0)
+                buying_power = _extract_account_value(ib_account, "BuyingPower", 0)
+                cash = _extract_account_value(ib_account, "TotalCashBalance", 0)
+                available_funds = _extract_account_value(
+                    ib_account, "AvailableFunds", buying_power
+                )
+                if net_liq and net_liq > 0:
+                    account = {
+                        "equity": float(net_liq),
+                        "portfolio_value": float(net_liq),
+                        "buying_power": float(buying_power),
+                        "cash": float(cash),
+                        "available_funds": float(available_funds),
+                        "currency": "USD",
+                        "source": "ib_pushed",
+                        "connected": is_pusher_connected(),
+                    }
+        except Exception as e:
+            logger.debug(f"IB pushed account fallback failed: {e}")
+    
+    status["account"] = account
+    # Surface equity at top-level so the V5 frontend's
+    # `status?.account_equity ?? status?.equity` read finds it without
+    # forcing a separate `/api/ib/account/summary` round-trip.
+    if account.get("equity"):
+        status["account_equity"] = account["equity"]
+        status.setdefault("equity", account["equity"])
     
     return {"success": True, **status}
 

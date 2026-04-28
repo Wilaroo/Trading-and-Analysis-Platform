@@ -2307,3 +2307,88 @@ def init_sentcom_service(services: Dict[str, Any]) -> SentComService:
     service = get_sentcom_service()
     service.inject_services(services)
     return service
+
+
+# ----------------------------------------------------------------------------
+# Module-level stream emitter — push event-driven messages into the unified
+# stream buffer from anywhere in the backend (trading_bot, ib router, EOD
+# pipeline, etc.). The stream buffer was previously populated only by the
+# pull-based `get_unified_stream` poller, which meant safety-blocks, fills,
+# and bot-evaluation events were silently dropped (the import existed but
+# the function did not, and callers wrapped it in try/except → silent).
+# ----------------------------------------------------------------------------
+
+_VALID_KINDS = {
+    "thought", "alert", "filter", "skip", "fill", "rejection",
+    "evaluation", "system", "scan", "info",
+}
+
+
+async def emit_stream_event(payload: Dict[str, Any]) -> bool:
+    """Append an event-driven message to the SentCom unified stream buffer.
+
+    Args:
+        payload: dict with keys
+            - kind/type: str (one of _VALID_KINDS — defaults to "thought")
+            - text/content: str (the operator-facing line)
+            - symbol: optional str
+            - event/action_type: optional str (e.g. "safety_block", "fill")
+            - confidence: optional int 0-100
+            - metadata: optional dict
+
+    Returns:
+        True if the event was buffered, False on dedup or invalid input.
+
+    Never raises — callers can fire-and-forget.
+    """
+    try:
+        if not isinstance(payload, dict):
+            return False
+        text = payload.get("text") or payload.get("content") or ""
+        if not text:
+            return False
+
+        kind = (payload.get("kind") or payload.get("type") or "thought").lower()
+        if kind not in _VALID_KINDS:
+            kind = "info"
+
+        symbol = payload.get("symbol")
+        action = payload.get("event") or payload.get("action_type")
+        meta = payload.get("metadata") or {}
+        if not isinstance(meta, dict):
+            meta = {"raw": str(meta)}
+        meta.setdefault("source", "emit_stream_event")
+
+        svc = get_sentcom_service()
+        msg = SentComMessage(
+            id=svc._generate_message_id() if hasattr(svc, "_generate_message_id")
+                else f"evt_{datetime.now(timezone.utc).timestamp()}",
+            type=kind,
+            content=str(text),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            confidence=payload.get("confidence"),
+            symbol=symbol,
+            action_type=action,
+            metadata=meta,
+        )
+
+        # Dedup against the same key the pull-based path uses.
+        dedup_key = f"{msg.type}:{msg.symbol or ''}:{msg.content[:40]}"
+        if dedup_key in svc._stream_seen_keys:
+            return False
+        svc._stream_seen_keys.add(dedup_key)
+        svc._stream_buffer.append(msg)
+
+        # Trim — keep newest first.
+        svc._stream_buffer.sort(key=lambda m: m.timestamp, reverse=True)
+        if len(svc._stream_buffer) > svc._stream_max_size:
+            removed = svc._stream_buffer[svc._stream_max_size:]
+            svc._stream_buffer = svc._stream_buffer[:svc._stream_max_size]
+            for r in removed:
+                key = f"{r.type}:{r.symbol or ''}:{r.content[:40]}"
+                svc._stream_seen_keys.discard(key)
+
+        return True
+    except Exception as e:
+        logger.debug(f"emit_stream_event failed: {e}")
+        return False

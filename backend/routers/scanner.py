@@ -351,6 +351,7 @@ def get_strategy_mix(n: int = 100):
     if db is None:
         return {"success": True, "n": 0, "buckets": [], "total": 0}
 
+    rows: list = []
     try:
         cursor = db["live_alerts"].find(
             {},
@@ -359,7 +360,25 @@ def get_strategy_mix(n: int = 100):
         rows = list(cursor)
     except Exception as e:
         logger.warning(f"strategy-mix aggregate failed: {e}")
-        return {"success": True, "n": 0, "buckets": [], "total": 0, "error": str(e)[:120]}
+        rows = []
+
+    # Fallback to in-memory `_live_alerts` when Mongo persistence is empty
+    # or behind. Mirrors what `/api/live-scanner/alerts` reads, so the V5
+    # StrategyMixCard always populates if the scanner is producing alerts —
+    # even if `_save_alert_to_db` had a transient failure.
+    if not rows:
+        try:
+            in_mem = list((getattr(_scanner_service, "_live_alerts", {}) or {}).values())
+            in_mem.sort(key=lambda a: getattr(a, "created_at", "") or "", reverse=True)
+            for a in in_mem[:n]:
+                rows.append({
+                    "setup_type": getattr(a, "setup_type", None),
+                    "direction": getattr(a, "direction", None),
+                    "created_at": getattr(a, "created_at", None),
+                    "ai_edge_label": getattr(a, "ai_edge_label", None),
+                })
+        except Exception as e:
+            logger.debug(f"strategy-mix in-memory fallback failed: {e}")
 
     if not rows:
         return {"success": True, "n": 0, "buckets": [], "total": 0}
@@ -472,6 +491,72 @@ def get_strategy_mix(n: int = 100):
         "top_strategy_pct": top_pct,
         "concentration_warning": top_pct >= 70.0,
     }
+
+
+@router.get("/detector-stats")
+def get_detector_stats():
+    """Per-setup-detector evaluation/hit telemetry — diagnoses why the
+    scanner is quiet or biased toward a single setup type.
+
+    Operator question this answers (Round 2 of the 2026-04-29 audit):
+      "Why is the scanner only emitting `relative_strength_laggard` hits
+      after 20 minutes of market open?"
+
+    Returns two views:
+      - `last_cycle`: counters since the last `_run_optimized_scan` reset.
+        Most actionable for "what just happened?" debugging.
+      - `cumulative`: counters since process startup. Better baseline.
+
+    For each detector:
+      - `evaluations`: how many times the checker was invoked
+      - `hits`: how many times it returned a non-None LiveAlert
+      - `hit_rate_pct`: hits / evaluations × 100
+    """
+    if not _scanner_service:
+        return {
+            "success": True,
+            "running": False,
+            "scan_count": 0,
+            "last_cycle": {"detectors": [], "total_evals": 0, "total_hits": 0},
+            "cumulative": {"detectors": [], "total_evals": 0, "total_hits": 0},
+        }
+
+    last_evals = getattr(_scanner_service, "_detector_evals", {}) or {}
+    last_hits = getattr(_scanner_service, "_detector_hits", {}) or {}
+    cum_evals = getattr(_scanner_service, "_detector_evals_total", {}) or {}
+    cum_hits = getattr(_scanner_service, "_detector_hits_total", {}) or {}
+
+    def _build(evals: dict, hits: dict) -> dict:
+        rows = []
+        for setup_type, e in evals.items():
+            h = hits.get(setup_type, 0)
+            rate = round((h / e) * 100, 1) if e else 0.0
+            rows.append({
+                "setup_type": setup_type,
+                "label": setup_type.replace("_", " ").title(),
+                "evaluations": int(e),
+                "hits": int(h),
+                "hit_rate_pct": rate,
+            })
+        rows.sort(key=lambda r: (-r["hits"], -r["evaluations"], r["setup_type"]))
+        return {
+            "detectors": rows,
+            "total_evals": int(sum(evals.values())),
+            "total_hits": int(sum(hits.values())),
+        }
+
+    return {
+        "success": True,
+        "running": bool(getattr(_scanner_service, "_running", False)),
+        "scan_count": int(getattr(_scanner_service, "_scan_count", 0)),
+        "symbols_scanned_last": int(getattr(_scanner_service, "_symbols_scanned_last", 0)),
+        "symbols_skipped_adv": int(getattr(_scanner_service, "_symbols_skipped_adv", 0)),
+        "symbols_skipped_rvol": int(getattr(_scanner_service, "_symbols_skipped_rvol", 0)),
+        "last_cycle": _build(last_evals, last_hits),
+        "cumulative": _build(cum_evals, cum_hits),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
 
 
 @router.get("/summary")

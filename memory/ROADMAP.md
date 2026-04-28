@@ -5,6 +5,20 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-29 EOD)
 
+### 🟢 Just shipped this session (2026-04-29 afternoon-3) — see CHANGELOG
+- ✅ **Round 1 backend fixes** — `/api/trading-bot/status` now reads IB
+  pushed account (was `$—`), `/api/scanner/strategy-mix` falls back to
+  in-memory alerts when Mongo empty (was `total: 0`), SPY change_pct now
+  uses daily-close anchor when only 1 intraday bar exists.
+- ✅ **`emit_stream_event` shipped** — module-level helper in
+  `services/sentcom_service.py`. Was imported but never defined → trade
+  fills + safety blocks + order dead-letters silently dropped from V5
+  Unified Stream for weeks. Wired into trade fills.
+- ✅ **Per-detector firing telemetry** — `_check_setup` counts
+  evaluations + hits per setup_type; `/api/scanner/detector-stats`
+  endpoint exposes per-cycle + cumulative views so operator can finally
+  diagnose "why is the scanner only emitting RS hits?".
+
 ### 🟢 Just shipped this session (2026-04-29) — see CHANGELOG
 - ✅ **Shadow tracker drain mode** — `?drain=true` clears 6,715-deep
   backlog in one curl; yields to event loop between batches; stats

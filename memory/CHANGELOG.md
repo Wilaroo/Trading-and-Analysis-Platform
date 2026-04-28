@@ -2,6 +2,136 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (afternoon-3) — Round 1 backend fixes + Round 2 detector telemetry + Stream emitter
+
+Closes the Round 1 audit findings (operator UI broken at market open) and
+ships the Round 2 diagnostic infrastructure operator asked for. 22 new
+regression tests, 101 total passing across the related suites.
+
+### 1. `/api/trading-bot/status` now reads IB pushed account (P0)
+- **Root cause**: `TradeExecutorService.get_account_info()` only handles
+  `SIMULATED` + Alpaca `PAPER` modes — returns `{}` for IB users. The
+  V5 dashboard reads `status?.account_equity ?? status?.equity` and
+  rendered `$—` because neither field was ever populated when the
+  operator was running on IB.
+- **Fix**: `routers/trading_bot.py::get_bot_status` now falls back to
+  `routers.ib._pushed_ib_data["account"]` when the executor returns
+  empty. Constructs a contract-compatible dict (equity / buying_power /
+  cash / available_funds / portfolio_value) and surfaces
+  `account_equity` + `equity` at the top level so the V5 frontend's
+  existing read finds them without a separate round-trip.
+- **Verified live** on cloud preview after a faked `/api/ib/push-data`
+  POST: `account_equity` populated to NetLiquidation, `account.source`
+  tagged `"ib_pushed"`. When the pusher has no account data, returns
+  `account: {}` (same `$—` behaviour as before — no false equity).
+- Regression coverage: 3 new tests in `tests/test_round1_fixes.py`.
+
+### 2. `/api/scanner/strategy-mix` falls back to in-memory alerts (P0)
+- **Root cause**: endpoint queries `db["live_alerts"]` (Mongo persisted)
+  while `/api/live-scanner/alerts` reads from in-memory `_live_alerts`.
+  When Mongo persistence is empty/lagging (the operator's exact
+  observation), the V5 StrategyMixCard rendered `total: 0` despite
+  the scanner producing alerts.
+- **Fix**: `routers/scanner.py::get_strategy_mix` now falls back to
+  `_scanner_service._live_alerts.values()` when the Mongo query returns
+  empty. Direction, ai_edge_label, and created_at all carry through
+  from in-memory LiveAlert objects so STRONG_EDGE counts + sorting
+  remain correct.
+- Regression coverage: 3 new tests in `tests/test_round1_fixes.py`
+  (Mongo-populated, Mongo-empty-fallback-to-memory, both-empty).
+
+### 3. `live_symbol_snapshot` daily-close anchor for change_pct (P0)
+- **Root cause**: SPY missing % at fresh market open. The intraday
+  slice only had ONE bar (today's first 5min), so
+  `prev_close = last_price` → `change_pct = 0`. Frontend's `formatPct`
+  rendered `+0.00%` (or `—` when chained through TopMoversTile's filter
+  on `success`).
+- **Fix**: `services/live_symbol_snapshot.py::get_latest_snapshot` now
+  detects single-bar / equal-prev-close cases and looks up YESTERDAY's
+  daily close from `ib_historical_data` (`bar_size: "1 day"`) as the
+  prev_close anchor. Never overrides a healthy 2-bar intraday slice
+  (intraday math wins when valid).
+- Regression coverage: 3 new tests in `tests/test_round1_fixes.py`.
+
+### 4. SentCom `emit_stream_event` — pushed events into the unified stream (P1)
+- **Root cause**: `services.sentcom_service.emit_stream_event` was
+  IMPORTED in `services/trading_bot_service.py` (safety blocks) and
+  `routers/ib.py` (order dead-letter timeouts) — but never DEFINED.
+  Both call sites wrapped the import in `try/except: pass`, so for
+  weeks every safety-block / order-timeout event was silently dropped.
+  Operator's "unified stream too quiet (only 2 messages)" complaint
+  traced directly to this gap.
+- **Fix**: new module-level coroutine
+  `services.sentcom_service.emit_stream_event(payload)`:
+  - Accepts `kind`/`type` + `text`/`content` synonym, `symbol`,
+    `event`/`action_type`, `metadata`.
+  - Normalises unknown kinds → `"info"`, dedupes against the same
+    key the pull-based `get_unified_stream` path uses, trims the
+    buffer to `_stream_max_size` (newest-first).
+  - Fire-and-forget: never raises on bad input (bad/empty payloads
+    return `False`, garbage metadata gets wrapped not crashed).
+- **Wired**:
+  - Trade fills (`services/trade_execution.py::execute_trade`) now
+    publish a `kind: "fill"` event with direction / shares / fill
+    price / setup_type metadata. UI's existing classifier picks up
+    `fill` → emerald colour.
+  - Safety-block events from `_safety_check` were already firing
+    `emit_stream_event` (now actually lands in the stream).
+  - Order dead-letter timeouts in `routers/ib.py` were already
+    firing `emit_stream_event` (now actually lands).
+- Regression coverage: 8 new tests in `tests/test_emit_stream_event.py`.
+
+### 5. Per-detector firing telemetry (P1 Round 2 diagnostic)
+- **Root cause**: operator's "scanner only emits `relative_strength_laggard`
+  hits after 20 min of market open" complaint had no telemetry surface
+  to confirm WHICH detectors were evaluating but missing vs not running
+  at all.
+- **Fix**:
+  - `services/enhanced_scanner.py`: `_check_setup` increments
+    `_detector_evals[setup_type]` on every invocation and
+    `_detector_hits[setup_type]` on every non-None return. Per-cycle
+    counters reset at the top of `_run_optimized_scan`; cumulative
+    `_detector_*_total` counters persist since startup.
+  - New endpoint `GET /api/scanner/detector-stats` exposes both views
+    sorted by `hits` desc with `hit_rate_pct` math + scan-cycle context
+    (`scan_count`, `symbols_scanned_last`, `symbols_skipped_adv/rvol`).
+- **Operator action on DGX**: after backend pull, watch the endpoint
+  during the first 20 min of market open. If `relative_strength_laggard`
+  shows `evaluations: 80, hits: 3` and `breakout` shows `evaluations: 0,
+  hits: 0`, the breakout detector isn't being routed any symbols — the
+  problem is upstream (universe selection, ADV filter, RVOL gate). If
+  `breakout` shows `evaluations: 80, hits: 0`, the detector IS running
+  but its preconditions (bars-since-open, volume profile) aren't met.
+  This is the diagnostic primitive that was missing.
+- Regression coverage: 4 new tests in `tests/test_detector_stats.py`.
+
+### Verification
+- 22 new tests + 79 carried-over related tests = **101/101 passing**.
+- Backend live on cloud preview; `/api/trading-bot/status`,
+  `/api/scanner/strategy-mix`, `/api/scanner/detector-stats` all return
+  valid payloads end-to-end.
+- No regressions in `test_scanner_canary`, `test_bot_account_value`,
+  `test_pusher_rpc_subscription_gate`, `test_l2_router`,
+  `test_setup_narrative`, `test_bot_rejection_narrative`.
+
+### Operator action on DGX after pull + restart
+1. After market open (or any time the IB pusher is feeding account
+   data): `curl /api/trading-bot/status | jq '.account, .account_equity'`
+   should show the live NetLiquidation. V5 HUD equity pill resolves
+   from `$—` to the real number.
+2. `curl /api/scanner/strategy-mix?n=100 | jq '.total, .buckets[0]'`
+   should return non-zero even if Mongo persistence has gaps.
+3. `curl /api/scanner/detector-stats | jq '.last_cycle.detectors'`
+   identifies which detectors are firing per scan cycle. If only RS
+   shows hits, drill down on what's blocking the others (universe,
+   ADV, RVOL, or detector-internal preconditions).
+4. Watch the V5 Unified Stream on a paper-mode trade: after the first
+   fill, a `✅ Filled LONG …` line should appear in the stream
+   (previously these only landed via the pull-based scanner alert
+   path, never directly from execute_trade).
+
+
+
 ## 2026-04-29 (afternoon-2) — V5 layout vertical expansion + audit findings
 
 ### Layout fix shipped

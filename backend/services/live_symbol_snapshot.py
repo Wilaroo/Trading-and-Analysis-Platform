@@ -95,6 +95,37 @@ async def get_latest_snapshot(
     except (TypeError, ValueError):
         prev_close = last_price
 
+    # If the intraday slice only returned 1 bar (pre-open thin tape, fresh
+    # market open with no prior bar yet, or the bar source has a gap), the
+    # naive computation produces change_pct=0 (last_price == prev_close).
+    # Fall back to yesterday's daily close from `ib_historical_data` so
+    # SPY/QQQ/IWM at market open still show a meaningful % change vs the
+    # prior session — operator's expected definition of "today's mover".
+    needs_daily_anchor = (
+        prev is None
+        or prev_close == last_price
+        or prev_close == 0.0
+    )
+    if needs_daily_anchor:
+        try:
+            from server import db as _app_db  # late import → avoids circular
+            if _app_db is not None and last_price:
+                daily = _app_db["ib_historical_data"].find_one(
+                    {"symbol": symbol.upper(), "bar_size": "1 day"},
+                    {"_id": 0, "close": 1, "date": 1},
+                    sort=[("date", -1)],
+                )
+                # Skip today's daily bar if it's the same session — we
+                # want YESTERDAY's close as the anchor.
+                if daily and daily.get("close"):
+                    daily_close = float(daily["close"])
+                    if daily_close > 0 and abs(daily_close - last_price) > 1e-6:
+                        prev_close = daily_close
+        except Exception as e:
+            logger.debug(
+                f"daily-close anchor lookup failed for {symbol}: {e}"
+            )
+
     change_abs = round(last_price - prev_close, 4)
     change_pct = (
         round((change_abs / prev_close) * 100.0, 4)
