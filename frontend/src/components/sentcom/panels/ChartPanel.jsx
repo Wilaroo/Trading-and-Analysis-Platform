@@ -79,6 +79,12 @@ export const ChartPanel = ({
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
   const [showSrLevels, setShowSrLevels] = useState(true);
   const [showVolumeProfile, setShowVolumeProfile] = useState(true);
+  // 2026-04-28e: Point-of-Control price from the volume profile —
+  // surfaced from VolumeProfileOverlay as a horizontal price line on
+  // the candle pane so it's readable at a glance (same idiom as
+  // PDH/PDL/PDC).
+  const [pocPrice, setPocPrice] = useState(null);
+  const pocLineRef = useRef(null);
   const resizeObsRef = useRef(null);
   // 2026-04-28b/c: cache the most recent normalized bars (with `session`
   // tag and OHLCV) so overlays (PremarketShadingOverlay,
@@ -607,6 +613,39 @@ export const ChartPanel = ({
     };
   }, [srLevels, showSrLevels]);
 
+  // 2026-04-28e — paint the volume-profile Point-of-Control as a
+  // horizontal price line on the candle pane (amber, matches the VP
+  // bin shading). Lives in its own effect so it tears down/up cleanly
+  // on toggle / symbol change without touching the S/R or position
+  // price-line stacks.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return undefined;
+    if (pocLineRef.current) {
+      try { series.removePriceLine(pocLineRef.current); } catch (_) { /* noop */ }
+      pocLineRef.current = null;
+    }
+    if (!showVolumeProfile || !Number.isFinite(pocPrice) || pocPrice <= 0) {
+      return undefined;
+    }
+    try {
+      pocLineRef.current = series.createPriceLine({
+        price: Number(pocPrice),
+        color: 'rgba(251, 191, 36, 0.85)',  // amber, matches POC bin
+        lineWidth: 1,
+        lineStyle: 2,                       // dashed
+        axisLabelVisible: true,
+        title: `POC ${Number(pocPrice).toFixed(2)}`,
+      });
+    } catch (_) { /* unsupported in this chart build */ }
+    return () => {
+      if (pocLineRef.current) {
+        try { series.removePriceLine(pocLineRef.current); } catch (_) { /* noop */ }
+        pocLineRef.current = null;
+      }
+    };
+  }, [pocPrice, showVolumeProfile]);
+
   const toggleIndicator = useCallback((key) => {
     setVisibleIndicators(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -775,6 +814,7 @@ export const ChartPanel = ({
           chartRef={chartRef}
           bars={normalizedBars}
           visible={showVolumeProfile}
+          onPocChange={setPocPrice}
         />
       </div>
 

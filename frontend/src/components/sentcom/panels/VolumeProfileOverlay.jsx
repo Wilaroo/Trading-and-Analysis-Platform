@@ -86,7 +86,7 @@ const computeProfile = (bars, numBins) => {
   return { bins, pocIdx, maxVolume };
 };
 
-export const VolumeProfileOverlay = ({ chartRef, bars, visible = true }) => {
+export const VolumeProfileOverlay = ({ chartRef, bars, visible = true, onPocChange = null }) => {
   const [version, setVersion] = useState(0);  // bump to force re-project
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
@@ -96,6 +96,19 @@ export const VolumeProfileOverlay = ({ chartRef, bars, visible = true }) => {
     () => computeProfile(bars, NUM_BINS),
     [bars]
   );
+
+  // Surface the Point-of-Control price upstream so ChartPanel can
+  // paint it as a horizontal price line on the candle pane (matches
+  // the PDH/PDL/PDC S/R-line idiom).
+  useEffect(() => {
+    if (!onPocChange) return;
+    if (!visible || pocIdx < 0 || !bins[pocIdx]) {
+      onPocChange(null);
+      return;
+    }
+    const b = bins[pocIdx];
+    onPocChange((b.priceLow + b.priceHigh) / 2);
+  }, [bins, pocIdx, visible, onPocChange]);
 
   // Trigger re-projection on chart pan/zoom + container resize. We
   // can't memoize the y-coordinates because they depend on the chart's

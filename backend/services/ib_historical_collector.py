@@ -2421,6 +2421,65 @@ class IBHistoricalCollector:
         "1 week":  "5 Y",
     }
 
+    # 2026-04-28e: Gap-detection helpers used by `_smart_backfill_sync`
+    # to catch the "newest bar is fresh BUT there's a 6-month hole in
+    # the middle" failure mode (TSLA screenshot showed Apr-prior-year
+    # → Jan-this-year gap). Without these, smart-backfill skipped every
+    # symbol whose tip-of-data was current and never re-fetched the
+    # gaps.
+    GAP_DETECT_LOOKBACK_DAYS = {
+        "1 min": 30,
+        "5 mins": 90,
+        "15 mins": 180,
+        "30 mins": 180,
+        "1 hour": 365,
+        "1 day": 730,     # 2 years — plenty of resolution to spot gaps
+        "1 week": 1825,   # 5 years
+    }
+    GAP_COVERAGE_THRESHOLD = 0.80   # < 80% expected bars ⇒ refill
+
+    def _has_internal_gaps(self, symbol: str, bar_size: str) -> bool:
+        """Return True iff `(symbol, bar_size)` has < 80% of expected
+        bars in its gap-detect lookback window. Cheap: one
+        count_documents call per (symbol, bar_size). Used inside
+        `_smart_backfill_sync` when the tip-of-data freshness check
+        passes — without this, gaps in the middle of the historical
+        range are invisible to the scheduler. Returns False on errors
+        (fail-open) so a transient Mongo glitch never blocks the
+        freshness path.
+        """
+        from datetime import datetime, timedelta, timezone as _tz
+        if self._data_col is None:
+            return False
+        lookback = self.GAP_DETECT_LOOKBACK_DAYS.get(bar_size)
+        cfg = self.BAR_CONFIGS.get(bar_size) or {}
+        bars_per_day = cfg.get("bars_per_day")
+        if not lookback or not bars_per_day:
+            return False
+        try:
+            window_start = (
+                datetime.now(_tz.utc) - timedelta(days=lookback)
+            )
+            actual = self._data_col.count_documents({
+                "symbol": symbol,
+                "bar_size": bar_size,
+                "date": {"$gte": window_start.isoformat()},
+            })
+        except Exception:
+            return False
+        # Approx trading days in lookback window: 5/7 of calendar days
+        # minus a small holiday allowance. 252 trading-days/year ⇒
+        # factor ≈ 0.69. Underestimating expected = false negatives,
+        # not false positives, which is the safer direction here.
+        expected_trading_days = max(1, int(lookback * 0.69))
+        expected = expected_trading_days * bars_per_day
+        if expected <= 0:
+            return False
+        coverage = actual / expected
+        return coverage < self.GAP_COVERAGE_THRESHOLD
+
+
+
     def _smart_backfill_sync(self, dry_run: bool, tier_filter: Optional[str],
                              freshness_days: int) -> Dict[str, Any]:
         """Blocking implementation — must be wrapped in asyncio.to_thread."""
@@ -2535,6 +2594,7 @@ class IBHistoricalCollector:
         to_queue: List[tuple] = []
         skipped_fresh = 0
         skipped_already_queued = 0
+        gap_filled = 0   # 2026-04-28e: count gap-detected refills
 
         for tier, syms in qualified.items():
             tier_required_bs = set(self.TIMEFRAMES_BY_TIER[tier])
@@ -2576,7 +2636,20 @@ class IBHistoricalCollector:
                         to_queue.append((sym, bs, self.DURATION_STRING[bs], tier, ""))
                         continue
                     if days_behind <= freshness_days:
-                        skipped_fresh += 1
+                        # Newest bar is fresh, BUT we may still have internal
+                        # gaps from earlier failed pulls (caught 2026-04-28e
+                        # via TSLA 1d screenshot showing Apr-prior-year →
+                        # Jan-this-year gap). Detect via bar-count vs expected
+                        # ratio in a lookback window. If coverage falls below
+                        # 80% of expected, queue a full re-fetch — IB returns
+                        # all bars, the unique index dedupes existing rows.
+                        if self._has_internal_gaps(sym, bs):
+                            to_queue.append(
+                                (sym, bs, self.DURATION_STRING[bs], tier, "")
+                            )
+                            gap_filled += 1
+                        else:
+                            skipped_fresh += 1
                         continue
                     # Chain requests walking back in time from "now".
                     remaining = days_behind
@@ -2616,6 +2689,7 @@ class IBHistoricalCollector:
                 "would_queue": len(to_queue),
                 "skipped_fresh": skipped_fresh,
                 "skipped_already_queued": skipped_already_queued,
+                "gap_filled": gap_filled,
                 "by_bar_size": dict(by_bar_size),
             }
 
@@ -2644,6 +2718,7 @@ class IBHistoricalCollector:
             "queued": queued,
             "skipped_fresh": skipped_fresh,
             "skipped_already_queued": skipped_already_queued,
+            "gap_filled": gap_filled,
             "by_bar_size": dict(by_bar_size),
             "ran_at": now_iso,
         }
