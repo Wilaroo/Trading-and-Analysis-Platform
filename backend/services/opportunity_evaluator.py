@@ -207,6 +207,39 @@ class OpportunityEvaluator:
             if not stop_price:
                 stop_price = self.calculate_atr_based_stop(entry_price, direction, atr, setup_type, bot)
 
+            # ── Stop-placement guard (2026-04-28e) ──
+            # Before targets / position size, ask Smart S/R if our stop
+            # is sitting inside a Volume-Profile / pivot cluster. If so,
+            # widen it to just past the cluster (capped at +40% of the
+            # original distance to preserve sizing risk math). Stops are
+            # NEVER tightened — only widened.
+            stop_guard_meta = None
+            try:
+                sym_for_guard = alert.get("symbol") if isinstance(alert, dict) else None
+                guard_bs = "5 mins"
+                if isinstance(alert, dict):
+                    guard_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
+                db_for_guard = getattr(bot, "_db", None) or getattr(bot, "db", None)
+                if sym_for_guard and db_for_guard is not None and stop_price:
+                    from services.smart_levels_service import compute_stop_guard
+                    dir_str = "long" if direction == TradeDirection.LONG else "short"
+                    guard = compute_stop_guard(
+                        db_for_guard, sym_for_guard.upper(), guard_bs,
+                        float(entry_price), float(stop_price), dir_str,
+                    )
+                    if guard.get("snapped"):
+                        logger.info(
+                            f"Stop-guard widened {sym_for_guard} "
+                            f"{dir_str.upper()} stop {stop_price:.2f} → "
+                            f"{guard['stop']:.2f} (past {guard['level_kind']} "
+                            f"@ {guard['level_price']:.2f}, widen "
+                            f"{guard['widen_pct']:+.0%})"
+                        )
+                        stop_price = guard["stop"]
+                    stop_guard_meta = guard
+            except Exception as exc:
+                logger.debug(f"stop-guard skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
+
             # Calculate targets if not provided
             if not target_prices:
                 risk = abs(entry_price - stop_price)

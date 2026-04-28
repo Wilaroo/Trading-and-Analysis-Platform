@@ -407,6 +407,153 @@ def compute_smart_levels(db, symbol: str, timeframe: str) -> Dict[str, Any]:
     }
 
 
+# ─── Stop-placement guard (for opportunity_evaluator) ──────────────────────
+
+# Bar-size ↔ frontend-timeframe mapping used when the bot calls into us
+# with the historical-collector bar_size string.
+_BAR_SIZE_TO_TF = {
+    "1 min":   "1min",
+    "5 mins":  "5min",
+    "15 mins": "15min",
+    "30 mins": "15min",   # close enough — same daily-pivot anchor
+    "1 hour":  "1hour",
+    "1 day":   "1day",
+}
+
+# Snap-buffer: how close (as a fraction of price) the proposed stop has
+# to be to a strong S/R level for us to widen it. 50bps catches the
+# typical "stop sitting just inside an HVN" case without firing on
+# every nearby pivot.
+_STOP_SNAP_BUFFER_PCT = 0.005
+
+# Cap on how far we're allowed to widen the original stop (preserves
+# the position-sizing risk math — a runaway stop would silently change
+# R:R and bypass the bot's risk caps).
+_STOP_MAX_WIDEN_PCT = 0.40
+
+# Only levels whose `strength` >= this value are eligible to widen a
+# stop. Filters out noise pivots that wouldn't provide meaningful
+# support / resistance.
+_STOP_MIN_LEVEL_STRENGTH = 0.50
+
+
+def compute_stop_guard(
+    db,
+    symbol: str,
+    bar_size: str,
+    entry: float,
+    proposed_stop: float,
+    direction: str,
+) -> Dict[str, Any]:
+    """Return `{stop, snapped, ...}` where `stop` may be a widened
+    version of `proposed_stop` if a strong S/R level sits in (or just
+    past) the danger zone.
+
+    Rule of thumb (LONG, mirror for SHORT):
+      1. Find strong supports near `proposed_stop` — defined as any
+         support whose price sits in
+         `[proposed_stop - buffer, proposed_stop + 2*buffer]`.
+      2. If any are found, snap `stop` to `lowest_level − ε` so the
+         stop sits just past the cluster instead of inside it. ε is
+         5 bps of price (or 1 cent, whichever is larger).
+      3. Cap the new stop at `(1 + _STOP_MAX_WIDEN_PCT)` of the
+         original distance — never let the snap silently 2x the risk.
+
+    Always returns a well-formed dict; defaults to `snapped=False,
+    stop=proposed_stop` when we can't resolve a good snap target.
+    """
+    out_default = {
+        "stop": float(proposed_stop),
+        "snapped": False,
+        "reason": "stop_clear_of_levels",
+        "original_stop": float(proposed_stop),
+    }
+    if not entry or not proposed_stop or entry == proposed_stop:
+        return {**out_default, "reason": "invalid_inputs"}
+
+    tf = _BAR_SIZE_TO_TF.get(bar_size, "5min")
+    levels = compute_smart_levels(db, symbol, tf)
+    if levels.get("error"):
+        return {**out_default, "reason": "no_levels"}
+
+    direction_norm = (direction or "").lower()
+    epsilon = max(0.01, float(entry) * 0.0005)
+    original_distance = abs(entry - proposed_stop)
+    max_distance = original_distance * (1 + _STOP_MAX_WIDEN_PCT)
+    buffer = float(entry) * _STOP_SNAP_BUFFER_PCT
+
+    if direction_norm in {"long", "buy", "up"}:
+        supports = levels.get("support") or []
+        # Levels that sit in the snap-buffer zone around proposed_stop.
+        # We bias the upper edge of the buffer wider (2×) because a
+        # support level *above* proposed_stop is more dangerous (price
+        # has to break through it before reaching our stop) than one
+        # below.
+        nearby = [
+            s for s in supports
+            if s.get("strength", 0) >= _STOP_MIN_LEVEL_STRENGTH
+            and (s["price"] - buffer) <= proposed_stop <= (s["price"] + 2 * buffer)
+        ]
+        if not nearby:
+            return out_default
+        target = min(nearby, key=lambda s: s["price"])
+        new_stop = target["price"] - epsilon
+        new_distance = abs(entry - new_stop)
+        if new_distance > max_distance:
+            return {
+                **out_default,
+                "reason": "would_exceed_max_widen",
+                "level_price": target["price"],
+                "level_kind": target["kind"],
+            }
+        if new_stop >= proposed_stop:
+            return {**out_default, "reason": "no_widening_needed"}
+        return {
+            "stop": round(new_stop, 4),
+            "snapped": True,
+            "reason": "snapped_below_support",
+            "level_kind": target["kind"],
+            "level_price": target["price"],
+            "level_strength": target.get("strength"),
+            "original_stop": float(proposed_stop),
+            "widen_pct": round((new_distance / original_distance) - 1.0, 3),
+        }
+
+    if direction_norm in {"short", "sell", "down"}:
+        resistances = levels.get("resistance") or []
+        nearby = [
+            r for r in resistances
+            if r.get("strength", 0) >= _STOP_MIN_LEVEL_STRENGTH
+            and (r["price"] - 2 * buffer) <= proposed_stop <= (r["price"] + buffer)
+        ]
+        if not nearby:
+            return out_default
+        target = max(nearby, key=lambda r: r["price"])
+        new_stop = target["price"] + epsilon
+        new_distance = abs(entry - new_stop)
+        if new_distance > max_distance:
+            return {
+                **out_default,
+                "reason": "would_exceed_max_widen",
+                "level_price": target["price"],
+                "level_kind": target["kind"],
+            }
+        if new_stop <= proposed_stop:
+            return {**out_default, "reason": "no_widening_needed"}
+        return {
+            "stop": round(new_stop, 4),
+            "snapped": True,
+            "reason": "snapped_above_resistance",
+            "level_kind": target["kind"],
+            "level_price": target["price"],
+            "level_strength": target.get("strength"),
+            "original_stop": float(proposed_stop),
+            "widen_pct": round((new_distance / original_distance) - 1.0, 3),
+        }
+
+    return {**out_default, "reason": "unknown_direction"}
+
+
 # ─── Path multiplier (for opportunity_evaluator) ───────────────────────────
 
 # How much volume in the (entry → stop) zone is "thick"?  Tuned against

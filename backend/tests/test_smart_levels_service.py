@@ -201,3 +201,127 @@ def test_path_multiplier_unknown_direction():
     out = sls.compute_path_multiplier(db, "TEST", "5 mins", entry=100, stop=95, direction="diagonal")
     assert out["multiplier"] == 1.0
     assert out["reason"] == "unknown_direction"
+
+
+# ─── compute_stop_guard ────────────────────────────────────────────────
+
+def _build_db_with_smart_levels(monkeypatch, support_levels, resistance_levels):
+    """Patch `compute_smart_levels` to return canned levels so we can
+    test the snap logic without seeding a full bar profile."""
+    canned = {
+        "current_price": 100.0,
+        "support":    support_levels,
+        "resistance": resistance_levels,
+        "sources": {},
+        "timeframe": "5min",
+    }
+    monkeypatch.setattr(sls, "compute_smart_levels", lambda *_a, **_kw: canned)
+    return MagicMock()
+
+
+def test_stop_guard_widens_long_stop_to_just_below_nearby_support(monkeypatch):
+    """Long stop at 95.10 with strong HVN at 95.00 → snap to 94.94."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[
+            {"price": 95.00, "kind": "HVN", "strength": 0.8},
+        ],
+        resistance_levels=[],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=95.10, direction="long",
+    )
+    assert out["snapped"] is True
+    assert out["reason"] == "snapped_below_support"
+    assert out["level_kind"] == "HVN"
+    assert out["stop"] < 95.00
+
+
+def test_stop_guard_does_not_widen_when_stop_is_clear_of_levels(monkeypatch):
+    """Long stop at 95 with nearest support at 90 → leaves stop alone."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[{"price": 90.00, "kind": "HVN", "strength": 0.9}],
+        resistance_levels=[],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=95.0, direction="long",
+    )
+    assert out["snapped"] is False
+    assert out["stop"] == 95.0
+
+
+def test_stop_guard_caps_widening_to_max_widen_pct(monkeypatch):
+    """If snapping would push stop > +40% of original distance, refuse
+    to snap (preserves sizing risk math)."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[
+            # entry=100, proposed_stop=99 (1pt distance). Level at 98.6
+            # ⇒ new_distance ≈ 1.4, +40% boundary = 1.40 — sits AT cap.
+            # So make level 98.4 so widen_pct = 0.6 (60%) and breaches.
+            {"price": 98.40, "kind": "HVN", "strength": 0.8},
+        ],
+        resistance_levels=[],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=99.0, direction="long",
+    )
+    assert out["snapped"] is False
+    assert out["reason"] == "would_exceed_max_widen"
+    assert out["stop"] == 99.0
+
+
+def test_stop_guard_filters_weak_levels(monkeypatch):
+    """A level with strength < 0.5 should not trigger a snap even if
+    it sits in the buffer zone."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[{"price": 95.00, "kind": "HVN", "strength": 0.30}],
+        resistance_levels=[],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=95.10, direction="long",
+    )
+    assert out["snapped"] is False
+
+
+def test_stop_guard_widens_short_stop_to_just_above_nearby_resistance(monkeypatch):
+    """Short stop at 104.90 with strong R1 at 105.00 → snap above."""
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[],
+        resistance_levels=[{"price": 105.00, "kind": "R1", "strength": 0.7}],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=104.90, direction="short",
+    )
+    assert out["snapped"] is True
+    assert out["reason"] == "snapped_above_resistance"
+    assert out["stop"] > 105.00
+
+
+def test_stop_guard_invalid_inputs():
+    out = sls.compute_stop_guard(MagicMock(), "TEST", "5 mins",
+                                 entry=100, proposed_stop=100, direction="long")
+    assert out["snapped"] is False
+    assert out["reason"] == "invalid_inputs"
+
+
+def test_stop_guard_unknown_direction(monkeypatch):
+    db = _build_db_with_smart_levels(
+        monkeypatch,
+        support_levels=[{"price": 95.00, "kind": "HVN", "strength": 0.9}],
+        resistance_levels=[],
+    )
+    out = sls.compute_stop_guard(
+        db, "TEST", "5 mins",
+        entry=100.0, proposed_stop=95.10, direction="diagonal",
+    )
+    assert out["snapped"] is False
+    assert out["reason"] == "unknown_direction"
