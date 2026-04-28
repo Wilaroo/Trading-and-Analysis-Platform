@@ -173,6 +173,8 @@ STRATEGY_TIME_WINDOWS = {
         TimeWindow.LATE_MORNING, TimeWindow.MIDDAY,
         TimeWindow.AFTERNOON,    TimeWindow.CLOSE,
     ],
+    # the_3_30_trade: power hour only (3-4 PM ET)
+    "the_3_30_trade":      [TimeWindow.CLOSE],
 }
 
 # Strategy market regime preferences
@@ -485,6 +487,20 @@ class LiveAlert:
     ai_confidence_delta_pp: float = 0.0   # current − baseline, in pp
     ai_edge_label: str = "INSUFFICIENT_DATA"  # STRONG_EDGE / ABOVE_BASELINE / AT_BASELINE / BELOW_BASELINE / INSUFFICIENT_DATA
     ai_baseline_sample: int = 0           # sample size of the rolling baseline
+
+    # NEW: Bellafiore Setup × Trade matrix (2026-04-29 evening)
+    # `market_setup` records the daily Setup the symbol is in *right now*
+    # (gap_and_go, range_break, day_2, gap_down_into_support,
+    # gap_up_into_resistance, overextension, volatility_in_range, neutral).
+    # `is_countertrend` is True when this Trade fires *against* the
+    # daily-Setup bias (e.g. a Bella Fade short on a Day-2 continuation
+    # day). `out_of_context_warning` fires when the matrix has no opinion
+    # on this Trade × Setup combo — operator should sanity-check before
+    # taking the alert.
+    market_setup: str = "neutral"
+    is_countertrend: bool = False
+    out_of_context_warning: bool = False
+    experimental: bool = False  # Trades not in the operator playbook matrix
     
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
@@ -795,6 +811,8 @@ class EnhancedBackgroundScanner:
             "vwap_continuation",     # Long re-entry near VWAP after morning trend
             "premarket_high_break",  # Long on first-5min OR break with strong gap
             "bouncy_ball",           # Short on support break after failed bounce
+            # Bellafiore matrix-driven setups (2026-04-29 evening, v2)
+            "the_3_30_trade",        # Long power-hour break of afternoon range on Gap&Go days
         }
         
         # Alert management
@@ -2693,6 +2711,9 @@ class EnhancedBackgroundScanner:
             "vwap_continuation": self._check_vwap_continuation,
             "premarket_high_break": self._check_premarket_high_break,
             "bouncy_ball": self._check_bouncy_ball,
+
+            # Bellafiore matrix-driven setups (added 2026-04-29 evening, v2)
+            "the_3_30_trade": self._check_the_3_30_trade,
         }
         
         checker = checkers.get(setup_type)
@@ -2707,6 +2728,11 @@ class EnhancedBackgroundScanner:
             if result is not None:
                 self._detector_hits[setup_type] = self._detector_hits.get(setup_type, 0) + 1
                 self._detector_hits_total[setup_type] = self._detector_hits_total.get(setup_type, 0) + 1
+                # ─────── Bellafiore Setup × Trade matrix gating ───────
+                # Apply soft-gate (operator chose option B): tag context,
+                # downgrade priority on out-of-context alerts but never
+                # block them outright in this first 2-week shake-down.
+                await self._apply_setup_context(result, symbol, snapshot)
             return result
         return None
 
@@ -2740,6 +2766,8 @@ class EnhancedBackgroundScanner:
         "up_through_open", "gap_pick_roll", "bella_fade",
         # Operator playbook setups (2026-04-29 evening)
         "vwap_continuation", "premarket_high_break", "bouncy_ball",
+        # Bellafiore matrix-driven setups (2026-04-29 evening, v2)
+        "the_3_30_trade",
     })
 
     # ==================== THRESHOLD PROXIMITY SAMPLER (afternoon-15b) ====================
@@ -4874,6 +4902,127 @@ class EnhancedBackgroundScanner:
                 expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             )
         return None
+
+    async def _check_the_3_30_trade(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """The 3:30 Trade — LONG (operator playbook, adapted for liquid universe).
+
+        Power-hour break of the afternoon consolidation range when the
+        stock has held above its morning OR-high all day. Original
+        Bellafiore variant targets low-float short-squeezes; we relax
+        the volume gate and require structure (held-above-OR + tight
+        afternoon range) instead. Only fires inside CLOSE window.
+        """
+        if snapshot.atr <= 0 or snapshot.or_high <= 0:
+            return None
+        # Pre-condition: held above morning OR-high all day → no break of
+        # the morning range. We approximate by requiring current price
+        # AND low_of_day to be above OR-high.
+        if snapshot.current_price < snapshot.or_high:
+            return None
+        if snapshot.low_of_day < snapshot.or_high * 0.998:
+            # Stock dipped under OR-high during the day — disqualifies per
+            # the playbook's "avoid entirely" rule.
+            return None
+        # Tight afternoon consolidation: latest 30-min range significantly
+        # smaller than morning OR. We approximate "afternoon range" via
+        # `(high_of_day - low_of_day) - (or_high - or_low)` not being
+        # widely larger than the morning OR — i.e. afternoon hasn't taken
+        # out much new range.
+        morning_range = snapshot.or_high - snapshot.or_low
+        intraday_range = snapshot.high_of_day - snapshot.low_of_day
+        afternoon_extension = intraday_range - morning_range
+        if morning_range <= 0:
+            return None
+        # Want afternoon to have *added* range (so there IS an afternoon
+        # consolidation high) but not too much (otherwise it's a runaway
+        # trend not a 3:30 setup).
+        if afternoon_extension < 0.2 * morning_range:
+            return None
+        # Trigger: break of HOD with momentum
+        dist_to_hod_pct = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
+        if dist_to_hod_pct > 0.3:  # need to be near or above HOD
+            return None
+        # Volume + tape confirmation (relaxed vs low-float original)
+        if snapshot.rvol < 1.2:
+            return None
+        if not snapshot.above_vwap or not snapshot.above_ema9:
+            return None
+        stop = round(snapshot.high_of_day - (afternoon_extension * 0.5), 2)
+        target = round(snapshot.high_of_day + (snapshot.atr * 1.5), 2)
+        risk = abs(snapshot.current_price - stop)
+        reward = abs(target - snapshot.current_price)
+        rr = (reward / risk) if risk > 0 else 1.5
+        if rr < 1.5:
+            return None
+        return LiveAlert(
+            id=f"the_3_30_trade_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="the_3_30_trade",
+            strategy_name="The 3:30 Trade (Playbook)",
+            direction="long",
+            priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
+            current_price=snapshot.current_price,
+            trigger_price=snapshot.high_of_day,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 2),
+            trigger_probability=0.55,
+            win_probability=0.55,
+            minutes_to_trigger=10,
+            headline=f"⏰ {symbol} 3:30 Trade — power-hour break of afternoon range",
+            reasoning=[
+                f"Held above OR-high ${snapshot.or_high:.2f} all day",
+                f"Afternoon consolidation: range +{afternoon_extension:.2f} above morning OR",
+                f"At/above HOD ${snapshot.high_of_day:.2f}",
+                f"Above VWAP + 9-EMA, RVOL {snapshot.rvol:.1f}×",
+                f"Exit on blowoff move with high volume",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        )
+
+    # ──────────── Bellafiore Setup × Trade matrix gating ────────────
+    async def _apply_setup_context(self, alert: "LiveAlert", symbol: str, snapshot) -> None:
+        """Tag the alert with daily-Setup context + downgrade priority on
+        out-of-context fires (operator chose soft-gate option B)."""
+        try:
+            from services.market_setup_classifier import (
+                get_market_setup_classifier, lookup_trade_context,
+                TradeContext, EXPERIMENTAL_TRADES, MarketSetup,
+            )
+        except Exception as e:
+            logger.debug(f"market_setup_classifier import skipped: {e}")
+            return
+        try:
+            classifier = get_market_setup_classifier(db=self.db)
+            result = await classifier.classify(symbol, intraday_snapshot=snapshot)
+            alert.market_setup = result.setup.value
+            ctx = lookup_trade_context(alert.setup_type, result.setup)
+            if alert.setup_type in EXPERIMENTAL_TRADES:
+                alert.experimental = True
+            if ctx == TradeContext.COUNTERTREND:
+                alert.is_countertrend = True
+                # Don't downgrade priority on countertrend — these are
+                # high-conviction reversal plays *because* they're against
+                # the daily setup. Just tag.
+            elif ctx == TradeContext.NOT_APPLIC and result.setup != MarketSetup.NEUTRAL:
+                alert.out_of_context_warning = True
+                # Downgrade priority by one notch (HIGH→MEDIUM, MEDIUM→LOW)
+                if alert.priority == AlertPriority.HIGH:
+                    alert.priority = AlertPriority.MEDIUM
+                elif alert.priority == AlertPriority.MEDIUM:
+                    alert.priority = AlertPriority.LOW
+                # Surface to the operator via the reasoning trail
+                alert.reasoning.append(
+                    f"⚠️ Out of context: this trade isn't in the {result.setup.value} "
+                    f"playbook column (priority downgraded; review before taking)"
+                )
+            else:
+                # WITH_TREND or NEUTRAL setup → no-op tagging
+                pass
+        except Exception as e:
+            logger.debug(f"_apply_setup_context({symbol}, {alert.setup_type}) failed: {e}")
 
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB

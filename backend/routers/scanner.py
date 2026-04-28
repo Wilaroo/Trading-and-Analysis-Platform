@@ -728,6 +728,49 @@ def get_setup_coverage():
     }
 
 
+@router.get("/setup-trade-matrix")
+async def get_setup_trade_matrix():
+    """
+    Bellafiore Setup × Trade matrix.
+
+    Returns the canonical operator-defined matrix mapping each Trade
+    (`setup_type`) to its valid daily Setups, plus a real-time
+    breakdown of which Setup each currently-classified symbol is in
+    (so the UI can render the matrix as a heat-grid with live counts).
+
+    Response shape:
+        {
+            "setups":          [list of MarketSetup values],
+            "trades":          [list of trade `setup_type` keys],
+            "matrix":          { trade: { setup: "with_trend"|"countertrend" } },
+            "experimental":    [trades not gated by the matrix],
+            "aliases":         { deprecated_name: canonical_name },
+            "classifier_stats": {...},
+        }
+    """
+    try:
+        from services.market_setup_classifier import (
+            get_market_setup_classifier, TRADE_SETUP_MATRIX,
+            EXPERIMENTAL_TRADES, TRADE_ALIASES, MarketSetup,
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Classifier import failed: {e}")
+    classifier = get_market_setup_classifier()
+    matrix_serialized = {
+        trade: {setup.value: ctx.value for setup, ctx in cells.items()}
+        for trade, cells in TRADE_SETUP_MATRIX.items()
+    }
+    return {
+        "setups": [s.value for s in MarketSetup],
+        "trades": sorted(TRADE_SETUP_MATRIX.keys()),
+        "matrix": matrix_serialized,
+        "experimental": sorted(EXPERIMENTAL_TRADES),
+        "aliases": dict(TRADE_ALIASES),
+        "classifier_stats": classifier.stats(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/summary")
 def get_scanner_summary():
     """

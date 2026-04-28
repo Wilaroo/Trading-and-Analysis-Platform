@@ -5,7 +5,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-29 evening)
 
-### 🟢 Just shipped this session (2026-04-29 evening) — see CHANGELOG
+### 🟢 Just shipped this session (2026-04-29 evening, v2) — see CHANGELOG
+- ✅ **Bellafiore Setup × Trade matrix system**: new `MarketSetup` enum
+  (7 setups), `MarketSetupClassifier` service with daily-bar-driven
+  detectors, `TRADE_SETUP_MATRIX` (21 Trades × 7 Setups), 4 new
+  `LiveAlert` fields, soft-gate logic in `_apply_setup_context`, new
+  `_check_the_3_30_trade` checker, new `/api/scanner/setup-trade-matrix`
+  endpoint, canonical `SETUPS_AND_TRADES.md` doc. 48/48 tests passing.
+  Trade aliases dedupe: `puppy_dog`→`big_dog`, `tidal_wave`→`bouncy_ball`,
+  `vwap_bounce`→`first_vwap_pullback`.
+
+### 🟢 Just shipped earlier this session (2026-04-29 evening, v1) — see CHANGELOG
 - ✅ **9 new detector functions**: 6 orphans (`first_move_up`,
   `first_move_down`, `back_through_open`, `up_through_open`,
   `gap_pick_roll`, `bella_fade`) + 3 playbook setups

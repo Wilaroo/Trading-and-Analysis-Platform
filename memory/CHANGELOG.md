@@ -2,6 +2,104 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-29 (evening, v2) — Bellafiore Setup × Trade matrix system
+
+### Concept
+Operator surfaced that our existing `setup_type` column conflates two
+orthogonal layers from the SMB / Bellafiore playbook (One Good Trade,
+The Playbook):
+- **Setup** = the daily/multi-day market context that "set up" the
+  opportunity (Gap & Go, Range Break, Day 2, Gap Down Into Support,
+  Gap Up Into Resistance, Overextension, Volatility In Range).
+- **Trade** = the specific intraday execution pattern (9-EMA Scalp,
+  VWAP Continuation, Bella Fade, …).
+
+A given Trade only has positive expectancy in the right Setup. Without
+a Setup classifier, our scanner was firing context-free trades and
+the operator was hand-filtering. This release adds the Setup layer
+*additively* (no `setup_type` rename) so existing AI training data,
+MongoDB indices, and frontend code keep working.
+
+### Shipped
+- New file `services/market_setup_classifier.py` (~520 lines):
+  - `MarketSetup` enum (7 + NEUTRAL).
+  - `MarketSetupClassifier` class with seven detection methods (one
+    per Setup), each returning a 0-1 confidence + reasoning.
+  - 5-min per-symbol cache, daily-bar history pulled from
+    `ib_historical_data` (no extra IB calls).
+  - `TRADE_SETUP_MATRIX` constant — full 21-Trade × 7-Setup matrix
+    transcribed verbatim from the operator playbook screenshot.
+  - `TRADE_ALIASES` dedupe map: `puppy_dog`→`big_dog`,
+    `tidal_wave`→`bouncy_ball`, `vwap_bounce`→`first_vwap_pullback`.
+  - `EXPERIMENTAL_TRADES` frozenset — 12 trades not in operator's
+    matrix that keep firing all-context with `experimental=True`.
+  - `lookup_trade_context(trade, setup)` resolver with alias chain.
+- `LiveAlert` extended with 4 new fields:
+  `market_setup`, `is_countertrend`, `out_of_context_warning`,
+  `experimental` (all default-safe so existing alert producers work
+  unchanged).
+- Soft-gate logic in `enhanced_scanner._apply_setup_context`: every
+  fired alert is tagged with the current daily Setup; if Trade is
+  out-of-context (empty cell), priority is downgraded one notch and
+  a warning bullet is appended to `reasoning`. Countertrend cells
+  tag `is_countertrend=True` but do NOT downgrade (those are
+  intentional reversal plays).
+- New checker `_check_the_3_30_trade` — power-hour break of afternoon
+  range with held-above-OR + tight-consolidation preconditions per
+  the playbook screenshot. Time-windowed to `CLOSE` only.
+- New endpoint `GET /api/scanner/setup-trade-matrix` — returns the
+  full matrix + classifier stats for UI heat-grid rendering.
+- Canonical doc `/app/memory/SETUPS_AND_TRADES.md` mirrors the
+  classifier constants for human reference.
+
+### Verification
+- 21 new tests in `tests/test_market_setup_matrix.py` covering:
+  matrix completeness (all 21 trades present), directionality
+  invariants (with-trend vs countertrend cells), alias resolution,
+  experimental-bypass, NEUTRAL-passes-all, classifier per-setup
+  detection (Gap & Go, Range Break, Day 2, Overextension,
+  Volatility In Range positive cases), classifier caching +
+  singleton, scanner integration (with-trend tag, out-of-context
+  warning + downgrade, countertrend tag without downgrade,
+  experimental bypass), the_3_30_trade detector (positive +
+  blocked-when-LOD-dipped-below-OR), and registration drift checks.
+- 48/48 passing across `test_market_setup_matrix`,
+  `test_orphan_setup_detectors`, `test_scanner_setup_coverage`,
+  `test_strategy_time_window_reclassification`.
+- Live `/api/scanner/setup-trade-matrix` returns 8 setups, 21
+  trades, 12 experimental, 3 aliases, full matrix payload.
+- Live `/api/scanner/setup-coverage` after restart: registered_checkers
+  37 → 38, orphans still 2 (`breaking_news`, `time_of_day_fade` —
+  operator deferred).
+
+### Operator action on DGX
+1. Save to GitHub → `git pull` on DGX (backend hot-reloads).
+2. Verify the new endpoint:
+   ```
+   curl -s http://localhost:8001/api/scanner/setup-trade-matrix \
+     | python3 -m json.tool | head -40
+   ```
+3. After tomorrow's open, watch for `out_of_context_warning=True`
+   alerts in the live feed — these are trades the matrix flags as
+   firing in the wrong daily Setup. If false-positive rate is high,
+   we tune the classifier thresholds; if low, we have validation
+   that the matrix is doing its job.
+4. After ~2 weeks of live data, decide whether to flip from soft-gate
+   (current) to strict-gate (block out-of-context alerts entirely).
+
+### Deferred / next session
+- 3:30 trade rules need live validation — operator noted it was
+  designed for low-float; we adapted it for the liquid universe by
+  swapping the volume gate for held-above-OR + tight-afternoon-
+  consolidation structure. May need threshold tuning.
+- Auto-generate `SETUPS_AND_TRADES.md` from the constants on commit
+  (currently hand-edited to mirror constants — drift risk).
+- UI heat-grid rendering for the matrix.
+- Feed `market_setup` + `is_countertrend` as features into the AI
+  training pipeline.
+
+
+
 ## 2026-04-29 (evening) — 9 new detector functions (orphans + playbook setups)
 
 Operator's last `/api/scanner/setup-coverage` showed 8 orphans (setups
