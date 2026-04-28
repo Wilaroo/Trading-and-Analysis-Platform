@@ -598,6 +598,104 @@ def get_detector_stats():
     }
 
 
+@router.get("/setup-coverage")
+def get_setup_coverage():
+    """Cross-reference the live scanner's enabled_setups against the
+    registered detector functions. Surfaces three classes of problem:
+
+      - `orphan_enabled_setups`: in `_enabled_setups` but no checker
+        function in `_check_setup`'s `checkers` dict. These are silent
+        no-ops — the scanner wastes a loop iteration per scan cycle on
+        them but emits nothing.
+
+      - `silent_detectors`: enabled AND has a checker, but cumulative
+        hit count is 0 across all evaluations. Either thresholds are
+        too tight or upstream data is missing. Operator can use this
+        list to prioritize threshold-tuning audits.
+
+      - `active_detectors`: enabled, has a checker, AND has emitted at
+        least one alert. Sorted by hit count.
+
+    Also includes `unenabled_with_checkers` — registered but not in
+    `_enabled_setups` (the inverse orphan: the code exists but the bot
+    won't ever ask for it).
+
+    2026-04-29 (afternoon-15): added so the operator doesn't have to
+    grep `enhanced_scanner.py` to identify dead enabled_setups names.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        scanner = get_enhanced_scanner()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scanner unavailable: {e}")
+
+    if not scanner:
+        raise HTTPException(status_code=503, detail="Scanner not initialized")
+
+    # Read the registered-checker keys from the source of truth: build
+    # a dummy snapshot/tape, hit `_check_setup` with a known-bad
+    # setup_type to introspect the dict — but that's brittle. Easier:
+    # scan the source of `_check_setup` for keys. Since this is a
+    # diagnostic endpoint, hit the scanner instance's evaluation
+    # totals: every key that has ever been called lives in
+    # `_detector_evals_total`. That's a sufficient proxy for "has a
+    # registered checker" because the counter only increments inside
+    # the `if checker:` branch.
+    cum_evals: Dict[str, int] = getattr(scanner, "_detector_evals_total", {}) or {}
+    cum_hits: Dict[str, int] = getattr(scanner, "_detector_hits_total", {}) or {}
+    enabled: set = set(getattr(scanner, "_enabled_setups", set()) or set())
+
+    registered = set(cum_evals.keys())
+
+    orphan_enabled = sorted(enabled - registered)
+    silent = sorted(
+        [s for s in (enabled & registered) if cum_hits.get(s, 0) == 0],
+        key=lambda s: -cum_evals.get(s, 0),
+    )
+    active = sorted(
+        [s for s in (enabled & registered) if cum_hits.get(s, 0) > 0],
+        key=lambda s: -cum_hits.get(s, 0),
+    )
+    unenabled_with_checkers = sorted(registered - enabled)
+
+    def _row(s: str) -> Dict[str, Any]:
+        e = int(cum_evals.get(s, 0))
+        h = int(cum_hits.get(s, 0))
+        return {
+            "setup_type": s,
+            "evaluations": e,
+            "hits": h,
+            "hit_rate_pct": round((h / e) * 100, 1) if e else 0.0,
+        }
+
+    return {
+        "success": True,
+        "running": bool(getattr(scanner, "_running", False)),
+        "scan_count": int(getattr(scanner, "_scan_count", 0)),
+        "totals": {
+            "enabled_setups": len(enabled),
+            "registered_detectors_seen": len(registered),
+            "orphan_count": len(orphan_enabled),
+            "silent_count": len(silent),
+            "active_count": len(active),
+            "unenabled_count": len(unenabled_with_checkers),
+        },
+        "orphan_enabled_setups": [
+            {
+                "setup_type": s,
+                "issue": "in _enabled_setups but no registered checker function — silent no-op every scan",
+            }
+            for s in orphan_enabled
+        ],
+        "silent_detectors": [_row(s) for s in silent],
+        "active_detectors": [_row(s) for s in active],
+        "unenabled_with_checkers": [
+            {"setup_type": s, "issue": "checker exists but not in _enabled_setups — code is unused"}
+            for s in unenabled_with_checkers
+        ],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
 
 @router.get("/summary")
 def get_scanner_summary():
