@@ -75,6 +75,31 @@ def init_trading_bot_router(trading_bot, trade_executor):
     logger.info("Trading bot router initialized")
 
 
+@router.get("/multiplier-analytics")
+async def get_multiplier_analytics(
+    days_back: int = Query(default=30, ge=1, le=365),
+    only_closed: bool = Query(default=True),
+):
+    """A/B-style analytics for the liquidity-aware execution layers.
+
+    Slices `bot_trades` over the last `days_back` days into "snap fired"
+    vs "snap didn't fire" cohorts for the stop-guard, target-snap, and
+    VP-path multiplier. Returns mean R-multiple, win rate, and sample
+    size per cohort so the operator can tell at a glance whether each
+    layer is moving live P&L. Used by the SmartLevelsAnalyticsCard.
+    """
+    if _trading_bot is None or getattr(_trading_bot, "_db", None) is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+    try:
+        from services.multiplier_analytics_service import compute_multiplier_analytics
+        return compute_multiplier_analytics(
+            _trading_bot._db, days_back=days_back, only_closed=only_closed,
+        )
+    except Exception as e:
+        logger.error(f"multiplier analytics failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== BOT CONTROL ====================
 
 @router.get("/status")

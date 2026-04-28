@@ -283,9 +283,11 @@ class OpportunityEvaluator:
                 scanner_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
             else:
                 scanner_bs = "5 mins"
+            position_multipliers: Dict[str, Any] = {}
             shares, risk_amount = self.calculate_position_size(
                 entry_price, stop_price, direction, bot, atr, atr_percent,
                 symbol=symbol_for_vp, bar_size=scanner_bs,
+                multipliers_out=position_multipliers,
             )
 
             # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
@@ -429,7 +431,12 @@ class OpportunityEvaluator:
                 entry_context=self.build_entry_context(
                     alert, intelligence, current_regime, regime_score,
                     filter_action, filter_win_rate, atr, atr_percent,
-                    confidence_gate_result=confidence_gate_result
+                    confidence_gate_result=confidence_gate_result,
+                    multipliers_meta={
+                        "position": position_multipliers,
+                        "stop_guard": stop_guard_meta,
+                        "target_snap": target_snap_meta,
+                    },
                 ),
                 scale_out_config={
                     "enabled": True,
@@ -570,7 +577,7 @@ class OpportunityEvaluator:
 
     # ==================== HELPERS ====================
 
-    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins") -> Tuple[int, float]:
+    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None) -> Tuple[int, float]:
         """Calculate position size based on risk management rules with volatility and market regime adjustment.
 
         2026-04-28e: also applies a Volume-Profile path multiplier — if the
@@ -578,6 +585,12 @@ class OpportunityEvaluator:
         cluster, the trade is downsized (chop-through risk). Skipped
         silently when `symbol` is None (legacy callers) or the profile
         can't be computed.
+
+        If `multipliers_out` (a dict) is supplied, the function records
+        per-multiplier values into it under keys `volatility`, `regime`,
+        `vp_path` (each a float, default 1.0) — used by
+        `build_entry_context` to surface multiplier provenance for
+        post-trade analytics.
         """
         from services.trading_bot_service import TradeDirection
 
@@ -645,6 +658,13 @@ class OpportunityEvaluator:
         if risk_amount > adjusted_max_risk:
             shares = int(adjusted_max_risk / risk_per_share)
             risk_amount = shares * risk_per_share
+        # Surface multiplier provenance for entry_context analytics.
+        if multipliers_out is not None:
+            multipliers_out.update({
+                "volatility": round(volatility_multiplier, 3),
+                "regime": round(regime_multiplier, 3),
+                "vp_path": round(vp_path_multiplier, 3),
+            })
         return shares, risk_amount
 
     def calculate_atr_based_stop(self, entry_price: float, direction, atr: float, setup_type: str, bot: 'TradingBotService') -> float:
@@ -687,7 +707,8 @@ class OpportunityEvaluator:
     def build_entry_context(
         self, alert: Dict, intelligence: Dict, regime: str,
         regime_score: float, filter_action: str, filter_win_rate: float,
-        atr: float, atr_percent: float, confidence_gate_result: Dict = None
+        atr: float, atr_percent: float, confidence_gate_result: Dict = None,
+        multipliers_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build rich entry context capturing WHY this trade was taken.
@@ -809,6 +830,50 @@ class OpportunityEvaluator:
             ctx["tqs"] = {
                 "pre_gate_score": round(pre_gate_tqs, 1),
             }
+
+        # 10. Liquidity-aware multipliers (2026-04-28e)
+        # Captures the full provenance of every dial that touched the
+        # trade: the volatility / regime / VP-path multipliers from
+        # `calculate_position_size`, plus stop-guard + target-snap
+        # results. Powers `/api/trading-bot/multiplier-analytics`.
+        if multipliers_meta:
+            mult_ctx: Dict[str, Any] = {}
+            pos_m = multipliers_meta.get("position") or {}
+            if pos_m:
+                mult_ctx["volatility"] = pos_m.get("volatility", 1.0)
+                mult_ctx["regime"]     = pos_m.get("regime", 1.0)
+                mult_ctx["vp_path"]    = pos_m.get("vp_path", 1.0)
+
+            sg = multipliers_meta.get("stop_guard") or {}
+            if isinstance(sg, dict) and sg:
+                mult_ctx["stop_guard"] = {
+                    "snapped":        bool(sg.get("snapped", False)),
+                    "reason":         sg.get("reason"),
+                    "level_kind":     sg.get("level_kind"),
+                    "level_price":    sg.get("level_price"),
+                    "level_strength": sg.get("level_strength"),
+                    "original_stop":  sg.get("original_stop"),
+                    "widen_pct":      sg.get("widen_pct"),
+                }
+
+            ts = multipliers_meta.get("target_snap")
+            if isinstance(ts, list) and ts:
+                # Compact per-target snap log: only fields useful for analytics.
+                mult_ctx["target_snap"] = [
+                    {
+                        "snapped":         bool(d.get("snapped", False)),
+                        "reason":          d.get("reason"),
+                        "level_kind":      d.get("level_kind"),
+                        "level_price":     d.get("level_price"),
+                        "shift_pct":       d.get("shift_pct"),
+                        "original_target": d.get("original_target"),
+                        "target":          d.get("target"),
+                    }
+                    for d in ts if isinstance(d, dict)
+                ]
+
+            if mult_ctx:
+                ctx["multipliers"] = mult_ctx
 
         return ctx
 
