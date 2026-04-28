@@ -48,6 +48,11 @@ from services.multi_index_regime_classifier import (
     REGIME_LABEL_FEATURE_NAMES,
     build_regime_label_features,
 )
+from services.sector_regime_classifier import (
+    SectorRegime,
+    SECTOR_LABEL_FEATURE_NAMES,
+    build_sector_label_features,
+)
 
 
 # ──────────────────────────── SETUP-LABEL FEATURES ────────────────────────────
@@ -85,28 +90,38 @@ def build_setup_label_features(
 # ──────────────────────────── COMBINED ────────────────────────────
 
 ALL_LABEL_FEATURE_NAMES: List[str] = (
-    SETUP_LABEL_FEATURE_NAMES + REGIME_LABEL_FEATURE_NAMES
+    SETUP_LABEL_FEATURE_NAMES + REGIME_LABEL_FEATURE_NAMES + SECTOR_LABEL_FEATURE_NAMES
 )
 
 
 def build_label_features(
     market_setup: Union[MarketSetup, str, None] = None,
     multi_index_regime: Union[MultiIndexRegime, str, None] = None,
+    sector_regime: Union[SectorRegime, str, None] = None,
 ) -> Dict[str, float]:
-    """Return the combined setup_label_* + regime_label_* one-hot dict."""
+    """Return the combined setup_label_* + regime_label_* + sector_label_*
+    one-hot dict.
+
+    Each layer's UNKNOWN/None case maps to its all-zeros baseline so the
+    feature vector is always the same length regardless of which
+    classifiers fired.
+    """
     feats: Dict[str, float] = {}
     feats.update(build_setup_label_features(market_setup))
     feats.update(build_regime_label_features(
         multi_index_regime if multi_index_regime is not None else MultiIndexRegime.UNKNOWN
     ))
+    feats.update(build_sector_label_features(sector_regime))
     return feats
 
 
 __all__ = [
     "SETUP_LABEL_FEATURE_NAMES",
     "REGIME_LABEL_FEATURE_NAMES",
+    "SECTOR_LABEL_FEATURE_NAMES",
     "ALL_LABEL_FEATURE_NAMES",
     "build_setup_label_features",
     "build_regime_label_features",
+    "build_sector_label_features",
     "build_label_features",
 ]

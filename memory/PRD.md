@@ -36,6 +36,8 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `GET /api/scanner/landscape-receipts?days=7&context=morning` — recent graded landscape predictions (closes the AI feedback loop — 2026-04-30 v4)
 - `POST /api/scanner/landscape-grade?trading_day=YYYY-MM-DD` — manual trigger of EOD grading job (2026-04-30 v4)
 - `GET /api/scanner/setup-trade-matrix` — full Trade × Setup matrix + classifier stats (2026-04-29 v2)
+- `GET /api/scanner/sector-regime` — per-sector regime snapshot (11 SPDR ETFs + SPY benchmark, soft-gate ML feature — 2026-04-30 v6)
+- `POST /api/scanner/backfill-sector-tags` — populate `symbol_adv_cache.sector` from the static GICS map (idempotent — 2026-04-30 v6)
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard
@@ -61,7 +63,12 @@ that would starve the ML pipeline of training data:
   - **Multi-index regime tag** (`MultiIndexRegimeClassifier` —
     shipped 2026-04-30) — composite SPY/QQQ/IWM/DIA label, 8 active
     buckets + UNKNOWN; one-hot encoded into `regime_label_*` features.
-  - Sector regime tag (planned next session — `SectorRegimeClassifier`)
+  - **Sector regime tag** (`SectorRegimeClassifier` — shipped
+    2026-04-30) — 11 SPDR sector ETFs + SPY benchmark → 5 active
+    buckets + UNKNOWN; per-symbol resolution via static GICS map
+    in `SectorTagService`; one-hot encoded into `sector_label_*`
+    features. Training uses `SectorRegimeHistoricalProvider` with
+    per-(etf, date) caching.
   - Daily Setup tag (`MarketSetupClassifier` — shipped 2026-04-29 v2;
     one-hot encoded into `setup_label_*` features 2026-04-30)
   - Setup × Trade matrix context (`is_countertrend`, `out_of_context_warning`, `experimental` — shipped 2026-04-29 v2)
@@ -90,7 +97,10 @@ is the operator's source of truth for which Trade fits which Setup;
 - `backend/services/enhanced_scanner.py` — 38 trade detectors, scanner loop, `_apply_setup_context` matrix gate + multi-index regime stamping (2026-04-30), `LiveAlert` dataclass with context fields (`market_setup`, `is_countertrend`, `out_of_context_warning`, `experimental`, `multi_index_regime`)
 - `backend/services/market_setup_classifier.py` — `MarketSetup` enum (7 + NEUTRAL), `MarketSetupClassifier` (daily-bar driven), `TRADE_SETUP_MATRIX`, `TRADE_ALIASES`, `EXPERIMENTAL_TRADES`, `lookup_trade_context()`, `_sync_classify_window()` for training-time per-bar labels (2026-04-30)
 - `backend/services/multi_index_regime_classifier.py` — **NEW 2026-04-30** — `MultiIndexRegime` enum (9 buckets), `MultiIndexRegimeClassifier` reads ~25 daily bars per index (SPY/QQQ/IWM/DIA), 5-min market-wide cache, `derive_regime_label_from_features()` for training
-- `backend/services/ai_modules/composite_label_features.py` — **NEW 2026-04-30** — one-hot helpers: `SETUP_LABEL_FEATURE_NAMES` (7), `REGIME_LABEL_FEATURE_NAMES` (8), `ALL_LABEL_FEATURE_NAMES` (15), `build_label_features()`
+- `backend/services/sector_tag_service.py` — **NEW 2026-04-30** — static GICS-aligned `STATIC_SECTOR_MAP` (~340 most-liquid stocks) + ETF self-mapping; `tag_symbol`, `tag_many`, `coverage`, `backfill_symbol_adv_cache` (idempotent)
+- `backend/services/sector_regime_classifier.py` — **NEW 2026-04-30** — `SectorRegime` enum (6 buckets: STRONG/ROTATING_IN/NEUTRAL/ROTATING_OUT/WEAK/UNKNOWN), `SectorRegimeClassifier` reads 11 SPDR ETFs + SPY (5-min market-wide cache), `SectorRegimeHistoricalProvider` for training-time per-sample sector regime lookup with per-(etf,date) caching
+- `backend/services/ai_modules/composite_label_features.py` — **NEW 2026-04-30** — one-hot helpers: `SETUP_LABEL_FEATURE_NAMES` (7), `REGIME_LABEL_FEATURE_NAMES` (8), `SECTOR_LABEL_FEATURE_NAMES` (5), `ALL_LABEL_FEATURE_NAMES` (20), `build_label_features(market_setup, multi_index_regime, sector_regime)`
+- `backend/scripts/backfill_sector_tags.py` — **NEW 2026-04-30** — one-shot CLI for sector backfill
 - `backend/services/setup_landscape_service.py` — `SetupLandscapeService` with 4 narrative voices (morning/midday/eod/weekend), 1st-person voice rules, 60s cache, **regime line preface (2026-04-30)** + `LandscapeSnapshot.multi_index_regime/regime_confidence/regime_reasoning` + **auto-records snapshot to `landscape_predictions` (2026-04-30) + cites yesterday's grade in morning narrative**
 - `backend/services/landscape_grading_service.py` — **NEW 2026-04-30** — `LandscapeGradingService` records every snapshot's prediction to `landscape_predictions`, grades EOD by joining to `alert_outcomes` (A/B/C/D/F per Bellafiore Setup family), `get_recent_grades` powers the morning briefing's "Quick receipt — yesterday I predicted ..." citation. **`get_weekly_summary` (2026-04-30 v5)** rolls up the past 7 days of grades for the Sunday weekend voice ("Last week's record — 3A · 1B · 1C — strong directional read")
 - `backend/services/ai_assistant_service.py` — `get_coaching_alert()` injects landscape narrative + voice rules + multi-index regime fields into AI prompts and payload (2026-04-30)

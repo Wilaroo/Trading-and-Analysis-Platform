@@ -19,13 +19,16 @@ encode every other layer as a feature into the per-Trade ML models.
 |---|---|---|---|---|
 | 1 | **`MultiIndexRegimeClassifier`** — read SPY+QQQ+IWM+DIA, return richer regime tags (incl. divergence/breadth). Stamp on alert metadata. | ~3h | **High** | ✅ **SHIPPED 2026-04-30** |
 | 2 | **Plumb `market_setup` + new `multi_index_regime` into per-Trade ML feature vector** so the models actually train on them | ~2h | **High** | ✅ **SHIPPED 2026-04-30** |
-| 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium | 🔴 next |
-| 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) | 🔴 next |
+| 3 | **Backfill sector tags** onto `symbol_adv_cache` (one-time job, GICS via IB or static map) | ~2h | Medium | ✅ **SHIPPED 2026-04-30** |
+| 4 | **`SectorRegimeClassifier`** — read sector ETFs (XLK/XLE/XLF/XLV/XLY/XLP/XLI/XLB/XLRE/XLU/XLC), tag each ticker's sector regime | ~3h | **High** (after #3) | ✅ **SHIPPED 2026-04-30** |
 | 5 | **Setup-landscape self-grading tracker** — `landscape_predictions` Mongo collection, EOD compare to realized R per Setup family, briefings get receipts | ~3h | Medium-high | ✅ **SHIPPED 2026-04-30** |
 | 6 | **Drop the "regime as hard gate" idea** that earlier-fork ROADMAP suggested (`STRATEGY_REGIME_PREFERENCES` enforcement). Replace with feature-based learning per items #1-2. Document the decision. | ~30min | (cleanup) | ✅ **SHIPPED 2026-04-30** |
 
 **Recommended commit ordering**: ~~#1 → #2 ship together~~ ✅ done.
-~~Next: #5 as quick parallel win~~ ✅ done. **Next: #3 → #4 ship together.**
+~~Next: #5 as quick parallel win~~ ✅ done. ~~Next: #3 → #4 ship together~~
+✅ done. **All 6 items SHIPPED 2026-04-30.** The agreed Regime → Sector
+→ Setup → Time → Trade pipeline is fully implemented with soft-gate
+ML feature plumbing. Next session: pick up from the P1 backlog.
 
 **Hard gates after this work:**
 1. **Time-window** (`_is_setup_valid_now`) — opening_drive can't fire midday

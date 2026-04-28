@@ -991,6 +991,74 @@ async def trigger_landscape_grade(trading_day: Optional[str] = None):
     }
 
 
+@router.get("/sector-regime")
+async def get_sector_regime():
+    """
+    Per-sector regime snapshot — all 11 SPDR sector ETFs classified.
+
+    Powers a future heat-grid in the operator UI ("XLK strong / XLE weak /
+    XLF rotating in / ..."). Reads from the live classifier's 5-min cache.
+    Returns ``{sectors: {ETF: {regime, trend_pct, momentum_5d, rs_vs_spy_pct}}}``.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.sector_regime_classifier import get_sector_regime_classifier
+        from services.sector_tag_service import SECTOR_ETFS
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        cls = get_sector_regime_classifier(db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sector classifier init failed: {e}")
+    res = await cls.classify_all_sectors()
+    return {
+        "success": True,
+        "classified_at": res.classified_at,
+        "spy_5d_return_pct": round(res.spy_5d_return_pct, 3),
+        "confidence": round(res.confidence, 2),
+        "sectors": {
+            etf: {
+                "name": SECTOR_ETFS.get(etf, etf),
+                "regime": snap.regime.value,
+                "trend_pct": round(snap.trend_pct, 3),
+                "momentum_5d_pct": round(snap.momentum_5d_pct, 3),
+                "rs_vs_spy_pct": round(snap.rs_vs_spy_pct, 3),
+                "last_close": round(snap.last_close, 2),
+            }
+            for etf, snap in res.sectors.items()
+        },
+        "stats": cls.stats(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/backfill-sector-tags")
+async def backfill_sector_tags():
+    """
+    Walk every doc in `symbol_adv_cache` and write a `sector` field
+    where one is missing. Idempotent — already-tagged docs are left
+    alone. Returns counts: ``{tagged, skipped, untaggable, total}``.
+
+    Called once after deploying the sector-tag service; can be re-run
+    safely after any expansion of the static sector map.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.sector_tag_service import get_sector_tag_service
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        if db is None:
+            raise HTTPException(status_code=503, detail="DB not bound on scanner singleton")
+        svc = get_sector_tag_service(db=db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backfill init failed: {e}")
+    result = await svc.backfill_symbol_adv_cache(db=db)
+    result["success"] = True
+    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+    return result
+
+
 @router.get("/universe-stats")
 def get_universe_stats():
     """

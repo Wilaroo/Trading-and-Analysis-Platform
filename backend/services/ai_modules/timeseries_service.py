@@ -2374,6 +2374,11 @@ class TimeSeriesAIService:
                 derive_regime_label_from_features, MultiIndexRegime,
             )
             from services.market_setup_classifier import MarketSetup, MarketSetupClassifier
+            from services.sector_regime_classifier import (
+                SectorRegimeHistoricalProvider, SectorRegime,
+            )
+            sector_hist_provider = SectorRegimeHistoricalProvider(db=self._db)
+            sector_hist_provider.preload()
             
             # Create a dedicated GBM model
             model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
@@ -2557,9 +2562,22 @@ class TimeSeriesAIService:
                             setup_label_for_sample = setup_res
                         except Exception:
                             pass
+                    # Sector regime — derived from per-sample date so
+                    # the model sees the historically-correct sector
+                    # bin instead of always-zero baseline.
+                    sample_date = str(
+                        bars[i + 49].get("timestamp", bars[i + 49].get("date", ""))
+                    )
+                    try:
+                        sector_label_for_sample = (
+                            sector_hist_provider.get_sector_regime_for(symbol, sample_date)
+                        )
+                    except Exception:
+                        sector_label_for_sample = SectorRegime.UNKNOWN
                     label_feats = build_label_features(
                         market_setup=setup_label_for_sample,
                         multi_index_regime=regime_label,
+                        sector_regime=sector_label_for_sample,
                     )
                     label_vector = np.array(
                         [label_feats.get(f, 0.0) for f in label_feat_names],
@@ -3008,8 +3026,12 @@ class TimeSeriesAIService:
                             from services.multi_index_regime_classifier import (
                                 get_multi_index_regime_classifier, MultiIndexRegime,
                             )
+                            from services.sector_regime_classifier import (
+                                get_sector_regime_classifier, SectorRegime,
+                            )
                             setup_label = MarketSetup.NEUTRAL
                             regime_label = MultiIndexRegime.UNKNOWN
+                            sector_label = SectorRegime.UNKNOWN
                             try:
                                 cached = get_market_setup_classifier()._cache.get(symbol)
                                 if cached is not None:
@@ -3017,11 +3039,26 @@ class TimeSeriesAIService:
                                 cached_regime = get_multi_index_regime_classifier()._cached_result
                                 if cached_regime is not None:
                                     regime_label = cached_regime.label
+                                cached_sector = get_sector_regime_classifier()._cached
+                                if cached_sector is not None:
+                                    # Resolve symbol → sector ETF → snapshot
+                                    try:
+                                        from services.sector_tag_service import (
+                                            get_sector_tag_service,
+                                        )
+                                        etf = get_sector_tag_service().tag_symbol(symbol)
+                                        if etf is not None:
+                                            snap = cached_sector.sectors.get(etf)
+                                            if snap is not None:
+                                                sector_label = snap.regime
+                                    except Exception:
+                                        pass
                             except Exception:
                                 pass
                             label_feats = build_label_features(
                                 market_setup=setup_label,
                                 multi_index_regime=regime_label,
+                                sector_regime=sector_label,
                             )
                             combined.update(label_feats)
                     except Exception as e:

@@ -519,6 +519,13 @@ class LiveAlert:
     # risk_off_broad / risk_off_defensive / bullish_divergence /
     # bearish_divergence / mixed / unknown.
     multi_index_regime: str = "unknown"
+
+    # NEW: Sector regime tag (Feb 2026, sibling to multi_index_regime).
+    # The home-sector regime for this symbol — strong / rotating_in /
+    # neutral / rotating_out / weak / unknown. Resolves the symbol via
+    # the static `sector_tag_service` map; symbols outside the map
+    # stay 'unknown' (alerts still fire — soft gate, not a hard reject).
+    sector_regime: str = "unknown"
     
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
@@ -5057,6 +5064,20 @@ class EnhancedBackgroundScanner:
             alert.multi_index_regime = regime_res.label.value
         except Exception as e:
             logger.debug(f"_apply_regime_context({symbol}) failed: {e}")
+
+        # Sector regime tag — per-symbol, derived from the 11 SPDR sector
+        # ETFs. Same soft-gate pattern: stamp the label on the alert,
+        # never modify priority. Symbols outside the static sector tag
+        # map stay 'unknown'.
+        try:
+            from services.sector_regime_classifier import (
+                get_sector_regime_classifier,
+            )
+            sector_classifier = get_sector_regime_classifier(db=self.db)
+            sector_label = await sector_classifier.classify_for_symbol(symbol)
+            alert.sector_regime = sector_label.value
+        except Exception as e:
+            logger.debug(f"_apply_sector_regime({symbol}) failed: {e}")
 
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB

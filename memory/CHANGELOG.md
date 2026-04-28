@@ -2,6 +2,150 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (fourth commit) — Sector Regime Pipeline (Items #3 + #4)
+
+Closes the agreed 6-item next-session plan. With this commit, the
+operator's mental hierarchy
+    `Multi-index regime → Sector regime → Daily Setup → Time/InPlay → Trade`
+is fully wired in. None of these layers hard-gate alerts; all four
+flow into the per-Trade ML model as one-hot features (the architecture
+decision locked at 2026-04-29).
+
+### Shipped
+
+#### 1. `services/sector_tag_service.py` (NEW — Item #3)
+- `SECTOR_ETFS` re-exports the 11 SPDR ETF map (XLK / XLE / XLF / XLV /
+  XLY / XLP / XLI / XLB / XLRE / XLU / XLC).
+- `STATIC_SECTOR_MAP` covers ~340 of the most-liquid US large/mid-caps,
+  GICS-aligned. Sized to give meaningful day-1 coverage without needing
+  IB contract-details lookups (which can be added later as a fallback).
+- `SectorTagService.tag_symbol(symbol)` → `"XLK"` | `None`
+  (case-insensitive, ETF-self-mapping built in).
+- `SectorTagService.backfill_symbol_adv_cache(db)` walks every doc in
+  `symbol_adv_cache`, writes `sector` + `sector_name`. Idempotent —
+  already-tagged docs are skipped. Returns
+  `{total, tagged, skipped, untaggable}`.
+- One-time backfill script at `backend/scripts/backfill_sector_tags.py`
+  for operators who prefer CLI to the API endpoint.
+
+#### 2. `services/sector_regime_classifier.py` (NEW — Item #4)
+- `SectorRegime` enum (6 buckets): STRONG / ROTATING_IN / NEUTRAL /
+  ROTATING_OUT / WEAK / UNKNOWN.
+- `SectorRegimeClassifier` reads daily bars for the 11 sector ETFs
+  + SPY (the relative-strength benchmark) in one pass. Per sector:
+  - trend_pct vs 20SMA
+  - momentum_5d_pct (vs 5 bars back)
+  - rs_vs_spy_pct = sector 5d − SPY 5d (relative strength)
+  - regime label per the 6-bucket rules (STRONG = trend ≥+0.5% AND
+    RS ≥+0.3%; ROTATING_IN = RS ≥+0.5% AND trend ≥0; etc.)
+  - 5-min market-wide cache (regime is a daily-bar derived signal).
+- `classify_for_symbol(symbol)` resolves via `SectorTagService` →
+  returns the home sector's regime. Untagged symbols return UNKNOWN.
+- **`SectorRegimeHistoricalProvider`** — date-aware sibling for the
+  per-Trade ML training loop. Pre-loads daily bars for all 11 ETFs +
+  SPY once (~50ms), then exposes
+  `get_sector_regime_for(symbol, date_str)` with a per-(etf, date)
+  cache so the same lookup across 1000s of training samples is O(1).
+
+#### 3. `services/ai_modules/composite_label_features.py` (UPDATED)
+- New `SECTOR_LABEL_FEATURE_NAMES` (5 one-hots, UNKNOWN baseline).
+- `ALL_LABEL_FEATURE_NAMES` grew from 15 → **20** features:
+  - 7 setup_label_*
+  - 8 regime_label_* (multi-index)
+  - 5 sector_label_*  ← NEW
+- `build_label_features()` now takes `sector_regime` and merges
+  the third one-hot block.
+
+#### 4. Scanner integration (`services/enhanced_scanner.py`)
+- `LiveAlert` gained `sector_regime: str = "unknown"` alongside
+  `multi_index_regime`. Every alert now carries both layers.
+- `_apply_setup_context` (already calls multi-index) now also calls
+  `SectorRegimeClassifier.classify_for_symbol(symbol)` and stamps
+  `alert.sector_regime`. Soft gate — never modifies priority.
+
+#### 5. ML feature plumbing (`services/ai_modules/timeseries_service.py`)
+- **Training** (`_train_single_setup_profile`):
+  - Imports + preloads `SectorRegimeHistoricalProvider`.
+  - Per training sample: computes the symbol's sector regime as of
+    the sample's date, then merges the 5 sector_label_* features into
+    the combined feature dict (alongside setup_label and regime_label).
+  - The full training feature vector now grows by 20 columns total
+    (instead of 15 in the prior commit) when the next retrain runs.
+- **Prediction** (`predict_for_setup`):
+  - Reads the cached `SectorRegimeClassifier._cached` result, resolves
+    `symbol → sector ETF → snapshot.regime`, populates the sector_label
+    one-hot. No async/sync mismatch — the alert path runs the
+    classifier upstream so the cache is hot.
+
+#### 6. API surface (`routers/scanner.py`)
+- `GET /api/scanner/sector-regime` — returns the 11-sector regime
+  snapshot with trend/momentum/RS for each. Powers a future heat-grid
+  in the operator UI.
+- `POST /api/scanner/backfill-sector-tags` — one-shot admin endpoint
+  to populate `symbol_adv_cache.sector`. Idempotent.
+
+### Tests
+`backend/tests/test_sector_regime_classifier.py` — **32 new tests**:
+- Static map coverage (every value is a valid ETF, every sector has
+  ≥1 stock, ETF-self-mapping correct).
+- `tag_symbol` lookups + `coverage` math.
+- Backfill writes `sector` + `sector_name`, skips already-tagged docs,
+  idempotent on re-run.
+- Classifier label assignment for all 5 active states from synthetic
+  bars (STRONG / WEAK / ROTATING_IN / NEUTRAL / UNKNOWN-on-thin-data).
+- Cache TTL hits + invalidate clears state.
+- `classify_for_symbol` resolves AAPL → XLK → STRONG.
+- Historical provider — preload, per-(etf, date) cache, UNKNOWN before
+  MIN_BARS, UNKNOWN for untagged symbols.
+- One-hot feature names exclude UNKNOWN; `ALL_LABEL_FEATURE_NAMES`
+  has exactly 20 slots; `build_label_features` combines all 3 layers.
+- LiveAlert exposes `sector_regime`; `_apply_setup_context` stamps
+  the right value via the cached classifier; UNKNOWN for untagged.
+- Source-level guards confirm training + prediction paths reference
+  the sector classifier.
+
+Total related-suite count after this commit: **157 tests** across:
+- `test_sector_regime_classifier.py`: 32 ✅ (new)
+- `test_landscape_grading_service.py`: 32 ✅
+- `test_multi_index_regime_classifier.py`: 28 ✅
+- `test_market_setup_matrix.py`: 21 ✅
+- `test_orphan_setup_detectors.py`: 17 ✅
+- `test_setup_landscape_service.py`: 13 ✅
+- + 14 from smb_profiles + setup_models_load_from_timeseries
+
+### Files touched
+- NEW `backend/services/sector_tag_service.py`
+- NEW `backend/services/sector_regime_classifier.py`
+- NEW `backend/scripts/backfill_sector_tags.py`
+- NEW `backend/tests/test_sector_regime_classifier.py`
+- `backend/services/enhanced_scanner.py` (LiveAlert.sector_regime
+  field + sector classify call in `_apply_setup_context`)
+- `backend/services/ai_modules/composite_label_features.py` (sector
+  label features added)
+- `backend/services/ai_modules/timeseries_service.py` (training-side
+  historical provider, prediction-side cached lookup)
+- `backend/routers/scanner.py` (2 new endpoints:
+  `sector-regime`, `backfill-sector-tags`)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Architecture status (post-commit)
+The agreed 6-item plan from the previous fork is fully complete:
+- ✅ #1 MultiIndexRegimeClassifier
+- ✅ #2 ML feature plumbing for setup_label + regime_label (+ sector now)
+- ✅ #3 Sector tag backfill (static map, IB-fallback parked)
+- ✅ #4 SectorRegimeClassifier
+- ✅ #5 Setup-landscape self-grading tracker
+- ✅ #6 Documented soft-gate decision; STRATEGY_REGIME_PREFERENCES re-tagged
+       as metadata only
+
+Pipeline as runtime:
+- HARD GATES: Time-window, In-Play/Universe, Confidence
+- SOFT GATES (priority downgrades): Setup × Trade matrix
+- ML FEATURES (one-hots): Setup, Multi-index regime, Sector regime,
+  + the existing 24 numerical regime features
+
+
+
 ## 2026-04-30 (third commit) — Receipts Cited Across All 4 Briefing Contexts
 
 Extended the just-shipped Setup-landscape self-grading tracker so all
