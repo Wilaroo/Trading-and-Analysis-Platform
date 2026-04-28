@@ -15,7 +15,6 @@ Human approval required for:
 - Final promotion to LIVE (safety gate)
 - Demotion from LIVE to PAPER
 """
-
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
@@ -62,6 +61,10 @@ class StrategyPerformance:
     days_in_phase: int = 0
     phase_start_date: str = ""
     last_trade_date: str = ""
+    # 2026-04-28f — per-cohort breakdown surfaced by the multiplier-
+    # dependence guard in `meets_requirements`. Populated from the
+    # `strategy_performance` collection's `multipliers_active` column.
+    multiplier_cohorts: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     
     def to_dict(self) -> Dict:
         return {
@@ -85,7 +88,24 @@ class StrategyPerformance:
             issues.append(f"Drawdown {self.max_drawdown_pct:.1%} > {req.max_drawdown_pct:.1%}")
         if self.days_in_phase < req.min_days_in_phase:
             issues.append(f"Only {self.days_in_phase} days in phase, need {req.min_days_in_phase}")
-            
+
+        # 2026-04-28f — multiplier-dependence guard. If the strategy's
+        # edge collapses when the liquidity-aware layers (stop_guard,
+        # target_snap, vp_path) AREN'T active, we surface that as a
+        # promotion issue so an LLM-grade strategy can't be auto-
+        # promoted on a multiplier-driven win rate.
+        cohorts = getattr(self, "multiplier_cohorts", None) or {}
+        with_m    = cohorts.get("with_multipliers")    or {}
+        without_m = cohorts.get("without_multipliers") or {}
+        if with_m and without_m and without_m.get("n", 0) >= 5:
+            wr_with    = (with_m.get("wins", 0) / with_m["n"]) if with_m.get("n") else 0
+            wr_without = (without_m.get("wins", 0) / without_m["n"]) if without_m.get("n") else 0
+            if (wr_with - wr_without) > 0.20:   # > +20pp lift from multipliers
+                issues.append(
+                    f"Multiplier-dependent edge: WR {wr_with:.1%} with multipliers "
+                    f"vs {wr_without:.1%} without (n={with_m['n']}/{without_m['n']})"
+                )
+
         return len(issues) == 0, issues
 
 
@@ -362,7 +382,34 @@ class StrategyPromotionService:
                             
                 if trades:
                     perf.last_trade_date = max(t.get("timestamp", "") for t in trades)
-                    
+
+            # 2026-04-28f — populate multiplier_cohorts from
+            # `strategy_performance` collection (the StrategyPerformance
+            # service writes multipliers_active flags there). Used by
+            # `meets_requirements` to detect multiplier-dependent edge.
+            try:
+                perf_col = self._db.get("strategy_performance")
+                if perf_col is not None:
+                    cohort_pipeline = [
+                        {"$match": {
+                            "strategy": strategy_name,
+                            "closed_at": {"$gte": cutoff.isoformat()},
+                        }},
+                        {"$group": {
+                            "_id": "$multipliers_active",
+                            "n":    {"$sum": 1},
+                            "wins": {"$sum": {"$cond": [{"$gt": ["$realized_pnl", 0]}, 1, 0]}},
+                        }},
+                    ]
+                    for d in perf_col.aggregate(cohort_pipeline):
+                        bucket = "with_multipliers" if d["_id"] else "without_multipliers"
+                        perf.multiplier_cohorts[bucket] = {
+                            "n":    d.get("n", 0),
+                            "wins": d.get("wins", 0),
+                        }
+            except Exception as _e:
+                logger.debug(f"multiplier_cohorts populate skipped: {_e}")
+
         except Exception as e:
             logger.error(f"Error getting performance for {strategy_name}: {e}")
             

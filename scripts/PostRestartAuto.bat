@@ -155,6 +155,27 @@ if %errorlevel%==0 (
 del "%TEMP%\incremental_result.tmp" 2>nul
 echo.
 
+:: =====================================================
+:: STEP 5: TRIGGER OVERNIGHT WATCHLIST SWEEP (2026-04-28f)
+:: =====================================================
+:: Force-runs the after-hours daily-chart scan + tomorrow-open
+:: carry-forward ranker so the operator sees a populated overnight
+:: watchlist immediately on resume — no more 20-min wait for the
+:: next automated sweep cycle.
+echo [5/5] Triggering overnight watchlist sweep...
+echo [5/5] Triggering overnight watchlist sweep... >> "%LOG_FILE%"
+curl -s -X POST -m 30 "%CLOUD_URL%/api/scanner/trigger-after-hours-sweep" > "%TEMP%\sweep_result.tmp" 2>nul
+if %errorlevel%==0 (
+    echo       Sweep result:
+    type "%TEMP%\sweep_result.tmp"
+    type "%TEMP%\sweep_result.tmp" >> "%LOG_FILE%"
+) else (
+    echo       Watchlist sweep request failed (non-fatal)
+    echo       Watchlist sweep request failed >> "%LOG_FILE%"
+)
+del "%TEMP%\sweep_result.tmp" 2>nul
+echo.
+
 :done_success
 
 :: =====================================================

@@ -153,6 +153,23 @@ async def get_trade_outcomes(
     }
 
 
+@router.get("/loop/multiplier-stats")
+async def get_multiplier_aware_stats(
+    setup_type: Optional[str] = None,
+    days_back: int = 30,
+):
+    """NIA-scoped per-layer cohort lift for the liquidity-aware
+    execution layers (stop_guard, target_snap, vp_path). Used by the
+    SentComIntelligencePanel to show per-setup-type whether the new
+    layers are pulling their weight in live trading.
+    """
+    learning_loop = get_learning_loop_service()
+    stats = await learning_loop.get_multiplier_aware_stats(
+        setup_type=setup_type, days_back=days_back,
+    )
+    return {"success": True, **stats}
+
+
 @router.get("/loop/profile")
 async def get_trader_profile():
     """

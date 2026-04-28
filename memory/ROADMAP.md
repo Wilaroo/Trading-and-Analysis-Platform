@@ -5,6 +5,28 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🔴 Now / Near-term (handoff to next session — 2026-04-27 EOD)
 
+### 🟠 Operator-prioritized follow-ups (2026-04-28f)
+- **Liquidity-aware realtime stop trail (Q1)**
+  Currently the realtime trail in `stop_manager.py` is purely ATR-based:
+  Target 1 hit → stop moves to entry, Target 2 hit → trailing engages.
+  The new `compute_stop_guard` from `smart_levels_service` only fires
+  at trade ENTRY. Plan: when Target 1 hits and stop is about to move
+  to breakeven, re-call `compute_stop_guard` to snap the stop to the
+  nearest HVN below entry instead of exact entry. Same logic on
+  trailing — snap each trail update to the next-lower HVN cluster
+  rather than a fixed % below price. ~1 hour. Keeps the bot's
+  realtime stop trail liquidity-aware end-to-end.
+- **Mean-reversion timing metric (Q2)**
+  No half-life / Hurst exponent calculation anywhere today. The bot
+  detects "mean_reversion" as a setup type but can't answer "this
+  symbol typically reverts in X bars". Plan: new
+  `services/mean_reversion_metrics_service.py` computes per-symbol
+  Hurst exponent + Ornstein-Uhlenbeck half-life nightly from daily
+  bars and caches `mean_reversion_stats` on `symbol_adv_cache`.
+  Evaluator can then prefer/avoid mean-revert setups based on the
+  symbol's intrinsic reversion speed. ~2-3 hours, real differentiator
+  vs typical setup scanners.
+
 ### 🟣 Saved improvements (operator pinned 2026-04-28)
 - **Live cache freshness pulse on chart x-axis** — turn the most
   recent x-axis tick green when its bar was written by

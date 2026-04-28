@@ -50,6 +50,26 @@ class StrategyPerformanceService:
 
         try:
             col = self._db["strategy_performance"]
+            # 2026-04-28f: capture multiplier provenance from
+            # `entry_context.multipliers` so per-strategy stats can be
+            # sliced by "with-multipliers-active" vs "without". Lets
+            # promotion logic detect a strategy whose apparent edge
+            # only exists because stop-guard/target-snap/VP-path are
+            # firing — vs one with intrinsic edge.
+            ec_multipliers = (trade_dict.get("entry_context") or {}).get("multipliers") or {}
+            sg = ec_multipliers.get("stop_guard") or {}
+            ts = ec_multipliers.get("target_snap") or []
+            vp = ec_multipliers.get("vp_path")
+            stop_guard_fired = bool(sg.get("snapped"))
+            target_snap_fired = any(
+                s.get("snapped") for s in ts if isinstance(s, dict)
+            )
+            try:
+                vp_active = vp is not None and float(vp) < 1.0
+            except (TypeError, ValueError):
+                vp_active = False
+            multipliers_active = bool(stop_guard_fired or target_snap_fired or vp_active)
+
             record = {
                 "trade_id": trade_dict.get("id"),
                 "symbol": trade_dict.get("symbol"),
@@ -67,12 +87,17 @@ class StrategyPerformanceService:
                 "quality_grade": trade_dict.get("quality_grade", ""),
                 "close_at_eod": trade_dict.get("close_at_eod", True),
                 "trail_pct_used": trade_dict.get("trailing_stop_config", {}).get("trail_pct", 0),
+                # Multiplier provenance (2026-04-28f)
+                "stop_guard_fired":  stop_guard_fired,
+                "target_snap_fired": target_snap_fired,
+                "vp_path_active":    vp_active,
+                "multipliers_active": multipliers_active,
                 "created_at": trade_dict.get("created_at"),
                 "closed_at": trade_dict.get("closed_at") or datetime.now(timezone.utc).isoformat(),
                 "recorded_at": datetime.now(timezone.utc).isoformat()
             }
             col.insert_one(record)
-            logger.info(f"Recorded performance: {record['symbol']} {record['strategy']} P&L=${record['realized_pnl']:.2f}")
+            logger.info(f"Recorded performance: {record['symbol']} {record['strategy']} P&L=${record['realized_pnl']:.2f} (mult_active={multipliers_active})")
         except Exception as e:
             logger.error(f"Error recording trade performance: {e}")
     
@@ -132,7 +157,41 @@ class StrategyPerformanceService:
                     "close_reasons": {str(k): v for k, v in reason_counts.items()},
                     "timeframe": r.get("strategies_used", ["unknown"])[0] if r.get("strategies_used") else "unknown"
                 }
-            
+
+            # 2026-04-28f — multiplier-cohort split per strategy.
+            # Detects strategies whose apparent edge depends on the
+            # liquidity-aware layers firing (vs intrinsic strategy
+            # quality). Logged separately so we don't expand the main
+            # aggregation pipeline beyond its current shape.
+            try:
+                multiplier_pipeline = [
+                    {"$group": {
+                        "_id": {
+                            "strategy": "$strategy",
+                            "mult_active": "$multipliers_active",
+                        },
+                        "n":        {"$sum": 1},
+                        "wins":     {"$sum": {"$cond": [{"$gt": ["$realized_pnl", 0]}, 1, 0]}},
+                        "total_pnl":{"$sum": "$realized_pnl"},
+                    }},
+                ]
+                for d in col.aggregate(multiplier_pipeline):
+                    strat = (d["_id"] or {}).get("strategy") or "unknown"
+                    is_active = bool((d["_id"] or {}).get("mult_active"))
+                    if strat not in stats:
+                        continue
+                    n = d.get("n") or 0
+                    cohort = {
+                        "n":        n,
+                        "wins":     d.get("wins", 0),
+                        "win_rate": round((d.get("wins", 0) / n * 100), 1) if n else 0,
+                        "total_pnl": round(d.get("total_pnl") or 0, 2),
+                    }
+                    bucket = "with_multipliers" if is_active else "without_multipliers"
+                    stats[strat].setdefault("multiplier_cohorts", {})[bucket] = cohort
+            except Exception as e:
+                logger.debug(f"multiplier-cohort aggregation failed (non-critical): {e}")
+
             return stats
         except Exception as e:
             logger.error(f"Error getting strategy stats: {e}")

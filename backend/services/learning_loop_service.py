@@ -845,6 +845,103 @@ class LearningLoopService:
             
         docs = list(self._trade_outcomes_col.find(query).sort("created_at", -1).limit(limit))
         return [TradeOutcome.from_dict(d) for d in docs]
+
+    # 2026-04-28f — multiplier-aware learning. Reads
+    # `bot_trades.entry_context.multipliers` (shipped earlier this
+    # session) so NIA can answer "win rate when stop-guard fires" vs
+    # "win rate when it doesn't" — surfaces whether the new liquidity-
+    # aware layers are pulling their weight in live performance.
+    async def get_multiplier_aware_stats(
+        self, setup_type: Optional[str] = None, days_back: int = 30
+    ) -> Dict[str, Any]:
+        """Return per-layer cohort lift for the liquidity-aware execution
+        layers (stop_guard, target_snap, vp_path).
+
+        For each layer, we slice closed bot_trades into "fired" vs
+        "not_fired" cohorts and report win_rate, mean_r, sample size,
+        and lift (fired - not_fired). Mirror of `multiplier_analytics_
+        service` but scoped to NIA's per-setup-type lens so it composes
+        cleanly with `get_contextual_win_rate`.
+        """
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        out = {
+            "setup_type": setup_type,
+            "window_days": days_back,
+            "stop_guard":  {"fired": None, "not_fired": None, "lift_r": None},
+            "target_snap": {"fired": None, "not_fired": None, "lift_r": None},
+            "vp_path":     {"downsized": None, "full_size": None, "lift_r": None},
+        }
+        if self._db is None:
+            return out
+        try:
+            cutoff = (_dt.now(_tz.utc) - _td(days=int(days_back))).isoformat()
+            q: Dict[str, Any] = {
+                "status": "closed",
+                "created_at": {"$gte": cutoff},
+            }
+            if setup_type:
+                q["setup_type"] = setup_type
+            trades = list(self._db["bot_trades"].find(
+                q, {"_id": 0, "realized_r_multiple": 1, "r_multiple": 1,
+                    "entry_context": 1},
+            ))
+        except Exception as e:
+            logger.error(f"get_multiplier_aware_stats query failed: {e}")
+            return out
+
+        def _bucket(rs: List[float]) -> Optional[Dict[str, Any]]:
+            if not rs:
+                return None
+            wins = sum(1 for r in rs if r > 0)
+            return {
+                "n":         len(rs),
+                "win_rate":  round(wins / len(rs), 3),
+                "mean_r":    round(sum(rs) / len(rs), 3),
+            }
+
+        sg_f, sg_n = [], []
+        ts_f, ts_n = [], []
+        vp_d, vp_o = [], []
+        for t in trades:
+            r = t.get("realized_r_multiple")
+            if r is None:
+                r = t.get("r_multiple")
+            if r is None:
+                continue
+            try:
+                r = float(r)
+            except (TypeError, ValueError):
+                continue
+            ec = (t.get("entry_context") or {}).get("multipliers") or {}
+
+            sg = ec.get("stop_guard") or {}
+            (sg_f if sg.get("snapped") else sg_n).append(r)
+
+            ts_list = ec.get("target_snap") or []
+            ts_fired = any(s.get("snapped") for s in ts_list if isinstance(s, dict))
+            (ts_f if ts_fired else ts_n).append(r)
+
+            vp = ec.get("vp_path")
+            try:
+                vp_active = vp is not None and float(vp) < 1.0
+            except (TypeError, ValueError):
+                vp_active = False
+            (vp_d if vp_active else vp_o).append(r)
+
+        out["stop_guard"]["fired"]      = _bucket(sg_f)
+        out["stop_guard"]["not_fired"]  = _bucket(sg_n)
+        out["target_snap"]["fired"]     = _bucket(ts_f)
+        out["target_snap"]["not_fired"] = _bucket(ts_n)
+        out["vp_path"]["downsized"]     = _bucket(vp_d)
+        out["vp_path"]["full_size"]     = _bucket(vp_o)
+
+        for layer in ("stop_guard", "target_snap", "vp_path"):
+            d = out[layer]
+            f_label = "downsized" if layer == "vp_path" else "fired"
+            n_label = "full_size" if layer == "vp_path" else "not_fired"
+            if d[f_label] and d[n_label]:
+                d["lift_r"] = round(d[f_label]["mean_r"] - d[n_label]["mean_r"], 3)
+        return out
         
     def is_tilted(self) -> bool:
         """Check if trader is currently tilted"""
