@@ -45,6 +45,20 @@ Open priorities, deferred ideas, and backlog. Move items to
   sorting by `(catalyst_score, tqs_score)` so news-driven candidates
   surface first. Pairs naturally with the SEC EDGAR 8-K integration
   (also on the roadmap as P2).
+- **Live health monitor — go-live trip wire**
+  (sketched 2026-04-28e at `services/live_health_monitor.py`,
+  not yet wired). Async daemon polling every 30s; trips
+  `bot.kill_switch_latch()` on any of: pusher offline >60s, account-
+  guard mismatch, RPC p99 >5s over a 2-min window, ≥5 consecutive
+  order rejects, bot loop heartbeat >90s stale. 10/10 tests
+  passing (`test_live_health_monitor.py`). Activate alongside the
+  first LIVE flip by:
+  (a) instantiating `LiveHealthMonitor(self).start()` in
+      `TradingBotService.start_bot`,
+  (b) adding a `/api/trading-bot/live-health` GET endpoint that
+      returns `monitor.snapshot()` for the operator dashboard,
+  (c) recording RPC latencies via `monitor.record_rpc_latency_ms`
+      in `routers/ib.py` after each pusher RPC call.
 
 ### Operator user-noted issues at end of session
 - **Paper account shows $100,000** instead of operator's expected balance

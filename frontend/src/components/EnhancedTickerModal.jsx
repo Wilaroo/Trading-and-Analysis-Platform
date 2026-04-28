@@ -44,6 +44,11 @@ import QuickActionsMenu from './QuickActionsMenu';
 import SmartStopSelector from './SmartStopSelector';
 import { useWsData } from '../contexts/WebSocketDataContext';
 import { useLiveSubscription } from '../hooks/useLiveSubscription';
+// 2026-04-28e: switched to ChartPanel so the modal inherits premarket
+// shading, Volume Profile, Smart S/R, POC line, and the daily-midnight
+// snap fix — instead of the local hand-rolled lightweight-charts setup
+// the modal had been carrying.
+import { ChartPanel } from './sentcom/panels/ChartPanel';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -1223,120 +1228,16 @@ const EnhancedTickerModal = ({
                 </div>
               </div>
             ) : activeTab === 'chart' ? (
-              /* CHART TAB - Full width chart */
-              <div className="flex-1 p-4 flex flex-col">
-                {/* Chart Controls */}
-                <div className="flex justify-between items-center mb-2 flex-shrink-0">
-                  <div className="flex gap-1">
-                    {TIMEFRAMES.map((tf) => (
-                      <button 
-                        key={tf.id}
-                        onClick={() => handleTimeframeChange(tf.id)}
-                        className={`px-3 py-1.5 rounded text-sm transition-colors ${
-                          selectedTimeframe === tf.id ? 'bg-cyan-400/30 text-cyan-400' : 'bg-white/10 hover:bg-white/20'
-                        }`}
-                      >
-                        {tf.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={showBotVision}
-                        onChange={(e) => setShowBotVision(e.target.checked)}
-                        className="w-4 h-4 accent-cyan-400" 
-                      />
-                      <span className="text-sm text-cyan-400 flex items-center gap-1">
-                        {showBotVision ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                        Bot Vision
-                      </span>
-                    </label>
-                    <button className="text-sm text-zinc-400 hover:text-white flex items-center gap-1">
-                      <BarChart3 className="w-4 h-4" /> Indicators
-                    </button>
-                    <button className="text-sm text-zinc-400 hover:text-white flex items-center gap-1">
-                      <Pencil className="w-4 h-4" /> Draw
-                    </button>
-                  </div>
-                </div>
-                
-                {/* Full Width Chart */}
-                <div className="relative flex-1 bg-black/50 rounded-lg overflow-hidden min-h-[500px]">
-                  {chartError ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-center">
-                        <AlertTriangle className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
-                        <p className="text-sm text-zinc-400">{chartError}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div ref={chartContainerRef} className="w-full h-full" style={{ minHeight: '500px' }} />
-                  )}
-                  
-                  {/* Position Badge Overlay */}
-                  {hasBotPosition && (
-                    <div className="absolute top-3 left-3 px-3 py-2 rounded-lg bg-emerald-400/15 border border-emerald-400/50 backdrop-blur-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="text-xs font-bold text-emerald-400">POSITION OPEN</span>
-                        </div>
-                        <div className="h-4 w-px bg-emerald-400/30" />
-                        <span className="font-mono text-sm text-white">
-                          {trade?.shares || trade?.quantity || 0} shares
-                        </span>
-                        <span className={`font-mono text-sm ${positionPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {positionPnl >= 0 ? '+' : ''}${positionPnl?.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Key Levels Bar */}
-                {keyLevels.length > 0 && (
-                  <div className="flex gap-2 mt-3 flex-shrink-0">
-                    {keyLevels.map((level, i) => (
-                      <div 
-                        key={i}
-                        className="flex-1 p-3 rounded-lg text-center"
-                        style={{ 
-                          backgroundColor: `rgba(${
-                            level.color === 'purple' ? '168,85,247' :
-                            level.color === 'emerald' ? '16,185,129' :
-                            level.color === 'red' ? '239,68,68' :
-                            level.color === 'cyan' ? '34,211,238' :
-                            level.color === 'yellow' ? '250,204,21' :
-                            '161,161,170'
-                          }, 0.1)`,
-                          borderColor: `rgba(${
-                            level.color === 'purple' ? '168,85,247' :
-                            level.color === 'emerald' ? '16,185,129' :
-                            level.color === 'red' ? '239,68,68' :
-                            level.color === 'cyan' ? '34,211,238' :
-                            level.color === 'yellow' ? '250,204,21' :
-                            '161,161,170'
-                          }, 0.2)`,
-                          border: '1px solid'
-                        }}
-                      >
-                        <span className="text-xs text-zinc-400">{level.label}</span>
-                        <span className="font-mono text-base ml-2" style={{
-                          color: level.color === 'purple' ? '#A855F7' :
-                                 level.color === 'emerald' ? '#10B981' :
-                                 level.color === 'red' ? '#EF4444' :
-                                 level.color === 'cyan' ? '#22D3EE' :
-                                 level.color === 'yellow' ? '#FACC15' :
-                                 '#A1A1AA'
-                        }}>
-                          ${level.value?.toFixed(2)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              /* CHART TAB - Full width chart (2026-04-28e: now uses
+                 ChartPanel — same component as the V5 main view, so all
+                 the premarket shading / Volume Profile / Smart S/R /
+                 POC line / daily-midnight-snap fixes apply here too.) */
+              <div className="flex-1 p-2 flex flex-col min-h-[500px]">
+                <ChartPanel
+                  symbol={ticker.symbol}
+                  initialTimeframe={selectedTimeframe || '5m'}
+                  className="flex-1 min-h-[500px]"
+                />
               </div>
             ) : (
               /* OVERVIEW TAB - Chart + Sidebar */
