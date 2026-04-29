@@ -11,6 +11,8 @@
  *   info   → slate    (fallback)
  */
 import React, { useCallback, useMemo, useState } from 'react';
+import { ShadowDecisionBadge } from './ShadowDecisionBadge';
+import { useRecentShadowDecisions, SHADOW_FRESHNESS_WINDOW_MS } from './useRecentShadowDecisions';
 
 const TIME_COLOR_BY_SEV = {
   scan:  'text-violet-300',
@@ -107,13 +109,35 @@ const formatRight = (msg, sev) => {
 };
 
 
-const StreamRow = ({ msg, onSymbolClick }) => {
+const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
   const sev = classifyMessage(msg);
   const time = formatTimestamp(msg.timestamp || msg.created_at || msg.time);
   const headline = formatHeadline(msg);
   const right = formatRight(msg, sev);
   const body = msg.summary || msg.text || msg.message || msg.content || msg.note || '';
   const sym = msg.symbol || msg.ticker;
+
+  // Shadow-decision chip — only render when:
+  //   • the row has a symbol AND
+  //   • the row is "alert-like" (a scanner/setup/eval event the bot
+  //     reasoned about, not a fill/win/loss after-the-fact log) AND
+  //   • shadow tracker has a decision for that symbol within
+  //     SHADOW_FRESHNESS_WINDOW_MS of the row's timestamp.
+  let shadowChip = null;
+  if (sym && (sev === 'scan' || sev === 'brain') && shadowBySymbol) {
+    const decision = shadowBySymbol.get(sym.toUpperCase());
+    if (decision) {
+      const rowMs = Date.parse(
+        msg.timestamp || msg.created_at || msg.time || ''
+      );
+      const ageMs = Number.isFinite(rowMs)
+        ? Math.abs(rowMs - decision.trigger_ms)
+        : 0;
+      if (ageMs <= SHADOW_FRESHNESS_WINDOW_MS) {
+        shadowChip = <ShadowDecisionBadge decision={decision} ageMs={ageMs} />;
+      }
+    }
+  }
 
   return (
     <div className={`v5-stream-item sev-${sev}`} data-testid={`v5-stream-item-${sev}`}>
@@ -138,6 +162,7 @@ const StreamRow = ({ msg, onSymbolClick }) => {
                 the headline to avoid duplication. */}
             {sym ? headline.replace(new RegExp(`^${sym}\\s*·\\s*`, 'i'), '') : headline}
           </b>
+          {shadowChip}
         </span>
         {right && <span className={`shrink-0 v5-mono ${right.color || ''}`}>{right.text}</span>}
       </div>
@@ -153,6 +178,10 @@ const StreamRow = ({ msg, onSymbolClick }) => {
 
 
 export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
+  // Shadow-decision lookup table (refreshed every 60s). Computed at
+  // the parent level so each row only does a Map.get() — no fetches.
+  const shadowBySymbol = useRecentShadowDecisions();
+
   // Stage 2d-C — filter chips matching the mockup. Multi-select: unlocked
   // defaults to "all". Clicking a chip toggles it.
   const [filters, setFilters] = useState(() => new Set());
@@ -199,7 +228,7 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
     <div data-testid="v5-unified-stream" data-help-id="unified-stream" className="flex flex-col">
       <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
       {filtered.map((m, i) => (
-        <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} />
+        <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} shadowBySymbol={shadowBySymbol} />
       ))}
       {filtered.length === 0 && filters.size > 0 && (
         <div className="px-3 py-4 text-center text-[11px] text-zinc-500 v5-why-dim">

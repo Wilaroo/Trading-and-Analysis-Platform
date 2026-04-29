@@ -6,6 +6,8 @@ Reverse-chronological log of shipped work. Newest first.
 
 Closes the operator's P1 backlog list ("B + C + a few gaps") in one
 batch. Four independent improvements, each surgical and additive.
+**Follow-on enhancement** (same commit, post-finish operator request):
+inline shadow-decision badges on V5 stream rows, see end of section.
 
 ### 1. Realtime stop-guard re-check (Task B)
 
@@ -144,6 +146,38 @@ scanner?". Audit result:
 `ai_assistant_service` still bind to it. Migrate those two callers to
 `enhanced_scanner` output (~2-3h refactor), then drop predictive_scanner
 + its 7 unused GET endpoints. Tracked as a P2 entry in ROADMAP.
+
+### 5. Inline shadow-decision badges on V5 stream rows (operator follow-on)
+
+After the four-feature batch shipped, the operator asked for the
+"shadow vs real" divergence signal to be **actionable per-alert**,
+not just visible as an aggregate in the new tile. Wired up:
+
+- New hook `frontend/src/components/sentcom/v5/useRecentShadowDecisions.js`
+  fetches `/api/ai-modules/shadow/decisions?limit=200` every 60s and
+  normalises into `Map<UPPER_SYMBOL, latestDecision>` keeping only
+  the highest-`trigger_ms` row per symbol.
+- New component `frontend/src/components/sentcom/v5/ShadowDecisionBadge.jsx`
+  — small inline chip with three variants:
+    - 🟢 **TAKE** (green) — shadow voted `proceed`
+    - 🔴 **PASS** (red) — shadow voted `pass`
+    - 🟡 **REDUCE** (amber) — shadow voted `reduce_size`
+  - Visual tail: confidence score (`0.72`), filled `●` when
+    `was_executed=true` (bot agreed) or hollow `○` when bot diverged,
+    dimmed when shadow signal is >5min stale relative to the row.
+- `UnifiedStreamV5.StreamRow` now consults the hook map for any row
+  with a `symbol` AND `sev ∈ {scan, brain}` — fills/wins/losses don't
+  get badged because the AI vote is post-hoc noise there.
+- Freshness gate: badge only renders when shadow decision is within
+  `SHADOW_FRESHNESS_WINDOW_MS = 10 minutes` of the row timestamp,
+  preventing stale shadow votes from leaking onto unrelated alerts.
+
+**Tests**: `backend/tests/test_v5_shadow_badge_wiring.py` — **15 source-
+level guards** covering hook polling cadence + endpoint, freshness
+window pin, 3-recommendation badge coverage, executed-vs-diverged
+glyph, alert-like-only dispatch, uppercase-symbol lookup contract.
+
+**239/239 passing** across all related suites (224 prior + 15 new).
 
 
 
