@@ -188,14 +188,27 @@ class SetupLandscapeService:
 
     async def _pull_top_symbols(self, n: int) -> List[str]:
         """Pull top-N symbols by ADV from `symbol_adv_cache`. Falls back
-        to the scanner's recently-scanned set if Mongo is unreachable."""
+        to the scanner's recently-scanned set if Mongo is unreachable.
+
+        2026-04-29 (operator-flagged pre-RTH): query field name was
+        `adv_dollars` which doesn't exist in `symbol_adv_cache` —
+        the writer side stores it as `avg_dollar_volume` (see
+        `enhanced_scanner._read_adv_data` and `symbol_universe.py`).
+        Pre-fix: 9,412 docs in the cache but query returned 0 → the
+        morning briefing said "I screened 0 names" every day. Fixed
+        to read `avg_dollar_volume`, with a fallback to the legacy
+        `adv_dollars` field for any rows still on the old schema.
+        """
         if self.db is None:
             return []
         try:
             cursor = self.db["symbol_adv_cache"].find(
-                {"adv_dollars": {"$gt": 0}},
-                {"_id": 0, "symbol": 1, "adv_dollars": 1},
-            ).sort("adv_dollars", -1).limit(n)
+                {"$or": [
+                    {"avg_dollar_volume": {"$gt": 0}},
+                    {"adv_dollars":       {"$gt": 0}},  # legacy schema fallback
+                ]},
+                {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "adv_dollars": 1},
+            ).sort("avg_dollar_volume", -1).limit(n)
             rows = await cursor.to_list(length=n)
             return [r["symbol"] for r in rows if r.get("symbol")]
         except Exception as e:
