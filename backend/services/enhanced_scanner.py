@@ -407,6 +407,14 @@ class LiveAlert:
     tape_score: float = 0.0
     tape_confirmation: bool = False
     tape_signals: List[str] = field(default_factory=list)
+
+    # 2026-04-30: snapshot signals stamped on the alert at fire-time so
+    # later diagnostic / ML / receipt queries don't have to join back to
+    # the full historical snapshot. Every detector checks these but
+    # they were never being persisted on the alert doc.
+    rvol: float = 0.0
+    gap_pct: float = 0.0
+    atr_percent: float = 0.0
     
     # Strategy stats
     strategy_win_rate: float = 0.0
@@ -1614,8 +1622,14 @@ class EnhancedBackgroundScanner:
                 momentum_signal=momentum_signal,
                 overall_signal=overall_signal,
                 tape_score=tape_score,
-                confirmation_for_long=tape_score > 0.2,
-                confirmation_for_short=tape_score < -0.2,
+                # 2026-04-30: was strict `>` which made score==0.2 fail.
+                # The tight_spread bonus alone is +0.2; without L2 imbalance
+                # (which hasn't been persisted yet) MOST alerts land
+                # exactly at 0.2, so we need an inclusive boundary or
+                # the entire HIGH-priority pipeline rejects them. Bumped
+                # to inclusive >= 0.2 (and >= -0.2 for shorts).
+                confirmation_for_long=tape_score >= 0.2,
+                confirmation_for_short=tape_score <= -0.2,
                 l2_available=l2_available,
                 l2_imbalance=l2_imbalance if l2_imbalance else 0.0,
                 l2_bid_depth=l2_bid_depth,
@@ -2674,6 +2688,12 @@ class EnhancedBackgroundScanner:
                         alert.in_play_score = in_play_qual.score
                         alert.in_play_reasons = list(in_play_qual.reasons)
                         alert.in_play_disqualifiers = list(in_play_qual.disqualifiers)
+
+                    # Stamp snapshot signals so post-hoc diagnostics
+                    # don't see 0.0 (they used to — fixed 2026-04-30).
+                    alert.rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+                    alert.gap_pct = float(getattr(snapshot, "gap_pct", 0.0) or 0.0)
+                    alert.atr_percent = float(getattr(snapshot, "atr_percent", 0.0) or 0.0)
                     
                     # Check auto-execute eligibility
                     alert.auto_execute_eligible = (
