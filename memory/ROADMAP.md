@@ -3,7 +3,33 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v16 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v17 fork)
+
+### 🎯 Just shipped 2026-04-30 v17 — see CHANGELOG (seventeenth commit)
+- ✅ **Pusher Rotation Service** — DGX-side service that manages
+  the new 500-line IB Quote Booster budget. Goes live ~60s after
+  bot startup. Pre-v17: 72 hardcoded symbols. Post-v17: ~480
+  symbols dynamically rotated by time-of-day profile.
+- ✅ **Hard safety guard**: open positions + pending orders
+  AUTO-PINNED, can NEVER be unsubscribed by rotation. 30/30 tests
+  pass including 4 dedicated safety canaries.
+- ✅ **`/api/diagnostic/pusher-rotation-status`** with optional
+  dry-run preview, plus `POST /api/diagnostic/pusher-rotation-
+  rotate-now` operator escape hatch.
+- ✅ Live-tick coverage jumps from **0.76% → ~19%** of qualified
+  universe. Phase 2 (bar-poll service) will close to ~76%+.
+
+### 🟠 P1 — Phase 2 (next session): Bar Poll Service
+- Build `services/bar_poll_service.py` — IB historical-bar polling
+  for the 1,495 swing/investment + ~590 non-subscribed intraday
+  symbols. Bar-based detectors (`squeeze`, `mean_reversion`,
+  `chart_pattern`, `breakout`, etc.) run on this expanded pool.
+- Build multi-client IB session manager — needed to clear the
+  60 reqs/10min historical-data rate limit (6 clients = 360/10min).
+- Stamp `data_source: bar_poll_5m` on alerts; AI gate can downweight
+  if needed.
+- Result: total scanner reach jumps from ~480 (v17) to ~2,000+ of
+  2,532 qualified symbols.
 
 ### 🎯 Just shipped 2026-04-30 v16 — see CHANGELOG (sixteenth commit)
 - ✅ **`relative_strength` detector OFF** — operator-flagged: no

@@ -2,6 +2,116 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (seventeenth commit) — Pusher Rotation Service (500-line budget)
+
+**Why**: Operator confirmed 2026-04-30 IB upgrade — 5 Quote Booster
+packs × 100 lines = **500 simultaneous IB Level-1 subscription
+budget**. Pre-v17 the pusher subscription was 72 hardcoded symbols on
+the Windows side, leaving 99.24% of the 9,412-symbol qualified
+universe starved of live ticks (and 38 detectors silent in 2-hour
+windows).
+
+This ships a DGX-side rotation service that **dynamically manages**
+the 500-line budget, swapping symbols in/out throughout the day so
+live-tick detectors see the right universe at the right time-of-day.
+
+### Architecture
+
+```
+500-LINE BUDGET (with 20-line safety buffer = 480 usable)
+├──  N    Open positions      (HARD pin — auto-discovered, no ceiling)
+├──  N    Pending orders      (HARD pin — auto-discovered, no ceiling)
+├──  30   Pinned ETFs/indices (SPY/QQQ/IWM + sector ETFs + vol/credit)
+├── 300   Static core         (top-300 intraday tier by ADV)
+├──  50   Hot slots           (premarket/news/halts; refreshed 4×/day)
+└── 100   Dynamic overlay     (RVOL/sector/news; refreshed every 15min RTH)
+```
+
+### Files added
+
+1. **`services/pusher_rotation_service.py`** (~500 LOC) — core orchestrator:
+   - `Profile.{PRE_MARKET_EARLY/LATE, RTH_OPEN/MIDDAY/AFTERNOON, POST_MARKET}`
+   - `select_profile()` — ET wall-clock dispatch
+   - `compose_target_set()` — priority-ordered cohort composition
+   - `compute_diff()` — diff-and-apply with safety-pinned protection
+   - `PusherRotationService` — async background loop (60s tick); calls
+     `rotate_once()` on schedule (4:30/7:00/8:30/9:25 ET hot-slot
+     refreshes; every 15min in RTH for dynamic overlay)
+   - Audit log → `pusher_rotation_log` Mongo collection (7d TTL)
+
+2. **`services/dynamic_slot_scorer.py`** (~250 LOC) — ranks the
+   non-core intraday tier (~737 candidates) for the 100 dynamic slots
+   each cycle. Signals: recent setup hits (60min), news tag (2h),
+   sector momentum (XL_ ETF moves), RVOL spike (5min), premarket gap
+   (session-open). Returns a single ranked list; rotation service
+   slices [:HOT_SLOT_BUDGET] and [HOT_SLOT_BUDGET:HOT+DYN] for each
+   cohort.
+
+3. **`services/ib_pusher_rpc.py`** — added `subscribe_symbols(set)`,
+   `unsubscribe_symbols(set)`, `get_subscribed_set(force_refresh=True)`
+   methods that hit the Windows pusher's `/rpc/subscribe` /
+   `/rpc/unsubscribe` endpoints with normalised, deduped, upper-cased
+   symbol sets.
+
+4. **`routers/diagnostic_router.py`** — two new endpoints:
+   - `GET  /api/diagnostic/pusher-rotation-status?dry_run_preview=true`
+     — see active profile, current subs count, budget allocation, and
+     optionally preview what the next rotation would do.
+   - `POST /api/diagnostic/pusher-rotation-rotate-now` — manual force
+     rotation, audit-logged (operator escape hatch).
+
+5. **`server.py` lifespan wiring** — rotation service auto-starts
+   alongside the trading bot. Fails gracefully if pusher RPC is
+   unreachable (logs `Pusher Rotation: FAILED` but doesn't block
+   startup).
+
+### Hard invariants (pytest-guarded — 30/30)
+
+★ **Open positions can NEVER be unsubscribed** by rotation. Even if
+  the rotation logic produces a target set that excludes a held name,
+  the diff-and-apply layer auto-pins it back in. `would_remove_held`
+  diagnostic field surfaces any caller bug attempting this.
+★ **Pending orders likewise pinned.**
+★ **Total subscription count NEVER exceeds 500 lines.**
+★ **Cohort priority order**: open_pos > pending > etfs > core > hot > dyn.
+  Lower-priority cohorts get squeezed if higher-priority pins overflow.
+★ **Diff math is correct** under all set permutations (idempotent on
+  identical sets, empty-current, empty-target, partial overlap).
+★ **`subscribe_symbols` short-circuits on empty input** (no
+  unnecessary RPC calls).
+★ **Symbol normalisation** in RPC layer (upper, strip, dedupe)
+  guaranteed before the wire.
+
+### What changes after pull + restart on Spark
+
+- Within ~60s of bot startup, the rotation service runs its first
+  cycle. Pusher subscriptions go from 72 → ~480 symbols matching the
+  current time-of-day profile.
+- Live-tick detectors (`9_ema_scalp`, `vwap_continuation`, `OR break`,
+  `vwap_fade`, etc.) start producing alerts on the expanded set.
+- Coverage goes from **0.76% to ~19%** of the 2,532 qualified
+  universe via live ticks alone (Phase 2: bar-poll service for swing
+  + investment tiers, planned for next session, will close the gap to
+  ~76%+ total coverage).
+- Operator-facing diagnostic:
+  ```bash
+  curl -s "http://localhost:8001/api/diagnostic/pusher-rotation-status?dry_run_preview=true" \
+    | python3 -m json.tool
+  ```
+
+### What does NOT ship in v17 (parked for v18)
+
+- **Bar Poll Service** (Phase 2) — historical-bar polling for the
+  ~590 non-subscribed intraday + 888 swing + 607 investment symbols.
+  Adds ~2,085 symbols of "second-tier" coverage at 30s freshness with
+  zero pusher-line burn. Will close the universe coverage gap to
+  ~76%+.
+- **Multi-client IB sessions** — needed before Phase 2 to clear the
+  IB historical-data rate limit (60 reqs/10min per client → 360/10min
+  with 6 clients).
+
+
+
 ## 2026-04-30 (sixteenth commit) — RS detector OFF, alert caps lifted end-to-end
 
 **Why**: Operator review of the v15 screenshot landed on two clear

@@ -1290,3 +1290,85 @@ def scanner_coverage(hours: int = 6) -> Dict[str, Any]:
         "starved_setups": starved,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# ===========================================================================
+# /api/diagnostic/pusher-rotation-status — 500-line budget allocation
+# ===========================================================================
+@router.get("/pusher-rotation-status")
+def pusher_rotation_status(
+    dry_run_preview: bool = False,
+) -> Dict[str, Any]:
+    """Surface the rotation service state.
+
+    Args:
+        dry_run_preview: if True, also computes what the next rotation
+            would do (without applying it). Useful before a manual rotation.
+
+    Returns:
+        - running: bool — is the rotation loop alive?
+        - active_profile: str — current time-of-day profile
+        - budget: max/usable/safety-buffer
+        - current_pusher_subscriptions: int — what's actually subscribed
+        - last_rotation: dict — most recent applied rotation
+        - dry_run_diff: dict — what would change if we rotated now (optional)
+    """
+    from services.pusher_rotation_service import (
+        get_rotation_service, MAX_LINES, USABLE_LINES, SAFETY_BUFFER,
+    )
+    svc = get_rotation_service(db=_get_db())
+    out: Dict[str, Any] = svc.status()
+    out["budget"] = {
+        "max_lines": MAX_LINES,
+        "usable_lines": USABLE_LINES,
+        "safety_buffer": SAFETY_BUFFER,
+    }
+    out["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    if dry_run_preview:
+        try:
+            preview = svc.rotate_once(dry_run=True)
+            out["dry_run_preview"] = {
+                "profile": preview.get("profile"),
+                "budget_used": preview.get("budget_used"),
+                "by_cohort": {
+                    k: len(v) for k, v in (preview.get("by_cohort") or {}).items()
+                },
+                "diff": preview.get("diff"),
+                "warnings": preview.get("warnings"),
+                "safety_pinned_count": preview.get("safety_pinned_count"),
+            }
+        except Exception as e:
+            out["dry_run_preview"] = {
+                "error": f"{type(e).__name__}: {e}",
+            }
+
+    return out
+
+
+@router.post("/pusher-rotation-rotate-now")
+def pusher_rotation_rotate_now() -> Dict[str, Any]:
+    """Operator escape hatch — force a rotation cycle right now.
+    Useful after manually opening a position before the next scheduled
+    refresh (the loop pins new positions on its own each minute, but
+    this is faster). Audit-logged in `pusher_rotation_log`."""
+    from services.pusher_rotation_service import get_rotation_service
+    svc = get_rotation_service(db=_get_db())
+    try:
+        result = svc.rotate_once(dry_run=False)
+        return {
+            "success": True,
+            "rotated_at": result.get("ts"),
+            "profile": result.get("profile"),
+            "budget_used": result.get("budget_used"),
+            "added_count": len(result.get("diff", {}).get("to_add", [])),
+            "removed_count": len(result.get("diff", {}).get("to_remove", [])),
+            "would_remove_held": result.get("diff", {}).get("would_remove_held", []),
+            "warnings": result.get("warnings", []),
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Rotation failed: {type(e).__name__}: {e}",
+        )

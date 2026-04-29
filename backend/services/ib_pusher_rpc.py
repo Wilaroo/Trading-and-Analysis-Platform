@@ -340,6 +340,65 @@ class _PusherRPCClient:
             return None
         return resp.get("quote")
 
+    # ---- subscription management (added 2026-04-30 v17) -----------------
+    #
+    # The DGX-side pusher rotation service uses these to swap symbols in
+    # and out of the pusher's live IB Level-1 subscription set. Both
+    # methods are idempotent on the pusher side — re-subscribing a symbol
+    # that's already streamed is a no-op there.
+    #
+    # Symbols are normalised to UPPER + stripped before sending so the
+    # diff math we do on the DGX side stays canonical with what the
+    # pusher reports back via /rpc/subscriptions.
+    #
+    # Both methods bust the local subscription-set cache automatically
+    # (see _request hook) so the next subscriptions() call returns the
+    # fresh post-mutation set.
+
+    def subscribe_symbols(self, symbols: set) -> Optional[Dict[str, Any]]:
+        """Ask the pusher to add ``symbols`` to its IB Level-1 subscription
+        set. Returns the pusher's JSON response (typically containing
+        ``success`` + ``added`` + ``current_count``) or None on failure.
+        """
+        if not symbols:
+            return {"success": True, "added": [], "skipped": []}
+        try:
+            payload = sorted({str(s).upper().strip() for s in symbols if s})
+        except Exception as e:
+            logger.warning("subscribe_symbols normalisation failed: %s: %s",
+                           type(e).__name__, e, exc_info=True)
+            return None
+        return self._request(
+            "POST", "/rpc/subscribe",
+            json_body={"symbols": payload},
+            timeout=15.0,  # IB contract qualification can take a few seconds per batch
+        )
+
+    def unsubscribe_symbols(self, symbols: set) -> Optional[Dict[str, Any]]:
+        """Ask the pusher to drop ``symbols`` from its IB Level-1
+        subscription set. Returns the pusher's JSON response or None on
+        failure. Safe to call with symbols not currently subscribed (the
+        pusher treats unknowns as a no-op)."""
+        if not symbols:
+            return {"success": True, "removed": []}
+        try:
+            payload = sorted({str(s).upper().strip() for s in symbols if s})
+        except Exception as e:
+            logger.warning("unsubscribe_symbols normalisation failed: %s: %s",
+                           type(e).__name__, e, exc_info=True)
+            return None
+        return self._request(
+            "POST", "/rpc/unsubscribe",
+            json_body={"symbols": payload},
+            timeout=10.0,
+        )
+
+    def get_subscribed_set(self, force_refresh: bool = True) -> Optional[set]:
+        """Convenience alias for ``subscriptions()`` with refresh-by-default
+        semantics — the rotation service always wants the freshest read
+        before doing diff math."""
+        return self.subscriptions(force_refresh=force_refresh)
+
     def is_configured(self) -> bool:
         return _is_enabled() and bool(_base_url())
 

@@ -3980,6 +3980,28 @@ async def startup_event():
         except Exception as e:
             print(f"Simulation engine: DEFERRED ({e})")
 
+        # 4.6 Pusher Rotation Service (2026-04-30 v17). Manages the
+        # 500-line IB Level-1 subscription budget so live-tick detectors
+        # see the right universe at the right time-of-day. Starts on
+        # the same loop as the trading bot. Bails gracefully if the
+        # pusher RPC is not configured.
+        try:
+            from services.pusher_rotation_service import get_rotation_service
+            from services.dynamic_slot_scorer import (
+                hot_slots_provider,
+                dynamic_overlay_provider,
+            )
+            rotation_svc = get_rotation_service(
+                db=db,
+                bot=trading_bot,
+                hot_slots_provider=hot_slots_provider,
+                dynamic_overlay_provider=dynamic_overlay_provider,
+            )
+            await rotation_svc.start_loop()
+            print("Pusher Rotation: STARTED (500-line budget)")
+        except Exception as e:
+            print(f"Pusher Rotation: FAILED ({type(e).__name__}: {e})")
+
         # 5. Startup summary
         print("")
         print("=" * 50)
