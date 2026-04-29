@@ -21,6 +21,41 @@ Open priorities, deferred ideas, and backlog. Move items to
   into the V5 status strip.
 - 40 new tests (12 + 20 + 8). 224/224 across related suites.
 
+### 🟠 P1 — Divergence drill-in (operator-saved 2026-04-30 v11)
+
+The shadow-decision badges shipped this commit (●/○ on V5 stream
+rows) make divergence VISIBLE but not yet DIAGNOSTIC. Goal: make
+every shadow-vs-real disagreement a labeled training sample.
+
+**Behaviour spec**:
+  - Click a `○` (bot diverged) badge → side panel opens
+  - Panel shows the full shadow decision context:
+      • What modules contributed (debate/risk/institutional/timeseries)
+      • The reasoning string from `ShadowDecision.reasoning`
+      • Why the bot diverged (look up the matching `live_alert` and
+        show which gate killed it: `tape_confirmation=false` /
+        `auto_execute_eligible=false` / `priority<HIGH` / etc)
+      • Outcome: `would_have_pnl` and `would_have_r` (already tracked)
+      • A "label" button (good_skip / bad_skip / unsure) that writes
+        to a new `divergence_labels` collection
+  - Click a `●` (bot agreed) badge → simpler panel showing both
+    decisions converged + actual trade outcome if closed
+
+**Implementation surface**:
+  - New endpoint `GET /api/ai-modules/shadow/decisions/{id}/divergence`
+    — joins shadow decision + matching `live_alert` + `bot_trade` row.
+  - New endpoint `POST /api/ai-modules/shadow/decisions/{id}/label`
+    — operator-supplied label for training data.
+  - New component `frontend/src/components/sentcom/v5/DivergenceDrillInPanel.jsx`.
+  - Wire badge `onClick` in `ShadowDecisionBadge.jsx`.
+
+**Why this matters**: closes the learning loop on the bot's gate
+calibration. Every time the operator marks a divergence as "bad_skip"
+the gate weights get a labeled signal — without that, divergence
+data sits unused. ~2-3h since `would_have_pnl` is already tracked on
+`ShadowDecision` and the join keys (symbol + trigger_time) align
+with `live_alerts`.
+
 ### 🟠 P2 — Predictive scanner deprecation (parked from this commit)
 The legacy `predictive_scanner` (forming-setup phases — early_formation /
 developing / nearly_ready / trigger_imminent) is still wired to:
