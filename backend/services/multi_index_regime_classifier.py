@@ -345,16 +345,38 @@ class MultiIndexRegimeClassifier:
     # ───────── Helpers ─────────
 
     async def _load_daily_bars(self, symbol: str) -> List[Dict]:
-        """Load up to N daily bars (oldest-first) for the given symbol."""
+        """Load up to N daily bars (oldest-first) for the given symbol.
+
+        2026-04-29 (operator-flagged mid-RTH): same silent motor/pymongo
+        bug as `setup_landscape_service._pull_top_symbols`. Pre-fix:
+        `await cursor.to_list(length=N)` only works on motor (async),
+        but the bot's `db` handle on Spark is sync PyMongo. The await
+        raised TypeError every call, the except swallowed it, returned
+        `[]`. End result: multi-index regime classifier reported
+        `have: []` for SPY/QQQ/IWM/DIA every day → cascaded into the
+        AI confidence gate marking every alert NEUTRAL → SKIP all.
+        Fixed by probing for the async `to_list` API and falling
+        through to sync iteration when not present, so the loader
+        works regardless of which client is wired.
+        """
         if self.db is None:
             return []
         try:
+            import asyncio as _asyncio
             cursor = self.db["ib_historical_data"].find(
                 {"symbol": symbol.upper(), "bar_size": "1 day"},
                 {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1,
                  "low": 1, "close": 1, "volume": 1},
             ).sort("date", -1).limit(self.DAILY_HISTORY_DAYS + 5)
-            bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+
+            # Sync (PyMongo) ↔ Async (motor) cursor materialisation.
+            bars: List[Dict] = []
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and _asyncio.iscoroutinefunction(to_list):
+                bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+            else:
+                bars = list(cursor)
+
             # Deduplicate by date (date string up to first 10 chars)
             seen: Dict[str, Dict] = {}
             for b in bars:

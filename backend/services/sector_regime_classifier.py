@@ -245,12 +245,22 @@ class SectorRegimeClassifier:
         if self.db is None:
             return []
         try:
+            import asyncio as _asyncio
             cursor = self.db["ib_historical_data"].find(
                 {"symbol": symbol.upper(), "bar_size": "1 day"},
                 {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1,
                  "low": 1, "close": 1, "volume": 1},
             ).sort("date", -1).limit(self.DAILY_HISTORY_DAYS + 5)
-            bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+            # 2026-04-29 (operator-flagged mid-RTH): same async/sync
+            # cursor bug as multi_index_regime_classifier and
+            # market_setup_classifier — see those files for the
+            # full diagnosis. Fixed identically here.
+            bars: List[Dict] = []
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and _asyncio.iscoroutinefunction(to_list):
+                bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+            else:
+                bars = list(cursor)
             seen: Dict[str, Dict] = {}
             for b in bars:
                 dk = str(b.get("date", ""))[:10]

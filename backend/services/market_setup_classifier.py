@@ -594,16 +594,35 @@ class MarketSetupClassifier:
     # ───────── Helpers ─────────
 
     async def _load_daily_bars(self, symbol: str) -> List[Dict]:
-        """Load up to N daily bars from MongoDB for the given symbol."""
+        """Load up to N daily bars from MongoDB for the given symbol.
+
+        2026-04-29 (operator-flagged mid-RTH, third hit of the same
+        async-cursor bug): pre-fix used `await cursor.to_list(...)`
+        which only works on motor; the bot's `db` handle on Spark is
+        sync PyMongo so the await raised TypeError every call,
+        except swallowed it, returned `[]`. End result: 200-symbol
+        sample loaded but `classified: 0` because every `_load_daily_bars`
+        returned empty → every classification returned None → the
+        Bellafiore Setup landscape was empty all day. Fixed by
+        probing for the async API and falling through to sync iteration.
+        """
         if self.db is None:
             return []
         try:
+            import asyncio as _asyncio
             cursor = self.db["ib_historical_data"].find(
                 {"symbol": symbol.upper(), "bar_size": "1 day"},
                 {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1,
                  "low": 1, "close": 1, "volume": 1},
             ).sort("date", -1).limit(self.DAILY_HISTORY_DAYS + 5)
-            bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+
+            bars: List[Dict] = []
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and _asyncio.iscoroutinefunction(to_list):
+                bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+            else:
+                bars = list(cursor)
+
             bars.reverse()  # oldest-first
             return bars
         except Exception as e:
