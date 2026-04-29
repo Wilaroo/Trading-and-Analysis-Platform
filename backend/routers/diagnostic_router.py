@@ -73,9 +73,19 @@ def _get_db():
 
 
 def _trading_day_iso(date_str: Optional[str]) -> str:
-    """Validate / default the trading-day argument to today (UTC)."""
+    """Validate / default the trading-day argument to today *in ET*.
+
+    Defaulting to UTC's "today" produces the wrong answer between
+    20:00-23:59 ET when UTC has already rolled over but the trading
+    day hasn't. Using America/New_York gives the operator the answer
+    they expect at all hours.
+    """
     if date_str is None or not date_str:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            from zoneinfo import ZoneInfo
+            return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        except Exception:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
         return date_str
@@ -357,6 +367,9 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
 
     # Read scanner hot counters (cumulative per cycle, not per-day) so the
     # operator can see what the live scanner *just* skipped.
+    scanner_hot: Dict[str, Any] = {}
+    scan_phase = "unknown"
+    et_clock = ""
     try:
         from services.enhanced_scanner import get_enhanced_scanner
         scanner = get_enhanced_scanner()
@@ -367,9 +380,47 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
             "symbols_skipped_adv": getattr(scanner, "_symbols_skipped_adv", None),
             "symbols_skipped_rvol": getattr(scanner, "_symbols_skipped_rvol", None),
             "symbols_skipped_in_play": getattr(scanner, "_symbols_skipped_in_play", None),
+            "scan_count": getattr(scanner, "_scan_count", None),
+            "running": getattr(scanner, "_running", None),
         }
+        # Resolve the scanner's current time-window so the 0-counters
+        # don't look like a bug when the scanner is intentionally idling.
+        try:
+            window = scanner._get_current_time_window()  # type: ignore
+            scan_phase = getattr(window, "value", str(window)).lower()
+        except Exception:
+            scan_phase = "unknown"
+        try:
+            from zoneinfo import ZoneInfo
+            et_clock = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S %Z")
+        except Exception:
+            pass
     except Exception:
         scanner_hot = {}
+
+    # Surface the scanner's "phase" prominently — it's the most common
+    # source of "0 alerts and I don't know why".
+    phase_explanation = {
+        "closed":       "After-hours mode: scanner runs daily-chart scans every ~20min; intraday RVOL/ADV gates aren't touched, so 0 skip counters are NORMAL.",
+        "premarket":    "Pre-market mode: scanner builds the morning watchlist every ~2min; intraday gates not active yet.",
+        "opening":      "Market open. Intraday gates active. ADV/RVOL skip counters should be climbing.",
+        "intraday":     "Regular intraday. ADV/RVOL skip counters should be climbing.",
+        "morning":      "Morning session. Intraday gates active.",
+        "afternoon":    "Afternoon session. Intraday gates active.",
+        "lunch":        "Lunch lull. Intraday gates active but most setups are time-windowed off.",
+        "power_hour":   "Power hour. Intraday gates active.",
+        "unknown":      "Scanner phase couldn't be resolved — supervisor may not have started the scanner.",
+    }.get(scan_phase, f"Scanner phase: {scan_phase}")
+
+    stages.append({
+        "stage": "scanner_phase",
+        "label": "Current scanner time-window",
+        "value": scan_phase.upper(),
+        "et_clock": et_clock,
+        "count": 1,
+        "kill_check": False,
+        "kill_reason": phase_explanation,
+    })
 
     return {
         "success": True,
