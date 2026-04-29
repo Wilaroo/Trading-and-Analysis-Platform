@@ -2338,7 +2338,17 @@ class TradingBotService:
             # Fail-OPEN on guardrail import / plumbing error would be unsafe;
             # fail-CLOSED (skip the trade) so a buggy safety layer can't
             # accidentally allow uncontrolled exposure.
-            logger.error("[SAFETY] Guardrail check crashed; blocking trade: %s", e)
+            #
+            # 2026-04-30 v14: `logger.exception` so the traceback appears
+            # in the log line itself. Lesson from the v13 `BotTrade.quantity`
+            # regression — that bug was a one-line `AttributeError` here
+            # that took 13 days to find because the prior `logger.error
+            # ("[SAFETY] Guardrail check crashed; blocking trade: %s", e)`
+            # hid the type + line number.
+            logger.exception(
+                "[SAFETY] Guardrail check crashed (%s): %s; blocking trade",
+                type(e).__name__, e,
+            )
             try:
                 from services.trade_drop_recorder import record_trade_drop
                 record_trade_drop(

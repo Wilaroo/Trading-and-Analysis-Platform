@@ -403,7 +403,10 @@ class BotPersistence:
             logger.debug(f"💾 Trade persisted: {trade.symbol} ({trade.id}) status={trade.status.value if hasattr(trade.status, 'value') else trade.status}")
 
         except Exception as e:
-            logger.error(f"Failed to persist trade {trade.id}: {e}")
+            logger.exception(
+                "Failed to persist trade %s (%s): %s",
+                trade.id, type(e).__name__, e,
+            )
 
     def persist_all_open_trades(self, bot: 'TradingBotService'):
         """Persist all open trades - call this periodically or on shutdown"""
@@ -433,7 +436,10 @@ class BotPersistence:
                 )
             )
         except Exception as e:
-            logger.error(f"Error saving trade: {e}")
+            logger.exception(
+                "Error saving trade (%s): %s",
+                type(e).__name__, e,
+            )
 
     async def load_trades_from_db(self, bot: 'TradingBotService'):
         """Load trades from database on startup"""
@@ -455,7 +461,10 @@ class BotPersistence:
             logger.info(f"Loaded {len(bot._open_trades)} open trades from database")
 
         except Exception as e:
-            logger.error(f"Error loading trades: {e}")
+            logger.exception(
+                "Error loading trades (%s): %s",
+                type(e).__name__, e,
+            )
 
     @staticmethod
     def dict_to_trade(d: Dict) -> Optional['BotTrade']:

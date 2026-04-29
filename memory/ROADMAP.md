@@ -3,7 +3,17 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v13 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v14 fork)
+
+### 🎯 Just shipped 2026-04-30 v14 — see CHANGELOG (fourteenth commit)
+- ✅ **`exc_info=True` / `logger.exception` sweep across the trade
+  chain** (15 sites in 4 files). Every critical except now surfaces
+  the exception type AND traceback line number in the log, so future
+  typo-class regressions like the v13 `BotTrade.quantity` bug surface
+  within the first failed trade attempt instead of needing a 13-day
+  forensic investigation.
+- ✅ 6 new regression canaries (29/29 total in
+  `test_trade_drop_instrumentation.py`).
 
 ### 🎯 Just shipped 2026-04-30 v13 — see CHANGELOG (thirteenth commit)
 - ✅ **13-DAY SILENT REGRESSION FIXED**. The v12 instrumentation

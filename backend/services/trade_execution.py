@@ -89,7 +89,10 @@ class TradeExecution:
                             "phase": "paper"
                         })
                     except Exception as e:
-                        logger.warning(f"Failed to record paper trade: {e}")
+                        logger.warning(
+                            "Failed to record paper trade (%s): %s",
+                            type(e).__name__, e, exc_info=True,
+                        )
 
                     # Mark trade as not executed (for UI feedback)
                     trade.status = TradeStatus.PAPER
@@ -161,7 +164,10 @@ class TradeExecution:
                         planned_r=planned_r
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to start execution tracking: {e}")
+                    logger.warning(
+                        "Failed to start execution tracking (%s): %s",
+                        type(e).__name__, e, exc_info=True,
+                    )
 
             # === PRE-EXECUTION GUARD RAILS (2026-04-21) ===
             # Block pathologically tight stops and oversized positions BEFORE
@@ -224,7 +230,14 @@ class TradeExecution:
                     await bot._save_trade(trade)
                     return
             except Exception as e:
-                logger.warning(f"Guardrail check failed (allowing trade): {e}")
+                # CRITICAL fail-OPEN path: a swallowed AttributeError here
+                # would let an undersized/oversized trade reach the broker.
+                # Surface type + traceback (lesson from the 2026-04-30 v13
+                # `BotTrade.quantity` typo regression).
+                logger.warning(
+                    "Guardrail check failed (allowing trade) (%s): %s",
+                    type(e).__name__, e, exc_info=True,
+                )
 
             # Execute entry order — Phase 3 (2026-04-22): prefer atomic bracket
             # over the legacy two-step entry→stop flow so stops can't die on
@@ -294,7 +307,10 @@ class TradeExecution:
                             actual_size=trade.shares
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to record entry: {e}")
+                        logger.warning(
+                            "Failed to record entry (%s): %s",
+                            type(e).__name__, e, exc_info=True,
+                        )
 
                 # Stop handling — bracket already placed the stop atomically,
                 # otherwise place it sequentially (legacy path)
@@ -423,10 +439,20 @@ class TradeExecution:
                 try:
                     await bot._save_trade(trade)
                 except Exception as save_err:
-                    logger.warning(f"Could not persist REJECTED trade {trade.id}: {save_err}")
+                    logger.warning(
+                        "Could not persist REJECTED trade %s (%s): %s",
+                        trade.id, type(save_err).__name__, save_err, exc_info=True,
+                    )
 
         except Exception as e:
-            logger.error(f"Trade execution error: {e}")
+            # 2026-04-30 v14: `logger.exception` so the traceback is in
+            # the log line itself, not buried in a separate
+            # `traceback.print_exc()` call. This is the gate that hid
+            # the 13-day `BotTrade.quantity` regression — keep loud.
+            logger.exception(
+                "Trade execution error (%s): %s",
+                type(e).__name__, e,
+            )
             trade.status = TradeStatus.REJECTED
             try:
                 from services.trade_drop_recorder import record_trade_drop
@@ -451,7 +477,10 @@ class TradeExecution:
                     del bot._pending_trades[trade.id]
                 await bot._save_trade(trade)
             except Exception as save_err:
-                logger.warning(f"Could not persist exception-rejected trade: {save_err}")
+                logger.warning(
+                    "Could not persist exception-rejected trade (%s): %s",
+                    type(save_err).__name__, save_err, exc_info=True,
+                )
 
     async def confirm_trade(self, trade_id: str, bot: 'TradingBotService') -> bool:
         """
@@ -490,7 +519,10 @@ class TradeExecution:
                     await bot._notify_trade_update(trade, "expired")
                     return False
             except Exception as e:
-                logger.warning(f"Could not check alert age: {e}")
+                logger.warning(
+                    "Could not check alert age (%s): %s",
+                    type(e).__name__, e, exc_info=True,
+                )
 
         # === PRICE RECALCULATION ===
         # Get current market price and recalculate position

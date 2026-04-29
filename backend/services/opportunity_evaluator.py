@@ -191,7 +191,10 @@ class OpportunityEvaluator:
                         print(f"   🧠 [CONFIDENCE GATE] GO ({gate_confidence}% conf) — {reasoning_summary}")
 
                 except Exception as e:
-                    logger.warning(f"Confidence gate error (proceeding anyway): {e}")
+                    logger.warning(
+                        "Confidence gate error (proceeding anyway) (%s): %s",
+                        type(e).__name__, e, exc_info=True,
+                    )
                     print(f"   ⚠️ Confidence gate error: {str(e)[:100]}")
 
             # ==================== GAP 3 FIX: POST-GATE TQS RECALCULATION ====================
@@ -617,7 +620,10 @@ class OpportunityEvaluator:
                             }
 
                 except Exception as e:
-                    logger.warning(f"AI Consultation failed (proceeding anyway): {e}")
+                    logger.warning(
+                        "AI Consultation failed (proceeding anyway) (%s): %s",
+                        type(e).__name__, e, exc_info=True,
+                    )
                     print(f"   ⚠️ AI Consultation error: {str(e)[:100]}")
 
             # AI evaluation - legacy
@@ -635,7 +641,10 @@ class OpportunityEvaluator:
                             else:
                                 print("   ⚠️ Overriding AI rejection in AUTONOMOUS mode")
                 except Exception as e:
-                    logger.warning(f"AI evaluation failed (proceeding anyway): {e}")
+                    logger.warning(
+                        "AI evaluation failed (proceeding anyway) (%s): %s",
+                        type(e).__name__, e, exc_info=True,
+                    )
 
             print(f"   ✅ Returning trade object {trade.id}")
 
@@ -665,7 +674,15 @@ class OpportunityEvaluator:
 
         except Exception as e:
             print(f"   ❌ Exception in _evaluate_opportunity: {e}")
-            logger.error(f"Error evaluating opportunity: {e}")
+            # 2026-04-30 v14: `logger.exception` writes the traceback
+            # into the log line itself — `traceback.print_exc()` below
+            # only reaches stdout, which can be lost when supervisor
+            # rotates. Both paths kept so the operator's terminal AND
+            # backend.log show the failure source.
+            logger.exception(
+                "Error evaluating opportunity (%s): %s",
+                type(e).__name__, e,
+            )
             import traceback
             traceback.print_exc()
             try:

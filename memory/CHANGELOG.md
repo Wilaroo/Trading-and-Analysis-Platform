@@ -2,6 +2,84 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (fourteenth commit) — exc_info=True / logger.exception sweep across the trade chain
+
+**Why**: The v13 `BotTrade.quantity` regression hid for 13 days because
+`except Exception as e: logger.error(f"... {e}")` strips the exception
+type AND the traceback line number. The error message was logged but
+nobody could tell *where* the error fired without grep diving into
+the source. Lesson: every critical except in the trade chain must
+surface either a full traceback (`logger.exception(...)` for outer
+errors) or `exc_info=True` (for "proceed anyway" warnings that may be
+hiding silent typo-class regressions).
+
+### Sites patched (15 total)
+
+**`services/trading_bot_service.py`** (1 site):
+- `_execute_trade` SAFETY guardrail crash (THE site that hid v13) →
+  `logger.exception("[SAFETY] Guardrail check crashed (%s): %s; blocking trade", type(e).__name__, e)`.
+
+**`services/trade_execution.py`** (8 sites):
+- Failed to record paper trade — `+ exc_info=True`
+- Failed to start execution tracking — `+ exc_info=True`
+- Guardrail check failed (allowing trade) — `+ exc_info=True`
+  (CRITICAL fail-OPEN path)
+- Failed to record entry — `+ exc_info=True`
+- Outer execute_trade exception → `logger.exception(...)`
+- Could not check alert age — `+ exc_info=True`
+- Could not persist REJECTED trade — `+ exc_info=True`
+- Could not persist exception-rejected trade — `+ exc_info=True`
+
+**`services/opportunity_evaluator.py`** (4 sites):
+- Confidence gate error (proceeding anyway) — `+ exc_info=True`
+- AI Consultation failed (proceeding anyway) — `+ exc_info=True`
+- AI evaluation failed (proceeding anyway) — `+ exc_info=True`
+- Outer evaluate_opportunity exception → `logger.exception(...)`
+  (also kept `traceback.print_exc()` so terminal AND backend.log
+  show the failure source).
+
+**`services/bot_persistence.py`** (3 sites):
+- `save_trade` outer exception → `logger.exception(...)`
+- `persist_trade` outer exception → `logger.exception(...)`
+- `load_trades_from_db` outer exception → `logger.exception(...)`
+
+### Regression coverage
+
+`backend/tests/test_trade_drop_instrumentation.py` — 29/29 (was 23/23)
+- 5 new parametrized canaries for `logger.exception` on critical paths
+- 1 new canary asserting `exc_info=True` on every "proceed anyway"
+  warning (7 sites verified)
+
+### Why this matters
+
+If the v13 `BotTrade.quantity` regression had hit AFTER this sweep,
+the very first auto-trade attempt would have produced this in
+backend.log:
+
+```
+ERROR [SAFETY] Guardrail check crashed (AttributeError):
+'BotTrade' object has no attribute 'quantity'; blocking trade
+Traceback (most recent call last):
+  File "/.../trading_bot_service.py", line 2264, in _execute_trade
+    notional = float(trade.entry_price or 0) * float(trade.quantity or 0)
+                                                     ^^^^^^^^^^^^^^^
+AttributeError: 'BotTrade' object has no attribute 'quantity'
+```
+
+vs. the actual v13 log line which was just:
+
+```
+ERROR [SAFETY] Guardrail check crashed; blocking trade: 'BotTrade' object has no attribute 'quantity'
+```
+
+— same message text, but the missing traceback (and the missing
+`AttributeError` type tag) made the operator's grep harder. Combined
+with the `safety_guardrail_crash` drop now being recorded to Mongo
+via the v12 instrumentation, future typo-class regressions surface
+within a single trade attempt.
+
+
+
 ## 2026-04-30 (thirteenth commit) — 13-DAY SILENT REGRESSION ROOT-CAUSED + FIXED
 
 **The instrumentation shipped in the twelfth commit caught the bug

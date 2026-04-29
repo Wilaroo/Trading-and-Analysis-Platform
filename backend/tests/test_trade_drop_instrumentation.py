@@ -242,7 +242,8 @@ def test_execution_exception_path_now_persists_trade():
     """Same fix on the exception branch."""
     pattern = re.compile(
         r"except Exception as e:\s+"
-        r"logger\.error\(f\"Trade execution error:.*?"
+        r"# 2026-04-30 v14:.*?"
+        r"logger\.exception\(.*?\"Trade execution error.*?"
         r"await bot\._save_trade\(trade\)",
         re.DOTALL,
     )
@@ -250,6 +251,82 @@ def test_execution_exception_path_now_persists_trade():
         "Exception branch in trade_execution.execute_trade() must persist "
         "the REJECTED trade so we don't lose forensics."
     )
+
+
+# --------------------------------------------------------------------------
+# v14 — exc_info=True / logger.exception canary
+#
+# The 2026-04-30 v13 root cause (`BotTrade.quantity` typo) hid for 13
+# days because the relevant `except Exception as e: logger.error(...)`
+# stripped the exception type and traceback. Audit guarantees every
+# critical except path in the trade chain now uses either
+# `logger.exception(...)` OR `exc_info=True` so the traceback is in the
+# log line — not buried in a separate `traceback.print_exc()` that
+# might miss a supervisor rotation.
+# --------------------------------------------------------------------------
+
+OPP_EVAL = (ROOT / "services" / "opportunity_evaluator.py").read_text()
+PERSIST = (ROOT / "services" / "bot_persistence.py").read_text()
+
+
+@pytest.mark.parametrize("haystack,needle,reason", [
+    # trading_bot_service: THE SAFETY guardrail crash that hid the v13 bug.
+    (TRADING_BOT,
+     'logger.exception(\n                "[SAFETY] Guardrail check crashed (%s): %s; blocking trade"',
+     "trading_bot_service._execute_trade SAFETY guardrail crash must use logger.exception"),
+    # trade_execution: outer execute_trade exception.
+    (TRADE_EXEC,
+     'logger.exception(\n                "Trade execution error (%s): %s"',
+     "trade_execution.execute_trade outer except must use logger.exception"),
+    # opportunity_evaluator: outer evaluate_opportunity exception.
+    (OPP_EVAL,
+     'logger.exception(\n                "Error evaluating opportunity (%s): %s"',
+     "opportunity_evaluator.evaluate_opportunity outer except must use logger.exception"),
+    # bot_persistence: trade-save paths.
+    (PERSIST,
+     'logger.exception(\n                "Error saving trade (%s): %s"',
+     "bot_persistence.save_trade must use logger.exception"),
+    (PERSIST,
+     'logger.exception(\n                "Failed to persist trade %s (%s): %s"',
+     "bot_persistence.persist_trade must use logger.exception"),
+], ids=[
+    "trading_bot_service__safety_guardrail_crash",
+    "trade_execution__outer_exception",
+    "opportunity_evaluator__outer_exception",
+    "bot_persistence__save_trade",
+    "bot_persistence__persist_trade",
+])
+def test_critical_exception_paths_use_logger_exception(haystack, needle, reason):
+    assert needle in haystack, reason
+
+
+def test_proceed_anyway_warnings_use_exc_info_true():
+    """`proceed anyway` warnings (confidence gate, AI consult, AI eval, paper
+    trade record, execution tracking, guardrail check) should still surface
+    the traceback so future typos can't hide silently like quantity did.
+    """
+    sites = [
+        # opportunity_evaluator
+        (OPP_EVAL, "Confidence gate error (proceeding anyway) (%s): %s"),
+        (OPP_EVAL, "AI Consultation failed (proceeding anyway) (%s): %s"),
+        (OPP_EVAL, "AI evaluation failed (proceeding anyway) (%s): %s"),
+        # trade_execution
+        (TRADE_EXEC, "Failed to record paper trade (%s): %s"),
+        (TRADE_EXEC, "Failed to start execution tracking (%s): %s"),
+        (TRADE_EXEC, "Guardrail check failed (allowing trade) (%s): %s"),
+        (TRADE_EXEC, "Failed to record entry (%s): %s"),
+    ]
+    for src, marker in sites:
+        # The marker should exist AND be followed by `exc_info=True` within
+        # the same logger call.
+        idx = src.find(marker)
+        assert idx >= 0, f"Marker not found: {marker!r}"
+        # Look in the next 200 chars for exc_info=True
+        window = src[idx:idx + 400]
+        assert "exc_info=True" in window, (
+            f"`{marker}` must include exc_info=True so future typos surface "
+            f"with full traceback (lesson from v13 BotTrade.quantity)."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -270,16 +347,26 @@ def test_execution_exception_path_now_persists_trade():
 # Diagnosed + fixed 2026-04-30 v12.
 
 def test_no_bot_trade_dot_quantity_in_trading_bot_service():
-    """Pin the 13-day regression — `trade.shares`, never `trade.quantity`."""
-    # The fix is in lines 2259 + 2264 (per pre-fix grep). These should
-    # now read `.shares` not `.quantity`.
-    assert ".quantity" not in TRADING_BOT, (
-        "Found `.quantity` reference in trading_bot_service.py — BotTrade "
-        "exposes `shares` not `quantity`. This is the EXACT bug that hid "
-        "the 13-day silent regression (Apr 16 → Apr 29 2026). "
-        "See safety_guardrail_crash drops in /api/diagnostic/trade-drops "
-        "for forensic confirmation."
-    )
+    """Pin the 13-day regression — `trade.shares`, never `trade.quantity`.
+
+    Looks for actual code patterns (`trade.quantity`, `t.quantity`,
+    `getattr(t, "quantity"`) — not docstring/comment mentions of the
+    bug name (which is fine and documents history).
+    """
+    bad_patterns = [
+        re.compile(r"\btrade\.quantity\b"),
+        re.compile(r"\bt\.quantity\b"),
+        re.compile(r"getattr\([^)]*?,\s*[\"']quantity[\"']"),
+    ]
+    for pat in bad_patterns:
+        match = pat.search(TRADING_BOT)
+        assert match is None, (
+            f"Found `{match.group(0)}` in trading_bot_service.py — "
+            "BotTrade exposes `shares` not `quantity`. This is the EXACT "
+            "code pattern that hid the 13-day silent regression "
+            "(Apr 16 → Apr 29 2026). See safety_guardrail_crash drops "
+            "in /api/diagnostic/trade-drops for forensic confirmation."
+        )
 
 
 def test_bot_trade_shares_attribute_used_for_notional():
