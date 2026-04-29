@@ -40,6 +40,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `POST /api/scanner/backfill-sector-tags` — populate `symbol_adv_cache.sector` from the static GICS map (idempotent — 2026-04-30 v6)
 - `GET /api/scanner/in-play-config` — current in-play scoring thresholds (single source of truth shared by scanner + AI assistant — 2026-04-30 v7)
 - `PUT /api/scanner/in-play-config` — runtime threshold tuning, persists to `bot_state.in_play_config` (`{"strict_gate": true}` opts into hard gating — 2026-04-30 v7)
+- `GET /api/diagnostic/trade-funnel?date=YYYY-MM-DD` — walks the alert→bot→execution chain and pinpoints the first dead stage (2026-04-30 v8)
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard

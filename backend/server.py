@@ -1496,6 +1496,11 @@ app.include_router(market_state_router)
 # the eod_generation_service scheduler + on-demand from the UI button.
 from routers.weekend_briefing_router import router as weekend_briefing_router  # noqa: E402
 app.include_router(weekend_briefing_router)
+# Diagnostic router — `/api/diagnostic/trade-funnel` walks the alert→bot
+# →execution chain and pinpoints which stage killed flow on a given day.
+# Built 2026-04-30 to answer "why no trades today" without log grepping.
+from routers.diagnostic_router import router as diagnostic_router  # noqa: E402
+app.include_router(diagnostic_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

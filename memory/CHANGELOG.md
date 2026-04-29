@@ -2,6 +2,65 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (sixth commit) — Trade-Funnel Diagnostic Endpoint
+
+### Why
+Operator asked "why no actual live trades happened today?" — a question
+the codebase couldn't answer without grepping logs. There are 9
+independent gates between a scanner alert and an executed broker order:
+
+  scanner → priority → tape conf → auto-eligible flag → bot master
+  switch → bot mode → bot eval → pre-execution filters → broker fill
+
+If flow dies at any one of those, the operator has no easy way to see
+*which* gate killed it. This endpoint walks all 9 stages for any
+calendar day and pinpoints the FIRST one where flow dropped to zero.
+
+### Shipped
+
+#### `GET /api/diagnostic/trade-funnel?date=YYYY-MM-DD`
+Returns:
+  - `diagnosis`: 1-line "first dead stage" answer (e.g. *"🔴 First dead
+    stage: bot_master_switch — Eligible alerts existed but the bot's
+    auto_execute master switch is OFF"*)
+  - `first_dead_stage`: stage_id string for programmatic use
+  - `stages[]`: per-stage `{label, count, kill_check, kill_reason,
+    optional breakdown}`. Breakdowns include priority distribution,
+    bot-trade status counts (PAPER/SIMULATED/VETOED/OPEN/etc.), order-
+    queue status counts. Daily defaults to today (UTC).
+  - `scanner_hot_counters`: live `_symbols_skipped_adv / _rvol /
+    _in_play` plus `auto_execute_enabled` + `auto_execute_min_win_rate`
+    — the *current* scanner state, useful when the alert pipeline is
+    stuck *now* rather than hours ago.
+  - `in_play_config`: current thresholds (in case strict-gate is
+    quietly rejecting flow).
+
+The endpoint is safe to hit in production — read-only Mongo aggregations
++ in-process scanner attribute reads. No new collections, no writes.
+
+### Files touched
+- NEW `backend/routers/diagnostic_router.py`
+- `backend/server.py` (one-liner `include_router` registration)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Operator workflow on Spark (for the "why no trades" investigation)
+```bash
+# 1. Pull latest commits, restart backend
+cd ~/Trading-and-Analysis-Platform && git pull && \
+  sudo supervisorctl restart backend && sleep 4
+
+# 2. Run the diagnostic for today
+curl -s http://localhost:8001/api/diagnostic/trade-funnel | python3 -m json.tool
+
+# 3. (Optional) Run for a specific historical day
+curl -s "http://localhost:8001/api/diagnostic/trade-funnel?date=2026-04-29" \
+  | python3 -m json.tool
+```
+The `diagnosis` line will name the first dead stage; the `stages[]`
+array shows the full funnel so you can also see *secondary* drop-offs.
+
+
+
 ## 2026-04-30 (fifth commit) — Unified In-Play Definition
 
 ### The bug we fixed

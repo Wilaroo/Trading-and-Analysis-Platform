@@ -32,7 +32,7 @@ ML feature plumbing. Next session: pick up from the P1 backlog.
 
 **Hard gates after this work:**
 1. **Time-window** (`_is_setup_valid_now`) — opening_drive can't fire midday
-2. **In-Play / Universe** (ADV / spread / halt — already exists)
+2. **In-Play / Universe** (ADV ≥$2M/day floor + RVOL ≥0.8 floor + tier-based scan frequency, optional STRICT in-play gate) — see `services/in_play_service.py`
 3. **Confidence gate** (already exists — predicted_R + win_prob threshold)
 
 Everything else (regime, sector, setup, intraday tape) → features.
