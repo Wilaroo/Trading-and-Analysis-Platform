@@ -526,6 +526,15 @@ class LiveAlert:
     # the static `sector_tag_service` map; symbols outside the map
     # stay 'unknown' (alerts still fire — soft gate, not a hard reject).
     sector_regime: str = "unknown"
+
+    # NEW: Unified in-play qualification (Feb 2026, fourth commit).
+    # Scanner + AI assistant now share a single definition. Score
+    # 0-100; reasons/disqualifiers explain the call. SOFT by default
+    # — the operator opts into strict gating via
+    # `bot_state.in_play_config.strict_gate=true`.
+    in_play_score: int = 0
+    in_play_reasons: List[str] = field(default_factory=list)
+    in_play_disqualifiers: List[str] = field(default_factory=list)
     
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
@@ -852,6 +861,7 @@ class EnhancedBackgroundScanner:
         self._symbols_scanned_last = 0
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0  # Skipped due to low volume
+        self._symbols_skipped_in_play = 0  # Skipped due to strict in-play gate
         # Per-detector firing telemetry — counts evaluations vs hits per setup_type
         # so the operator can answer "why is the scanner only emitting RS hits?"
         # without grep-walking logs. Surfaced via /api/scanner/detector-stats.
@@ -2074,7 +2084,7 @@ class EnhancedBackgroundScanner:
                     f"📊 Scan #{self._scan_count} in {scan_duration:.1f}s | "
                     f"Regime: {self._market_regime.value} | Window: {current_window.value} | "
                     f"Scanned: {self._symbols_scanned_last} | "
-                    f"Skipped: ADV={self._symbols_skipped_adv}, RVOL={self._symbols_skipped_rvol} | "
+                    f"Skipped: ADV={self._symbols_skipped_adv}, RVOL={self._symbols_skipped_rvol}, InPlay={self._symbols_skipped_in_play} | "
                     f"Alerts: {len(self._live_alerts)}"
                 )
                 
@@ -2110,6 +2120,7 @@ class EnhancedBackgroundScanner:
         # Reset counters
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0
+        self._symbols_skipped_in_play = 0
         # Per-cycle detector telemetry resets so the operator sees the latest
         # "why is this scan tick quiet?" signal in /api/scanner/detector-stats.
         # Cumulative totals (`_detector_*_total`) persist across cycles.
@@ -2588,17 +2599,34 @@ class EnhancedBackgroundScanner:
             if snapshot.rvol < self._min_rvol_filter:
                 self._symbols_skipped_rvol += 1
                 return
-            
+
             # Update caches with fresh data
             now = datetime.now(timezone.utc)
             self._rvol_cache[symbol] = (snapshot.rvol, now)
             # Only update ADV cache from snapshot if we don't already have IB-sourced data
             if symbol not in self._adv_cache:
                 self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
-            
+
             # Get tape reading for this symbol
             tape = await self._get_tape_reading(symbol, snapshot)
-            
+
+            # Unified in-play qualification — scanner + AI assistant
+            # both call this scorer. SOFT gate by default; STRICT gate
+            # when `bot_state.in_play_config.strict_gate=true`.
+            in_play_qual = None
+            try:
+                from services.in_play_service import get_in_play_service
+                ipsvc = get_in_play_service(db=self.db)
+                spread_pct_for_inplay = float(getattr(tape, "spread_pct", 0.0) or 0.0)
+                in_play_qual = ipsvc.score_from_snapshot(
+                    snapshot, spread_pct=spread_pct_for_inplay,
+                )
+                if ipsvc.is_strict_gate() and not in_play_qual.is_in_play:
+                    self._symbols_skipped_in_play += 1
+                    return
+            except Exception as e:
+                logger.debug(f"in_play scoring failed for {symbol}: {e}")
+
             alerts = []
             current_window = self._get_current_time_window()
             
@@ -2638,6 +2666,14 @@ class EnhancedBackgroundScanner:
                         tape.imbalance_signal.value,
                         tape.momentum_signal.value
                     ]
+
+                    # Stamp the unified in-play qualification (computed
+                    # once per scan tick above, shared across all alerts
+                    # produced for this symbol this cycle)
+                    if in_play_qual is not None:
+                        alert.in_play_score = in_play_qual.score
+                        alert.in_play_reasons = list(in_play_qual.reasons)
+                        alert.in_play_disqualifiers = list(in_play_qual.disqualifiers)
                     
                     # Check auto-execute eligibility
                     alert.auto_execute_eligible = (
@@ -6623,6 +6659,7 @@ class EnhancedBackgroundScanner:
             "symbols_scanned_last": self._symbols_scanned_last,
             "symbols_skipped_adv": self._symbols_skipped_adv,
             "symbols_skipped_rvol": self._symbols_skipped_rvol,
+            "symbols_skipped_in_play": self._symbols_skipped_in_play,
             "scan_interval": self._scan_interval,
             "enabled_setups": list(self._enabled_setups),
             "market_regime": self._market_regime.value,

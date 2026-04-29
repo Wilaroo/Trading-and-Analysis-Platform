@@ -991,6 +991,60 @@ async def trigger_landscape_grade(trading_day: Optional[str] = None):
     }
 
 
+@router.get("/in-play-config")
+def get_in_play_config():
+    """
+    Current in-play scoring config (thresholds + strict_gate flag).
+
+    The same config drives both the live scanner's in-play gate AND the
+    AI assistant's "is this stock in play?" check, so they always agree.
+    SOFT mode by default — the operator opts into strict gating via
+    PUT /api/scanner/in-play-config with ``{"strict_gate": true}``.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.in_play_service import get_in_play_service
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        svc = get_in_play_service(db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Service init failed: {e}")
+    return {
+        "success": True,
+        "config": svc.get_config(),
+        "defaults": svc.DEFAULT_CONFIG,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.put("/in-play-config")
+async def update_in_play_config(updates: Dict[str, Any]):
+    """
+    Update in-play scoring thresholds. Persists to ``bot_state.in_play_config``.
+
+    Only known keys are accepted (typos are silently dropped — see
+    ``InPlayService.DEFAULT_CONFIG`` for the full set). Pass
+    ``{"strict_gate": true}`` to flip the live scanner from SOFT mode
+    (stamp metadata only) to STRICT mode (reject alerts where
+    ``is_in_play`` is False).
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.in_play_service import get_in_play_service
+        live_scanner = get_enhanced_scanner()
+        db = getattr(live_scanner, "db", None)
+        svc = get_in_play_service(db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Service init failed: {e}")
+    new_config = svc.update_config(updates)
+    return {
+        "success": True,
+        "config": new_config,
+        "applied_keys": [k for k in updates if k in svc.DEFAULT_CONFIG],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/sector-regime")
 async def get_sector_regime():
     """

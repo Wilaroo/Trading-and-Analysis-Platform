@@ -364,87 +364,31 @@ class AdvancedAlertSystem:
     # ==================== IN PLAY QUALIFICATION ====================
     
     async def check_in_play(self, symbol: str, market_data: Dict) -> InPlayQualification:
+        """[DEPRECATED 2026-04-30 — delegates to `services.in_play_service`.]
+
+        Single source of truth for in-play scoring is now
+        `InPlayService.score_from_market_data`. This shim preserves the
+        legacy call shape so any remaining callers keep working while
+        we migrate them. New code should use:
+
+            from services.in_play_service import get_in_play_service
+            qual = get_in_play_service().score_from_market_data(market_data)
         """
-        Check if a stock qualifies as "in play" for scalping/intraday.
-        A stock is in play if it has unusual activity that creates opportunity.
-        """
-        reasons = []
-        disqualifiers = []
-        score = 0
-        
-        rvol = market_data.get("rvol", 1.0)
-        gap_pct = market_data.get("gap_pct", 0)
-        atr_pct = market_data.get("atr_pct", 1.0)
-        spread_pct = market_data.get("spread_pct", 0.1)
-        volume = market_data.get("volume", 0)
-        has_catalyst = market_data.get("has_catalyst", False)
-        short_interest = market_data.get("short_interest")
-        float_shares = market_data.get("float_shares")
-        
-        # Check RVOL (most important)
-        if rvol >= 5.0:
-            score += 35
-            reasons.append(f"🔥 Exceptional volume (RVOL: {rvol:.1f}x) - Very active")
-        elif rvol >= 3.0:
-            score += 25
-            reasons.append(f"High volume (RVOL: {rvol:.1f}x)")
-        elif rvol >= IN_PLAY_CRITERIA["min_rvol"]:
-            score += 15
-            reasons.append(f"Above average volume (RVOL: {rvol:.1f}x)")
-        else:
-            disqualifiers.append(f"Low relative volume ({rvol:.1f}x) - Not in play")
-        
-        # Check gap
-        if abs(gap_pct) >= 8.0:
-            score += 25
-            reasons.append(f"🚀 Large gap {'up' if gap_pct > 0 else 'down'} ({gap_pct:+.1f}%)")
-        elif abs(gap_pct) >= IN_PLAY_CRITERIA["min_gap_pct"]:
-            score += 15
-            reasons.append(f"Gapping {'up' if gap_pct > 0 else 'down'} ({gap_pct:+.1f}%)")
-        
-        # Check ATR/Range
-        if atr_pct >= 3.0:
-            score += 15
-            reasons.append(f"High daily range ({atr_pct:.1f}%) - Good for scalping")
-        elif atr_pct >= IN_PLAY_CRITERIA["min_atr_pct"]:
-            score += 8
-            reasons.append(f"Decent range ({atr_pct:.1f}%)")
-        else:
-            disqualifiers.append(f"Tight range ({atr_pct:.1f}%) - Difficult to scalp")
-        
-        # Check spread
-        if spread_pct > IN_PLAY_CRITERIA["max_spread_pct"]:
-            score -= 10
-            disqualifiers.append(f"Wide spread ({spread_pct:.2f}%) - Hurts entries/exits")
-        
-        # Check catalyst
-        if has_catalyst:
-            score += 15
-            reasons.append("Has news/catalyst driving movement")
-        
-        # Check short interest (short squeeze potential)
-        if short_interest and short_interest >= 20:
-            score += 10
-            reasons.append(f"High short interest ({short_interest:.1f}%) - Squeeze potential")
-        
-        # Check float (low float = more volatile)
-        if float_shares and float_shares < 20_000_000:
-            score += 5
-            reasons.append("Low float - Can move fast")
-        
-        is_in_play = score >= 30 and len(disqualifiers) < 2
-        
+        from services.in_play_service import get_in_play_service
+        unified = get_in_play_service().score_from_market_data(market_data)
+        # The unified service returns its own InPlayQualification dataclass.
+        # Map it back to this module's dataclass shape for backward compat.
         return InPlayQualification(
-            is_in_play=is_in_play,
-            score=min(100, score),
-            reasons=reasons,
-            disqualifiers=disqualifiers,
-            rvol=rvol,
-            gap_pct=gap_pct,
-            atr_pct=atr_pct,
-            float_shares=float_shares,
-            short_interest=short_interest,
-            has_catalyst=has_catalyst
+            is_in_play=unified.is_in_play,
+            score=unified.score,
+            reasons=unified.reasons,
+            disqualifiers=unified.disqualifiers,
+            rvol=unified.rvol,
+            gap_pct=unified.gap_pct,
+            atr_pct=unified.atr_pct,
+            float_shares=unified.float_shares,
+            short_interest=unified.short_interest,
+            has_catalyst=unified.has_catalyst,
         )
     
     # ==================== SCORING BY TIMEFRAME ====================

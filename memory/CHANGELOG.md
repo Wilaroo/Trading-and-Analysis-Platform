@@ -2,6 +2,146 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (fifth commit) — Unified In-Play Definition
+
+### The bug we fixed
+
+Two completely separate "in play" definitions had been coexisting:
+
+  1. **Live scanner** (`enhanced_scanner._min_rvol_filter = 0.8`) —
+     a single RVOL ≥ 0.8 floor. No gap, no ATR, no spread, no halt.
+  2. **AI assistant** (`alert_system.AdvancedAlertSystem.check_in_play`) —
+     a 0-100 scorer using RVOL ≥ 2.0, gap ≥ 3%, ATR ≥ 1.5%, spread ≤ 0.3%,
+     bonuses for catalyst / short interest / low float. *Not* wired into
+     the live scanner — only `ai_market_intelligence.py` called it.
+
+The AI assistant could declare "AAPL is in play (score 65)" while the
+scanner had silently rejected the same symbol on the RVOL floor, or
+vice-versa. Two surfaces, two answers, persistent operator confusion.
+
+### The fix
+
+New `services/in_play_service.py` is the single source of truth. Both
+paths now call the same scorer and persist the same thresholds, so the
+two surfaces always agree.
+
+### Key design decisions
+
+- **Soft by default**. The first version of the gate ships in SOFT mode
+  — every alert gets the score + reasons + disqualifiers stamped on it,
+  but no alert is rejected. This preserves current alert flow for the
+  operator who's tuned scanner thresholds against the v1 RVOL≥0.8
+  behaviour. To opt-in to STRICT gating (fewer, higher-quality alerts):
+  `PUT /api/scanner/in-play-config {"strict_gate": true}`.
+- **Operator-tunable at runtime**. All thresholds (`min_rvol`,
+  `min_gap_pct`, `min_atr_pct`, `max_spread_pct`,
+  `min_qualifying_score`, `max_disqualifiers`, plus the strong/modest
+  band breakpoints) persist to `bot_state.in_play_config` and can be
+  updated without a redeploy.
+- **Backward compat shim**. `alert_system.AdvancedAlertSystem.check_in_play`
+  was rewritten to a 5-line shim that delegates to `InPlayService` and
+  maps the result into the legacy `alert_system.InPlayQualification`
+  dataclass, so the existing 5 callers (in alerts router + AI market
+  intelligence) keep working with zero call-site changes.
+
+### Shipped
+
+#### 1. `services/in_play_service.py` (NEW)
+- `InPlayQualification` dataclass — `is_in_play`, `score` (0-100),
+  `reasons`, `disqualifiers`, plus the raw signals (rvol, gap_pct,
+  atr_pct, spread_pct, has_catalyst, short_interest, float_shares).
+- `InPlayService`:
+  - `DEFAULT_CONFIG` with 13 tunable thresholds.
+  - `score_from_snapshot(snapshot, spread_pct, ...)` — used by the
+    live scanner. Reads `rvol`, `gap_pct`, `atr_percent` directly off
+    the existing TechnicalSnapshot.
+  - `score_from_market_data(dict)` — backward-compat for the AI
+    assistant's existing call shape.
+  - `get_config` / `update_config` / `is_strict_gate` for runtime
+    tuning. `update_config` coerces strings (so `"true"` → True,
+    `"1.5"` → 1.5) for the API surface, and silently drops unknown
+    keys to keep typos out of `bot_state`.
+  - Singleton accessor with late-bind DB.
+
+#### 2. `services/enhanced_scanner.py` integration
+- New `LiveAlert` fields: `in_play_score: int = 0`,
+  `in_play_reasons: List[str]`, `in_play_disqualifiers: List[str]`.
+- New `_symbols_skipped_in_play` counter, reset per cycle, surfaced
+  in the cycle-summary log line + diagnostic JSON output.
+- `_scan_symbol` now scores in-play once between RVOL floor and
+  alert generation. Result stamped on every alert produced for the
+  symbol that cycle. STRICT mode rejects the symbol when
+  `is_in_play` is False; SOFT mode (default) only stamps metadata.
+
+#### 3. `services/alert_system.py` (DEPRECATED check_in_play)
+- The 80-line inline rubric was replaced with a 25-line shim
+  delegating to `InPlayService.score_from_market_data`. Returns
+  `alert_system.InPlayQualification` for backward compat with
+  existing callers.
+- The legacy `IN_PLAY_CRITERIA` dict still exists but is now
+  effectively unused (kept for one cycle to avoid breaking any
+  third-party imports — can be deleted once we audit external
+  callers).
+
+#### 4. API surface (`routers/scanner.py`)
+- `GET /api/scanner/in-play-config` — current thresholds + defaults
+  for diff display. Powers a future operator-side config panel.
+- `PUT /api/scanner/in-play-config` — partial-update with type
+  coercion. Persists to `bot_state.in_play_config`.
+
+### Tests
+`backend/tests/test_in_play_service.py` — **26 new tests**:
+- Default config + persisted-config loading from `bot_state`.
+- Score rubric — every band fires (exceptional/high/modest/sub-min
+  RVOL, big/modest/no-gap, big/decent/tight ATR, wide-spread
+  disqualifier, catalyst/short/float bonuses).
+- `is_in_play` true only when score ≥ min AND disqualifiers < max.
+- `score_from_snapshot` reads correct fields off TechnicalSnapshot.
+- `score_from_market_data` accepts the dict shape.
+- `update_config` persists to bot_state, drops unknowns, coerces
+  string→bool and string→float for the API surface.
+- LiveAlert exposes the 3 new fields with correct defaults.
+- Source-level guards: scanner calls `score_from_snapshot`, gates
+  only in strict mode, alert_system shim delegates to unified
+  service.
+- Legacy shim returns the `alert_system.InPlayQualification`
+  dataclass so existing AI-assistant callers work unchanged.
+
+Total related-suite count after this commit: **169 tests** across
+the in-play + sector + landscape + grading + setup-matrix + regime
+suites.
+
+### Files touched
+- NEW `backend/services/in_play_service.py`
+- NEW `backend/tests/test_in_play_service.py`
+- `backend/services/enhanced_scanner.py` (3 LiveAlert fields, new
+  `_symbols_skipped_in_play` counter, in-play scoring in `_scan_symbol`,
+  cycle-log + diagnostic surface)
+- `backend/services/alert_system.py` (`check_in_play` shrunk from
+  80 lines to 25 — delegating shim)
+- `backend/routers/scanner.py` (2 new config endpoints)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Verification on Spark
+- Pull, restart backend.
+- `curl http://localhost:8001/api/scanner/in-play-config` should show
+  the 13 thresholds at defaults.
+- After 1 scan cycle, `db.live_alerts.findOne({})` should expose
+  `in_play_score`, `in_play_reasons`, `in_play_disqualifiers` on every
+  alert.
+- The cycle-summary log line should now include
+  `Skipped: ADV=N, RVOL=N, InPlay=N` (last counter is 0 in SOFT mode).
+- To experiment with stricter gating without a redeploy:
+  ```
+  curl -X PUT http://localhost:8001/api/scanner/in-play-config \
+       -H 'Content-Type: application/json' \
+       -d '{"strict_gate": true, "min_qualifying_score": 40}'
+  ```
+  Watch `_symbols_skipped_in_play` climb in the scanner log;
+  flip back with `{"strict_gate": false}` instantly.
+
+
+
 ## 2026-04-30 (fourth commit) — Sector Regime Pipeline (Items #3 + #4)
 
 Closes the agreed 6-item next-session plan. With this commit, the

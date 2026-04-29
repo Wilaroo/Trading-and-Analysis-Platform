@@ -38,6 +38,8 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `GET /api/scanner/setup-trade-matrix` — full Trade × Setup matrix + classifier stats (2026-04-29 v2)
 - `GET /api/scanner/sector-regime` — per-sector regime snapshot (11 SPDR ETFs + SPY benchmark, soft-gate ML feature — 2026-04-30 v6)
 - `POST /api/scanner/backfill-sector-tags` — populate `symbol_adv_cache.sector` from the static GICS map (idempotent — 2026-04-30 v6)
+- `GET /api/scanner/in-play-config` — current in-play scoring thresholds (single source of truth shared by scanner + AI assistant — 2026-04-30 v7)
+- `PUT /api/scanner/in-play-config` — runtime threshold tuning, persists to `bot_state.in_play_config` (`{"strict_gate": true}` opts into hard gating — 2026-04-30 v7)
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard
@@ -56,7 +58,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 **Hard gates only in 3 places** to avoid compounding rejection rate
 that would starve the ML pipeline of training data:
   1. **Time-window** (`_is_setup_valid_now` in `enhanced_scanner.py`) — opening_drive can't fire midday
-  2. **In-Play / Universe** — ADV / spread / halt
+  2. **In-Play / Universe** — ADV ≥ $2M/day floor (FAIL CLOSED on unknown ADV) + RVOL ≥ 0.8 floor + tier-based scan frequency. **Unified richer in-play score** (RVOL/Gap/ATR/Spread/Catalyst — `services/in_play_service.py`, shipped 2026-04-30 v7) is **stamped on every alert** as metadata; promotes to a hard gate only when `bot_state.in_play_config.strict_gate=true`.
   3. **Confidence gate** — predicted_R + win_prob threshold
 
 **Everything else flows in as features** to the per-Trade ML models:
@@ -96,6 +98,7 @@ is the operator's source of truth for which Trade fits which Setup;
 - `backend/services/order_queue_service.py` — Mongo-backed queue with auto-expire
 - `backend/services/enhanced_scanner.py` — 38 trade detectors, scanner loop, `_apply_setup_context` matrix gate + multi-index regime stamping (2026-04-30), `LiveAlert` dataclass with context fields (`market_setup`, `is_countertrend`, `out_of_context_warning`, `experimental`, `multi_index_regime`)
 - `backend/services/market_setup_classifier.py` — `MarketSetup` enum (7 + NEUTRAL), `MarketSetupClassifier` (daily-bar driven), `TRADE_SETUP_MATRIX`, `TRADE_ALIASES`, `EXPERIMENTAL_TRADES`, `lookup_trade_context()`, `_sync_classify_window()` for training-time per-bar labels (2026-04-30)
+- `backend/services/in_play_service.py` — **NEW 2026-04-30** — unified in-play scorer used by both the live scanner (`score_from_snapshot`) and the AI assistant (`score_from_market_data`); runtime-tunable thresholds persisted to `bot_state.in_play_config`; SOFT mode by default (stamps `LiveAlert.in_play_score/reasons/disqualifiers` only), STRICT mode rejects alerts when `is_in_play=False`
 - `backend/services/multi_index_regime_classifier.py` — **NEW 2026-04-30** — `MultiIndexRegime` enum (9 buckets), `MultiIndexRegimeClassifier` reads ~25 daily bars per index (SPY/QQQ/IWM/DIA), 5-min market-wide cache, `derive_regime_label_from_features()` for training
 - `backend/services/sector_tag_service.py` — **NEW 2026-04-30** — static GICS-aligned `STATIC_SECTOR_MAP` (~340 most-liquid stocks) + ETF self-mapping; `tag_symbol`, `tag_many`, `coverage`, `backfill_symbol_adv_cache` (idempotent)
 - `backend/services/sector_regime_classifier.py` — **NEW 2026-04-30** — `SectorRegime` enum (6 buckets: STRONG/ROTATING_IN/NEUTRAL/ROTATING_OUT/WEAK/UNKNOWN), `SectorRegimeClassifier` reads 11 SPDR ETFs + SPY (5-min market-wide cache), `SectorRegimeHistoricalProvider` for training-time per-sample sector regime lookup with per-(etf,date) caching
