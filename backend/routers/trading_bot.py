@@ -257,8 +257,82 @@ async def get_bot_status():
     if account.get("equity"):
         status["account_equity"] = account["equity"]
         status.setdefault("equity", account["equity"])
-    
+
+        # 2026-04-29 (operator-flagged pre-RTH): keep
+        # `risk_params.starting_capital` in lock-step with the live
+        # account equity. Pre-fix the position sizer read
+        # `risk_params.starting_capital` (frozen at the $100k default)
+        # while the UI showed real $1M+ equity from the same `/status`
+        # response — every trade was sized off the wrong baseline.
+        try:
+            live_equity = float(account["equity"])
+            if live_equity > 0 and _trading_bot is not None:
+                current = float(getattr(_trading_bot.risk_params, "starting_capital", 0) or 0)
+                if abs(current - live_equity) > 1.0:
+                    _trading_bot.risk_params.starting_capital = live_equity
+                    status["risk_params"] = _trading_bot.risk_params.dict()
+                    logger.info(
+                        f"💰 Synced risk_params.starting_capital to live equity: "
+                        f"${current:,.0f} → ${live_equity:,.0f}"
+                    )
+        except Exception as e:
+            logger.debug(f"starting_capital sync failed: {e}")
+
     return {"success": True, **status}
+
+
+@router.post("/refresh-account")
+async def refresh_account():
+    """Force-pull the latest IB account equity and sync it into
+    `risk_params.starting_capital`. Operator-flagged 2026-04-29:
+    convenience endpoint so the bot's position sizer can be unstuck
+    without waiting for the next `/status` poll.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    try:
+        from routers.ib import _pushed_ib_data, _extract_account_value
+        from services.ib_pusher_rpc import get_account_snapshot
+
+        # Try push-loop first, then RPC fallback.
+        ib_account = (_pushed_ib_data or {}).get("account") or {}
+        if not ib_account:
+            snap = get_account_snapshot() or {}
+            if snap.get("success") and snap.get("account"):
+                ib_account = snap["account"]
+                _pushed_ib_data["account"] = ib_account
+
+        if not ib_account:
+            return {
+                "success": False,
+                "error": "no_account_data",
+                "message": "Both push-loop and RPC came up empty — "
+                           "check Windows pusher + IB Gateway connection",
+            }
+
+        net_liq = _extract_account_value(ib_account, "NetLiquidation", 0)
+        if not net_liq or net_liq <= 0:
+            return {
+                "success": False,
+                "error": "invalid_net_liq",
+                "message": f"NetLiquidation read as {net_liq} — IB session may be unauthenticated",
+            }
+
+        old_capital = float(_trading_bot.risk_params.starting_capital or 0)
+        _trading_bot.risk_params.starting_capital = float(net_liq)
+        logger.info(
+            f"💰 Manual refresh: starting_capital ${old_capital:,.0f} → ${net_liq:,.0f}"
+        )
+        return {
+            "success": True,
+            "old_starting_capital": old_capital,
+            "new_starting_capital": float(net_liq),
+            "delta": float(net_liq) - old_capital,
+            "source": "rpc" if not (_pushed_ib_data or {}).get("account_seeded_by_push") else "push",
+        }
+    except Exception as e:
+        logger.error(f"refresh-account failed: {e}")
+        raise HTTPException(500, f"refresh failed: {e}")
 
 
 @router.get("/rejection-analytics")

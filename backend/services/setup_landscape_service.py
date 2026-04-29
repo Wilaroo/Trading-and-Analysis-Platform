@@ -198,6 +198,14 @@ class SetupLandscapeService:
         morning briefing said "I screened 0 names" every day. Fixed
         to read `avg_dollar_volume`, with a fallback to the legacy
         `adv_dollars` field for any rows still on the old schema.
+
+        2026-04-29 v2 (same morning, second silent bug): query was
+        using ``await cursor.to_list(length=n)`` — motor async API —
+        but the bot's `db` handle on Spark is **sync** PyMongo. The
+        await raised TypeError every call, the except-clause swallowed
+        it, returned []. Fixed by using sync iteration via `list(cursor)`
+        so the query works regardless of whether the db handle is sync
+        (PyMongo) or async (motor).
         """
         if self.db is None:
             return []
@@ -209,7 +217,17 @@ class SetupLandscapeService:
                 ]},
                 {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "adv_dollars": 1},
             ).sort("avg_dollar_volume", -1).limit(n)
-            rows = await cursor.to_list(length=n)
+
+            # Cursor materialisation that works for both sync (PyMongo)
+            # and async (motor) clients. Motor's `to_list` is awaitable;
+            # PyMongo's cursor is iterable. Probe for the async API
+            # first, fall through to sync iteration.
+            rows: List[Dict] = []
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                rows = await cursor.to_list(length=n)
+            else:
+                rows = list(cursor)
             return [r["symbol"] for r in rows if r.get("symbol")]
         except Exception as e:
             logger.warning(f"_pull_top_symbols failed, returning []: {e}")
