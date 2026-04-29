@@ -3,7 +3,17 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.4 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.5 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.5 — see CHANGELOG (twenty-fourth commit)
+- ✅ **Safety config Pydantic ceiling raised** for margin accounts —
+  `max_total_exposure_pct` validator was `le=100`, rejecting the
+  v19.4 unblock curl with HTTP 422 (`Input should be less than or
+  equal to 100`, input=320). Bumped to `le=1000` (still rejects
+  typos but allows realistic Reg-T margin operation).
+- ✅ Cash operators unaffected; only impacts margin-account operators
+  who legitimately need >100% of equity in aggregate exposure.
+- ✅ 4 new validator tests. **112/112 across v12-v19.5 suites.**
 
 ### 🎯 Just shipped 2026-04-30 v19.4 — see CHANGELOG (twenty-third commit)
 - ✅ **Position-sizer absolute-notional clamp** — new

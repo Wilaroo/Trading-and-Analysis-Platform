@@ -2,6 +2,68 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-fourth commit, v19.5) — Safety config ceiling raised for margin accounts
+
+**Why**: Operator ran the v19.4 unblock script, got HTTP 422 on the
+safety PUT:
+
+```
+"max_total_exposure_pct": {"type": "less_than_equal",
+  "msg": "Input should be less than or equal to 100", "input": 320,
+  "ctx": {"le": 100.0}}
+```
+
+The Pydantic validator on `SafetyConfigPatch.max_total_exposure_pct`
+had `le=100`. That's correct for cash accounts but rejects margin
+operators — 80% of buying power on a 4× margin account == 320% of
+equity is completely normal.
+
+The underlying dataclass + env loader (`safety_guardrails.py`)
+already accepted arbitrary floats; only the API validator was the
+chokepoint.
+
+### Patch
+
+- `routers/safety_router.py:40` — `le=100` → `le=1000` on
+  `max_total_exposure_pct`. Cash operators naturally stay under 100;
+  margin operators get the headroom they need. >1000% is still
+  rejected as a typo guard (no realistic broker offers >10× leverage
+  on US equities).
+
+### Tests (`tests/test_safety_config_margin_ceiling_v19_5.py` — 4 tests)
+
+- **`test_safety_config_patch_accepts_margin_exposure_pct`** — pins
+  320% and 999% as accepted.
+- **`test_safety_config_patch_still_rejects_negative_or_zero`** —
+  lower bound (>0) must still hold.
+- **`test_safety_config_patch_rejects_absurd_exposure`** — >1000%
+  rejected as a typo guard.
+- **`test_other_safety_fields_unchanged`** — bumping exposure ceiling
+  didn't loosen the other validators (`max_daily_loss_pct`,
+  `max_positions`, `max_quote_age_seconds`).
+
+**112/112 across v12-v19.5 suites.**
+
+### Operator workflow on Spark
+
+```bash
+# Re-run the v19.4 unblock — should now succeed:
+curl -s -X PUT "http://localhost:8001/api/safety/config" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "max_symbol_exposure_usd": 100000,
+    "max_positions": 25,
+    "max_total_exposure_pct": 320,
+    "max_daily_loss_usd": 5000,
+    "max_quote_age_seconds": 10
+  }' | jq
+```
+
+The returned body should show all five caps applied; the `effective`
+block of `/api/safety/effective-risk-caps` should reflect them.
+
+
+
 ## 2026-04-30 (twenty-third commit, v19.4) — Position-sizer absolute-notional clamp
 
 **Why**: Operator's `/api/diagnostic/trade-drops` curl finally named

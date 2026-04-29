@@ -37,7 +37,11 @@ class SafetyConfigPatch(BaseModel):
     max_daily_loss_pct:      Optional[float] = Field(default=None, gt=0, lt=100)
     max_positions:           Optional[int]   = Field(default=None, ge=1, le=100)
     max_symbol_exposure_usd: Optional[float] = Field(default=None, gt=0)
-    max_total_exposure_pct:  Optional[float] = Field(default=None, gt=0, le=100)
+    # 2026-04-30 v19.5 — ceiling raised 100 → 1000 for margin accounts.
+    # max_total_exposure_pct is "% of cash equity"; on a 4× margin
+    # account, 80% of buying power == 320% of equity. Cash-only operators
+    # naturally stay under 100; margin operators need the headroom.
+    max_total_exposure_pct:  Optional[float] = Field(default=None, gt=0, le=1000)
     max_quote_age_seconds:   Optional[float] = Field(default=None, gt=0, lt=300)
     enabled:                 Optional[bool]  = None
 
