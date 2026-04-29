@@ -2256,12 +2256,12 @@ class TradingBotService:
                     open_positions_snapshot.append({
                         "symbol": getattr(t, "symbol", None),
                         "side": str(getattr(t, "direction", "")).lower(),
-                        "notional_usd": float(getattr(t, "entry_price", 0) or 0) * float(getattr(t, "quantity", 0) or 0),
+                        "notional_usd": float(getattr(t, "entry_price", 0) or 0) * float(getattr(t, "shares", 0) or 0),
                     })
                 except Exception:
                     continue
 
-            notional = float(trade.entry_price or 0) * float(trade.quantity or 0)
+            notional = float(trade.entry_price or 0) * float(trade.shares or 0)
             equity = float(self.risk_params.starting_capital or 100_000)
             last_quote_age = None
             try:

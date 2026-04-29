@@ -250,3 +250,46 @@ def test_execution_exception_path_now_persists_trade():
         "Exception branch in trade_execution.execute_trade() must persist "
         "the REJECTED trade so we don't lose forensics."
     )
+
+
+# --------------------------------------------------------------------------
+# THE root cause of the April-16 → April-29 13-day silent regression
+# --------------------------------------------------------------------------
+#
+# `BotTrade` has a `shares` field, NOT a `quantity` field. Two sites in
+# `trading_bot_service._execute_trade` were referencing `trade.quantity`
+# / `getattr(t, "quantity", ...)`. The latter is silently safe (getattr
+# default), but the former raised `AttributeError` on EVERY autonomous
+# trade attempt. The outer try/except caught it and bubbled up as
+# `safety_guardrail_crash` → silent fail-CLOSED return → trade never
+# reaches broker → `bot_trades` collection sees zero new inserts.
+#
+# The instrumentation made this visible the moment we deployed:
+#     "reason": "guardrail check exception: 'BotTrade' object has no
+#                attribute 'quantity'"
+# Diagnosed + fixed 2026-04-30 v12.
+
+def test_no_bot_trade_dot_quantity_in_trading_bot_service():
+    """Pin the 13-day regression — `trade.shares`, never `trade.quantity`."""
+    # The fix is in lines 2259 + 2264 (per pre-fix grep). These should
+    # now read `.shares` not `.quantity`.
+    assert ".quantity" not in TRADING_BOT, (
+        "Found `.quantity` reference in trading_bot_service.py — BotTrade "
+        "exposes `shares` not `quantity`. This is the EXACT bug that hid "
+        "the 13-day silent regression (Apr 16 → Apr 29 2026). "
+        "See safety_guardrail_crash drops in /api/diagnostic/trade-drops "
+        "for forensic confirmation."
+    )
+
+
+def test_bot_trade_shares_attribute_used_for_notional():
+    """The notional calculation must read `.shares` from BotTrade."""
+    # Two specific patterns that were broken by `.quantity`:
+    assert _src_has(
+        TRADING_BOT,
+        'notional = float(trade.entry_price or 0) * float(trade.shares or 0)',
+    ), "notional must use trade.shares (not trade.quantity)"
+    assert _src_has(
+        TRADING_BOT,
+        'float(getattr(t, "shares", 0) or 0)',
+    ), "open_positions_snapshot must use t.shares (not t.quantity)"

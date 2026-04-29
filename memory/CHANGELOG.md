@@ -2,6 +2,90 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirteenth commit) — 13-DAY SILENT REGRESSION ROOT-CAUSED + FIXED
+
+**The instrumentation shipped in the twelfth commit caught the bug
+within minutes of going live on Spark.** First curl to
+`/api/diagnostic/trade-drops?minutes=60` returned:
+
+```
+"first_killing_gate": "safety_guardrail_crash",
+"reason": "guardrail check exception: 'BotTrade' object has no attribute 'quantity'",
+"context": {"exc_type": "AttributeError"}
+```
+
+### Root cause
+
+`services/trading_bot_service.py::_execute_trade` had two sites
+referencing `BotTrade.quantity`. **`BotTrade` exposes `shares`, not
+`quantity`.** Every autonomous trade attempt for 13 days hit
+`AttributeError`, which the outer try/except caught and returned
+silently from the safety-guardrail check (fail-CLOSED). Trade never
+reached the broker, never landed in `bot_trades`. The bug had been
+hiding behind a generic `except Exception as e: logger.error(...)
+return` that didn't include the variable name in the log.
+
+### Fix
+
+Two-line change:
+- Line 2259 (snapshot of open positions, *was* silently safe via
+  `getattr(t, "quantity", 0)` default — getattr returned 0 → notional 0
+  → loop continued). Still corrected to `t.shares` for clarity.
+- Line 2264 — the actual crash site:
+  ```python
+  # Before
+  notional = float(trade.entry_price or 0) * float(trade.quantity or 0)
+  # After
+  notional = float(trade.entry_price or 0) * float(trade.shares or 0)
+  ```
+
+### Regression tests (`tests/test_trade_drop_instrumentation.py`)
+
+Two new source-level guards, total now 23/23 passing:
+- `test_no_bot_trade_dot_quantity_in_trading_bot_service` — fails if
+  any future contributor reintroduces `.quantity` in
+  `trading_bot_service.py`.
+- `test_bot_trade_shares_attribute_used_for_notional` — pins the two
+  specific call-sites that were broken.
+
+### Why this hid for 13 days
+
+Reading the recent[] from the live curl makes the dynamics obvious:
+the AI confidence gate, scanner, hard gates were all GREEN. The bug
+manifested as "32 GOs / 0 trades" with **no error in any user-facing
+log** because:
+1. Original `except` in `_execute_trade` logged with format string
+   `"%s"` truncating the exception name, then returned silently.
+2. `_save_trade` was never called (REJECTED trades orphaned in memory).
+3. No Mongo collection captured the drop.
+
+The 2026-04-30 v12 instrumentation closes #2 and #3 permanently. The
+v13 commit closes #1 by name (the actual `.quantity` typo).
+
+### Operator next step
+
+After pull + restart on Spark:
+```bash
+# Watch trade-drops empty out as new trades flow:
+watch -n 30 'curl -s http://localhost:8001/api/diagnostic/trade-drops?minutes=15 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[\"first_killing_gate\"], d[\"by_gate\"])"'
+
+# After 5-10 min RTH scanning, confirm bot_trades is no longer frozen:
+~/Trading-and-Analysis-Platform/.venv/bin/python -c "
+import os
+from pathlib import Path
+env_path = Path.home() / 'Trading-and-Analysis-Platform/backend/.env'
+for line in env_path.read_text().splitlines():
+    if '=' in line and not line.startswith('#'):
+        k, _, v = line.partition('='); os.environ.setdefault(k.strip(), v.strip().strip(chr(34)).strip(chr(39)))
+from pymongo import MongoClient
+db = MongoClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+print('bot_trades inserted today:', db.bot_trades.count_documents({'created_at': {'\$regex': '^2026-04-29'}}))
+"
+```
+
+
+
+
 ## 2026-04-30 (twelfth commit) — Trade-Drop Forensic Instrumentation + Broker-Reject Persistence Fix
 
 **Why**: On 2026-04-29 the operator confirmed the bot has not created

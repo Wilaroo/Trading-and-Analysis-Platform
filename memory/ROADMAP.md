@@ -3,7 +3,20 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v12 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v13 fork)
+
+### 🎯 Just shipped 2026-04-30 v13 — see CHANGELOG (thirteenth commit)
+- ✅ **13-DAY SILENT REGRESSION FIXED**. The v12 instrumentation
+  caught the bug within minutes of going live: `BotTrade` exposes
+  `shares` not `quantity`, but `_execute_trade` had two
+  `trade.quantity` typos. Every autonomous trade for 13 days hit
+  `AttributeError`, silently fail-CLOSED through the
+  `safety_guardrail_crash` path, and never reached the broker.
+- ✅ Two-line fix in `trading_bot_service.py` lines 2259 + 2264.
+- ✅ Two new source-level regression guards in
+  `tests/test_trade_drop_instrumentation.py` (23/23 passing).
+- ✅ Operator's first curl after pull — confirm `bot_trades` count
+  starts climbing again during RTH.
 
 ### 🎯 Just shipped 2026-04-30 v12 — see CHANGELOG (twelfth commit)
 - ✅ **Trade-drop forensic instrumentation** — new

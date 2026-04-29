@@ -87,38 +87,32 @@ ai_modules:          4 registered, all shadow_mode=true
                      (debate_agents, ai_risk_manager, institutional_flow, timeseries_ai)
 ```
 
-## Critical issue under investigation (April 29-30, 2026)
+## Critical issue ROOT-CAUSED + FIXED (2026-04-30 v13)
 
-**Bot has not created a single `bot_trade` since 2026-04-16 (13-day silent regression).**
+**13-day silent regression solved — `BotTrade.quantity` typo (was: `shares`).**
 
-- Hard gates work: alerts → priority → tape_confirmed → auto_eligible flow correctly (validated 2026-04-29)
-- Confidence gate evaluates and approves (today_evaluated: 84, today_go: 32, today_skip: 31)
-- BUT zero rows land in `bot_trades` collection
-- **Forensic instrumentation shipped 2026-04-30 v12** — every silent exit between AI gate and `bot_trades.insert_one()` now records to `trade_drops` collection. `GET /api/diagnostic/trade-drops?minutes=60` aggregates by gate.
-- **Likeliest root cause identified**: `trade_execution.execute_trade` broker-reject + exception branches were orphaning REJECTED trades in process memory (no `_save_trade()` call). Patched in v12.
-
-### 🎯 Operator action plan (after pull + restart on Spark)
-
-```bash
-# After 5-10 min of RTH scanning
-curl -s http://localhost:8001/api/diagnostic/trade-drops?minutes=60 | python3 -m json.tool
-# Read `first_killing_gate` — names the suspect.
-# Possible gates: account_guard, broker_rejected, safety_guardrail,
-# safety_guardrail_crash, no_trade_executor, pre_exec_guardrail_veto,
-# strategy_paper_phase, strategy_simulation_phase, execution_exception
+The instrumentation shipped in v12 caught the bug within minutes of
+going live on Spark. First curl returned:
 ```
+"first_killing_gate": "safety_guardrail_crash",
+"reason": "guardrail check exception: 'BotTrade' object has no attribute 'quantity'"
+```
+Every autonomous trade for 13 days hit `AttributeError` (lines 2259 +
+2264 of `trading_bot_service._execute_trade` referenced
+`trade.quantity` — `BotTrade` exposes `shares`). The outer try/except
+caught it, returned silently fail-CLOSED, and the trade never reached
+the broker. Fixed in v13.
 
-If `first_killing_gate=account_guard`: rotate `IB_ACCOUNT_PAPER` in
-backend/.env to include the pusher's reported `DUM61566S` alias.
+After pull + restart on Spark, expect:
+- `/api/diagnostic/trade-drops` should drain to empty (no more
+  `safety_guardrail_crash` rows).
+- `bot_trades` collection starts receiving inserts again during RTH.
 
-If `first_killing_gate=broker_rejected`: read the `reason` field in
-the `recent[]` array — IB-side error (margin, no buying power, etc).
-
-REJECTED trades now appear in `bot_trades` (orphan bug fixed in v12)
-so post-mortem queries against the collection will see attempts that
-were silently dropping for 13 days.
-
-See `/app/memory/CHANGELOG.md` v12 entry for the full detail.
+Two regression guards added in
+`/app/backend/tests/test_trade_drop_instrumentation.py`
+(`test_no_bot_trade_dot_quantity_in_trading_bot_service` +
+`test_bot_trade_shares_attribute_used_for_notional`) prevent
+re-introduction.
 
 ## Key endpoints (use external `localhost:8001` from Spark CLI)
 
