@@ -191,16 +191,19 @@ async def test_cursor_advances_through_pool_deterministically():
     # First batch — cursor starts at 0
     summary1 = await svc.poll_pool_once("intraday_noncore")
     assert summary1["batch_symbols"] > 0
-    assert summary1["cursor"] == 50  # BATCH_SIZE
+    # BATCH_SIZE = 25 (v19.1); cursor lands at 25
+    assert summary1["cursor"] == 25
 
     # Second batch — cursor advances
     summary2 = await svc.poll_pool_once("intraday_noncore")
-    assert summary2["cursor"] == 100
+    assert summary2["cursor"] == 50
 
-    # Third batch — wraps around (only 20 left of the original 120, then re-cycles 30 from start)
-    summary3 = await svc.poll_pool_once("intraday_noncore")
-    # cursor wraps: 100 + 50 = 150, mod 120 = 30
-    assert summary3["cursor"] == 30
+    # Continue advancing — confirm no premature wrap
+    for _ in range(2):
+        await svc.poll_pool_once("intraday_noncore")
+    summary5 = await svc.poll_pool_once("intraday_noncore")
+    # 5 batches × 25 = 125 mod 120 = 5
+    assert summary5["cursor"] == 5
 
 
 # --------------------------------------------------------------------------
@@ -227,6 +230,19 @@ async def test_emitted_alerts_stamped_with_bar_poll_provenance():
 
     # _check_squeeze fires on each → 3 alerts
     assert summary["alerts_emitted"] == 3
+
+    # CRITICAL v19.1 regression guard: bar poll MUST request mongo_only
+    # mode. Without it, bar poll bombards the pusher's /rpc/latest-bars
+    # endpoint and triggers IB historical-data rate-limit cascades.
+    technical.get_batch_snapshots.assert_called_once()
+    call_kwargs = technical.get_batch_snapshots.call_args.kwargs
+    assert call_kwargs.get("mongo_only") is True, (
+        "BarPollService.poll_pool_once MUST call get_batch_snapshots "
+        "with mongo_only=True. Otherwise the snapshot service hits "
+        "/rpc/latest-bars per symbol on the v17-expanded subscription "
+        "set, overwhelming the pusher's IB historical-data API. "
+        "See 2026-04-30 v19.1 fix in bar_poll_service.py."
+    )
 
     # Each alert should be in the scanner's _live_alerts dict, stamped
     # with data_source="bar_poll_5m" and a reasoning breadcrumb.

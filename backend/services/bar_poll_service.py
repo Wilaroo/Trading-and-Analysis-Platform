@@ -66,14 +66,17 @@ logger = logging.getLogger(__name__)
 
 
 # Cadence per pool, in seconds
-INTRADAY_NONCORE_INTERVAL_S = 30
-SWING_INTERVAL_S = 60
+INTRADAY_NONCORE_INTERVAL_S = 60   # bumped 30→60s 2026-04-30 v19.1 to ease pusher load
+SWING_INTERVAL_S = 120              # bumped 60→120s for the same reason
 INVESTMENT_INTERVAL_S = 7200  # 2 hours
 
 # Per-cycle batch size — keeps Mongo reads + snapshot computation
-# bounded so a slow cycle doesn't compound. 50 is a comfortable size:
-# the technical service can build 50 snapshots in <1s.
-BATCH_SIZE = 50
+# bounded so a slow cycle doesn't compound. 25 is a comfortable size
+# (was 50 pre-v19.1; halved after we observed pusher RPC bombardment
+# in the wild — the snapshot service now uses mongo_only mode so
+# it doesn't hit pusher RPC at all, but the smaller batch also keeps
+# event-loop blocks shorter for indicator computation).
+BATCH_SIZE = 25
 
 # Detectors that fire on bar-poll snapshots. Live-tick-dependent
 # detectors (9_ema_scalp, vwap_continuation, opening_range_break) are
@@ -302,11 +305,21 @@ class BarPollService:
             batch = batch + symbols[: BATCH_SIZE - len(batch)]
         pool.cursor = (start + BATCH_SIZE) % len(symbols)
 
-        # Build snapshots for the batch (Mongo reads — no IB calls)
+        # Build snapshots for the batch (Mongo reads — no IB calls).
+        # 2026-04-30 v19.1 — explicitly request `mongo_only=True` so
+        # the snapshot service skips its pusher RPC live-bar overlay.
+        # Pre-fix: bar poll bombarded the pusher's /rpc/latest-bars
+        # endpoint with 50 calls/cycle on the v17-expanded subscription
+        # set, hitting IB historical-data rate limits and triggering
+        # the "[RPC] latest-bars X failed" cascade + 120s push-to-DGX
+        # backend timeouts. With mongo_only the bar poll is fully
+        # decoupled from the pusher.
         snapshots: Dict[str, Any] = {}
         if self.technical is not None:
             try:
-                snapshots = await self.technical.get_batch_snapshots(batch)
+                snapshots = await self.technical.get_batch_snapshots(
+                    batch, mongo_only=True,
+                )
             except Exception as e:
                 logger.warning(
                     "[BarPoll] snapshot build failed for pool=%s (%s): %s",

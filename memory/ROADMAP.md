@@ -3,7 +3,21 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.1 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.1 — see CHANGELOG (twentieth commit)
+- ✅ **Hot-fix**: bar poll bombarding pusher RPC. Operator's
+  post-v19 logs showed `[RPC] latest-bars X failed` cascade + 120s
+  push-to-DGX timeouts. Root cause: v17 expanded subscriptions,
+  triggering live-bar overlay in the snapshot service for hundreds
+  of symbols every bar-poll cycle.
+- ✅ Added `mongo_only=True` flag on `realtime_technical_service`,
+  threaded through `bar_poll_service`. Bar poll now reads ONLY from
+  Mongo; live-tick scanner unaffected (still uses the live-bar
+  overlay for the ~480 streamed symbols).
+- ✅ Defence in depth: bar poll cadence/batch dialed down (30s→60s,
+  50→25 symbols).
+- ✅ Regression guard added — `mongo_only=True` is mandatory.
 
 ### 🎯 Just shipped 2026-04-30 v19 — see CHANGELOG (nineteenth commit)
 - ✅ **Confidence Gate Parallelism (3-5× EVAL speedup)** — 8

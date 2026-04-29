@@ -2,6 +2,57 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twentieth commit, v19.1) — Hot-fix: bar poll bombarding pusher RPC
+
+**Why**: Operator post-pull logs (2026-04-30 14:27 ET) showed:
+```
+[RPC] latest-bars IGV failed:
+[RPC] latest-bars EWY failed:
+[RPC] latest-bars MSTR failed:
+... (one symbol every ~18s, then 120s push-to-DGX timeouts)
+```
+
+### Root cause
+
+v17 expanded pusher subscriptions 72 → 237 (working as designed).
+But the v18 bar poll service called `realtime_technical_service.get_batch_snapshots()`, which has a "live-bar overlay" feature: when a symbol IS in the pusher subscription, it preferentially fetches the latest 5-min bar via `/rpc/latest-bars` for sub-second freshness.
+
+With v17 dramatically expanding the subscription set, v18's bar poll was triggering live-bar RPC calls for **hundreds of symbols every cycle**. The pusher's `/rpc/latest-bars` handler issues `reqHistoricalData` to IB, which has strict pacing (~6 req/2s for the same contract, 60 req/10min cumulative). IB rate-limited → "[RPC] latest-bars X failed" cascade. While the pusher was busy handling those failed RPC calls, its outbound push to DGX `/api/ib-data/push` couldn't keep up → 120s read timeouts.
+
+### Fix
+
+#### 1. `realtime_technical_service` — new `mongo_only` parameter
+
+Both `get_technical_snapshot()` and `get_batch_snapshots()` now accept `mongo_only=False` (default keeps prior behaviour for the live-tick scanner). When True, the live-bar overlay is skipped entirely — only Mongo `ib_historical_data` is consulted.
+
+#### 2. `bar_poll_service` calls with `mongo_only=True`
+
+The bar poll path is fully decoupled from the pusher RPC. Live-tick scanner is unaffected (still uses live-bar overlay for the ~480 live-streamed symbols where freshness matters).
+
+#### 3. Conservative cadence + batch reduction (defence in depth)
+
+- `INTRADAY_NONCORE_INTERVAL_S`: 30s → 60s
+- `SWING_INTERVAL_S`: 60s → 120s
+- `BATCH_SIZE`: 50 → 25
+
+Even if a future contributor accidentally re-enables live-bar overlay, the throttled cadence prevents pusher bombardment. Mongo bars are typically <60s lagged from the always-on turbo collectors — fine for slow setups.
+
+### Tests
+
+`test_bar_poll_v18.py` — added regression guard:
+
+- **`test_emitted_alerts_stamped_with_bar_poll_provenance`** now also asserts `technical.get_batch_snapshots.call_args.kwargs["mongo_only"] is True`. A future contributor removing the flag fails the build instead of silently triggering the bombardment cascade again.
+
+90/90 across all v12-v19.1 suites.
+
+### Operator-side notes
+
+- **No `.bat` change required** for this hot-fix — it's all DGX-side.
+- **Optional cold-start improvement**: the `.bat` sets `IB_PUSHER_L1_AUTO_TOP_N=60`. Bumping to `300` makes the pusher start with ~300 of the right symbols immediately, and v17's rotation just fine-tunes from there. Cold-start coverage goes from 73 → ~300 in <60s. Not required, just faster.
+- After pull + restart, the `[RPC] latest-bars X failed` warnings should stop. The 120s push timeouts should stop. Coverage continues to climb normally via v17 + v18 (Mongo-only) paths.
+
+
+
 ## 2026-04-30 (nineteenth commit) — Confidence Gate Parallelism (3-5× EVAL speedup)
 
 **Why**: v18 unleashed bar-poll on ~2,000 symbols, multiplying alert

@@ -380,13 +380,25 @@ class RealTimeTechnicalService:
             pass
         return self._spy_change_pct
     
-    async def get_technical_snapshot(self, symbol: str, force_refresh: bool = False) -> Optional[TechnicalSnapshot]:
+    async def get_technical_snapshot(
+        self, symbol: str, force_refresh: bool = False,
+        mongo_only: bool = False,
+    ) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
         Uses 100% IB data to match training data (eliminates train/serve skew):
         - Quotes: IB Pusher (real-time)
         - Intraday bars: ib_historical_data (MongoDB, 5-min)
         - Daily bars: ib_historical_data (MongoDB, 1-day)
+
+        Args:
+            mongo_only: when True, skip the pusher live-bar RPC overlay.
+                Used by the v18 bar poll service which polls 1,000s of
+                symbols every 30-60s and would otherwise overwhelm the
+                pusher's IB historical-data API (causing the
+                "[RPC] latest-bars X failed" cascade we saw 2026-04-30).
+                Mongo bars are typically <60s lagged from the always-on
+                turbo collectors — fine for slow setups.
         """
         symbol = symbol.upper()
         
@@ -412,10 +424,16 @@ class RealTimeTechnicalService:
             # and any newer bars are appended on top. This keeps the indicator
             # warm-up (200-period EMA, 14-RSI etc.) intact while making sure
             # the trailing edge of the series is real-time, not stale.
-            live_bars = await self._get_live_intraday_bars(symbol, "5 mins")
-            intraday_bars, intraday_source = self._merge_live_into_history(
-                intraday_bars, live_bars
-            )
+            #
+            # 2026-04-30 v19.1 — caller can opt out via `mongo_only=True`
+            # (used by bar_poll_service to avoid pusher RPC bombardment).
+            if mongo_only:
+                intraday_source = "mongo_only_caller_request"
+            else:
+                live_bars = await self._get_live_intraday_bars(symbol, "5 mins")
+                intraday_bars, intraday_source = self._merge_live_into_history(
+                    intraday_bars, live_bars
+                )
 
             # Staleness check: skip symbol if intraday data is too old
             # BUT: if IB Pusher has a live quote, bars are fine for indicator calc
@@ -803,15 +821,25 @@ class RealTimeTechnicalService:
         
         return (resistance, support)
     
-    async def get_batch_snapshots(self, symbols: List[str]) -> Dict[str, TechnicalSnapshot]:
-        """Get technical snapshots for multiple symbols"""
+    async def get_batch_snapshots(
+        self, symbols: List[str], *, mongo_only: bool = False,
+    ) -> Dict[str, TechnicalSnapshot]:
+        """Get technical snapshots for multiple symbols.
+
+        Args:
+            mongo_only: forwarded to ``get_technical_snapshot`` — see
+                that docstring for rationale (avoids pusher RPC bombardment
+                from the v18 bar poll service).
+        """
         results = {}
-        
+
         for symbol in symbols:
-            snapshot = await self.get_technical_snapshot(symbol)
+            snapshot = await self.get_technical_snapshot(
+                symbol, mongo_only=mongo_only,
+            )
             if snapshot:
                 results[symbol] = snapshot
-        
+
         return results
     
     def snapshot_to_dict(self, snapshot: TechnicalSnapshot) -> Dict[str, Any]:
