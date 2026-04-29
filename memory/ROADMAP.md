@@ -397,6 +397,35 @@ Live-side spot checks:
   vs typical setup scanners.
 
 ### 🟣 Saved improvements (operator pinned 2026-04-28)
+
+- **Trade-chain log watcher / first-occurrence pager** (operator
+  pinned 2026-04-30 v14). Now that every critical except in the
+  trade chain emits a full traceback (`logger.exception(...)`) and
+  every silent drop writes to `trade_drops`, wire a tiny watcher
+  that pages on FIRST occurrence of `[TRADE_DROP] gate=…` /
+  `safety_guardrail_crash` / new `AttributeError`/`TypeError`/
+  `KeyError` in the trade chain. Two flavours:
+
+  • **Light (~30min)**: cron-style `journalctl -k --since "5 min ago"
+    | grep -E "[TRADE_DROP]|guardrail check crashed|execute_trade
+    error"` piped to a `mail`/`curl webhook` if non-empty. Lives in
+    a small `scripts/trade_chain_log_watcher.sh` on Spark, runs every
+    5 min via cron. Stores last-seen line hash in `/tmp` to avoid
+    spamming on the same recurring bug.
+
+  • **Heavy (~3h)**: real Loki/Promtail/Vector setup with structured
+    log labels (`gate`, `symbol`, `setup_type`) → Grafana alert rule
+    that fires on `count_over_time({app="sentcom"} |~ "TRADE_DROP"
+    [10m]) > 5`. Better long-term but adds infra.
+
+  Recommended start: light flavor. Heavy version when we have ≥2 more
+  silent regressions worth justifying the infra weight.
+
+  **Why this matters**: the 13-day v13 regression cost real trading
+  days. With the v12 instrumentation + v14 logging the next typo will
+  surface in the first failed trade attempt, but only if someone is
+  watching. A 30-min watcher closes that loop.
+
 - **Live cache freshness pulse on chart x-axis** — turn the most
   recent x-axis tick green when its bar was written by
   `source="live_tick"` within the last 60s. Visual confirmation the
