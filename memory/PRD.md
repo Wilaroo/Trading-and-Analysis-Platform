@@ -113,7 +113,9 @@ is the operator's source of truth for which Trade fits which Setup;
 - `backend/services/ai_modules/post_training_validator.py` — 9 fail-closed gates
 - `backend/scripts/revalidate_all.py` — Phase 13 revalidation script
 - `backend/services/smart_levels_service.py` — `compute_smart_levels`, `compute_stop_guard`, `compute_target_snap`, `compute_trailing_stop_snap` (added 2026-04-29 — liquidity-aware trail)
-- `backend/services/stop_manager.py` — `set_db(db)` injection enables HVN-anchored breakeven + trail (2026-04-29)
+- `backend/services/stop_manager.py` — `set_db(db)` injection enables HVN-anchored breakeven + trail (2026-04-29). **Realtime stop-guard re-check (2026-04-30 v11)**: `_periodic_resnap_check` runs after every `update_trailing_stop` call (60s per-trade throttle), re-snaps to fresher HVN levels in `breakeven`/`trailing` modes, ratchet-only.
+- `backend/services/sector_tag_service.py` — `tag_symbol_async` (2026-04-30 v11) full fallback chain: STATIC_MAP → `symbol_adv_cache.sector` → Finnhub `stock/profile2` industry → `_industry_to_etf` mapper → persist back to Mongo. `_PRIORITY_OVERRIDES` resolves conflicts (Biotech > Tech, REIT > Industrial, Renewable > Energy); `_EXPLICIT_NONE` blocklist returns UNKNOWN for cryptocurrency / SPAC / trust / fund.
+- `frontend/src/components/sentcom/v5/ShadowVsRealTile.jsx` — **NEW 2026-04-30 v11** — V5 status-strip tile, reads `/api/ai-modules/shadow/stats` + `/api/trading-bot/stats/performance` every 60s, renders side-by-side win-rate + divergence signal (`shadow ahead` / `shadow behind` / `in sync` per ±5pp).
 - `app/memory/SETUPS_AND_TRADES.md` — canonical doc for the 7 Setups + 22 Trades + matrix + aliases
 
 

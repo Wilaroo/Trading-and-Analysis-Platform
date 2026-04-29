@@ -3,7 +3,48 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v11 fork)
+
+### 🎯 Just shipped 2026-04-30 v11 — see CHANGELOG
+- ✅ **Realtime stop-guard re-check** — 60s per-trade throttle, ratchet-only,
+  re-snaps to fresher HVN levels in breakeven + trailing modes.
+- ✅ **Sector fallback chain** — `tag_symbol_async` adds Mongo cache +
+  Finnhub `stock/profile2` industry mapping with `_PRIORITY_OVERRIDES`
+  (Biotech > Tech, REIT > Industrial) + `_EXPLICIT_NONE` blocklist.
+  Persists Finnhub hits back to `symbol_adv_cache.sector`.
+- ✅ **Daily-Setup landscape pre-warm** — runs in `_scan_loop` CLOSED +
+  PREMARKET branches; Saturday 12:00 ET cron job for weekend-context
+  rollup. First morning briefing now O(1) instead of paying 200×classify
+  latency.
+- ✅ **V5 Shadow vs Real tile** — side-by-side win-rate comparison
+  with divergence signal (shadow ahead / behind / in sync). Wired
+  into the V5 status strip.
+- 40 new tests (12 + 20 + 8). 224/224 across related suites.
+
+### 🟠 P2 — Predictive scanner deprecation (parked from this commit)
+The legacy `predictive_scanner` (forming-setup phases — early_formation /
+developing / nearly_ready / trigger_imminent) is still wired to:
+  - `POST /api/scanner/scan` (used by `ScannerPage.js`)
+  - `services/ai_assistant_service.py:1852` (AI assistant context query)
+  - 7 GET endpoints (`/setups`, `/alerts`, `/status`, `/summary`,
+    `/ai-context`, `/setup-types`, `/alerts/history`) — none of which
+    are referenced in V5.
+
+Plan to retire (~2-3h):
+  1. Migrate `ScannerPage.js` to `enhanced_scanner` output (likely
+     `/api/live-scanner/*` + a small server-side adapter for the
+     "scan these symbols now" trigger).
+  2. Re-point `ai_assistant_service.get_predictive_scanner()` calls
+     to `get_enhanced_scanner()` — both expose the same shape for the
+     specific data the assistant reads.
+  3. Drop the 7 unused GET endpoints from `routers/scanner.py`.
+  4. Delete `services/predictive_scanner.py` + its 1.1k LOC.
+
+Rationale: `enhanced_scanner` is the live source of truth for V5 +
+diagnostics + matrix-driven gating. Keeping `predictive_scanner`
+around adds confusion (two scanner singletons, one feeds telemetry,
+the other doesn't) and dead code surface. Confirmed no V5 frontend
+component references `predictive_scanner` data — safe to migrate.
 
 ### 🎯 NEXT-SESSION PLAN — Regime → Setup → Trade pipeline (6-item rollout — STATUS UPDATE)
 

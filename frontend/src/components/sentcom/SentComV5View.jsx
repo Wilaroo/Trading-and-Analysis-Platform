@@ -36,6 +36,7 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
+import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
 import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
 import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
@@ -296,6 +297,9 @@ export const SentComV5View = ({
         </PanelErrorBoundary>
         <PanelErrorBoundary label="strategy-mix" compact>
           <StrategyMixCard />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="shadow-vs-real" compact>
+          <ShadowVsRealTile />
         </PanelErrorBoundary>
       </div>
 

@@ -14,10 +14,21 @@ Handles all trailing stop logic:
   breakeven. Falls through cleanly to the legacy ATR/breakeven logic
   when no level is found (so the manager keeps working without smart
   levels).
+
+2026-04-30 — Realtime stop-guard re-check (operator-flagged P1):
+  Pre-fix, snaps only fired on (a) a target hit OR (b) price extending
+  to a fresh high/low. If the liquidity profile shifted DURING a held
+  position (e.g., a new HVN forms tighter than the current stop, or a
+  HOD/LOD pivot lands in the protected zone), the trail wouldn't re-
+  evaluate until the next high-water-mark print. Now `update_trailing_stop`
+  runs a `_periodic_resnap_check` once every `_RESNAP_INTERVAL_SECONDS`
+  per trade (default 60s — operator-confirmed throttle). Re-snap only
+  RATCHETS — never loosens — so a stale liquidity read can't widen
+  the stop.
 """
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 if TYPE_CHECKING:
     from services.trading_bot_service import BotTrade, TradeDirection
@@ -28,8 +39,15 @@ logger = logging.getLogger(__name__)
 class StopManager:
     """Manages trailing stop logic for open trades."""
 
+    # Realtime stop-guard re-check throttle. Operator-confirmed at 60s
+    # so smart_levels_service / IB-pusher RPC don't get hammered.
+    _RESNAP_INTERVAL_SECONDS = 60.0
+
     def __init__(self):
         self._db = None
+        # Per-trade timestamp of the last periodic re-snap. Keyed by
+        # trade.id so multiple open positions don't share the throttle.
+        self._last_resnap_at: Dict[str, datetime] = {}
 
     def set_db(self, db):
         """Inject DB so the manager can call into `smart_levels_service`
@@ -42,6 +60,10 @@ class StopManager:
         Update trailing stop based on targets hit:
         - Target 1 hit: Move stop to breakeven (entry price)
         - Target 2 hit: Start trailing stop (follows price by trail_pct)
+
+        After the target-driven branches, runs a periodic stop-guard
+        re-check (every 60s per trade) so stale liquidity reads get
+        refreshed even when price hasn't extended to a fresh high/low.
         """
         from services.trading_bot_service import TradeDirection
         targets_hit = trade.scale_out_config.get('targets_hit', [])
@@ -55,6 +77,77 @@ class StopManager:
 
         if current_mode == 'trailing':
             self._update_trail_position(trade)
+
+        # Realtime stop-guard re-check — fires for breakeven and
+        # trailing modes. Skips `original` mode (pre-T1) because the
+        # operator's hard stop is intentional and shouldn't be re-snapped
+        # before any profit has been booked.
+        latest_mode = trailing_config.get('mode', current_mode)
+        if latest_mode in ('breakeven', 'trailing'):
+            self._periodic_resnap_check(trade)
+
+    # ── Periodic stop-guard re-check ────────────────────────────────────────
+    def _periodic_resnap_check(self, trade: 'BotTrade'):
+        """Re-evaluate the current stop against the latest liquidity
+        profile. Throttled per-trade so we don't hammer smart_levels
+        every tick.
+
+        Hard guarantee: only RATCHETS in the protective direction —
+        a re-snap can never loosen the stop.
+        """
+        from services.trading_bot_service import TradeDirection
+
+        # Throttle: per-trade 60s cooldown.
+        trade_id = getattr(trade, 'id', None) or getattr(trade, 'trade_id', None)
+        if not trade_id:
+            return  # without an id we can't throttle safely
+        now = datetime.now(timezone.utc)
+        last = self._last_resnap_at.get(trade_id)
+        if last is not None:
+            if (now - last).total_seconds() < self._RESNAP_INTERVAL_SECONDS:
+                return
+        # Stamp BEFORE the snap call so a flaky smart_levels lookup
+        # can't put us in a tight retry loop.
+        self._last_resnap_at[trade_id] = now
+
+        trailing_config = trade.trailing_stop_config
+        old_stop = trailing_config.get('current_stop', trade.stop_price)
+        if old_stop is None or old_stop <= 0:
+            return
+
+        snap = self._snap_to_liquidity(trade, old_stop)
+        if not snap or not snap.get("snapped"):
+            return
+        candidate = snap["stop"]
+        # Ratchet — only commit if the candidate is more protective.
+        if trade.direction == TradeDirection.LONG:
+            if candidate <= old_stop:
+                return
+        else:
+            if candidate >= old_stop:
+                return
+
+        new_stop = round(candidate, 2)
+        trailing_config['current_stop'] = new_stop
+        trailing_config['last_resnap_at'] = now.isoformat()
+        trailing_config['last_resnap_level'] = {
+            "kind":     snap.get("level_kind"),
+            "price":    snap.get("level_price"),
+            "strength": snap.get("level_strength"),
+        }
+        mode = trailing_config.get('mode', 'unknown')
+        reason = f"resnap_{mode}_hvn"
+        self._record_stop_adjustment(trade, old_stop, new_stop, reason)
+        level_kind = snap.get("level_kind") or "level"
+        level_price = snap.get("level_price")
+        level_str = (
+            f" (snap to {level_kind} @ ${level_price:.2f})"
+            if level_price is not None else ""
+        )
+        logger.info(
+            f"STOP-GUARD RESNAP ({mode}): {trade.symbol} "
+            f"${old_stop:.2f} → ${new_stop:.2f}{level_str}"
+        )
 
     # ── Liquidity-aware snap helper ────────────────────────────────────────
     def _snap_to_liquidity(

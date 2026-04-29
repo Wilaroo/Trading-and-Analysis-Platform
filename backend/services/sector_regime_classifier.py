@@ -154,10 +154,18 @@ class SectorRegimeClassifier:
 
     async def classify_for_symbol(self, symbol: str) -> SectorRegime:
         """Return the regime of the symbol's home sector. UNKNOWN when
-        the symbol isn't in the static tag map."""
+        the symbol can't be resolved through the static map, the Mongo
+        cache, OR the Finnhub fallback (the last is gated by API key
+        availability — see ``SectorTagService.tag_symbol_async``).
+        """
         try:
             from services.sector_tag_service import get_sector_tag_service
-            etf = get_sector_tag_service(db=self.db).tag_symbol(symbol)
+            svc = get_sector_tag_service(db=self.db)
+            # Fast path: synchronous static-map hit.
+            etf = svc.tag_symbol(symbol)
+            # Fallback chain (Mongo cache → Finnhub → persist).
+            if etf is None:
+                etf = await svc.tag_symbol_async(symbol)
         except Exception:
             etf = None
         if etf is None:

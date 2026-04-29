@@ -196,6 +196,173 @@ def _build_full_map() -> Dict[str, str]:
     return out
 
 
+# ──────────────────────────── Industry → SPDR ETF ────────────────────────────
+#
+# Finnhub `finnhubIndustry` returns free-form-ish strings like "Technology",
+# "Banking", "Pharmaceuticals", "Oil & Gas E&P" etc. None of these are GICS
+# sector codes — we have to translate. Map below is hand-curated against
+# the actual values Finnhub returns for the 200 most-active US tickers.
+# Comparisons are case-insensitive and substring-based via `_industry_to_etf`.
+#
+# 2026-04-30 (operator P2): added so we can catch newly-listed names that
+# aren't in STATIC_SECTOR_MAP yet without pushing a code change.
+
+_INDUSTRY_TO_ETF: Dict[str, str] = {
+    # Technology — XLK
+    "technology":            "XLK",
+    "semiconductor":         "XLK",
+    "software":              "XLK",
+    "computer hardware":     "XLK",
+    "computer service":      "XLK",  # consulting, IT services
+    "information technology":"XLK",
+    "internet of things":    "XLK",
+    "electronic equipment":  "XLK",
+    # Communication — XLC
+    "communication services":"XLC",
+    "media":                 "XLC",
+    "telecommunication":     "XLC",
+    "internet":              "XLC",  # Finnhub uses "Internet" for META/GOOGL
+    "broadcasting":          "XLC",
+    "publishing":            "XLC",
+    "entertainment":         "XLC",
+    "interactive media":     "XLC",
+    # Consumer Discretionary — XLY
+    "consumer cyclical":     "XLY",
+    "consumer discretionary":"XLY",
+    "auto":                  "XLY",
+    "automobile":            "XLY",
+    "retail":                "XLY",
+    "apparel":               "XLY",
+    "leisure":               "XLY",
+    "lodging":               "XLY",
+    "travel":                "XLY",
+    "homebuild":             "XLY",
+    # Consumer Staples — XLP
+    "consumer staples":      "XLP",
+    "consumer defensive":    "XLP",
+    "beverages":             "XLP",
+    "tobacco":               "XLP",
+    "food":                  "XLP",
+    "household":             "XLP",
+    "personal product":      "XLP",
+    # Healthcare — XLV
+    "health":                "XLV",
+    "pharmaceutical":        "XLV",
+    "biotech":               "XLV",
+    "medical":               "XLV",
+    "healthcare":            "XLV",
+    "life sciences":         "XLV",
+    "drug manufacturer":     "XLV",
+    # Financials — XLF
+    "financial":             "XLF",
+    "bank":                  "XLF",
+    "insurance":             "XLF",
+    "capital market":        "XLF",
+    "asset management":      "XLF",
+    "credit service":        "XLF",
+    "exchange":              "XLF",  # NYSE, ICE, CME (financial-exchange names)
+    # Energy — XLE
+    "energy":                "XLE",
+    "oil":                   "XLE",
+    "gas":                   "XLE",
+    "petroleum":             "XLE",
+    "fuel":                  "XLE",
+    # Industrials — XLI
+    "industrial":            "XLI",
+    "aerospace":             "XLI",
+    "defense":               "XLI",
+    "machinery":             "XLI",
+    "transportation":        "XLI",
+    "logistic":              "XLI",
+    "airline":               "XLI",
+    "rail":                  "XLI",
+    "construction":          "XLI",
+    "engineer":              "XLI",
+    "trucking":              "XLI",
+    # Materials — XLB
+    "materials":             "XLB",
+    "chemical":              "XLB",
+    "metal":                 "XLB",
+    "mining":                "XLB",
+    "steel":                 "XLB",
+    "paper":                 "XLB",
+    "container":             "XLB",
+    # Real Estate — XLRE
+    "real estate":           "XLRE",
+    "reit":                  "XLRE",
+    # Utilities — XLU
+    "utilit":                "XLU",   # catches "utility" / "utilities"
+    "electric":              "XLU",
+    "water":                 "XLU",
+    "renewable":             "XLU",
+}
+
+# Sectors that should win over generic substring matches when both
+# fire on the same input. Order matters: earlier groups have higher
+# priority. Each group lists ETF + the keys that should "claim" the
+# string before falling through to longest-substring resolution.
+#
+# Why: "Biotechnology" contains both `biotech` (XLV) AND `technology`
+# (XLK) — sorted-by-length-desc would wrongly pick XLK. "REIT -
+# Industrial" contains both `reit` (XLRE) AND `industrial` (XLI).
+# Etc.
+_PRIORITY_OVERRIDES: List[tuple] = [
+    # Most-specific first.
+    ("XLV",  ["biotech", "pharmaceutical", "drug manufacturer",
+              "life sciences", "healthcare", "medical"]),
+    ("XLRE", ["reit", "real estate"]),
+    ("XLU",  ["renewable energy", "utilit"]),
+    ("XLE",  ["oil & gas", "petroleum", "natural gas"]),
+]
+
+# Industries that look sector-y but aren't covered by SPDR — return
+# None so callers degrade to UNKNOWN rather than mis-classify them.
+# Explicit blocklist beats trying to bucket every long-tail value.
+_EXPLICIT_NONE: List[str] = [
+    "cryptocurrency",
+    "crypto ",      # leading space avoids "cryptosporidium" et al.
+    "blockchain",
+    "digital asset",
+    "shell company",
+    "spac",         # blank-check / SPACs
+    "trust",        # closed-end funds, royalty trusts (heterogeneous sectors)
+    "etf",          # the few non-SPDR ETF tickers in the universe
+    "fund",
+]
+
+
+def _industry_to_etf(industry: Optional[str]) -> Optional[str]:
+    """Resolve a free-form industry string to an SPDR sector ETF code.
+
+    Resolution order:
+      1. ``_EXPLICIT_NONE`` blocklist — return None for industries
+         where mis-classification is worse than UNKNOWN.
+      2. ``_PRIORITY_OVERRIDES`` — claim sector-conflict cases like
+         "Biotechnology" (biotech beats tech) and "REIT - Industrial"
+         (reit beats industrial).
+      3. Longest-substring match into ``_INDUSTRY_TO_ETF``.
+
+    Case-insensitive throughout. Returns ``None`` when no rule applies.
+    """
+    if not industry:
+        return None
+    needle = industry.lower()
+    # 1. Explicit blocklist — UNKNOWN beats wrong sector tag.
+    for blocked in _EXPLICIT_NONE:
+        if blocked in needle:
+            return None
+    # 2. Priority overrides — sector-conflict resolution.
+    for etf, keys in _PRIORITY_OVERRIDES:
+        for k in keys:
+            if k in needle:
+                return etf
+    # 3. Longest-substring match.
+    for key in sorted(_INDUSTRY_TO_ETF.keys(), key=len, reverse=True):
+        if key in needle:
+            return _INDUSTRY_TO_ETF[key]
+    return None
+
+
 # ──────────────────────────── Service ────────────────────────────
 
 
@@ -209,10 +376,98 @@ class SectorTagService:
     # ───────── Lookup ─────────
 
     def tag_symbol(self, symbol: str) -> Optional[str]:
-        """Return the sector ETF code for ``symbol`` or ``None`` if unknown."""
+        """Return the sector ETF code for ``symbol`` or ``None`` if unknown.
+
+        SYNC, fast — only consults the in-memory static map. Use
+        :py:meth:`tag_symbol_async` for the full fallback chain
+        (Mongo cache → Finnhub) when the static miss matters.
+        """
         if not symbol:
             return None
         return self._map.get(symbol.upper())
+
+    async def tag_symbol_async(self, symbol: str) -> Optional[str]:
+        """Async tag with full fallback chain — added 2026-04-30 (operator P2).
+
+        Lookup order:
+          1. STATIC_SECTOR_MAP (in-memory, instant) — same as :py:meth:`tag_symbol`.
+          2. ``symbol_adv_cache.sector`` (Mongo cache from a prior backfill
+             OR a prior Finnhub lookup persisted by step 3).
+          3. Finnhub ``stock/profile2`` via ``fundamental_data_service`` —
+             maps the returned ``industry`` string to an SPDR ETF via
+             ``_industry_to_etf``. Network call, gated behind a 4s timeout
+             inside the fundamental service.
+
+        On Finnhub success, the result is persisted to
+        ``symbol_adv_cache.sector`` so step 2 hits on subsequent calls
+        (operator-confirmed: persist == yes).
+
+        Returns ``None`` if every step fails — caller treats as UNKNOWN
+        sector, downstream classifier degrades gracefully.
+        """
+        if not symbol:
+            return None
+        sym = symbol.upper()
+
+        # 1. Static map
+        hit = self._map.get(sym)
+        if hit is not None:
+            return hit
+
+        # 2. Mongo cache (`symbol_adv_cache.sector`)
+        if self.db is not None:
+            try:
+                doc = self.db["symbol_adv_cache"].find_one(
+                    {"symbol": sym},
+                    {"_id": 0, "sector": 1},
+                )
+                cached = (doc or {}).get("sector")
+                if cached and cached in SECTOR_ETFS:
+                    # Promote to in-memory map so future sync `tag_symbol`
+                    # calls hit instantly.
+                    self._map[sym] = cached
+                    return cached
+            except Exception as e:
+                logger.debug(f"tag_symbol_async mongo lookup failed for {sym}: {e}")
+
+        # 3. Finnhub fallback (network call). Gated behind a try/except —
+        # any failure (no key, timeout, parse error) silently falls
+        # through to None.
+        try:
+            from services.fundamental_data_service import get_fundamental_data_service
+            fund_svc = get_fundamental_data_service()
+            profile = await fund_svc.get_company_profile(sym)
+            industry = (profile or {}).get("industry")
+            etf = _industry_to_etf(industry)
+            if etf:
+                self._map[sym] = etf  # cache in-process
+                # Persist to Mongo for next time. Best-effort —
+                # never blocks the lookup on a write failure.
+                if self.db is not None:
+                    try:
+                        self.db["symbol_adv_cache"].update_one(
+                            {"symbol": sym},
+                            {"$set": {
+                                "sector": etf,
+                                "sector_name": SECTOR_ETFS.get(etf, etf),
+                                "sector_source": "finnhub_industry",
+                                "sector_source_industry": industry,
+                            }},
+                            upsert=True,
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            f"tag_symbol_async persist failed for {sym}: {e}"
+                        )
+                logger.info(
+                    f"[SECTOR FALLBACK] {sym} → {etf} via Finnhub industry "
+                    f"'{industry}' (persisted)"
+                )
+                return etf
+        except Exception as e:
+            logger.debug(f"tag_symbol_async Finnhub fallback failed for {sym}: {e}")
+
+        return None
 
     def tag_many(self, symbols: Iterable[str]) -> Dict[str, Optional[str]]:
         """Batch tag — returns ``{symbol: ETF | None}``."""

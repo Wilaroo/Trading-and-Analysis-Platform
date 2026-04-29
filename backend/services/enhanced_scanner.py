@@ -2043,6 +2043,10 @@ class EnhancedBackgroundScanner:
                     # 1. Scan daily charts for swing/position setups
                     # 2. Re-rank today's intraday alerts as tomorrow-open
                     #    carry-forward candidates (added 2026-04-28).
+                    # 3. Pre-warm the Bellafiore Setup landscape so the
+                    #    morning briefing's first call is O(1) instead
+                    #    of paying 200×classify latency (added 2026-04-30
+                    #    operator-flagged P1 — overnight/weekend prep).
                     #
                     # 2026-04-28e: Cadence dropped from `% 20` (100 min)
                     # to `% 4` (20 min). Old cadence meant operators saw
@@ -2051,11 +2055,12 @@ class EnhancedBackgroundScanner:
                     if self._scan_count % 4 == 0 or self._scan_count == 0:
                         logger.info(
                             f"After-hours sweep #{self._scan_count // 4 + 1} — "
-                            f"daily chart scan + tomorrow-open carry-forward ranker"
+                            f"daily chart scan + tomorrow-open carry-forward + landscape pre-warm"
                         )
                         try:
                             await self._scan_daily_setups()
                             await self._rank_carry_forward_setups_for_tomorrow()
+                            await self._prewarm_setup_landscape()
                             self._cleanup_expired_alerts()
                         except Exception as e:
                             logger.debug(f"After-hours daily scan error: {e}")
@@ -2065,10 +2070,14 @@ class EnhancedBackgroundScanner:
                 
                 if current_window == TimeWindow.PREMARKET:
                     # PRE-MARKET MODE: Build morning watchlist for opening trades
+                    # plus a fresh landscape snapshot so the morning briefing
+                    # cited tickers reflect this morning's gap data, not
+                    # last night's stale daily-bar classification.
                     if self._scan_count % 10 == 0 or self._scan_count == 0:
-                        logger.info("Pre-market — building morning watchlist for opening trades")
+                        logger.info("Pre-market — building morning watchlist + landscape pre-warm")
                         try:
                             await self._scan_premarket_setups()
+                            await self._prewarm_setup_landscape(force_morning=True)
                             self._cleanup_expired_alerts()
                         except Exception as e:
                             logger.debug(f"Pre-market scan error: {e}")
@@ -5527,6 +5536,56 @@ class EnhancedBackgroundScanner:
             next_day.year, next_day.month, next_day.day, 9, 30, 0, tzinfo=et
         )
         return next_open.astimezone(timezone.utc)
+
+
+    async def _prewarm_setup_landscape(self, force_morning: bool = False):
+        """Pre-warm the SetupLandscape snapshot during overnight + premarket
+        scan cycles so the first morning/weekend briefing call is ~free.
+
+        Operator-flagged 2026-04-30 (P1): the Bellafiore daily-Setup
+        classifier is invoked lazily by `setup_landscape_service` —
+        which is fine for intraday but adds visible latency to the
+        morning briefing because the 200-symbol classification has
+        to run end-to-end. Pre-warming during after-hours sweeps
+        means operator hits the briefing endpoint on a hot snapshot.
+
+        Context selection:
+          - PREMARKET (force_morning=True) → "morning"
+          - Sat/Sun (any after-hours window)         → "weekend"
+          - Mon-Fri after-hours                      → "morning" (next session)
+        """
+        try:
+            from datetime import datetime as _dt
+            from zoneinfo import ZoneInfo as _ZI
+            from services.setup_landscape_service import get_setup_landscape_service
+        except Exception as e:
+            logger.debug(f"_prewarm_setup_landscape import skipped: {e}")
+            return
+        # Choose context — weekend on Sat/Sun, morning otherwise.
+        try:
+            now_et = _dt.now(_ZI("America/New_York"))
+            weekday = now_et.weekday()  # Mon=0 .. Sun=6
+        except Exception:
+            weekday = 0
+        if force_morning:
+            context = "morning"
+        elif weekday in (5, 6):
+            context = "weekend"
+        else:
+            context = "morning"
+        try:
+            svc = get_setup_landscape_service(db=self.db)
+            # Force a fresh snapshot — the 60s TTL will then keep it
+            # warm across the next several briefing calls.
+            svc.invalidate()
+            snap = await svc.get_snapshot(context=context)
+            logger.info(
+                f"📚 Landscape pre-warmed ({context}): {snap.classified}/"
+                f"{snap.sample_size} classified, regime={snap.multi_index_regime}"
+            )
+        except Exception as e:
+            logger.debug(f"_prewarm_setup_landscape failed: {e}")
+
 
 
     async def _scan_premarket_setups(self):

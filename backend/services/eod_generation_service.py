@@ -160,6 +160,47 @@ class EndOfDayGenerationService:
                 replace_existing=True,
             )
 
+            # 2026-04-30 — Saturday weekly Setup-landscape pre-warm.
+            # Pre-computes the WEEKEND-context snapshot (which uses
+            # `LandscapeGradingService.get_weekly_summary` for last
+            # week's record) so Sunday-night prep + Monday's first
+            # briefing are O(1). Idempotent — `get_snapshot` caches
+            # for 60s, but the underlying daily-Setup classifier
+            # caches per symbol for 5min so the cost is amortised
+            # across the rest of the weekend's briefings too.
+            def _run_weekend_landscape_prewarm():
+                try:
+                    from services.setup_landscape_service import (
+                        get_setup_landscape_service,
+                    )
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        svc = get_setup_landscape_service(db=self.db)
+                        svc.invalidate()
+                        snap = loop.run_until_complete(
+                            svc.get_snapshot(context="weekend")
+                        )
+                        logger.info(
+                            f"weekend_landscape_prewarm: classified="
+                            f"{snap.classified}/{snap.sample_size}, "
+                            f"regime={snap.multi_index_regime}"
+                        )
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.error(f"weekend_landscape_prewarm failed: {e}")
+
+            self.scheduler.add_job(
+                _run_weekend_landscape_prewarm,
+                # Saturday 12:00 ET — late-morning so any Friday-late
+                # data corrections have settled into Mongo, but before
+                # most operators sit down for weekend prep.
+                CronTrigger(hour=12, minute=0, day_of_week='sat', timezone=self.et_timezone),
+                id='auto_weekend_landscape_prewarm',
+                replace_existing=True,
+            )
+
             self.scheduler.start()
             logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
     

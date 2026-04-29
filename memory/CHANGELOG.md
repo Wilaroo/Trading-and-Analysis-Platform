@@ -2,6 +2,151 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (eleventh commit) — Realtime Stop-Guard + Sector Fallback + Landscape Pre-warm + V5 Shadow vs Real
+
+Closes the operator's P1 backlog list ("B + C + a few gaps") in one
+batch. Four independent improvements, each surgical and additive.
+
+### 1. Realtime stop-guard re-check (Task B)
+
+**Pre-fix (`stop_manager.py`)**: `update_trailing_stop` only re-snapped
+on (a) a target hit OR (b) price extending to a fresh high/low. If the
+liquidity profile shifted DURING a held position (a tighter HVN forms
+intraday, a HOD/LOD pivot reprices) the trail wouldn't refresh until
+the next high-water-mark print.
+
+**Post-fix**:
+- New `_periodic_resnap_check(trade)` runs at the end of every
+  `update_trailing_stop` call.
+- Throttle: `_RESNAP_INTERVAL_SECONDS = 60.0` per-trade (operator-confirmed).
+- Hard guarantee: only RATCHETS — never loosens. Long stops can only
+  go up; short stops can only go down.
+- Skips `mode == 'original'` (pre-T1) — the operator's hard stop stays put.
+- Records a per-trade audit trail (`last_resnap_at`, `last_resnap_level`)
+  on `trade.trailing_stop_config` so the diagnostic can show what changed.
+- Logs a `STOP-GUARD RESNAP` line on every commit.
+
+### 2. Sector fallback chain (Task C)
+
+**Pre-fix (`sector_tag_service.py`)**: `tag_symbol` only consulted
+`STATIC_SECTOR_MAP`. Newly-listed names returned None → SectorRegime
+classifier reported UNKNOWN forever.
+
+**Post-fix**:
+- New `tag_symbol_async` runs the full chain:
+  - Static map (instant, in-memory)
+  - `symbol_adv_cache.sector` Mongo cache (fast)
+  - Finnhub `stock/profile2` industry → SPDR ETF mapping (network)
+- `_industry_to_etf` resolves free-form Finnhub strings via:
+  - `_EXPLICIT_NONE` blocklist (cryptocurrency/SPAC/trust → UNKNOWN
+    rather than mis-classify)
+  - `_PRIORITY_OVERRIDES` for sector-conflict cases (Biotech wins over
+    Tech, REIT wins over Industrial, Renewable Energy wins over Energy)
+  - Longest-substring match into `_INDUSTRY_TO_ETF` (~75 keys covering
+    all 11 SPDR sectors)
+- Finnhub hits are **persisted** to `symbol_adv_cache.sector` so the
+  next call hits the Mongo cache (operator-confirmed: persist=yes).
+- `SectorRegimeClassifier.classify_for_symbol` falls through to
+  `tag_symbol_async` on a static miss — newly-listed names get a
+  sector regime feature without a code change.
+
+### 3. Daily-Setup landscape pre-warm
+
+**Pre-fix gap**: `MarketSetupClassifier` was only invoked at intraday
+alert time. The first morning briefing of the day paid the full
+200×classify latency since the snapshot cache was cold.
+
+**Post-fix**:
+- `enhanced_scanner._scan_loop` CLOSED branch now calls a new
+  `_prewarm_setup_landscape()` every after-hours sweep (every 20 min).
+  Sat/Sun → "weekend" context; Mon-Fri after-hours → "morning" (next session).
+- PREMARKET branch calls it with `force_morning=True` so the morning
+  briefing reflects fresh gap data.
+- `eod_generation_service` adds a Saturday 12:00 ET cron job
+  (`auto_weekend_landscape_prewarm`) that pre-warms the WEEKEND-context
+  snapshot — uses `LandscapeGradingService.get_weekly_summary` so the
+  Sunday-night narrative leads with last week's record.
+- Pre-warm calls `service.invalidate()` before `get_snapshot()` to force
+  a fresh classify rather than re-reading a stale 60s-old snapshot.
+
+### 4. V5 Shadow vs Real tile
+
+Operator's question: "where in V5 do I see shadow tracking, so we
+can compare shadow trades vs real trade stats?". Answer pre-commit:
+nowhere. Shadow stats lived only in the legacy `AIModulesPanel`
+(gated behind `?v4=1` / `compact={true}`) and the NIA tab.
+
+**New `frontend/src/components/sentcom/v5/ShadowVsRealTile.jsx`**:
+- Reads `/api/ai-modules/shadow/stats` (shadow win-rate + decisions)
+  and `/api/trading-bot/stats/performance` (real trade win-rate + P&L)
+  every 60s, side-by-side.
+- Computes a per-percentage-point **divergence** signal:
+  - `shadow ahead` (Δ ≥ +5pp, green) — shadow-mode is calling more
+    winners than real trading is taking
+  - `shadow behind` (Δ ≤ −5pp, red) — real trades are picking up
+    edges the shadow modules would have skipped
+  - `in sync` (|Δ| < 5pp, amber) — modules and execution agreed
+- Wired into `SentComV5View`'s top status strip beside the
+  StrategyMixCard, so it's visible on every V5 view.
+
+### Tests
+- `backend/tests/test_stop_manager_realtime_resnap.py` — **12 tests**:
+  source-level guards (throttle constant, ratchet rules, audit-trail
+  metadata), behavioural (throttle blocks within 60s, doesn't loosen
+  long, doesn't loosen short, throttle clears after interval, no-op
+  when no snap available).
+- `backend/tests/test_sector_tag_finnhub_fallback.py` — **20 tests**:
+  industry mapping per sector, conflict-resolution overrides
+  (Biotech > Tech, REIT > Industrial, Renewable > Energy),
+  blocklist (cryptocurrency / SPAC), full async fallback chain
+  (static / Mongo cache / Finnhub / persist), no-DB / empty-symbol
+  edge cases.
+- `backend/tests/test_landscape_prewarm.py` — **8 tests**: source-level
+  guards for the prewarm method, after-hours + premarket dispatch,
+  weekday-based context selection (Sat/Sun → weekend), invalidate-then-
+  refresh ordering, Saturday cron registration + 12:00 ET timing.
+
+**224/224 passing across the related suites.**
+
+### Files touched
+- `backend/services/stop_manager.py` (re-snap method + 60s throttle)
+- `backend/services/sector_tag_service.py` (Finnhub fallback +
+  conflict-resolution overrides + blocklist + persist)
+- `backend/services/sector_regime_classifier.py` (classify_for_symbol
+  delegates to tag_symbol_async on static miss)
+- `backend/services/enhanced_scanner.py` (`_prewarm_setup_landscape`
+  helper + dispatch in CLOSED + PREMARKET branches)
+- `backend/services/eod_generation_service.py` (Saturday 12:00 ET
+  weekend-prewarm cron job)
+- NEW `frontend/src/components/sentcom/v5/ShadowVsRealTile.jsx`
+- `frontend/src/components/sentcom/SentComV5View.jsx` (tile imported
+  + rendered in the V5 status strip)
+- NEW `backend/tests/test_stop_manager_realtime_resnap.py`
+- NEW `backend/tests/test_sector_tag_finnhub_fallback.py`
+- NEW `backend/tests/test_landscape_prewarm.py`
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Open question parked for next session
+Operator asked again "should we deprecate / shut off the predictive
+scanner?". Audit result:
+- `predictive_scanner` is the legacy **forming-setup** scanner
+  (early_formation / developing / nearly_ready / trigger_imminent
+  phases) — distinct concept from `enhanced_scanner` which only fires
+  on TRIGGERED setups.
+- Currently serves: `POST /api/scanner/scan` (used by the manual
+  ScannerPage), `services/ai_assistant_service` queries, and 7 GET
+  endpoints (none referenced in V5 frontend).
+- V5 reads from `enhanced_scanner` via `/api/live-scanner/*` and the
+  newer `/api/scanner/strategy-mix`/`setup-coverage`/`setup-landscape`/
+  `sector-regime` endpoints.
+
+**Recommendation (P2)**: don't shut it off yet — `ScannerPage.js` and
+`ai_assistant_service` still bind to it. Migrate those two callers to
+`enhanced_scanner` output (~2-3h refactor), then drop predictive_scanner
++ its 7 unused GET endpoints. Tracked as a P2 entry in ROADMAP.
+
+
+
 ## 2026-04-30 (tenth commit) — Trade Funnel: Bugs 1+2+3c+4a Fixed
 
 ### Context
