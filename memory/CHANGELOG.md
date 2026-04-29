@@ -2,6 +2,81 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-eighth commit, v19.9) — V5 layout: Scanner full-height, drawer aligned to chart
+
+**Why**: Operator asked to move the bottom "SentCom Intelligence"
+drawer so its left edge aligns with the chart — freeing the left
+20% column for the Scanner to span the full viewport height and
+scroll through many hits without the drawer cutting underneath.
+
+### Before
+
+```
+┌──────────────────────────────────────────────┐
+│ HUD / StatusStrip                            │
+├────────┬──────────────────┬──────────────────┤
+│Scanner │      Chart       │  Right sidebar   │  ← grid (~800px)
+│  20%   │     55%          │      25%         │
+├────────┴──────────────────┴──────────────────┤
+│   SentCom Intelligence  |  Deep Feed         │  ← drawer (100% width)
+│   (split drawer, spans full viewport)        │
+└──────────────────────────────────────────────┘
+```
+
+### After
+
+```
+┌──────────────────────────────────────────────┐
+│ HUD / StatusStrip                            │
+├────────┬─────────────────────────────────────┤
+│        │       Chart     │  Right sidebar    │  ← grid within right col
+│Scanner │       55fr      │      25fr         │
+│ full-  ├─────────────────┴───────────────────┤
+│ height │  SentCom Intel  |  Deep Feed        │  ← drawer within right col
+│  20%   │  (aligned to chart's left edge)     │
+│        │                                     │
+└────────┴─────────────────────────────────────┘
+```
+
+### Patch
+
+`SentComV5View.jsx` — layout surgery (no component logic touched):
+
+- Replaced the outer 3-col grid (`20% 55% 25%`) with a 2-col flex row:
+  - **LEFT** (`width: 20%`) — Scanner `<section>` (unchanged internals)
+  - **RIGHT** (`flex-1 min-w-0`) — new flex-col wrapper
+- Inside the right column:
+  - Top grid now `55fr 25fr` (same 55/25 proportions, just of the
+    80% right column width = effectively 44% chart / 20% sidebar of
+    the overall screen; visually indistinguishable from before)
+  - Drawer (`SentCom Intelligence | Deep Feed`) moved INSIDE the
+    right column so its left edge starts where the chart starts
+- Outer row `min-h: 1120px` = 800 (grid min) + 320 (drawer min) to
+  match the previous total vertical space
+- Scanner stretches to the full row height via default flex
+  `align-items: stretch` — the `overflow-y-auto flex-1 v5-scroll`
+  inside its card list keeps the scroll behaviour identical
+
+### What stays the same
+
+- Grid column proportions within the right 80% (55fr / 25fr)
+- Drawer split logic (`drawerContainerRef`, `leftPct`, `resetToDefault`)
+  and `DrawerSplitHandle`
+- All `data-testid` hooks (`sentcom-v5-left`, `sentcom-v5-grid`,
+  `sentcom-v5-bottom-drawer`, `sentcom-v5-drawer-split`) preserved
+- Scanner card rendering, Chart, Right-sidebar aside, both drawer
+  panels — all untouched component-side
+- ESLint clean; no JSX balance issues
+
+### Operator benefit
+
+With 500+ symbols scanning simultaneously (post-v17), the Scanner
+can now show 30-40 cards without the drawer squashing it from
+below. Operator's scroll-through-hits workflow gets the full
+viewport height instead of the 800px grid slice.
+
+
+
 ## 2026-04-30 (twenty-seventh commit, v19.8) — V5 Stream Waves 1-4
 
 Big multi-wave UX upgrade across Scanner, Unified Stream, and the
