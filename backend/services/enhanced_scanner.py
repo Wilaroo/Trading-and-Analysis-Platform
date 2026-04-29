@@ -844,8 +844,15 @@ class EnhancedBackgroundScanner:
             "hod_breakout", "time_of_day_fade",
             # Special
             "breaking_news", "volume_capitulation", "range_break", "breakout",
-            # NEW: Relative strength & gap plays
-            "relative_strength",  # Leaders/laggards vs SPY
+            # NEW: Gap plays
+            # 2026-04-30 v16: `relative_strength` detector REMOVED from this
+            # set. Operator flagged that RS leader/laggard alerts have no
+            # concrete entry trigger ("Buy dips" / "Short rallies" is not a
+            # setup) and were dominating breadth, drowning out playbook
+            # setups. The `_check_relative_strength` method is preserved so
+            # RS can be re-enabled per-strategy via promotion service if we
+            # ever wire it as an ML feature instead of an alert. Removed
+            # cleanly so dispatch never calls it.
             "gap_fade",  # Fade failing gaps
             # Chart patterns
             "chart_pattern",  # Flags, pennants, triangles, H&S, wedges
@@ -860,7 +867,12 @@ class EnhancedBackgroundScanner:
         # Alert management
         self._live_alerts: Dict[str, LiveAlert] = {}
         self._alert_subscribers: List[asyncio.Queue] = []
-        self._max_alerts = 50
+        # 2026-04-30 v16: bumped 50 → 500. Operator wants every setup
+        # visible to tweak/grow the scanner faster (the cap was the
+        # ultimate upstream throttle behind the "only ever 5 alerts"
+        # complaint). The trim still runs periodically via
+        # `_enforce_alert_limit`, so memory remains bounded.
+        self._max_alerts = 500
         
         # Stats
         self._scan_count = 0

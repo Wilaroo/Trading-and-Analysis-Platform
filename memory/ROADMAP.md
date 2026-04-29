@@ -3,7 +3,17 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v15 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v16 fork)
+
+### 🎯 Just shipped 2026-04-30 v16 — see CHANGELOG (sixteenth commit)
+- ✅ **`relative_strength` detector OFF** — operator-flagged: no
+  concrete entry trigger, was dominating breadth. Detector method
+  preserved for future re-wiring as ML feature on other alerts.
+- ✅ **Alert caps lifted 50 → 500 end-to-end** — scanner internal,
+  REST endpoint ceiling, frontend REST + WS slice. Operator can now
+  see every detected setup/idea to tweak/grow the scanner faster.
+- ✅ 4 new regression guards (35/35 across instrumentation + hydration
+  + v16 suites).
 
 ### 🎯 Just shipped 2026-04-30 v15 — see CHANGELOG (fifteenth commit)
 - ✅ **SentCom Intelligence 50-eval cap** removed — confidence_gate

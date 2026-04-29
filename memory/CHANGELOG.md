@@ -2,6 +2,74 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (sixteenth commit) — RS detector OFF, alert caps lifted end-to-end
+
+**Why**: Operator review of the v15 screenshot landed on two clear
+calls:
+1. `relative_strength_laggard` (and leader) alerts were dominating
+   breadth despite having no concrete entry trigger ("Buy dips" /
+   "Short rallies" is not a setup).
+2. The "only ever 5 alerts" complaint had three caps stacked behind
+   it — fixing the visible one (frontend `?limit=5`) only revealed
+   the next two layers (`/api/sentcom/alerts` ceiling=50, scanner
+   `_max_alerts=50`). v16 lifts all three end-to-end.
+
+### Patches
+
+#### 1. RS detector REMOVED from `_enabled_setups`
+
+`enhanced_scanner.py:848` — dropped `"relative_strength"` from the
+detector dispatch set. The `_check_relative_strength` method is
+**preserved** so RS can be re-wired as an ML feature on other alerts
+(or re-enabled per-strategy via the promotion service) without
+rebuilding the detector. Pre-existing references in
+`_check_relative_strength` (carry-forward) and `bot_persistence.py`
+are untouched — they're tagging logic, not dispatch.
+
+#### 2. Alert caps lifted 50 → 500 end-to-end
+
+| Layer | Before | After | File |
+|---|---|---|---|
+| Scanner internal | `_max_alerts = 50` | `_max_alerts = 500` | `enhanced_scanner.py:870` |
+| REST endpoint | `Query(10, ge=1, le=50)` | `Query(200, ge=1, le=500)` | `routers/sentcom.py:364` |
+| Frontend REST fetch | `?limit=20` | `?limit=500` | `useSentComAlerts.js:19` |
+| Frontend WS slice | `wsAlerts.slice(0, 20)` | `wsAlerts` (no slice) | `useSentComAlerts.js:50` |
+
+The scanner's `_enforce_alert_limit()` trim still runs each cycle so
+memory remains bounded; the new ceiling is just much higher than
+practical RTH output.
+
+### Tests
+
+`tests/test_scanner_v16_no_caps.py` (4 new):
+1. `relative_strength` is NOT in `_enabled_setups` literal.
+2. `_check_relative_strength` method still present (re-enable safety).
+3. `_max_alerts >= 500` (regression guard).
+4. `/sentcom/alerts` Query ceiling >= 500.
+
+Total: 35/35 across instrumentation + hydration + v16 suites.
+
+### Operator-visible outcome (after pull + restart)
+
+- Live scanner alerts panel: shows every detected setup, no 5/20/50 cap.
+- HUD `EVAL` tile: counts every alert today, no longer capped at 5.
+- RS leader/laggard alerts: gone. Other detectors (gap_and_go,
+  vwap_continuation, 9_ema_scalp, opening_range_break, the_3_30_trade)
+  finally have unblocked breadth.
+
+### Re-enabling RS as a feature (future)
+
+When ready, two paths preserved:
+- **Per-strategy promotion**: re-add `"relative_strength"` to
+  `_enabled_setups` and gate it through the promotion service so it's
+  PAPER until proven.
+- **ML feature on other alerts**: read `snapshot.rs_vs_spy` inside
+  every other detector and stamp it onto the alert as a feature
+  (similar to how `market_setup` is now stamped). No new alerts; just
+  enriches the existing ones.
+
+
+
 ## 2026-04-30 (fifteenth commit) — V5 HUD truth + diagnostic endpoints
 
 **Why**: After v13 unblocked the trade chain, the operator screenshot

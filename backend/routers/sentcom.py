@@ -361,10 +361,10 @@ async def get_setups():
 
 
 @router.get("/alerts")
-async def get_alerts(limit: int = Query(10, ge=1, le=50)):
+async def get_alerts(limit: int = Query(200, ge=1, le=500)):
     """
     Get recent alerts and notifications.
-    
+
     Returns alerts about:
     - Positions approaching stops
     - Positions hitting targets

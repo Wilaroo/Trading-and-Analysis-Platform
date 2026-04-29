@@ -16,10 +16,10 @@ export const useSentComAlerts = (pollInterval = 60000) => {
 
   const fetchAlerts = useCallback(async () => {
     try {
-      // Bumped 5 → 20 (2026-04-30 v15) — operator flagged that the
-      // alerts panel could only ever surface 5 setups, masking the
-      // breadth of scanner output during fast tape sessions.
-      const data = await safeGet('/api/sentcom/alerts?limit=20');
+      // 2026-04-30 v16: operator wants every setup/idea visible — no
+      // artificial cap. 500 is the backend's hard ceiling (sentcom.py
+      // get_alerts) which is effectively unlimited for any RTH session.
+      const data = await safeGet('/api/sentcom/alerts?limit=500');
       if (data?.success) {
         setAlerts(data.alerts || []);
         setCached('sentcomAlerts', data.alerts || [], 15000); // 15 second TTL (alerts update frequently)
@@ -50,8 +50,10 @@ export const useSentComAlerts = (pollInterval = 60000) => {
   // Subscribe to WS scanner alerts (supplements polling)
   useEffect(() => {
     if (!wsAlerts || wsAlerts.length === 0) return;
-    // Bumped 5 → 20 to match the REST limit (2026-04-30 v15).
-    setAlerts(wsAlerts.slice(0, 20));
+    // 2026-04-30 v16: No cap — operator wants every setup visible to
+    // tweak/grow the scanner faster. WebSocketDataContext upstream
+    // already trims old alerts so unbounded growth is not a concern.
+    setAlerts(wsAlerts);
     setLoading(false);
   }, [wsAlerts]);
 
