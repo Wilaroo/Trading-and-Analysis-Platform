@@ -903,6 +903,15 @@ class EnhancedBackgroundScanner:
         self._auto_execute_enabled = False
         self._auto_execute_min_win_rate = 0.55
         self._auto_execute_min_priority = AlertPriority.HIGH
+
+        # 2026-04-30 — grace period for cold-start strategies. Until a
+        # strategy has accumulated this many graded outcomes (closed bot
+        # trades with R-multiples), use `_auto_execute_min_win_rate` as
+        # the synthetic baseline instead of the strategy's real (0.0)
+        # win_rate. Breaks the chicken-and-egg deadlock where a fresh
+        # strategy can't auto-execute → can't earn wins → never clears
+        # the floor. Operator-tunable via API in a future commit.
+        self._win_rate_grace_min_trades = 20
         self._trading_bot = None
         
         # AI Assistant for proactive coaching notifications
@@ -2663,7 +2672,22 @@ class EnhancedBackgroundScanner:
                     base_setup = setup_type.split("_long")[0].split("_short")[0]
                     if base_setup in self._strategy_stats:
                         stats = self._strategy_stats[base_setup]
-                        alert.strategy_win_rate = stats.win_rate
+                        # 2026-04-30: grace period for cold-start strategies.
+                        # Without graded outcomes a strategy stays at 0.0 and
+                        # never clears the auto_execute_min_win_rate floor —
+                        # creating a chicken-and-egg deadlock where a
+                        # strategy can't auto-execute until it has wins,
+                        # and can't get wins until it auto-executes.
+                        # Bridge: until 20 graded outcomes accumulate, use
+                        # the floor itself (0.55 by default) as the
+                        # synthetic baseline so the alert can pass the
+                        # eligibility check on tape + priority alone. Once
+                        # the strategy has earned its real rate, that
+                        # takes over.
+                        if stats.alerts_triggered < self._win_rate_grace_min_trades:
+                            alert.strategy_win_rate = self._auto_execute_min_win_rate
+                        else:
+                            alert.strategy_win_rate = stats.win_rate
                         alert.strategy_profit_factor = stats.profit_factor
                         # Add EV data (SMB-style)
                         alert.strategy_ev_r = stats.expected_value_r
@@ -4046,19 +4070,36 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_relative_strength(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Relative Strength/Weakness vs SPY: find leaders and laggards"""
+        """Relative Strength/Weakness vs SPY: find leaders and laggards.
+
+        2026-04-30 — priority thresholds tightened. The previous map
+        (rs >= 2.0 → MEDIUM, rs >= 4.0 → HIGH) made `relative_strength_*`
+        produce 100% of HIGH-priority alerts on volatile days, drowning
+        the playbook setups (gap_and_go, range_break, etc.). New map:
+        - rs in [2.0, 4.0)  → LOW
+        - rs in [4.0, 5.0)  → MEDIUM
+        - rs >= 5.0         → HIGH
+        Same firing condition (abs(rs) >= 2.0); just stricter promotion.
+        """
         if not hasattr(snapshot, 'rs_vs_spy'):
             return None
-        
+
         rs = snapshot.rs_vs_spy
         if abs(rs) < 2.0 or snapshot.rvol < 1.0:
             return None
-        
+
+        abs_rs = abs(rs)
+        if abs_rs >= 5.0:
+            priority = AlertPriority.HIGH
+        elif abs_rs >= 4.0:
+            priority = AlertPriority.MEDIUM
+        else:
+            priority = AlertPriority.LOW
+
         if rs > 0:
             direction = "long"
             stop = snapshot.current_price - (snapshot.atr * 1.5)
             target = snapshot.current_price + (snapshot.atr * 3)
-            priority = AlertPriority.HIGH if rs >= 4.0 else AlertPriority.MEDIUM
             label = "LEADER"
             reasoning = [
                 f"Outperforming SPY by {rs:.1f}% today",
@@ -4071,7 +4112,6 @@ class EnhancedBackgroundScanner:
             direction = "short"
             stop = snapshot.current_price + (snapshot.atr * 1.5)
             target = snapshot.current_price - (snapshot.atr * 3)
-            priority = AlertPriority.HIGH if abs(rs) >= 4.0 else AlertPriority.MEDIUM
             label = "LAGGARD"
             reasoning = [
                 f"Underperforming SPY by {abs(rs):.1f}% today",

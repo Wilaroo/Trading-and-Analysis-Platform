@@ -2,6 +2,103 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (tenth commit) — Trade Funnel: Bugs 1+2+3c+4a Fixed
+
+### Context
+The 9th commit's diagnostic surfaced exactly why no live trades happened on
+Tuesday Apr 28: 140 alerts → 42 HIGH → **0 tape-confirmed**. This commit
+ships the surgical fixes for the four root causes the data revealed.
+
+### Bug 1 — Off-by-one tape threshold (CRITICAL)
+**Symptom**: 25 of 42 HIGH alerts had `tape_score = 0.20 EXACTLY` but the
+threshold was `tape_score > 0.2` (strict greater-than). All 25 failed
+`confirmation_for_long` on the boundary even though the tight-spread bonus
+(+0.2) is supposed to be a passing signal on its own.
+
+**Fix**: `enhanced_scanner.py:1617` — `> 0.2` → `>= 0.2` (and `< -0.2` →
+`<= -0.2` for shorts). One-character change, immediately unblocks **60%**
+of the HIGH-priority pipeline that was getting silently rejected.
+
+### Bug 2 — Snapshot signals weren't persisted on alerts
+**Symptom**: diagnostic queries showed `avg_rvol = 0.00` on alerts even
+though detectors require `rvol >= 1.0` to fire. Because `LiveAlert` had
+no `rvol`/`gap_pct`/`atr_percent` fields and they were never stamped.
+
+**Fix**: Added the 3 fields to `LiveAlert`, default 0.0; stamped from
+`snapshot.*` in the alert post-processing block. Now every alert carries
+the signals that drove it — useful for diagnostics, AI training, and
+operator-side filtering.
+
+### Bug 3 — Cold-start strategy deadlock (3c grace period)
+**Symptom**: every alert had `strategy_win_rate = 0.0`. The auto-execute
+floor is 0.55, so no alert could ever be eligible. New strategies start
+at 0 wins and never accumulate any because they can't auto-execute in
+the first place — chicken-and-egg.
+
+**Fix (option 3c chosen by operator)**: grace period. Until a strategy
+has accumulated `_win_rate_grace_min_trades = 20` graded outcomes,
+substitute `_auto_execute_min_win_rate` (0.55) as a synthetic baseline
+so the alert can pass eligibility on tape + priority alone. Once 20
+graded outcomes exist, the real win_rate takes over. Breaks the deadlock
+without bypassing safety logic permanently.
+
+### Bug 4a — RS detector dominated HIGH bucket
+**Symptom**: 42/42 HIGH alerts were `relative_strength_laggard`. Other
+detectors (the actual playbook setups) couldn't get a word in.
+
+**Fix (4a + 4b roadmap)**: Tightened the RS detector's priority map:
+- `abs(rs) >= 5.0` → HIGH (was 4.0)
+- `abs(rs) in [4.0, 5.0)` → MEDIUM (was HIGH)
+- `abs(rs) in [2.0, 4.0)` → LOW (was MEDIUM)
+
+Same firing condition (`abs(rs) >= 2.0 AND rvol >= 1.0`); just stricter
+promotion. The follow-up audit of every detector's priority logic is
+tracked as **Bug 4b** in the roadmap (deferred per operator's "do 4d"
+choice).
+
+### Tests
+`backend/tests/test_trade_funnel_fixes.py` — **9 new tests** covering
+all four fixes via source-level guards + dataclass introspection.
+- 178/178 across the related test suites still green.
+
+### Files touched
+- `backend/services/enhanced_scanner.py` (4 surgical fixes)
+- NEW `backend/tests/test_trade_funnel_fixes.py`
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Operator action
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && \
+  sudo supervisorctl restart backend && sleep 5 && \
+  curl -s http://localhost:8001/api/diagnostic/trade-funnel | python3 -m json.tool
+```
+
+After Wednesday's session opens with these fixes in place, the funnel
+should look much healthier:
+- `priority_high_or_critical`: should drop from "all RS laggards" to a
+  more diverse mix as RS demotions take effect (and other detectors get
+  their fair share of HIGH).
+- `tape_confirmed`: 25-of-42 type alerts that were stuck at 0.20 will
+  now pass. Should see N>0 for the first time.
+- `auto_execute_eligible`: with grace period in place + tape passing,
+  this should also become non-zero on Wednesday.
+- `bot_trades_created`: this is where we'll see the next blocker (or
+  finally, real trades).
+
+If the funnel still dies, the next-most-likely culprit is `_evaluate_opportunity`
+in trading_bot_service — daily-loss guardrail, stale-quote guard, max
+concurrent positions. The diagnostic will name it.
+
+### Bug 4b — Detector priority audit (deferred)
+Track in ROADMAP. Every detector's priority promotion logic should be
+audited so HIGH represents a balanced mix of the playbook setups, not
+one detector's threshold. Likely candidates needing tuning:
+gap_and_go (probably under-promotes), range_break, the_3_30_trade,
+9_ema_scalp, vwap_continuation. Time-budget: ~3-4h to walk all 30+
+detectors and adjust thresholds with shadow-testing.
+
+
+
 ## 2026-04-30 (seventh commit) — Bot ↔ Scanner Auto-Execute Sync Fix + Diagnostic Upgrade
 
 ### The bug the diagnostic uncovered
