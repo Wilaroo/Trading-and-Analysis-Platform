@@ -2,6 +2,116 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-second commit, v19.3) — HOT-FIX: Live-tick scanner ALSO bombing pusher RPC
+
+**Why**: Operator pulled v19.2 + restarted. Within ~96 seconds of
+pusher startup the SAME `[RPC] latest-bars X failed` cascade returned,
+plus 120s `Connection error on post. ... Read timed out.` on the
+pusher → DGX push channel:
+
+```
+14:55:21 [INFO] Starting data push loop...
+14:56:39 [INFO] Pushing: 315 quotes (push OK)
+14:56:57 [WARNING] [RPC] latest-bars HIMS failed:
+14:57:15 [WARNING] [RPC] latest-bars VUG failed:
+14:57:33 [WARNING] [RPC] latest-bars ALAB failed:
+14:58:39 [WARNING] Connection error on post. Retry 1/3 in 5.9s:
+        HTTPConnectionPool(host='192.168.50.2', port=8001):
+        Read timed out. (read timeout=120)
+...
+```
+
+UI-side symptoms (operator screenshot):
+- Equity = `$-`
+- Top movers stuck on "loading..."
+- Pusher chip RED
+- Unified Stream + Stream Deep Feed frozen since restart
+
+### Root cause
+
+v19.1's `mongo_only=True` fix correctly decoupled the bar poll
+service. But there was a SECOND bombardment site we missed:
+**the live-tick scanner itself**. `_scan_symbol_all_setups` (line
+2645 of `enhanced_scanner.py`) calls `get_technical_snapshot(symbol)`
+WITHOUT `mongo_only=True`. With v17 expanding pusher subscriptions
+to ~480 symbols, every scan cycle fans out 480 calls to
+`_get_live_intraday_bars` → `/rpc/latest-bars` → pusher fires
+`reqHistoricalData` for each → IB's 60-req/10min pacing limit blows
+out within 2-3 cycles → cascade.
+
+The pusher's threadpool stalls behind these stuck calls; pusher's
+own POSTs to DGX `/api/ib/push-data` queue up; DGX's push handler
+also slows because it shares the same async event loop the scanner's
+`asyncio.gather()` is saturating with `asyncio.to_thread`-wrapped
+sync `requests` calls. End result: equity stops updating, stream
+freezes, pusher goes RED in the HUD.
+
+### Fix
+
+One-line change (with full docstring) in `enhanced_scanner.py:2645`:
+
+```python
+# Before:
+snapshot = await self.technical_service.get_technical_snapshot(symbol)
+
+# After:
+snapshot = await self.technical_service.get_technical_snapshot(
+    symbol, mongo_only=True,
+)
+```
+
+Why this is safe:
+- The live tick still flows through `_pushed_ib_data` (unaffected by
+  `mongo_only`). `get_technical_snapshot` still reads it at line
+  440 to populate `quote.price`.
+- Mongo bars are <60s lagged from the always-on turbo collectors —
+  fine for 5-min and 15-min bar detectors.
+- Setups that need sub-second timing (`9_ema_scalp`,
+  `vwap_continuation`, `opening_range_break`) rely on the live tick
+  + recent Mongo bars, NOT on the live-bar overlay.
+
+What is NOT changed:
+- API/UI endpoints (e.g. `/api/scanner/scan`, AI assistant queries)
+  still default to `mongo_only=False` — those are one-off, freshness
+  beats pacing safety there.
+- The swing/position DMA filter at line 6401 is alert-time only
+  (low volume); leaving it on the freshness path.
+
+### Tests (`tests/test_scanner_mongo_only_v19_3.py` — 4 new)
+
+- **`test_scan_symbol_all_setups_uses_mongo_only`** — source-level
+  regex check. The single most important guard: a future contributor
+  "cleaning up" `mongo_only=True` will hit this red test.
+- **`test_bar_poll_service_still_uses_mongo_only`** — keeps the
+  v19.1 fix pinned in place too (defense in depth).
+- **`test_get_technical_snapshot_signature_has_mongo_only`** — pins
+  the param name + default=False so neither side of the kill-switch
+  silently flips.
+- **`test_get_batch_snapshots_signature_has_mongo_only`** — same for
+  the batch path.
+
+**101/101 across v12-v19.3 suites.**
+
+### Operator workflow on Spark
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && \
+  pkill -f "python server.py" && \
+  cd backend && nohup python server.py > /tmp/backend.log 2>&1 &
+
+# Within ~30s of restart:
+# 1. The `[RPC] latest-bars X failed` cascade should STOP.
+# 2. The 120s push-to-DGX timeouts should STOP.
+# 3. Pusher chip turns GREEN in the HUD.
+# 4. Equity populates, top movers load, unified stream resumes.
+```
+
+If the cascade returns AGAIN, audit any new caller of
+`get_technical_snapshot()` in a hot path (the test guards the two
+known hot paths; new ones must explicitly opt into mongo_only).
+
+
+
 ## 2026-04-30 (twenty-first commit, v19.2) — DLQ Purge Endpoint
 
 **Why**: The V5 HUD's `N DLQ` badge surfaces the count of permanently-

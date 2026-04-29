@@ -2639,10 +2639,25 @@ class EnhancedBackgroundScanner:
         
         NOTE: This method is only called for symbols that ALREADY passed ADV pre-filter.
         We still check for higher intraday threshold for scalp setups.
+
+        2026-04-30 v19.3 — `mongo_only=True` is mandatory here. The live-tick
+        scanner runs ~480 calls/cycle; without `mongo_only`, each call
+        triggers `/rpc/latest-bars` → pusher fires `reqHistoricalData` →
+        IB's 60-req/10min pacing limit blows out within 2-3 cycles → the
+        `[RPC] latest-bars X failed` cascade plus 120s timeouts on
+        `/api/ib/push-data` (operator screenshot, 14:58 ET 2026-04-29).
+
+        The live quote still comes from `_pushed_ib_data` (independent of
+        this overlay). Mongo bars are <60s lagged from the always-on turbo
+        collectors — fine for 5-min/15-min bar detectors. Setups needing
+        sub-second timing (`9_ema_scalp`, `vwap_continuation`, OR break)
+        rely on the live tick + recent Mongo bars, not the overlay.
         """
         try:
-            # Get technical snapshot
-            snapshot = await self.technical_service.get_technical_snapshot(symbol)
+            # Get technical snapshot (mongo_only — see docstring)
+            snapshot = await self.technical_service.get_technical_snapshot(
+                symbol, mongo_only=True,
+            )
             if not snapshot:
                 return
             

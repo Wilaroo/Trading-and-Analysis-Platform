@@ -3,7 +3,22 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.2 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.3 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.3 — see CHANGELOG (twenty-second commit)
+- ✅ **HOT-FIX**: live-tick scanner ALSO bombing pusher RPC.
+  Operator's post-v19.2 restart logs reproduced the same cascade
+  v19.1 was supposed to kill, plus 120s push-to-DGX timeouts +
+  equity `$-` + frozen unified stream.
+- ✅ Root cause: `_scan_symbol_all_setups` was the OTHER caller
+  hitting `_get_live_intraday_bars` for every scanned symbol —
+  ~480 calls/cycle blow IB's pacing limit within 2-3 cycles.
+- ✅ One-line fix: pass `mongo_only=True` in the live-tick scanner's
+  hot path. Live quote still flows through `_pushed_ib_data`; Mongo
+  bars are <60s lagged so 5-min/15-min detectors are unaffected.
+- ✅ 4 new regression guards (1 source-level pin on the call site,
+  1 v19.1 bar-poll re-pin, 2 signature pins on `get_technical_snapshot`
+  / `get_batch_snapshots`). **101/101 across v12-v19.3 suites.**
 
 ### 🎯 Just shipped 2026-04-30 v19.2 — see CHANGELOG (twenty-first commit)
 - ✅ **DLQ purge endpoint** — `POST /api/diagnostic/dlq-purge` finally
