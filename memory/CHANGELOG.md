@@ -2,6 +2,115 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-first commit, v19.2) — DLQ Purge Endpoint
+
+**Why**: The V5 HUD's `N DLQ` badge surfaces the count of permanently-
+failed historical-data collection requests. With v17/v18 expanding the
+universe scan, the DLQ accumulates entries IB will NEVER successfully
+serve — delisted symbols ("SLY"), ambiguous contracts, "no security
+definition" errors, etc. Two complementary endpoints already existed:
+
+- `POST /api/ib-collector/retry-failed` — re-queues failures
+- `GET  /api/ib-collector/failed-items` — lists them
+
+**What was missing: purge.** Operator can't currently distinguish "5
+transient failures we should retry" from "47 permanent failures we
+should drop". Retrying terminal errors wastes IB pacing budget and
+pollutes the badge count.
+
+### Patch
+
+#### `POST /api/diagnostic/dlq-purge`
+
+```
+POST /api/diagnostic/dlq-purge
+  ?permanent_only=true       # (default) only delete known-permanent errors
+  &older_than_hours=72       # optional: scope to items at least this old
+  &bar_size="1 min"          # optional: scope to a single bar_size
+  &force=true                # required when permanent_only=false
+  &dry_run=true              # preview without deleting
+```
+
+**Safe-by-default contract**:
+
+- `permanent_only=True` (the default) restricts deletes to a strict
+  allowlist of "will-never-succeed" patterns:
+    - `no security definition` (IB error 200 — delisted/unknown symbol)
+    - `contract not found` / `contract_not_found`
+    - `no_data` (IB returned empty for a valid contract)
+    - `Contract: Stock` (generic IB contract error)
+    - `ambiguous contract`
+    - `expired contract`
+- `permanent_only=False` requires `force=True` — without force the
+  endpoint returns 400 to prevent a sleepy operator from mass-deleting
+  retryable transient failures.
+- `dry_run=True` returns the WOULD-purge count, by_error_type breakdown,
+  by_bar_size breakdown, and a 10-row sample without deleting anything
+  or writing to the audit log.
+
+**Audit trail**: Every non-dry-run purge writes a row to a new
+`dlq_purge_log` Mongo collection with `ts / purged_count / by_error_type /
+by_bar_size / permanent_only / older_than_hours / bar_size / force`.
+30-day TTL via `expireAfterSeconds=30 * 24 * 3600`.
+
+**Filter combination**: when both `permanent_only` and `older_than_hours`
+are active, the query uses `$and: [<regex_or>, <timestamp_or>]` so both
+constraints must hold. When only `older_than_hours` is set (with force
+mode), the timestamp filter sits at top-level via `$or` over
+`completed_at` + `created_at`.
+
+### Tests (`tests/test_dlq_purge_v19_2.py` — 13 tests)
+
+- **`test_purge_rejects_non_permanent_without_force`** — sleepy-operator
+  guard: `permanent_only=false` without `force=true` MUST 400.
+- **`test_purge_rejects_non_permanent_without_force_default`** — pins
+  the default value of `force` (False).
+- **`test_purge_default_deletes_permanent_failures`** — happy path,
+  3 docs deleted, audit log written.
+- **`test_purge_default_uses_permanent_allowlist_query`** — pins the
+  regex string (a future contributor widening it must update the test).
+- **`test_dry_run_does_not_delete`** — dry-run returns the count, never
+  calls `delete_many`, never writes audit log.
+- **`test_purge_response_shape`** (parametrized) — pins the 8-key
+  response contract for both dry-run and live modes.
+- **`test_purge_aggregates_by_error_type_and_bar_size`** — by_bar_size
+  / by_error_type counts and 10-row sample populated.
+- **`test_purge_force_mode_works_when_explicitly_requested`** — force
+  mode skips the regex filter (purges ALL failed).
+- **`test_older_than_hours_with_permanent_only_uses_and`** — the
+  filter-combination case uses `$and` correctly.
+- **`test_older_than_hours_alone_uses_or_at_top_level`** — the
+  no-permanent-only case uses top-level `$or`.
+- **`test_bar_size_filter_scopes_query`** — bar_size narrows the query.
+- **`test_audit_log_entry_shape`** — pins the 9-field audit entry shape.
+
+97/97 tests passing across v12-v19.2 suites.
+
+### Operator workflow on Spark
+
+```bash
+# 1. Preview what WOULD be purged (no deletion):
+curl -s -X POST "http://localhost:8001/api/diagnostic/dlq-purge?dry_run=true" \
+  | python3 -m json.tool
+
+# 2. Looks right? Drop them:
+curl -s -X POST "http://localhost:8001/api/diagnostic/dlq-purge" \
+  | python3 -m json.tool
+
+# 3. Operator-friendly: drop ONLY items older than 7 days that are
+#    permanent failures (catches "we gave up on these weeks ago"):
+curl -s -X POST \
+  "http://localhost:8001/api/diagnostic/dlq-purge?older_than_hours=168" \
+  | python3 -m json.tool
+
+# 4. Audit trail:
+mongo tradecommand --eval 'db.dlq_purge_log.find().sort({ts_dt:-1}).limit(5).pretty()'
+```
+
+The V5 HUD's DLQ badge count drops as the queue clears.
+
+
+
 ## 2026-04-30 (twentieth commit, v19.1) — Hot-fix: bar poll bombarding pusher RPC
 
 **Why**: Operator post-pull logs (2026-04-30 14:27 ET) showed:

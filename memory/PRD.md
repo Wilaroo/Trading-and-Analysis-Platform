@@ -42,6 +42,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `PUT /api/scanner/in-play-config` — runtime threshold tuning, persists to `bot_state.in_play_config` (`{"strict_gate": true}` opts into hard gating — 2026-04-30 v7)
 - `GET /api/diagnostic/trade-funnel?date=YYYY-MM-DD` — walks the alert→bot→execution chain and pinpoints the first dead stage (2026-04-30 v8)
 - `GET /api/diagnostic/trade-drops?minutes=N&gate=X&limit=N` — silent execution-drop forensics (2026-04-30 v12); 9 instrumented gates between AI gate and `bot_trades.insert_one()`
+- `POST /api/diagnostic/dlq-purge?permanent_only=true&dry_run=true&older_than_hours=N&bar_size=X&force=true` — purges permanently-failed historical-data requests; safe-by-default allowlist + audit log to `dlq_purge_log` (2026-04-30 v19.2)
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard

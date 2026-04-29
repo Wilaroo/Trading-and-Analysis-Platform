@@ -3,7 +3,21 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.1 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.2 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.2 — see CHANGELOG (twenty-first commit)
+- ✅ **DLQ purge endpoint** — `POST /api/diagnostic/dlq-purge` finally
+  closes the third corner of the historical-data DLQ tooling (alongside
+  `/retry-failed` and `/failed-items`). Safe-by-default: `permanent_only`
+  allowlist of known-terminal IB errors (no security definition, contract
+  not found, no_data, etc.); `permanent_only=False` requires explicit
+  `force=true`; `dry_run=true` previews without deleting.
+- ✅ Optional `older_than_hours` and `bar_size` filters; combines
+  `$and` with the permanent regex when both active.
+- ✅ Audit trail to new `dlq_purge_log` collection (30d TTL).
+- ✅ 13 new regression tests; **97/97 across v12-v19.2 suites**.
+- **Operator usage**: dry-run first, then drop. The V5 HUD's `N DLQ`
+  badge clears as the queue thins.
 
 ### 🎯 Just shipped 2026-04-30 v19.1 — see CHANGELOG (twentieth commit)
 - ✅ **Hot-fix**: bar poll bombarding pusher RPC. Operator's
