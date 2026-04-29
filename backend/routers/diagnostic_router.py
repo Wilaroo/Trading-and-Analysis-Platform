@@ -94,15 +94,15 @@ def _trading_day_iso(date_str: Optional[str]) -> str:
 
 
 def _date_range_filter(field: str, day_iso: str) -> Dict:
-    """ISO-prefix scan — works whether the field stores str or datetime."""
-    next_day = (datetime.strptime(day_iso, "%Y-%m-%d") + timedelta(days=1)
-                ).strftime("%Y-%m-%d")
-    return {
-        "$or": [
-            {field: {"$gte": day_iso, "$lt": next_day}},   # string sort
-            {field: {"$regex": f"^{day_iso}"}},             # ISO prefix
-        ]
-    }
+    """Day-prefix match against a string-stored ISO timestamp.
+
+    Uses a regex anchored to the YYYY-MM-DD prefix because that's the
+    pattern the rest of the codebase stores `created_at` / `entered_at`
+    in (proven via the live_alerts schema dump 2026-04-30). A previous
+    version used `$or` between $gte/$lt and $regex which silently
+    returned 0 on real data — switched to the simpler proven shape.
+    """
+    return {field: {"$regex": f"^{day_iso}"}}
 
 
 @router.get("/trade-funnel")
