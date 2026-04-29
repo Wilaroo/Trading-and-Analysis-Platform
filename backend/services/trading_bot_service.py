@@ -2219,6 +2219,31 @@ class TradingBotService:
                         guard.trip_kill_switch(reason=f"Account guard: {_reason}")
                     except Exception:
                         pass
+                    # Forensic breadcrumb so the operator's
+                    # /api/diagnostic/trade-drops endpoint can pinpoint
+                    # *this* gate as the silent killer (the April 16
+                    # regression hid behind exactly this branch). Never
+                    # raises — see trade_drop_recorder.record_trade_drop.
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(self, "_db", None),
+                            gate="account_guard",
+                            symbol=getattr(trade, "symbol", None),
+                            setup_type=getattr(trade, "setup_type", None),
+                            direction=(
+                                trade.direction.value
+                                if hasattr(trade.direction, "value")
+                                else str(getattr(trade, "direction", ""))
+                            ),
+                            reason=_reason,
+                            context={
+                                "current_account_id": _current_acct,
+                                "ib_account_active_env": __import__("os").environ.get("IB_ACCOUNT_ACTIVE"),
+                            },
+                        )
+                    except Exception:
+                        pass
                     return {"success": False, "action": "SKIP",
                             "reason": f"Account guard blocked: {_reason}"}
             except Exception as _ag_err:
@@ -2274,6 +2299,29 @@ class TradingBotService:
                     "[SAFETY] Trade blocked for %s (%s): %s",
                     trade.symbol, result.check, result.reason,
                 )
+                # Forensic breadcrumb — surface this drop in
+                # /api/diagnostic/trade-drops alongside account_guard /
+                # broker rejects so we can rank silent killers by gate.
+                try:
+                    from services.trade_drop_recorder import record_trade_drop
+                    record_trade_drop(
+                        getattr(self, "_db", None),
+                        gate="safety_guardrail",
+                        symbol=getattr(trade, "symbol", None),
+                        setup_type=getattr(trade, "setup_type", None),
+                        direction=str(trade.direction).lower(),
+                        reason=f"{result.check}: {result.reason}",
+                        context={
+                            "check": result.check,
+                            "notional_usd": float(notional),
+                            "equity": float(equity),
+                            "open_positions": len(open_positions_snapshot),
+                            "last_quote_age_s": last_quote_age,
+                            "awaiting_quotes": bool(awaiting_quotes),
+                        },
+                    )
+                except Exception:
+                    pass
                 # Surface to the SentCom stream so operators see it in V5 UI
                 try:
                     from services.sentcom_service import emit_stream_event
@@ -2291,6 +2339,22 @@ class TradingBotService:
             # fail-CLOSED (skip the trade) so a buggy safety layer can't
             # accidentally allow uncontrolled exposure.
             logger.error("[SAFETY] Guardrail check crashed; blocking trade: %s", e)
+            try:
+                from services.trade_drop_recorder import record_trade_drop
+                record_trade_drop(
+                    getattr(self, "_db", None),
+                    gate="safety_guardrail_crash",
+                    symbol=getattr(trade, "symbol", None),
+                    setup_type=getattr(trade, "setup_type", None),
+                    direction=(
+                        trade.direction.value if hasattr(trade.direction, "value")
+                        else str(getattr(trade, "direction", ""))
+                    ),
+                    reason=f"guardrail check exception: {e}",
+                    context={"exc_type": type(e).__name__},
+                )
+            except Exception:
+                pass
             return
 
         await self._trade_execution.execute_trade(trade, self)

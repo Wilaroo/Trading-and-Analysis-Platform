@@ -3,7 +3,35 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v11 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v12 fork)
+
+### 🎯 Just shipped 2026-04-30 v12 — see CHANGELOG (twelfth commit)
+- ✅ **Trade-drop forensic instrumentation** — new
+  `services/trade_drop_recorder.py` + 9 instrumented gates between
+  the AI confidence gate and `bot_trades.insert_one()`. Every silent
+  exit now writes to `trade_drops` Mongo collection (TTL 7d) AND emits
+  a `[TRADE_DROP] gate=… symbol=… reason=…` WARN log.
+- ✅ **Broker-reject + exception paths now persist** —
+  `trade_execution.execute_trade` was orphaning REJECTED trades in
+  memory (no `bot._save_trade(trade)` call). **THIS IS THE LIKELIEST
+  ROOT CAUSE** of the April 16 → April 29 silent regression. Fixed.
+- ✅ **New endpoint `/api/diagnostic/trade-drops?minutes=N&gate=X`** —
+  aggregates drops by gate, names `first_killing_gate`, lists last 25
+  with full context. Companion to `/trade-funnel`.
+- 21 new tests (44/44 across instrumentation + adjacent suites).
+
+### 🟠 P0 — User-verification pending after Spark pull + restart
+**MUST RUN AFTER OPERATOR PULLS AND RESTARTS:**
+1. After 5-10 min of RTH scanning:
+   `curl -s http://localhost:8001/api/diagnostic/trade-drops?minutes=60 | jq .`
+2. Read `first_killing_gate` — that names the suspect.
+3. If `account_guard` (highest-confidence suspect for the April 16
+   regression): inspect `IB_ACCOUNT_PAPER` in backend/.env and
+   ensure it includes the pusher's reported `DUM61566S` alias.
+4. If `broker_rejected`: read the `recent[]` array's `reason` field
+   for the IB-side error (margin, no-buying-power, etc).
+5. Verify REJECTED trades now appear in `bot_trades` (the
+   instrumentation also fixed the orphan-in-memory bug).
 
 ### 🎯 Just shipped 2026-04-30 v11 — see CHANGELOG
 - ✅ **Realtime stop-guard re-check** — 60s per-trade throttle, ratchet-only,

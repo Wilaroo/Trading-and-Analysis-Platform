@@ -49,6 +49,24 @@ class TradeExecution:
                     logger.info(f"📝 [PAPER TRADE] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
                     trade.notes = (trade.notes or "") + f" [PAPER: {phase_reason}]"
 
+                    # Forensic breadcrumb — PAPER trades DO save to
+                    # bot_trades (with status="paper") but operator
+                    # asked for visibility on every silent-execute exit
+                    # so we can verify the funnel is healthy.
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="strategy_paper_phase",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=trade.direction.value,
+                            reason=phase_reason,
+                            context={"phase": "paper", "trade_id": trade.id},
+                        )
+                    except Exception:
+                        pass
+
                     # Record paper trade for tracking
                     try:
                         paper_trade_id = await bot._strategy_promotion_service.record_paper_trade(
@@ -84,6 +102,19 @@ class TradeExecution:
                     trade.notes = (trade.notes or "") + f" [SKIPPED: {phase_reason}]"
                     trade.status = TradeStatus.SIMULATED
                     trade.close_reason = "simulation_phase"
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="strategy_simulation_phase",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=trade.direction.value,
+                            reason=phase_reason,
+                            context={"phase": "simulation", "trade_id": trade.id},
+                        )
+                    except Exception:
+                        pass
                     await bot._save_trade(trade)
                     return
             else:
@@ -93,6 +124,22 @@ class TradeExecution:
         if not bot._trade_executor:
             print("   ❌ Trade executor not configured")
             logger.error("Trade executor not configured")
+            try:
+                from services.trade_drop_recorder import record_trade_drop
+                record_trade_drop(
+                    getattr(bot, "_db", None),
+                    gate="no_trade_executor",
+                    symbol=trade.symbol,
+                    setup_type=trade.setup_type,
+                    direction=(
+                        trade.direction.value if hasattr(trade.direction, "value")
+                        else str(trade.direction)
+                    ),
+                    reason="bot._trade_executor is None — trade dropped before broker call",
+                    context={"trade_id": trade.id},
+                )
+            except Exception:
+                pass
             return
 
         try:
@@ -153,6 +200,27 @@ class TradeExecution:
                     trade.close_reason = "guardrail_veto"
                     if trade.id in bot._pending_trades:
                         del bot._pending_trades[trade.id]
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="pre_exec_guardrail_veto",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=(
+                                trade.direction.value if hasattr(trade.direction, "value")
+                                else str(trade.direction)
+                            ),
+                            reason=str(veto.reason),
+                            context={
+                                "trade_id": trade.id,
+                                "entry_price": float(trade.entry_price or 0),
+                                "stop_price": float(trade.stop_price or 0),
+                                "shares": int(trade.shares or 0),
+                            },
+                        )
+                    except Exception:
+                        pass
                     await bot._save_trade(trade)
                     return
             except Exception as e:
@@ -311,10 +379,79 @@ class TradeExecution:
             else:
                 trade.status = TradeStatus.REJECTED
                 logger.warning(f"Trade rejected: {result.get('error')}")
+                # ──────────────────────────────────────────────────────
+                # Forensic instrumentation (2026-04-30) — root-cause of
+                # the April 16 silent regression. The legacy code path
+                # never wrote a row to `bot_trades` here, so a 13-day
+                # spike in broker rejections appeared as "0 trades since
+                # April 16" with no rejection breadcrumb anywhere.
+                #
+                # Two fixes:
+                #   1. Drop a record into `trade_drops` with the broker
+                #      error so the diagnostic endpoint surfaces it.
+                #   2. Persist the REJECTED trade to `bot_trades` so the
+                #      analytics pipeline (and future post-mortems) can
+                #      see attempted-but-failed executions, not just
+                #      successes.
+                # ──────────────────────────────────────────────────────
+                try:
+                    from services.trade_drop_recorder import record_trade_drop
+                    record_trade_drop(
+                        getattr(bot, "_db", None),
+                        gate="broker_rejected",
+                        symbol=trade.symbol,
+                        setup_type=trade.setup_type,
+                        direction=(
+                            trade.direction.value if hasattr(trade.direction, "value")
+                            else str(trade.direction)
+                        ),
+                        reason=str(result.get("error") or result.get("status") or "unknown"),
+                        context={
+                            "trade_id": trade.id,
+                            "broker": result.get("broker"),
+                            "status": result.get("status"),
+                            "simulated": result.get("simulated"),
+                            "bracket": result.get("bracket"),
+                        },
+                    )
+                except Exception:
+                    pass
+                trade.close_reason = "broker_rejected"
+                trade.notes = (trade.notes or "") + f" [REJECTED: {str(result.get('error') or result.get('status') or 'unknown')[:120]}]"
+                if trade.id in bot._pending_trades:
+                    del bot._pending_trades[trade.id]
+                try:
+                    await bot._save_trade(trade)
+                except Exception as save_err:
+                    logger.warning(f"Could not persist REJECTED trade {trade.id}: {save_err}")
 
         except Exception as e:
             logger.error(f"Trade execution error: {e}")
             trade.status = TradeStatus.REJECTED
+            try:
+                from services.trade_drop_recorder import record_trade_drop
+                record_trade_drop(
+                    getattr(bot, "_db", None),
+                    gate="execution_exception",
+                    symbol=getattr(trade, "symbol", None),
+                    setup_type=getattr(trade, "setup_type", None),
+                    direction=(
+                        trade.direction.value if hasattr(trade.direction, "value")
+                        else str(getattr(trade, "direction", ""))
+                    ),
+                    reason=f"{type(e).__name__}: {e}",
+                    context={"trade_id": getattr(trade, "id", None)},
+                )
+            except Exception:
+                pass
+            try:
+                trade.close_reason = "execution_exception"
+                trade.notes = (trade.notes or "") + f" [EXC: {str(e)[:120]}]"
+                if trade.id in bot._pending_trades:
+                    del bot._pending_trades[trade.id]
+                await bot._save_trade(trade)
+            except Exception as save_err:
+                logger.warning(f"Could not persist exception-rejected trade: {save_err}")
 
     async def confirm_trade(self, trade_id: str, bot: 'TradingBotService') -> bool:
         """

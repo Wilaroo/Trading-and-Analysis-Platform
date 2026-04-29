@@ -917,3 +917,104 @@ def rth_readiness() -> Dict[str, Any]:
         "et_clock": et_clock,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# ===========================================================================
+# /api/diagnostic/trade-drops — silent execution-drop forensics
+# ===========================================================================
+#
+# Companion to `/trade-funnel`. The funnel walks the alert→bot→broker chain
+# top-down to pinpoint *which stage* dropped flow. This endpoint walks the
+# tail-end of that chain (the post-AI-gate execution path) bottom-up: every
+# `return None` / `return` between the AI gate and `bot_trades.insert_one()`
+# now records a row via `services.trade_drop_recorder`. Hitting this endpoint
+# tells the operator which gate is killing trades in real time without
+# grepping logs.
+#
+# Gates currently instrumented (from KNOWN_GATES in trade_drop_recorder.py):
+#   account_guard           — IB_ACCOUNT_ACTIVE vs pusher account drift
+#   safety_guardrail        — SafetyGuardrails.check_can_enter rejected
+#   safety_guardrail_crash  — exception in the guardrail check itself
+#   no_trade_executor       — bot._trade_executor is None
+#   pre_exec_guardrail_veto — execution_guardrails.run_all_guardrails veto
+#   strategy_paper_phase    — strategy still in PAPER (does save to bot_trades)
+#   strategy_simulation_phase — strategy in SIMULATION (does save)
+#   broker_rejected         — place_bracket_order/execute_entry returned error
+#   execution_exception     — raised exception inside execute_trade
+# ===========================================================================
+@router.get("/trade-drops")
+def trade_drops(
+    minutes: int = 60,
+    gate: Optional[str] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Aggregate recent silent execution drops by gate.
+
+    Args:
+        minutes: lookback window (1 ≤ minutes ≤ 1440). Defaults to 60.
+        gate: optional gate filter (e.g. ``account_guard``).
+        limit: max rows returned in the ``recent`` list (1-500).
+
+    Returns shape::
+
+        {
+          "success": True,
+          "minutes": 60,
+          "total": 47,
+          "by_gate": {"account_guard": 32, "safety_guardrail": 15},
+          "first_killing_gate": "account_guard",
+          "recent": [
+              {
+                "ts": "2026-04-30T18:42:01.123456+00:00",
+                "ts_epoch_ms": 1730351321123,
+                "gate": "account_guard",
+                "symbol": "AAPL",
+                "setup_type": "9_ema_scalp",
+                "direction": "long",
+                "reason": "account drift: expected … got DUM61566S",
+                "context": {...}
+              },
+              ...
+          ]
+        }
+    """
+    from services.trade_drop_recorder import (
+        get_recent_drops,
+        summarize_recent_drops,
+        KNOWN_GATES,
+    )
+
+    try:
+        minutes_clamped = max(1, min(int(minutes), 24 * 60))
+    except Exception:
+        raise HTTPException(status_code=400, detail="minutes must be an int")
+    try:
+        limit_clamped = max(1, min(int(limit), 500))
+    except Exception:
+        raise HTTPException(status_code=400, detail="limit must be an int")
+
+    if gate and gate not in KNOWN_GATES:
+        # Soft warning, not a 400 — the recorder accepts unknown gates
+        # for forward-compat, so the endpoint should surface them too.
+        logger.debug(f"[trade-drops] unknown gate filter '{gate}' — returning anyway")
+
+    db = _get_db()
+    summary = summarize_recent_drops(db, minutes=minutes_clamped)
+    if gate:
+        # Re-read with the filter so `recent` matches the gate the caller asked for.
+        summary["recent"] = get_recent_drops(
+            db, minutes=minutes_clamped, gate=gate, limit=limit_clamped,
+        )
+        summary["total"] = len(summary["recent"])
+        summary["by_gate"] = {gate: summary["total"]} if summary["total"] else {}
+        summary["first_killing_gate"] = gate if summary["total"] else None
+    else:
+        summary["recent"] = summary["recent"][:limit_clamped]
+
+    return {
+        "success": True,
+        "known_gates": sorted(KNOWN_GATES),
+        **summary,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

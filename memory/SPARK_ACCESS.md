@@ -87,16 +87,38 @@ ai_modules:          4 registered, all shadow_mode=true
                      (debate_agents, ai_risk_manager, institutional_flow, timeseries_ai)
 ```
 
-## Critical issue under investigation (April 29, 2026)
+## Critical issue under investigation (April 29-30, 2026)
 
 **Bot has not created a single `bot_trade` since 2026-04-16 (13-day silent regression).**
 
 - Hard gates work: alerts → priority → tape_confirmed → auto_eligible flow correctly (validated 2026-04-29)
 - Confidence gate evaluates and approves (today_evaluated: 84, today_go: 32, today_skip: 31)
 - BUT zero rows land in `bot_trades` collection
-- Top suspects: shadow_mode global toggle, PAPER mode branch, AI consultation silent exit, missing `bot_trades.insert_one()` call
+- **Forensic instrumentation shipped 2026-04-30 v12** — every silent exit between AI gate and `bot_trades.insert_one()` now records to `trade_drops` collection. `GET /api/diagnostic/trade-drops?minutes=60` aggregates by gate.
+- **Likeliest root cause identified**: `trade_execution.execute_trade` broker-reject + exception branches were orphaning REJECTED trades in process memory (no `_save_trade()` call). Patched in v12.
 
-See `/app/memory/CHANGELOG.md` for the full session history that led to the discovery.
+### 🎯 Operator action plan (after pull + restart on Spark)
+
+```bash
+# After 5-10 min of RTH scanning
+curl -s http://localhost:8001/api/diagnostic/trade-drops?minutes=60 | python3 -m json.tool
+# Read `first_killing_gate` — names the suspect.
+# Possible gates: account_guard, broker_rejected, safety_guardrail,
+# safety_guardrail_crash, no_trade_executor, pre_exec_guardrail_veto,
+# strategy_paper_phase, strategy_simulation_phase, execution_exception
+```
+
+If `first_killing_gate=account_guard`: rotate `IB_ACCOUNT_PAPER` in
+backend/.env to include the pusher's reported `DUM61566S` alias.
+
+If `first_killing_gate=broker_rejected`: read the `reason` field in
+the `recent[]` array — IB-side error (margin, no buying power, etc).
+
+REJECTED trades now appear in `bot_trades` (orphan bug fixed in v12)
+so post-mortem queries against the collection will see attempts that
+were silently dropping for 13 days.
+
+See `/app/memory/CHANGELOG.md` v12 entry for the full detail.
 
 ## Key endpoints (use external `localhost:8001` from Spark CLI)
 
@@ -104,6 +126,7 @@ See `/app/memory/CHANGELOG.md` for the full session history that led to the disc
 |---|---|---|
 | GET | `/api/diagnostic/rth-readiness` | 9-check pre-flight (single curl) |
 | GET | `/api/diagnostic/trade-funnel` | Stage-by-stage execution flow with kill_check |
+| GET | `/api/diagnostic/trade-drops?minutes=N&gate=X` | **NEW 2026-04-30 v12** — silent execution-drop forensics. `first_killing_gate` names the suspect; `recent[]` lists last 25 with context. |
 | GET | `/api/trading-bot/status` | Bot mode, daily_stats, risk_params, account.equity |
 | POST | `/api/trading-bot/refresh-account` | Force-pull IB equity → starting_capital |
 | GET | `/api/scanner/setup-landscape` | Daily Bellafiore Setup classification + multi-index regime |

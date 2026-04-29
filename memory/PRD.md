@@ -41,6 +41,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `GET /api/scanner/in-play-config` — current in-play scoring thresholds (single source of truth shared by scanner + AI assistant — 2026-04-30 v7)
 - `PUT /api/scanner/in-play-config` — runtime threshold tuning, persists to `bot_state.in_play_config` (`{"strict_gate": true}` opts into hard gating — 2026-04-30 v7)
 - `GET /api/diagnostic/trade-funnel?date=YYYY-MM-DD` — walks the alert→bot→execution chain and pinpoints the first dead stage (2026-04-30 v8)
+- `GET /api/diagnostic/trade-drops?minutes=N&gate=X&limit=N` — silent execution-drop forensics (2026-04-30 v12); 9 instrumented gates between AI gate and `bot_trades.insert_one()`
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard
@@ -96,6 +97,9 @@ is the operator's source of truth for which Trade fits which Setup;
 - `backend/routers/ib.py` — push-data + order queue glue
 - `backend/routers/scanner.py` — `/setup-coverage`, `/setup-trade-matrix`, `/setup-landscape`, `/detector-stats`
 - `backend/routers/assistant.py` — `/coach/morning-briefing`, `/coach/eod-briefing`, `/coach/weekend-prep-briefing`
+- `backend/services/trade_drop_recorder.py` — **NEW 2026-04-30 v12** — silent-execution-drop audit trail. `record_trade_drop` writes to `trade_drops` Mongo collection (TTL 7d) + 500-deep in-memory ring buffer fallback + structured `[TRADE_DROP]` WARN log line. 9 KNOWN_GATES wired between AI confidence gate and `bot_trades.insert_one()`: `account_guard`, `safety_guardrail`, `safety_guardrail_crash`, `no_trade_executor`, `pre_exec_guardrail_veto`, `strategy_paper_phase`, `strategy_simulation_phase`, `broker_rejected`, `execution_exception`.
+- `backend/services/trade_execution.py` — **PATCH 2026-04-30 v12** — `execute_trade` broker-reject + exception branches now call `await bot._save_trade(trade)` so REJECTED trades are no longer orphaned in process memory. This was the likeliest root cause of the April 16 → April 29 silent regression (zero `bot_trades` inserts despite 32 AI-gate GOs/day).
+- `backend/routers/diagnostic_router.py` — `/api/diagnostic/trade-drops` endpoint added 2026-04-30 v12; aggregates drops by gate, names `first_killing_gate`, returns last 25 rows with full context.
 - `backend/services/order_queue_service.py` — Mongo-backed queue with auto-expire
 - `backend/services/enhanced_scanner.py` — 38 trade detectors, scanner loop, `_apply_setup_context` matrix gate + multi-index regime stamping (2026-04-30), `LiveAlert` dataclass with context fields (`market_setup`, `is_countertrend`, `out_of_context_warning`, `experimental`, `multi_index_regime`)
 - `backend/services/market_setup_classifier.py` — `MarketSetup` enum (7 + NEUTRAL), `MarketSetupClassifier` (daily-bar driven), `TRADE_SETUP_MATRIX`, `TRADE_ALIASES`, `EXPERIMENTAL_TRADES`, `lookup_trade_context()`, `_sync_classify_window()` for training-time per-bar labels (2026-04-30)

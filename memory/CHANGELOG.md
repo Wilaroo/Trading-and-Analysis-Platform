@@ -2,6 +2,147 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twelfth commit) — Trade-Drop Forensic Instrumentation + Broker-Reject Persistence Fix
+
+**Why**: On 2026-04-29 the operator confirmed the bot has not created
+a single `bot_trade` since 2026-04-16 — a **13-day silent regression**.
+Today's funnel showed the AI gate evaluating 84 alerts (32 GO / 31 SKIP)
+yet zero rows landing in `bot_trades`. Some `return None` / `return`
+between the AI confidence gate and `bot_trades.insert_one()` was
+aborting the trade silently. Today we instrumented every silent exit
+in that chain so the next bar of intake makes the killer obvious.
+
+### Scope
+
+#### 1. New service — `services/trade_drop_recorder.py`
+- Single helper `record_trade_drop(db, gate, symbol, setup, direction,
+  reason, context)` that:
+  - Writes a structured row to a new `trade_drops` Mongo collection
+    (TTL 7 days, indexed on `gate + ts_epoch_ms`).
+  - Falls back to a 500-deep in-memory ring buffer on Mongo flap.
+  - Always emits a structured `[TRADE_DROP] gate=… symbol=… reason=…`
+    WARN log line so operators grepping `backend.log` can find drops
+    without curl/db access.
+  - Never raises — drop logic is fail-safe (caught and swallowed at
+    every callsite).
+- Module exposes `KNOWN_GATES` (9 gates currently wired),
+  `get_recent_drops`, `summarize_recent_drops`, and a tests-only
+  `reset_memory_buffer_for_tests()`.
+
+#### 2. Instrumented every silent exit in the execution chain
+
+In `services/trading_bot_service.py::_execute_trade`:
+- **`account_guard`** — IB_ACCOUNT_ACTIVE vs pusher account drift.
+  This is the highest-confidence suspect for the April 16 regression
+  (the operator's pusher reports `DUM61566S`; if `IB_ACCOUNT_PAPER`
+  env var lists a different alias the kill-switch trips silently and
+  the trade dies before reaching the broker).
+- **`safety_guardrail`** — SafetyGuardrails.check_can_enter rejected
+  (daily-loss / stale-quote / exposure caps).
+- **`safety_guardrail_crash`** — exception in the guardrail check
+  itself (fail-CLOSED path that previously silently dropped trades).
+
+In `services/trade_execution.py::execute_trade`:
+- **`no_trade_executor`** — `bot._trade_executor is None`.
+- **`pre_exec_guardrail_veto`** — `services.execution_guardrails.run_all_guardrails`
+  veto (USO-style $0.03 stop on $108 stock).
+- **`strategy_paper_phase`** — strategy still in PAPER (also saves to
+  `bot_trades` with status=paper; instrumented for visibility so the
+  operator can rule it in/out).
+- **`strategy_simulation_phase`** — strategy in SIMULATION.
+- **`broker_rejected`** — `place_bracket_order` / `execute_entry`
+  returned `success=False, status!=timeout`. **THIS IS THE LIKELIEST
+  ROOT CAUSE** of the April 16 regression — the legacy code path
+  marked the trade `REJECTED` in memory and never persisted to
+  `bot_trades`, so 13 days of broker rejections vanished without trace.
+- **`execution_exception`** — raised exception inside `execute_trade`.
+
+#### 3. Broker-reject + exception paths now PERSIST the trade
+
+The hidden bug behind the 13-day silence: `trade_execution.execute_trade`
+set `trade.status = TradeStatus.REJECTED` in two branches (broker
+non-success-non-timeout, and `except Exception`) but **never called
+`bot._save_trade(trade)`**. Trades were orphaned in process memory.
+
+Fix: both branches now call `await bot._save_trade(trade)` so REJECTED
+attempts land in `bot_trades` for forensic visibility. Also stamps
+`trade.close_reason` (`broker_rejected` / `execution_exception`) and
+removes the trade from `bot._pending_trades` to prevent dangling refs.
+
+#### 4. New endpoint — `GET /api/diagnostic/trade-drops`
+
+```
+GET /api/diagnostic/trade-drops?minutes=60&gate=account_guard&limit=100
+```
+
+Returns:
+```json
+{
+  "success": true,
+  "known_gates": ["account_guard", "broker_rejected", "execution_exception", "no_trade_executor", "pre_exec_guardrail_veto", "safety_guardrail", "safety_guardrail_crash", "strategy_paper_phase", "strategy_simulation_phase"],
+  "minutes": 60,
+  "total": 47,
+  "by_gate": {"account_guard": 32, "safety_guardrail": 15},
+  "first_killing_gate": "account_guard",
+  "recent": [<last 25 drops with timestamps + context>]
+}
+```
+
+Companion to `/trade-funnel`: the funnel walks the alert→bot chain
+top-down to show which stage stops flow; `/trade-drops` walks the
+post-AI-gate chain bottom-up to show which gate kills it.
+
+### Verification
+
+`backend/tests/test_trade_drop_instrumentation.py` — 21 tests (all
+passing locally + clean on existing 23-test adjacent suite for a 44/44
+total). Coverage:
+- 9 recorder-contract tests (memory fallback, oversized reason
+  truncation, mongo write shape, minutes-window cutoff, gate
+  filtering, summary aggregation).
+- 9 source-level guards (1 per gate) that grep the source for
+  `gate="<name>"` so a future contributor deleting a breadcrumb
+  fails the canary instead of hiding another silent regression.
+- 1 `KNOWN_GATES` consistency check (every advertised gate must be
+  wired in source).
+- 2 regression guards confirming the broker-rejected and
+  execute-exception branches now call `bot._save_trade(trade)`.
+
+### Operator next step (after pull + restart on Spark)
+
+```bash
+# 1. After 5-10 minutes of RTH scanning, query the new endpoint:
+curl -s http://localhost:8001/api/diagnostic/trade-drops?minutes=60 | python3 -m json.tool
+
+# 2. The "first_killing_gate" field names the suspect.
+#    - If "account_guard": rotate IB_ACCOUNT_PAPER in backend/.env to
+#      include the actual pusher account (DUM61566S). Restart.
+#    - If "broker_rejected": read the recent[] array; the `reason`
+#      field will show what IB returned (rejected, no margin, etc).
+#    - If "safety_guardrail": daily-loss or stale-quote cap is firing.
+#      Audit /api/safety/effective-risk-caps for the binding cap.
+
+# 3. The new instrumentation also persists REJECTED trades to bot_trades
+#    so post-mortem queries against the collection finally see the
+#    attempts that were silently dropping for 13 days:
+~/Trading-and-Analysis-Platform/.venv/bin/python -c "
+import os
+from pathlib import Path
+env_path = Path.home() / 'Trading-and-Analysis-Platform/backend/.env'
+for line in env_path.read_text().splitlines():
+    if '=' in line and not line.startswith('#'):
+        k, _, v = line.partition('='); os.environ.setdefault(k.strip(), v.strip().strip('\"').strip(\"'\"))
+from pymongo import MongoClient
+db = MongoClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+print('REJECTED count past 24h:', db.bot_trades.count_documents({'status':'rejected'}))
+print('Top close_reasons:')
+for r in db.bot_trades.aggregate([{'\$match':{'status':'rejected'}},{'\$group':{'_id':'\$close_reason','c':{'\$sum':1}}},{'\$sort':{'c':-1}}]):
+    print(f'  {r[\"_id\"]}: {r[\"c\"]}')
+"
+```
+
+
+
 ## 2026-04-30 (eleventh commit) — Realtime Stop-Guard + Sector Fallback + Landscape Pre-warm + V5 Shadow vs Real
 
 Closes the operator's P1 backlog list ("B + C + a few gaps") in one
