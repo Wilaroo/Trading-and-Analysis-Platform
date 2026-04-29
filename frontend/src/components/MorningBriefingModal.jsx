@@ -109,7 +109,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.98, opacity: 0, y: 12 }}
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          className="w-full max-w-xl max-h-[88vh] overflow-hidden rounded-lg bg-zinc-950 border border-zinc-800 shadow-2xl v5-root"
+          className="w-full max-w-[min(108rem,95vw)] max-h-[88vh] overflow-hidden rounded-lg bg-zinc-950 border border-zinc-800 shadow-2xl v5-root"
           onClick={(e) => e.stopPropagation()}
           data-testid="morning-briefing-modal"
           data-help-id="briefings"

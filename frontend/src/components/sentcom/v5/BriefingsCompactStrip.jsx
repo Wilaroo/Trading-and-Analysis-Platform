@@ -151,7 +151,7 @@ const BriefingModal = ({ def, briefing, loading, positions, totalPnl,
     >
       <div
         className="bg-zinc-950 border border-zinc-800 rounded-xl
-                   shadow-2xl w-full max-w-3xl max-h-[85vh]
+                   shadow-2xl w-full max-w-[min(144rem,95vw)] max-h-[85vh]
                    overflow-y-auto v5-scroll"
         onClick={(e) => e.stopPropagation()}
         data-testid={`briefing-modal-${def.key}`}
