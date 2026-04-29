@@ -1522,7 +1522,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                         : trainReadiness.readiness?.summary || 'Readiness unknown.'}
                   </div>
                   {!trainReadiness.ready && !trainReadiness.loading && (
-                    <div className="opacity-80 mt-0.5 text-[11px]">
+                    <div className="opacity-80 mt-0.5 text-[13px]">
                       {(trainReadiness.blockers.length ? trainReadiness.blockers : trainReadiness.warnings)
                         .slice(0, 2)
                         .join(' · ')}
@@ -1534,7 +1534,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                 <button
                   type="button"
                   onClick={(e) => { e.preventDefault(); trainReadiness.refresh(); }}
-                  className="text-[10px] px-1.5 py-0.5 rounded hover:bg-black/30 opacity-70 hover:opacity-100"
+                  className="text-[12px] px-1.5 py-0.5 rounded hover:bg-black/30 opacity-70 hover:opacity-100"
                   title="Re-check readiness"
                   data-testid="train-readiness-refresh"
                 >

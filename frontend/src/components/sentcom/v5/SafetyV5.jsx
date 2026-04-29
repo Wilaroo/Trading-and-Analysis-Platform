@@ -92,7 +92,7 @@ export const SafetyBannerV5 = ({ safety }) => {
             <div className="v5-mono text-xs font-bold text-rose-100 uppercase tracking-widest">
               KILL-SWITCH ACTIVE · no new trades
             </div>
-            <div className="v5-why text-[11px] text-rose-200/90 truncate not-italic">
+            <div className="v5-why text-[13px] text-rose-200/90 truncate not-italic">
               <span className="v5-mono">{trippedAt}</span>
               <span className="mx-2">·</span>
               {state.kill_switch_reason || 'unknown reason'}
@@ -103,7 +103,7 @@ export const SafetyBannerV5 = ({ safety }) => {
           onClick={handleReset}
           disabled={resetting}
           data-testid="v5-safety-reset-btn"
-          className="shrink-0 px-3 py-1 rounded-sm bg-rose-100 text-rose-900 hover:bg-white v5-mono text-[10px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
+          className="shrink-0 px-3 py-1 rounded-sm bg-rose-100 text-rose-900 hover:bg-white v5-mono text-[12px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
         >
           {resetting ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <X className="w-3 h-3 inline mr-1" />}
           Acknowledge + unlock
@@ -152,8 +152,8 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
   //     (no fixed positioning, matches the v5-chip scale).
   //   • inline=false → legacy floating button in the bottom-left corner.
   const btnClass = inline
-    ? "flex items-center gap-1 px-2 py-0.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/60 border border-rose-500/60 text-rose-100 v5-mono text-[9px] font-bold uppercase tracking-widest transition-all"
-    : "fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[10px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm";
+    ? "flex items-center gap-1 px-2 py-0.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/60 border border-rose-500/60 text-rose-100 v5-mono text-[11px] font-bold uppercase tracking-widest transition-all"
+    : "fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[12px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm";
 
   return (
     <>
@@ -192,7 +192,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                     <span className="text-rose-400 font-bold"> market-close every open position</span>. The kill-switch
                     will also latch so the bot cannot re-enter until you reset it.
                   </p>
-                  <p className="text-[11px] v5-mono v5-dim">
+                  <p className="text-[13px] v5-mono v5-dim">
                     Type <span className="text-rose-400 font-bold">FLATTEN</span> to confirm.
                   </p>
                   <input
@@ -208,7 +208,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                 <div className="px-4 py-3 border-t border-zinc-800 bg-zinc-950 flex justify-end gap-2">
                   <button
                     onClick={onClose}
-                    className="px-3 py-1.5 rounded-sm text-zinc-400 hover:text-zinc-200 v5-mono text-[11px] uppercase tracking-widest transition-colors"
+                    className="px-3 py-1.5 rounded-sm text-zinc-400 hover:text-zinc-200 v5-mono text-[13px] uppercase tracking-widest transition-colors"
                   >
                     Cancel
                   </button>
@@ -216,7 +216,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                     onClick={onFire}
                     disabled={!confirmed || busy}
                     data-testid="v5-flatten-fire-btn"
-                    className={`px-4 py-1.5 rounded-sm v5-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                    className={`px-4 py-1.5 rounded-sm v5-mono text-[13px] font-bold uppercase tracking-widest transition-colors ${
                       confirmed
                         ? 'bg-rose-600 hover:bg-rose-500 text-white'
                         : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
@@ -250,7 +250,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                 <div className="px-4 py-3 border-t border-zinc-800 flex justify-end">
                   <button
                     onClick={onClose}
-                    className="px-4 py-1.5 rounded-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-100 v5-mono text-[11px] font-bold uppercase tracking-widest transition-colors"
+                    className="px-4 py-1.5 rounded-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-100 v5-mono text-[13px] font-bold uppercase tracking-widest transition-colors"
                   >
                     Close
                   </button>
@@ -439,7 +439,7 @@ export const AwaitingQuotesPillV5 = ({ safety }) => {
       </span>
       {count > 0 && (
         <span
-          className="v5-mono text-[10px] text-amber-100/80 px-1.5 py-0.5 rounded-sm bg-amber-500/20 border border-amber-400/30"
+          className="v5-mono text-[12px] text-amber-100/80 px-1.5 py-0.5 rounded-sm bg-amber-500/20 border border-amber-400/30"
           data-testid="v5-awaiting-quotes-symbols"
         >
           {count === 1 ? missing[0] : `${count} positions`}

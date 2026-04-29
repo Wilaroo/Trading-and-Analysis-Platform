@@ -33,7 +33,7 @@ const InlineStatus = ({ serviceId, label }) => {
       title={`${label}: ${isConnected ? 'Connected' : isConnecting ? 'Connecting...' : 'Disconnected'}`}
     >
       <Icon className="w-3 h-3" />
-      <span className="text-[10px] font-medium uppercase">{label}</span>
+      <span className="text-[12px] font-medium uppercase">{label}</span>
       <div className={`w-1.5 h-1.5 rounded-full ${
         isConnected 
           ? 'bg-green-400 shadow-[0_0_4px_rgba(74,222,128,0.6)]' 

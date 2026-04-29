@@ -63,14 +63,14 @@ export const LastRunsTimeline = ({ refreshToken = 0, limit = 5 }) => {
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <Trophy className="w-3.5 h-3.5 text-amber-400" />
-          <span className="v5-mono text-[10px] text-zinc-400 uppercase tracking-wider font-bold">
+          <span className="v5-mono text-[12px] text-zinc-400 uppercase tracking-wider font-bold">
             Last {limit} Runs
           </span>
         </div>
         {latest && (
           <span
             data-testid="last-runs-latest-summary"
-            className="v5-mono text-[9px] text-zinc-500 uppercase tracking-wider"
+            className="v5-mono text-[11px] text-zinc-500 uppercase tracking-wider"
           >
             latest · {latest.models_trained_count} models · {latest.elapsed_human}
           </span>
@@ -81,19 +81,19 @@ export const LastRunsTimeline = ({ refreshToken = 0, limit = 5 }) => {
         {err && (
           <div
             data-testid="last-runs-error"
-            className="flex items-center gap-2 text-rose-400 v5-mono text-[10px]"
+            className="flex items-center gap-2 text-rose-400 v5-mono text-[12px]"
           >
             <AlertTriangle className="w-3 h-3" />
             <span>{err}</span>
           </div>
         )}
         {!err && loading && !ordered.length && (
-          <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+          <div className="v5-mono text-[12px] text-zinc-600">loading…</div>
         )}
         {!err && !loading && !ordered.length && (
           <div
             data-testid="last-runs-empty"
-            className="v5-mono text-[10px] text-zinc-600"
+            className="v5-mono text-[12px] text-zinc-600"
           >
             No archived runs yet — kick off `Train All` to start the timeline.
           </div>
@@ -120,7 +120,7 @@ export const LastRunsTimeline = ({ refreshToken = 0, limit = 5 }) => {
                   title={label}
                   className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0"
                 >
-                  <div className="v5-mono text-[9px] text-zinc-400 tabular-nums truncate w-full text-center">
+                  <div className="v5-mono text-[11px] text-zinc-400 tabular-nums truncate w-full text-center">
                     {r.models_trained_count}
                   </div>
                   <div

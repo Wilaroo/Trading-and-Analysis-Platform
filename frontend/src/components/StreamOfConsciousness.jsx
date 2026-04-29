@@ -548,7 +548,7 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
               
               {/* Label Badge */}
               <span 
-                className={`text-[10px] font-bold tracking-wider px-2 py-1 rounded-md ${style.bgColor} ${style.textColor}`}
+                className={`text-[12px] font-bold tracking-wider px-2 py-1 rounded-md ${style.bgColor} ${style.textColor}`}
                 style={{ fontFamily: "'Space Grotesk', sans-serif" }}
               >
                 {style.label}
@@ -566,7 +566,7 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
             {/* Timestamp + Expand */}
             <div className="flex items-center gap-2">
               <span 
-                className="text-[10px] text-zinc-500"
+                className="text-[12px] text-zinc-500"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {formatTime(entry.timestamp)}
@@ -596,7 +596,7 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
               {chips.map((chip, i) => (
                 <div 
                   key={i}
-                  className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border ${chip.color} ${chip.bg}`}
+                  className={`flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg border ${chip.color} ${chip.bg}`}
                   style={{ fontFamily: "'JetBrains Mono', monospace" }}
                 >
                   {chip.icon}
@@ -618,7 +618,7 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
                 />
               </div>
               <span 
-                className="text-[9px] text-zinc-500"
+                className="text-[11px] text-zinc-500"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {entry.confidence}%
@@ -710,21 +710,21 @@ const StreamOfConsciousness = ({ className = '' }) => {
             <span className="text-sm font-bold text-emerald-400 tracking-wide">
               SentCom S.O.C.
             </span>
-            <p className="text-[9px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
+            <p className="text-[11px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Connection status indicator */}
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/30" title={`Last update: ${lastUpdateStr}`}>
             <Radio className={`w-3 h-3 ${isConnected ? 'text-emerald-400' : 'text-zinc-600'}`} />
-            <span className={`text-[9px] font-mono ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+            <span className={`text-[11px] font-mono ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
               {isConnected ? 'LIVE' : 'SYNC'}
             </span>
           </div>
           
           {highPriorityCount > 0 && (
             <span 
-              className="text-[10px] px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold"
+              className="text-[12px] px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold"
             >
               {highPriorityCount}
             </span>
@@ -760,7 +760,7 @@ const StreamOfConsciousness = ({ className = '' }) => {
             <div className="text-center">
               <Brain className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
               <p className="text-sm text-zinc-500">Waiting for activity...</p>
-              <p className="text-[10px] text-zinc-600 mt-1">Trade decisions and alerts will appear here</p>
+              <p className="text-[12px] text-zinc-600 mt-1">Trade decisions and alerts will appear here</p>
             </div>
           </div>
         ) : (
@@ -779,7 +779,7 @@ const StreamOfConsciousness = ({ className = '' }) => {
       >
         <div className="flex items-center gap-3">
           <span 
-            className="text-[10px] text-zinc-600"
+            className="text-[12px] text-zinc-600"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {thoughts.length} entries
@@ -792,7 +792,7 @@ const StreamOfConsciousness = ({ className = '' }) => {
                   scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
                 }
               }}
-              className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+              className="text-[12px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
             >
               <ChevronDown className="w-3 h-3" />
               Resume live
@@ -802,7 +802,7 @@ const StreamOfConsciousness = ({ className = '' }) => {
         <div className="flex items-center gap-2">
           <div className={`w-1.5 h-1.5 rounded-full ${autoScroll ? 'bg-emerald-400' : 'bg-amber-400'}`} />
           <span 
-            className="text-[10px] text-zinc-600"
+            className="text-[12px] text-zinc-600"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
             {autoScroll ? 'LIVE' : 'PAUSED'}

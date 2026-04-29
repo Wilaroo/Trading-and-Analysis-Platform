@@ -94,7 +94,7 @@ const AIModulesPanel = memo(({ data, connectors, thresholds, onRefresh, onRunCal
                           {module.lastTrained && (
                             <div className="flex items-center justify-between text-xs mt-1">
                               <span className="text-zinc-400">Last Trained</span>
-                              <span className="text-zinc-500 font-mono text-[10px]">{new Date(module.lastTrained).toLocaleDateString()}</span>
+                              <span className="text-zinc-500 font-mono text-[12px]">{new Date(module.lastTrained).toLocaleDateString()}</span>
                             </div>
                           )}
                         </>
@@ -182,7 +182,7 @@ const AIModulesPanel = memo(({ data, connectors, thresholds, onRefresh, onRunCal
                           <span className="text-xs text-zinc-300">{setup}</span>
                           <div className="flex items-center gap-2">
                             <span className={`text-xs font-mono ${d.value > 1 ? 'text-yellow-400' : d.value < 1 ? 'text-green-400' : 'text-zinc-400'}`}>{d.value?.toFixed(2)}x</span>
-                            <span className="text-[10px] text-zinc-500">{(d.win_rate_30d * 100).toFixed(0)}% WR</span>
+                            <span className="text-[12px] text-zinc-500">{(d.win_rate_30d * 100).toFixed(0)}% WR</span>
                           </div>
                         </div>
                       ))}

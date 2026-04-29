@@ -112,7 +112,7 @@ export const DynamicRiskBadge = ({ onClick }) => {
         {multiplier.toFixed(1)}x
       </span>
       {status.override?.active && (
-        <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+        <span className="text-[12px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
           OVR
         </span>
       )}
@@ -210,12 +210,12 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-white">Dynamic Risk</span>
               {!status.enabled && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/30 text-gray-400">
+                <span className="text-[12px] px-1.5 py-0.5 rounded bg-gray-500/30 text-gray-400">
                   OFF
                 </span>
               )}
               {status.override?.active && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+                <span className="text-[12px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
                   OVERRIDE
                 </span>
               )}

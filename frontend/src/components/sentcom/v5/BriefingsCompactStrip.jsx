@@ -1,9 +1,5 @@
 /**
- * BriefingsCompactStrip — 4 compact pulse-buttons for the V5 right
- * sidebar / TopBar. Replaces the wide `BriefingsV5` panel when the
- * operator wants more vertical room for the live action surfaces
- * (Stream, Positions, SentCom Intelligence) — see 2026-04-29
- * afternoon-10 layout reorg.
+ * BriefingsCompactStrip — 4 pulse-buttons for the V5 right sidebar / TopBar.
  *
  * Each button represents one of the 4 daily briefings:
  *   - Morning Prep        (pre-open)
@@ -19,21 +15,17 @@
  *   - `passed`   — window closed. Static. Click still opens the
  *                  recorded briefing for review.
  *
- * Click → modal shows the full original briefing card (re-uses
- * `MorningPrepCard` / `MidDayRecapCard` / `PowerHourCard` /
- * `CloseRecapCard` from BriefingsV5 with `expanded={true}` so the
- * operator sees the full rendering, not a re-implementation).
+ * 2026-04-29 morning rewire (operator-flagged): clicking a button now
+ * routes directly to the parent's deep-dive modal (`onOpenDeepDive(key)`)
+ * — the previous intermediate compact-modal step rendered a stripped
+ * card with only ~5 lines of detail, which the operator rightly called
+ * "pointless". Buttons now jump straight to the full-screen briefing
+ * surface. The deep-dive modal owns its own `briefingKey`-aware
+ * rendering for morning / midday / powerhour / eod variants.
  */
-import React, { useState } from 'react';
-import { Sun, Coffee, Zap, Moon, X } from 'lucide-react';
-import {
-  MorningPrepCard,
-  MidDayRecapCard,
-  PowerHourCard,
-  CloseRecapCard,
-  statusFor,
-} from './BriefingsV5';
-import { useMorningBriefing } from './useMorningBriefing';
+import React from 'react';
+import { Sun, Coffee, Zap, Moon } from 'lucide-react';
+import { statusFor } from './BriefingsV5';
 
 const BRIEFINGS = [
   {
@@ -104,14 +96,14 @@ const BriefingButton = ({ def, state, onClick }) => {
   return (
     <button
       onClick={onClick}
-      className={`relative flex items-center gap-2 px-3 py-1.5 rounded-md
-                  border text-xs font-medium transition-all duration-200
+      className={`relative flex items-center gap-2 px-3 py-2 rounded-md
+                  border text-sm font-medium transition-all duration-200
                   ${STATE_STYLES[state] || STATE_STYLES.pending}`}
       data-testid={`briefing-btn-${def.key}`}
       data-state={state}
       title={`${def.label} — ${state}`}
     >
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className="w-4 h-4" />
       <span className="hidden sm:inline">{def.label}</span>
       <span className="sm:hidden">{def.short}</span>
       <StateDot state={state} />
@@ -119,86 +111,10 @@ const BriefingButton = ({ def, state, onClick }) => {
   );
 };
 
-const BriefingModal = ({ def, briefing, loading, positions, totalPnl,
-                         onClose, onSymbolClick, onOpenDeepDive }) => {
-  const cardCommon = {
-    expanded: true,
-    onToggle: () => {}, // no-op — modal owns expanded state
-    onSymbolClick,
-    onOpenDeepDive,
-  };
-  let card = null;
-  if (def.key === 'morning') {
-    card = <MorningPrepCard data={briefing} loading={loading} {...cardCommon} />;
-  } else if (def.key === 'midday') {
-    card = <MidDayRecapCard
-      positions={positions} totalPnl={totalPnl} briefing={briefing}
-      {...cardCommon} />;
-  } else if (def.key === 'powerhour') {
-    card = <PowerHourCard
-      positions={positions} totalPnl={totalPnl} briefing={briefing}
-      {...cardCommon} />;
-  } else {
-    card = <CloseRecapCard
-      positions={positions} totalPnl={totalPnl} {...cardCommon} />;
-  }
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center
-                 bg-black/70 backdrop-blur-sm p-4"
-      onClick={onClose}
-      data-testid="briefing-modal-backdrop"
-    >
-      <div
-        className="bg-zinc-950 border border-zinc-800 rounded-xl
-                   shadow-2xl w-full max-w-[min(144rem,95vw)] max-h-[85vh]
-                   overflow-y-auto v5-scroll"
-        onClick={(e) => e.stopPropagation()}
-        data-testid={`briefing-modal-${def.key}`}
-      >
-        <div className="flex items-center justify-between px-4 py-3
-                        border-b border-zinc-800 sticky top-0 bg-zinc-950 z-10">
-          <div className="flex items-center gap-2">
-            <def.icon className="w-4 h-4 text-emerald-400" />
-            <span className="text-sm font-semibold text-white">
-              {def.label}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400
-                       hover:text-white transition-colors"
-            data-testid="briefing-modal-close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-2">{card}</div>
-      </div>
-    </div>
-  );
-};
-
 export const BriefingsCompactStrip = ({
-  context,
-  positions,
-  totalPnl,
-  onSymbolClick,
   onOpenDeepDive,
   className = '',
 }) => {
-  const { loading, data } = useMorningBriefing({ refreshMs: 120_000 });
-  const [openKey, setOpenKey] = useState(null);
-
-  const briefing = data || {
-    game_plan: context?.game_plan,
-    drc: context?.drc,
-    scanner: context?.scanner,
-    bot: context?.bot,
-  };
-
-  const openDef = openKey ? BRIEFINGS.find((b) => b.key === openKey) : null;
-
   return (
     <div
       data-testid="briefings-compact-strip"
@@ -211,22 +127,13 @@ export const BriefingsCompactStrip = ({
             key={def.key}
             def={def}
             state={state}
-            onClick={() => setOpenKey(def.key)}
+            // Operator-flagged 2026-04-29: skip the intermediate compact
+            // modal entirely — buttons jump straight to the full deep-dive.
+            // Parent owns the modal; we just hand it the briefing key.
+            onClick={() => onOpenDeepDive && onOpenDeepDive(def.key)}
           />
         );
       })}
-      {openDef && (
-        <BriefingModal
-          def={openDef}
-          briefing={briefing}
-          loading={loading}
-          positions={positions}
-          totalPnl={totalPnl}
-          onClose={() => setOpenKey(null)}
-          onSymbolClick={onSymbolClick}
-          onOpenDeepDive={onOpenDeepDive}
-        />
-      )}
     </div>
   );
 };

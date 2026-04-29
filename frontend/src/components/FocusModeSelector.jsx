@@ -119,7 +119,7 @@ const FocusModeSelector = ({ compact = false }) => {
           )}
           <span className="hidden sm:inline">{modeConfig.shortLabel}</span>
           {isInFocusMode() && (
-            <span className="text-[10px] opacity-70">
+            <span className="text-[12px] opacity-70">
               {formatTime(elapsedTime)}
             </span>
           )}

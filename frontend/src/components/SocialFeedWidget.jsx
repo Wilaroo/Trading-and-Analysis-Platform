@@ -99,19 +99,19 @@ const TwitterTimeline = ({ handle, height = 450, refreshKey = 0 }) => {
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/50">
           <div className="flex flex-col items-center gap-2 text-zinc-500">
             <Loader className="w-4 h-4 animate-spin" />
-            <span className="text-[10px]">Loading @{handle}...</span>
+            <span className="text-[12px]">Loading @{handle}...</span>
           </div>
         </div>
       )}
       {error && (
         <div className="flex flex-col items-center justify-center py-10 gap-2">
           <AlertTriangle className="w-5 h-5 text-amber-400" />
-          <p className="text-[10px] text-zinc-500">Timeline unavailable</p>
+          <p className="text-[12px] text-zinc-500">Timeline unavailable</p>
           <a
             href={`https://x.com/${handle}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+            className="text-[12px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
           >
             Open @{handle} on X <ExternalLink className="w-2.5 h-2.5" />
           </a>
@@ -158,7 +158,7 @@ const PanelSwapDropdown = ({ currentHandle, allHandles, wallHandles, onSwap }) =
                 style={{ backgroundColor: CATEGORY_COLORS[h.category] || '#6b7280' }}
               />
               <span className="truncate">@{h.handle}</span>
-              <span className="text-[9px] text-zinc-500 ml-auto flex-shrink-0">{h.category}</span>
+              <span className="text-[11px] text-zinc-500 ml-auto flex-shrink-0">{h.category}</span>
             </button>
           ))}
         </div>
@@ -248,7 +248,7 @@ const WallPanel = ({ handle, allHandles, wallHandles, onSwap, panelHeight, refre
             href={`https://x.com/${handle}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11px] font-semibold text-white hover:text-sky-400 transition-colors truncate"
+            className="text-[13px] font-semibold text-white hover:text-sky-400 transition-colors truncate"
           >
             @{handle}
           </a>
@@ -310,11 +310,11 @@ const SentimentCard = ({ analysis }) => {
         <div className="flex items-center gap-2">
           <Icon className={`w-4 h-4 ${config.color}`} />
           <span className={`text-sm font-bold ${config.color}`}>{analysis.sentiment}</span>
-          <span className="text-[10px] text-zinc-500 font-mono">
+          <span className="text-[12px] text-zinc-500 font-mono">
             {(analysis.confidence * 100).toFixed(0)}% conf
           </span>
         </div>
-        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+        <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
           analysis.market_impact === 'HIGH' ? 'bg-red-500/20 text-red-400' :
           analysis.market_impact === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
           'bg-zinc-500/20 text-zinc-400'
@@ -327,9 +327,9 @@ const SentimentCard = ({ analysis }) => {
 
       {analysis.tickers?.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-zinc-500">Tickers:</span>
+          <span className="text-[12px] text-zinc-500">Tickers:</span>
           {analysis.tickers.map(t => (
-            <span key={t} className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 text-[10px] font-mono">
+            <span key={t} className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 text-[12px] font-mono">
               ${t}
             </span>
           ))}
@@ -337,7 +337,7 @@ const SentimentCard = ({ analysis }) => {
       )}
 
       {analysis.action && (
-        <div className="text-[10px] text-zinc-500 flex items-center gap-1">
+        <div className="text-[12px] text-zinc-500 flex items-center gap-1">
           <Zap className="w-3 h-3 text-amber-400" />
           {analysis.action}
         </div>
@@ -459,11 +459,11 @@ const SocialFeedWidget = () => {
             <XLogo className="w-3 h-3 text-sky-400" />
           </div>
           <h3 className="text-sm font-bold text-white">Social Feed</h3>
-          <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 text-[10px] font-mono">
+          <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 text-[12px] font-mono">
             {handles.length} HANDLES
           </span>
           {viewMode === 'wall' && (
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[12px] font-mono flex items-center gap-1">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400"></span>
@@ -478,7 +478,7 @@ const SocialFeedWidget = () => {
           <button
             onClick={() => setShowAnalyzer(!showAnalyzer)}
             data-testid="social-feed-analyze-toggle"
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all border ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-medium transition-all border ${
               showAnalyzer
                 ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
                 : 'bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 border-zinc-700/50'
@@ -495,7 +495,7 @@ const SocialFeedWidget = () => {
                 key={key}
                 onClick={() => setViewMode(key)}
                 data-testid={`social-feed-view-${key}`}
-                className={`flex items-center gap-1 px-2 py-1 text-[10px] font-medium transition-all ${
+                className={`flex items-center gap-1 px-2 py-1 text-[12px] font-medium transition-all ${
                   viewMode === key
                     ? 'bg-white/10 text-white'
                     : 'bg-zinc-800/60 text-zinc-500 hover:text-zinc-300'
@@ -511,7 +511,7 @@ const SocialFeedWidget = () => {
           {viewMode === 'wall' && (
             <button
               onClick={() => setRefreshSignal(s => s + 1)}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-zinc-800/60 text-zinc-400 hover:text-emerald-400 border border-zinc-700/50 transition-all"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-medium bg-zinc-800/60 text-zinc-400 hover:text-emerald-400 border border-zinc-700/50 transition-all"
               title="Refresh all panels"
               data-testid="social-feed-refresh-all"
             >
@@ -630,13 +630,13 @@ const SocialFeedWidget = () => {
                             style={{ backgroundColor: CATEGORY_COLORS[activeHandle.category] || '#6b7280' }}
                           />
                           <span className="text-xs font-medium text-white">@{activeHandle.handle}</span>
-                          <span className="text-[10px] text-zinc-500">{activeHandle.description}</span>
+                          <span className="text-[12px] text-zinc-500">{activeHandle.description}</span>
                         </div>
                         <a
                           href={`https://x.com/${activeHandle.handle}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1"
+                          className="text-[12px] text-sky-400 hover:text-sky-300 flex items-center gap-1"
                         >
                           Open on X <ExternalLink className="w-2.5 h-2.5" />
                         </a>
@@ -680,7 +680,7 @@ const SocialFeedWidget = () => {
                               <span className="text-[8px] px-1 rounded bg-amber-500/15 text-amber-400 font-mono">P{h.priority}</span>
                             )}
                           </div>
-                          <div className="text-[10px] text-zinc-500 truncate">{h.label}</div>
+                          <div className="text-[12px] text-zinc-500 truncate">{h.label}</div>
                         </div>
                         <ExternalLink className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 flex-shrink-0 transition-colors" />
                       </a>
@@ -696,7 +696,7 @@ const SocialFeedWidget = () => {
                     return (
                       <div key={cat} className="flex items-center gap-1">
                         <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-                        <span className="text-[9px] text-zinc-500 capitalize">{cat} ({count})</span>
+                        <span className="text-[11px] text-zinc-500 capitalize">{cat} ({count})</span>
                       </div>
                     );
                   })}

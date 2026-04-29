@@ -142,7 +142,7 @@ export const ShadowVsRealTile = () => {
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-1.5 text-zinc-400">
           <Eye className="w-3.5 h-3.5" />
-          <span className="font-semibold uppercase tracking-wide text-[10px]">
+          <span className="font-semibold uppercase tracking-wide text-[12px]">
             Shadow vs Real
           </span>
         </div>
@@ -152,7 +152,7 @@ export const ShadowVsRealTile = () => {
             className={`flex items-center gap-1 ${divergenceClass}`}
           >
             <DivergenceIcon className="w-3 h-3" />
-            <span className="font-mono text-[10px]">
+            <span className="font-mono text-[12px]">
               {divergence > 0 ? '+' : ''}{divergence.toFixed(0)}pp · {divergenceLabel}
             </span>
           </div>
@@ -167,18 +167,18 @@ export const ShadowVsRealTile = () => {
         >
           <div className="flex items-center gap-1 text-violet-300 mb-0.5">
             <Eye className="w-3 h-3" />
-            <span className="text-[10px] font-semibold uppercase tracking-wide">
+            <span className="text-[12px] font-semibold uppercase tracking-wide">
               Shadow
             </span>
           </div>
           <div className="font-mono text-base font-bold text-violet-200">
             {_fmtPct(shadowWr)}
           </div>
-          <div className="text-[10px] text-zinc-500">
+          <div className="text-[12px] text-zinc-500">
             {_fmtCount(shadowOutcomes)} graded · {_fmtCount(shadowTotal)} logged
           </div>
           {(shadowExecuted !== null || shadowOnly !== null) && (
-            <div className="text-[10px] text-zinc-500 mt-0.5">
+            <div className="text-[12px] text-zinc-500 mt-0.5">
               {shadowExecuted !== null && (
                 <span>
                   {_fmtCount(shadowExecuted)} exec
@@ -199,19 +199,19 @@ export const ShadowVsRealTile = () => {
         >
           <div className="flex items-center gap-1 text-emerald-300 mb-0.5">
             <Activity className="w-3 h-3" />
-            <span className="text-[10px] font-semibold uppercase tracking-wide">
+            <span className="text-[12px] font-semibold uppercase tracking-wide">
               Real
             </span>
           </div>
           <div className="font-mono text-base font-bold text-emerald-200">
             {_fmtPct(realWr)}
           </div>
-          <div className="text-[10px] text-zinc-500">
+          <div className="text-[12px] text-zinc-500">
             {_fmtCount(realTotal)} closed
           </div>
           {realPnl !== null && (
             <div
-              className={`text-[10px] mt-0.5 ${
+              className={`text-[12px] mt-0.5 ${
                 realPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >

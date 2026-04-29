@@ -25,12 +25,12 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
         </div>
         <div className="flex items-center gap-2">
           {setups.length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 font-bold">
+            <span className="text-[12px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 font-bold">
               {setups.length} watching
             </span>
           )}
           {alerts.length > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold">
+            <span className="text-[12px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold">
               {alerts.length} alerts
             </span>
           )}
@@ -42,8 +42,8 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
         <div className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="scanner-ib-warning">
           <WifiOff className="w-4 h-4 text-red-400 flex-shrink-0" />
           <div>
-            <p className="text-[11px] font-bold text-red-400">IB Not Connected</p>
-            <p className="text-[10px] text-red-400/70">Scanner requires live IB data. Alerts may be stale.</p>
+            <p className="text-[13px] font-bold text-red-400">IB Not Connected</p>
+            <p className="text-[12px] text-red-400/70">Scanner requires live IB data. Alerts may be stale.</p>
           </div>
         </div>
       )}
@@ -56,9 +56,9 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center gap-1.5 mb-2">
               <Crosshair className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider">Watching</span>
+              <span className="text-[12px] font-bold text-violet-400 uppercase tracking-wider">Watching</span>
               {setups.length > 0 && (
-                <span className="text-[9px] text-violet-400/60">{setups.length}</span>
+                <span className="text-[11px] text-violet-400/60">{setups.length}</span>
               )}
             </div>
             
@@ -77,14 +77,14 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                     <div className="flex items-center gap-2">
                       <Target className="w-3 h-3 text-violet-400" />
                       <ClickableTicker symbol={setup.symbol} variant="inline" className="text-xs font-bold" />
-                      <span className="text-[9px] text-zinc-500">{setup.setup_type}</span>
+                      <span className="text-[11px] text-zinc-500">{setup.setup_type}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {setup.trigger_price && (
-                        <span className="text-[10px] text-cyan-400 font-mono">${setup.trigger_price?.toFixed?.(2) || setup.trigger_price}</span>
+                        <span className="text-[12px] text-cyan-400 font-mono">${setup.trigger_price?.toFixed?.(2) || setup.trigger_price}</span>
                       )}
                       {setup.confidence && (
-                        <span className={`text-[9px] px-1 py-0.5 rounded ${
+                        <span className={`text-[11px] px-1 py-0.5 rounded ${
                           setup.confidence >= 55 ? 'bg-emerald-500/15 text-emerald-400' :
                           setup.confidence >= 30 ? 'bg-amber-500/15 text-amber-400' :
                           'bg-zinc-500/15 text-zinc-400'
@@ -105,8 +105,8 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
           {setups.length > 0 && alerts.length > 0 && (
             <div className="flex items-center gap-1.5 mb-1 pt-1 border-t border-white/5">
               <AlertCircle className="w-3 h-3 text-amber-400" />
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">All Alerts</span>
-              <span className="text-[9px] text-zinc-600">{alerts.length}</span>
+              <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-wider">All Alerts</span>
+              <span className="text-[11px] text-zinc-600">{alerts.length}</span>
             </div>
           )}
           {alertsLoading && alerts.length === 0 ? (
@@ -116,7 +116,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
           ) : alerts.length === 0 ? (
             <div className="flex items-center justify-center py-3 gap-1.5">
               <Activity className="w-3.5 h-3.5 text-zinc-600" />
-              <p className="text-[10px] text-zinc-500">No active alerts</p>
+              <p className="text-[12px] text-zinc-500">No active alerts</p>
             </div>
           ) : (
             alerts.map((alert, i) => (
@@ -140,7 +140,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <ClickableTicker symbol={alert.symbol} variant="inline" className="text-xs font-bold" />
                         {alert.setup_type && (
-                          <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
+                          <span className="text-[11px] px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
                             {alert.setup_type}
                           </span>
                         )}
@@ -154,7 +154,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                           </span>
                         )}
                         {alert.direction && (
-                          <span className={`text-[9px] ${
+                          <span className={`text-[11px] ${
                             alert.direction === 'long' ? 'text-emerald-400' : 'text-rose-400'
                           }`}>
                             {alert.direction === 'long' ? <TrendingUp className="w-2.5 h-2.5 inline" /> : <TrendingDown className="w-2.5 h-2.5 inline" />}
@@ -162,9 +162,9 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                         )}
                       </div>
                     )}
-                    <p className="text-[10px] text-zinc-400 leading-relaxed">{alert.message}</p>
+                    <p className="text-[12px] text-zinc-400 leading-relaxed">{alert.message}</p>
                     {alert.trigger_price && (
-                      <p className="text-[9px] text-zinc-500 mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         Trigger: ${alert.trigger_price?.toFixed?.(2) || alert.trigger_price}
                         {alert.quality_score && ` | Quality: ${alert.quality_score}`}
                       </p>

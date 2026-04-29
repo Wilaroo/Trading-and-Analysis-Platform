@@ -128,7 +128,7 @@ const ValidationSummaryCard = memo(() => {
             <button
               key={key}
               onClick={() => setActiveWindow(key)}
-              className={`flex-1 px-2 py-1.5 rounded-md text-[10px] uppercase tracking-wide border transition-colors ${
+              className={`flex-1 px-2 py-1.5 rounded-md text-[12px] uppercase tracking-wide border transition-colors ${
                 isActive
                   ? 'bg-white/10 border-white/20 text-white'
                   : 'bg-transparent border-white/5 text-zinc-500 hover:text-zinc-300 hover:border-white/10'
@@ -148,15 +148,15 @@ const ValidationSummaryCard = memo(() => {
       <div className="grid grid-cols-3 gap-2" data-testid="validation-summary-metrics">
         <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5 text-center">
           <div className="text-2xl font-bold text-white" data-testid="metric-total">{current.total}</div>
-          <div className="text-[10px] text-zinc-500 uppercase mt-0.5">Evaluated</div>
+          <div className="text-[12px] text-zinc-500 uppercase mt-0.5">Evaluated</div>
         </div>
         <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
           <div className="text-2xl font-bold text-emerald-400" data-testid="metric-promoted">{current.promoted}</div>
-          <div className="text-[10px] text-emerald-500 uppercase mt-0.5">Promoted</div>
+          <div className="text-[12px] text-emerald-500 uppercase mt-0.5">Promoted</div>
         </div>
         <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
           <div className="text-2xl font-bold text-red-400" data-testid="metric-rejected">{current.rejected}</div>
-          <div className="text-[10px] text-red-500 uppercase mt-0.5">Rejected</div>
+          <div className="text-[12px] text-red-500 uppercase mt-0.5">Rejected</div>
         </div>
       </div>
 
@@ -179,7 +179,7 @@ const ValidationSummaryCard = memo(() => {
       {/* Top promoted */}
       {topPromoted.length > 0 && (
         <div data-testid="top-promoted-section">
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="flex items-center gap-1.5 mb-2 text-[12px] uppercase tracking-wide text-zinc-500">
             <Trophy className="w-3 h-3 text-amber-400" /> Top Performers
           </div>
           <div className="space-y-1">
@@ -192,9 +192,9 @@ const ValidationSummaryCard = memo(() => {
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-zinc-500 font-mono w-4">{idx + 1}.</span>
                   <span className="text-zinc-200 font-mono truncate">{m.setup_type}</span>
-                  <span className="text-zinc-500 text-[10px]">{m.bar_size}</span>
+                  <span className="text-zinc-500 text-[12px]">{m.bar_size}</span>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] flex-shrink-0">
+                <div className="flex items-center gap-3 text-[13px] flex-shrink-0">
                   <span className="text-emerald-400">WR {m.win_rate}%</span>
                   <span className="text-blue-400">Sh {m.sharpe}</span>
                   <span className="text-zinc-500">n={m.trades}</span>
@@ -208,7 +208,7 @@ const ValidationSummaryCard = memo(() => {
       {/* Rejection buckets */}
       {rejections.length > 0 && (
         <div data-testid="rejection-reasons-section">
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="flex items-center gap-1.5 mb-2 text-[12px] uppercase tracking-wide text-zinc-500">
             <ShieldAlert className="w-3 h-3 text-red-400" /> Why Models Got Rejected
           </div>
           <div className="space-y-1">
@@ -222,7 +222,7 @@ const ValidationSummaryCard = memo(() => {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-zinc-300">{BUCKET_LABELS[r.bucket] || r.bucket}</span>
-                    <span className="text-zinc-500 font-mono text-[10px]">
+                    <span className="text-zinc-500 font-mono text-[12px]">
                       {r.count} <span className="text-zinc-600">({pct.toFixed(0)}%)</span>
                     </span>
                   </div>
@@ -253,7 +253,7 @@ const ValidationSummaryCard = memo(() => {
       {/* Footer */}
       {summary?.generated_at && (
         <div
-          className="text-[10px] text-zinc-600 text-right pt-1 border-t border-white/5"
+          className="text-[12px] text-zinc-600 text-right pt-1 border-t border-white/5"
           data-testid="validation-summary-timestamp"
         >
           Updated {new Date(summary.generated_at).toLocaleTimeString()}

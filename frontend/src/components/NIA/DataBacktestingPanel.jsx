@@ -73,10 +73,10 @@ const DataBacktestingPanel = memo(({ simulationJobs, backtestResults, backtestJo
                 >
                   <tab.icon className="w-3 h-3" /> {tab.label}
                   {tab.id === 'validation' && valResults.total > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500/20 text-amber-400">{valResults.total}</span>
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[11px] bg-amber-500/20 text-amber-400">{valResults.total}</span>
                   )}
                   {tab.id === 'backtest' && btResults.length > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-violet-500/20 text-violet-400">{btResults.length}</span>
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[11px] bg-violet-500/20 text-violet-400">{btResults.length}</span>
                   )}
                 </button>
               ))}

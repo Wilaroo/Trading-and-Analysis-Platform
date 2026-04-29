@@ -50,7 +50,7 @@ export const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, acti
             <div className="text-xl">👻</div>
             <div>
               <h4 className="text-sm font-bold text-white">Shadow Mode</h4>
-              <p className="text-[10px] text-zinc-400">AI makes decisions but doesn't execute trades</p>
+              <p className="text-[12px] text-zinc-400">AI makes decisions but doesn't execute trades</p>
             </div>
           </div>
           <button
@@ -69,7 +69,7 @@ export const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, acti
           </button>
         </div>
         {shadowMode && (
-          <div className="mt-2 text-[10px] text-violet-400 flex items-center gap-1">
+          <div className="mt-2 text-[12px] text-violet-400 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
             All AI decisions are logged without execution for learning
           </div>
@@ -104,7 +104,7 @@ export const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, acti
                   <span className="text-xl">{module.icon}</span>
                   <div>
                     <h5 className="text-sm font-medium text-white">{module.name}</h5>
-                    <p className="text-[10px] text-zinc-400">{module.description}</p>
+                    <p className="text-[12px] text-zinc-400">{module.description}</p>
                   </div>
                 </div>
                 <button
@@ -137,36 +137,36 @@ export const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, acti
       {/* Shadow Stats */}
       {aiStatus?.shadow_stats && (
         <div className="p-3 rounded-xl bg-black/30 border border-white/5">
-          <h5 className="text-[10px] font-bold text-zinc-400 uppercase mb-2">Shadow Tracking Stats</h5>
+          <h5 className="text-[12px] font-bold text-zinc-400 uppercase mb-2">Shadow Tracking Stats</h5>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div>
               <p className="text-lg font-bold text-white">{aiStatus.shadow_stats.total_decisions?.toLocaleString()}</p>
-              <p className="text-[9px] text-zinc-500">Decisions</p>
+              <p className="text-[11px] text-zinc-500">Decisions</p>
             </div>
             <div>
               <p className="text-lg font-bold text-emerald-400">{aiStatus.shadow_stats.executed_decisions?.toLocaleString()}</p>
-              <p className="text-[9px] text-zinc-500">Executed</p>
+              <p className="text-[11px] text-zinc-500">Executed</p>
             </div>
             <div>
               <p className="text-lg font-bold text-violet-400">{aiStatus.shadow_stats.shadow_only?.toLocaleString()}</p>
-              <p className="text-[9px] text-zinc-500">Shadow Only</p>
+              <p className="text-[11px] text-zinc-500">Shadow Only</p>
             </div>
           </div>
           {(aiStatus.shadow_stats.outcomes_tracked > 0 || aiStatus.shadow_stats.avg_confidence > 0) && (
             <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-3 gap-2 text-center">
               <div>
                 <p className="text-sm font-bold text-cyan-400">{aiStatus.shadow_stats.outcomes_tracked?.toLocaleString()}</p>
-                <p className="text-[9px] text-zinc-500">Tracked</p>
+                <p className="text-[11px] text-zinc-500">Tracked</p>
               </div>
               <div>
                 <p className={`text-sm font-bold ${(aiStatus.shadow_stats.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {aiStatus.shadow_stats.win_rate || 0}%
                 </p>
-                <p className="text-[9px] text-zinc-500">Win Rate</p>
+                <p className="text-[11px] text-zinc-500">Win Rate</p>
               </div>
               <div>
                 <p className="text-sm font-bold text-amber-400">{((aiStatus.shadow_stats.avg_confidence || 0) * 100).toFixed(0)}%</p>
-                <p className="text-[9px] text-zinc-500">Avg Confidence</p>
+                <p className="text-[11px] text-zinc-500">Avg Confidence</p>
               </div>
             </div>
           )}

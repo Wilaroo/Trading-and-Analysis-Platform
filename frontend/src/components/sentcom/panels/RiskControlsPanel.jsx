@@ -132,7 +132,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
             >
               <span className="text-lg">{preset.icon}</span>
               <div className="text-xs font-medium mt-1">{preset.label}</div>
-              <div className="text-[9px] text-zinc-500 mt-0.5">{preset.description}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">{preset.description}</div>
             </button>
           ))}
         </div>
@@ -150,7 +150,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
         <div className="grid grid-cols-2 gap-3">
           {/* Max Risk Per Trade */}
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-500 uppercase">Risk/Trade (%)</label>
+            <label className="text-[12px] text-zinc-500 uppercase">Risk/Trade (%)</label>
             <input
               type="number"
               step="0.1"
@@ -165,7 +165,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
 
           {/* Max Daily Loss */}
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-500 uppercase">Max Daily Loss ($)</label>
+            <label className="text-[12px] text-zinc-500 uppercase">Max Daily Loss ($)</label>
             <input
               type="number"
               step="50"
@@ -179,7 +179,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
 
           {/* Max Open Positions */}
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-500 uppercase">Max Positions</label>
+            <label className="text-[12px] text-zinc-500 uppercase">Max Positions</label>
             <input
               type="number"
               step="1"
@@ -194,7 +194,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
 
           {/* Min Risk:Reward */}
           <div className="space-y-1">
-            <label className="text-[10px] text-zinc-500 uppercase">Min R:R Ratio</label>
+            <label className="text-[12px] text-zinc-500 uppercase">Min R:R Ratio</label>
             <input
               type="number"
               step="0.5"

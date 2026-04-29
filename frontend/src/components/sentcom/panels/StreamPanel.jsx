@@ -70,13 +70,13 @@ export const StreamPanel = ({ messages, loading }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-medium text-violet-400 uppercase">
+                    <span className="text-[12px] font-medium text-violet-400 uppercase">
                       {getMessageLabel(msg.type, msg.action_type)}
                     </span>
                     {msg.symbol && (
                       <ClickableTicker symbol={msg.symbol} variant="badge" />
                     )}
-                    <span className="text-[10px] text-zinc-600">
+                    <span className="text-[12px] text-zinc-600">
                       {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -84,7 +84,7 @@ export const StreamPanel = ({ messages, loading }) => {
                   {msg.confidence && (
                     <div className="flex items-center gap-1 mt-2">
                       <Gauge className="w-3 h-3 text-violet-400" />
-                      <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                      <span className="text-[12px] text-violet-400">Confidence: {msg.confidence}%</span>
                     </div>
                   )}
                 </div>

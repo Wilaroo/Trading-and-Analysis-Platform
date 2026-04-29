@@ -124,7 +124,7 @@ const QuickStatsBar = memo(({ data }) => {
       <div className="flex items-center gap-2 mb-2">
         <div className="flex items-center gap-1.5">
           <div className={`w-1.5 h-1.5 rounded-full ${activeCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
-          <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          <span className="text-[12px] font-medium uppercase tracking-wider text-zinc-500">
             {activeCount > 0 ? `${activeCount} active` : 'System idle'}
           </span>
         </div>
@@ -146,7 +146,7 @@ const QuickStatsBar = memo(({ data }) => {
                 <div className={`text-sm font-bold leading-tight ${stat.active ? colors.text : 'text-zinc-400'}`}>
                   {stat.value}
                 </div>
-                <div className="text-[9px] text-zinc-500 leading-tight truncate">
+                <div className="text-[11px] text-zinc-500 leading-tight truncate">
                   {stat.sub}
                 </div>
               </div>

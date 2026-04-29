@@ -74,7 +74,7 @@ const LearningProgressPanel = memo(({ data }) => {
         <div className="flex items-center gap-3">
           <div className="text-right">
             <div className="text-lg font-bold text-white">{overallProgress}%</div>
-            <div className="text-[10px] text-zinc-500">Overall</div>
+            <div className="text-[12px] text-zinc-500">Overall</div>
           </div>
           <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
@@ -109,9 +109,9 @@ const LearningProgressPanel = memo(({ data }) => {
                     />
                   </div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-[10px] text-zinc-500">{item.detail}</span>
+                    <span className="text-[12px] text-zinc-500">{item.detail}</span>
                     {item.ready && (
-                      <span className="text-[10px] text-green-400 flex items-center gap-1">
+                      <span className="text-[12px] text-green-400 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" /> Ready
                       </span>
                     )}

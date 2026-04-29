@@ -56,7 +56,7 @@ export const ShadowDecisionBadge = ({ decision, ageMs }) => {
   return (
     <span
       data-testid={`shadow-badge-${decision.recommendation}`}
-      className={`inline-flex items-center gap-1 px-1.5 py-px ml-1.5 rounded border text-[9px] font-semibold uppercase tracking-wide ${style.cls} ${stale ? 'opacity-60' : ''}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-px ml-1.5 rounded border text-[11px] font-semibold uppercase tracking-wide ${style.cls} ${stale ? 'opacity-60' : ''}`}
       title={title}
     >
       <span aria-hidden="true">{executed ? '●' : '○'}</span>

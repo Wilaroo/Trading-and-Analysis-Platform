@@ -101,7 +101,7 @@ const LastBackfillCard = memo(({ run, onRerun, busy }) => {
       <button
         onClick={onRerun}
         disabled={busy}
-        className="ml-auto px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[11px] font-medium border border-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="ml-auto px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[13px] font-medium border border-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         data-testid="last-backfill-rerun-btn"
         title="Re-run smart backfill now"
       >
@@ -404,11 +404,11 @@ const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
           </div>
           <div>
             <h3 className="text-sm font-bold text-white">Historical Data Collection</h3>
-            <p className="text-[10px] text-zinc-500">Smart gap-fill with max IB lookback &bull; Per-stock chaining</p>
+            <p className="text-[12px] text-zinc-500">Smart gap-fill with max IB lookback &bull; Per-stock chaining</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isRunning && <span className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">COLLECTING</span>}
+          {isRunning && <span className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-[12px] font-medium animate-pulse">COLLECTING</span>}
           {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
         </div>
       </div>
@@ -486,11 +486,11 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
           <div className="text-left">
             <div className="text-xs font-bold text-white flex items-center gap-2">
               Failed Requests
-              <span className="text-[10px] font-mono font-semibold text-rose-300" data-testid="failed-requests-count">
+              <span className="text-[12px] font-mono font-semibold text-rose-300" data-testid="failed-requests-count">
                 {total.toLocaleString()}
               </span>
             </div>
-            <div className="text-[10px] text-zinc-500">Permanent failures — grouped by error · retry with one click</div>
+            <div className="text-[12px] text-zinc-500">Permanent failures — grouped by error · retry with one click</div>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -499,7 +499,7 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
               type="button"
               onClick={(e) => { e.stopPropagation(); retryGroup(null); }}
               disabled={retrying !== null}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-200 text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-200 text-[12px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="failed-requests-retry-all"
               title="Re-queue every failed request for retry"
             >
@@ -552,8 +552,8 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                 >
                   <div className="flex items-start justify-between gap-3 mb-1">
                     <div className="flex-1 min-w-0">
-                      <div className="text-[11px] text-rose-300 font-mono break-all">{err}</div>
-                      <div className="text-[9px] text-zinc-500 font-mono mt-0.5">
+                      <div className="text-[13px] text-rose-300 font-mono break-all">{err}</div>
+                      <div className="text-[11px] text-zinc-500 font-mono mt-0.5">
                         {info.count.toLocaleString()} failures · {info.bar_sizes?.join(', ') || '?'}
                       </div>
                     </div>
@@ -561,7 +561,7 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                       type="button"
                       onClick={() => retryGroup(err)}
                       disabled={retrying !== null}
-                      className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 text-[10px] font-semibold text-zinc-300 hover:text-rose-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 text-[12px] font-semibold text-zinc-300 hover:text-rose-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       data-testid="failed-group-retry-btn"
                       title={`Retry ${info.count.toLocaleString()} requests matching this error`}
                     >
@@ -569,7 +569,7 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                       Retry {info.count.toLocaleString()}
                     </button>
                   </div>
-                  <div className="text-[10px] text-zinc-500 leading-snug break-words">
+                  <div className="text-[12px] text-zinc-500 leading-snug break-words">
                     {info.symbols.slice(0, 25).join(', ')}
                     {info.symbols.length > 25 && (
                       <span className="text-zinc-600 italic"> … +{info.symbols.length - 25} more</span>
@@ -604,9 +604,9 @@ const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, prio
           <span className="text-xs font-medium text-cyan-400">
             {collectionMode?.collection_mode?.active ? 'Collecting' : 'Script Processing'}
           </span>
-          {priorityCollection && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[9px] text-amber-400 font-medium">PRIORITY</span>}
+          {priorityCollection && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[11px] text-amber-400 font-medium">PRIORITY</span>}
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-zinc-400">
+        <div className="flex items-center gap-3 text-[12px] text-zinc-400">
           {rate > 0 && <span>{Math.round(rate)}/hr</span>}
           {eta !== null && <span>ETA: ~{eta < 1 ? '<1' : eta}h</span>}
           <span className="text-cyan-400 font-mono">{pct}%</span>
@@ -615,7 +615,7 @@ const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, prio
       <div className="h-2 bg-black/50 rounded-full overflow-hidden">
         <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500 rounded-full" style={{ width: `${pct}%` }} />
       </div>
-      <div className="flex items-center justify-between mt-1.5 text-[10px] text-zinc-500">
+      <div className="flex items-center justify-between mt-1.5 text-[12px] text-zinc-500">
         <span>{completed.toLocaleString()} / {total.toLocaleString()} requests</span>
         <span>{pending.toLocaleString()} remaining</span>
       </div>
@@ -627,11 +627,11 @@ const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, prio
             const bsPct = bs.progress_pct || 0;
             return (
               <div key={i} className="flex items-center gap-2">
-                <span className="text-[10px] text-zinc-500 w-12 truncate">{bs.bar_size}</span>
+                <span className="text-[12px] text-zinc-500 w-12 truncate">{bs.bar_size}</span>
                 <div className="flex-1 h-1 bg-black/40 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all ${bsPct >= 90 ? 'bg-emerald-500' : bsPct >= 50 ? 'bg-cyan-500' : 'bg-amber-500'}`} style={{ width: `${bsPct}%` }} />
                 </div>
-                <span className={`text-[9px] font-mono ${bsPct >= 90 ? 'text-emerald-400' : 'text-zinc-500'}`}>{bsPct}%</span>
+                <span className={`text-[11px] font-mono ${bsPct >= 90 ? 'text-emerald-400' : 'text-zinc-500'}`}>{bsPct}%</span>
               </div>
             );
           })}
@@ -659,7 +659,7 @@ const TierSection = memo(({ tier, progressByBarSize }) => {
         <div className="flex items-center gap-2.5">
           <Icon className={`w-4 h-4 ${meta.iconClass}`} />
           <span className="text-sm font-semibold text-white">{meta.label}</span>
-          <span className="text-[10px] text-zinc-500">{meta.adv}</span>
+          <span className="text-[12px] text-zinc-500">{meta.adv}</span>
         </div>
         <div className="flex items-center gap-3 text-xs">
           <span className="text-zinc-400">{tier.total_symbols} symbols</span>
@@ -709,25 +709,25 @@ const TimeframeRow = memo(({ tf, barColorClass, progress }) => {
 
       {/* Bars */}
       <div className="w-16 text-right flex-shrink-0">
-        <span className="text-[10px] text-zinc-500 font-mono">{formatBars(tf.total_bars)}</span>
+        <span className="text-[12px] text-zinc-500 font-mono">{formatBars(tf.total_bars)}</span>
       </div>
 
       {/* Date range */}
       <div className="w-36 flex-shrink-0 text-right">
         {tf.earliest_date ? (
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[12px] text-zinc-500">
             <Calendar className="w-2.5 h-2.5 inline mr-0.5 opacity-50" />
             {formatDate(tf.earliest_date)} <span className="text-zinc-600 mx-0.5">&rarr;</span> {formatDate(tf.latest_date)}
           </span>
         ) : (
-          <span className="text-[10px] text-zinc-600">No data</span>
+          <span className="text-[12px] text-zinc-600">No data</span>
         )}
       </div>
 
       {/* Collection progress for this timeframe */}
       {progress && progress.pending > 0 && (
         <div className="w-16 flex-shrink-0 text-right">
-          <span className="text-[9px] text-cyan-400 font-mono">{progress.progress_pct || 0}%</span>
+          <span className="text-[11px] text-cyan-400 font-mono">{progress.progress_pct || 0}%</span>
         </div>
       )}
     </div>

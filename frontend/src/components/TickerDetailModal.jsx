@@ -341,19 +341,19 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         <p className="text-sm text-zinc-300 mb-3">{tradingSummary.summary}</p>
                         <div className="grid grid-cols-4 gap-3 text-center">
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 uppercase">Direction</span>
+                            <span className="text-[12px] text-zinc-500 uppercase">Direction</span>
                             <p className={`text-sm font-bold ${tradingSummary.suggested_direction === 'LONG' ? 'text-green-400' : tradingSummary.suggested_direction === 'SHORT' ? 'text-red-400' : 'text-yellow-400'}`}>{tradingSummary.suggested_direction || 'WAIT'}</p>
                           </div>
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 uppercase">Entry</span>
+                            <span className="text-[12px] text-zinc-500 uppercase">Entry</span>
                             <p className="text-sm font-mono text-white">${tradingSummary.entry?.toFixed(2) || '--'}</p>
                           </div>
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 uppercase">Stop</span>
+                            <span className="text-[12px] text-zinc-500 uppercase">Stop</span>
                             <p className="text-sm font-mono text-red-400">${tradingSummary.stop_loss?.toFixed(2) || '--'}</p>
                           </div>
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 uppercase">Target</span>
+                            <span className="text-[12px] text-zinc-500 uppercase">Target</span>
                             <p className="text-sm font-mono text-green-400">${tradingSummary.target?.toFixed(2) || '--'}</p>
                           </div>
                         </div>
@@ -372,7 +372,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         { label: 'Confidence', value: scores.confidence, color: 'green', termId: 'confidence-score' },
                       ].map((score, idx) => (
                         <div key={idx} className="bg-zinc-900 rounded-lg p-3 text-center">
-                          <span className="text-[10px] text-zinc-500 uppercase block"><HelpTooltip termId={score.termId}>{score.label}</HelpTooltip></span>
+                          <span className="text-[12px] text-zinc-500 uppercase block"><HelpTooltip termId={score.termId}>{score.label}</HelpTooltip></span>
                           <p className={`text-xl font-bold font-mono text-${score.color}-400`}>{score.value?.toFixed(0) || '--'}</p>
                         </div>
                       ))}
@@ -380,7 +380,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
 
                     {companyInfo.name && (
                       <div className="bg-zinc-900/50 rounded-lg p-3">
-                        <span className="text-[10px] text-zinc-500 uppercase">Company</span>
+                        <span className="text-[12px] text-zinc-500 uppercase">Company</span>
                         <p className="text-sm text-white font-medium">{companyInfo.name}</p>
                         <div className="flex gap-4 mt-1 text-xs text-zinc-400">
                           <span>{companyInfo.sector}</span>
@@ -393,12 +393,12 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                     {matchedStrategies.length > 0 && (
                       <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-[10px] text-cyan-400 uppercase font-semibold">Top Strategy Match</span>
+                          <span className="text-[12px] text-cyan-400 uppercase font-semibold">Top Strategy Match</span>
                           <span className="text-xs text-cyan-400">{matchedStrategies[0].match_score}% match</span>
                         </div>
                         <p className="text-sm font-bold text-white">{matchedStrategies[0].name}</p>
                         <p className="text-xs text-zinc-400 mt-1">{matchedStrategies[0].match_reasons?.join(' • ')}</p>
-                        {matchedStrategies[0].entry_rules && <p className="text-[10px] text-zinc-500 mt-2">Entry: {matchedStrategies[0].entry_rules}</p>}
+                        {matchedStrategies[0].entry_rules && <p className="text-[12px] text-zinc-500 mt-2">Entry: {matchedStrategies[0].entry_rules}</p>}
                       </div>
                     )}
 
@@ -423,24 +423,24 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         </div>
                         <div className="grid grid-cols-2 gap-2 mt-2">
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 block">Best Strategy</span>
+                            <span className="text-[12px] text-zinc-500 block">Best Strategy</span>
                             <p className="text-xs text-white font-medium">{matchedStrategies[0]?.name || 'No match found'}</p>
                           </div>
                           <div className="bg-black/30 rounded p-2">
-                            <span className="text-[10px] text-zinc-500 block">Timeframe</span>
+                            <span className="text-[12px] text-zinc-500 block">Timeframe</span>
                             <p className="text-xs text-white font-medium">{matchedStrategies[0]?.timeframe || 'Intraday'}</p>
                           </div>
                         </div>
                         {scores.overall < 50 && (
                           <div className="flex items-center gap-2 mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded">
                             <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                            <p className="text-[10px] text-red-300">Low score ({scores.overall}/100) - Higher risk setup. Consider smaller position size or skip.</p>
+                            <p className="text-[12px] text-red-300">Low score ({scores.overall}/100) - Higher risk setup. Consider smaller position size or skip.</p>
                           </div>
                         )}
                         {scores.overall >= 70 && tradingSummary.bias && (
                           <div className="flex items-center gap-2 mt-2 p-2 bg-green-500/10 border border-green-500/20 rounded">
                             <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
-                            <p className="text-[10px] text-green-300">High conviction setup! Score: {scores.overall}/100 with clear {tradingSummary.bias.toLowerCase()} bias.</p>
+                            <p className="text-[12px] text-green-300">High conviction setup! Score: {scores.overall}/100 with clear {tradingSummary.bias.toLowerCase()} bias.</p>
                           </div>
                         )}
                       </div>
@@ -467,7 +467,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                     )}
                     {!chartError && <div ref={chartContainerRef} className="w-full border border-zinc-800 rounded" style={{ height: '300px', minHeight: '300px', minWidth: '400px', background: '#0A0A0A' }} />}
                     {showTradingLines && tradingSummary.entry && (
-                      <div className="flex items-center justify-center gap-4 mt-2 text-[10px]">
+                      <div className="flex items-center justify-center gap-4 mt-2 text-[12px]">
                         <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-cyan-400 rounded"></span>Entry ${tradingSummary.entry?.toFixed(2)}</span>
                         <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-red-400 rounded"></span>Stop ${tradingSummary.stop_loss?.toFixed(2)}</span>
                         <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-400 rounded"></span>Target ${tradingSummary.target?.toFixed(2)}</span>
@@ -475,10 +475,10 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                     )}
                     {supportResistance.resistance_1 && (
                       <div className="grid grid-cols-4 gap-2 mt-3">
-                        <div className="bg-red-500/10 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">R1</span><p className="text-sm font-mono text-red-400">${supportResistance.resistance_1?.toFixed(2)}</p></div>
-                        <div className="bg-red-500/5 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">R2</span><p className="text-sm font-mono text-red-300">${supportResistance.resistance_2?.toFixed(2)}</p></div>
-                        <div className="bg-green-500/5 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">S1</span><p className="text-sm font-mono text-green-300">${supportResistance.support_1?.toFixed(2)}</p></div>
-                        <div className="bg-green-500/10 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">S2</span><p className="text-sm font-mono text-green-400">${supportResistance.support_2?.toFixed(2)}</p></div>
+                        <div className="bg-red-500/10 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">R1</span><p className="text-sm font-mono text-red-400">${supportResistance.resistance_1?.toFixed(2)}</p></div>
+                        <div className="bg-red-500/5 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">R2</span><p className="text-sm font-mono text-red-300">${supportResistance.resistance_2?.toFixed(2)}</p></div>
+                        <div className="bg-green-500/5 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">S1</span><p className="text-sm font-mono text-green-300">${supportResistance.support_1?.toFixed(2)}</p></div>
+                        <div className="bg-green-500/10 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">S2</span><p className="text-sm font-mono text-green-400">${supportResistance.support_2?.toFixed(2)}</p></div>
                       </div>
                     )}
                   </div>
@@ -498,7 +498,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                       { label: 'ATR (14)', value: '$' + technicals.atr_14?.toFixed(2), color: 'orange' },
                     ].map((item, idx) => (
                       <div key={idx} className="bg-zinc-900 rounded-lg p-3">
-                        <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                        <span className="text-[12px] text-zinc-500 uppercase block">{item.label}</span>
                         <p className={`text-lg font-mono text-${item.color}-400`}>{item.value || '--'}</p>
                       </div>
                     ))}
@@ -519,7 +519,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                       { label: 'Avg Volume', value: fundamentals.avg_volume ? formatVolume(fundamentals.avg_volume) : '--' },
                     ].map((item, idx) => (
                       <div key={idx} className="bg-zinc-900 rounded-lg p-3">
-                        <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                        <span className="text-[12px] text-zinc-500 uppercase block">{item.label}</span>
                         <p className="text-lg font-mono text-white">{item.value}</p>
                       </div>
                     ))}
@@ -560,17 +560,17 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                             <div className="bg-zinc-900 rounded-lg p-3">
                               <p className="text-xs text-zinc-500 uppercase mb-2">EPS Performance</p>
                               <div className="flex items-center justify-between">
-                                <div className="text-center"><p className="text-lg font-bold text-green-400">{earningsData.trends.eps_beats}</p><p className="text-[10px] text-zinc-500">Beats</p></div>
-                                <div className="text-center"><p className="text-lg font-bold text-red-400">{earningsData.trends.eps_misses}</p><p className="text-[10px] text-zinc-500">Misses</p></div>
-                                <div className="text-center"><p className="text-lg font-bold text-cyan-400">{earningsData.trends.eps_beat_rate?.toFixed(0)}%</p><p className="text-[10px] text-zinc-500">Beat Rate</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-green-400">{earningsData.trends.eps_beats}</p><p className="text-[12px] text-zinc-500">Beats</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-red-400">{earningsData.trends.eps_misses}</p><p className="text-[12px] text-zinc-500">Misses</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-cyan-400">{earningsData.trends.eps_beat_rate?.toFixed(0)}%</p><p className="text-[12px] text-zinc-500">Beat Rate</p></div>
                               </div>
                             </div>
                             <div className="bg-zinc-900 rounded-lg p-3">
                               <p className="text-xs text-zinc-500 uppercase mb-2">Revenue Performance</p>
                               <div className="flex items-center justify-between">
-                                <div className="text-center"><p className="text-lg font-bold text-green-400">{earningsData.trends.rev_beats}</p><p className="text-[10px] text-zinc-500">Beats</p></div>
-                                <div className="text-center"><p className="text-lg font-bold text-red-400">{earningsData.trends.rev_misses}</p><p className="text-[10px] text-zinc-500">Misses</p></div>
-                                <div className="text-center"><p className="text-lg font-bold text-cyan-400">{earningsData.trends.rev_beat_rate?.toFixed(0)}%</p><p className="text-[10px] text-zinc-500">Beat Rate</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-green-400">{earningsData.trends.rev_beats}</p><p className="text-[12px] text-zinc-500">Beats</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-red-400">{earningsData.trends.rev_misses}</p><p className="text-[12px] text-zinc-500">Misses</p></div>
+                                <div className="text-center"><p className="text-lg font-bold text-cyan-400">{earningsData.trends.rev_beat_rate?.toFixed(0)}%</p><p className="text-[12px] text-zinc-500">Beat Rate</p></div>
                               </div>
                             </div>
                           </div>
@@ -588,7 +588,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                                       <td className="py-2 text-right text-zinc-400">${q.eps_estimate?.toFixed(2)}</td>
                                       <td className="py-2 text-right text-white font-mono">${q.eps_actual?.toFixed(2)}</td>
                                       <td className={`py-2 text-right font-mono ${q.eps_surprise_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{q.eps_surprise_pct >= 0 ? '+' : ''}{q.eps_surprise_pct?.toFixed(1)}%</td>
-                                      <td className="py-2 text-right"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${q.eps_result === 'BEAT' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{q.eps_result}</span></td>
+                                      <td className="py-2 text-right"><span className={`px-1.5 py-0.5 rounded text-[12px] font-bold ${q.eps_result === 'BEAT' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{q.eps_result}</span></td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -598,9 +598,9 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         )}
                         {earningsData.metrics && (
                           <div className="grid grid-cols-3 gap-2">
-                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">EPS Growth (YoY)</span><p className={`text-sm font-mono ${earningsData.metrics.eps_growth_quarterly_yoy >= 0 ? 'text-green-400' : 'text-red-400'}`}>{earningsData.metrics.eps_growth_quarterly_yoy?.toFixed(1)}%</p></div>
-                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">Revenue Growth (YoY)</span><p className={`text-sm font-mono ${earningsData.metrics.revenue_growth_quarterly_yoy >= 0 ? 'text-green-400' : 'text-red-400'}`}>{earningsData.metrics.revenue_growth_quarterly_yoy?.toFixed(1)}%</p></div>
-                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[10px] text-zinc-500">Growth Trend</span><p className={`text-sm font-bold ${earningsData.growth_trend === 'accelerating' ? 'text-green-400' : earningsData.growth_trend === 'slowing' ? 'text-yellow-400' : 'text-red-400'}`}>{earningsData.growth_trend?.toUpperCase()}</p></div>
+                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">EPS Growth (YoY)</span><p className={`text-sm font-mono ${earningsData.metrics.eps_growth_quarterly_yoy >= 0 ? 'text-green-400' : 'text-red-400'}`}>{earningsData.metrics.eps_growth_quarterly_yoy?.toFixed(1)}%</p></div>
+                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">Revenue Growth (YoY)</span><p className={`text-sm font-mono ${earningsData.metrics.revenue_growth_quarterly_yoy >= 0 ? 'text-green-400' : 'text-red-400'}`}>{earningsData.metrics.revenue_growth_quarterly_yoy?.toFixed(1)}%</p></div>
+                            <div className="bg-zinc-900 rounded p-2 text-center"><span className="text-[12px] text-zinc-500">Growth Trend</span><p className={`text-sm font-bold ${earningsData.growth_trend === 'accelerating' ? 'text-green-400' : earningsData.growth_trend === 'slowing' ? 'text-yellow-400' : 'text-red-400'}`}>{earningsData.growth_trend?.toUpperCase()}</p></div>
                           </div>
                         )}
                       </>
@@ -618,7 +618,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                           <span className={`text-xs ${idx === 0 ? 'text-cyan-400' : 'text-zinc-400'}`}>{strategy.match_score}% match</span>
                         </div>
                         <p className="text-xs text-zinc-400 mt-1">{strategy.match_reasons?.join(' • ')}</p>
-                        {strategy.entry_rules && <p className="text-[10px] text-zinc-500 mt-2">Entry: {strategy.entry_rules}</p>}
+                        {strategy.entry_rules && <p className="text-[12px] text-zinc-500 mt-2">Entry: {strategy.entry_rules}</p>}
                       </div>
                     )) : <p className="text-center text-zinc-500 py-10">No matching strategies found</p>}
                   </div>

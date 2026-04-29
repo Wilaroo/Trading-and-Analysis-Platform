@@ -68,7 +68,7 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
             <p className="text-xs font-bold uppercase tracking-wide text-red-300">
               Execution Health — CRITICAL
             </p>
-            <p className="text-[10px] text-red-200/80">
+            <p className="text-[12px] text-red-200/80">
               {report.n_failed} of {report.n_closed_trades} stops failed in last 24h
               ({ratePct}% — threshold 15%)
             </p>
@@ -78,13 +78,13 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
         <div className="flex-1 flex items-center gap-3 overflow-x-auto">
           {topSetups.length > 0 && (
             <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-black/30 border border-red-500/20">
-              <span className="text-[9px] text-red-300/70 uppercase font-bold">
+              <span className="text-[11px] text-red-300/70 uppercase font-bold">
                 Top failing
               </span>
               {topSetups.map(([setup, count]) => (
                 <span
                   key={setup}
-                  className="text-[10px] font-mono text-red-200 whitespace-nowrap"
+                  className="text-[12px] font-mono text-red-200 whitespace-nowrap"
                 >
                   {setup}
                   <span className="text-red-400/70">×{count}</span>
@@ -95,7 +95,7 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
 
           {report.total_R_bled > 0 && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-black/30 border border-red-500/20">
-              <span className="text-[9px] text-red-300/70 uppercase font-bold">
+              <span className="text-[11px] text-red-300/70 uppercase font-bold">
                 Excess R bled
               </span>
               <span className="text-xs font-mono font-bold text-red-300">
@@ -110,7 +110,7 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
             <button
               onClick={onClickDetails}
               data-testid="bot-health-banner-details"
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-[10px] font-bold transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-[12px] font-bold transition-colors"
             >
               Details
               <ExternalLink className="w-3 h-3" />

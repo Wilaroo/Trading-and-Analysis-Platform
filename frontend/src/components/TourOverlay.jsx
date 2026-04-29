@@ -177,7 +177,7 @@ export const TourOverlay = () => {
           >
             <div className="flex items-start gap-2 mb-2">
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] text-cyan-400 font-mono uppercase tracking-wide mb-0.5">
+                <div className="text-[12px] text-cyan-400 font-mono uppercase tracking-wide mb-0.5">
                   {activeTour.name} · {stepIdx + 1}/{activeTour.steps.length}
                 </div>
                 <div className="text-sm font-semibold text-zinc-100">{step.title}</div>
@@ -198,7 +198,7 @@ export const TourOverlay = () => {
                 type="button"
                 onClick={() => openGlossary(step.helpId)}
                 data-testid="tour-learn-more"
-                className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 mb-3"
+                className="text-[13px] text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 mb-3"
               >
                 <BookOpen className="w-3 h-3" /> Learn more
               </button>
@@ -209,7 +209,7 @@ export const TourOverlay = () => {
                 onClick={prev}
                 disabled={stepIdx === 0}
                 data-testid="tour-prev"
-                className="text-[11px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 inline-flex items-center gap-1"
+                className="text-[13px] px-2 py-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 inline-flex items-center gap-1"
               >
                 <ChevronLeft className="w-3 h-3" /> Back
               </button>
@@ -217,7 +217,7 @@ export const TourOverlay = () => {
                 type="button"
                 onClick={next}
                 data-testid="tour-next"
-                className="text-[11px] px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 inline-flex items-center gap-1"
+                className="text-[13px] px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 inline-flex items-center gap-1"
               >
                 {stepIdx + 1 >= activeTour.steps.length ? 'Finish' : 'Next'}
                 <ChevronRight className="w-3 h-3" />

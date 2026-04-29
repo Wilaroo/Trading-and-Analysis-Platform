@@ -51,12 +51,12 @@ export const AutonomyReadinessCard = () => {
              data-help-id="autonomy-readiness"
              data-verdict={verdict}
              className="space-y-2">
-      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
+      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
         Autonomous trading readiness
         {loading && (
           <span data-testid="autonomy-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[9px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
           go/no-go before flipping auto-execute
         </span>
       </div>
@@ -71,7 +71,7 @@ export const AutonomyReadinessCard = () => {
             {VERDICT_LABEL[verdict] || '—'}
           </span>
         </div>
-        <div className="flex-1 min-w-0 v5-mono text-[11px] leading-tight pt-0.5 break-words">
+        <div className="flex-1 min-w-0 v5-mono text-[13px] leading-tight pt-0.5 break-words">
           {error && !data ? (
             <span className="text-rose-400" data-testid="autonomy-error">
               /api/autonomy/readiness unreachable — {error}
@@ -107,13 +107,13 @@ export const AutonomyReadinessCard = () => {
                             ${isOpen ? 'sm:col-span-2 ring-1 ring-cyan-500/30' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[tone] || 'bg-zinc-500'}`} />
-                  <span className="v5-mono text-[10px] font-bold flex-1 truncate">
+                  <span className="v5-mono text-[12px] font-bold flex-1 truncate">
                     {CHECK_LABELS[k] || k}
                   </span>
-                  <span className={`v5-mono text-[9px] tabular-nums opacity-70`}>
+                  <span className={`v5-mono text-[11px] tabular-nums opacity-70`}>
                     {STATUS_LABEL[tone] || '—'}
                   </span>
-                  <span className="v5-mono text-[10px] opacity-60 ml-1" aria-hidden>
+                  <span className="v5-mono text-[12px] opacity-60 ml-1" aria-hidden>
                     {isOpen ? '▾' : '▸'}
                   </span>
                 </div>
@@ -122,7 +122,7 @@ export const AutonomyReadinessCard = () => {
                 </div>
                 {isOpen && (
                   <div data-testid={`autonomy-check-${k}-drawer`}
-                       className="mt-2 pt-2 border-t border-current/20 v5-mono text-[10px] space-y-0.5"
+                       className="mt-2 pt-2 border-t border-current/20 v5-mono text-[12px] space-y-0.5"
                        onClick={(e) => e.stopPropagation()}>
                     {Object.entries(c).filter(([key]) =>
                       !['status', 'detail'].includes(key)
@@ -148,7 +148,7 @@ export const AutonomyReadinessCard = () => {
       {data && (
         <div data-testid="autonomy-auto-execute-banner"
              data-enabled={data.auto_execute_enabled}
-             className={`px-2 py-1.5 rounded border v5-mono text-[10px] flex items-center gap-2 ${
+             className={`px-2 py-1.5 rounded border v5-mono text-[12px] flex items-center gap-2 ${
                data.auto_execute_enabled
                  ? 'bg-cyan-900/40 text-cyan-200 border-cyan-700'
                  : 'bg-zinc-900/60 text-zinc-400 border-zinc-800'
@@ -165,13 +165,13 @@ export const AutonomyReadinessCard = () => {
       {/* Next steps (if any) */}
       {data?.next_steps?.length > 0 && (
         <div data-testid="autonomy-next-steps" className="space-y-0.5">
-          <div className="v5-mono text-[9px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
             Next steps
           </div>
           {data.next_steps.slice(0, 5).map((s, i) => (
             <div key={i}
                  data-testid={`autonomy-next-step-${i}`}
-                 className="v5-mono text-[10px] text-zinc-300 leading-snug">
+                 className="v5-mono text-[12px] text-zinc-300 leading-snug">
               <span className="text-zinc-500 mr-1">→</span>{s}
             </div>
           ))}

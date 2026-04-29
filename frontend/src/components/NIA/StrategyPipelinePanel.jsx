@@ -62,7 +62,7 @@ const StrategyPipelinePanel = memo(({ phases, candidates, loading, onPromote, on
           <div className="flex items-center gap-2">
             {/* Phase summary pills */}
             {phaseCounts.map(pc => pc.count > 0 && (
-              <span key={pc.phase} className={`text-[10px] px-1.5 py-0.5 rounded ${phaseColors[pc.phase]}`}>
+              <span key={pc.phase} className={`text-[12px] px-1.5 py-0.5 rounded ${phaseColors[pc.phase]}`}>
                 {pc.count} {pc.phase}
               </span>
             ))}
@@ -114,7 +114,7 @@ const StrategyPipelinePanel = memo(({ phases, candidates, loading, onPromote, on
                               <Icon className={`w-5 h-5 ${count > 0 ? phaseColors[phase]?.split(' ')[0] : 'text-zinc-600'}`} />
                             </div>
                             <span className="text-white font-bold text-sm">{count}</span>
-                            <span className="text-[10px] text-zinc-500 capitalize">{phase}</span>
+                            <span className="text-[12px] text-zinc-500 capitalize">{phase}</span>
                           </div>
                           {idx < phaseOrder.length - 1 && (
                             <div className="flex-1 flex items-center justify-center">
@@ -137,7 +137,7 @@ const StrategyPipelinePanel = memo(({ phases, candidates, loading, onPromote, on
                             <Icon className={`w-3 h-3 ${phaseColors[phase]?.split(' ')[0] || 'text-zinc-400'}`} />
                             <span className="text-xs text-zinc-300">{name}</span>
                           </div>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${phaseColors[phase]}`}>{phase}</span>
+                          <span className={`text-[12px] px-1.5 py-0.5 rounded ${phaseColors[phase]}`}>{phase}</span>
                         </div>
                       );
                     })}
@@ -212,7 +212,7 @@ const StrategyPipelinePanel = memo(({ phases, candidates, loading, onPromote, on
                               <div className="flex items-center justify-between mb-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm text-zinc-300">{candidate.strategy_name}</span>
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${phaseColors[candidate.current_phase]}`}>{candidate.current_phase}</span>
+                                  <span className={`text-[12px] px-1.5 py-0.5 rounded ${phaseColors[candidate.current_phase]}`}>{candidate.current_phase}</span>
                                 </div>
                                 <span className="text-xs text-zinc-500">&rarr; {candidate.target_phase}</span>
                               </div>
@@ -291,9 +291,9 @@ const StrategyPipelinePanel = memo(({ phases, candidates, loading, onPromote, on
                 </ul>
               </div>
               <div className="grid grid-cols-3 gap-2 mb-4">
-                <div className="p-2 rounded bg-white/[0.03] text-center"><div className="text-lg font-bold text-white">{selectedCandidate.performance?.total_trades || 0}</div><div className="text-[10px] text-zinc-500">Paper Trades</div></div>
-                <div className="p-2 rounded bg-white/[0.03] text-center"><div className={`text-lg font-bold ${(selectedCandidate.performance?.win_rate || 0) >= 0.52 ? 'text-green-400' : 'text-yellow-400'}`}>{((selectedCandidate.performance?.win_rate || 0) * 100).toFixed(0)}%</div><div className="text-[10px] text-zinc-500">Win Rate</div></div>
-                <div className="p-2 rounded bg-white/[0.03] text-center"><div className={`text-lg font-bold ${(selectedCandidate.performance?.avg_r_multiple || 0) >= 0.4 ? 'text-green-400' : 'text-yellow-400'}`}>{(selectedCandidate.performance?.avg_r_multiple || 0).toFixed(2)}R</div><div className="text-[10px] text-zinc-500">Avg R</div></div>
+                <div className="p-2 rounded bg-white/[0.03] text-center"><div className="text-lg font-bold text-white">{selectedCandidate.performance?.total_trades || 0}</div><div className="text-[12px] text-zinc-500">Paper Trades</div></div>
+                <div className="p-2 rounded bg-white/[0.03] text-center"><div className={`text-lg font-bold ${(selectedCandidate.performance?.win_rate || 0) >= 0.52 ? 'text-green-400' : 'text-yellow-400'}`}>{((selectedCandidate.performance?.win_rate || 0) * 100).toFixed(0)}%</div><div className="text-[12px] text-zinc-500">Win Rate</div></div>
+                <div className="p-2 rounded bg-white/[0.03] text-center"><div className={`text-lg font-bold ${(selectedCandidate.performance?.avg_r_multiple || 0) >= 0.4 ? 'text-green-400' : 'text-yellow-400'}`}>{(selectedCandidate.performance?.avg_r_multiple || 0).toFixed(2)}R</div><div className="text-[12px] text-zinc-500">Avg R</div></div>
               </div>
               <div className="flex gap-3">
                 <button onClick={() => setShowConfirmModal(false)} className="flex-1 px-4 py-2 rounded-lg border border-white/10 text-zinc-400 hover:bg-white/5 transition-colors text-sm">Cancel</button>

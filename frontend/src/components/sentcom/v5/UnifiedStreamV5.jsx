@@ -141,7 +141,7 @@ const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
 
   return (
     <div className={`v5-stream-item sev-${sev}`} data-testid={`v5-stream-item-${sev}`}>
-      <div className="flex items-center justify-between gap-2 text-[10px] v5-mono">
+      <div className="flex items-center justify-between gap-2 text-[12px] v5-mono">
         <span className="min-w-0 truncate">
           {time && <span className={TIME_COLOR_BY_SEV[sev]}>{time}</span>}
           {' '}
@@ -210,14 +210,14 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
 
   if (loading && (!messages || messages.length === 0)) {
     return (
-      <div className="px-3 py-6 text-center text-[11px] text-zinc-500">Loading stream…</div>
+      <div className="px-3 py-6 text-center text-[13px] text-zinc-500">Loading stream…</div>
     );
   }
   if (!messages || messages.length === 0) {
     return (
       <div className="flex flex-col">
         <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
-        <div className="px-3 py-6 text-center text-[11px] text-zinc-500">
+        <div className="px-3 py-6 text-center text-[13px] text-zinc-500">
           <div className="v5-mono">No stream events yet.</div>
           <div className="mt-1 v5-why-dim">Scanner · gate decisions · fills · closes will flow here in real time.</div>
         </div>
@@ -231,7 +231,7 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
         <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} shadowBySymbol={shadowBySymbol} />
       ))}
       {filtered.length === 0 && filters.size > 0 && (
-        <div className="px-3 py-4 text-center text-[11px] text-zinc-500 v5-why-dim">
+        <div className="px-3 py-4 text-center text-[13px] text-zinc-500 v5-why-dim">
           No events match the selected filter{filters.size > 1 ? 's' : ''}.
         </div>
       )}
@@ -242,7 +242,7 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
 
 const StreamFilterBar = ({ filters, toggle, options }) => (
   <div className="flex items-center gap-1 px-3 py-1.5 border-b border-zinc-900 bg-zinc-950/80 sticky top-0 z-10">
-    <span className="v5-mono text-[9px] v5-dim uppercase tracking-widest mr-1">filter:</span>
+    <span className="v5-mono text-[11px] v5-dim uppercase tracking-widest mr-1">filter:</span>
     {options.map(o => (
       <button
         key={o.key}

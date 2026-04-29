@@ -909,7 +909,7 @@ export const Tip = ({
           >
             <div className="flex items-center gap-2 mb-1">
               <span className="font-semibold text-cyan-400 text-sm">{definition.term}</span>
-              <span className="text-[9px] text-zinc-500 uppercase tracking-wider px-1.5 py-0.5 bg-zinc-800 rounded">
+              <span className="text-[11px] text-zinc-500 uppercase tracking-wider px-1.5 py-0.5 bg-zinc-800 rounded">
                 {definition.category}
               </span>
             </div>

@@ -69,7 +69,7 @@ const ScoreRing = ({ score, size = 56, label }) => {
       <div className="absolute inset-0 flex items-center justify-center">
         <span className={`font-bold text-lg ${colors.text}`}>{score || 0}</span>
       </div>
-      {label && <span className="text-[10px] text-zinc-500 mt-1">{label}</span>}
+      {label && <span className="text-[12px] text-zinc-500 mt-1">{label}</span>}
     </div>
   );
 };
@@ -131,14 +131,14 @@ const ScoreBar = ({ label, value, tip, category }) => {
   
   const content = (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-zinc-500 w-16 flex-shrink-0">{label}</span>
+      <span className="text-[12px] text-zinc-500 w-16 flex-shrink-0">{label}</span>
       <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
         <div 
           className={`h-full rounded-full transition-all duration-500 ${getColor(value)}`}
           style={{ width: `${value || 0}%` }}
         />
       </div>
-      <span className={`text-[10px] w-24 text-right ${getTextColor(value)}`}>
+      <span className={`text-[12px] w-24 text-right ${getTextColor(value)}`}>
         {category ? getScoreLabel(category, value) : (value?.toFixed(0) || '--')}
       </span>
     </div>
@@ -313,7 +313,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           {/* Score Ring + Overall Label */}
           <div className="flex flex-col items-center">
             <ScoreRing score={regime?.composite_score} size={56} />
-            <span className="text-[9px] text-zinc-500 mt-1">
+            <span className="text-[11px] text-zinc-500 mt-1">
               {regime?.composite_score >= 70 ? 'Favorable' :
                regime?.composite_score >= 40 ? 'Mixed' : 'Unfavorable'}
             </span>
@@ -357,7 +357,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           
           <CustomTip label="Risk Level" description="Higher = more caution needed. Used to adjust position sizes.">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-zinc-500">Risk:</span>
+              <span className="text-[12px] text-zinc-500">Risk:</span>
               <span className={`text-xs font-mono font-medium ${
                 (regime?.risk_level || 0) <= 30 ? 'text-emerald-400' :
                 (regime?.risk_level || 0) <= 60 ? 'text-yellow-400' : 'text-red-400'
@@ -373,7 +373,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       <button
         onClick={() => { setExpanded(!expanded); if (!expanded && !aiRegime) fetchAiRegime(); }}
         className="w-full flex items-center justify-center gap-1 py-2 border-t border-white/5 
-                   text-[10px] text-zinc-500 hover:text-zinc-400 hover:bg-white/5 transition-colors"
+                   text-[12px] text-zinc-500 hover:text-zinc-400 hover:bg-white/5 transition-colors"
         data-testid="regime-expand-btn"
       >
         {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
@@ -385,7 +385,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
         <div className="px-3 pb-3 space-y-3 border-t border-white/5">
           {/* Major Indices - SPY, QQQ, IWM */}
           <div className="mt-3">
-            <span className="text-[10px] text-zinc-500 block mb-2">MAJOR INDICES</span>
+            <span className="text-[12px] text-zinc-500 block mb-2">MAJOR INDICES</span>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { symbol: 'SPY', name: 'S&P 500', change: regime?.signal_blocks?.breadth?.signals?.spy_change || 0 },
@@ -410,14 +410,14 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
                       {idx.change > 0 ? '+' : ''}{idx.change?.toFixed(2) || '0.00'}%
                     </span>
                   </div>
-                  <span className="text-[9px] text-zinc-500">{idx.name}</span>
+                  <span className="text-[11px] text-zinc-500">{idx.name}</span>
                 </div>
               ))}
             </div>
             
             {/* Index Alignment Status */}
             <div className="mt-2 flex items-center justify-between p-2 bg-black/30 rounded-lg">
-              <span className="text-[10px] text-zinc-500">Index Alignment</span>
+              <span className="text-[12px] text-zinc-500">Index Alignment</span>
               <span className={`text-xs font-medium ${
                 regime?.signal_blocks?.breadth?.signals?.indices_aligned === 'BULLISH' ? 'text-emerald-400' :
                 regime?.signal_blocks?.breadth?.signals?.indices_aligned === 'BEARISH' ? 'text-rose-400' :
@@ -431,7 +431,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           {/* AI Regime Classification */}
           {aiRegime && (
             <div className="space-y-2" data-testid="ai-regime-section">
-              <span className="text-[10px] text-zinc-500 block">AI REGIME CLASSIFICATION</span>
+              <span className="text-[12px] text-zinc-500 block">AI REGIME CLASSIFICATION</span>
               <div className={`p-2 rounded-lg border ${
                 aiRegime.regime === 'bull_trend' ? 'bg-emerald-500/5 border-emerald-500/20' :
                 aiRegime.regime === 'bear_trend' ? 'bg-red-500/5 border-red-500/20' :
@@ -460,7 +460,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
                     { label: 'Growth/Val', val: aiRegime.cross.rotation_qqq_iwm, desc: 'QQQ vs IWM' },
                   ].map(({ label, val, desc }) => (
                     <div key={label} className="p-1.5 bg-black/30 rounded-lg text-center">
-                      <span className="text-[9px] text-zinc-500 block">{label}</span>
+                      <span className="text-[11px] text-zinc-500 block">{label}</span>
                       <span className={`text-xs font-mono font-medium ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {val > 0 ? '+' : ''}{(val * 100).toFixed(1)}%
                       </span>
@@ -482,20 +482,20 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           {/* Trading Implications */}
           <div className="grid grid-cols-2 gap-2">
             <div className="p-2 bg-black/30 rounded-lg">
-              <span className="text-[10px] text-zinc-500 block">Position Size</span>
+              <span className="text-[12px] text-zinc-500 block">Position Size</span>
               <span className="text-xs text-zinc-300">
                 {regime?.state === 'CONFIRMED_UP' ? 'Normal-Aggressive' :
                  regime?.state === 'CONFIRMED_DOWN' ? 'Minimal (25-50%)' : 'Reduced (50-75%)'}
               </span>
             </div>
             <div className="p-2 bg-black/30 rounded-lg">
-              <span className="text-[10px] text-zinc-500 block">Confidence</span>
+              <span className="text-[12px] text-zinc-500 block">Confidence</span>
               <span className="text-xs text-zinc-300">{regime?.confidence || 0}%</span>
             </div>
           </div>
           
           {/* Favored/Avoid */}
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
+          <div className="grid grid-cols-2 gap-2 text-[12px]">
             <div className="p-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
               <span className="text-emerald-400 font-medium block mb-1">Favored</span>
               <span className="text-zinc-400">

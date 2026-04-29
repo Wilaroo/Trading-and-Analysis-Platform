@@ -249,7 +249,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
             <p className="text-xs text-zinc-500">Trade Styles</p>
             <div className="flex gap-1 mt-1">
               {Object.entries(summary.by_trade_style || {}).slice(0, 3).map(([style, data]) => (
-                <span key={style} className={`text-[9px] px-1.5 py-0.5 rounded ${getTradeStyleColor(style)}`}>
+                <span key={style} className={`text-[11px] px-1.5 py-0.5 rounded ${getTradeStyleColor(style)}`}>
                   {style}: {data.count}
                 </span>
               ))}
@@ -272,7 +272,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                 <Timer className="w-3 h-3" />
                 Auto-Generation {eodStatus.scheduler_running ? 'Active' : 'Inactive'}
               </p>
-              <p className="text-[10px] text-zinc-400">
+              <p className="text-[12px] text-zinc-400">
                 {eodStatus.scheduler_running 
                   ? `Next analysis: ${eodStatus.next_runs?.auto_playbook_analysis ? new Date(eodStatus.next_runs.auto_playbook_analysis).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:45 PM ET weekdays'}`
                   : 'Scheduler not running'
@@ -295,7 +295,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
               <Zap className="w-4 h-4" />
               Pending Review ({pendingPlaybooks.length})
             </h3>
-            <span className="text-[10px] text-zinc-400">AI-generated from your winning trades</span>
+            <span className="text-[12px] text-zinc-400">AI-generated from your winning trades</span>
           </div>
           <div className="space-y-2">
             {pendingPlaybooks.map((pb) => (
@@ -303,10 +303,10 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-white">{pb.name}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getTradeStyleColor(pb.trade_style)}`}>
+                    <span className={`text-[12px] px-1.5 py-0.5 rounded border ${getTradeStyleColor(pb.trade_style)}`}>
                       {pb.trade_style}
                     </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/20 text-zinc-400 border border-zinc-500/30">
+                    <span className="text-[12px] px-1.5 py-0.5 rounded bg-zinc-500/20 text-zinc-400 border border-zinc-500/30">
                       {pb.setup_type}
                     </span>
                   </div>
@@ -365,7 +365,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                 <div className="flex items-center gap-2">
                   <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${expandedPlaybook === pb.id ? 'rotate-90' : ''}`} />
                   <span className="font-medium text-white">{pb.name}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getTradeStyleColor(pb.trade_style)}`}>
+                  <span className={`text-[12px] px-1.5 py-0.5 rounded border ${getTradeStyleColor(pb.trade_style)}`}>
                     {pb.trade_style}
                   </span>
                 </div>
@@ -393,26 +393,26 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                       {/* Left Column */}
                       <div className="space-y-3">
                         <div>
-                          <p className="text-[10px] text-zinc-500 uppercase mb-1">Setup Type</p>
+                          <p className="text-[12px] text-zinc-500 uppercase mb-1">Setup Type</p>
                           <p className="text-sm text-white">{pb.setup_type}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-zinc-500 uppercase mb-1">Market Context</p>
+                          <p className="text-[12px] text-zinc-500 uppercase mb-1">Market Context</p>
                           <p className="text-sm text-white">{pb.market_context || 'Any'}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-zinc-500 uppercase mb-1">Catalyst</p>
+                          <p className="text-[12px] text-zinc-500 uppercase mb-1">Catalyst</p>
                           <p className="text-sm text-white">{pb.catalyst_type}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-zinc-500 uppercase mb-1">Risk/Reward Target</p>
+                          <p className="text-[12px] text-zinc-500 uppercase mb-1">Risk/Reward Target</p>
                           <p className="text-sm text-white">{pb.risk_reward_target}R</p>
                         </div>
                       </div>
 
                       {/* Right Column - IF/THEN Statements */}
                       <div>
-                        <p className="text-[10px] text-zinc-500 uppercase mb-2">IF/THEN Rules</p>
+                        <p className="text-[12px] text-zinc-500 uppercase mb-2">IF/THEN Rules</p>
                         <div className="space-y-2">
                           {pb.if_then_statements?.map((stmt, idx) => (
                             stmt.condition && (
@@ -430,7 +430,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                     {/* Description */}
                     {pb.description && (
                       <div className="mt-3">
-                        <p className="text-[10px] text-zinc-500 uppercase mb-1">Description</p>
+                        <p className="text-[12px] text-zinc-500 uppercase mb-1">Description</p>
                         <p className="text-xs text-zinc-300">{pb.description}</p>
                       </div>
                     )}

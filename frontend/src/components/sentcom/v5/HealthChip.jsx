@@ -55,7 +55,7 @@ export const HealthChip = ({ onOpenInspector }) => {
       data-help-id="health-chip"
       onClick={() => onOpenInspector?.()}
       title={error || `${status.toUpperCase()} — click for details`}
-      className={`flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-900 transition-colors v5-mono text-[10px] ${colors.text}`}
+      className={`flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-900 transition-colors v5-mono text-[12px] ${colors.text}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${colors.bg} ${status === 'green' ? '' : 'animate-pulse'}`} />
       <span className="uppercase tracking-wide">{label}</span>

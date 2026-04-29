@@ -27,16 +27,16 @@ const Stage = ({ stage, label, count, sub, accent }) => {
       className={`flex-1 min-w-0 px-3 py-2 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className={`text-[10px] uppercase tracking-[0.18em] font-bold ${c.text}`}>{label}</span>
+        <span className={`text-[12px] uppercase tracking-[0.18em] font-bold ${c.text}`}>{label}</span>
         <div className="flex items-baseline gap-1.5">
           {accent && (
-            <span className={`v5-mono text-[10px] font-bold ${accent.color}`}>{accent.text}</span>
+            <span className={`v5-mono text-[12px] font-bold ${accent.color}`}>{accent.text}</span>
           )}
           <span className="v5-mono text-2xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
         </div>
       </div>
       {sub && (
-        <div className="text-[10px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
+        <div className="text-[12px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
       )}
     </div>
   );
@@ -44,7 +44,7 @@ const Stage = ({ stage, label, count, sub, accent }) => {
 
 const Metric = ({ label, value, color = 'text-zinc-100' }) => (
   <div className="text-right">
-    <div className="text-[9px] uppercase tracking-widest text-zinc-500">{label}</div>
+    <div className="text-[11px] uppercase tracking-widest text-zinc-500">{label}</div>
     <div className={`font-mono text-sm font-bold ${color}`}>{value}</div>
   </div>
 );
@@ -93,7 +93,7 @@ export const PipelineHUDV5 = ({
       className="border-b border-zinc-800 bg-zinc-950 px-3 py-2"
     >
       <div className="flex items-center gap-2">
-        <div className="text-[10px] font-mono text-zinc-500 pr-2 border-r border-zinc-800 font-semibold tracking-widest">
+        <div className="text-[12px] font-mono text-zinc-500 pr-2 border-r border-zinc-800 font-semibold tracking-widest">
           SENTCOM
         </div>
 

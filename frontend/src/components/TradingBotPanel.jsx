@@ -125,19 +125,19 @@ const Reasons2SellMonitor = ({ trade }) => {
           {reasons.severity === 'exit' ? 'EXIT SIGNAL' : 
            reasons.severity === 'warning' ? 'WARNING' : 'STATUS'}
         </span>
-        <span className="text-[10px] text-zinc-500">
+        <span className="text-[12px] text-zinc-500">
           {reasons.recommended_action?.toUpperCase()}
         </span>
       </div>
       <div className="flex flex-wrap gap-1">
         {reasons.reasons.map((reason, i) => (
-          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-black/20">
+          <span key={i} className="text-[12px] px-1.5 py-0.5 rounded bg-black/20">
             {reasonLabels[reason] || reason}
           </span>
         ))}
       </div>
       {reasons.details?.give_back_pct > 0 && (
-        <div className="text-[10px] text-zinc-500 mt-1">
+        <div className="text-[12px] text-zinc-500 mt-1">
           Gave back {reasons.details.give_back_pct.toFixed(0)}% of peak profit
         </div>
       )}
@@ -246,7 +246,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
         <div className="flex items-center gap-2 text-sm text-zinc-300 mb-2">
           <span>{trade.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
           {trade.timeframe && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+            <span className={`text-[12px] px-1.5 py-0.5 rounded font-medium ${
               trade.timeframe === 'scalp' ? 'bg-orange-500/15 text-orange-400' :
               trade.timeframe === 'intraday' ? 'bg-yellow-500/15 text-yellow-400' :
               trade.timeframe === 'swing' ? 'bg-cyan-500/15 text-cyan-400' :
@@ -256,7 +256,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
             </span>
           )}
           {trade.close_at_eod && trade.status !== 'closed' && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
               EOD Close
             </span>
           )}
@@ -286,10 +286,10 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
               <span className="text-zinc-500 flex items-center gap-1">
                 Stop
                 {trade.trailing_stop_config?.mode === 'breakeven' && (
-                  <span className="text-[9px] px-1 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">BE</span>
+                  <span className="text-[11px] px-1 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">BE</span>
                 )}
                 {trade.trailing_stop_config?.mode === 'trailing' && (
-                  <span className="text-[9px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">TRAIL</span>
+                  <span className="text-[11px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">TRAIL</span>
                 )}
               </span>
               <p className={`font-mono ${
@@ -335,7 +335,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
               </span>
             </div>
             {trade.trailing_stop_config.mode === 'trailing' && trade.trailing_stop_config.high_water_mark > 0 && (
-              <div className="mt-1 text-[10px] text-zinc-500">
+              <div className="mt-1 text-[12px] text-zinc-500">
                 High: ${trade.trailing_stop_config.high_water_mark?.toFixed(2)} | 
                 Trail: {(trade.trailing_stop_config.trail_pct * 100)?.toFixed(1)}%
               </div>
@@ -365,7 +365,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
                 );
               })}
             </div>
-            <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
+            <div className="flex justify-between mt-1 text-[12px] text-zinc-500">
               <span>T1</span>
               <span>T2</span>
               <span>T3</span>
@@ -1067,7 +1067,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                             <div className="flex items-center gap-2 mb-2">
                               <span className="text-sm">{categoryIcons[category]}</span>
                               <span className="text-xs font-semibold text-zinc-200">{category}</span>
-                              <span className="text-[10px] text-zinc-500">({categoryStrategies.length})</span>
+                              <span className="text-[12px] text-zinc-500">({categoryStrategies.length})</span>
                             </div>
                             <div className="grid grid-cols-1 gap-1.5">
                               {categoryStrategies.map(key => {
@@ -1079,17 +1079,17 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                   <div key={key} className="p-2 bg-zinc-800/60 rounded border border-zinc-700/40" data-testid={`strategy-config-${key}`}>
                                     <div className="flex items-center justify-between mb-1">
                                       <div className="flex items-center gap-2">
-                                        <span className="text-[11px] font-medium text-white">
+                                        <span className="text-[13px] font-medium text-white">
                                           {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                         </span>
-                                        <span className={`text-[9px] px-1 py-0.5 rounded border ${tfStyle}`}>
+                                        <span className={`text-[11px] px-1 py-0.5 rounded border ${tfStyle}`}>
                                           {config.timeframe?.toUpperCase()}
                                         </span>
                                       </div>
                                       {!isEditing ? (
                                         <button
                                           onClick={() => startEditingStrategy(key, config)}
-                                          className="text-[9px] text-cyan-400 hover:text-cyan-300 px-1 py-0.5 rounded bg-cyan-500/10"
+                                          className="text-[11px] text-cyan-400 hover:text-cyan-300 px-1 py-0.5 rounded bg-cyan-500/10"
                                           data-testid={`edit-strategy-${key}`}
                                         >
                                           Edit
@@ -1099,14 +1099,14 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                           <button
                                             onClick={() => saveStrategyConfig(key)}
                                             disabled={actionLoading === `strategy-${key}`}
-                                            className="text-[9px] text-emerald-400 hover:text-emerald-300 px-1 py-0.5 rounded bg-emerald-500/10"
+                                            className="text-[11px] text-emerald-400 hover:text-emerald-300 px-1 py-0.5 rounded bg-emerald-500/10"
                                             data-testid={`save-strategy-${key}`}
                                           >
                                             {actionLoading === `strategy-${key}` ? '...' : 'Save'}
                                           </button>
                                           <button
                                             onClick={() => { setEditingStrategy(null); setStrategyForm({}); }}
-                                            className="text-[9px] text-zinc-400 hover:text-zinc-300 px-1 py-0.5 rounded bg-zinc-600/30"
+                                            className="text-[11px] text-zinc-400 hover:text-zinc-300 px-1 py-0.5 rounded bg-zinc-600/30"
                                           >
                                             ✕
                                           </button>
@@ -1117,7 +1117,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                     {isEditing ? (
                                       <div className="space-y-2 mt-2">
                                         <div className="flex items-center justify-between">
-                                          <label className="text-[10px] text-zinc-400">Trail Stop %</label>
+                                          <label className="text-[12px] text-zinc-400">Trail Stop %</label>
                                           <input
                                             type="number"
                                             step="0.001"
@@ -1125,15 +1125,15 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                             max="0.2"
                                             value={strategyForm.trail_pct ?? config.trail_pct}
                                             onChange={(e) => setStrategyForm(f => ({ ...f, trail_pct: parseFloat(e.target.value) }))}
-                                            className="w-16 px-1.5 py-0.5 text-[10px] bg-zinc-900 border border-zinc-600 rounded text-white font-mono text-right"
+                                            className="w-16 px-1.5 py-0.5 text-[12px] bg-zinc-900 border border-zinc-600 rounded text-white font-mono text-right"
                                             data-testid={`input-trail-pct-${key}`}
                                           />
                                         </div>
                                         <div className="flex items-center justify-between">
-                                          <label className="text-[10px] text-zinc-400">Close at EOD</label>
+                                          <label className="text-[12px] text-zinc-400">Close at EOD</label>
                                           <button
                                             onClick={() => setStrategyForm(f => ({ ...f, close_at_eod: !(f.close_at_eod ?? config.close_at_eod) }))}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                            className={`px-2 py-0.5 rounded text-[12px] font-medium transition-colors ${
                                               (strategyForm.close_at_eod ?? config.close_at_eod)
                                                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                                                 : 'bg-zinc-600/30 text-zinc-400 border border-zinc-600/30'
@@ -1145,7 +1145,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="flex items-center gap-2 text-[10px]">
+                                      <div className="flex items-center gap-2 text-[12px]">
                                         <span className="text-zinc-500">
                                           Trail: <span className="text-zinc-300 font-mono">{(config.trail_pct * 100).toFixed(1)}%</span>
                                         </span>
@@ -1189,7 +1189,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
       {liveSignals.length > 0 && (
         <div className="px-4 py-2 border-b border-zinc-700/50" data-testid="live-signals-strip">
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            <span className="text-[10px] text-zinc-500 uppercase whitespace-nowrap flex items-center gap-1">
+            <span className="text-[12px] text-zinc-500 uppercase whitespace-nowrap flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               Signals
             </span>
@@ -1201,7 +1201,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                 <button
                   key={idx}
                   onClick={() => handleTickerClick(sig.symbol)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium border whitespace-nowrap hover:brightness-125 transition-all ${priorityColor}`}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[13px] font-medium border whitespace-nowrap hover:brightness-125 transition-all ${priorityColor}`}
                   data-testid={`signal-bubble-${sig.symbol}`}
                   title={sig.message || `${sig.setup_type} on ${sig.symbol}`}
                 >

@@ -61,7 +61,7 @@ export const CarouselCountdownChip = ({ onManualPick, userHasFocused, currentCha
       <div
         data-testid="carousel-countdown-chip"
         data-mode="auto"
-        className="inline-flex items-center gap-1 px-1 py-0.5 rounded-full ring-1 ring-cyan-500/40 bg-cyan-900/15 v5-mono text-[9px] uppercase tracking-wider text-cyan-300"
+        className="inline-flex items-center gap-1 px-1 py-0.5 rounded-full ring-1 ring-cyan-500/40 bg-cyan-900/15 v5-mono text-[11px] uppercase tracking-wider text-cyan-300"
         title={`Auto-frame carousel · rotates every 5 min · ${status.totalWatches} watches · click ‹/› to skip ahead manually`}
       >
         <Radio className="w-3 h-3 animate-pulse mx-0.5" />
@@ -105,7 +105,7 @@ export const CarouselCountdownChip = ({ onManualPick, userHasFocused, currentCha
     <div
       data-testid="carousel-countdown-chip"
       data-mode="paused"
-      className="inline-flex items-center gap-1 px-1 py-0.5 rounded-full ring-1 ring-zinc-700/60 bg-zinc-900/40 v5-mono text-[9px] uppercase tracking-wider text-zinc-400"
+      className="inline-flex items-center gap-1 px-1 py-0.5 rounded-full ring-1 ring-zinc-700/60 bg-zinc-900/40 v5-mono text-[11px] uppercase tracking-wider text-zinc-400"
       title={`Auto-rotation paused (you took over). Click ‹/› to step through the bot's watches manually.`}
     >
       <span className="font-bold">WATCHES</span>

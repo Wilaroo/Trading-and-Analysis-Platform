@@ -63,23 +63,23 @@ const ReportCardPanel = memo(({ reportCard, loading }) => {
                   <div className="grid grid-cols-4 gap-2 mb-4">
                     <div className="p-2 rounded-lg bg-white/[0.03] text-center">
                       <div className="text-lg font-bold text-white">{reportCard.overall_stats?.total_trades || 0}</div>
-                      <div className="text-[10px] text-zinc-500">Total Trades</div>
+                      <div className="text-[12px] text-zinc-500">Total Trades</div>
                     </div>
                     <div className="p-2 rounded-lg bg-white/[0.03] text-center">
                       <div className={`text-lg font-bold ${getWinRateColor(reportCard.overall_stats?.win_rate || 0)}`}>
                         {((reportCard.overall_stats?.win_rate || 0) * 100).toFixed(0)}%
                       </div>
-                      <div className="text-[10px] text-zinc-500">Win Rate</div>
+                      <div className="text-[12px] text-zinc-500">Win Rate</div>
                     </div>
                     <div className="p-2 rounded-lg bg-white/[0.03] text-center">
                       <div className={`text-lg font-bold ${(reportCard.overall_stats?.avg_r_multiple || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {(reportCard.overall_stats?.avg_r_multiple || 0).toFixed(2)}R
                       </div>
-                      <div className="text-[10px] text-zinc-500">Avg R</div>
+                      <div className="text-[12px] text-zinc-500">Avg R</div>
                     </div>
                     <div className="p-2 rounded-lg bg-white/[0.03] text-center">
                       <div className="text-lg font-bold text-cyan-400">{reportCard.overall_stats?.winning_trades || 0}</div>
-                      <div className="text-[10px] text-zinc-500">Winners</div>
+                      <div className="text-[12px] text-zinc-500">Winners</div>
                     </div>
                   </div>
 
@@ -96,7 +96,7 @@ const ReportCardPanel = memo(({ reportCard, loading }) => {
                               <span className={`text-xs px-1.5 py-0.5 rounded ${getWinRateBg(sym.win_rate)} ${getWinRateColor(sym.win_rate)}`}>
                                 {(sym.win_rate * 100).toFixed(0)}%
                               </span>
-                              <span className="text-[10px] text-zinc-500">({sym.total_trades})</span>
+                              <span className="text-[12px] text-zinc-500">({sym.total_trades})</span>
                             </div>
                           </div>
                         ))}
@@ -118,7 +118,7 @@ const ReportCardPanel = memo(({ reportCard, loading }) => {
                               <span className={`text-xs px-1.5 py-0.5 rounded ${getWinRateBg(setup.win_rate)} ${getWinRateColor(setup.win_rate)}`}>
                                 {(setup.win_rate * 100).toFixed(0)}%
                               </span>
-                              <span className="text-[10px] text-zinc-500">({setup.traded_count})</span>
+                              <span className="text-[12px] text-zinc-500">({setup.traded_count})</span>
                             </div>
                           </div>
                         ))}

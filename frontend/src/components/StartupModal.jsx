@@ -267,7 +267,7 @@ const StartupModal = ({ onComplete }) => {
                 <div className={`text-2xl font-bold ${allGreen ? 'text-green-400' : isReady ? 'text-emerald-400' : 'text-cyan-400'}`}>
                   {progress}%
                 </div>
-                <div className="text-[10px] text-zinc-500">
+                <div className="text-[12px] text-zinc-500">
                   {successCount}/{SERVICES.length} services
                 </div>
               </div>
@@ -306,7 +306,7 @@ const StartupModal = ({ onComplete }) => {
                       {category.required && <span className="text-red-400 ml-1">*</span>}
                     </span>
                     {categoryReady && (
-                      <span className="text-[10px] text-green-400 px-1.5 py-0.5 bg-green-500/20 rounded">
+                      <span className="text-[12px] text-green-400 px-1.5 py-0.5 bg-green-500/20 rounded">
                         READY
                       </span>
                     )}
@@ -331,11 +331,11 @@ const StartupModal = ({ onComplete }) => {
                               'text-zinc-400'
                             }`}>
                               {service.label}
-                              {service.required && <span className="text-red-400 ml-0.5 text-[10px]">*</span>}
+                              {service.required && <span className="text-red-400 ml-0.5 text-[12px]">*</span>}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[10px] ${
+                            <span className={`text-[12px] ${
                               status === 'success' ? 'text-green-400' :
                               status === 'error' ? 'text-red-400' :
                               status === 'warning' ? 'text-yellow-400' :
@@ -356,7 +356,7 @@ const StartupModal = ({ onComplete }) => {
 
           {/* Legend */}
           <div className="px-5 py-2 border-t border-zinc-800 bg-zinc-900/50">
-            <div className="flex items-center justify-center gap-4 text-[10px] text-zinc-500">
+            <div className="flex items-center justify-center gap-4 text-[12px] text-zinc-500">
               <span><span className="text-red-400">*</span> Required for startup</span>
               <span>Check #{checkCount}</span>
               {isChecking && <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />}

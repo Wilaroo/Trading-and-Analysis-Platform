@@ -147,7 +147,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                               data-testid={`sim-bar-size-${opt.value.replace(/\s+/g, '-')}`}
                             >
                               <div className="font-medium">{opt.label}</div>
-                              <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                              <div className="text-[12px] text-zinc-500">{opt.description}</div>
                             </button>
                           ))}
                         </div>
@@ -166,12 +166,12 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                       <div>
                         <label className="block text-xs text-zinc-400 mb-1.5">Max Symbols: <span className="text-violet-400">{maxSymbols.toLocaleString()}</span></label>
                         <input type="range" min="100" max="1500" step="100" value={maxSymbols} onChange={(e) => setMaxSymbols(parseInt(e.target.value))} className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-violet-500" data-testid="max-symbols-slider" />
-                        <div className="flex justify-between text-[10px] text-zinc-500 mt-0.5"><span>100</span><span>1,500</span></div>
+                        <div className="flex justify-between text-[12px] text-zinc-500 mt-0.5"><span>100</span><span>1,500</span></div>
                       </div>
                       <div className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5">
                         <div>
                           <div className="text-xs text-zinc-300">Multi-Timeframe Analysis</div>
-                          <div className="text-[10px] text-zinc-500">Daily trend + {simBarSize} entries</div>
+                          <div className="text-[12px] text-zinc-500">Daily trend + {simBarSize} entries</div>
                         </div>
                         <button
                           onClick={() => setUseMultiTimeframe(!useMultiTimeframe)}
@@ -190,20 +190,20 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <button onClick={handleQuickTest} disabled={starting !== null} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 transition-colors text-sm font-medium disabled:opacity-50" data-testid="quick-simulation-btn">
                   {starting === 'quick' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                  Smart Test <span className="text-[10px] text-violet-400/60">(30 symbols)</span>
+                  Smart Test <span className="text-[12px] text-violet-400/60">(30 symbols)</span>
                 </button>
                 <button onClick={handleMarketWideBacktest} disabled={starting !== null} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-cyan-400 hover:from-cyan-500/30 hover:to-violet-500/30 transition-colors text-sm font-medium disabled:opacity-50" data-testid="market-wide-backtest-btn">
                   {starting === 'market' ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
-                  Full Test <span className="text-[10px] text-cyan-400/60">({maxSymbols.toLocaleString()} symbols)</span>
+                  Full Test <span className="text-[12px] text-cyan-400/60">({maxSymbols.toLocaleString()} symbols)</span>
                 </button>
               </div>
 
               {/* Overall Stats */}
               {completedJobs.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-4">
-                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className="text-lg font-bold text-white">{completedJobs.length}</div><div className="text-[10px] text-zinc-500">Backtests</div></div>
-                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className={`text-lg font-bold ${avgWinRate >= 0.5 ? 'text-green-400' : 'text-yellow-400'}`}>{(avgWinRate * 100).toFixed(0)}%</div><div className="text-[10px] text-zinc-500">Avg Win Rate</div></div>
-                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className="text-lg font-bold text-white">{totalTrades}</div><div className="text-[10px] text-zinc-500">Total Trades</div></div>
+                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className="text-lg font-bold text-white">{completedJobs.length}</div><div className="text-[12px] text-zinc-500">Backtests</div></div>
+                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className={`text-lg font-bold ${avgWinRate >= 0.5 ? 'text-green-400' : 'text-yellow-400'}`}>{(avgWinRate * 100).toFixed(0)}%</div><div className="text-[12px] text-zinc-500">Avg Win Rate</div></div>
+                  <div className="p-2 rounded bg-white/[0.02] text-center"><div className="text-lg font-bold text-white">{totalTrades}</div><div className="text-[12px] text-zinc-500">Total Trades</div></div>
                 </div>
               )}
 
@@ -224,13 +224,13 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${job.status === 'completed' ? 'bg-green-400' : job.status === 'running' ? 'bg-cyan-400 animate-pulse' : job.status === 'failed' ? 'bg-red-400' : 'bg-zinc-400'}`} />
                             <div>
                               <div className="text-xs text-zinc-300 font-mono">{job.id || job.job_id}</div>
-                              <div className="text-[10px] text-zinc-500">{dateRange}</div>
+                              <div className="text-[12px] text-zinc-500">{dateRange}</div>
                             </div>
                           </div>
                           {isRunning ? (
                             <div className="text-right">
                               <div className="text-sm font-bold text-cyan-400">{progress}%</div>
-                              <div className="text-[10px] text-zinc-500">{job.symbols_processed}/{job.symbols_total} symbols</div>
+                              <div className="text-[12px] text-zinc-500">{job.symbols_processed}/{job.symbols_total} symbols</div>
                             </div>
                           ) : (
                             <span className={`text-xs px-2 py-0.5 rounded ${job.status === 'completed' ? 'bg-green-500/20 text-green-400' : job.status === 'failed' ? 'bg-red-500/20 text-red-400' : 'bg-zinc-500/20 text-zinc-400'}`}>{job.status}</span>
@@ -246,27 +246,27 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                         {job.status === 'completed' && (
                           <div className="px-3 pb-3 pt-1 border-t border-white/5">
                             <div className="grid grid-cols-5 gap-2 text-center">
-                              <div><div className="text-sm font-bold text-white">{job.total_trades || 0}</div><div className="text-[9px] text-zinc-500">Trades</div></div>
-                              <div><div className={`text-sm font-bold ${(job.win_rate || 0) >= 0.5 ? 'text-green-400' : (job.win_rate || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? `${(job.win_rate * 100).toFixed(0)}%` : '--'}</div><div className="text-[9px] text-zinc-500">Win Rate</div></div>
-                              <div><div className={`text-sm font-bold ${(job.profit_factor || 0) >= 1 ? 'text-green-400' : (job.profit_factor || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? (job.profit_factor || 0).toFixed(2) : '--'}</div><div className="text-[9px] text-zinc-500">PF</div></div>
-                              <div><div className={`text-sm font-bold ${(job.total_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{job.total_trades > 0 ? `$${(job.total_pnl || 0).toFixed(0)}` : '--'}</div><div className="text-[9px] text-zinc-500">P&L</div></div>
-                              <div><div className="text-sm font-bold text-white">{job.symbols_total || symbols.length || 0}</div><div className="text-[9px] text-zinc-500">Symbols</div></div>
+                              <div><div className="text-sm font-bold text-white">{job.total_trades || 0}</div><div className="text-[11px] text-zinc-500">Trades</div></div>
+                              <div><div className={`text-sm font-bold ${(job.win_rate || 0) >= 0.5 ? 'text-green-400' : (job.win_rate || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? `${(job.win_rate * 100).toFixed(0)}%` : '--'}</div><div className="text-[11px] text-zinc-500">Win Rate</div></div>
+                              <div><div className={`text-sm font-bold ${(job.profit_factor || 0) >= 1 ? 'text-green-400' : (job.profit_factor || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? (job.profit_factor || 0).toFixed(2) : '--'}</div><div className="text-[11px] text-zinc-500">PF</div></div>
+                              <div><div className={`text-sm font-bold ${(job.total_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{job.total_trades > 0 ? `$${(job.total_pnl || 0).toFixed(0)}` : '--'}</div><div className="text-[11px] text-zinc-500">P&L</div></div>
+                              <div><div className="text-sm font-bold text-white">{job.symbols_total || symbols.length || 0}</div><div className="text-[11px] text-zinc-500">Symbols</div></div>
                             </div>
                             {symbols.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
-                                {symbols.slice(0, 6).map((sym, idx) => <span key={idx} className="px-1.5 py-0.5 rounded text-[9px] bg-white/5 text-zinc-400">{sym}</span>)}
-                                {symbols.length > 6 && <span className="px-1.5 py-0.5 rounded text-[9px] bg-white/5 text-zinc-500">+{symbols.length - 6} more</span>}
+                                {symbols.slice(0, 6).map((sym, idx) => <span key={idx} className="px-1.5 py-0.5 rounded text-[11px] bg-white/5 text-zinc-400">{sym}</span>)}
+                                {symbols.length > 6 && <span className="px-1.5 py-0.5 rounded text-[11px] bg-white/5 text-zinc-500">+{symbols.length - 6} more</span>}
                               </div>
                             )}
                             {job.total_trades === 0 && (
                               <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20">
-                                <p className="text-[10px] text-yellow-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No trade signals found in this period</p>
+                                <p className="text-[12px] text-yellow-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> No trade signals found in this period</p>
                               </div>
                             )}
                           </div>
                         )}
                         {job.status === 'failed' && job.error_message && (
-                          <div className="px-3 pb-3"><div className="p-2 rounded bg-red-500/10 border border-red-500/20"><p className="text-[10px] text-red-400">{job.error_message}</p></div></div>
+                          <div className="px-3 pb-3"><div className="p-2 rounded bg-red-500/10 border border-red-500/20"><p className="text-[12px] text-red-400">{job.error_message}</p></div></div>
                         )}
                       </div>
                     );
@@ -284,7 +284,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                 <div className="mt-4 space-y-3">
                   <h4 className="text-xs text-zinc-500 uppercase flex items-center gap-2">
                     Advanced Backtests
-                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-violet-500/20 text-violet-400">{backtestResults.length}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[11px] bg-violet-500/20 text-violet-400">{backtestResults.length}</span>
                   </h4>
                   {backtestResults.slice(0, 6).map((result, idx) => {
                     const setup = result.setup_only || {};
@@ -299,20 +299,20 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                         <div className="p-3">
                           <div className="flex items-center justify-between mb-2">
                             <div className="text-xs text-zinc-300 font-medium">{result.strategy_name || result.setup_type || 'Backtest'}</div>
-                            <div className="text-[10px] text-zinc-500">{result.date_range || ''}</div>
+                            <div className="text-[12px] text-zinc-500">{result.date_range || ''}</div>
                           </div>
                           
                           {/* 4-way comparison grid */}
                           <div className={`grid ${hasGate ? 'grid-cols-4' : hasAi ? 'grid-cols-3' : 'grid-cols-1'} gap-1`}>
                             {/* Setup Only */}
                             <div className="p-2 rounded bg-white/[0.03] border border-white/5">
-                              <div className="text-[9px] text-zinc-500 uppercase mb-1">Setup Only</div>
+                              <div className="text-[11px] text-zinc-500 uppercase mb-1">Setup Only</div>
                               <div className="text-sm font-bold text-white">{setup.total_trades || 0}</div>
-                              <div className="text-[10px] text-zinc-400">trades</div>
+                              <div className="text-[12px] text-zinc-400">trades</div>
                               <div className={`text-xs font-medium mt-1 ${(setup.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
                                 {(setup.win_rate || 0).toFixed(0)}% WR
                               </div>
-                              <div className={`text-[10px] ${(setup.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              <div className={`text-[12px] ${(setup.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                 ${(setup.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
                               </div>
                             </div>
@@ -320,13 +320,13 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* AI Filtered */}
                             {hasAi && (
                               <div className="p-2 rounded bg-cyan-500/[0.05] border border-cyan-500/20">
-                                <div className="text-[9px] text-cyan-500 uppercase mb-1">AI Filter</div>
+                                <div className="text-[11px] text-cyan-500 uppercase mb-1">AI Filter</div>
                                 <div className="text-sm font-bold text-white">{aiFiltered.total_trades || 0}</div>
-                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(aiFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
                                   {(aiFiltered.win_rate || 0).toFixed(0)}% WR
                                 </div>
-                                <div className={`text-[10px] ${(aiFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                <div className={`text-[12px] ${(aiFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                   ${(aiFiltered.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
                                 </div>
                               </div>
@@ -335,13 +335,13 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* Gate Filtered */}
                             {hasGate && (
                               <div className="p-2 rounded bg-amber-500/[0.05] border border-amber-500/20">
-                                <div className="text-[9px] text-amber-500 uppercase mb-1">Gate Filter</div>
+                                <div className="text-[11px] text-amber-500 uppercase mb-1">Gate Filter</div>
                                 <div className="text-sm font-bold text-white">{gateFiltered.total_trades || 0}</div>
-                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(gateFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
                                   {(gateFiltered.win_rate || 0).toFixed(0)}% WR
                                 </div>
-                                <div className={`text-[10px] ${(gateFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                <div className={`text-[12px] ${(gateFiltered.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                   ${(gateFiltered.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
                                 </div>
                               </div>
@@ -350,13 +350,13 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* AI Only (if available) */}
                             {hasAi && (result.ai_only?.total_trades || 0) > 0 && (
                               <div className="p-2 rounded bg-violet-500/[0.05] border border-violet-500/20">
-                                <div className="text-[9px] text-violet-500 uppercase mb-1">AI Only</div>
+                                <div className="text-[11px] text-violet-500 uppercase mb-1">AI Only</div>
                                 <div className="text-sm font-bold text-white">{result.ai_only.total_trades}</div>
-                                <div className="text-[10px] text-zinc-400">trades</div>
+                                <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(result.ai_only.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
                                   {(result.ai_only.win_rate || 0).toFixed(0)}% WR
                                 </div>
-                                <div className={`text-[10px] ${(result.ai_only.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                <div className={`text-[12px] ${(result.ai_only.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                   ${(result.ai_only.total_pnl || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}
                                 </div>
                               </div>
@@ -365,7 +365,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                           
                           {/* Gate Stats */}
                           {hasGate && gateStats.evaluated > 0 && (
-                            <div className="mt-2 flex items-center gap-3 text-[10px]">
+                            <div className="mt-2 flex items-center gap-3 text-[12px]">
                               <span className="text-zinc-500">Gate: {gateStats.evaluated} evaluated</span>
                               <span className="text-emerald-400">{gateStats.go} GO</span>
                               <span className="text-yellow-400">{gateStats.reduce} REDUCE</span>

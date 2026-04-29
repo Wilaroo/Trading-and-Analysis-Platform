@@ -45,7 +45,7 @@ export const PositionsPanel = ({ positions, totalPnl, loading, onSelectPosition 
             >
               <div className="flex items-center gap-3">
                 <ClickableTicker symbol={pos.symbol} variant="inline" className="text-sm font-bold" />
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                <span className={`text-[12px] px-1.5 py-0.5 rounded ${
                   pos.status === 'running' ? 'bg-emerald-500/20 text-emerald-400' :
                   pos.status === 'watching' ? 'bg-amber-500/20 text-amber-400' :
                   'bg-cyan-500/20 text-cyan-400'

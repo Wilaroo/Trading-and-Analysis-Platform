@@ -249,7 +249,7 @@ const ScannerCard = ({ card, active, onClick }) => {
           </span>
         </div>
         {change && (
-          <span className={`v5-mono text-[11px] font-bold ${Number(card.change_pct) >= 0 ? 'v5-up' : 'v5-down'}`}>
+          <span className={`v5-mono text-[13px] font-bold ${Number(card.change_pct) >= 0 ? 'v5-up' : 'v5-down'}`}>
             {card.stage === 'close' && card.metrics?.r != null
               ? `${Number(card.metrics.r) >= 0 ? '+' : ''}${Number(card.metrics.r).toFixed(1)}R`
               : change
@@ -268,7 +268,7 @@ const ScannerCard = ({ card, active, onClick }) => {
       )}
 
       {hasMetrics && (
-        <div className="flex items-center gap-3 mt-2 text-[10px] v5-mono">
+        <div className="flex items-center gap-3 mt-2 text-[12px] v5-mono">
           {card.metrics.gate != null && (
             <div className="flex items-center gap-1">
               <span className="v5-dim">gate</span>
@@ -340,7 +340,7 @@ export const ScannerCardsV5 = ({
 
   if (cards.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-[11px] text-zinc-500">
+      <div className="px-3 py-6 text-center text-[13px] text-zinc-500">
         <div className="v5-mono">Scanner idle.</div>
         <div className="mt-1 v5-why-dim">No setups, alerts, or open positions yet.</div>
       </div>

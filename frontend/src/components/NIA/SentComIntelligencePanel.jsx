@@ -77,14 +77,14 @@ const ScoreBreakdown = memo(({ decision }) => {
     <div className="mt-1.5 space-y-0.5" data-testid="score-breakdown">
       {components.map((c, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <span className="text-[9px] text-zinc-500 w-16 text-right truncate">{c.label}</span>
+          <span className="text-[11px] text-zinc-500 w-16 text-right truncate">{c.label}</span>
           <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden relative">
             <div
               className={`h-full rounded-full ${c.pts >= 0 ? 'bg-emerald-500/60' : 'bg-red-500/60'}`}
               style={{ width: `${Math.min(100, (Math.abs(c.pts) / maxPts) * 100)}%` }}
             />
           </div>
-          <span className={`text-[9px] font-mono w-6 text-right ${
+          <span className={`text-[11px] font-mono w-6 text-right ${
             c.pts > 0 ? 'text-emerald-400' : c.pts < 0 ? 'text-red-400' : 'text-zinc-500'
           }`}>
             {c.pts > 0 ? '+' : ''}{c.pts}
@@ -110,16 +110,16 @@ const DecisionRow = memo(({ decision }) => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-bold text-white">{decision.symbol}</span>
-            <span className="text-[10px] text-zinc-500 font-mono">{decision.setup_type}</span>
-            <span className={`text-[10px] font-medium ${style.color}`}>{decision.decision}</span>
+            <span className="text-[12px] text-zinc-500 font-mono">{decision.setup_type}</span>
+            <span className={`text-[12px] font-medium ${style.color}`}>{decision.decision}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-mono ${
+            <span className={`text-[12px] font-mono ${
               decision.confidence_score >= 55 ? 'text-emerald-400' :
               decision.confidence_score >= 30 ? 'text-amber-400' :
               'text-zinc-400'
             }`}>{decision.confidence_score} pts</span>
-            <span className="text-[10px] text-zinc-600">{timeStr}</span>
+            <span className="text-[12px] text-zinc-600">{timeStr}</span>
           </div>
         </div>
         {decision.reasoning && decision.reasoning.length > 0 && (
@@ -127,7 +127,7 @@ const DecisionRow = memo(({ decision }) => {
             {decision.reasoning
               .filter(r => !r.includes('logged only') && !r.includes('AI regime'))
               .slice(0, 3).map((r, i) => (
-              <p key={i} className="text-[10px] text-zinc-500 leading-tight">{r}</p>
+              <p key={i} className="text-[12px] text-zinc-500 leading-tight">{r}</p>
             ))}
           </div>
         )}
@@ -212,7 +212,7 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate, compact = 
             <ModeIcon className={`w-3.5 h-3.5 ${modeStyle.text}`} />
             <span className={`text-xs font-bold ${modeStyle.text}`}>{modeStyle.label}</span>
           </div>
-          <div className="flex items-center gap-3 text-[10px]">
+          <div className="flex items-center gap-3 text-[12px]">
             <span className="text-white"><b>{today.evaluated}</b> eval</span>
             <span className="text-emerald-400"><b>{today.taken}</b> taken</span>
             <span className="text-red-400"><b>{today.skipped}</b> skip</span>
@@ -243,22 +243,22 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate, compact = 
           <div className="flex items-center gap-4">
             <div className="text-center">
               <div className="text-lg font-bold text-white">{today.evaluated}</div>
-              <div className="text-[10px] text-zinc-500">Evaluated</div>
+              <div className="text-[12px] text-zinc-500">Evaluated</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-emerald-400">{today.taken}</div>
-              <div className="text-[10px] text-zinc-500">Taken</div>
+              <div className="text-[12px] text-zinc-500">Taken</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-bold text-red-400">{today.skipped}</div>
-              <div className="text-[10px] text-zinc-500">Skipped</div>
+              <div className="text-[12px] text-zinc-500">Skipped</div>
             </div>
             {today.evaluated > 0 && (
               <div className="text-center pl-3 border-l border-white/10">
                 <div className={`text-lg font-bold ${today.take_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {(today.take_rate * 100).toFixed(0)}%
                 </div>
-                <div className="text-[10px] text-zinc-500">Take Rate</div>
+                <div className="text-[12px] text-zinc-500">Take Rate</div>
               </div>
             )}
           </div>
@@ -302,7 +302,7 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate, compact = 
           >
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-zinc-300">Recent Decisions</span>
-              <span className="text-[10px] text-zinc-600">({decisions.length})</span>
+              <span className="text-[12px] text-zinc-600">({decisions.length})</span>
             </div>
             {showDecisions ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
           </button>
@@ -313,7 +313,7 @@ const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate, compact = 
                 <div className="text-center py-6">
                   <Brain className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
                   <p className="text-xs text-zinc-500">No decisions yet today</p>
-                  <p className="text-[10px] text-zinc-600 mt-1">SentCom will log each trade evaluation here</p>
+                  <p className="text-[12px] text-zinc-600 mt-1">SentCom will log each trade evaluation here</p>
                 </div>
               ) : (
                 decisions.map((d, i) => <DecisionRow key={`${d.symbol}-${d.timestamp}-${i}`} decision={d} />)

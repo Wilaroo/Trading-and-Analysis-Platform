@@ -150,11 +150,11 @@ export const StreamMessage = React.memo(({ msg, index }) => {
 
             {/* Header with label and symbol */}
             <div className={`relative flex items-center gap-2 mb-2 ${isUser ? 'justify-end' : ''}`}>
-              <span className={`text-[10px] font-bold uppercase tracking-wider ${colors.label}`}>
+              <span className={`text-[12px] font-bold uppercase tracking-wider ${colors.label}`}>
                 {getLabel()}
               </span>
               {msg.symbol && (
-                <ClickableTicker symbol={msg.symbol} variant="badge" className={`text-[10px] ${colors.badge}`} />
+                <ClickableTicker symbol={msg.symbol} variant="badge" className={`text-[12px] ${colors.badge}`} />
               )}
             </div>
 
@@ -167,7 +167,7 @@ export const StreamMessage = React.memo(({ msg, index }) => {
             {msg.confidence && (
               <div className={`relative flex items-center gap-1.5 mt-3 pt-2 border-t border-white/10 ${isUser ? 'justify-end' : ''}`}>
                 <Gauge className={`w-3 h-3 ${colors.label}`} />
-                <span className={`text-[10px] ${colors.label}`}>
+                <span className={`text-[12px] ${colors.label}`}>
                   Confidence: {msg.confidence}%
                 </span>
               </div>

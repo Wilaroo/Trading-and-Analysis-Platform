@@ -63,7 +63,7 @@ const NumPill = ({ label, value, tone = 'zinc', testid }) => {
   };
   return (
     <div data-testid={testid}
-         className={`px-2 py-1 rounded border v5-mono text-[10px] ${TONES[tone] || TONES.zinc}`}>
+         className={`px-2 py-1 rounded border v5-mono text-[12px] ${TONES[tone] || TONES.zinc}`}>
       <span className="opacity-60 mr-1">{label}</span>
       <span className="font-bold">{value}</span>
     </div>
@@ -81,7 +81,7 @@ const ActionButton = ({ label, busy, onClick, testid, tone = 'cyan' }) => {
       data-testid={testid}
       disabled={busy}
       onClick={onClick}
-      className={`mt-2 px-3 py-1.5 rounded border v5-mono text-[11px] uppercase tracking-wide font-bold transition-colors ${TONES[tone] || TONES.cyan} disabled:opacity-40 disabled:cursor-not-allowed`}
+      className={`mt-2 px-3 py-1.5 rounded border v5-mono text-[13px] uppercase tracking-wide font-bold transition-colors ${TONES[tone] || TONES.cyan} disabled:opacity-40 disabled:cursor-not-allowed`}
     >
       {busy ? 'running…' : label}
     </button>
@@ -105,7 +105,7 @@ const QueueDrawer = ({ check }) => {
                  tone={failed > 0 ? 'amber' : 'emerald'} />
       </div>
       {(pending > 0 || claimed > 0) && (
-        <div className="v5-mono text-[10px] text-zinc-400">
+        <div className="v5-mono text-[12px] text-zinc-400">
           Wait for the 4 turbo collectors to drain. The check polls every 30s; just
           leave it open. ETA ≈ {Math.ceil((pending + claimed) / 23)} min at the
           observed 232-req/10-min throughput.
@@ -119,20 +119,20 @@ const CriticalSymbolsDrawer = ({ check, onAction, busy }) => {
   const stale = check.stale_symbols || [];
   if (!stale.length) {
     return (
-      <div className="v5-mono text-[10px] text-emerald-300">
+      <div className="v5-mono text-[12px] text-emerald-300">
         All 10 critical symbols fresh on every required timeframe ✓
       </div>
     );
   }
   return (
     <div data-testid="readiness-drawer-critical_symbols_fresh" className="space-y-2">
-      <div className="v5-mono text-[10px] text-rose-200">
+      <div className="v5-mono text-[12px] text-rose-200">
         These critical symbols have at least one stale timeframe:
       </div>
       <div className="flex flex-wrap gap-1.5">
         {stale.map((s) => (
           <span key={s} data-testid={`stale-sym-${s}`}
-                className="px-2 py-0.5 rounded border bg-rose-900/30 border-rose-800 text-rose-200 v5-mono text-[10px] font-bold">
+                className="px-2 py-0.5 rounded border bg-rose-900/30 border-rose-800 text-rose-200 v5-mono text-[12px] font-bold">
             {s}
           </span>
         ))}
@@ -144,7 +144,7 @@ const CriticalSymbolsDrawer = ({ check, onAction, busy }) => {
         onClick={() => onAction('smart-backfill', { freshness_days: 1, tier_filter: 'intraday' })}
         label={`POST smart-backfill?freshness_days=1`}
       />
-      <div className="v5-mono text-[9px] text-zinc-500">
+      <div className="v5-mono text-[11px] text-zinc-500">
         Smart-backfill now plans the union of (a) tier-required AND (b) bar_sizes
         the symbol already has data for — guaranteed to refresh these.
       </div>
@@ -166,7 +166,7 @@ const FreshnessDrawer = ({ check, onAction, busy }) => {
       )}
       {tfs.length > 0 && (
         <div className="space-y-1">
-          <div className="v5-mono text-[9px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
             By timeframe (worst-offender first)
           </div>
           {[...tfs].sort((a, b) => (a.fresh_pct ?? 0) - (b.fresh_pct ?? 0)).map((row) => {
@@ -177,7 +177,7 @@ const FreshnessDrawer = ({ check, onAction, busy }) => {
             };
             return (
               <div key={row.timeframe} data-testid={`tf-row-${row.timeframe}`}
-                   className="flex items-center gap-2 v5-mono text-[10px]">
+                   className="flex items-center gap-2 v5-mono text-[12px]">
                 <span className="w-14 shrink-0 opacity-70">{row.timeframe}</span>
                 <span className="w-14 shrink-0 text-right tabular-nums">
                   {row.fresh}/{row.total}
@@ -205,9 +205,9 @@ const FreshnessDrawer = ({ check, onAction, busy }) => {
 };
 
 const NoDupesDrawer = ({ check }) => (
-  <div data-testid="readiness-drawer-no_duplicates" className="v5-mono text-[10px] text-zinc-300">
+  <div data-testid="readiness-drawer-no_duplicates" className="v5-mono text-[12px] text-zinc-300">
     {check.detail}
-    <div className="mt-1 text-[9px] text-zinc-500">
+    <div className="mt-1 text-[11px] text-zinc-500">
       O(1) check: the unique compound index on `(symbol, bar_size, date)` is
       asserted at write time, so duplicate bars are impossible by construction.
     </div>
@@ -225,26 +225,26 @@ const DensityDrawer = ({ check }) => {
       )}
       {sample.length > 0 ? (
         <>
-          <div className="v5-mono text-[9px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
             Low-density sample (will be dropped from training)
           </div>
           <div className="flex flex-wrap gap-1">
             {sample.slice(0, 30).map((row, i) => (
               <span key={i}
-                    className="px-1.5 py-0.5 rounded border bg-amber-900/20 border-amber-800/50 text-amber-200 v5-mono text-[9px]"
+                    className="px-1.5 py-0.5 rounded border bg-amber-900/20 border-amber-800/50 text-amber-200 v5-mono text-[11px]"
                     title={`${row.bars ?? '?'} bars`}>
                 {row.symbol ?? row}{row.bars ? ` (${row.bars})` : ''}
               </span>
             ))}
             {sample.length > 30 && (
-              <span className="v5-mono text-[9px] text-zinc-500">
+              <span className="v5-mono text-[11px] text-zinc-500">
                 +{sample.length - 30} more
               </span>
             )}
           </div>
         </>
       ) : (
-        <div className="v5-mono text-[10px] text-zinc-300">
+        <div className="v5-mono text-[12px] text-zinc-300">
           No low-density symbols — every intraday symbol has ≥ 780 5-min bars.
         </div>
       )}
@@ -321,14 +321,14 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
 
   return (
     <section data-testid="backfill-readiness-card" data-help-id="backfill-readiness" className="space-y-2">
-      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
+      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
         Backfill readiness · OK to train?
         {loading && (
           <span data-testid="readiness-loading" className="text-zinc-600">
             · loading…
           </span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[9px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
           tip: click a tile to drill in
         </span>
       </div>
@@ -344,7 +344,7 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
             {style.label}
           </span>
         </div>
-        <div className="flex-1 min-w-0 v5-mono text-[11px] leading-tight pt-0.5">
+        <div className="flex-1 min-w-0 v5-mono text-[13px] leading-tight pt-0.5">
           {error && !data && (
             <span className="text-rose-400" data-testid="readiness-error">
               /api/backfill/readiness unreachable — {error}
@@ -357,13 +357,13 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
       {/* Inline action result (shown briefly after a tile button click) */}
       {actionMsg && (
         <div data-testid="readiness-action-msg"
-             className="v5-mono text-[10px] px-2 py-1 rounded border bg-zinc-900/60 border-zinc-700 text-zinc-200">
+             className="v5-mono text-[12px] px-2 py-1 rounded border bg-zinc-900/60 border-zinc-700 text-zinc-200">
           {actionMsg}
         </div>
       )}
 
       {data?.blockers?.length > 0 && (
-        <div data-testid="readiness-blockers" className="v5-mono text-[10px] pl-3">
+        <div data-testid="readiness-blockers" className="v5-mono text-[12px] pl-3">
           <div className="text-rose-400 uppercase tracking-wide font-bold mb-0.5">Blockers</div>
           <ul className="list-disc pl-4 space-y-0.5 text-rose-200">
             {data.blockers.map((b, i) => (
@@ -374,7 +374,7 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
       )}
 
       {data?.warnings?.length > 0 && (
-        <div data-testid="readiness-warnings" className="v5-mono text-[10px] pl-3">
+        <div data-testid="readiness-warnings" className="v5-mono text-[12px] pl-3">
           <div className="text-amber-400 uppercase tracking-wide font-bold mb-0.5">Warnings</div>
           <ul className="list-disc pl-4 space-y-0.5 text-amber-200">
             {data.warnings.map((w, i) => (
@@ -410,15 +410,15 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
             >
               <div className="flex items-center gap-2">
                 <span className={`w-1.5 h-1.5 rounded-full ${cs.dot}`} />
-                <span className="v5-mono text-[10px] font-bold">{label}</span>
-                <span className="v5-mono text-[9px] uppercase opacity-70 ml-auto">
+                <span className="v5-mono text-[12px] font-bold">{label}</span>
+                <span className="v5-mono text-[11px] uppercase opacity-70 ml-auto">
                   {c.status}
                 </span>
-                <span className="v5-mono text-[10px] opacity-60 ml-1" aria-hidden>
+                <span className="v5-mono text-[12px] opacity-60 ml-1" aria-hidden>
                   {isOpen ? '▾' : '▸'}
                 </span>
               </div>
-              <div className="v5-mono text-[9px] opacity-75 mt-0.5">
+              <div className="v5-mono text-[11px] opacity-75 mt-0.5">
                 {c.detail}
               </div>
               {isOpen && Drawer && (
@@ -436,7 +436,7 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
       </div>
 
       {data?.next_steps?.length > 0 && (
-        <div data-testid="readiness-next-steps" className="v5-mono text-[10px] pl-3 pt-1">
+        <div data-testid="readiness-next-steps" className="v5-mono text-[12px] pl-3 pt-1">
           <div className="text-zinc-400 uppercase tracking-wide font-bold mb-0.5">Next steps</div>
           <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
             {data.next_steps.map((n, i) => (

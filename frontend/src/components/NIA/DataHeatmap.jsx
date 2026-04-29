@@ -50,7 +50,7 @@ const HeatmapCell = memo(({ tf, queuePending }) => {
   if (isNA) {
     return (
       <div className="flex items-center justify-center rounded-md bg-zinc-900/40 border border-zinc-800/30 min-h-[52px]">
-        <span className="text-[9px] text-zinc-700">--</span>
+        <span className="text-[11px] text-zinc-700">--</span>
       </div>
     );
   }
@@ -83,9 +83,9 @@ const HeatmapCell = memo(({ tf, queuePending }) => {
       {/* Hover tooltip */}
       {hovered && (
         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl z-20 whitespace-nowrap">
-          <p className="text-[10px] text-white font-medium">{tf.symbols_with_data}/{tf.symbols_needed} symbols</p>
-          <p className="text-[9px] text-zinc-400">{tf.total_bars?.toLocaleString()} total bars</p>
-          {queuePending > 0 && <p className="text-[9px] text-amber-400">{queuePending.toLocaleString()} pending in queue</p>}
+          <p className="text-[12px] text-white font-medium">{tf.symbols_with_data}/{tf.symbols_needed} symbols</p>
+          <p className="text-[11px] text-zinc-400">{tf.total_bars?.toLocaleString()} total bars</p>
+          {queuePending > 0 && <p className="text-[11px] text-amber-400">{queuePending.toLocaleString()} pending in queue</p>}
         </div>
       )}
     </div>
@@ -125,7 +125,7 @@ const DataHeatmap = memo(({ dataCoverage, queueProgress }) => {
   return (
     <div data-testid="data-heatmap">
       {/* Summary strip */}
-      <div className="flex items-center gap-4 mb-3 text-[10px]">
+      <div className="flex items-center gap-4 mb-3 text-[12px]">
         <span className="text-zinc-400">{totalSymbols.toLocaleString()} symbols</span>
         <span className="text-zinc-600">&bull;</span>
         <span className="text-zinc-400">{formatBars(totalBars)} bars</span>
@@ -142,7 +142,7 @@ const DataHeatmap = memo(({ dataCoverage, queueProgress }) => {
           <div /> {/* Empty corner */}
           {ALL_TIMEFRAMES.map(tf => (
             <div key={tf} className="text-center">
-              <span className="text-[10px] font-medium text-zinc-400">{TF_SHORT[tf]}</span>
+              <span className="text-[12px] font-medium text-zinc-400">{TF_SHORT[tf]}</span>
             </div>
           ))}
         </div>
@@ -204,7 +204,7 @@ const DataHeatmap = memo(({ dataCoverage, queueProgress }) => {
         <div className="mt-3 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/15">
           <div className="flex items-center gap-1.5 mb-1">
             <AlertTriangle className="w-3 h-3 text-amber-400" />
-            <span className="text-[10px] font-medium text-amber-400">{totalGaps} Data Gaps</span>
+            <span className="text-[12px] font-medium text-amber-400">{totalGaps} Data Gaps</span>
           </div>
           <div className="flex flex-wrap gap-1">
             {dataCoverage.missing.slice(0, 8).map((gap, i) => (

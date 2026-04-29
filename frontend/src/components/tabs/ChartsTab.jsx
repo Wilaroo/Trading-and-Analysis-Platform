@@ -74,7 +74,7 @@ const ChartsTab = ({
 
           {/* Popular Symbols */}
           <div className="flex items-center gap-1 overflow-x-auto">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider mr-1">Quick:</span>
+            <span className="text-[12px] text-zinc-500 uppercase tracking-wider mr-1">Quick:</span>
             {popularSymbols.slice(0, 8).map((sym) => (
               <button
                 key={sym}
@@ -97,12 +97,12 @@ const ChartsTab = ({
           {watchlist.length > 0 && (
             <div className="flex items-center gap-1">
               <Star className="w-3 h-3 text-yellow-500" />
-              <span className="text-[10px] text-zinc-500 mr-1">Watchlist:</span>
+              <span className="text-[12px] text-zinc-500 mr-1">Watchlist:</span>
               {watchlist.slice(0, 5).map((item) => (
                 <button
                   key={item.symbol}
                   onClick={() => handleSymbolChange(item.symbol)}
-                  className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                  className={`px-2 py-0.5 text-[12px] rounded transition-colors ${
                     chartSymbol === item.symbol 
                       ? 'bg-yellow-500/20 text-yellow-400' 
                       : 'bg-zinc-800/50 text-zinc-500 hover:text-yellow-400'
@@ -118,12 +118,12 @@ const ChartsTab = ({
           {recentCharts.length > 0 && (
             <div className="flex items-center gap-1">
               <Clock className="w-3 h-3 text-zinc-500" />
-              <span className="text-[10px] text-zinc-500 mr-1">Recent:</span>
+              <span className="text-[12px] text-zinc-500 mr-1">Recent:</span>
               {recentCharts.slice(0, 5).map((sym) => (
                 <button
                   key={sym}
                   onClick={() => handleSymbolChange(sym)}
-                  className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                  className={`px-2 py-0.5 text-[12px] rounded transition-colors ${
                     chartSymbol === sym 
                       ? 'bg-cyan-500/20 text-cyan-400' 
                       : 'bg-zinc-800/50 text-zinc-500 hover:text-white'

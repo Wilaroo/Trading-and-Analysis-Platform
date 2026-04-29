@@ -22,7 +22,7 @@ export const Badge = ({ children, variant = 'info', className = '' }) => {
   };
   
   return (
-    <span className={`px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border rounded-sm ${variants[variant]} ${className}`}>
+    <span className={`px-2 py-0.5 text-[12px] font-mono uppercase tracking-wide border rounded-sm ${variants[variant]} ${className}`}>
       {children}
     </span>
   );

@@ -84,7 +84,7 @@ const HealthTile = ({ row, active, retraining, onClick }) => {
       title={`${row.setup_type} · ${row.bar_size} · ${meta.label}${retraining ? ' · retraining' : ''}`}
     >
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[9px] font-semibold uppercase tracking-wider text-zinc-300 truncate max-w-[72px]">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300 truncate max-w-[72px]">
           {label}
         </span>
         {retraining ? (
@@ -94,8 +94,8 @@ const HealthTile = ({ row, active, retraining, onClick }) => {
         )}
       </div>
       <div className="flex items-center justify-between gap-1 mt-0.5">
-        <span className="text-[9px] text-zinc-500">{row.bar_size.replace(' mins', 'm').replace(' min', 'm').replace(' hour', 'h').replace(' day', 'd')}</span>
-        <span className={`text-[9px] font-medium ${meta.text}`}>{retraining ? 'TRAIN…' : meta.label}</span>
+        <span className="text-[11px] text-zinc-500">{row.bar_size.replace(' mins', 'm').replace(' min', 'm').replace(' hour', 'h').replace(' day', 'd')}</span>
+        <span className={`text-[11px] font-medium ${meta.text}`}>{retraining ? 'TRAIN…' : meta.label}</span>
       </div>
     </button>
   );
@@ -134,7 +134,7 @@ const RetrainButton = ({ row, jobState, onRetrain }) => {
       data-testid={testid}
       onClick={isRunning ? undefined : onRetrain}
       disabled={isRunning}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-semibold tracking-wider uppercase ring-1 transition-colors ${className}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-semibold tracking-wider uppercase ring-1 transition-colors ${className}`}
     >
       <Icon className={`w-3 h-3 ${spin ? 'animate-spin' : ''}`} />
       <span>{body}</span>
@@ -157,14 +157,14 @@ const ModeDetail = ({ row, jobState, onRetrain }) => {
           <span className="text-xs font-semibold text-zinc-100">
             {row.setup_type === '__GENERIC__' ? 'Generic directional' : row.setup_type} · {row.bar_size}
           </span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${meta.text}`}>
+          <span className={`text-[12px] font-semibold uppercase tracking-wider ${meta.text}`}>
             {meta.label}
           </span>
           {row.version && (
-            <span className="text-[10px] text-zinc-500 font-mono">{row.version}</span>
+            <span className="text-[12px] text-zinc-500 font-mono">{row.version}</span>
           )}
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-zinc-400 mt-0.5 flex-wrap">
+        <div className="flex items-center gap-3 text-[12px] text-zinc-400 mt-0.5 flex-wrap">
           <span>Acc {formatPct(row.metrics?.accuracy)}</span>
           <span>R↑ {formatPct(row.metrics?.recall_up)}</span>
           <span>R↓ {formatPct(row.metrics?.recall_down)}</span>
@@ -178,7 +178,7 @@ const ModeDetail = ({ row, jobState, onRetrain }) => {
         <div className="mt-2 flex items-center gap-2 flex-wrap">
           <RetrainButton row={row} jobState={jobState} onRetrain={onRetrain} />
           {jobState?.job_id && (
-            <span data-testid="model-health-job-id" className="text-[10px] text-zinc-500 font-mono">job {jobState.job_id.slice(0, 8)}</span>
+            <span data-testid="model-health-job-id" className="text-[12px] text-zinc-500 font-mono">job {jobState.job_id.slice(0, 8)}</span>
           )}
         </div>
       </div>
@@ -306,7 +306,7 @@ export const ModelHealthScorecard = ({
         <div className="flex items-center gap-3 flex-wrap">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
           <span className="text-sm font-semibold text-zinc-100 tracking-tight">Model Health</span>
-          <span className="text-[10px] text-zinc-500">· {rows.length} models</span>
+          <span className="text-[12px] text-zinc-500">· {rows.length} models</span>
 
           <div className="flex items-center gap-2 ml-2">
             {Object.entries(counts).map(([mode, n]) => {
@@ -316,7 +316,7 @@ export const ModelHealthScorecard = ({
                 <span
                   key={mode}
                   data-testid={`model-health-count-${mode}`}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium ${meta.bg} ${meta.text}`}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${meta.bg} ${meta.text}`}
                 >
                   <span className={`w-1 h-1 rounded-full ${meta.dot}`} />
                   {n} {meta.label}
@@ -330,7 +330,7 @@ export const ModelHealthScorecard = ({
           <button
             data-testid="model-health-toggle"
             onClick={() => setExpanded(v => !v)}
-            className="px-2 py-0.5 text-[11px] rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
+            className="px-2 py-0.5 text-[13px] rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
           >
             {expanded ? 'Collapse' : 'Expand'}
           </button>

@@ -61,7 +61,7 @@ export class PanelErrorBoundary extends React.Component {
     return (
       <div
         data-testid={`panel-error-${label}`}
-        className={`bg-rose-950/30 border border-rose-800/40 rounded p-3 text-rose-300 ${compact ? 'text-[10px]' : 'text-[11px]'}`}
+        className={`bg-rose-950/30 border border-rose-800/40 rounded p-3 text-rose-300 ${compact ? 'text-[12px]' : 'text-[13px]'}`}
       >
         <div className="flex items-center gap-2 mb-1.5">
           <span className="v5-mono font-bold uppercase tracking-wide">⚠ {label} crashed</span>
@@ -69,7 +69,7 @@ export class PanelErrorBoundary extends React.Component {
             type="button"
             onClick={this.copyError}
             data-testid={`panel-error-copy-${label}`}
-            className="ml-auto v5-mono text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            className="ml-auto v5-mono text-[11px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
             title="Copy error + stack trace to clipboard"
           >
             copy error ⧉
@@ -78,12 +78,12 @@ export class PanelErrorBoundary extends React.Component {
             type="button"
             onClick={this.reset}
             data-testid={`panel-error-reset-${label}`}
-            className="v5-mono text-[9px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            className="v5-mono text-[11px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
           >
             reload panel ↻
           </button>
         </div>
-        <div className="v5-mono text-[10px] opacity-75 truncate" title={msg}>
+        <div className="v5-mono text-[12px] opacity-75 truncate" title={msg}>
           {msg}
         </div>
       </div>

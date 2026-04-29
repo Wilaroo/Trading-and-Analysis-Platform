@@ -65,7 +65,7 @@ export const PusherHealthChip = () => {
       <span className={`v5-chip ${chipClass}`} data-testid="v5-pusher-health-chip">
         Pusher {label}
         {data.health === 'green' || data.health === 'amber' ? (
-          <span className="ml-1 opacity-70 v5-mono text-[9px]">· {ageStr}</span>
+          <span className="ml-1 opacity-70 v5-mono text-[11px]">· {ageStr}</span>
         ) : null}
       </span>
 

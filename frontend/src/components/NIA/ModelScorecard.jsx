@@ -36,7 +36,7 @@ function Metric({ label, value, suffix = "", threshold = null, invert = false, t
       ? value.toFixed(value < 10 && Math.abs(value) > 0 ? 2 : 1)
       : "—";
   return (
-    <div className="flex justify-between text-[11px] py-0.5" data-testid={testid}>
+    <div className="flex justify-between text-[13px] py-0.5" data-testid={testid}>
       <span className="text-zinc-500">{label}</span>
       <span className={color}>
         {formatted}
@@ -49,7 +49,7 @@ function Metric({ label, value, suffix = "", threshold = null, invert = false, t
 function Section({ title, children }) {
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800/40 pb-0.5">
+      <div className="text-[12px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800/40 pb-0.5">
         {title}
       </div>
       {children}
@@ -81,11 +81,11 @@ export default function ModelScorecard({ scorecard, onClose }) {
         <div>
           <div className="text-sm font-medium">
             {scorecard.setup_type} / {scorecard.bar_size}
-            <span className="text-zinc-600 ml-1 text-[10px]">
+            <span className="text-zinc-600 ml-1 text-[12px]">
               ({scorecard.trade_side || "long"})
             </span>
           </div>
-          <div className="text-[10px] text-zinc-500">
+          <div className="text-[12px] text-zinc-500">
             {scorecard.model_name}{" "}
             {scorecard.version && <span>· {scorecard.version}</span>}
           </div>
@@ -99,10 +99,10 @@ export default function ModelScorecard({ scorecard, onClose }) {
             <div className="text-lg leading-none font-bold">{g}</div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-zinc-500">Composite</div>
+            <div className="text-[12px] text-zinc-500">Composite</div>
             <div className="text-sm font-bold text-zinc-200" data-testid="scorecard-score">
               {(scorecard.composite_score || 0).toFixed(0)}
-              <span className="text-zinc-600 text-[10px]">/100</span>
+              <span className="text-zinc-600 text-[12px]">/100</span>
             </div>
           </div>
           {onClose && (
@@ -120,7 +120,7 @@ export default function ModelScorecard({ scorecard, onClose }) {
       {/* Red lines banner */}
       {redLines.length > 0 && (
         <div
-          className="mb-2 text-[10px] text-rose-400 bg-rose-500/5 border border-rose-500/20 rounded px-2 py-1"
+          className="mb-2 text-[12px] text-rose-400 bg-rose-500/5 border border-rose-500/20 rounded px-2 py-1"
           data-testid="scorecard-redlines"
         >
           ⚠ Red-line failures: {redLines.join(", ")}
@@ -233,7 +233,7 @@ export default function ModelScorecard({ scorecard, onClose }) {
 
       {/* Footer */}
       {scorecard.validated_at && (
-        <div className="mt-2 pt-1 border-t border-zinc-800/40 text-[9px] text-zinc-600 flex justify-between">
+        <div className="mt-2 pt-1 border-t border-zinc-800/40 text-[11px] text-zinc-600 flex justify-between">
           <span>Validated {new Date(scorecard.validated_at).toLocaleString()}</span>
           {scorecard.is_statistically_significant ? (
             <span className="text-emerald-500/70">✓ Statistically significant</span>

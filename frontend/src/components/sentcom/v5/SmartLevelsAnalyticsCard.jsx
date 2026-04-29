@@ -34,7 +34,7 @@ const _liftClass = (firedV, notV) => {
 const CohortRow = ({ label, summary, accent }) => (
   <div
     data-testid={`cohort-row-${label.toLowerCase().replace(/\s+/g, '-')}`}
-    className="grid grid-cols-5 items-center gap-2 px-3 py-1.5 text-[11px]"
+    className="grid grid-cols-5 items-center gap-2 px-3 py-1.5 text-[13px]"
   >
     <span className={`v5-mono ${accent || 'text-zinc-300'}`}>{label}</span>
     <span className="v5-mono text-right text-zinc-400">{summary?.count ?? 0}</span>
@@ -65,13 +65,13 @@ const LayerBlock = ({ icon: Icon, title, fired, notFired, firedLabel, notLabel }
           <span>{title}</span>
         </div>
         <span
-          className={`v5-mono text-[10px] ${_liftClass(fired?.mean_r, notFired?.mean_r)}`}
+          className={`v5-mono text-[12px] ${_liftClass(fired?.mean_r, notFired?.mean_r)}`}
           title="Mean R-multiple lift between cohorts"
         >
           {meanLift == null ? '—' : `${meanLift >= 0 ? '+' : ''}${meanLift.toFixed(2)}R lift`}
         </span>
       </div>
-      <div className="grid grid-cols-5 px-3 py-1 text-[10px] text-zinc-500 uppercase tracking-wider border-b border-zinc-900">
+      <div className="grid grid-cols-5 px-3 py-1 text-[12px] text-zinc-500 uppercase tracking-wider border-b border-zinc-900">
         <span>Cohort</span>
         <span className="text-right">N</span>
         <span className="text-right">Mean R</span>
@@ -142,14 +142,14 @@ export const SmartLevelsAnalyticsCard = ({ daysBack = 30, className = '' }) => {
         <div className="flex items-center gap-2 text-zinc-200 text-xs uppercase tracking-wider">
           <Layers className="w-4 h-4 opacity-70" />
           <span>Smart-levels analytics</span>
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[12px] text-zinc-500">
             ({data.total_trades} closed · {data.window_days}d)
           </span>
         </div>
         <button
           data-testid="smart-levels-analytics-refresh"
           onClick={load}
-          className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
         >
           refresh
         </button>

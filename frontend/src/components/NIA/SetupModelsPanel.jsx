@@ -43,7 +43,7 @@ const RISK_COLORS = {
 
 // ─── Small stat component ─────────────────
 const Stat = ({ label, value, color = 'text-zinc-300' }) => (
-  <div className="flex justify-between text-[9px]">
+  <div className="flex justify-between text-[11px]">
     <span className="text-zinc-500">{label}</span>
     <span className={`font-mono ${color}`}>{value}</span>
   </div>
@@ -56,7 +56,7 @@ const PhaseBadge = ({ phase, label, icon: Icon, status }) => {
   const skip = status === 'skip';
   return (
     <div
-      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium border ${
+      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border ${
         ok ? 'text-green-400 bg-green-500/10 border-green-500/20'
         : fail ? 'text-red-400 bg-red-500/10 border-red-500/20'
         : skip ? 'text-zinc-500 bg-zinc-500/10 border-zinc-500/20'
@@ -94,7 +94,7 @@ const ValidationSummary = memo(({ validation }) => {
     <div className="mt-1.5 p-2 rounded bg-black/30 border border-white/5 space-y-1.5" data-testid={`validation-summary-${v.setup_type}-${v.bar_size}`}>
       {/* Status + phases */}
       <div className="flex items-center justify-between">
-        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${statusColor}`}>
+        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${statusColor}`}>
           {v.status?.toUpperCase()} ({v.phases_passed || 0}/{v.phases_total || 3})
         </span>
         <div className="flex gap-1">
@@ -110,7 +110,7 @@ const ValidationSummary = memo(({ validation }) => {
         <div className="space-y-0.5">
           <div className="text-[8px] text-zinc-500 uppercase tracking-wider">AI Edge</div>
           {ai.error ? (
-            <div className="text-[9px] text-red-400">Error</div>
+            <div className="text-[11px] text-red-400">Error</div>
           ) : (
             <>
               <Stat label="WR" value={`${ai.ai_edge_win_rate > 0 ? '+' : ''}${(ai.ai_edge_win_rate || 0).toFixed(1)}%`}
@@ -126,9 +126,9 @@ const ValidationSummary = memo(({ validation }) => {
         <div className="space-y-0.5">
           <div className="text-[8px] text-zinc-500 uppercase tracking-wider">Risk</div>
           {mc.error ? (
-            <div className="text-[9px] text-red-400">Error</div>
+            <div className="text-[11px] text-red-400">Error</div>
           ) : mc.skipped ? (
-            <div className="text-[9px] text-zinc-500">Skipped</div>
+            <div className="text-[11px] text-zinc-500">Skipped</div>
           ) : (
             <>
               <Stat label="P(profit)" value={`${(mc.probability_of_profit || 0).toFixed(0)}%`}
@@ -145,9 +145,9 @@ const ValidationSummary = memo(({ validation }) => {
         <div className="space-y-0.5">
           <div className="text-[8px] text-zinc-500 uppercase tracking-wider">Robust</div>
           {wf.error ? (
-            <div className="text-[9px] text-red-400">Error</div>
+            <div className="text-[11px] text-red-400">Error</div>
           ) : wf.skipped ? (
-            <div className="text-[9px] text-zinc-500">Skipped</div>
+            <div className="text-[11px] text-zinc-500">Skipped</div>
           ) : (
             <>
               <Stat label="Efficiency" value={`${(wf.avg_efficiency_ratio || 0).toFixed(0)}%`}
@@ -195,7 +195,7 @@ const ProfileBadge = ({ profile, validation }) => {
     }
 
     return (
-      <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${accColor}`} data-testid={`profile-badge-${profile.bar_size}`}>
+      <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[12px] font-mono ${accColor}`} data-testid={`profile-badge-${profile.bar_size}`}>
         {hasValidation && vStatus === 'promoted' && <ShieldCheck className="w-2.5 h-2.5" />}
         {hasValidation && vStatus === 'rejected' && <ShieldX className="w-2.5 h-2.5" />}
         {!hasValidation && <Timer className="w-2.5 h-2.5" />}
@@ -205,7 +205,7 @@ const ProfileBadge = ({ profile, validation }) => {
     );
   }
   return (
-    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.02] text-[10px] text-zinc-500 font-mono" data-testid={`profile-badge-${profile.bar_size}`}>
+    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.02] text-[12px] text-zinc-500 font-mono" data-testid={`profile-badge-${profile.bar_size}`}>
       <Timer className="w-2.5 h-2.5" />
       <span>{label}</span>
       <span>--</span>
@@ -229,8 +229,8 @@ const ProfileScorecard = memo(({ modelName }) => {
       .catch(() => !cancelled && setErr("Fetch failed"));
     return () => { cancelled = true; };
   }, [modelName]);
-  if (err) return <div className="text-[10px] text-rose-400/70 mt-2">{err}</div>;
-  if (sc === null) return <div className="text-[10px] text-zinc-500 mt-2 italic">Loading scorecard…</div>;
+  if (err) return <div className="text-[12px] text-rose-400/70 mt-2">{err}</div>;
+  if (sc === null) return <div className="text-[12px] text-zinc-500 mt-2 italic">Loading scorecard…</div>;
   return (
     <div className="mt-2">
       <ModelScorecard scorecard={sc} />
@@ -284,25 +284,25 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
             <span className="text-xs font-semibold text-white truncate">{name.replace(/_/g, ' ')}</span>
           </div>
           {isAnyTraining ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] flex-shrink-0">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[12px] flex-shrink-0">
               <Loader2 className="w-2.5 h-2.5 animate-spin" /> Training
             </span>
           ) : trainedCount === totalCount && totalCount > 0 ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] flex-shrink-0">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[12px] flex-shrink-0">
               <CheckCircle2 className="w-2.5 h-2.5" /> {trainedCount}/{totalCount}
             </span>
           ) : trainedCount > 0 ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[10px] flex-shrink-0">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[12px] flex-shrink-0">
               {trainedCount}/{totalCount}
             </span>
           ) : (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-500/20 text-zinc-500 text-[10px] flex-shrink-0">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-500/20 text-zinc-500 text-[12px] flex-shrink-0">
               <XCircle className="w-2.5 h-2.5" /> 0/{totalCount}
             </span>
           )}
         </div>
 
-        <p className="text-[10px] text-zinc-500 mb-2">{data?.description || ''}</p>
+        <p className="text-[12px] text-zinc-500 mb-2">{data?.description || ''}</p>
 
         {/* Profile badges row */}
         <div className="flex flex-wrap gap-1 mb-2">
@@ -313,7 +313,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Validation status summary line */}
         {hasValidations && (
-          <div className="flex items-center gap-2 mb-1.5 text-[9px]">
+          <div className="flex items-center gap-2 mb-1.5 text-[11px]">
             <Shield className="w-3 h-3 text-zinc-500" />
             {promotedCount > 0 && (
               <span className="text-green-400">{promotedCount} promoted</span>
@@ -357,7 +357,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Market-wide signal density (from batch) */}
         {mwData && !mwData.error && (
-          <div className="flex items-center gap-2 mb-1.5 text-[9px]">
+          <div className="flex items-center gap-2 mb-1.5 text-[11px]">
             <Globe className="w-3 h-3 text-zinc-500" />
             <span className="text-zinc-400">
               {mwData.symbols_with_signals}/{mwData.symbols_scanned} symbols
@@ -371,7 +371,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Best accuracy highlight */}
         {bestProfile && (
-          <div className="flex justify-between text-[10px] mb-1">
+          <div className="flex justify-between text-[12px] mb-1">
             <span className="text-zinc-500">Best</span>
             <span className="text-green-400 font-mono">
               {(bestProfile.accuracy * 100).toFixed(1)}% ({BAR_SIZE_LABELS[bestProfile.bar_size] || bestProfile.bar_size})
@@ -382,7 +382,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
         {/* Expandable profile details */}
         <button
           onClick={() => setShowProfiles(!showProfiles)}
-          className="w-full text-left text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mb-1"
+          className="w-full text-left text-[12px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mb-1"
           data-testid={`toggle-profiles-${name}`}
         >
           <ChevronDown className={`w-3 h-3 transition-transform ${showProfiles ? 'rotate-180' : ''}`} />
@@ -404,17 +404,17 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                 return (
                   <div key={p.bar_size} className="p-2 rounded bg-black/20 border border-white/5" data-testid={`profile-detail-${name}-${p.bar_size}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-mono text-zinc-300">{BAR_SIZE_LABELS[p.bar_size] || p.bar_size}</span>
+                      <span className="text-[12px] font-mono text-zinc-300">{BAR_SIZE_LABELS[p.bar_size] || p.bar_size}</span>
                       {p.trained ? (
-                        <span className="text-[10px] text-green-400 font-mono">{(p.accuracy * 100).toFixed(1)}%</span>
+                        <span className="text-[12px] text-green-400 font-mono">{(p.accuracy * 100).toFixed(1)}%</span>
                       ) : pTraining?.status === 'running' ? (
-                        <span className="text-[10px] text-cyan-400 flex items-center gap-1"><Loader2 className="w-2 h-2 animate-spin" /> Training</span>
+                        <span className="text-[12px] text-cyan-400 flex items-center gap-1"><Loader2 className="w-2 h-2 animate-spin" /> Training</span>
                       ) : (
-                        <span className="text-[10px] text-zinc-500">Not trained</span>
+                        <span className="text-[12px] text-zinc-500">Not trained</span>
                       )}
                     </div>
-                    <div className="text-[9px] text-zinc-500">{p.description}</div>
-                    <div className="flex gap-2 mt-1 text-[9px] flex-wrap">
+                    <div className="text-[11px] text-zinc-500">{p.description}</div>
+                    <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
                       <span className="text-zinc-600">h={p.forecast_horizon}</span>
                       <span className="text-zinc-600">thr={((p.noise_threshold || 0) * 100).toFixed(2)}%</span>
                       {p.label_scheme === "triple_barrier_3class" && (
@@ -438,7 +438,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       })()}
                     </div>
                     {p.trained && (
-                      <div className="flex gap-3 mt-1 text-[9px] items-center">
+                      <div className="flex gap-3 mt-1 text-[11px] items-center">
                         <span className="text-zinc-500">{(p.training_samples || 0).toLocaleString()} samples</span>
                         {p.version && <span className="text-zinc-600">{p.version}</span>}
                         <button
@@ -451,7 +451,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       </div>
                     )}
                     {pTraining?.status === 'running' && pTraining.message && (
-                      <div className="text-[9px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
+                      <div className="text-[11px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
                     )}
 
                     {/* Scorecard expander */}
@@ -472,7 +472,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
         {hasValidations && !showProfiles && (
           <button
             onClick={() => setShowValidation(!showValidation)}
-            className="w-full text-left text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mb-1"
+            className="w-full text-left text-[12px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mb-1"
             data-testid={`toggle-validation-${name}`}
           >
             <Shield className={`w-3 h-3 transition-transform`} />
@@ -490,7 +490,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
             >
               {Object.entries(profileValidations).map(([barSize, val]) => (
                 <div key={barSize}>
-                  <div className="text-[9px] text-zinc-400 font-mono mb-0.5">{BAR_SIZE_LABELS[barSize] || barSize}</div>
+                  <div className="text-[11px] text-zinc-400 font-mono mb-0.5">{BAR_SIZE_LABELS[barSize] || barSize}</div>
                   <ValidationSummary validation={val} />
                 </div>
               ))}
@@ -500,11 +500,11 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Train button */}
         {isAnyTraining ? (
-          <div className="text-[10px] text-cyan-400/80 text-center mt-1">Training in progress...</div>
+          <div className="text-[12px] text-cyan-400/80 text-center mt-1">Training in progress...</div>
         ) : (
           <button
             onClick={() => onTrain(name)}
-            className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[10px] font-medium transition-colors mt-1 ${
+            className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[12px] font-medium transition-colors mt-1 ${
               trainedCount === totalCount && totalCount > 0
                 ? 'bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/5'
                 : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30'
@@ -539,7 +539,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
           <Layers className="w-3.5 h-3.5 text-cyan-400" />
           <span className="font-semibold">Batch Validation</span>
           {ms && !ms.error && (
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[12px] text-zinc-500">
               {ms.strategies_compared} strategies compared
             </span>
           )}
@@ -558,11 +558,11 @@ const BatchValidationPanel = memo(({ batchData }) => {
             {/* Phase 4: Multi-Strategy */}
             {ms && !ms.error && (
               <div className="p-2 rounded bg-black/20 border border-white/5" data-testid="multi-strategy-results">
-                <div className="flex items-center gap-1.5 mb-2 text-[10px] text-zinc-300 font-semibold">
+                <div className="flex items-center gap-1.5 mb-2 text-[12px] text-zinc-300 font-semibold">
                   <BarChart2 className="w-3 h-3 text-cyan-400" />
                   Phase 4: Multi-Strategy Comparison
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-2 text-[9px]">
+                <div className="grid grid-cols-3 gap-2 mb-2 text-[11px]">
                   <Stat label="Combined WR" value={`${(ms.combined_win_rate || 0).toFixed(1)}%`}
                     color={ms.combined_win_rate > 50 ? 'text-green-400' : 'text-yellow-400'} />
                   <Stat label="Combined Sharpe" value={`${(ms.combined_sharpe || 0).toFixed(2)}`}
@@ -572,7 +572,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
                 {/* Per-strategy table */}
                 <div className="space-y-0.5">
                   {(ms.strategy_summaries || []).map(s => (
-                    <div key={s.setup_type} className="flex items-center justify-between text-[9px] py-0.5 border-b border-white/5 last:border-0">
+                    <div key={s.setup_type} className="flex items-center justify-between text-[11px] py-0.5 border-b border-white/5 last:border-0">
                       <span className="text-zinc-400">{(s.setup_type || '').replace(/_/g, ' ')}</span>
                       <div className="flex gap-3">
                         <span className={s.win_rate > 50 ? 'text-green-400' : 'text-zinc-400'}>{s.win_rate?.toFixed(1)}%</span>
@@ -588,13 +588,13 @@ const BatchValidationPanel = memo(({ batchData }) => {
             {/* Phase 5: Market-Wide */}
             {mw.length > 0 && (
               <div className="p-2 rounded bg-black/20 border border-white/5" data-testid="market-wide-results">
-                <div className="flex items-center gap-1.5 mb-2 text-[10px] text-zinc-300 font-semibold">
+                <div className="flex items-center gap-1.5 mb-2 text-[12px] text-zinc-300 font-semibold">
                   <Globe className="w-3 h-3 text-cyan-400" />
                   Phase 5: Market-Wide Scan
                 </div>
                 <div className="space-y-0.5">
                   {mw.filter(m => !m.error).map(m => (
-                    <div key={m.setup_type} className="flex items-center justify-between text-[9px] py-0.5 border-b border-white/5 last:border-0">
+                    <div key={m.setup_type} className="flex items-center justify-between text-[11px] py-0.5 border-b border-white/5 last:border-0">
                       <span className="text-zinc-400">{(m.setup_type || '').replace(/_/g, ' ')}</span>
                       <div className="flex gap-3">
                         <span className="text-zinc-500">{m.symbols_with_signals}/{m.symbols_scanned}</span>
@@ -610,7 +610,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
 
             {/* Duration */}
             {batchData.total_duration_seconds && (
-              <div className="text-[9px] text-zinc-600 text-right">
+              <div className="text-[11px] text-zinc-600 text-right">
                 Total: {(batchData.total_duration_seconds / 60).toFixed(1)} min
               </div>
             )}
@@ -802,7 +802,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
               {totalPromoted}/{totalValidated} promoted
             </span>
           )}
-          <span className="text-[10px] text-zinc-500">{Object.keys(models).length} setup types</span>
+          <span className="text-[12px] text-zinc-500">{Object.keys(models).length} setup types</span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -848,7 +848,7 @@ const SetupModelsPanel = memo(({ embedded = false }) => {
       </div>
 
       {/* Pipeline info badge */}
-      <div className="flex items-center gap-2 mb-3 px-2 py-1.5 rounded bg-cyan-500/5 border border-cyan-500/10 text-[10px] text-cyan-400/70" data-testid="pipeline-info">
+      <div className="flex items-center gap-2 mb-3 px-2 py-1.5 rounded bg-cyan-500/5 border border-cyan-500/10 text-[12px] text-cyan-400/70" data-testid="pipeline-info">
         <Info className="w-3 h-3 flex-shrink-0" />
         <span>5-Phase Auto-Validation: AI Comparison &rarr; Monte Carlo &rarr; Walk-Forward &rarr; Multi-Strategy &rarr; Market-Wide</span>
       </div>

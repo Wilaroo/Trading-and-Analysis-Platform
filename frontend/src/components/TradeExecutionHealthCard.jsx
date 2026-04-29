@@ -45,7 +45,7 @@ const TradeExecutionHealthCard = memo(({ onClick }) => {
         data-testid="execution-health-loading"
       >
         <Loader2 className="w-3 h-3 text-zinc-500 animate-spin" />
-        <span className="text-[9px] font-mono text-zinc-500">exec</span>
+        <span className="text-[11px] font-mono text-zinc-500">exec</span>
       </div>
     );
   }
@@ -58,7 +58,7 @@ const TradeExecutionHealthCard = memo(({ onClick }) => {
         title="Could not fetch execution health"
       >
         <ShieldX className="w-3 h-3 text-zinc-500" />
-        <span className="text-[9px] font-mono text-zinc-500">exec ?</span>
+        <span className="text-[11px] font-mono text-zinc-500">exec ?</span>
       </div>
     );
   }
@@ -114,11 +114,11 @@ const TradeExecutionHealthCard = memo(({ onClick }) => {
       className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border ${s.border} ${s.bg} hover:brightness-125 transition-all cursor-pointer`}
     >
       <Icon className={`w-3 h-3 ${s.text}`} />
-      <span className={`text-[9px] font-mono font-bold ${s.text}`}>
+      <span className={`text-[11px] font-mono font-bold ${s.text}`}>
         EXEC {s.label}
       </span>
       {level !== 'insufficient_data' && (
-        <span className={`text-[9px] font-mono ${s.text} opacity-70`}>
+        <span className={`text-[11px] font-mono ${s.text} opacity-70`}>
           {ratePct}%
         </span>
       )}

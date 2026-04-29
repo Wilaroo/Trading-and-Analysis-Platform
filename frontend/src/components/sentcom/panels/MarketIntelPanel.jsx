@@ -23,7 +23,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div className="p-2 rounded-lg bg-black/30">
-              <span className="text-[10px] text-zinc-500 block">Regime</span>
+              <span className="text-[12px] text-zinc-500 block">Regime</span>
               <span className={`text-sm font-bold ${
                 context?.regime === 'RISK_ON' ? 'text-emerald-400' :
                 context?.regime === 'RISK_OFF' ? 'text-rose-400' :
@@ -33,7 +33,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
               </span>
             </div>
             <div className="p-2 rounded-lg bg-black/30">
-              <span className="text-[10px] text-zinc-500 block">SPY</span>
+              <span className="text-[12px] text-zinc-500 block">SPY</span>
               <span className={`text-sm font-bold ${
                 context?.spy_trend === 'Bullish' ? 'text-emerald-400' :
                 context?.spy_trend === 'Bearish' ? 'text-rose-400' :
@@ -43,11 +43,11 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
               </span>
             </div>
             <div className="p-2 rounded-lg bg-black/30">
-              <span className="text-[10px] text-zinc-500 block">VIX</span>
+              <span className="text-[12px] text-zinc-500 block">VIX</span>
               <span className="text-sm font-bold text-zinc-300">{context?.vix || '--'}</span>
             </div>
             <div className="p-2 rounded-lg bg-black/30">
-              <span className="text-[10px] text-zinc-500 block">Market</span>
+              <span className="text-[12px] text-zinc-500 block">Market</span>
               <span className={`text-sm font-bold ${context?.market_open ? 'text-emerald-400' : 'text-zinc-500'}`}>
                 {context?.market_open ? 'OPEN' : 'CLOSED'}
               </span>
@@ -64,7 +64,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
           </div>
           <span className="text-sm font-medium text-zinc-300">Setups We're Watching</span>
           {setups.length > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400">
+            <span className="text-[12px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400">
               {setups.length}
             </span>
           )}
@@ -77,7 +77,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
         ) : setups.length === 0 ? (
           <div className="text-center py-3">
             <Crosshair className="w-4 h-4 text-zinc-600 mx-auto mb-1" />
-            <p className="text-[10px] text-zinc-500">No setups currently</p>
+            <p className="text-[12px] text-zinc-500">No setups currently</p>
           </div>
         ) : (
           <div className="space-y-2 max-h-[200px] overflow-y-auto">
@@ -89,7 +89,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ClickableTicker symbol={setup.symbol} variant="inline" className="font-bold text-sm" />
-                    <span className="text-[9px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
+                    <span className="text-[11px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
                       {setup.setup_type || setup.type}
                     </span>
                   </div>
@@ -99,7 +99,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                   </div>
                 </div>
                 {setup.trigger_price && (
-                  <div className="text-[10px] text-zinc-500 mt-1">
+                  <div className="text-[12px] text-zinc-500 mt-1">
                     Entry: ${setup.trigger_price?.toFixed(2)}
                   </div>
                 )}
@@ -117,7 +117,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
           </div>
           <span className="text-sm font-medium text-zinc-300">Live Scanner Alerts</span>
           {alerts.length > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+            <span className="text-[12px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
               {alerts.length}
             </span>
           )}
@@ -130,7 +130,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
         ) : alerts.length === 0 ? (
           <div className="text-center py-3">
             <Radio className="w-4 h-4 text-zinc-600 mx-auto mb-1" />
-            <p className="text-[10px] text-zinc-500">Scanning for opportunities...</p>
+            <p className="text-[12px] text-zinc-500">Scanning for opportunities...</p>
           </div>
         ) : (
           <div className="space-y-2 max-h-[200px] overflow-y-auto">
@@ -142,7 +142,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ClickableTicker symbol={alert.symbol} variant="inline" className="font-bold text-sm" />
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
                       alert.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' :
                       alert.direction === 'SHORT' ? 'bg-rose-500/20 text-rose-400' :
                       'bg-zinc-500/20 text-zinc-400'
@@ -152,7 +152,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                   </div>
                   <span className="text-xs text-zinc-400">${alert.price?.toFixed(2) || '--'}</span>
                 </div>
-                <div className="text-[10px] text-zinc-500 mt-1">
+                <div className="text-[12px] text-zinc-500 mt-1">
                   {alert.setup_type} • {alert.score ? `Score: ${alert.score}` : ''}
                 </div>
               </div>

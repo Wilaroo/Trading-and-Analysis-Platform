@@ -50,7 +50,7 @@ const IntelOverview = memo(({ data }) => {
         ) : (
           <XCircle className="w-3 h-3 text-red-400" />
         )}
-        <span className="text-[10px] text-zinc-500">
+        <span className="text-[12px] text-zinc-500">
           {healthy}/{total} connectors
         </span>
       </div>
@@ -89,7 +89,7 @@ const IntelOverview = memo(({ data }) => {
             </div>
             <div className="text-xs text-zinc-400">{metric.label}</div>
             {metric.subtext && (
-              <div className="text-[10px] text-zinc-500 mt-1">{metric.subtext}</div>
+              <div className="text-[12px] text-zinc-500 mt-1">{metric.subtext}</div>
             )}
             {metric.connectorSummary && (
               <ConnectorDot summary={metric.connectorSummary} />

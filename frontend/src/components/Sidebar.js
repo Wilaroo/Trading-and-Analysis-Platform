@@ -133,7 +133,7 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               exit={{ opacity: 0 }}
               className="text-center"
             >
-              <p className="text-[9px] font-mono text-zinc-500">
+              <p className="text-[11px] font-mono text-zinc-500">
                 v2.0 • <span className="text-cyan-400">Compact</span>
               </p>
             </motion.div>

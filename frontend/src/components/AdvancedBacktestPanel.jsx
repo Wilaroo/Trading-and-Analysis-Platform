@@ -1557,7 +1557,7 @@ const AIComparisonTab = ({ allStrategies, onJobStarted, setLoading, loading }) =
               onChange={e => setConfidenceThreshold(parseFloat(e.target.value))}
               className="w-full accent-cyan-500"
             />
-            <div className="flex justify-between text-[10px] text-slate-500">
+            <div className="flex justify-between text-[12px] text-slate-500">
               <span>0.0 (any "up")</span>
               <span>0.5 (high conf.)</span>
             </div>
@@ -1613,13 +1613,13 @@ const AIComparisonTab = ({ allStrategies, onJobStarted, setLoading, loading }) =
 
 const MetricCard = ({ label, value, subtext, positive, testId }) => (
   <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/40" data-testid={testId}>
-    <div className="text-[11px] text-slate-400 mb-1">{label}</div>
+    <div className="text-[13px] text-slate-400 mb-1">{label}</div>
     <div className={`text-lg font-bold ${
       positive === true ? 'text-emerald-400' : positive === false ? 'text-red-400' : 'text-white'
     }`}>
       {value}
     </div>
-    {subtext && <div className="text-[10px] text-slate-500 mt-0.5">{subtext}</div>}
+    {subtext && <div className="text-[12px] text-slate-500 mt-0.5">{subtext}</div>}
   </div>
 );
 
@@ -1738,7 +1738,7 @@ const AIComparisonResults = ({ result }) => {
                     <th className="text-right py-2 px-2" colSpan="3">AI+Setup</th>
                     <th className="text-right py-2 px-2" colSpan="3">AI-Only</th>
                   </tr>
-                  <tr className="text-[10px] text-slate-500 border-b border-slate-700/30">
+                  <tr className="text-[12px] text-slate-500 border-b border-slate-700/30">
                     <th></th>
                     <th className="text-right px-2">Trades</th><th className="text-right px-2">WR</th><th className="text-right px-2">P&L</th>
                     <th className="text-right px-2">Trades</th><th className="text-right px-2">WR</th><th className="text-right px-2">P&L</th>
@@ -2603,7 +2603,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                           <tr key={t.id || i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                             <td className="py-1.5 px-2 font-mono text-slate-200">{t.symbol}</td>
                             <td className="py-1.5 px-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                                 t.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                               }`}>{t.direction}</span>
                             </td>
@@ -2619,7 +2619,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                             </td>
                             <td className="py-1.5 px-2 text-slate-500 max-w-[100px] truncate">{t.exit_reason}</td>
                             <td className="py-1.5 px-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                                 t.ai_consultation?.recommendation === 'proceed' ? 'bg-emerald-500/20 text-emerald-400' :
                                 t.ai_consultation?.recommendation === 'skip' ? 'bg-amber-500/20 text-amber-400' :
                                 'bg-slate-500/20 text-slate-400'
@@ -2663,13 +2663,13 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                               <td className="py-1.5 px-2 font-mono text-slate-200">{d.symbol}</td>
                               <td className="py-1.5 px-2 text-slate-300">{d.signal?.type}</td>
                               <td className="py-1.5 px-2">
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                                   d.signal?.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                                 }`}>{d.signal?.direction}</span>
                               </td>
                               <td className="py-1.5 px-2 text-right text-slate-300">{d.signal?.strength || '-'}</td>
                               <td className="py-1.5 px-2">
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                                   d.ai_decision?.recommendation === 'proceed' ? 'bg-emerald-500/20 text-emerald-400' :
                                   d.ai_decision?.recommendation === 'skip' ? 'bg-amber-500/20 text-amber-400' :
                                   'bg-slate-500/20 text-slate-400'
@@ -2715,7 +2715,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-300 font-mono">{jid?.substring(0, 20)}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${
                       job.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
                       job.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
                       job.status === 'failed' ? 'bg-red-500/20 text-red-400' :
@@ -2724,7 +2724,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                       {job.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 mt-1 text-[11px] text-slate-500">
+                  <div className="flex items-center gap-4 mt-1 text-[13px] text-slate-500">
                     <span>{job.config?.universe || job.universe || 'sp500'}</span>
                     <span>{job.total_trades || 0} trades</span>
                     {jWinRate > 0 && <span className={jWinRate >= 50 ? 'text-emerald-500' : 'text-red-500'}>{jWinRate.toFixed(0)}% WR</span>}

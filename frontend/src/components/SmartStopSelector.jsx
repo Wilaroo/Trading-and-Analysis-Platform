@@ -113,7 +113,7 @@ const LayeredStopsVisualizer = ({ entryPrice, atr, direction }) => {
           </div>
         </div>
       ))}
-      <p className="text-[10px] text-zinc-500 mt-2">
+      <p className="text-[12px] text-zinc-500 mt-2">
         Hardest to hunt - exit 40% at first stop, survive brief sweeps with remaining 60%
       </p>
     </div>
@@ -327,7 +327,7 @@ const SmartStopSelector = ({
                           </div>
                           <div className="flex justify-between text-xs">
                             <span className="text-zinc-500">Hunt Risk:</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${HUNT_RISK_COLORS[data.hunt_risk] || 'text-zinc-400'}`}>
+                            <span className={`px-1.5 py-0.5 rounded text-[12px] font-medium ${HUNT_RISK_COLORS[data.hunt_risk] || 'text-zinc-400'}`}>
                               {data.hunt_risk}
                             </span>
                           </div>

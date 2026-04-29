@@ -43,7 +43,7 @@ const RenderContent = ({ text, isUser }) => {
         if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
           return (
             <div key={i} className="flex items-start gap-1.5 pl-1">
-              <span className="text-emerald-400 mt-0.5 text-[10px]">&#9679;</span>
+              <span className="text-emerald-400 mt-0.5 text-[12px]">&#9679;</span>
               <span dangerouslySetInnerHTML={{ __html: processed.replace(/^[\s]*[-*]\s/, '') }} />
             </div>
           );
@@ -53,7 +53,7 @@ const RenderContent = ({ text, isUser }) => {
         if (/^\d+\.\s/.test(line.trim())) {
           return (
             <div key={i} className="flex items-start gap-1.5 pl-1">
-              <span className="text-cyan-400 font-mono text-[10px] mt-0.5 min-w-[14px]">{line.trim().match(/^(\d+)/)[1]}.</span>
+              <span className="text-cyan-400 font-mono text-[12px] mt-0.5 min-w-[14px]">{line.trim().match(/^(\d+)/)[1]}.</span>
               <span dangerouslySetInnerHTML={{ __html: processed.replace(/^\d+\.\s/, '') }} />
             </div>
           );
@@ -105,7 +105,7 @@ const ChatMessage = ({ msg }) => {
             : 'bg-zinc-800/80 border border-zinc-700/50 text-zinc-200 rounded-tl-sm'
         }`}>
           {/* Label */}
-          <span className={`text-[9px] font-bold uppercase tracking-wider block mb-1 ${
+          <span className={`text-[11px] font-bold uppercase tracking-wider block mb-1 ${
             showAsUser ? 'text-cyan-400/70' : 'text-emerald-400/70'
           }`}>
             {showAsUser ? 'YOU' : 'SENTCOM'}
@@ -126,7 +126,7 @@ const ChatMessage = ({ msg }) => {
             </button>
           )}
         </div>
-        <span className={`text-[9px] text-zinc-600 mt-0.5 block ${showAsUser ? 'text-right' : ''}`}>
+        <span className={`text-[11px] text-zinc-600 mt-0.5 block ${showAsUser ? 'text-right' : ''}`}>
           {formatRelativeTime(msg.timestamp)}
         </span>
       </div>
@@ -153,7 +153,7 @@ const QuickActions = ({ onAction, loading }) => {
             key={a.id}
             onClick={() => onAction(a)}
             disabled={loading === a.id}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all"
             data-testid={`chat-quick-${a.id}`}
           >
             {loading === a.id ? <Loader className="w-3 h-3 animate-spin" /> : <Icon className="w-3 h-3" />}
@@ -265,7 +265,7 @@ const ChatBubbleOverlay = ({
               <motion.span
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
-                className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow-lg"
+                className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-[12px] font-bold flex items-center justify-center shadow-lg"
                 data-testid="chat-unread-badge"
               >
                 {unreadCount > 9 ? '9+' : unreadCount}
@@ -299,7 +299,7 @@ const ChatBubbleOverlay = ({
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">SentCom</h3>
-                    <span className="text-[10px] text-zinc-500">Your trading partner &middot; Ctrl+K</span>
+                    <span className="text-[12px] text-zinc-500">Your trading partner &middot; Ctrl+K</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -353,7 +353,7 @@ const ChatBubbleOverlay = ({
                       <motion.span className="w-1.5 h-1.5 rounded-full bg-emerald-400" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, delay: 0.2 }} />
                       <motion.span className="w-1.5 h-1.5 rounded-full bg-emerald-400" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, delay: 0.4 }} />
                     </div>
-                    <span className="text-[11px] text-emerald-300/50">thinking...</span>
+                    <span className="text-[13px] text-emerald-300/50">thinking...</span>
                   </motion.div>
                 )}
               </div>

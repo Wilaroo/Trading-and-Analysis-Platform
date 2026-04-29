@@ -87,7 +87,7 @@ const PhaseRow = memo(({ phaseKey, phase, isCurrent }) => {
             {phase.label || phaseKey}
             {phase.phase_num ? <span className="text-zinc-600 ml-1">P{phase.phase_num}</span> : null}
           </span>
-          <span className="text-[10px] text-zinc-500 flex-shrink-0 ml-2 tabular-nums">
+          <span className="text-[12px] text-zinc-500 flex-shrink-0 ml-2 tabular-nums">
             {trained}/{expected}
             {failed > 0 && <span className="text-red-400 ml-1">({failed} err)</span>}
           </span>
@@ -106,13 +106,13 @@ const PhaseRow = memo(({ phaseKey, phase, isCurrent }) => {
       {/* Accuracy badge */}
       <div className="flex-shrink-0 w-16 text-right">
         {avgAcc ? (
-          <span className={`text-[10px] font-mono ${
+          <span className={`text-[12px] font-mono ${
             parseFloat(avgAcc) >= 60 ? 'text-green-400' : parseFloat(avgAcc) >= 50 ? 'text-yellow-400' : 'text-red-400'
           }`}>
             {avgAcc}%
           </span>
         ) : isDone ? (
-          elapsed ? <span className="text-[10px] text-zinc-600">{elapsed}</span> : null
+          elapsed ? <span className="text-[12px] text-zinc-600">{elapsed}</span> : null
         ) : null}
       </div>
     </motion.div>

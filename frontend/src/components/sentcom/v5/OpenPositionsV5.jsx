@@ -98,17 +98,17 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
           <div className="v5-panel-title">Open ({open.length})</div>
           <LiveDataChip compact />
         </div>
-        <div className={`v5-mono text-[10px] ${Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
+        <div className={`v5-mono text-[12px] ${Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
           {totalPnl != null ? formatUsd(totalPnl) : ''}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto v5-scroll">
         {loading && open.length === 0 && (
-          <div className="px-3 py-4 text-[11px] text-zinc-500">Loading positions…</div>
+          <div className="px-3 py-4 text-[13px] text-zinc-500">Loading positions…</div>
         )}
         {!loading && open.length === 0 && (
-          <div className="px-3 py-4 text-[11px] text-zinc-500">No open positions.</div>
+          <div className="px-3 py-4 text-[13px] text-zinc-500">No open positions.</div>
         )}
         {open.map(p => (
           <PositionRow key={p.id || p._id || p.symbol} position={p} onClick={() => onSelectPosition?.(p)} />

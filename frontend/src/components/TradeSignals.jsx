@@ -102,11 +102,11 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
             <span className="text-sm font-semibold text-white">Trade Signals</span>
           </div>
           {connected && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
               Live
             </span>
           )}
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[12px] text-zinc-500">
             {scanCount} scans | {signalCount} signals
           </span>
         </div>
@@ -123,10 +123,10 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
                   data-testid={`signal-chip-${s.symbol}`}
                 >
                   <span className="text-xs font-bold text-white">{s.symbol}</span>
-                  <span className={`text-[10px] ${s.direction === 'LONG' || s.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  <span className={`text-[12px] ${s.direction === 'LONG' || s.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
                     {s.direction === 'LONG' || s.direction === 'long' ? '▲' : '▼'}
                   </span>
-                  <span className={`text-[9px] px-1 py-0.5 rounded ${SETUP_COLORS[s.setup] || 'bg-zinc-700 text-zinc-300'}`}>
+                  <span className={`text-[11px] px-1 py-0.5 rounded ${SETUP_COLORS[s.setup] || 'bg-zinc-700 text-zinc-300'}`}>
                     {s.setup?.replace(/_/g, ' ').split(' ').map(w => w[0]?.toUpperCase()).join('')}
                   </span>
                 </button>
@@ -145,7 +145,7 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
 
       {/* Scanner Settings (collapsible) */}
       {showSettings && (
-        <div className="px-4 py-2 border-t border-white/5 flex items-center gap-3 text-[11px] text-zinc-400">
+        <div className="px-4 py-2 border-t border-white/5 flex items-center gap-3 text-[13px] text-zinc-400">
           <span>Watchlist: {status?.watchlist_size || 15} symbols</span>
           <span>Interval: {status?.scan_interval || 90}s</span>
           <span>Setups: {status?.setup_count || 4}</span>
@@ -171,11 +171,11 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
                   }
                   <span className="text-sm font-bold text-white">{signal.symbol}</span>
                 </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${SETUP_COLORS[signal.setup] || 'bg-zinc-700 text-zinc-300 border-zinc-600'}`}>
+                <span className={`text-[12px] px-1.5 py-0.5 rounded border ${SETUP_COLORS[signal.setup] || 'bg-zinc-700 text-zinc-300 border-zinc-600'}`}>
                   {signal.setup?.replace(/_/g, ' ')}
                 </span>
                 {signal.grade && (
-                  <span className={`text-[10px] px-1 py-0.5 rounded font-semibold ${
+                  <span className={`text-[12px] px-1 py-0.5 rounded font-semibold ${
                     signal.grade?.startsWith('A') ? 'bg-emerald-500/20 text-emerald-400' :
                     signal.grade?.startsWith('B') ? 'bg-cyan-500/20 text-cyan-400' :
                     'bg-zinc-600/30 text-zinc-400'
@@ -186,7 +186,7 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
                 {signal.price > 0 && (
                   <span className="text-xs font-mono text-zinc-300">${signal.price.toFixed(2)}</span>
                 )}
-                <span className="text-[10px] text-zinc-600">
+                <span className="text-[12px] text-zinc-600">
                   {signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                 </span>
               </div>
@@ -195,7 +195,7 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
             <div className="text-center py-6 text-zinc-500">
               <Zap className="w-6 h-6 mx-auto mb-1.5 opacity-40" />
               <p className="text-xs">No signals yet</p>
-              <p className="text-[10px] mt-0.5">Scanner is analyzing the market...</p>
+              <p className="text-[12px] mt-0.5">Scanner is analyzing the market...</p>
             </div>
           )}
         </div>

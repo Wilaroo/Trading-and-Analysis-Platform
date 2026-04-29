@@ -24,7 +24,7 @@ export const HoverTimestamp = ({ timestamp, children, position = 'left' }) => {
           >
             <button
               onClick={() => setShowFull(!showFull)}
-              className="px-2 py-0.5 rounded bg-zinc-800/95 border border-white/10 text-[10px] text-zinc-400 hover:text-zinc-300 whitespace-nowrap shadow-lg backdrop-blur-sm transition-colors"
+              className="px-2 py-0.5 rounded bg-zinc-800/95 border border-white/10 text-[12px] text-zinc-400 hover:text-zinc-300 whitespace-nowrap shadow-lg backdrop-blur-sm transition-colors"
             >
               {showFull ? formatFullTime(timestamp) : formatRelativeTime(timestamp)}
             </button>

@@ -531,21 +531,21 @@ const BotPerformanceChart = ({
         {/* Stats Row - Horizontal */}
         <div className="grid grid-cols-4 gap-2 mb-2">
           <div className="text-center p-2 rounded-lg bg-black/20">
-            <p className="text-[9px] text-zinc-500 uppercase">Trades</p>
+            <p className="text-[11px] text-zinc-500 uppercase">Trades</p>
             <p className="text-base font-bold text-white">{stats.totalTrades}</p>
           </div>
           <div className="text-center p-2 rounded-lg bg-black/20">
-            <p className="text-[9px] text-zinc-500 uppercase">Win Rate</p>
+            <p className="text-[11px] text-zinc-500 uppercase">Win Rate</p>
             <p className={`text-base font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
               {stats.winRate.toFixed(0)}%
             </p>
           </div>
           <div className="text-center p-2 rounded-lg bg-black/20">
-            <p className="text-[9px] text-zinc-500 uppercase">Open</p>
+            <p className="text-[11px] text-zinc-500 uppercase">Open</p>
             <p className="text-base font-bold text-cyan-400">{stats.openPositions || 0}</p>
           </div>
           <div className="text-center p-2 rounded-lg bg-black/20">
-            <p className="text-[9px] text-zinc-500 uppercase">Unrealized</p>
+            <p className="text-[11px] text-zinc-500 uppercase">Unrealized</p>
             <p className={`text-base font-bold ${stats.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {stats.unrealizedPnl >= 0 ? '+' : ''}{Math.abs(stats.unrealizedPnl || 0).toFixed(0)}
             </p>
@@ -558,7 +558,7 @@ const BotPerformanceChart = ({
             <button
               key={range}
               onClick={() => setTimeRange(range)}
-              className={`flex-1 px-2 py-1 text-[10px] rounded transition-all ${
+              className={`flex-1 px-2 py-1 text-[12px] rounded transition-all ${
                 timeRange === range 
                   ? 'bg-cyan-400/20 text-cyan-400 font-medium' 
                   : 'text-zinc-500 hover:text-zinc-400 hover:bg-white/5'

@@ -256,7 +256,7 @@ export const SentComV5View = ({
               data-help-id="cmd-k"
               title="Press ⌘K (Mac) or Ctrl+K to open the symbol search palette"
               onClick={() => window.dispatchEvent(new CustomEvent('sentcom:open-command-palette'))}
-              className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 v5-mono text-[9px] text-zinc-500 uppercase tracking-wide select-none hover:border-violet-700 hover:text-violet-300 transition-colors"
+              className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 v5-mono text-[11px] text-zinc-500 uppercase tracking-wide select-none hover:border-violet-700 hover:text-violet-300 transition-colors"
             >
               <kbd className="font-bold text-zinc-400">⌘K</kbd>
               <span className="opacity-60">search</span>
@@ -319,7 +319,7 @@ export const SentComV5View = ({
               <div className="v5-panel-title">Scanner · Live</div>
               <LiveDataChip compact />
             </div>
-            <div className="text-[9px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
+            <div className="text-[11px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
               {(() => {
                 // Count unique symbols across setups/alerts/positions so the
                 // header matches the deduped card list below (a single
@@ -501,7 +501,7 @@ export const SentComV5View = ({
       {/* Corner watermark — lets users opt out to v4 */}
       <div
         data-testid="sentcom-v5-badge"
-        className="fixed bottom-1 right-2 text-[9px] v5-mono text-zinc-600 pointer-events-none z-50"
+        className="fixed bottom-1 right-2 text-[11px] v5-mono text-zinc-600 pointer-events-none z-50"
       >
         v5 · <a
           href={typeof window !== 'undefined' ? `${window.location.pathname}?v4=1` : '/'}
@@ -557,7 +557,7 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
             spellCheck={false}
             autoComplete="off"
             data-testid="chart-header-symbol-input"
-            className="bg-transparent border border-zinc-800 focus:border-cyan-700 focus:outline-none rounded px-2 py-[2px] text-[11px] v5-mono uppercase tracking-wider w-28 placeholder-zinc-600 text-zinc-200"
+            className="bg-transparent border border-zinc-800 focus:border-cyan-700 focus:outline-none rounded px-2 py-[2px] text-[13px] v5-mono uppercase tracking-wider w-28 placeholder-zinc-600 text-zinc-200"
           />
         )}
         <LiveDataChip />
@@ -572,7 +572,7 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
           </span>
         )}
         {position && (
-          <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[10px] v5-mono">
+          <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[12px] v5-mono">
             {position.entry_price != null && (<><span className="v5-dim">E</span><span className="v5-warn font-bold">{Number(position.entry_price).toFixed(2)}</span></>)}
             {position.stop_price != null && (<><span className="v5-dim ml-1">SL</span><span className="v5-down font-bold">{Number(position.stop_price).toFixed(2)}</span></>)}
             {(() => {

@@ -156,7 +156,7 @@ const AICommandCenter = memo(({ aiData, connectors, thresholds, onRefresh, onRun
                             <span className="text-xs text-zinc-300">{setup}</span>
                             <div className="flex items-center gap-2">
                               <span className={`text-xs font-mono ${d.value > 1 ? 'text-yellow-400' : 'text-green-400'}`}>{d.value?.toFixed(2)}x</span>
-                              <span className="text-[10px] text-zinc-500">{(d.win_rate_30d * 100).toFixed(0)}% WR</span>
+                              <span className="text-[12px] text-zinc-500">{(d.win_rate_30d * 100).toFixed(0)}% WR</span>
                             </div>
                           </div>
                         ))}

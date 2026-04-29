@@ -16,7 +16,7 @@ export const TypingIndicator = ({ agentName = 'SENTCOM' }) => (
       <div className="relative overflow-hidden rounded-2xl rounded-tl-sm p-4 bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-transparent border border-violet-500/20 backdrop-blur-xl bg-white/[0.02] shadow-lg shadow-black/5">
         <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-transparent pointer-events-none" />
         <div className="relative flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">
+          <span className="text-[12px] font-bold uppercase tracking-wider text-violet-400">
             {agentName}
           </span>
         </div>

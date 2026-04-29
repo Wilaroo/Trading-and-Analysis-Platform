@@ -24,21 +24,21 @@ const ValidationResultsPanel = memo(({ validationResults, onRefresh }) => {
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div className="p-3 rounded-lg bg-white/[0.03] border border-white/5 text-center">
           <div className="text-2xl font-bold text-white">{total}</div>
-          <div className="text-[10px] text-zinc-500 uppercase">Total Validated</div>
+          <div className="text-[12px] text-zinc-500 uppercase">Total Validated</div>
         </div>
         <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
           <div className="text-2xl font-bold text-emerald-400">{promoted}</div>
-          <div className="text-[10px] text-emerald-500 uppercase">Promoted</div>
+          <div className="text-[12px] text-emerald-500 uppercase">Promoted</div>
         </div>
         <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
           <div className="text-2xl font-bold text-red-400">{rejected}</div>
-          <div className="text-[10px] text-red-500 uppercase">Rejected</div>
+          <div className="text-[12px] text-red-500 uppercase">Rejected</div>
         </div>
       </div>
 
       {/* Validation Records Table */}
       <div className="rounded-lg border border-white/5 overflow-hidden">
-        <div className="grid grid-cols-12 gap-1 px-3 py-2 bg-white/[0.02] text-[10px] text-zinc-500 uppercase font-medium border-b border-white/5">
+        <div className="grid grid-cols-12 gap-1 px-3 py-2 bg-white/[0.02] text-[12px] text-zinc-500 uppercase font-medium border-b border-white/5">
           <div className="col-span-3">Setup</div>
           <div className="col-span-2">Bar Size</div>
           <div className="col-span-2 text-center">Status</div>
@@ -70,15 +70,15 @@ const ValidationResultsPanel = memo(({ validationResults, onRefresh }) => {
                 </div>
                 <div className="col-span-2 text-center">
                   {isPromoted ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[12px]">
                       <ShieldCheck className="w-3 h-3" /> Live
                     </span>
                   ) : isRejected ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-[10px]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-[12px]">
                       <ShieldAlert className="w-3 h-3" /> Fail
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-500/20 text-zinc-400 text-[10px]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-500/20 text-zinc-400 text-[12px]">
                       <AlertTriangle className="w-3 h-3" /> Pending
                     </span>
                   )}
@@ -93,7 +93,7 @@ const ValidationResultsPanel = memo(({ validationResults, onRefresh }) => {
                         }`}
                       />
                     ))}
-                    <span className="ml-1 text-[10px] text-zinc-500">{phases}/{maxPhases}</span>
+                    <span className="ml-1 text-[12px] text-zinc-500">{phases}/{maxPhases}</span>
                   </div>
                 </div>
                 <div className="col-span-3 text-center">
@@ -121,7 +121,7 @@ const ValidationResultsPanel = memo(({ validationResults, onRefresh }) => {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 mt-3 text-[10px] text-zinc-500">
+      <div className="flex items-center gap-4 mt-3 text-[12px] text-zinc-500">
         <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-400" /> Promoted to live</span>
         <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-400" /> Rejected</span>
         <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-zinc-600" /> Phase not passed</span>

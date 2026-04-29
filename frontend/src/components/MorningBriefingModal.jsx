@@ -1,8 +1,11 @@
 /**
- * MorningBriefingModal — V5-styled deep-dive surface.
+ * BriefingDeepDiveModal (was: MorningBriefingModal) — V5-styled deep-dive
+ * surface. Accepts a `briefingKey` prop ("morning" | "midday" | "powerhour"
+ * | "close") so a single component renders all four daily briefings with
+ * the appropriate framing.
  *
- * Shares the `useMorningBriefing` hook with the inline V5 Briefings panel so
- * the modal and the panel never show stale/out-of-sync data.
+ * Shares the `useMorningBriefing` hook with the inline V5 Briefings panel
+ * so the modal and the panel never show stale/out-of-sync data.
  *
  * Visual language matches option-1-v5-command-center.html:
  *   • Pure zinc-950 background with a single 1px zinc-800 border
@@ -10,16 +13,57 @@
  *   • IBM Plex Sans for body copy
  *   • Stage chips (manage/order/eval/close/veto) reused from the V5 CSS
  *
- * The modal is opt-in (the CommandCenterPage floating bell) and no longer
- * auto-popups on page load (that logic was removed 2026-04-22).
+ * 2026-04-29 wide-modal rewire: max-w bumped from `xl` (576px) to
+ * min(108rem, 95vw) (~1728px on a 4K display) so the deep-dive
+ * actually uses the screen real estate operators have. Also the
+ * single-entry-point for all 4 briefings — clicking any pulse-button
+ * in `BriefingsCompactStrip` opens this modal with the matching key.
+ *
+ * Backwards-compat: legacy `<MorningBriefingModal>` named import still
+ * works (it's just an alias) so existing consumers that don't pass
+ * a `briefingKey` keep their original "morning" rendering.
  */
 import React, { memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, RefreshCw } from 'lucide-react';
+import { X, RefreshCw, Sun, Coffee, Zap, Moon } from 'lucide-react';
 import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
 import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
 import { fmtET12 } from '../utils/timeET';
+
+// Briefing variant table — drives header label, accent colour and icon.
+// Keeping all 4 in one map means a future 5th briefing (e.g. weekly
+// rollup) is a one-line addition.
+const BRIEFING_VARIANTS = {
+  morning: {
+    label:     'MORNING BRIEFING',
+    accent:    'text-violet-400',
+    Icon:      Sun,
+    timeBand:  '8:30 — 9:35 AM ET',
+    blurb:     "Pre-open prep — game plan, watchlist, regime, risk cap.",
+  },
+  midday: {
+    label:     'MID-DAY RECAP',
+    accent:    'text-amber-400',
+    Icon:      Coffee,
+    timeBand:  '11:30 AM — 1:00 PM ET',
+    blurb:     "Lunch checkpoint — open trades, scratched setups, drift since open.",
+  },
+  powerhour: {
+    label:     'POWER HOUR',
+    accent:    'text-orange-400',
+    Icon:      Zap,
+    timeBand:  '2:30 — 4:00 PM ET',
+    blurb:     "Pre-close re-eval — what to manage into the bell, what to flatten.",
+  },
+  close: {
+    label:     'EOD RECAP',
+    accent:    'text-cyan-400',
+    Icon:      Moon,
+    timeBand:  '4:00 — 5:00 PM ET',
+    blurb:     "End-of-day — closed trades, realized P&L, prediction grading.",
+  },
+};
 
 
 const fmtUsd = (v) => (v == null || Number.isNaN(Number(v))) ? '$—' : `${Number(v) >= 0 ? '+$' : '−$'}${Math.abs(Number(v)).toFixed(0)}`;
@@ -41,7 +85,7 @@ const fmtSwing = (v) => {
 const Section = ({ title, accent = 'text-zinc-200', right, children, testid }) => (
   <section data-testid={testid} className="border-t border-zinc-800">
     <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-900 bg-zinc-950/40">
-      <div className={`v5-mono text-[11px] font-bold tracking-widest uppercase ${accent}`}>{title}</div>
+      <div className={`v5-mono text-[13px] font-bold tracking-widest uppercase ${accent}`}>{title}</div>
       {right}
     </div>
     <div className="px-4 py-3">{children}</div>
@@ -49,10 +93,15 @@ const Section = ({ title, accent = 'text-zinc-200', right, children, testid }) =
 );
 
 
-const MorningBriefingModal = memo(({ isOpen, onClose }) => {
+const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }) => {
   useV5Styles();
   const { loading, data, reload } = useMorningBriefing({ enabled: isOpen, refreshMs: 0 });
   const live = useBriefingLiveData({ enabled: isOpen });
+
+  // Variant selection — defaults to morning if an unknown key is passed
+  // so a typo in the parent doesn't render a blank header.
+  const variant = BRIEFING_VARIANTS[briefingKey] || BRIEFING_VARIANTS.morning;
+  const VariantIcon = variant.Icon;
 
   const gp = data?.game_plan;
   const drc = data?.drc;
@@ -115,48 +164,59 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
           data-help-id="briefings"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950/90">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-950/90">
             <div className="flex items-center gap-3">
-              <span className="v5-mono text-xs font-bold tracking-widest text-violet-400">MORNING BRIEFING</span>
-              <span className="v5-mono text-[10px] v5-dim">{dateLabel}</span>
+              <VariantIcon className={`w-5 h-5 ${variant.accent}`} />
+              <span className={`v5-mono text-sm font-bold tracking-widest ${variant.accent}`}>
+                {variant.label}
+              </span>
+              <span className="v5-mono text-xs v5-dim hidden md:inline">·</span>
+              <span className="v5-mono text-xs v5-dim hidden md:inline">{variant.timeBand}</span>
+              <span className="v5-mono text-xs v5-dim hidden lg:inline">·</span>
+              <span className="v5-mono text-xs v5-dim hidden lg:inline">{dateLabel}</span>
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => { reload(); live.reload(); }}
-                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                className="p-2 rounded hover:bg-zinc-800 transition-colors"
                 data-testid="briefing-refresh"
                 title="Refresh"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${loading || live.loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 text-zinc-400 ${loading || live.loading ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
+                className="p-2 rounded hover:bg-zinc-800 transition-colors"
                 data-testid="close-briefing"
               >
-                <X className="w-3.5 h-3.5 text-zinc-400" />
+                <X className="w-4 h-4 text-zinc-400" />
               </button>
             </div>
+          </div>
+
+          {/* Variant blurb — sets context for the briefing variant */}
+          <div className="px-5 py-2 border-b border-zinc-900 bg-zinc-950/40">
+            <span className="text-xs text-zinc-400">{variant.blurb}</span>
           </div>
 
           {/* Top HUD — quick summary strip */}
           <div className="grid grid-cols-3 gap-px bg-zinc-900">
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Open P&L</div>
+              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Open P&L</div>
               <div className={`v5-mono text-lg font-bold ${quotesReady ? (totalUnrealizedPnl >= 0 ? 'v5-up' : 'v5-down') : 'v5-warn'}`}>
                 {quotesReady ? fmtUsd(totalUnrealizedPnl) : 'pending'}
               </div>
-              <div className="text-[9px] text-zinc-500">{open.length} position{open.length === 1 ? '' : 's'}</div>
+              <div className="text-[11px] text-zinc-500">{open.length} position{open.length === 1 ? '' : 's'}</div>
             </div>
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Closed today</div>
+              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Closed today</div>
               <div className={`v5-mono text-lg font-bold ${closed.length === 0 ? 'text-zinc-500' : (totalRealizedPnl >= 0 ? 'v5-up' : 'v5-down')}`}>
                 {closed.length === 0 ? '—' : fmtUsd(totalRealizedPnl)}
               </div>
-              <div className="text-[9px] text-zinc-500">{closed.length} fill{closed.length === 1 ? '' : 's'}</div>
+              <div className="text-[11px] text-zinc-500">{closed.length} fill{closed.length === 1 ? '' : 's'}</div>
             </div>
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">DRC</div>
+              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">DRC</div>
               <div className={`v5-mono text-lg font-bold ${
                 !drcHealth ? 'text-zinc-500'
                 : (drcHealth === 'green' || drcHealth === 'healthy') ? 'v5-up'
@@ -165,7 +225,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               }`}>
                 {drcHealth ? drcHealth.toUpperCase() : '—'}
               </div>
-              <div className="text-[9px] text-zinc-500">{maxRisk != null ? `cap $${Math.round(maxRisk)}` : 'no cap set'}</div>
+              <div className="text-[11px] text-zinc-500">{maxRisk != null ? `cap $${Math.round(maxRisk)}` : 'no cap set'}</div>
             </div>
           </div>
 
@@ -183,17 +243,17 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               testid="briefing-section-top-movers"
               right={
                 live.marketState && (
-                  <span data-testid="briefing-top-movers-market-state" className="v5-mono text-[9px] text-zinc-500 uppercase">
+                  <span data-testid="briefing-top-movers-market-state" className="v5-mono text-[11px] text-zinc-500 uppercase">
                     {live.marketState}
                   </span>
                 )
               }
             >
               {live.loading && live.topMovers.length === 0 && (
-                <div data-testid="briefing-top-movers-loading" className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                <div data-testid="briefing-top-movers-loading" className="v5-mono text-[12px] text-zinc-600">loading…</div>
               )}
               {!live.loading && live.topMovers.length === 0 && (
-                <div data-testid="briefing-top-movers-empty" className="v5-mono text-[10px] text-zinc-600">
+                <div data-testid="briefing-top-movers-empty" className="v5-mono text-[12px] text-zinc-600">
                   No live data (pusher offline or pre-trade)
                 </div>
               )}
@@ -207,9 +267,9 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                         data-testid={`briefing-mover-${s.symbol}`}
                         className="bg-zinc-950 px-3 py-2 flex flex-col gap-0.5"
                       >
-                        <span className="v5-mono text-[10px] font-bold text-zinc-100">{s.symbol}</span>
-                        <span className="v5-mono text-[10px] text-zinc-400">{fmtPrice(s.latest_price)}</span>
-                        <span className={`v5-mono text-[10px] font-bold ${up ? 'v5-up text-emerald-400' : 'v5-down text-rose-400'}`}>
+                        <span className="v5-mono text-[12px] font-bold text-zinc-100">{s.symbol}</span>
+                        <span className="v5-mono text-[12px] text-zinc-400">{fmtPrice(s.latest_price)}</span>
+                        <span className={`v5-mono text-[12px] font-bold ${up ? 'v5-up text-emerald-400' : 'v5-down text-rose-400'}`}>
                           {fmtChangePct(s.change_pct)}
                         </span>
                       </div>
@@ -233,7 +293,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                   {live.yesterdayCloseHours != null && live.yesterdayCloseHours > 10 && (
                     <span
                       data-testid="briefing-weekend-catchup-badge"
-                      className="v5-mono text-[9px] text-amber-400 uppercase tracking-wide"
+                      className="v5-mono text-[11px] text-amber-400 uppercase tracking-wide"
                       title={`Window widened to catch weekend / holiday news since ${live.yesterdayCloseStart || 'last close'}`}
                     >
                       since {Math.round(live.yesterdayCloseHours)}h ago
@@ -248,10 +308,10 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               }
             >
               {live.loading && live.sentimentResults.length === 0 && (
-                <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                <div className="v5-mono text-[12px] text-zinc-600">loading…</div>
               )}
               {!live.loading && live.sentimentResults.length === 0 && (
-                <div data-testid="briefing-sentiment-empty" className="v5-mono text-[10px] text-zinc-600">
+                <div data-testid="briefing-sentiment-empty" className="v5-mono text-[12px] text-zinc-600">
                   No overnight news for watchlist symbols.
                 </div>
               )}
@@ -269,17 +329,17 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                         data-testid={`briefing-sentiment-${r.symbol}`}
                         className={`flex items-start gap-2 px-2 py-1.5 rounded ${r.notable ? 'bg-zinc-900/60' : ''}`}
                       >
-                        <span className="v5-mono text-[10px] font-bold text-zinc-100 w-10 shrink-0">
+                        <span className="v5-mono text-[12px] font-bold text-zinc-100 w-10 shrink-0">
                           {r.symbol}
                         </span>
-                        <span className={`${chipCls} v5-mono text-[9px] shrink-0`} data-testid={`briefing-sentiment-chip-${r.symbol}`}>
+                        <span className={`${chipCls} v5-mono text-[11px] shrink-0`} data-testid={`briefing-sentiment-chip-${r.symbol}`}>
                           {fmtSwing(r.swing)}
                         </span>
-                        <span className="v5-mono text-[9px] text-zinc-500 shrink-0">
+                        <span className="v5-mono text-[11px] text-zinc-500 shrink-0">
                           y.close {fmtSwing(r.sentiment_yesterday_close)} · pre {fmtSwing(r.sentiment_premarket)}
                         </span>
                         {r.top_headline && (
-                          <span className="text-[10px] text-zinc-400 truncate flex-1" title={r.top_headline}>
+                          <span className="text-[12px] text-zinc-400 truncate flex-1" title={r.top_headline}>
                             · {r.top_headline}
                           </span>
                         )}
@@ -303,21 +363,21 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               }
             >
               {!gp ? (
-                <div className="text-[11px] text-zinc-500 v5-why">
+                <div className="text-[13px] text-zinc-500 v5-why">
                   No game plan filed for today. Add one in your journal to see
                   regime, bias, stocks-in-play and focus setups here tomorrow.
                 </div>
               ) : (
-                <div className="space-y-2 text-[11px]">
+                <div className="space-y-2 text-[13px]">
                   {marketBias && (
                     <div className="flex items-center gap-2">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Bias</span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Bias</span>
                       <span className={`v5-chip ${biasChip}`}>{marketBias}</span>
                     </div>
                   )}
                   {stocksInPlay.length > 0 && (
                     <div>
-                      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Stocks in play</div>
+                      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider mb-1">Stocks in play</div>
                       <div className="flex flex-wrap gap-1">
                         {stocksInPlay.slice(0, 12).map((s, i) => {
                           const sym = typeof s === 'string' ? s : (s.symbol || s.ticker);
@@ -333,19 +393,19 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                   )}
                   {focusSetups && (
                     <div className="v5-why">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Focus: </span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Focus: </span>
                       <span className="text-zinc-300">{focusSetups}</span>
                     </div>
                   )}
                   {riskNotes && (
                     <div className="v5-why">
-                      <span className="v5-mono text-[10px] text-rose-400 uppercase tracking-wider">Risk: </span>
+                      <span className="v5-mono text-[12px] text-rose-400 uppercase tracking-wider">Risk: </span>
                       <span className="text-zinc-300">{riskNotes}</span>
                     </div>
                   )}
                   {gp.thesis && (
                     <div className="v5-why">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Thesis: </span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Thesis: </span>
                       <span className="text-zinc-300">{gp.thesis}</span>
                     </div>
                   )}
@@ -375,12 +435,12 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="v5-mono text-xs font-bold text-zinc-100">{p.symbol}</span>
                           <span className={`v5-chip ${chip}`}>{dir === 'short' ? 'SHORT' : 'LONG'}</span>
-                          <span className="v5-mono text-[10px] v5-dim">{p.quantity || p.shares}sh</span>
+                          <span className="v5-mono text-[12px] v5-dim">{p.quantity || p.shares}sh</span>
                         </div>
                         {p.quote_ready === false ? (
-                          <span className="v5-mono text-[10px] v5-warn">awaiting…</span>
+                          <span className="v5-mono text-[12px] v5-warn">awaiting…</span>
                         ) : (
-                          <span className={`v5-mono text-[11px] font-bold ${pnl >= 0 ? 'v5-up' : 'v5-down'}`}>
+                          <span className={`v5-mono text-[13px] font-bold ${pnl >= 0 ? 'v5-up' : 'v5-down'}`}>
                             {fmtUsd(pnl)}
                           </span>
                         )}
@@ -388,7 +448,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                     );
                   })}
                   {open.length > 8 && (
-                    <div className="text-[10px] v5-dim pt-1">+ {open.length - 8} more…</div>
+                    <div className="text-[12px] v5-dim pt-1">+ {open.length - 8} more…</div>
                   )}
                 </div>
               </Section>
@@ -412,33 +472,33 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
               >
                 <div className="grid grid-cols-2 gap-px bg-zinc-900 -mx-4 -my-3">
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Kill switch</div>
+                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Kill switch</div>
                     <div className={`v5-mono text-xs font-bold ${safety?.state?.kill_switch_tripped ? 'v5-down' : 'v5-up'}`}>
                       {safety?.state?.kill_switch_tripped ? 'TRIPPED' : 'ARMED'}
                     </div>
                     {safety?.state?.kill_switch_reason && (
-                      <div className="text-[9px] text-zinc-400 truncate">{safety.state.kill_switch_reason}</div>
+                      <div className="text-[11px] text-zinc-400 truncate">{safety.state.kill_switch_reason}</div>
                     )}
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Open positions</div>
+                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Open positions</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       {safety?.live?.open_positions_count ?? 0}
                     </div>
                     {safety?.live?.awaiting_quotes && (
-                      <div className="text-[9px] text-amber-400 truncate" data-testid="briefing-awaiting-quotes">
+                      <div className="text-[11px] text-amber-400 truncate" data-testid="briefing-awaiting-quotes">
                         awaiting: {(safety.live.positions_missing_quotes || []).slice(0, 3).join(', ') || '—'}
                       </div>
                     )}
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Daily loss cap</div>
+                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Daily loss cap</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       ${Math.round(safety?.config?.max_daily_loss_usd ?? 0)}
                     </div>
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">Max positions</div>
+                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Max positions</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       {safety?.config?.max_positions ?? '—'}
                     </div>
@@ -485,13 +545,13 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                         data-testid={`briefing-drift-row-${d.model_version}`}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="v5-mono text-[11px] text-zinc-100 truncate">{d.model_version}</span>
+                          <span className="v5-mono text-[13px] text-zinc-100 truncate">{d.model_version}</span>
                           <span className={`v5-chip ${statusChip}`}>{(d.status || '').toUpperCase()}</span>
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
-                          <span className="v5-mono text-[10px] v5-dim">PSI {d.psi != null ? d.psi.toFixed(2) : '—'}</span>
-                          <span className="v5-mono text-[10px] v5-dim">KS {d.ks != null ? d.ks.toFixed(2) : '—'}</span>
-                          <span className={`v5-mono text-[10px] ${d.mean_shift >= 0 ? 'v5-up' : 'v5-down'}`}>
+                          <span className="v5-mono text-[12px] v5-dim">PSI {d.psi != null ? d.psi.toFixed(2) : '—'}</span>
+                          <span className="v5-mono text-[12px] v5-dim">KS {d.ks != null ? d.ks.toFixed(2) : '—'}</span>
+                          <span className={`v5-mono text-[12px] ${d.mean_shift >= 0 ? 'v5-up' : 'v5-down'}`}>
                             Δμ {d.mean_shift != null ? (d.mean_shift >= 0 ? '+' : '') + d.mean_shift.toFixed(2) : '—'}
                           </span>
                         </div>
@@ -499,7 +559,7 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                     );
                   })}
                   {drift.length > 6 && (
-                    <div className="text-[10px] v5-dim pt-1">+ {drift.length - 6} more…</div>
+                    <div className="text-[12px] v5-dim pt-1">+ {drift.length - 6} more…</div>
                   )}
                 </div>
               </Section>
@@ -516,22 +576,22 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                   <div className={`v5-mono text-xs font-bold ${scanner?.mode || scanner?.running ? 'v5-up' : 'text-zinc-500'}`}>
                     {scanner?.mode || (scanner?.running ? 'ACTIVE' : 'IDLE')}
                   </div>
-                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Scanner</div>
+                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Scanner</div>
                   {scanner?.total_hits != null && (
-                    <div className="text-[10px] text-zinc-400 v5-mono">{scanner.total_hits} hits</div>
+                    <div className="text-[12px] text-zinc-400 v5-mono">{scanner.total_hits} hits</div>
                   )}
                 </div>
                 <div className="bg-zinc-950 px-3 py-2">
                   <div className={`v5-mono text-xs font-bold ${bot?.is_active || bot?.running ? 'v5-up' : 'text-zinc-500'}`}>
                     {bot?.is_active || bot?.running ? 'ACTIVE' : 'IDLE'}
                   </div>
-                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Trading bot</div>
-                  {bot?.mode && <div className="text-[10px] text-zinc-400 v5-mono">{bot.mode}</div>}
+                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Trading bot</div>
+                  {bot?.mode && <div className="text-[12px] text-zinc-400 v5-mono">{bot.mode}</div>}
                 </div>
                 <div className="bg-zinc-950 px-3 py-2">
                   <div className="v5-mono text-xs font-bold v5-warn">PAPER</div>
-                  <div className="text-[9px] text-zinc-500 uppercase tracking-wider">Account mode</div>
-                  <div className="text-[10px] text-zinc-400 v5-mono">{timeLabel}</div>
+                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Account mode</div>
+                  <div className="text-[12px] text-zinc-400 v5-mono">{timeLabel}</div>
                 </div>
               </div>
             </Section>
@@ -543,10 +603,10 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                 accent="text-rose-400"
                 testid="briefing-section-drc"
               >
-                <div className="space-y-1 text-[11px]">
+                <div className="space-y-1 text-[13px]">
                   {drcHealth && (
                     <div className="flex items-center gap-2">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Status</span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Status</span>
                       <span className={`v5-chip ${drcHealth === 'green' || drcHealth === 'healthy' ? 'v5-chip-manage' : drcHealth === 'yellow' ? 'v5-chip-order' : 'v5-chip-veto'}`}>
                         {drcHealth.toUpperCase()}
                       </span>
@@ -554,13 +614,13 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
                   )}
                   {maxRisk != null && (
                     <div className="v5-why">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Daily risk cap: </span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Daily risk cap: </span>
                       <span className="v5-mono text-zinc-200">${Math.round(maxRisk)}</span>
                     </div>
                   )}
                   {drc.used != null && (
                     <div className="v5-why">
-                      <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wider">Used: </span>
+                      <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Used: </span>
                       <span className={`v5-mono ${drc.used >= maxRisk ? 'v5-down' : 'text-zinc-200'}`}>
                         ${Math.round(drc.used)} ({fmtPct(drc.used / Math.max(1e-6, maxRisk))})
                       </span>
@@ -574,12 +634,12 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
 
           {/* Footer — single CTA */}
           <div className="px-4 py-3 border-t border-zinc-800 bg-zinc-950/90 flex items-center justify-between">
-            <span className="v5-mono text-[9px] v5-dim">
+            <span className="v5-mono text-[11px] v5-dim">
               Auto-popup disabled · opens only via the briefing button
             </span>
             <button
               onClick={onClose}
-              className="px-4 py-1.5 rounded-sm bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-200 v5-mono text-[11px] font-bold uppercase tracking-widest transition-colors"
+              className="px-4 py-1.5 rounded-sm bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-200 v5-mono text-[13px] font-bold uppercase tracking-widest transition-colors"
               data-testid="start-trading-btn"
             >
               Let's trade →
@@ -591,6 +651,12 @@ const MorningBriefingModal = memo(({ isOpen, onClose }) => {
   );
 });
 
-MorningBriefingModal.displayName = 'MorningBriefingModal';
+BriefingDeepDiveModal.displayName = 'BriefingDeepDiveModal';
 
+// Backwards-compat alias — existing call sites that import the old
+// name keep working without a code change. New call sites should
+// prefer `BriefingDeepDiveModal` and pass a `briefingKey` prop.
+const MorningBriefingModal = BriefingDeepDiveModal;
+
+export { BriefingDeepDiveModal };
 export default MorningBriefingModal;

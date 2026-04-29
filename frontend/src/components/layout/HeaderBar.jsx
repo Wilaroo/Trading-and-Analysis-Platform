@@ -567,7 +567,7 @@ const SystemStatusPopover = ({
               <Server className="w-4 h-4 text-cyan-400" />
               System Status
             </h3>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Connection status for all services</p>
+            <p className="text-[12px] text-zinc-500 mt-0.5">Connection status for all services</p>
           </div>
           
           {/* Service List */}
@@ -593,7 +593,7 @@ const SystemStatusPopover = ({
                     </div>
                     <div>
                       <p className="text-xs font-medium text-white">{service.name}</p>
-                      <p className="text-[10px] text-zinc-500">
+                      <p className="text-[12px] text-zinc-500">
                         {service.stale ? 'Data stale — reconnect pusher' : service.description}
                       </p>
                     </div>
@@ -604,7 +604,7 @@ const SystemStatusPopover = ({
                       <button
                         onClick={service.action.onClick}
                         disabled={service.action.disabled}
-                        className="px-2 py-1 text-[10px] font-medium rounded bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+                        className="px-2 py-1 text-[12px] font-medium rounded bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
                       >
                         {service.action.label}
                       </button>
@@ -625,7 +625,7 @@ const SystemStatusPopover = ({
           
           {/* Footer with last update */}
           {wsLastUpdate && (
-            <div className="px-4 py-2 border-t border-white/5 text-[10px] text-zinc-500 flex items-center gap-1.5">
+            <div className="px-4 py-2 border-t border-white/5 text-[12px] text-zinc-500 flex items-center gap-1.5">
               <Clock className="w-3 h-3" />
               Last quote: {new Date(wsLastUpdate).toLocaleTimeString()}
             </div>
@@ -722,7 +722,7 @@ const HeaderBar = ({
               <h1 className="text-base font-bold tracking-tight text-white">
                 Command <span className="neon-text">Center</span>
               </h1>
-              <p className="text-zinc-500 text-[10px] tracking-wide hidden sm:block">Real-time trading intelligence</p>
+              <p className="text-zinc-500 text-[12px] tracking-wide hidden sm:block">Real-time trading intelligence</p>
             </div>
           </div>
 

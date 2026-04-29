@@ -151,19 +151,19 @@ export const AIInsightsDashboard = ({ onClose }) => {
                     
                     <div className="grid grid-cols-3 gap-4 mb-3">
                       <div>
-                        <p className="text-[10px] text-zinc-500 uppercase">Price</p>
+                        <p className="text-[12px] text-zinc-500 uppercase">Price</p>
                         <p className="text-sm font-medium text-white">
                           ${decision.price_at_decision?.toFixed(2) || 'N/A'}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-zinc-500 uppercase">Confidence</p>
+                        <p className="text-[12px] text-zinc-500 uppercase">Confidence</p>
                         <p className="text-sm font-medium text-cyan-400">
                           {(decision.confidence_score || 0).toFixed(0)}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-zinc-500 uppercase">Regime</p>
+                        <p className="text-[12px] text-zinc-500 uppercase">Regime</p>
                         <p className="text-sm font-medium text-violet-400">
                           {decision.market_regime || 'N/A'}
                         </p>
@@ -200,33 +200,33 @@ export const AIInsightsDashboard = ({ onClose }) => {
                   <div className="grid grid-cols-4 gap-4 text-center">
                     <div>
                       <p className="text-lg font-bold text-white">{timeseriesStatus.model.version}</p>
-                      <p className="text-[9px] text-zinc-500">Version</p>
+                      <p className="text-[11px] text-zinc-500">Version</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-cyan-400" data-testid="model-accuracy">
                         {((timeseriesStatus.model.metrics?.accuracy || 0) * 100).toFixed(1)}%
                       </p>
-                      <p className="text-[9px] text-zinc-500">Accuracy</p>
+                      <p className="text-[11px] text-zinc-500">Accuracy</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-amber-400">{timeseriesStatus.model.feature_count}</p>
-                      <p className="text-[9px] text-zinc-500">Features</p>
+                      <p className="text-[11px] text-zinc-500">Features</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-violet-400">
                         {(timeseriesStatus.model.metrics?.training_samples || 0).toLocaleString()}
                       </p>
-                      <p className="text-[9px] text-zinc-500">Samples</p>
+                      <p className="text-[11px] text-zinc-500">Samples</p>
                     </div>
                   </div>
                 )}
                 
                 {timeseriesStatus?.model?.metrics?.top_features && (
                   <div className="mt-3 pt-3 border-t border-white/5">
-                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Top Features</p>
+                    <p className="text-[12px] text-zinc-500 uppercase mb-2">Top Features</p>
                     <div className="flex flex-wrap gap-1">
                       {timeseriesStatus.model.metrics.top_features.slice(0, 6).map((f, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 text-zinc-400">
+                        <span key={i} className="text-[12px] px-2 py-0.5 rounded-full bg-black/40 text-zinc-400">
                           {f}
                         </span>
                       ))}
@@ -285,19 +285,19 @@ export const AIInsightsDashboard = ({ onClose }) => {
                         <p className="text-2xl font-bold text-emerald-400">
                           {(forecastResult.probability_up * 100).toFixed(1)}%
                         </p>
-                        <p className="text-[10px] text-zinc-500">Prob. UP</p>
+                        <p className="text-[12px] text-zinc-500">Prob. UP</p>
                       </div>
                       <div>
                         <p className="text-2xl font-bold text-rose-400">
                           {(forecastResult.probability_down * 100).toFixed(1)}%
                         </p>
-                        <p className="text-[10px] text-zinc-500">Prob. DOWN</p>
+                        <p className="text-[12px] text-zinc-500">Prob. DOWN</p>
                       </div>
                       <div>
                         <p className="text-2xl font-bold text-cyan-400">
                           {(forecastResult.confidence * 100).toFixed(0)}%
                         </p>
-                        <p className="text-[10px] text-zinc-500">Confidence</p>
+                        <p className="text-[12px] text-zinc-500">Confidence</p>
                       </div>
                     </div>
                     
@@ -305,7 +305,7 @@ export const AIInsightsDashboard = ({ onClose }) => {
                       {forecastResult.signal}
                     </p>
                     
-                    <p className="text-[10px] text-zinc-500 text-center mt-2">
+                    <p className="text-[12px] text-zinc-500 text-center mt-2">
                       Model: {forecastResult.model_version} | {forecastResult.usable ? '✅ Usable' : '⚠️ Low confidence'}
                     </p>
                   </div>
@@ -349,23 +349,23 @@ export const AIInsightsDashboard = ({ onClose }) => {
                   <div className="grid grid-cols-4 gap-4 text-center">
                     <div>
                       <p className="text-2xl font-bold text-white">{predictionAccuracy.total_predictions}</p>
-                      <p className="text-[9px] text-zinc-500">Total Predictions</p>
+                      <p className="text-[11px] text-zinc-500">Total Predictions</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-emerald-400">{predictionAccuracy.correct_predictions || 0}</p>
-                      <p className="text-[9px] text-zinc-500">Correct</p>
+                      <p className="text-[11px] text-zinc-500">Correct</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-cyan-400">
                         {(predictionAccuracy.accuracy * 100).toFixed(1)}%
                       </p>
-                      <p className="text-[9px] text-zinc-500">Accuracy</p>
+                      <p className="text-[11px] text-zinc-500">Accuracy</p>
                     </div>
                     <div>
                       <p className={`text-2xl font-bold ${(predictionAccuracy.avg_return_when_correct || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {((predictionAccuracy.avg_return_when_correct || 0) * 100).toFixed(2)}%
                       </p>
-                      <p className="text-[9px] text-zinc-500">Avg Return (Correct)</p>
+                      <p className="text-[11px] text-zinc-500">Avg Return (Correct)</p>
                     </div>
                   </div>
                 ) : (
@@ -375,7 +375,7 @@ export const AIInsightsDashboard = ({ onClose }) => {
                 {/* Accuracy by Direction */}
                 {predictionAccuracy?.by_direction && Object.keys(predictionAccuracy.by_direction).length > 0 && (
                   <div className="mt-4 pt-4 border-t border-white/5">
-                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Accuracy by Direction</p>
+                    <p className="text-[12px] text-zinc-500 uppercase mb-2">Accuracy by Direction</p>
                     <div className="flex gap-3">
                       {Object.entries(predictionAccuracy.by_direction).map(([dir, stats]) => (
                         <div key={dir} className="flex-1 p-2 rounded-lg bg-black/30 text-center">
@@ -444,7 +444,7 @@ export const AIInsightsDashboard = ({ onClose }) => {
                             </span>
                           )}
                           
-                          <span className="text-[10px] text-zinc-500">
+                          <span className="text-[12px] text-zinc-500">
                             {new Date(pred.timestamp).toLocaleDateString()}
                           </span>
                         </div>
@@ -488,19 +488,19 @@ export const AIInsightsDashboard = ({ onClose }) => {
                     <div className="grid grid-cols-4 gap-4 text-center">
                       <div>
                         <p className="text-lg font-bold text-white">{perf.total_decisions}</p>
-                        <p className="text-[9px] text-zinc-500">Total</p>
+                        <p className="text-[11px] text-zinc-500">Total</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-emerald-400">{perf.correct_decisions}</p>
-                        <p className="text-[9px] text-zinc-500">Correct</p>
+                        <p className="text-[11px] text-zinc-500">Correct</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-rose-400">{perf.incorrect_decisions}</p>
-                        <p className="text-[9px] text-zinc-500">Incorrect</p>
+                        <p className="text-[11px] text-zinc-500">Incorrect</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-amber-400">{perf.pending_outcomes}</p>
-                        <p className="text-[9px] text-zinc-500">Pending</p>
+                        <p className="text-[11px] text-zinc-500">Pending</p>
                       </div>
                     </div>
                     
@@ -510,13 +510,13 @@ export const AIInsightsDashboard = ({ onClose }) => {
                           <p className={`text-sm font-bold ${perf.avg_pnl_correct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {perf.avg_pnl_correct >= 0 ? '+' : ''}{perf.avg_pnl_correct?.toFixed(2) || 0}%
                           </p>
-                          <p className="text-[9px] text-zinc-500">Avg P&L (Correct)</p>
+                          <p className="text-[11px] text-zinc-500">Avg P&L (Correct)</p>
                         </div>
                         <div>
                           <p className={`text-sm font-bold ${perf.avg_pnl_incorrect >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {perf.avg_pnl_incorrect >= 0 ? '+' : ''}{perf.avg_pnl_incorrect?.toFixed(2) || 0}%
                           </p>
-                          <p className="text-[9px] text-zinc-500">Avg P&L (Incorrect)</p>
+                          <p className="text-[11px] text-zinc-500">Avg P&L (Incorrect)</p>
                         </div>
                       </div>
                     )}

@@ -28,7 +28,7 @@ export const StatusHeader = ({ status, context }) => {
               </span>
             </div>
             {regime !== 'UNKNOWN' && (
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              <span className={`px-2 py-0.5 rounded text-[12px] font-bold ${
                 regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
                 regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
                 'bg-zinc-500/20 text-zinc-400'

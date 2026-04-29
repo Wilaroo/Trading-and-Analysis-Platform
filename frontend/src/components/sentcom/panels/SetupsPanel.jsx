@@ -34,7 +34,7 @@ export const SetupsPanel = ({ setups, loading }) => {
             <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
               <div className="flex items-center gap-2">
                 <ClickableTicker symbol={setup.symbol} variant="inline" className="text-xs font-bold" />
-                <span className="text-[10px] text-zinc-500">{setup.setup_type}</span>
+                <span className="text-[12px] text-zinc-500">{setup.setup_type}</span>
               </div>
               {setup.trigger_price && (
                 <span className="text-xs text-cyan-400">${setup.trigger_price?.toFixed(2)}</span>

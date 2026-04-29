@@ -183,7 +183,7 @@ export const GlossaryDrawer = () => {
                 {selected ? selected.term : 'Glossary'}
               </span>
               {!selected && (
-                <span className="text-[10px] text-zinc-500 font-mono">
+                <span className="text-[12px] text-zinc-500 font-mono">
                   {filteredEntries.length}/{entries.length}
                 </span>
               )}
@@ -213,7 +213,7 @@ export const GlossaryDrawer = () => {
               </div>
               {selected.relatedTerms?.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-zinc-800">
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                  <div className="text-[12px] text-zinc-500 uppercase tracking-wide mb-1.5">
                     Related
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -226,7 +226,7 @@ export const GlossaryDrawer = () => {
                           type="button"
                           onClick={() => openTerm(rid)}
                           data-testid={`glossary-related-${rid}`}
-                          className="text-[11px] px-2 py-0.5 rounded border border-zinc-700 hover:border-cyan-500 text-zinc-300 hover:text-cyan-300 transition-colors"
+                          className="text-[13px] px-2 py-0.5 rounded border border-zinc-700 hover:border-cyan-500 text-zinc-300 hover:text-cyan-300 transition-colors"
                         >
                           {rel.term}
                         </button>
@@ -238,7 +238,7 @@ export const GlossaryDrawer = () => {
               {selected.tags?.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1">
                   {selected.tags.map((t) => (
-                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-500 uppercase tracking-wide">
+                    <span key={t} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-500 uppercase tracking-wide">
                       {t}
                     </span>
                   ))}
@@ -266,7 +266,7 @@ export const GlossaryDrawer = () => {
                 <button
                   type="button"
                   onClick={() => setCategoryFilter(ALL_CATEGORY_ID)}
-                  className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wide transition-colors ${
+                  className={`text-[12px] px-2 py-0.5 rounded uppercase tracking-wide transition-colors ${
                     categoryFilter === ALL_CATEGORY_ID
                       ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                       : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
@@ -280,7 +280,7 @@ export const GlossaryDrawer = () => {
                     type="button"
                     onClick={() => setCategoryFilter(c.id)}
                     data-testid={`glossary-cat-${c.id}`}
-                    className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wide transition-colors ${
+                    className={`text-[12px] px-2 py-0.5 rounded uppercase tracking-wide transition-colors ${
                       categoryFilter === c.id
                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                         : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
@@ -309,10 +309,10 @@ export const GlossaryDrawer = () => {
                       <div className="text-sm font-medium text-zinc-100 mb-0.5">
                         {e.term}
                       </div>
-                      <div className="text-[11px] text-zinc-500 line-clamp-2 leading-snug">
+                      <div className="text-[13px] text-zinc-500 line-clamp-2 leading-snug">
                         {e.shortDef}
                       </div>
-                      <div className="text-[9px] text-zinc-600 uppercase tracking-wide mt-1">
+                      <div className="text-[11px] text-zinc-600 uppercase tracking-wide mt-1">
                         {categories.find((c) => c.id === e.category)?.name || e.category}
                       </div>
                     </button>
@@ -323,7 +323,7 @@ export const GlossaryDrawer = () => {
           )}
 
           {/* Footer hint */}
-          <div className="px-3 py-2 border-t border-zinc-900 text-[10px] text-zinc-600 flex items-center justify-between">
+          <div className="px-3 py-2 border-t border-zinc-900 text-[12px] text-zinc-600 flex items-center justify-between">
             <span>Press <kbd className="px-1 py-0.5 bg-zinc-900 rounded">?</kbd> on the page to highlight every helpable element</span>
             <span>Esc to close</span>
           </div>

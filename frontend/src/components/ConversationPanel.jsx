@@ -46,7 +46,7 @@ const TypingIndicator = () => (
     <div className="flex-1 max-w-[80%]">
       <div className="rounded-2xl rounded-tl-sm p-3 bg-gradient-to-br from-violet-500/10 to-purple-500/5 border border-violet-500/20">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">SENTCOM</span>
+          <span className="text-[12px] font-bold uppercase tracking-wider text-violet-400">SENTCOM</span>
         </div>
         <div className="flex items-center gap-1.5">
           <motion.span
@@ -107,12 +107,12 @@ const ChatMessage = React.memo(({ message, index }) => {
         `}>
           {/* Header */}
           <div className={`flex items-center gap-2 mb-1.5 ${isUser ? 'justify-end' : ''}`}>
-            <span className={`text-[10px] font-bold uppercase tracking-wider ${
+            <span className={`text-[12px] font-bold uppercase tracking-wider ${
               isUser ? 'text-cyan-400' : 'text-violet-400'
             }`}>
               {isUser ? 'YOU' : 'SENTCOM'}
             </span>
-            <span className="text-[9px] text-zinc-500">
+            <span className="text-[11px] text-zinc-500">
               {formatRelativeTime(message.timestamp)}
             </span>
           </div>
@@ -126,7 +126,7 @@ const ChatMessage = React.memo(({ message, index }) => {
           {!isUser && message.confidence && (
             <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/10">
               <Gauge className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] text-violet-400">
+              <span className="text-[12px] text-violet-400">
                 Confidence: {message.confidence}%
               </span>
             </div>
@@ -164,7 +164,7 @@ const QuickActions = ({ onAction, loading }) => {
             key={action.id}
             onClick={() => onAction(action)}
             disabled={isLoading}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all border
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-medium transition-all border
               ${isLoading ? 'opacity-50' : 'hover:scale-105'}
               ${action.color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
                 action.color === 'cyan' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
@@ -319,7 +319,7 @@ const ConversationPanel = React.memo(({
       <div className="h-11 flex-shrink-0 flex items-center gap-2 px-4 border-b border-white/10">
         <MessageSquare className="w-4 h-4 text-cyan-400" />
         <span className="text-sm font-medium text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Conversation</span>
-        <span className="text-[10px] text-zinc-500 ml-auto">Chat with SentCom</span>
+        <span className="text-[12px] text-zinc-500 ml-auto">Chat with SentCom</span>
       </div>
       
       {/* Messages Area - Fills remaining space above input */}
@@ -355,7 +355,7 @@ const ConversationPanel = React.memo(({
           <QuickActions onAction={onQuickAction} loading={quickActionLoading} />
           <button
             onClick={() => setShowTradeForm(!showTradeForm)}
-            className={`flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all border
+            className={`flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-medium transition-all border
               ${showTradeForm 
                 ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400' 
                 : 'bg-zinc-800/50 border-white/10 text-zinc-400 hover:border-cyan-500/30'

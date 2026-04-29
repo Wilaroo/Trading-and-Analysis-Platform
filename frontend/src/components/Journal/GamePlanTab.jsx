@@ -171,19 +171,19 @@ const GamePlanTab = () => {
       {stats && (
         <div className="grid grid-cols-4 gap-3">
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">30-Day Plans</p>
+            <p className="text-[12px] text-zinc-500">30-Day Plans</p>
             <p className="text-lg font-bold text-white">{stats.total_plans}</p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Completion Rate</p>
+            <p className="text-[12px] text-zinc-500">Completion Rate</p>
             <p className="text-lg font-bold text-emerald-400">{stats.completion_rate}%</p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Night Before Prep</p>
+            <p className="text-[12px] text-zinc-500">Night Before Prep</p>
             <p className="text-lg font-bold text-cyan-400">{stats.night_before_rate}%</p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Avg Stocks/Plan</p>
+            <p className="text-[12px] text-zinc-500">Avg Stocks/Plan</p>
             <p className="text-lg font-bold text-white">{stats.avg_stocks_per_plan}</p>
           </div>
         </div>
@@ -213,7 +213,7 @@ const GamePlanTab = () => {
                   className="mt-3 space-y-3 overflow-hidden"
                 >
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">Market Overview</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">Market Overview</label>
                     {editing ? (
                       <textarea
                         value={editedPlan?.big_picture?.market_overview || ''}
@@ -231,7 +231,7 @@ const GamePlanTab = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase">Market Regime</label>
+                      <label className="text-[12px] text-zinc-500 uppercase">Market Regime</label>
                       {editing ? (
                         <select
                           value={editedPlan?.big_picture?.market_regime || ''}
@@ -252,7 +252,7 @@ const GamePlanTab = () => {
                       )}
                     </div>
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase">Bias</label>
+                      <label className="text-[12px] text-zinc-500 uppercase">Bias</label>
                       {editing ? (
                         <select
                           value={editedPlan?.big_picture?.bias || ''}
@@ -273,7 +273,7 @@ const GamePlanTab = () => {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">Recent Observations (What's Working)</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">Recent Observations (What's Working)</label>
                     {editing ? (
                       <textarea
                         value={editedPlan?.big_picture?.recent_observations || ''}
@@ -331,12 +331,12 @@ const GamePlanTab = () => {
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-white">{stock.symbol}</span>
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
                               stock.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                             }`}>
                               {stock.direction?.toUpperCase()}
                             </span>
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
                               stock.priority === 'primary' ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-500/20 text-zinc-400'
                             }`}>
                               {stock.priority}
@@ -371,7 +371,7 @@ const GamePlanTab = () => {
                         {stock.if_then_statements?.some(s => s.condition) && (
                           <div className="space-y-1">
                             {stock.if_then_statements.filter(s => s.condition).map((stmt, i) => (
-                              <div key={i} className="text-[10px] p-1.5 rounded bg-black/40">
+                              <div key={i} className="text-[12px] p-1.5 rounded bg-black/40">
                                 <span className="text-cyan-400">IF:</span> {stmt.condition}
                                 <span className="text-emerald-400 ml-2">THEN:</span> {stmt.action}
                               </div>
@@ -408,7 +408,7 @@ const GamePlanTab = () => {
                 >
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase">Daily Stop</label>
+                      <label className="text-[12px] text-zinc-500 uppercase">Daily Stop</label>
                       {editing ? (
                         <input
                           type="text"
@@ -425,7 +425,7 @@ const GamePlanTab = () => {
                       )}
                     </div>
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase">Per Trade Risk</label>
+                      <label className="text-[12px] text-zinc-500 uppercase">Per Trade Risk</label>
                       {editing ? (
                         <input
                           type="text"
@@ -443,7 +443,7 @@ const GamePlanTab = () => {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">Risk-Off Conditions</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">Risk-Off Conditions</label>
                     {editing ? (
                       <textarea
                         value={editedPlan?.risk_management?.risk_off_conditions || ''}
@@ -506,7 +506,7 @@ const GamePlanTab = () => {
               {editing ? (
                 <>
                   <div>
-                    <label className="text-[10px] text-zinc-500">Primary Goal</label>
+                    <label className="text-[12px] text-zinc-500">Primary Goal</label>
                     <input
                       type="text"
                       value={editedPlan?.session_goals?.primary_goal || ''}
@@ -519,7 +519,7 @@ const GamePlanTab = () => {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500">What to Avoid</label>
+                    <label className="text-[12px] text-zinc-500">What to Avoid</label>
                     <input
                       type="text"
                       value={editedPlan?.session_goals?.what_to_avoid || ''}

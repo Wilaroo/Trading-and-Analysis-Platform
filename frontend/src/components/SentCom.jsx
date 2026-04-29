@@ -92,7 +92,13 @@ import MorningBriefingModal from './MorningBriefingModal';
 // ============================================================================
 
 const SentCom = ({ compact = false, embedded = false }) => {
-  const [showBriefingDeepDive, setShowBriefingDeepDive] = useState(false);
+  // Briefing deep-dive modal state.
+  // Pre-2026-04-29 this was a simple boolean (only morning briefing
+  // existed in modal form). Now stores the briefingKey ("morning" |
+  // "midday" | "powerhour" | "close") so a single modal renders all
+  // four variants — clicked via the BriefingsCompactStrip pulse buttons.
+  const [briefingKey, setBriefingKey] = useState(null);
+  const showBriefingDeepDive = briefingKey !== null;
   const { status, loading: statusLoading } = useSentComStatus();
   const { messages, loading: streamLoading, refresh: refreshStream } = useSentComStream();
   const { positions, totalPnl, loading: positionsLoading } = useSentComPositions();
@@ -361,11 +367,12 @@ const SentCom = ({ compact = false, embedded = false }) => {
           handleChat={handleChat}
           selectedPosition={selectedPosition}
           setSelectedPosition={setSelectedPosition}
-          onOpenBriefingDeepDive={() => setShowBriefingDeepDive(true)}
+          onOpenBriefingDeepDive={(key = 'morning') => setBriefingKey(key)}
         />
         <MorningBriefingModal
           isOpen={showBriefingDeepDive}
-          onClose={() => setShowBriefingDeepDive(false)}
+          briefingKey={briefingKey || 'morning'}
+          onClose={() => setBriefingKey(null)}
         />
       </>
     );
@@ -440,7 +447,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                   </div>
                   <span className="text-zinc-600">•</span>
                   {/* Market Session Badge */}
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                     marketSession.is_open 
                       ? marketSession.name === 'MARKET OPEN' 
                         ? 'bg-emerald-500/20 text-emerald-400'
@@ -452,7 +459,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                   {regime !== 'UNKNOWN' && (
                     <>
                       <span className="text-zinc-600">•</span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                         regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
                         regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
                         'bg-zinc-500/20 text-zinc-400'
@@ -472,7 +479,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 : 'bg-zinc-500/10 border-zinc-500/30'
             }`}>
               <Bot className={`w-3.5 h-3.5 ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`} />
-              <span className={`text-[10px] font-bold ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              <span className={`text-[12px] font-bold ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`}>
                 {isRunning ? 'ACTIVE' : 'STOPPED'}
               </span>
             </div>
@@ -486,7 +493,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
               {mode === 'autonomous' ? <Zap className="w-3 h-3" /> :
                mode === 'confirmation' ? <Eye className="w-3 h-3" /> :
                <Pause className="w-3 h-3" />}
-              <span className="text-[9px] font-bold uppercase">{mode}</span>
+              <span className="text-[11px] font-bold uppercase">{mode}</span>
             </div>
             
             {/* Dynamic Risk Badge */}
@@ -603,7 +610,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                   >
                     AI Modules
                     {aiModulesStatus?.active_modules > 0 && (
-                      <span className="ml-1.5 px-1.5 py-0.5 text-[9px] bg-violet-500/30 text-violet-300 rounded-full">
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[11px] bg-violet-500/30 text-violet-300 rounded-full">
                         {aiModulesStatus.active_modules}
                       </span>
                     )}
@@ -635,7 +642,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                       >
                         <Zap className={`w-5 h-5 mx-auto mb-2 ${mode === 'autonomous' ? 'text-emerald-400' : 'text-zinc-500'}`} />
                         <div className="text-sm font-medium">Autonomous</div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">Auto-execute trades</div>
+                        <div className="text-[12px] text-zinc-500 mt-0.5">Auto-execute trades</div>
                       </button>
                       
                       {/* Confirmation Mode */}
@@ -650,7 +657,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                       >
                         <Eye className={`w-5 h-5 mx-auto mb-2 ${mode === 'confirmation' ? 'text-cyan-400' : 'text-zinc-500'}`} />
                         <div className="text-sm font-medium">Confirmation</div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">Require approval</div>
+                        <div className="text-[12px] text-zinc-500 mt-0.5">Require approval</div>
                       </button>
                       
                       {/* Paused Mode */}
@@ -665,7 +672,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                       >
                         <Pause className={`w-5 h-5 mx-auto mb-2 ${mode === 'paused' ? 'text-amber-400' : 'text-zinc-500'}`} />
                         <div className="text-sm font-medium">Paused</div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">No scanning</div>
+                        <div className="text-[12px] text-zinc-500 mt-0.5">No scanning</div>
                       </button>
                     </div>
                   </>
@@ -780,12 +787,12 @@ const SentCom = ({ compact = false, embedded = false }) => {
                   ) : (
                     <Circle className="w-2 h-2 text-zinc-500" />
                   )}
-                  <span className={`text-[10px] font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                  <span className={`text-[12px] font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
                     {status?.connected ? 'CONNECTED' : 'OFFLINE'}
                   </span>
                 </div>
                 {context?.regime && context.regime !== 'UNKNOWN' && (
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${
                     context.regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
                     context.regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
                     'bg-zinc-500/20 text-zinc-400'
@@ -818,7 +825,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
 
         {/* Thought Label */}
         <div className="px-4 pt-3 pb-1">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">What we're thinking right now</p>
+          <p className="text-[12px] text-zinc-500 uppercase tracking-wider">What we're thinking right now</p>
         </div>
         
         {/* Live Stream - compact height */}

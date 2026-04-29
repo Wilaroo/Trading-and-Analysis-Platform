@@ -115,13 +115,13 @@ export const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolCli
               type="button"
               data-testid="briefing-open-deep-dive"
               onClick={(e) => { e.stopPropagation(); onOpenDeepDive(); }}
-              className="v5-mono text-[9px] text-zinc-500 hover:text-violet-400 transition-colors uppercase tracking-wide"
+              className="v5-mono text-[11px] text-zinc-500 hover:text-violet-400 transition-colors uppercase tracking-wide"
               title="Open full briefing (top movers + overnight sentiment)"
             >
               full briefing ↗
             </button>
           )}
-          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
+          <span className="v5-mono text-[11px] v5-dim">{state === 'pending' ? '08:00' : '09:28'}</span>
         </div>
       </div>
       <div className="v5-why mt-1">
@@ -138,7 +138,7 @@ export const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolCli
         )}
       </div>
       {expanded && hasData && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1 text-zinc-400">
           {gp?.thesis && (
             <div><span className="text-zinc-500">Thesis: </span>{gp.thesis}</div>
           )}
@@ -209,13 +209,13 @@ export const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onTog
               type="button"
               data-testid="briefing-midday-open-deep-dive"
               onClick={(e) => { e.stopPropagation(); onOpenDeepDive('midday'); }}
-              className="v5-mono text-[9px] text-zinc-500 hover:text-amber-400 transition-colors uppercase tracking-wide"
+              className="v5-mono text-[11px] text-zinc-500 hover:text-amber-400 transition-colors uppercase tracking-wide"
               title="Open full mid-day briefing (closed trades, open P&L, regime drift)"
             >
               full briefing ↗
             </button>
           )}
-          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowETDisplay()}</span>
+          <span className="v5-mono text-[11px] v5-dim">{state === 'pending' ? formatTimeRange(11, 30) : nowETDisplay()}</span>
         </div>
       </div>
       <div className="v5-why mt-1">
@@ -240,7 +240,7 @@ export const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onTog
         )}
       </div>
       {expanded && closed.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1">
           {closed.slice(0, 5).map((p, i) => {
             const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
             return (
@@ -258,7 +258,7 @@ export const MidDayRecapCard = ({ positions, totalPnl, briefing, expanded, onTog
       {/* Empty-state expand: surface scanner watchlist so operator has
           something actionable to skim mid-day. */}
       {expanded && closed.length === 0 && open.length === 0 && Array.isArray(gp?.watchlist) && gp.watchlist.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1 text-zinc-400">
           <div>
             <span className="text-zinc-500">Watchlist: </span>
             {gp.watchlist.slice(0, 8).map((sym, i) => (
@@ -308,13 +308,13 @@ export const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggl
               type="button"
               data-testid="briefing-powerhour-open-deep-dive"
               onClick={(e) => { e.stopPropagation(); onOpenDeepDive('powerhour'); }}
-              className="v5-mono text-[9px] text-zinc-500 hover:text-orange-400 transition-colors uppercase tracking-wide"
+              className="v5-mono text-[11px] text-zinc-500 hover:text-orange-400 transition-colors uppercase tracking-wide"
               title="Open full power-hour briefing (open positions + setups for the close)"
             >
               full briefing ↗
             </button>
           )}
-          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowETDisplay()}</span>
+          <span className="v5-mono text-[11px] v5-dim">{state === 'pending' ? formatTimeRange(15, 0) : nowETDisplay()}</span>
         </div>
       </div>
       <div className="v5-why mt-1">
@@ -346,7 +346,7 @@ export const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggl
         )}
       </div>
       {expanded && open.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1">
           {open.map((p, i) => {
             const pnl = Number(p.unrealized_pnl ?? p.pnl ?? 0);
             return (
@@ -362,7 +362,7 @@ export const PowerHourCard = ({ positions, totalPnl, briefing, expanded, onToggl
       )}
       {/* Empty-state expand: full watchlist for the close. */}
       {expanded && open.length === 0 && fallbackWatch.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 text-zinc-400">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1 text-zinc-400">
           <div>
             <span className="text-zinc-500">Setups for the close: </span>
             {fallbackWatch.map((sym, i) => (
@@ -405,13 +405,13 @@ export const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymb
               type="button"
               data-testid="briefing-close-open-deep-dive"
               onClick={(e) => { e.stopPropagation(); onOpenDeepDive('close'); }}
-              className="v5-mono text-[9px] text-zinc-500 hover:text-slate-300 transition-colors uppercase tracking-wide"
+              className="v5-mono text-[11px] text-zinc-500 hover:text-slate-300 transition-colors uppercase tracking-wide"
               title="Open full close recap (every fill, win-rate, day P&L breakdown)"
             >
               full briefing ↗
             </button>
           )}
-          <span className="v5-mono text-[9px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowETDisplay()}</span>
+          <span className="v5-mono text-[11px] v5-dim">{state === 'pending' ? formatTimeRange(16, 0) : nowETDisplay()}</span>
         </div>
       </div>
       <div className="v5-why mt-1">
@@ -426,7 +426,7 @@ export const CloseRecapCard = ({ positions, totalPnl, expanded, onToggle, onSymb
         )}
       </div>
       {expanded && closed.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-zinc-800 text-[10px] space-y-1 max-h-32 overflow-y-auto v5-scroll">
+        <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1 max-h-32 overflow-y-auto v5-scroll">
           {closed.map((p, i) => {
             const pnl = Number(p.realized_pnl ?? p.pnl ?? 0);
             return (

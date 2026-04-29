@@ -110,11 +110,11 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
             <div className="flex items-center gap-2">
-              <span className="v5-mono font-bold text-[11px] text-violet-400 uppercase">
+              <span className="v5-mono font-bold text-[13px] text-violet-400 uppercase">
                 Freshness Inspector
               </span>
               {health && (
-                <span className={`v5-mono text-[9px] px-1.5 py-0.5 rounded border uppercase ${STATUS_PILL[health.overall] || STATUS_PILL.yellow}`}>
+                <span className={`v5-mono text-[11px] px-1.5 py-0.5 rounded border uppercase ${STATUS_PILL[health.overall] || STATUS_PILL.yellow}`}>
                   {health.overall}
                 </span>
               )}
@@ -185,7 +185,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
 
             {/* Subsystem grid */}
             <section data-testid="inspector-subsystems">
-              <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+              <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide mb-1.5">
                 Subsystems
               </div>
               {health?.subsystems ? (
@@ -197,23 +197,23 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                       className={`px-2.5 py-1.5 rounded border ${STATUS_PILL[s.status] || STATUS_PILL.yellow}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="v5-mono text-[10px] font-bold">{s.name}</span>
-                        <span className="v5-mono text-[9px] uppercase opacity-70">{s.status}</span>
+                        <span className="v5-mono text-[12px] font-bold">{s.name}</span>
+                        <span className="v5-mono text-[11px] uppercase opacity-70">{s.status}</span>
                       </div>
-                      <div className="v5-mono text-[9px] opacity-75 mt-0.5 truncate" title={s.detail}>
+                      <div className="v5-mono text-[11px] opacity-75 mt-0.5 truncate" title={s.detail}>
                         {s.detail}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                <div className="v5-mono text-[12px] text-zinc-600">loading…</div>
               )}
             </section>
 
             {/* Live subscriptions */}
             <section data-testid="inspector-subs">
-              <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5 flex items-center gap-2">
+              <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide mb-1.5 flex items-center gap-2">
                 Live subscriptions
                 {subs && (
                   <span className="text-zinc-400">
@@ -222,7 +222,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                 )}
               </div>
               {subs?.subscriptions?.length ? (
-                <div className="space-y-0.5 v5-mono text-[10px]">
+                <div className="space-y-0.5 v5-mono text-[12px]">
                   {subs.subscriptions.slice(0, 20).map((s) => (
                     <div
                       key={s.symbol}
@@ -232,7 +232,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                       <span className="font-bold text-zinc-100 w-12">{s.symbol}</span>
                       <span className="text-zinc-500">ref×{s.ref_count}</span>
                       <span className="text-zinc-600">idle {Math.round(s.idle_seconds)}s</span>
-                      <span className={`ml-auto text-[9px] ${s.pusher_ok ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      <span className={`ml-auto text-[11px] ${s.pusher_ok ? 'text-emerald-500' : 'text-amber-500'}`}>
                         {s.pusher_ok ? 'pusher ok' : 'no pusher'}
                       </span>
                     </div>
@@ -240,25 +240,25 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                   {subs.subscriptions.length > 20 && (
                     <div
                       data-testid="inspector-subs-more"
-                      className="px-2 py-1 text-[9px] text-zinc-600 uppercase tracking-wide"
+                      className="px-2 py-1 text-[11px] text-zinc-600 uppercase tracking-wide"
                     >
                       +{subs.subscriptions.length - 20} more not shown
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="v5-mono text-[10px] text-zinc-600">no active subscriptions</div>
+                <div className="v5-mono text-[12px] text-zinc-600">no active subscriptions</div>
               )}
             </section>
 
             {/* TTL plan + pusher RPC */}
             <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div data-testid="inspector-ttl">
-                <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide mb-1.5">
                   Cache TTL plan
                 </div>
                 {ttl ? (
-                  <div className="v5-mono text-[10px] space-y-0.5">
+                  <div className="v5-mono text-[12px] space-y-0.5">
                     <div className="text-zinc-400">
                       current state: <span className="text-zinc-100 font-bold">{ttl.market_state}</span>
                     </div>
@@ -274,15 +274,15 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                     </div>
                   </div>
                 ) : (
-                  <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                  <div className="v5-mono text-[12px] text-zinc-600">loading…</div>
                 )}
               </div>
               <div data-testid="inspector-rpc">
-                <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide mb-1.5">
                   Pusher RPC
                 </div>
                 {rpc ? (
-                  <div className="v5-mono text-[10px] space-y-0.5 text-zinc-400">
+                  <div className="v5-mono text-[12px] space-y-0.5 text-zinc-400">
                     <div>
                       reachable: <span className={rpc.reachable ? 'text-emerald-400' : 'text-amber-400'}>
                         {String(rpc.reachable)}
@@ -293,7 +293,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                     <div>failures: <span className="text-zinc-100">{rpc.client?.consecutive_failures ?? 0}</span></div>
                   </div>
                 ) : (
-                  <div className="v5-mono text-[10px] text-zinc-600">loading…</div>
+                  <div className="v5-mono text-[12px] text-zinc-600">loading…</div>
                 )}
               </div>
             </section>

@@ -20,7 +20,7 @@ export const OrderPipeline = ({ status }) => {
         </div>
         <div>
           <p className="text-lg font-bold text-amber-400">{pipeline.pending}</p>
-          <p className="text-[9px] text-zinc-500 uppercase">Pending</p>
+          <p className="text-[11px] text-zinc-500 uppercase">Pending</p>
         </div>
       </div>
       
@@ -32,7 +32,7 @@ export const OrderPipeline = ({ status }) => {
         </div>
         <div>
           <p className="text-lg font-bold text-cyan-400">{pipeline.executing}</p>
-          <p className="text-[9px] text-zinc-500 uppercase">Executing</p>
+          <p className="text-[11px] text-zinc-500 uppercase">Executing</p>
         </div>
       </div>
       
@@ -44,7 +44,7 @@ export const OrderPipeline = ({ status }) => {
         </div>
         <div>
           <p className="text-lg font-bold text-emerald-400">{pipeline.filled}</p>
-          <p className="text-[9px] text-zinc-500 uppercase">Filled</p>
+          <p className="text-[11px] text-zinc-500 uppercase">Filled</p>
         </div>
       </div>
     </div>

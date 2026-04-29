@@ -151,7 +151,7 @@ const QuickActionsMenu = ({
   // Variant: Compact (small inline text buttons)
   if (variant === 'compact') {
     return (
-      <div className={`flex items-center gap-1 text-[10px] ${className}`} data-testid={`quick-actions-${symbol}`}>
+      <div className={`flex items-center gap-1 text-[12px] ${className}`} data-testid={`quick-actions-${symbol}`}>
         {hasPosition && (
           <button
             onClick={handleClosePosition}

@@ -111,7 +111,7 @@ export const StrategyMixCard = () => {
         {data.concentration_warning && (
           <div
             data-testid="strategy-mix-concentration-warning"
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30"
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-bold tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30"
           >
             <AlertTriangle className="w-3 h-3" />
             {data.top_strategy_pct.toFixed(0)}% CONCENTRATION
@@ -159,7 +159,7 @@ export const StrategyMixCard = () => {
               </span>
               {b.strong_edge_count > 0 && (
                 <span
-                  className="flex items-center gap-0.5 text-[10px] text-fuchsia-300"
+                  className="flex items-center gap-0.5 text-[12px] text-fuchsia-300"
                   data-testid={`strategy-mix-strong-edge-${b.setup_type}`}
                 >
                   <Zap className="w-3 h-3" />
@@ -182,7 +182,7 @@ export const StrategyMixCard = () => {
               >
                 {hasPnl ? `${b.win_rate_pct.toFixed(0)}%` : '—'}
               </span>
-              <span className="w-8 text-right v5-mono text-zinc-600 text-[10px]">
+              <span className="w-8 text-right v5-mono text-zinc-600 text-[12px]">
                 {hasPnl ? `n${b.outcomes_count}` : ''}
               </span>
             </div>
@@ -190,7 +190,7 @@ export const StrategyMixCard = () => {
         })}
         {hidden > 0 && (
           <div
-            className="text-[10px] text-zinc-600 italic pl-32"
+            className="text-[12px] text-zinc-600 italic pl-32"
             data-testid="strategy-mix-hidden-count"
           >
             +{hidden} more strategies
@@ -201,7 +201,7 @@ export const StrategyMixCard = () => {
       {/* Column legend — only render once strategies are populated. */}
       {visible.length > 0 && (
         <div
-          className="flex items-center justify-end gap-2 text-[9px] text-zinc-600 pl-32 pt-1 v5-mono"
+          className="flex items-center justify-end gap-2 text-[11px] text-zinc-600 pl-32 pt-1 v5-mono"
           data-testid="strategy-mix-legend"
         >
           <span className="w-10 text-right">freq%</span>

@@ -761,11 +761,11 @@ export const ChartPanel = ({
           >
             {symbol}
           </span>
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[12px] uppercase tracking-wider text-zinc-500">
             {active.label} bars
           </span>
           {lastUpdated && !loading && (
-            <span className="text-[10px] text-zinc-600 truncate">
+            <span className="text-[12px] text-zinc-600 truncate">
               · updated {fmtET12Sec(lastUpdated)} ET
             </span>
           )}
@@ -782,7 +782,7 @@ export const ChartPanel = ({
                   data-testid={`chart-indicator-${spec.key}`}
                   onClick={() => toggleIndicator(spec.key)}
                   title={`Toggle ${spec.label}`}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ${
                     on
                       ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
                       : 'text-zinc-500 hover:text-zinc-300'
@@ -804,7 +804,7 @@ export const ChartPanel = ({
               data-testid="chart-sr-toggle"
               onClick={() => setShowSrLevels((v) => !v)}
               title="Toggle PDH / PDL / PMH / PML support-resistance lines"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
                 showSrLevels
                   ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
                   : 'text-zinc-500 hover:text-zinc-300'
@@ -824,7 +824,7 @@ export const ChartPanel = ({
               data-testid="chart-volprof-toggle"
               onClick={() => setShowVolumeProfile((v) => !v)}
               title="Toggle Side Volume Profile (Volume-at-Price histogram)"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
                 showVolumeProfile
                   ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
                   : 'text-zinc-500 hover:text-zinc-300'
@@ -844,7 +844,7 @@ export const ChartPanel = ({
               data-testid="chart-smart-sr-toggle"
               onClick={() => setShowSmartLevels((v) => !v)}
               title="Toggle Smart Support/Resistance (Volume Profile + swing pivots + floor pivots)"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ml-1 ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
                 showSmartLevels
                   ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
                   : 'text-zinc-500 hover:text-zinc-300'
@@ -868,7 +868,7 @@ export const ChartPanel = ({
                 key={t.label}
                 data-testid={`chart-timeframe-${t.label}`}
                 onClick={() => setTimeframe(t.label)}
-                className={`px-2.5 py-0.5 text-[11px] rounded-md transition-colors ${
+                className={`px-2.5 py-0.5 text-[13px] rounded-md transition-colors ${
                   t.label === timeframe
                     ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/30'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
@@ -955,7 +955,7 @@ export const ChartPanel = ({
       {!error && staleInfo?.stale && bars.length > 0 && (
         <div
           data-testid="chart-stale-banner"
-          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/50 bg-amber-500/10 text-[10px] uppercase tracking-wider text-amber-300"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/50 bg-amber-500/10 text-[12px] uppercase tracking-wider text-amber-300"
           title={`Historical collector hasn't written fresh bars. Reason: ${staleInfo.reason || 'unknown'}`}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
@@ -970,7 +970,7 @@ export const ChartPanel = ({
       {!error && !staleInfo?.stale && staleInfo?.partial && bars.length > 0 && (
         <div
           data-testid="chart-partial-banner"
-          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-sky-500/50 bg-sky-500/10 text-[10px] uppercase tracking-wider text-sky-300"
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-sky-500/50 bg-sky-500/10 text-[12px] uppercase tracking-wider text-sky-300"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
           PARTIAL · {Math.round((staleInfo.coverage || 0) * 100)}% coverage

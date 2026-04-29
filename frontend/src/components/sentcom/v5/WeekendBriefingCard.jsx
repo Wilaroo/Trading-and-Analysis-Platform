@@ -73,15 +73,15 @@ const Section = ({ title, icon: Icon, count, children, defaultOpen = false }) =>
       >
         {open ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
         {Icon && <Icon className="w-3 h-3 text-zinc-400" />}
-        <span className="v5-mono text-[10px] uppercase tracking-wider text-zinc-300 font-bold">{title}</span>
+        <span className="v5-mono text-[12px] uppercase tracking-wider text-zinc-300 font-bold">{title}</span>
         {count != null && (
-          <span className="v5-mono text-[9px] text-zinc-500 ml-auto">
+          <span className="v5-mono text-[11px] text-zinc-500 ml-auto">
             {count}
           </span>
         )}
       </button>
       {open && (
-        <div className="px-3 pb-3 v5-mono text-[10px] text-zinc-300/90">
+        <div className="px-3 pb-3 v5-mono text-[12px] text-zinc-300/90">
           {children}
         </div>
       )}
@@ -106,11 +106,11 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
     <div className="space-y-3">
       {recapWatches.length > 0 && (
         <div data-testid="gameplan-recap">
-          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
             last week's gameplan grade
             {recap?.iso_week && <span className="ml-1 text-zinc-600">· {recap.iso_week}</span>}
           </div>
-          <div className="text-[10px] mb-1.5">
+          <div className="text-[12px] mb-1.5">
             {recapSummary.wins ?? 0}W · {recapSummary.losses ?? 0}L
             {recapSummary.avg_change_pct != null && (
               <span className={` · ${recapSummary.avg_change_pct >= 0 ? 'v5-up' : 'v5-down'}`}>
@@ -124,7 +124,7 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
                 <span className="truncate">
                   <ClickableSymbol symbol={w.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200 font-medium" />
                   {w.thesis && (
-                    <span className="ml-1.5 text-zinc-500 text-[9px] truncate">
+                    <span className="ml-1.5 text-zinc-500 text-[11px] truncate">
                       {w.thesis}
                     </span>
                   )}
@@ -143,13 +143,13 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
       )}
       {sectors.length > 0 && (
         <div>
-          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">sector returns (7d)</div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">sector returns (7d)</div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {sectors.slice(0, 11).map((s) => (
               <div key={s.symbol} className="flex justify-between">
                 <span>
                   <ClickableSymbol symbol={s.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200" />
-                  <span className="ml-1.5 text-zinc-500 text-[9px]">{s.name}</span>
+                  <span className="ml-1.5 text-zinc-500 text-[11px]">{s.name}</span>
                 </span>
                 <span className={(s.change_pct || 0) >= 0 ? 'v5-up' : 'v5-down'}>
                   {fmtPctSigned(s.change_pct)}
@@ -161,8 +161,8 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
       )}
       {trades.length > 0 && (
         <div>
-          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1">your closed trades (7d)</div>
-          <div className="text-[10px] mb-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">your closed trades (7d)</div>
+          <div className="text-[12px] mb-1.5">
             {summary.wins ?? 0}W · {summary.losses ?? 0}L
             {summary.win_rate != null && <span> · {(summary.win_rate * 100).toFixed(0)}% WR</span>}
             {summary.total_pnl != null && (
@@ -206,7 +206,7 @@ const NewsList = ({ items }) => {
           >
             {n.headline || '(no headline)'}
           </a>
-          <span className="text-zinc-600 text-[9px] ml-1.5">— {n.source || '?'}</span>
+          <span className="text-zinc-600 text-[11px] ml-1.5">— {n.source || '?'}</span>
         </div>
       ))}
     </div>
@@ -227,12 +227,12 @@ const EarningsList = ({ items, onSymbolClick }) => {
     <div className="space-y-2">
       {sortedDates.map((d) => (
         <div key={d}>
-          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-0.5">{fmtDate(d)}</div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">{fmtDate(d)}</div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {groups[d].map((e, i) => (
               <div key={i} className="flex items-center justify-between">
                 <ClickableSymbol symbol={e.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200 font-medium" />
-                <span className="text-zinc-500 text-[9px]">{e.timing || 'TBD'}</span>
+                <span className="text-zinc-500 text-[11px]">{e.timing || 'TBD'}</span>
               </div>
             ))}
           </div>
@@ -301,7 +301,7 @@ const Catalysts = ({ items }) => {
             {c.headline}
           </a>
           {c.matched_keywords?.length > 0 && (
-            <span className="ml-1.5 text-amber-400/70 text-[9px] uppercase tracking-wider">
+            <span className="ml-1.5 text-amber-400/70 text-[11px] uppercase tracking-wider">
               [{c.matched_keywords.join(', ')}]
             </span>
           )}
@@ -333,7 +333,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
   // Legacy string shape — render as a single paragraph block.
   if (typeof gameplan === 'string') {
     return (
-      <div className="whitespace-pre-wrap leading-snug text-[10px] text-zinc-300">
+      <div className="whitespace-pre-wrap leading-snug text-[12px] text-zinc-300">
         {gameplan}
       </div>
     );
@@ -351,7 +351,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
     <div className="space-y-3">
       {watches.length > 0 && (
         <div data-testid="gameplan-watches">
-          <div className="text-[9px] uppercase tracking-wider text-zinc-500 mb-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1.5">
             top {watches.length} watch{watches.length === 1 ? '' : 'es'}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -373,7 +373,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                       <ClickableSymbol
                         symbol={w.symbol}
                         onSymbolClick={onSymbolClick}
-                        className="text-zinc-100 font-bold text-[11px]"
+                        className="text-zinc-100 font-bold text-[13px]"
                       />
                       {isLive && (
                         <span
@@ -386,7 +386,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                     </div>
                     {w.key_level && (
                       <span
-                        className="text-cyan-400 text-[9px] tabular-nums truncate max-w-[60%]"
+                        className="text-cyan-400 text-[11px] tabular-nums truncate max-w-[60%]"
                         title={w.key_level}
                       >
                         {w.key_level}
@@ -394,10 +394,10 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                     )}
                   </div>
                   {w.thesis && (
-                    <div className="text-zinc-300 text-[10px] leading-snug">{w.thesis}</div>
+                    <div className="text-zinc-300 text-[12px] leading-snug">{w.thesis}</div>
                   )}
                   {w.invalidation && (
-                    <div className="text-rose-400/80 text-[9px] leading-snug mt-0.5">
+                    <div className="text-rose-400/80 text-[11px] leading-snug mt-0.5">
                       × {w.invalidation}
                     </div>
                   )}
@@ -408,7 +408,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
         </div>
       )}
       {text && (
-        <div className="whitespace-pre-wrap leading-snug text-[10px] text-zinc-300">
+        <div className="whitespace-pre-wrap leading-snug text-[12px] text-zinc-300">
           {text}
         </div>
       )}
@@ -486,12 +486,12 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
           <Trophy className="w-3.5 h-3.5 text-amber-400" />
           <span className="v5-mono font-bold text-xs text-amber-300">WEEK AHEAD</span>
           {isoWeek && (
-            <span className="v5-mono text-[9px] text-zinc-500">{isoWeek}</span>
+            <span className="v5-mono text-[11px] text-zinc-500">{isoWeek}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {generatedAtLabel && (
-            <span className="v5-mono text-[9px] text-zinc-600" title={`Generated ${generatedAt}`}>
+            <span className="v5-mono text-[11px] text-zinc-600" title={`Generated ${generatedAt}`}>
               {generatedAtLabel}
             </span>
           )}
@@ -509,19 +509,19 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
       </div>
 
       {err && (
-        <div data-testid="weekend-briefing-error" className="px-3 py-2 v5-mono text-[10px] text-rose-400 flex items-center gap-1.5">
+        <div data-testid="weekend-briefing-error" className="px-3 py-2 v5-mono text-[12px] text-rose-400 flex items-center gap-1.5">
           <AlertTriangle className="w-3 h-3" />
           {err}
         </div>
       )}
 
       {loading && !briefing && (
-        <div className="px-3 py-3 v5-mono text-[10px] text-zinc-600">Loading briefing…</div>
+        <div className="px-3 py-3 v5-mono text-[12px] text-zinc-600">Loading briefing…</div>
       )}
 
       {!loading && !briefing && !err && (
         <div className="px-3 py-3 space-y-2">
-          <div className="v5-mono text-[10px] text-zinc-500">
+          <div className="v5-mono text-[12px] text-zinc-500">
             No briefing yet for this week. Sunday 14:00 ET cron generates it
             automatically — or click the refresh icon above to generate now.
           </div>
@@ -530,7 +530,7 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
             onClick={regenerate}
             disabled={generating}
             data-testid="weekend-briefing-generate-btn"
-            className="v5-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-amber-700/50 text-amber-300 hover:bg-amber-900/20 transition-colors disabled:opacity-50"
+            className="v5-mono text-[12px] uppercase tracking-wider px-2 py-1 rounded border border-amber-700/50 text-amber-300 hover:bg-amber-900/20 transition-colors disabled:opacity-50"
           >
             {generating ? 'Generating…' : 'Generate Now'}
           </button>

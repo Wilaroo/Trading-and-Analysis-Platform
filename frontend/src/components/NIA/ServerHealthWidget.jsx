@@ -65,13 +65,13 @@ const ServerHealthWidget = memo(() => {
           </div>
           <span className="text-xs font-medium text-zinc-300">Server</span>
           {pingMs !== null && (
-            <span className={`text-[10px] font-mono ${getLatencyColor(pingMs)}`}>{pingMs}ms</span>
+            <span className={`text-[12px] font-mono ${getLatencyColor(pingMs)}`}>{pingMs}ms</span>
           )}
           {data?.threads && (
-            <span className="text-[10px] font-mono text-zinc-500">{data.threads}T</span>
+            <span className="text-[12px] font-mono text-zinc-500">{data.threads}T</span>
           )}
           {data?.loop === 'uvloop' && (
-            <span className="text-[10px] px-1 rounded bg-cyan-500/10 text-cyan-400 font-medium">uv</span>
+            <span className="text-[12px] px-1 rounded bg-cyan-500/10 text-cyan-400 font-medium">uv</span>
           )}
         </div>
         <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
@@ -89,7 +89,7 @@ const ServerHealthWidget = memo(() => {
           </div>
 
           {data?.last_refresh && (
-            <div className="text-[10px] text-zinc-600 text-right">
+            <div className="text-[12px] text-zinc-600 text-right">
               Cache: {new Date(data.last_refresh).toLocaleTimeString()}
               {data?.loop && ` | Loop: ${data.loop}`}
             </div>
@@ -104,9 +104,9 @@ const MetricRow = ({ icon: Icon, label, value, warn, color }) => (
   <div className="flex items-center justify-between">
     <div className="flex items-center gap-1.5">
       <Icon className="w-3 h-3 text-zinc-500" />
-      <span className="text-[11px] text-zinc-500">{label}</span>
+      <span className="text-[13px] text-zinc-500">{label}</span>
     </div>
-    <span className={`text-[11px] font-mono ${color || (warn ? 'text-yellow-400' : 'text-zinc-300')}`}>
+    <span className={`text-[13px] font-mono ${color || (warn ? 'text-yellow-400' : 'text-zinc-300')}`}>
       {value}
     </span>
   </div>

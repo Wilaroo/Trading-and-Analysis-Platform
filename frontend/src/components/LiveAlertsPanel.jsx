@@ -483,7 +483,7 @@ const SettingsPanel = ({
                 data-testid={`interval-${preset.value}`}
               >
                 <div className="text-sm font-medium">{preset.label}</div>
-                <div className="text-[10px] text-zinc-500 mt-0.5">{preset.description.split(' - ')[0]}</div>
+                <div className="text-[12px] text-zinc-500 mt-0.5">{preset.description.split(' - ')[0]}</div>
               </button>
             ))}
           </div>

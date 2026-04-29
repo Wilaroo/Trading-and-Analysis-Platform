@@ -39,13 +39,13 @@ const ServerHealthBadge = memo(() => {
         <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${dotColor}`} />
       </div>
       {pingMs !== null && (
-        <span className={`text-[9px] font-mono font-bold ${latencyColor}`}>{pingMs}ms</span>
+        <span className={`text-[11px] font-mono font-bold ${latencyColor}`}>{pingMs}ms</span>
       )}
       {data?.threads && (
-        <span className={`text-[9px] font-mono ${data.threads > 80 ? 'text-yellow-400' : 'text-zinc-500'}`}>{data.threads}T</span>
+        <span className={`text-[11px] font-mono ${data.threads > 80 ? 'text-yellow-400' : 'text-zinc-500'}`}>{data.threads}T</span>
       )}
       {data?.memory_mb && (
-        <span className="text-[9px] font-mono text-zinc-600">{data.memory_mb > 1024 ? `${(data.memory_mb/1024).toFixed(1)}G` : `${Math.round(data.memory_mb)}M`}</span>
+        <span className="text-[11px] font-mono text-zinc-600">{data.memory_mb > 1024 ? `${(data.memory_mb/1024).toFixed(1)}G` : `${Math.round(data.memory_mb)}M`}</span>
       )}
     </div>
   );

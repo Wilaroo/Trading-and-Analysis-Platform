@@ -40,7 +40,7 @@ const QuickStatsRow = ({
             <DollarSign className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Net Liquidation</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Net Liquidation</p>
             <p className="text-lg font-bold font-mono text-white" data-testid="net-liquidation">
               {formatCurrency(account?.net_liquidation)}
             </p>
@@ -57,7 +57,7 @@ const QuickStatsRow = ({
             {totalPnL >= 0 ? <TrendingUp className="w-5 h-5 text-green-400" /> : <TrendingDown className="w-5 h-5 text-red-400" />}
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Today&apos;s P&L</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Today&apos;s P&L</p>
             <p className={`text-lg font-bold font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`} data-testid="todays-pnl">
               {formatCurrency(account?.unrealized_pnl || totalPnL)}
             </p>
@@ -75,13 +75,13 @@ const QuickStatsRow = ({
             <Briefcase className="w-5 h-5 text-purple-400" />
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Positions</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Positions</p>
             <p className="text-lg font-bold font-mono text-white" data-testid="positions-count">{positions.length}</p>
           </div>
         </div>
         {expandedStatCard === 'positions' && (
           <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-[#111] border border-white/10 rounded-lg p-3 shadow-xl min-w-[280px]" data-testid="positions-dropdown">
-            <p className="text-[10px] text-zinc-500 uppercase mb-2">Holdings</p>
+            <p className="text-[12px] text-zinc-500 uppercase mb-2">Holdings</p>
             <div className="space-y-1 max-h-[200px] overflow-y-auto">
               {positions.length > 0 ? positions.map((pos, idx) => (
                 <div key={idx} className="flex items-center justify-between p-1.5 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
@@ -112,25 +112,25 @@ const QuickStatsRow = ({
             <Bell className="w-5 h-5 text-yellow-400" />
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Alerts</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Alerts</p>
             <p className="text-lg font-bold font-mono text-white" data-testid="alerts-count">{enhancedAlerts.length + alerts.length}</p>
           </div>
         </div>
         {expandedStatCard === 'alerts' && (
           <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-[#111] border border-white/10 rounded-lg p-3 shadow-xl min-w-[320px]" data-testid="alerts-dropdown">
-            <p className="text-[10px] text-zinc-500 uppercase mb-2">Active Alerts</p>
+            <p className="text-[12px] text-zinc-500 uppercase mb-2">Active Alerts</p>
             <div className="space-y-1 max-h-[250px] overflow-y-auto">
               {enhancedAlerts.length > 0 ? enhancedAlerts.slice(0, 8).map((alert, idx) => (
                 <div key={idx} className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
                   onClick={(e) => { e.stopPropagation(); setSelectedEnhancedAlert(alert); }}>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-white">{alert.symbol}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    <span className={`text-[12px] px-1.5 py-0.5 rounded ${
                       alert.grade === 'A' ? 'bg-green-500 text-black' :
                       alert.grade === 'B' ? 'bg-cyan-500 text-black' : 'bg-yellow-500 text-black'
                     }`}>{alert.grade}</span>
                   </div>
-                  <p className="text-[10px] text-zinc-400 mt-0.5 truncate">{alert.headline}</p>
+                  <p className="text-[12px] text-zinc-400 mt-0.5 truncate">{alert.headline}</p>
                 </div>
               )) : alerts.length > 0 ? alerts.slice(0, 8).map((alert, idx) => (
                 <div key={idx} className="p-1.5 bg-zinc-900/50 rounded text-xs text-zinc-300">
@@ -155,7 +155,7 @@ const QuickStatsRow = ({
             <Activity className={`w-5 h-5 ${regimeColors[marketContext?.regime] || 'text-zinc-400'}`} />
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Market</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Market</p>
             <p className={`text-sm font-bold ${regimeColors[marketContext?.regime] || 'text-zinc-400'}`} data-testid="market-regime">
               {marketContext?.regime || 'Loading...'}
             </p>
@@ -170,7 +170,7 @@ const QuickStatsRow = ({
             <Zap className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase">Opportunities</p>
+            <p className="text-[12px] text-zinc-500 uppercase">Opportunities</p>
             <p className="text-lg font-bold font-mono text-white" data-testid="opportunities-count">{opportunities.length}</p>
           </div>
         </div>

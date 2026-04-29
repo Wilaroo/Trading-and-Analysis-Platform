@@ -48,7 +48,7 @@ const accTone = (acc) => {
 
 const Pill = ({ label, value, tone = 'zinc', testid }) => (
   <div data-testid={testid}
-       className={`px-2 py-1 rounded border v5-mono text-[10px] ${TONE[tone] || TONE.zinc}`}>
+       className={`px-2 py-1 rounded border v5-mono text-[12px] ${TONE[tone] || TONE.zinc}`}>
     <span className="opacity-60 mr-1">{label}</span>
     <span className="font-bold">{value}</span>
   </div>
@@ -93,12 +93,12 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
              data-help-id="last-trophy-run"
              data-verdict={verdict}
              className="space-y-2">
-      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
+      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
         Last successful trophy run
         {loading && (
           <span data-testid="trophy-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[9px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
           last completed pipeline · 0-failure SLA
         </span>
       </div>
@@ -115,7 +115,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
             {verdictLabel}
           </span>
         </div>
-        <div className="flex-1 min-w-0 v5-mono text-[11px] leading-tight pt-0.5">
+        <div className="flex-1 min-w-0 v5-mono text-[13px] leading-tight pt-0.5">
           {error && !data ? (
             <span className="text-rose-400" data-testid="trophy-error">
               /api/ai-training/last-trophy-run unreachable — {error}
@@ -191,7 +191,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
       {/* Headline accuracies — top performers from this run */}
       {data?.found && data.headline_accuracies?.length > 0 && (
         <div data-testid="trophy-headline-accuracies" className="space-y-0.5">
-          <div className="v5-mono text-[9px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
             Top accuracies this run
           </div>
           {data.headline_accuracies.slice(0, 5).map((m, i) => {
@@ -199,7 +199,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
             return (
               <div key={i}
                    data-testid={`trophy-headline-${i}`}
-                   className="flex items-center gap-2 v5-mono text-[10px]">
+                   className="flex items-center gap-2 v5-mono text-[12px]">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   tone === 'emerald' ? 'bg-emerald-400'
                   : tone === 'amber' ? 'bg-amber-400'
@@ -219,7 +219,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
 
       {/* Footer note when synthesized from live status (pre-archive runs) */}
       {data?.found && data._synthesized_from_live && (
-        <div className="v5-mono text-[9px] text-zinc-500">
+        <div className="v5-mono text-[11px] text-zinc-500">
           (Synthesized from live status — future runs will be archived
           automatically.)
         </div>

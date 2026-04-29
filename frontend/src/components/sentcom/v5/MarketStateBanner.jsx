@@ -57,19 +57,19 @@ export const MarketStateBanner = () => {
     >
       <Icon className={`w-4 h-4 shrink-0 ${cfg.iconColor}`} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 v5-mono text-[10px] uppercase tracking-wider">
+        <div className="flex items-center gap-2 v5-mono text-[12px] uppercase tracking-wider">
           <span className="font-bold">{cfg.title}</span>
           <span className="opacity-50">·</span>
           <span className="opacity-80">buffers active</span>
         </div>
-        <div className="v5-mono text-[10px] opacity-80 truncate mt-0.5">
+        <div className="v5-mono text-[12px] opacity-80 truncate mt-0.5">
           {cfg.detail}
         </div>
       </div>
       {etClock && (
         <div
           data-testid="market-state-banner-clock"
-          className="v5-mono text-[10px] opacity-70 tabular-nums whitespace-nowrap"
+          className="v5-mono text-[12px] opacity-70 tabular-nums whitespace-nowrap"
           title={`${snap.label} · ET wall clock`}
         >
           {etClock} ET

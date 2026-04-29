@@ -219,7 +219,7 @@ const TraderSyncImport = ({ onImportComplete }) => {
               >
                 <div>
                   <p className="text-xs text-white">{batch.trade_count} trades</p>
-                  <p className="text-[10px] text-zinc-500">
+                  <p className="text-[12px] text-zinc-500">
                     {new Date(batch.imported_at).toLocaleDateString()} • 
                     ${batch.total_pnl?.toFixed(0)} P&L • 
                     {batch.symbol_count} symbols
@@ -309,12 +309,12 @@ const TraderSyncImport = ({ onImportComplete }) => {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs font-medium text-white">{result.playbook?.name}</p>
-                          <p className="text-[10px] text-zinc-500">{result.setup_type}</p>
+                          <p className="text-[12px] text-zinc-500">{result.setup_type}</p>
                         </div>
                         <button
                           onClick={() => savePlaybook(result.playbook)}
                           disabled={result.status === 'saved'}
-                          className={`px-2 py-1 rounded text-[10px] font-medium ${
+                          className={`px-2 py-1 rounded text-[12px] font-medium ${
                             result.status === 'saved'
                               ? 'bg-emerald-500/20 text-emerald-400'
                               : 'bg-cyan-500 text-black hover:bg-cyan-400'

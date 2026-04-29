@@ -167,27 +167,27 @@ const DRCTab = () => {
       {stats && (
         <div className="grid grid-cols-5 gap-3">
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">30-Day P&L</p>
+            <p className="text-[12px] text-zinc-500">30-Day P&L</p>
             <p className={`text-lg font-bold ${stats.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               ${stats.total_pnl?.toFixed(0) || 0}
             </p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Avg Daily P&L</p>
+            <p className="text-[12px] text-zinc-500">Avg Daily P&L</p>
             <p className={`text-lg font-bold ${stats.avg_daily_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               ${stats.avg_daily_pnl?.toFixed(0) || 0}
             </p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">DRCs Complete</p>
+            <p className="text-[12px] text-zinc-500">DRCs Complete</p>
             <p className="text-lg font-bold text-white">{stats.complete_drcs}/{stats.total_drcs}</p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Best Segment</p>
+            <p className="text-[12px] text-zinc-500">Best Segment</p>
             <p className="text-lg font-bold text-emerald-400">{stats.best_segment?.id || '-'}</p>
           </div>
           <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-            <p className="text-[10px] text-zinc-500">Worst Segment</p>
+            <p className="text-[12px] text-zinc-500">Worst Segment</p>
             <p className="text-lg font-bold text-red-400">{stats.worst_segment?.id || '-'}</p>
           </div>
         </div>
@@ -207,7 +207,7 @@ const DRCTab = () => {
                 <Timer className="w-3 h-3" />
                 Auto-Generation {eodStatus.scheduler_running ? 'Active' : 'Inactive'}
               </p>
-              <p className="text-[10px] text-zinc-400">
+              <p className="text-[12px] text-zinc-400">
                 {eodStatus.scheduler_running 
                   ? `Next: ${eodStatus.next_runs?.auto_generate_drc ? new Date(eodStatus.next_runs.auto_generate_drc).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:30 PM ET weekdays'}`
                   : 'Scheduler not running'
@@ -232,7 +232,7 @@ const DRCTab = () => {
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-zinc-500 uppercase">Today's Grade</p>
                   {drc?.auto_generated && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
                       <Zap className="w-2.5 h-2.5" />
                       AI Generated
                     </span>
@@ -427,7 +427,7 @@ const DRCTab = () => {
                   className="mt-3 space-y-3 overflow-hidden"
                 >
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">What I Learned Today</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">What I Learned Today</label>
                     {editing ? (
                       <textarea
                         value={editedDrc?.reflections?.what_i_learned || ''}
@@ -444,7 +444,7 @@ const DRCTab = () => {
                     )}
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">Easiest $3K Trade (Even if Missed)</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">Easiest $3K Trade (Even if Missed)</label>
                     {editing ? (
                       <textarea
                         value={editedDrc?.reflections?.easiest_3k_trade || ''}
@@ -461,7 +461,7 @@ const DRCTab = () => {
                     )}
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase">Changes for Tomorrow</label>
+                    <label className="text-[12px] text-zinc-500 uppercase">Changes for Tomorrow</label>
                     {editing ? (
                       <textarea
                         value={editedDrc?.reflections?.changes_for_tomorrow || ''}

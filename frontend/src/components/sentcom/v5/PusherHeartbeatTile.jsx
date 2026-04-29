@@ -87,7 +87,7 @@ export const PusherHeartbeatTile = () => {
           <span className={`text-xs font-bold tracking-wider ${palette.text}`}>
             PUSHER {data.health?.toUpperCase() || '—'}
           </span>
-          <span className="text-[10px] text-zinc-500 v5-mono">
+          <span className="text-[12px] text-zinc-500 v5-mono">
             last push {fmtAge(data.age_seconds)} ago
           </span>
         </div>
@@ -106,7 +106,7 @@ export const PusherHeartbeatTile = () => {
         <span className="text-zinc-500">/min</span>
         {rateHealth && rateHealth !== 'healthy' && pushesPerMin != null && (
           <span
-            className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider ${
+            className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold tracking-wider ${
               rateHealth === 'degraded'
                 ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                 : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
@@ -127,7 +127,7 @@ export const PusherHeartbeatTile = () => {
         <Zap className="w-3.5 h-3.5 text-zinc-500" />
         <span className="text-zinc-500">RPC</span>
         <span className="font-bold text-zinc-200 v5-mono">{fmtLat(rpcLast)}</span>
-        <span className="text-zinc-500 text-[10px]">
+        <span className="text-zinc-500 text-[12px]">
           last
           {rpcP95 != null && (
             <span className="ml-1">· p95 {fmtLat(rpcP95)}</span>
@@ -137,7 +137,7 @@ export const PusherHeartbeatTile = () => {
           )}
         </span>
         {rpcSamples > 0 && (
-          <span className="text-zinc-600 text-[9px]">(n={rpcSamples})</span>
+          <span className="text-zinc-600 text-[11px]">(n={rpcSamples})</span>
         )}
       </div>
 
@@ -186,7 +186,7 @@ export const PusherHeartbeatTile = () => {
           big PusherDeadBanner above can carry the loud message. */}
       {data.pusher_dead && (
         <div
-          className="flex items-center gap-1 text-[10px] text-rose-300/80"
+          className="flex items-center gap-1 text-[12px] text-rose-300/80"
           data-testid="pusher-heartbeat-dead-hint"
         >
           <Clock className="w-3 h-3" />

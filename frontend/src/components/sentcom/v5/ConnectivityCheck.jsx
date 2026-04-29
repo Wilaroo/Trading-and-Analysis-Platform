@@ -227,8 +227,8 @@ export const ConnectivityCheck = () => {
       >
         <Activity className="w-2.5 h-2.5" />
         <span>Wires</span>
-        {counts.fail > 0 && <span className="ml-1 v5-mono text-[9px]">· {counts.fail} fail</span>}
-        {counts.fail === 0 && counts.warn > 0 && <span className="ml-1 v5-mono text-[9px]">· {counts.warn} warn</span>}
+        {counts.fail > 0 && <span className="ml-1 v5-mono text-[11px]">· {counts.fail} fail</span>}
+        {counts.fail === 0 && counts.warn > 0 && <span className="ml-1 v5-mono text-[11px]">· {counts.warn} warn</span>}
       </button>
 
       {open && (
@@ -246,7 +246,7 @@ export const ConnectivityCheck = () => {
                 <div className={`w-2 h-2 rounded-full ${meta.dot} ${overall === 'ok' ? 'shadow-[0_0_8px_currentColor]' : ''}`} />
                 <div>
                   <div className="text-sm font-bold text-white tracking-tight">V5 Connectivity Check</div>
-                  <div className="text-[10px] text-zinc-500">
+                  <div className="text-[12px] text-zinc-500">
                     {lastRun
                       ? `Last run ${lastRun.toLocaleTimeString()} · ${counts.ok} ok · ${counts.warn} warn · ${counts.fail} fail`
                       : 'Running initial pass…'}
@@ -258,7 +258,7 @@ export const ConnectivityCheck = () => {
                   type="button"
                   onClick={runAll}
                   disabled={running}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 text-[11px] text-zinc-300 border border-white/10 transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 text-[13px] text-zinc-300 border border-white/10 transition-colors disabled:opacity-50"
                   data-testid="v5-connectivity-rerun"
                 >
                   <RefreshCw className={`w-3 h-3 ${running ? 'animate-spin' : ''}`} />
@@ -278,7 +278,7 @@ export const ConnectivityCheck = () => {
             <div className="max-h-[70vh] overflow-y-auto v5-scroll">
               <ConnectivityGroup title="REST endpoints" rows={results} />
               <ConnectivityGroup title="WebSocket streams" rows={wsResults} />
-              <div className="px-4 py-3 text-[10px] text-zinc-600 border-t border-white/5 bg-zinc-950/60">
+              <div className="px-4 py-3 text-[12px] text-zinc-600 border-t border-white/5 bg-zinc-950/60">
                 Read-only pings. Training and collection are not affected by this check.
               </div>
             </div>
@@ -295,8 +295,8 @@ const ConnectivityGroup = ({ title, rows }) => {
     <div className="px-4 pt-3 pb-1">
       <div className="flex items-center gap-2 mb-2">
         <ChevronDown className="w-3 h-3 text-zinc-600" />
-        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest">{title}</span>
-        <span className="text-[10px] text-zinc-600 v5-mono">· {rows.length}</span>
+        <span className="text-[12px] font-semibold text-zinc-400 uppercase tracking-widest">{title}</span>
+        <span className="text-[12px] text-zinc-600 v5-mono">· {rows.length}</span>
       </div>
       <div className="space-y-1">
         {rows.map((r) => {
@@ -312,10 +312,10 @@ const ConnectivityGroup = ({ title, rows }) => {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-zinc-200 truncate">{r.name}</span>
                   {r.latency_ms != null && (
-                    <span className="text-[9px] text-zinc-500 v5-mono shrink-0">{r.latency_ms}ms</span>
+                    <span className="text-[11px] text-zinc-500 v5-mono shrink-0">{r.latency_ms}ms</span>
                   )}
                 </div>
-                <div className={`text-[10px] ${m.text} truncate`} title={r.summary}>
+                <div className={`text-[12px] ${m.text} truncate`} title={r.summary}>
                   {r.summary}
                 </div>
               </div>

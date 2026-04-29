@@ -168,7 +168,7 @@ export const DataFreshnessBadge = () => {
         data-help-id="data-freshness-badge"
         title={`${title}\n\nClick for details.`}
         onClick={() => setInspectorOpen(true)}
-        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-wider select-none transition-colors hover:brightness-125 cursor-pointer ${toneClasses}`}
+        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[12px] font-mono uppercase tracking-wider select-none transition-colors hover:brightness-125 cursor-pointer ${toneClasses}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
         {/* Moon icon when the market is closed (weekend OR overnight) —

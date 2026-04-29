@@ -80,11 +80,11 @@ const DashboardHeader = ({
             {/* AI Credits indicator */}
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
               <Sparkles className="w-3 h-3 text-violet-400" />
-              <span className="text-[9px] text-zinc-400">AI</span>
+              <span className="text-[11px] text-zinc-400">AI</span>
               <div className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" style={{ width: '70%' }} />
               </div>
-              <span className="text-[10px] text-violet-400 font-mono">281</span>
+              <span className="text-[12px] text-violet-400 font-mono">281</span>
             </div>
             
             <div className="w-px h-5 bg-white/10" />
@@ -96,7 +96,7 @@ const DashboardHeader = ({
                   : 'bg-amber-500/10 border-amber-500/20'
                 : 'bg-white/5 border-white/5'
             }`}>
-              <span className={`text-[10px] font-medium ${
+              <span className={`text-[12px] font-medium ${
                 marketSession.is_open 
                   ? marketSession.name === 'MARKET OPEN'
                     ? 'text-emerald-400'
@@ -113,7 +113,7 @@ const DashboardHeader = ({
           
           {/* Account Value */}
           <div className="text-right">
-            <div className="text-[9px] text-zinc-500 uppercase">Account</div>
+            <div className="text-[11px] text-zinc-500 uppercase">Account</div>
             <div className="font-mono text-sm text-white">
               ${accountData?.net_liquidation?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -121,7 +121,7 @@ const DashboardHeader = ({
           
           {/* Buying Power */}
           <div className="text-right">
-            <div className="text-[9px] text-zinc-500 uppercase">BP</div>
+            <div className="text-[11px] text-zinc-500 uppercase">BP</div>
             <div className="font-mono text-sm text-white">
               ${accountData?.buying_power?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -129,7 +129,7 @@ const DashboardHeader = ({
           
           {/* Today P&L */}
           <div className="text-right">
-            <div className="text-[9px] text-zinc-500 uppercase">Today</div>
+            <div className="text-[11px] text-zinc-500 uppercase">Today</div>
             <div className={`font-mono text-sm ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -137,7 +137,7 @@ const DashboardHeader = ({
           
           {/* Open P&L */}
           <div className="text-right">
-            <div className="text-[9px] text-zinc-500 uppercase">Open</div>
+            <div className="text-[11px] text-zinc-500 uppercase">Open</div>
             <div className={`font-mono text-sm ${openPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -169,7 +169,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <h2 className="font-bold text-sm">ACTIVE POSITIONS</h2>
-          <span className="px-1.5 py-0.5 rounded bg-zinc-700 text-[10px] font-mono">
+          <span className="px-1.5 py-0.5 rounded bg-zinc-700 text-[12px] font-mono">
             {positions.length} OPEN
           </span>
         </div>
@@ -213,7 +213,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                     <span className={`font-bold text-sm ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                       {pos.symbol}
                     </span>
-                    <span className={`px-1 py-0.5 rounded text-[10px] ${
+                    <span className={`px-1 py-0.5 rounded text-[12px] ${
                       direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                     }`}>
                       {direction?.toUpperCase() || 'L'}
@@ -221,7 +221,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                   </div>
                   
                   {/* Compact Stats */}
-                  <div className="flex items-center gap-3 text-[10px]">
+                  <div className="flex items-center gap-3 text-[12px]">
                     <div className="text-zinc-500">
                       <span className="font-mono">{Math.abs(shares)}</span> @ <span className="font-mono">${entryPrice?.toFixed(2)}</span>
                     </div>
@@ -237,7 +237,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                     <div className={`font-mono text-sm font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                       {isPositive ? '+' : ''}${pnl.toFixed(0)}
                     </div>
-                    <div className={`text-[10px] ${isPositive ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+                    <div className={`text-[12px] ${isPositive ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
                       {isPositive ? '+' : ''}{pnlPct.toFixed(1)}%
                     </div>
                   </div>
@@ -322,7 +322,7 @@ const WatchingSetupsCard = ({ setups = [] }) => {
                     {probability}%
                   </span>
                 </div>
-                <div className="text-[10px] text-zinc-500 mt-1">Probability to trigger</div>
+                <div className="text-[12px] text-zinc-500 mt-1">Probability to trigger</div>
               </motion.div>
             );
           })}

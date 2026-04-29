@@ -227,7 +227,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-          <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide">⌘K</span>
+          <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide">⌘K</span>
           <input
             ref={inputRef}
             value={query}
@@ -240,13 +240,13 @@ export const CommandPalette = ({ onSelectSymbol }) => {
             data-testid="command-palette-input"
             className="flex-1 bg-transparent outline-none text-zinc-100 v5-mono text-xs placeholder:text-zinc-600"
           />
-          <span className="v5-mono text-[9px] text-zinc-600">esc</span>
+          <span className="v5-mono text-[11px] text-zinc-600">esc</span>
         </div>
         <div className="max-h-[50vh] overflow-y-auto v5-scroll">
           {helpMode && (
             <div
               data-testid="command-palette-help-header"
-              className="v5-mono text-[9px] text-cyan-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-cyan-500/5"
+              className="v5-mono text-[11px] text-cyan-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-cyan-500/5"
             >
               Glossary · {visibleItems.length} match{visibleItems.length === 1 ? '' : 'es'}
             </div>
@@ -254,7 +254,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           {cmdMode && (
             <div
               data-testid="command-palette-cmd-header"
-              className="v5-mono text-[9px] text-violet-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-violet-500/5"
+              className="v5-mono text-[11px] text-violet-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-violet-500/5"
             >
               Commands · {visibleItems.length} available
             </div>
@@ -262,13 +262,13 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           {!helpMode && !cmdMode && showRecent && (
             <div
               data-testid="command-palette-recent-header"
-              className="v5-mono text-[9px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
+              className="v5-mono text-[11px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
             >
               Recent
             </div>
           )}
           {visibleItems.length === 0 && (
-            <div className="v5-mono text-[10px] text-zinc-600 px-3 py-4 text-center">
+            <div className="v5-mono text-[12px] text-zinc-600 px-3 py-4 text-center">
               {helpMode
                 ? `No glossary match for "${query.slice(1)}"`
                 : cmdMode
@@ -291,37 +291,37 @@ export const CommandPalette = ({ onSelectSymbol }) => {
               }
               onMouseEnter={() => setSelectedIdx(i)}
               onClick={() => activate(r)}
-              className={`w-full flex items-start gap-2 px-3 py-1.5 v5-mono text-[11px] text-left hover:bg-zinc-900 ${i === selectedIdx ? 'bg-zinc-900 text-violet-300' : 'text-zinc-200'}`}
+              className={`w-full flex items-start gap-2 px-3 py-1.5 v5-mono text-[13px] text-left hover:bg-zinc-900 ${i === selectedIdx ? 'bg-zinc-900 text-violet-300' : 'text-zinc-200'}`}
             >
               {r.glossary ? (
                 <>
                   <span className="text-cyan-400 mt-0.5">?</span>
                   <span className="flex-1 min-w-0">
                     <span className="font-bold text-zinc-100 block truncate">{r.glossary.term}</span>
-                    <span className="text-[10px] text-zinc-500 line-clamp-1 leading-tight block">
+                    <span className="text-[12px] text-zinc-500 line-clamp-1 leading-tight block">
                       {r.glossary.shortDef}
                     </span>
                   </span>
-                  {i === selectedIdx && <span className="text-[9px] text-zinc-500 mt-0.5">enter ↵</span>}
+                  {i === selectedIdx && <span className="text-[11px] text-zinc-500 mt-0.5">enter ↵</span>}
                 </>
               ) : r.command ? (
                 <>
                   <span className="text-violet-400 mt-0.5">›</span>
                   <span className="flex-1 min-w-0">
                     <span className="font-bold text-zinc-100 block truncate">{r.command.label}</span>
-                    <span className="text-[10px] text-zinc-500 line-clamp-1 leading-tight block">
+                    <span className="text-[12px] text-zinc-500 line-clamp-1 leading-tight block">
                       {r.command.description}
                     </span>
                   </span>
-                  {i === selectedIdx && <span className="text-[9px] text-zinc-500 mt-0.5">run ↵</span>}
+                  {i === selectedIdx && <span className="text-[11px] text-zinc-500 mt-0.5">run ↵</span>}
                 </>
               ) : (
                 <>
                   <span className="font-bold w-14">{r.symbol}</span>
                   {r.isRecent && (
-                    <span className="text-[9px] text-zinc-600 uppercase tracking-wide">recent</span>
+                    <span className="text-[11px] text-zinc-600 uppercase tracking-wide">recent</span>
                   )}
-                  {i === selectedIdx && <span className="ml-auto text-[9px] text-zinc-500">enter ↵</span>}
+                  {i === selectedIdx && <span className="ml-auto text-[11px] text-zinc-500">enter ↵</span>}
                 </>
               )}
             </button>

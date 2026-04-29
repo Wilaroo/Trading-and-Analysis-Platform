@@ -240,7 +240,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
                     key={item.type}
                     onClick={() => report ? selectReport(report) : handleGenerate(item.type)}
                     disabled={generating === item.type}
-                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all whitespace-nowrap ${
+                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] font-medium transition-all whitespace-nowrap ${
                       isActive
                         ? `${colors.bg} ${colors.border} ${colors.text} border`
                         : item.generated
@@ -280,7 +280,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
                     <span className="text-xs font-bold text-white">{activeReport.label}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-zinc-500 flex items-center gap-1">
+                    <span className="text-[12px] text-zinc-500 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {activeReport.generated_at_et}
                     </span>
@@ -309,7 +309,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
               <div className="text-center py-6" data-testid="no-report-placeholder">
                 <Sparkles className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
                 <p className="text-xs text-zinc-500 mb-2">No reports generated yet</p>
-                <p className="text-[10px] text-zinc-600 mb-3">
+                <p className="text-[12px] text-zinc-600 mb-3">
                   Reports auto-generate at scheduled times. Click a report type above to generate now.
                 </p>
                 <button

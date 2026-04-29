@@ -123,7 +123,7 @@ const PHASE_TONE_STYLES = {
 
 const NumPill = ({ label, value, tone = 'zinc', testid }) => (
   <div data-testid={testid}
-       className={`px-2 py-1 rounded border v5-mono text-[10px] ${PHASE_TONE_STYLES[tone] || PHASE_TONE_STYLES.zinc}`}>
+       className={`px-2 py-1 rounded border v5-mono text-[12px] ${PHASE_TONE_STYLES[tone] || PHASE_TONE_STYLES.zinc}`}>
     <span className="opacity-60 mr-1">{label}</span>
     <span className="font-bold">{value}</span>
   </div>
@@ -160,7 +160,7 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
 
       {RECURRING_FAILURE_PHASES.has(phaseKey) && (phase.models ?? 0) === 0 && (
         <div data-testid={`${phaseKey}-warning`}
-             className="v5-mono text-[10px] text-rose-200 bg-rose-900/20 border border-rose-800/50 rounded p-1.5">
+             className="v5-mono text-[12px] text-rose-200 bg-rose-900/20 border border-rose-800/50 rounded p-1.5">
           ⚠ This phase failed in 2 prior sessions ({phaseKey === 'P5'
             ? 'Sector-Relative trained 0 models'
             : 'P8 _1day_predictor UnboundLocalError'}). If it stays at 0/?, re-check after current run finishes.
@@ -169,7 +169,7 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
 
       {ours.length > 0 ? (
         <div className="space-y-0.5">
-          <div className="v5-mono text-[9px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
             Recently completed
           </div>
           {ours.slice(0, 12).map((m, i) => {
@@ -179,7 +179,7 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
               : 'zinc';
             return (
               <div key={i} data-testid={`${phaseKey}-model-${i}`}
-                   className="flex items-center gap-2 v5-mono text-[10px]">
+                   className="flex items-center gap-2 v5-mono text-[12px]">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   tone === 'emerald' ? 'bg-emerald-400'
                   : tone === 'amber' ? 'bg-amber-400'
@@ -198,11 +198,11 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
             );
           })}
           {ours.length > 12 && (
-            <div className="v5-mono text-[9px] text-zinc-500">+{ours.length - 12} more</div>
+            <div className="v5-mono text-[11px] text-zinc-500">+{ours.length - 12} more</div>
           )}
         </div>
       ) : (phase.models ?? 0) === 0 ? (
-        <div className="v5-mono text-[10px] text-zinc-500">
+        <div className="v5-mono text-[12px] text-zinc-500">
           No models trained for this phase yet.
         </div>
       ) : null}
@@ -266,12 +266,12 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
 
   return (
     <section data-testid="last-training-run-card" data-help-id="last-training-run" className="space-y-2">
-      <div className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
+      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wide flex items-center gap-2">
         Last training run
         {loading && (
           <span data-testid="training-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[9px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
           tip: click a phase tile to drill in
         </span>
       </div>
@@ -287,7 +287,7 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
             {style.label}
           </span>
         </div>
-        <div className="flex-1 min-w-0 v5-mono text-[11px] leading-tight pt-0.5 break-words">
+        <div className="flex-1 min-w-0 v5-mono text-[13px] leading-tight pt-0.5 break-words">
           {error && !data ? (
             <span className="text-rose-400" data-testid="training-error">
               /api/ai-training/status unreachable — {error}
@@ -353,18 +353,18 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
                     : tone === 'amber' ? 'bg-amber-400'
                     : tone === 'rose'  ? 'bg-rose-400'
                     : 'bg-zinc-500'}`} />
-                  <span className="v5-mono text-[10px] font-bold">
+                  <span className="v5-mono text-[12px] font-bold">
                     {PHASE_LABELS[pk] || pk}
                   </span>
-                  <span className="v5-mono text-[10px] tabular-nums opacity-80 ml-auto">
+                  <span className="v5-mono text-[12px] tabular-nums opacity-80 ml-auto">
                     {phase.models ?? 0}/{phase.total ?? '?'}
                   </span>
-                  <span className="v5-mono text-[10px] opacity-60 ml-1" aria-hidden>
+                  <span className="v5-mono text-[12px] opacity-60 ml-1" aria-hidden>
                     {isOpen ? '▾' : '▸'}
                   </span>
                 </div>
                 {phase.acc != null && phase.acc !== '-' && (
-                  <div className="v5-mono text-[9px] opacity-75 mt-0.5">
+                  <div className="v5-mono text-[11px] opacity-75 mt-0.5">
                     avg acc {typeof phase.acc === 'number' ? `${(phase.acc * 100).toFixed(1)}%` : phase.acc}
                     {phase.failed > 0 ? ` · ${phase.failed} failed` : ''}
                   </div>
@@ -388,7 +388,7 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
       {/* No breakdown at all — empty state */}
       {Object.keys(breakdown).length === 0 && status === 'idle' && (
         <div data-testid="training-empty-state"
-             className="v5-mono text-[10px] text-zinc-500 px-2 py-3 rounded border border-zinc-800 bg-zinc-900/30">
+             className="v5-mono text-[12px] text-zinc-500 px-2 py-3 rounded border border-zinc-800 bg-zinc-900/30">
           No training runs recorded. Trigger one from the NIA panel — Train All
           (regular) or Shift-click to bypass the Backfill Readiness gate.
         </div>

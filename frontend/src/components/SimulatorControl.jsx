@@ -358,7 +358,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
                     data-testid={`interval-${preset.value}`}
                   >
                     <div className="text-sm font-medium">{preset.label}</div>
-                    <div className="text-[10px] text-zinc-500">{preset.description}</div>
+                    <div className="text-[12px] text-zinc-500">{preset.description}</div>
                   </button>
                 ))}
               </div>

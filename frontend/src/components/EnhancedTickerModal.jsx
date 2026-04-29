@@ -136,7 +136,7 @@ const PositionProgressBar = React.memo(({ entry, stop, target, current }) => {
   
   return (
     <div>
-      <div className="flex justify-between text-[10px] mb-1">
+      <div className="flex justify-between text-[12px] mb-1">
         <span className="text-red-400">-{stopLossPct}%</span>
         <span className="text-zinc-400">Entry</span>
         <span className="text-emerald-400">+{targetGainPct}%</span>
@@ -181,7 +181,7 @@ const ScoreRing = React.memo(({ score, size = 64 }) => {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-mono text-xl font-bold text-cyan-400">{score?.toFixed(0) || '--'}</span>
-        <span className="text-[9px] text-zinc-400">{grade}</span>
+        <span className="text-[11px] text-zinc-400">{grade}</span>
       </div>
     </div>
   );
@@ -248,13 +248,13 @@ const BotTakeCard = ({ trade, symbol }) => {
             <div>
               <span className={`text-sm font-bold ${hasStopWarnings ? 'text-amber-400' : 'text-violet-400'}`}>OUR TAKE</span>
               {hasStopWarnings && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 ml-2">
+                <span className="text-[12px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 ml-2">
                   Stop needs attention
                 </span>
               )}
             </div>
           </div>
-          {timestamp && <span className="text-[10px] text-zinc-500">{timestamp}</span>}
+          {timestamp && <span className="text-[12px] text-zinc-500">{timestamp}</span>}
         </div>
         
         <p className="text-sm text-zinc-200 leading-relaxed mb-3">
@@ -271,19 +271,19 @@ const BotTakeCard = ({ trade, symbol }) => {
         {entryPrice && (
           <div className="grid grid-cols-4 gap-2 mb-3">
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
+              <p className="text-[11px] text-zinc-500 uppercase">Entry</p>
               <p className="text-sm font-bold text-white">${entryPrice.toFixed(2)}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
+              <p className="text-[11px] text-zinc-500 uppercase">Stop</p>
               <p className="text-sm font-bold text-rose-400">${stopPrice?.toFixed(2) || '--'}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[9px] text-zinc-500 uppercase">Target</p>
+              <p className="text-[11px] text-zinc-500 uppercase">Target</p>
               <p className="text-sm font-bold text-emerald-400">${targetPrice?.toFixed(2) || '--'}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[9px] text-zinc-500 uppercase">R:R</p>
+              <p className="text-[11px] text-zinc-500 uppercase">R:R</p>
               <p className="text-sm font-bold text-cyan-400">{rrRatio ? `${rrRatio}:1` : '--'}</p>
             </div>
           </div>
@@ -427,7 +427,7 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
             }`}>
               {isPass ? 'PASS' : isLong ? 'LONG' : 'SHORT'}
             </span>
-            <span className="text-[10px] text-zinc-500">{hypothetical.confidence}% conf</span>
+            <span className="text-[12px] text-zinc-500">{hypothetical.confidence}% conf</span>
           </div>
         </div>
         
@@ -440,19 +440,19 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
             {/* Trade Parameters Grid */}
             <div className="grid grid-cols-4 gap-2 mb-3">
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
+                <p className="text-[11px] text-zinc-500 uppercase">Entry</p>
                 <p className="text-sm font-bold text-white">${hypothetical.entry?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
+                <p className="text-[11px] text-zinc-500 uppercase">Stop</p>
                 <p className="text-sm font-bold text-rose-400">${hypothetical.stop?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[9px] text-zinc-500 uppercase">Target</p>
+                <p className="text-[11px] text-zinc-500 uppercase">Target</p>
                 <p className="text-sm font-bold text-emerald-400">${hypothetical.target?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[9px] text-zinc-500 uppercase">R:R</p>
+                <p className="text-[11px] text-zinc-500 uppercase">R:R</p>
                 <p className="text-sm font-bold text-cyan-400">{hypothetical.rrRatio}:1</p>
               </div>
             </div>
@@ -503,7 +503,7 @@ const AIRecommendationCard = ({ analysis, onAskAI, symbol }) => {
            'Mixed signals, consider waiting for clarity.')
         }
       </p>
-      <div className="flex gap-3 text-[10px]">
+      <div className="flex gap-3 text-[12px]">
         <span className="text-zinc-500">Strategy: <span className="text-cyan-400">{matchedStrategies[0]?.name || 'Analyzing...'}</span></span>
         <span className="text-zinc-500">Timeframe: <span className="text-white">{matchedStrategies[0]?.timeframe || 'Intraday'}</span></span>
       </div>
@@ -1068,7 +1068,7 @@ const EnhancedTickerModal = ({
                     {formatPercent(liveChangePct)}
                   </span>
                   {analysis?.data_freshness && (
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
                       analysis.data_freshness === 'live' 
                         ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' 
                         : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
@@ -1145,7 +1145,7 @@ const EnhancedTickerModal = ({
                                 {item.summary && (
                                   <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{item.summary}</p>
                                 )}
-                                <div className="flex items-center gap-3 mt-2 text-[10px] text-zinc-500">
+                                <div className="flex items-center gap-3 mt-2 text-[12px] text-zinc-500">
                                   <span className="flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
                                     {item.timestamp ? new Date(item.timestamp).toLocaleString() : '--'}
@@ -1340,7 +1340,7 @@ const EnhancedTickerModal = ({
                             }, 0.2)`
                           }}
                         >
-                          <span className="text-[10px] text-zinc-400">{level.label}</span>
+                          <span className="text-[12px] text-zinc-400">{level.label}</span>
                           <span className="font-mono text-xs ml-1.5" style={{
                             color: level.color === 'purple' ? '#A855F7' :
                                    level.color === 'emerald' ? '#10B981' :
@@ -1371,19 +1371,19 @@ const EnhancedTickerModal = ({
                     
                     <div className="grid grid-cols-3 gap-2 mb-3">
                       <div className="text-center p-2.5 rounded-lg bg-black/40">
-                        <div className="text-[10px] text-zinc-500 mb-0.5">ENTRY</div>
+                        <div className="text-[12px] text-zinc-500 mb-0.5">ENTRY</div>
                         <div className="font-mono font-bold text-white">
                           ${(trade?.fill_price || trade?.entry_price || tradingSummary.entry)?.toFixed(2) || '--'}
                         </div>
                       </div>
                       <div className="text-center p-2.5 rounded-lg bg-black/40 border border-red-500/40">
-                        <div className="text-[10px] text-red-400 mb-0.5">STOP</div>
+                        <div className="text-[12px] text-red-400 mb-0.5">STOP</div>
                         <div className="font-mono font-bold text-red-400">
                           ${(trade?.stop_price || tradingSummary.stop_loss)?.toFixed(2) || '--'}
                         </div>
                       </div>
                       <div className="text-center p-2.5 rounded-lg bg-black/40 border border-emerald-500/40">
-                        <div className="text-[10px] text-emerald-400 mb-0.5">TARGET</div>
+                        <div className="text-[12px] text-emerald-400 mb-0.5">TARGET</div>
                         <div className="font-mono font-bold text-emerald-400">
                           ${(trade?.target_prices?.[0] || tradingSummary.target)?.toFixed(2) || '--'}
                         </div>
@@ -1429,17 +1429,17 @@ const EnhancedTickerModal = ({
                       {learningInsights.symbol_insights && learningInsights.symbol_insights.total_trades > 0 && (
                         <div className="grid grid-cols-3 gap-2 mb-3">
                           <div className="text-center p-2 rounded-lg bg-black/40">
-                            <div className="text-[10px] text-zinc-500 mb-0.5">TRADES</div>
+                            <div className="text-[12px] text-zinc-500 mb-0.5">TRADES</div>
                             <div className="font-mono font-bold text-white">{learningInsights.symbol_insights.total_trades}</div>
                           </div>
                           <div className="text-center p-2 rounded-lg bg-black/40">
-                            <div className="text-[10px] text-zinc-500 mb-0.5">WIN RATE</div>
+                            <div className="text-[12px] text-zinc-500 mb-0.5">WIN RATE</div>
                             <div className={`font-mono font-bold ${learningInsights.symbol_insights.win_rate >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {learningInsights.symbol_insights.win_rate?.toFixed(0)}%
                             </div>
                           </div>
                           <div className="text-center p-2 rounded-lg bg-black/40">
-                            <div className="text-[10px] text-zinc-500 mb-0.5">AVG P&L</div>
+                            <div className="text-[12px] text-zinc-500 mb-0.5">AVG P&L</div>
                             <div className={`font-mono font-bold ${learningInsights.symbol_insights.avg_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                               ${learningInsights.symbol_insights.avg_pnl?.toFixed(0)}
                             </div>
@@ -1478,7 +1478,7 @@ const EnhancedTickerModal = ({
                       {onAskAI && (
                         <button 
                           onClick={() => onAskAI(ticker.symbol)}
-                          className="text-[10px] text-amber-400 hover:underline flex items-center gap-1"
+                          className="text-[12px] text-amber-400 hover:underline flex items-center gap-1"
                         >
                           <Brain className="w-3 h-3" />
                           Deep Analysis
@@ -1497,14 +1497,14 @@ const EnhancedTickerModal = ({
                           { label: 'Confidence', value: scores.confidence, color: 'cyan' },
                         ].map((score, i) => (
                           <div key={i} className="flex items-center gap-2">
-                            <span className="text-[10px] text-zinc-500 w-14">{score.label}</span>
+                            <span className="text-[12px] text-zinc-500 w-14">{score.label}</span>
                             <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
                               <div 
                                 className={`h-full rounded-full transition-all duration-500 ${getScoreBarColor(score.value)}`}
                                 style={{ width: `${score.value || 0}%` }}
                               />
                             </div>
-                            <span className={`font-mono text-[10px] w-5 ${getScoreColor(score.value)}`}>
+                            <span className={`font-mono text-[12px] w-5 ${getScoreColor(score.value)}`}>
                               {score.value?.toFixed(0) || '--'}
                             </span>
                           </div>

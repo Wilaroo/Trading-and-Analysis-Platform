@@ -96,7 +96,7 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel, phaseProgress
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+          <span className={`text-[12px] font-mono px-1 py-0.5 rounded ${
             isActive ? 'bg-cyan-500/15 text-cyan-400' : status === 'done' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800 text-zinc-600'
           }`}>{phase.num}</span>
           <span className={`text-xs ${isActive ? 'text-white font-medium' : status === 'done' ? 'text-zinc-300' : 'text-zinc-600'}`}>
@@ -104,7 +104,7 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel, phaseProgress
           </span>
         </div>
         {isActive && currentModel && (
-          <div className="text-[10px] text-cyan-400/70 font-mono mt-0.5 truncate pl-6">{currentModel}</div>
+          <div className="text-[12px] text-cyan-400/70 font-mono mt-0.5 truncate pl-6">{currentModel}</div>
         )}
         {isActive && phaseProgress > 0 && (
           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1 ml-6">
@@ -115,17 +115,17 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel, phaseProgress
       <div className="flex items-center gap-2 flex-shrink-0">
         {(status === 'done' || isActive) && (
           <>
-            <span className={`text-[10px] font-mono ${isActive ? 'text-cyan-400' : 'text-zinc-400'}`}>{trained}/{expected}</span>
+            <span className={`text-[12px] font-mono ${isActive ? 'text-cyan-400' : 'text-zinc-400'}`}>{trained}/{expected}</span>
             {skipped > 0 && (
-              <span className="text-[9px] font-mono text-zinc-600" title="Skipped (already trained)">({skipped} cached)</span>
+              <span className="text-[11px] font-mono text-zinc-600" title="Skipped (already trained)">({skipped} cached)</span>
             )}
             {avgAcc > 0 && (
-              <span className={`text-[10px] font-mono ${avgAcc > 0.6 ? 'text-emerald-400' : avgAcc > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
+              <span className={`text-[12px] font-mono ${avgAcc > 0.6 ? 'text-emerald-400' : avgAcc > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
                 {(avgAcc * 100).toFixed(1)}%
               </span>
             )}
             {status === 'done' && elapsed > 0 && (
-              <span className="text-[10px] text-zinc-600 font-mono">{formatDuration(elapsed)}</span>
+              <span className="text-[12px] text-zinc-600 font-mono">{formatDuration(elapsed)}</span>
             )}
           </>
         )}
@@ -198,22 +198,22 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
           )}
           {isTraining && eta > 0 && (
             <div className="flex items-center gap-1.5" title={etaSource === 'estimated' ? 'Rough estimate until first model completes' : 'Based on actual training speed'}>
-              <span className="text-[10px] text-zinc-500 uppercase">ETA</span>
+              <span className="text-[12px] text-zinc-500 uppercase">ETA</span>
               <span className={`text-xs font-mono ${etaSource === 'estimated' ? 'text-amber-400/70' : 'text-amber-400'}`}>
                 ~{formatDuration(eta)}
-                {etaSource === 'estimated' && <span className="text-[9px] text-zinc-600 ml-1">*</span>}
+                {etaSource === 'estimated' && <span className="text-[11px] text-zinc-600 ml-1">*</span>}
               </span>
             </div>
           )}
           {isTraining && modelsCompleted > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-zinc-500">AVG</span>
+              <span className="text-[12px] text-zinc-500">AVG</span>
               <span className="text-xs font-mono text-cyan-400">{formatDuration(elapsed / modelsCompleted)}/model</span>
             </div>
           )}
           {isTraining && eta > 3600 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-zinc-500">DONE</span>
+              <span className="text-[12px] text-zinc-500">DONE</span>
               <span className="text-xs font-mono text-emerald-400/80">
                 ~{new Date(Date.now() + eta * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
@@ -223,8 +223,8 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
       </div>
       <div className="px-4 py-2 border-b border-white/5">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-zinc-500">Overall Progress</span>
-          <span className="text-[10px] font-mono text-zinc-400">
+          <span className="text-[12px] text-zinc-500">Overall Progress</span>
+          <span className="text-[12px] font-mono text-zinc-400">
             {pipelineStatus?.pipeline_status?.models_completed || 0} / {pipelineStatus?.pipeline_status?.models_total || totalExpectedModels} models
           </span>
         </div>
@@ -252,15 +252,15 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
           <div className="grid grid-cols-3 gap-2 text-center">
             <div>
               <div className="text-sm font-bold text-emerald-400">{completedModelsInPhases}</div>
-              <div className="text-[10px] text-zinc-500">Trained</div>
+              <div className="text-[12px] text-zinc-500">Trained</div>
             </div>
             <div>
               <div className="text-sm font-bold text-red-400">{completedPhases.reduce((s, p) => s + (p.models_failed || 0), 0)}</div>
-              <div className="text-[10px] text-zinc-500">Failed</div>
+              <div className="text-[12px] text-zinc-500">Failed</div>
             </div>
             <div>
               <div className="text-sm font-bold text-zinc-300">{formatDuration(totalElapsedPhases)}</div>
-              <div className="text-[10px] text-zinc-500">Total Time</div>
+              <div className="text-[12px] text-zinc-500">Total Time</div>
             </div>
           </div>
         </div>
@@ -300,7 +300,7 @@ const CategoryRow = memo(({ categoryKey, category }) => {
           <Icon className={`w-3.5 h-3.5 ${color}`} />
           <span className="text-xs font-medium text-white">{category.label}</span>
           {validation && validation.total_validated > 0 && (
-            <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+            <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
               validation.promoted === validation.total_validated ? 'bg-emerald-500/15 text-emerald-400' :
               validation.promoted > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
             }`} data-testid={`validation-badge-${categoryKey}`}>
@@ -312,11 +312,11 @@ const CategoryRow = memo(({ categoryKey, category }) => {
           <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
             <div className={`h-full rounded-full transition-all ${trainedCount === totalCount && totalCount > 0 ? 'bg-emerald-500' : trainedCount > 0 ? 'bg-cyan-500' : 'bg-zinc-700'}`} style={{ width: `${totalCount > 0 ? (trainedCount / totalCount) * 100 : 0}%` }} />
           </div>
-          <span className={`text-[10px] font-mono w-10 text-right ${trainedCount === totalCount && totalCount > 0 ? 'text-emerald-400' : trainedCount > 0 ? 'text-zinc-300' : 'text-zinc-600'}`}>
+          <span className={`text-[12px] font-mono w-10 text-right ${trainedCount === totalCount && totalCount > 0 ? 'text-emerald-400' : trainedCount > 0 ? 'text-zinc-300' : 'text-zinc-600'}`}>
             {trainedCount}/{totalCount}
           </span>
           {avgAccuracy > 0 && (
-            <span className={`text-[10px] font-mono w-12 text-right ${avgAccuracy > 0.6 ? 'text-emerald-400' : avgAccuracy > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
+            <span className={`text-[12px] font-mono w-12 text-right ${avgAccuracy > 0.6 ? 'text-emerald-400' : avgAccuracy > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
               {(avgAccuracy * 100).toFixed(1)}%
             </span>
           )}
@@ -325,26 +325,26 @@ const CategoryRow = memo(({ categoryKey, category }) => {
       </button>
       {expanded && (
         <div className="border-t border-white/5 p-2 space-y-0.5 max-h-60 overflow-auto">
-          <p className="text-[10px] text-zinc-500 px-2 mb-1">{category.description}</p>
+          <p className="text-[12px] text-zinc-500 px-2 mb-1">{category.description}</p>
           {models.map((m) => {
             const valStatus = validation?.per_setup?.[m.setup_type || m.name];
             return (
               <div key={m.name} className="flex items-center justify-between px-2 py-1 rounded hover:bg-white/[0.02]" data-testid={`model-row-${m.name}`}>
                 <div className="flex items-center gap-1.5">
                   {m.trained ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Circle className="w-3 h-3 text-zinc-700" />}
-                  <span className="text-[10px] text-zinc-300 font-mono">{m.name}</span>
+                  <span className="text-[12px] text-zinc-300 font-mono">{m.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {m.accuracy > 0 && (
-                    <span className={`text-[10px] font-mono ${m.accuracy > 0.6 ? 'text-emerald-400' : m.accuracy > 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                    <span className={`text-[12px] font-mono ${m.accuracy > 0.6 ? 'text-emerald-400' : m.accuracy > 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
                       {(m.accuracy * 100).toFixed(1)}%
                     </span>
                   )}
                   {m.training_samples > 0 && (
-                    <span className="text-[9px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
+                    <span className="text-[11px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
                   )}
                   {valStatus && (
-                    <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${
+                    <span className={`text-[11px] font-mono px-1 py-0.5 rounded ${
                       valStatus.status === 'promoted' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
                     }`}>{valStatus.phases_passed}/3</span>
                   )}
@@ -383,20 +383,20 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
           <Shield className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-semibold text-white uppercase tracking-wider">Training Readiness</span>
           {blocked ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20" data-testid="readiness-verdict">Blocked</span>
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20" data-testid="readiness-verdict">Blocked</span>
           ) : overallReady ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" data-testid="readiness-verdict">Ready</span>
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" data-testid="readiness-verdict">Ready</span>
           ) : dataAnyOK ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20" data-testid="readiness-verdict">Partial</span>
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20" data-testid="readiness-verdict">Partial</span>
           ) : (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/20" data-testid="readiness-verdict">Awaiting data</span>
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/20" data-testid="readiness-verdict">Awaiting data</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onRunPreflight}
             disabled={runningPreflight}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-zinc-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-[13px] text-zinc-300 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="run-preflight-btn"
             data-help-id="preflight"
             title="Synthetic-bar shape validator (~2s). Catches feature-list drift before launching a multi-hour run."
@@ -407,7 +407,7 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
           <button
             onClick={onTestMode}
             disabled={starting || isTraining || blocked}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-[11px] text-violet-300 hover:text-violet-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-[13px] text-violet-300 hover:text-violet-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             data-testid="test-mode-start-btn"
             data-help-id="test-mode"
             title="Run a small-universe quick training to validate the pipeline end-to-end before the full overnight run."
@@ -431,20 +431,20 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
             title={`${bs.bar_size} — ${bs.symbol_count} symbols (target ${bs.target_symbols}, min ${bs.min_bars_per_symbol} bars each)`}
             data-testid={`readiness-bar-${bs.bar_size.replace(/\s+/g, '-')}`}
           >
-            <span className={`text-[9px] font-mono ${bs.ready ? 'text-emerald-400' : 'text-zinc-500'}`}>
+            <span className={`text-[11px] font-mono ${bs.ready ? 'text-emerald-400' : 'text-zinc-500'}`}>
               {bs.bar_size}
             </span>
-            <span className={`text-[11px] font-mono font-semibold ${bs.ready ? 'text-emerald-300' : 'text-zinc-600'}`}>
+            <span className={`text-[13px] font-mono font-semibold ${bs.ready ? 'text-emerald-300' : 'text-zinc-600'}`}>
               {bs.symbol_count}
             </span>
           </div>
         )) : (
-          <div className="col-span-7 text-center py-2 text-[11px] text-zinc-500">Loading readiness…</div>
+          <div className="col-span-7 text-center py-2 text-[13px] text-zinc-500">Loading readiness…</div>
         )}
       </div>
 
       {/* Status line + preflight detail */}
-      <div className="flex items-center justify-between text-[11px] flex-wrap gap-2">
+      <div className="flex items-center justify-between text-[13px] flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <span className="text-zinc-400">
             Data: <span className={dataOK ? 'text-emerald-400' : dataAnyOK ? 'text-amber-400' : 'text-zinc-500'}>{readyCount}/{totalCount}</span> bar sizes
@@ -462,23 +462,23 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
           </span>
         </div>
         {readiness?.recommendation && (
-          <span className="text-[10px] text-zinc-500 italic">{readiness.recommendation}</span>
+          <span className="text-[12px] text-zinc-500 italic">{readiness.recommendation}</span>
         )}
       </div>
 
       {/* Failure details when pre-flight fails */}
       {preflightFailed && preflight.failures?.length > 0 && (
         <div className="mt-2 p-2 rounded border border-red-500/20 bg-red-500/[0.04]" data-testid="preflight-failure-details">
-          <div className="text-[10px] font-semibold text-red-400 uppercase mb-1">Shape mismatches — fix before training:</div>
+          <div className="text-[12px] font-semibold text-red-400 uppercase mb-1">Shape mismatches — fix before training:</div>
           <ul className="space-y-0.5 max-h-24 overflow-auto">
             {preflight.failures.slice(0, 6).map((f, i) => (
-              <li key={i} className="text-[10px] text-red-300 font-mono">
+              <li key={i} className="text-[12px] text-red-300 font-mono">
                 • {f.phase || f.worker || 'phase'}: expected {f.expected_cols ?? f.expected}, got {f.actual_cols ?? f.actual}
                 {f.note ? ` — ${f.note}` : ''}
               </li>
             ))}
             {preflight.failures.length > 6 && (
-              <li className="text-[10px] text-red-500/70 italic">… and {preflight.failures.length - 6} more</li>
+              <li className="text-[12px] text-red-500/70 italic">… and {preflight.failures.length - 6} more</li>
             )}
           </ul>
         </div>
@@ -771,7 +771,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
         <div className="flex items-center gap-2">
           <Brain className="w-5 h-5 text-cyan-400" />
           <h2 className="text-base font-semibold text-white">AI Training Pipeline</h2>
-          <span className="text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{totalTrained}/{totalModels} trained</span>
+          <span className="text-[12px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded font-mono">{totalTrained}/{totalModels} trained</span>
         </div>
         <div className="flex items-center gap-2">
           {isTraining ? (
@@ -834,10 +834,10 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
               {gpuInfo.cuda ? <Monitor className="w-3 h-3 text-fuchsia-400" /> : <Cpu className="w-3 h-3 text-zinc-500" />}
             </div>
             <span className="text-xs text-white truncate">{gpuInfo.cuda ? gpuInfo.gpu : 'CPU'}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
+            <span className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
               {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
             </span>
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-cyan-500/15 text-cyan-400" data-testid="engine-label">
+            <span className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-cyan-500/15 text-cyan-400" data-testid="engine-label">
               XGBoost
             </span>
           </div>
@@ -861,7 +861,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
             <div className="flex items-center gap-2 mb-2">
               <Crosshair className="w-3.5 h-3.5 text-violet-400" />
               <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">Trade Signal Generators</span>
-              <span className="text-[10px] text-zinc-600">Directly produce trade decisions</span>
+              <span className="text-[12px] text-zinc-600">Directly produce trade decisions</span>
             </div>
             <div className="space-y-1.5">
               {signalCategories.map(([key, cat]) => (
@@ -873,15 +873,15 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
                   <div className="flex items-center gap-2">
                     <Eye className="w-3.5 h-3.5 text-fuchsia-400" />
                     <span className="text-xs font-medium text-white">CNN Visual Patterns</span>
-                    <span className="text-[10px] text-zinc-600">ResNet-18</span>
+                    <span className="text-[12px] text-zinc-600">ResNet-18</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full transition-all ${cnnModels.length > 0 ? 'bg-fuchsia-500' : 'bg-zinc-700'}`} style={{ width: `${Math.min((cnnModels.length / 34) * 100, 100)}%` }} />
                     </div>
-                    <span className={`text-[10px] font-mono w-10 text-right ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-600'}`}>{cnnModels.length}/34</span>
+                    <span className={`text-[12px] font-mono w-10 text-right ${cnnModels.length > 0 ? 'text-fuchsia-400' : 'text-zinc-600'}`}>{cnnModels.length}/34</span>
                     {cnnModels.length > 0 && (
-                      <span className="text-[10px] font-mono text-zinc-500 w-12 text-right">
+                      <span className="text-[12px] font-mono text-zinc-500 w-12 text-right">
                         {(cnnModels.reduce((s, m) => s + (m.metrics?.win_auc || m.win_auc || 0), 0) / cnnModels.length * 100).toFixed(1)}%
                       </span>
                     )}
@@ -896,7 +896,7 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
             <div className="flex items-center gap-2 mb-2">
               <Wrench className="w-3.5 h-3.5 text-zinc-500" />
               <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Support Models</span>
-              <span className="text-[10px] text-zinc-600">Context, sizing, risk & regime inputs</span>
+              <span className="text-[12px] text-zinc-600">Context, sizing, risk & regime inputs</span>
             </div>
             <div className="space-y-1.5">
               {supportCategories.map(([key, cat]) => (

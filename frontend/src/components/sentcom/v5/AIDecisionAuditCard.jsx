@@ -77,11 +77,11 @@ const PerModuleStrip = ({ summary }) => {
             data-testid={`ai-audit-summary-${mod}`}
             className="flex flex-col items-center gap-0.5"
           >
-            <div className="text-[9px] uppercase tracking-wider text-zinc-500">
+            <div className="text-[11px] uppercase tracking-wider text-zinc-500">
               {MODULE_DISPLAY[mod]}
             </div>
             <div className={`v5-mono text-sm ${cls}`}>{_fmtPct(rate)}</div>
-            <div className="text-[9px] text-zinc-600">
+            <div className="text-[11px] text-zinc-600">
               {consulted > 0 ? `n=${consulted}` : 'no data'}
             </div>
           </div>
@@ -96,10 +96,10 @@ const TradeRow = ({ row }) => {
   return (
     <div
       data-testid={`ai-audit-row-${row.trade_id}`}
-      className="grid grid-cols-12 items-center gap-1 px-3 py-1.5 text-[11px] border-b border-zinc-900/40 last:border-b-0"
+      className="grid grid-cols-12 items-center gap-1 px-3 py-1.5 text-[13px] border-b border-zinc-900/40 last:border-b-0"
     >
       <span className="col-span-2 v5-mono text-zinc-200 truncate">{row.symbol}</span>
-      <span className="col-span-2 text-[10px] text-zinc-500 truncate">
+      <span className="col-span-2 text-[12px] text-zinc-500 truncate">
         {row.setup_type || '—'}
       </span>
       <span className={`col-span-2 v5-mono text-right ${winCls}`}>
@@ -120,7 +120,7 @@ const TradeRow = ({ row }) => {
         );
       })}
       <span
-        className="col-span-2 text-right v5-mono text-[10px] text-zinc-500 truncate"
+        className="col-span-2 text-right v5-mono text-[12px] text-zinc-500 truncate"
         title={row.close_reason}
       >
         {row.close_reason || '—'}
@@ -192,14 +192,14 @@ export const AIDecisionAuditCard = ({ limit = 20, className = '' }) => {
         <div className="flex items-center gap-2 text-zinc-200 text-xs uppercase tracking-wider">
           <Brain className="w-4 h-4 opacity-70" />
           <span>AI decision audit</span>
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[12px] text-zinc-500">
             ({total} trades · win-rate {_fmtPct(data.summary.win_rate)})
           </span>
         </div>
         <button
           data-testid="ai-decision-audit-refresh"
           onClick={load}
-          className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors"
         >
           refresh
         </button>
@@ -211,7 +211,7 @@ export const AIDecisionAuditCard = ({ limit = 20, className = '' }) => {
         data-testid="ai-decision-audit-trade-list"
         className="grid"
       >
-        <div className="grid grid-cols-12 gap-1 px-3 py-1 text-[9px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800/40">
+        <div className="grid grid-cols-12 gap-1 px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800/40">
           <span className="col-span-2">Sym</span>
           <span className="col-span-2">Setup</span>
           <span className="col-span-2 text-right">PnL</span>
@@ -230,7 +230,7 @@ export const AIDecisionAuditCard = ({ limit = 20, className = '' }) => {
         <button
           data-testid="ai-decision-audit-toggle-expand"
           onClick={() => setExpanded((v) => !v)}
-          className="w-full text-center py-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors border-t border-zinc-800/40"
+          className="w-full text-center py-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 transition-colors border-t border-zinc-800/40"
         >
           {expanded
             ? 'collapse'
