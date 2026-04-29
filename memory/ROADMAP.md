@@ -3,7 +3,19 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.5 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.6 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.6 — see CHANGELOG (twenty-fifth commit)
+- ✅ **V5 HUD: Buying Power replaces Latency** in the top-bar metrics
+  cluster. More actionable on a margin account — shows real-time
+  margin headroom alongside equity. Color-coded (emerald when
+  `BP > equity × 0.5`; amber when running close to maintenance).
+- ✅ Backend already collected `BuyingPower` from IB account snapshot
+  (line 235 of trading_bot.py); v19.6 surfaces it at top-level of
+  `/api/trading-bot/status` so the V5 HUD can read it without an
+  extra round-trip.
+- ✅ Latency still visible on the Pusher Heartbeat tile (avg/p95/last);
+  we just freed the prime HUD slot for buying power.
 
 ### 🎯 Just shipped 2026-04-30 v19.5 — see CHANGELOG (twenty-fourth commit)
 - ✅ **Safety config Pydantic ceiling raised** for margin accounts —

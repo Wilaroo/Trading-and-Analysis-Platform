@@ -185,7 +185,7 @@ export const SentComV5View = ({
   const { leftPct, setLeftPct, resetToDefault } = useDrawerSplit();
 
   const equity = status?.account_equity ?? status?.equity ?? context?.account_equity;
-  const latencySeconds = status?.order_latency_seconds ?? status?.latency_seconds;
+  const buyingPower = status?.account_buying_power ?? status?.buying_power ?? context?.account_buying_power;
   const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
   // Single entry point for every ticker-symbol click anywhere inside V5:
@@ -252,7 +252,7 @@ export const SentComV5View = ({
         } : undefined}
         totalPnl={totalPnl}
         equity={equity}
-        latencySeconds={latencySeconds}
+        buyingPower={buyingPower}
         phase={phase}
         rightExtra={
           <div className="flex items-center gap-2">

@@ -2,9 +2,14 @@
  * PipelineHUDV5 — Stage 2d V5 top-bar pipeline funnel.
  *
  * Five-stage horizontal HUD: Scan → Evaluate → Order → Manage → Close Today,
- * plus a right-side metrics cluster (P&L / Equity / Latency / Phase).
+ * plus a right-side metrics cluster (P&L / Equity / Buying Power / Phase).
  * Pure presentational component — consumer passes every count so we never
  * fetch here. Counts are derived upstream from the existing SentCom hooks.
+ *
+ * 2026-04-30 v19.6 — `Latency` metric replaced with `Buying Power` per
+ * operator request. Buying power is the more actionable number on a
+ * margin account (shows real-time margin headroom alongside equity);
+ * latency is exposed in the Pusher Heartbeat tile already.
  *
  * Matches the aesthetic of `public/mockups/option-1-v5-command-center.html`
  * without breaking any existing panels or styles.
@@ -76,7 +81,7 @@ export const PipelineHUDV5 = ({
   closeAccent,
   totalPnl = 0,
   equity,
-  latencySeconds,
+  buyingPower,
   phase = '—',
   rightExtra = null,
 }) => {
@@ -113,9 +118,13 @@ export const PipelineHUDV5 = ({
           {rightExtra}
           <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
           <Metric label="Equity"  value={formatEquity(equity)} />
-          <Metric label="Latency"
-            value={latencySeconds != null ? `${Number(latencySeconds).toFixed(1)}s` : '—'}
-            color={latencySeconds != null && Number(latencySeconds) < 10 ? 'text-emerald-400' : 'text-amber-400'}
+          <Metric label="Buying Pwr"
+            value={formatEquity(buyingPower)}
+            color={
+              buyingPower != null && equity != null && Number(buyingPower) > Number(equity) * 0.5
+                ? 'text-emerald-400'
+                : 'text-amber-400'
+            }
           />
           <span data-help-id="pipeline-phase">
             <Metric label="Phase" value={phase} color={phaseColor} />

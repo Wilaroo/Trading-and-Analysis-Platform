@@ -258,6 +258,11 @@ async def get_bot_status():
     if account.get("equity"):
         status["account_equity"] = account["equity"]
         status.setdefault("equity", account["equity"])
+        # 2026-04-30 v19.6 — also surface live buying power at top-level
+        # so the V5 HUD can show real-time margin headroom next to equity
+        # (replaced the old `Latency` metric per operator request).
+        if account.get("buying_power"):
+            status["account_buying_power"] = account["buying_power"]
 
         # 2026-04-29 (operator-flagged pre-RTH): keep
         # `risk_params.starting_capital` in lock-step with the live

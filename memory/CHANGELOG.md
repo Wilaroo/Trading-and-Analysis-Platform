@@ -2,6 +2,52 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-fifth commit, v19.6) — V5 HUD: Buying Power replaces Latency
+
+**Why**: Operator on a 4× margin paper account asked for **real-time
+buying power** in the V5 top-bar HUD, next to Equity. Latency was
+displaced (it's exposed in the Pusher Heartbeat tile already; the
+HUD's right-cluster spot is more valuable for a margin number).
+
+### Patch
+
+- **Backend**: `routers/trading_bot.py` — when surfacing
+  `account_equity` at top-level of `/api/trading-bot/status`, also
+  surface `account_buying_power` (already collected from
+  `BuyingPower` field of the IB account snapshot at line 235;
+  previously only nested under `account.buying_power`).
+
+- **Frontend**: `components/sentcom/SentComV5View.jsx` — read
+  `status.account_buying_power ?? status.buying_power ??
+  context.account_buying_power` and pass to `<PipelineHUDV5/>`.
+  Removed the `latencySeconds` read.
+
+- **Frontend**: `components/sentcom/panels/PipelineHUDV5.jsx` —
+  prop `latencySeconds` → `buyingPower`. Metric tile label
+  `Latency` → `Buying Pwr`. Color coding:
+  - `text-emerald-400` when `buyingPower > equity × 0.5` (healthy
+    margin headroom)
+  - `text-amber-400` otherwise (running close to maintenance margin)
+
+### Why color thresholds at 50% of equity
+
+A standard Reg-T margin account has `BuyingPower ≈ 4× Equity`
+intraday. As open positions consume margin, `BuyingPower` drops.
+At 50% of equity, used margin is roughly 87.5% of available — close
+to the operator's `max_total_exposure_pct=320%` cap. The amber
+warning fires before reaching the hard reject so the operator gets
+a visual heads-up to either close positions or stand down on new
+entries.
+
+### Persistence / latency display
+
+Latency wasn't deleted from the system — it's still exposed on the
+Pusher Heartbeat tile (`PusherHeartbeatTile.jsx`) with avg / p95 /
+last RPC latency. The change is just where the V5 HUD's
+prime-real-estate metric slot points.
+
+
+
 ## 2026-04-30 (twenty-fourth commit, v19.5) — Safety config ceiling raised for margin accounts
 
 **Why**: Operator ran the v19.4 unblock script, got HTTP 422 on the
