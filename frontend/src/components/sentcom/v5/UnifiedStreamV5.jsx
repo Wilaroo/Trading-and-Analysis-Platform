@@ -13,6 +13,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ShadowDecisionBadge } from './ShadowDecisionBadge';
 import { useRecentShadowDecisions, SHADOW_FRESHNESS_WINDOW_MS } from './useRecentShadowDecisions';
+import { collapseStreamMessages } from './streamCollapse';
+import { useStreamLabels, ReactionButtons } from './useStreamLabels';
 
 const TIME_COLOR_BY_SEV = {
   scan:  'text-violet-300',
@@ -109,13 +111,14 @@ const formatRight = (msg, sev) => {
 };
 
 
-const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
+const StreamRow = ({ msg, onSymbolClick, shadowBySymbol, hoveredSymbol, onHoverSymbol, labels, setLabel }) => {
   const sev = classifyMessage(msg);
   const time = formatTimestamp(msg.timestamp || msg.created_at || msg.time);
   const headline = formatHeadline(msg);
   const right = formatRight(msg, sev);
   const body = msg.summary || msg.text || msg.message || msg.content || msg.note || '';
   const sym = msg.symbol || msg.ticker;
+  const isHovered = sym && hoveredSymbol && sym.toUpperCase() === hoveredSymbol;
 
   // Shadow-decision chip — only render when:
   //   • the row has a symbol AND
@@ -140,7 +143,12 @@ const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
   }
 
   return (
-    <div className={`v5-stream-item sev-${sev}`} data-testid={`v5-stream-item-${sev}`}>
+    <div
+      className={`v5-stream-item sev-${sev}${isHovered ? ' v5-row-hover-cross' : ''}`}
+      data-testid={`v5-stream-item-${sev}`}
+      onMouseEnter={sym && onHoverSymbol ? () => onHoverSymbol(sym.toUpperCase()) : undefined}
+      onMouseLeave={sym && onHoverSymbol ? () => onHoverSymbol(null) : undefined}
+    >
       <div className="flex items-center justify-between gap-2 text-[12px] v5-mono">
         <span className="min-w-0 truncate">
           {time && <span className={TIME_COLOR_BY_SEV[sev]}>{time}</span>}
@@ -164,7 +172,17 @@ const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
           </b>
           {shadowChip}
         </span>
-        {right && <span className={`shrink-0 v5-mono ${right.color || ''}`}>{right.text}</span>}
+        <span className="shrink-0 flex items-center gap-1">
+          {right && <span className={`v5-mono ${right.color || ''}`}>{right.text}</span>}
+          {labels && setLabel && (
+            <ReactionButtons
+              event_id={msg.id || msg._id}
+              ctx={{ symbol: sym, kind: sev, action_type: msg.action_type }}
+              labels={labels}
+              setLabel={setLabel}
+            />
+          )}
+        </span>
       </div>
       {body && (
         <div className="v5-why mt-0.5">
@@ -177,10 +195,104 @@ const StreamRow = ({ msg, onSymbolClick, shadowBySymbol }) => {
 };
 
 
-export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
+const formatRunAge = (last_ts) => {
+  if (!last_ts) return '';
+  try {
+    const diffS = Math.max(0, Math.floor((Date.now() - new Date(last_ts).getTime()) / 1000));
+    if (diffS < 60) return `last ${diffS}s ago`;
+    if (diffS < 3600) return `last ${Math.floor(diffS / 60)}m ago`;
+    return `last ${Math.floor(diffS / 3600)}h ago`;
+  } catch { return ''; }
+};
+
+/**
+ * CollapsedStreamRow — single row representing a run of consecutive
+ * same-(symbol, action_type) events. Click expands; clicking again
+ * collapses. The `head` (newest in run) drives the colour/headline
+ * so the row's severity matches what the operator would see if they
+ * expanded.
+ */
+const CollapsedStreamRow = ({ group, onExpandToggle, onSymbolClick, hoveredSymbol, onHoverSymbol, labels, setLabel }) => {
+  const head = group.head;
+  const sev = classifyMessage(head);
+  const headline = formatHeadline(head);
+  const sym = head.symbol || head.ticker;
+  const isHovered = sym && hoveredSymbol && sym.toUpperCase() === hoveredSymbol;
+  const ageText = formatRunAge(group.first_ts);
+
+  return (
+    <div
+      className={`v5-stream-item sev-${sev} v5-stream-collapsed${isHovered ? ' v5-row-hover-cross' : ''}`}
+      data-testid={`v5-stream-collapsed-${sev}`}
+      onMouseEnter={sym && onHoverSymbol ? () => onHoverSymbol(sym.toUpperCase()) : undefined}
+      onMouseLeave={sym && onHoverSymbol ? () => onHoverSymbol(null) : undefined}
+    >
+      <div className="flex items-center justify-between gap-2 text-[12px] v5-mono">
+        <span className="min-w-0 truncate">
+          {sym && onSymbolClick ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSymbolClick(sym); }}
+              className="text-zinc-100 font-bold hover:text-cyan-300 hover:underline transition-colors uppercase"
+              data-testid={`stream-collapsed-symbol-${sym}`}
+              title={`Open ${sym} analysis`}
+            >
+              {sym}
+            </button>
+          ) : null}
+          {sym ? <span className="text-zinc-500"> · </span> : null}
+          <b className="text-zinc-200">
+            {sym ? headline.replace(new RegExp(`^${sym}\\s*·\\s*`, 'i'), '') : headline}
+          </b>
+          <span className={`ml-2 px-1.5 py-0.5 rounded-sm text-[11px] font-bold ${TIME_COLOR_BY_SEV[sev]} bg-zinc-900/60 border border-zinc-800`}>
+            ×{group.count}
+          </span>
+          {ageText && <span className="ml-2 text-zinc-500">· {ageText}</span>}
+        </span>
+        <span className="shrink-0 flex items-center gap-1">
+          {labels && setLabel && (
+            <ReactionButtons
+              event_id={head.id || head._id}
+              ctx={{ symbol: sym, kind: sev, action_type: head.action_type }}
+              labels={labels}
+              setLabel={setLabel}
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => onExpandToggle(group.key)}
+            className="text-[11px] v5-mono text-zinc-500 hover:text-cyan-300 transition-colors"
+            data-testid={`stream-collapsed-expand-${group.key}`}
+            title="Expand to see all events"
+          >
+            expand ▾
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+};
+
+
+export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick, hoveredSymbol, onHoverSymbol }) => {
+  // Wave 4 (#8) — operator RLHF labels (👍/👎). Single hook at the
+  // parent level so reactions render consistently across all rows.
+  const { labels, setLabel } = useStreamLabels();
+
   // Shadow-decision lookup table (refreshed every 60s). Computed at
   // the parent level so each row only does a Map.get() — no fetches.
   const shadowBySymbol = useRecentShadowDecisions();
+
+  // Wave-1 (#5) — operator-controlled expansion of collapsed groups.
+  // Keys live here so they survive WS pushes that don't disturb the run.
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  const toggleExpand = useCallback((key) => {
+    setExpandedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
 
   // Stage 2d-C — filter chips matching the mockup. Multi-select: unlocked
   // defaults to "all". Clicking a chip toggles it.
@@ -193,10 +305,14 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
     });
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!messages || filters.size === 0) return messages || [];
-    return messages.filter(m => filters.has(classifyMessage(m)));
-  }, [messages, filters]);
+  // Apply severity filter FIRST so the collapser doesn't accidentally
+  // group across filtered-out events. Then collapse consecutive runs.
+  const visible = useMemo(() => {
+    const filtered = (!messages || filters.size === 0)
+      ? (messages || [])
+      : messages.filter(m => filters.has(classifyMessage(m)));
+    return collapseStreamMessages(filtered, { expandedKeys });
+  }, [messages, filters, expandedKeys]);
 
   const filterOptions = [
     { key: 'scan',  label: 'scan' },
@@ -227,10 +343,32 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick }) => {
   return (
     <div data-testid="v5-unified-stream" data-help-id="unified-stream" className="flex flex-col">
       <StreamFilterBar filters={filters} toggle={toggle} options={filterOptions} />
-      {filtered.map((m, i) => (
-        <StreamRow key={m.id || m._id || `${m.timestamp || i}-${i}`} msg={m} onSymbolClick={onSymbolClick} shadowBySymbol={shadowBySymbol} />
+      {visible.map((m, i) => (
+        m._collapsed ? (
+          <CollapsedStreamRow
+            key={`collapsed-${m.key}`}
+            group={m}
+            onExpandToggle={toggleExpand}
+            onSymbolClick={onSymbolClick}
+            hoveredSymbol={hoveredSymbol}
+            onHoverSymbol={onHoverSymbol}
+            labels={labels}
+            setLabel={setLabel}
+          />
+        ) : (
+          <StreamRow
+            key={m.id || m._id || `${m.timestamp || i}-${i}`}
+            msg={m}
+            onSymbolClick={onSymbolClick}
+            shadowBySymbol={shadowBySymbol}
+            hoveredSymbol={hoveredSymbol}
+            onHoverSymbol={onHoverSymbol}
+            labels={labels}
+            setLabel={setLabel}
+          />
+        )
       ))}
-      {filtered.length === 0 && filters.size > 0 && (
+      {visible.length === 0 && filters.size > 0 && (
         <div className="px-3 py-4 text-center text-[13px] text-zinc-500 v5-why-dim">
           No events match the selected filter{filters.size > 1 ? 's' : ''}.
         </div>

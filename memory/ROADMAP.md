@@ -3,7 +3,34 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.6 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.8 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.8 — see CHANGELOG (twenty-seventh commit)
+All 4 stream-improvement waves shipped together:
+
+- ✅ **Wave 1** — perception layer:
+  - Repeat-event collapser (5× effective stream capacity on busy windows)
+  - Cross-panel hover highlight (Scanner ⇄ Stream ⇄ Deep Feed)
+  - Counter-trend striping on Scanner cards (surfaces v17 soft-gate decisions)
+- ✅ **Wave 2** — Deep Feed → real forensic tool:
+  - `GET /api/sentcom/stream/history` over `sentcom_thoughts` (TTL 7d)
+  - Time-range chips (5m / 30m / 1h / 4h / 1d / 7d) + symbol drill-in + free-form search
+  - Right pane stops being a duplicate of Unified Stream
+- ✅ **Wave 3** — context layer:
+  - Scanner groupable by Market Setup (operator-toggleable, persisted)
+  - Day-rollup banner pinned to top of Unified Stream — names the
+    funnel's first dead stage in 1 line so operator stops curling
+    `/api/diagnostic/trade-funnel`
+- ✅ **Wave 4** — RLHF labels:
+  - `POST /api/sentcom/stream/label` (👍/👎/clear, idempotent toggle)
+  - New `sentcom_labels` Mongo collection (TTL 90d)
+  - Training-pipeline export endpoint joins labels with stored events
+  - Closes the self-improving loop alongside realised P&L
+
+**Tests**: 10 new pytest + 9 frontend collapser tests = **122/122 v12-v19.8 + 9/9 collapser**.
+ESLint & ruff clean.
+
+### 🎯 Just shipped 2026-04-30 v19.7 — V5 HUD layout 2/3 ⇄ 1/3 split (CHANGELOG: twenty-sixth commit)
 
 ### 🎯 Just shipped 2026-04-30 v19.6 — see CHANGELOG (twenty-fifth commit)
 - ✅ **V5 HUD: Buying Power replaces Latency** in the top-bar metrics

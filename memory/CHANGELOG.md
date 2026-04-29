@@ -2,6 +2,138 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-seventh commit, v19.8) — V5 Stream Waves 1-4
+
+Big multi-wave UX upgrade across Scanner, Unified Stream, and the
+right-pane "Stream · Deep Feed" (which until now was a duplicate of
+Unified Stream). All four waves shipped in one commit because they
+share helpers (hover state, severity classifier, expanded-key
+sets) and ship cleanly behind operator-toggleable defaults.
+
+**Wave 1** — perception: collapse + cross-highlight + counter-trend
+**Wave 2** — forensics: real Deep Feed history + filters
+**Wave 3** — context: setup grouping + day-rollup banner
+**Wave 4** — RLHF: 👍/👎 reactions feeding the training pipeline
+
+### Wave 1 (#5) Repeat-event collapser
+
+`UnifiedStreamV5.jsx` now feeds messages through `streamCollapse.js`
+(new pure-function module). Consecutive same-(symbol, action_type)
+runs render as a single row: `AAPL · skip_low_gate ×5 · last 0:32 ago`.
+Click `expand ▾` to see all children. Effective stream capacity 5×
+on busy windows. **9/9 unit tests via node-direct execution.**
+
+Implementation notes:
+- Filter chips applied BEFORE collapse so groups don't span filtered-out events.
+- `expandedKeys` (Set<string>) lives in `UnifiedStreamV5` state — survives WS pushes that don't disturb the run.
+- Group key `<sym>|<kind>|<oldest_ts>` survives re-renders — operator's expansion choice persists.
+- Empty-signature rows (no symbol AND no kind) never collapse.
+
+### Wave 1 (#11) Cross-panel hover
+
+`hoveredSymbol` lifted to `SentComV5View`; passed to all three panels
+(Scanner, Unified Stream, Deep Feed). Hover a row → matching Scanner
+card pulses cyan (`@keyframes v5-cross-pulse`, 220ms). Hover a card →
+matching stream rows highlight. Cost: nil — Map.get() per row, no
+re-renders from the parent.
+
+### Wave 1 (#2) Counter-trend warning stripe
+
+`is_countertrend` and `market_setup` plumbed from `LiveAlert.to_dict()`
+through `buildCards` to `<ScannerCard>`. Counter-trend cards render
+with diagonal-stripe amber left border + `⚠ CT` chip. Backend already
+sets these via the v17 soft-gate matrix — we just made them visible.
+
+### Wave 2 (#9) Deep Feed → real persisted history
+
+New endpoint: `GET /api/sentcom/stream/history` over the existing
+`sentcom_thoughts` Mongo collection (TTL 7d). Filters:
+- `minutes` (1 - 10080, default 60)
+- `symbol` (case-insensitive exact)
+- `kind` (scan / brain / order / fill / win / loss / skip / info)
+- `q` (regex search across `content` + `action_type`)
+- `limit` (1 - 2000)
+
+Frontend `<DeepFeedV5/>` replaces the duplicate `<UnifiedStreamV5/>`
+in the right pane. Adds:
+- 6 time-range chips: 5m / 30m / 1h / 4h / 1d / 7d
+- Symbol drill-in input (debounced 250ms)
+- Free-form text search (debounced 250ms)
+- 30s background poll (independent of WS stream)
+- Reuses `<UnifiedStreamV5/>` for rendering, so collapse + severity
+  + reactions + cross-highlight all "just work".
+
+### Wave 3 (#1) Scanner grouping by Market Setup
+
+`<ScannerCardsV5/>` now supports two modes:
+- **flat** (default) — preserves the legacy ranked list
+- **grouped** — sections by `market_setup` (Gap & Go, Range Break, Day-2,
+  etc.), each collapsible, with per-section `N CT` counter-trend chip
+
+Toggle persists to `localStorage['v5_scanner_group_by_setup']` so the
+operator's choice survives reload.
+
+### Wave 3 (#7) Day-rollup banner
+
+`<DayRollupBannerV5/>` pinned at the top of Unified Stream. Reads
+`/api/diagnostic/trade-funnel` every 30s. One sticky line:
+`Today: 276 alerts · 20 HIGH · 16 eligible · 0 orders · killed at: orders`
+
+When `orders=0` and `eligible>0`, the line ends in red highlighting
+which stage is killing trades — surfaces the funnel state without
+operator curl.
+
+### Wave 4 (#8) Operator RLHF reactions
+
+New router: `routers/sentcom_labels.py` with three endpoints:
+
+```
+POST /api/sentcom/stream/label             # 👍/👎/clear (idempotent toggle)
+GET  /api/sentcom/stream/labels            # list + counts (UI hydration)
+GET  /api/sentcom/stream/label/training-export  # JSONL for the training pipe
+```
+
+New collection `sentcom_labels` (TTL 90d, longer than `sentcom_thoughts`
+because labels survive past the underlying events). Idempotent toggle
+via unique `(event_id, operator_id)` index. Optional context fields
+(`symbol`, `kind`, `action_type`, `note`) so the training pipe can
+join without round-tripping through `sentcom_thoughts`.
+
+Frontend `useStreamLabels` hook + `<ReactionButtons/>` component:
+- Hydrates last 24h on mount
+- Optimistic update — UI reflects the click before the POST returns
+- Same emoji clicked twice → "clear" (removes the row)
+- Hidden until row hover; visible permanently once labelled
+
+The training pipeline can now read this signal as an RLHF reward
+alongside realised P&L. Closes the self-improving loop.
+
+### Tests
+
+- `tests/test_stream_history_and_labels_v19_8.py` — 10 new pytest tests
+  covering history filter wiring, error envelopes, label
+  insert/idempotent/flip/clear, validation, count rollups, pydantic limits.
+- `streamCollapse.js` — 9 node-direct tests covering empty inputs,
+  single rows, runs of N, interleaving, expandedKeys, mixed runs.
+- **122/122 backend tests across v12-v19.8.**
+
+### Files touched (frontend)
+- `components/sentcom/SentComV5View.jsx` (lift hover state, mount Deep Feed + day-rollup)
+- `components/sentcom/v5/UnifiedStreamV5.jsx` (collapser + cross-hover + reactions)
+- `components/sentcom/v5/ScannerCardsV5.jsx` (counter-trend, grouping, hover)
+- `components/sentcom/v5/DeepFeedV5.jsx` (NEW)
+- `components/sentcom/v5/DayRollupBannerV5.jsx` (NEW)
+- `components/sentcom/v5/streamCollapse.js` (NEW)
+- `components/sentcom/v5/useStreamLabels.js` (NEW)
+- `components/sentcom/v5/useV5Styles.js` (CSS additions only)
+
+### Files touched (backend)
+- `routers/sentcom.py` (added `/stream/history`)
+- `routers/sentcom_labels.py` (NEW — full router)
+- `server.py` (1-line include)
+
+
+
 ## 2026-04-30 (twenty-sixth commit, v19.7) — V5 HUD layout: 2/3 ⇄ 1/3 split
 
 **Why**: With margin-account dollar values shipping in v19.6

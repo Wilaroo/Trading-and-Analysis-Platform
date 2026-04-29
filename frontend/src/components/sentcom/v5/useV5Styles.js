@@ -55,7 +55,62 @@ const CSS = `
 .v5-stream-item.sev-loss  { border-left-color:#ef4444; }
 .v5-stream-item.sev-skip  { border-left-color:#71717a; }
 .v5-stream-item.sev-brain { border-left-color:#a855f7; }
+.v5-stream-item.sev-scan  { border-left-color:#a78bfa; }
 .v5-stream-item.sev-info  { border-left-color:#334155; }
+
+/* Wave-1 (#5) — collapsed run row. Slightly lighter background +
+   subtle dotted bottom border so it stands out from individual rows
+   without being loud. */
+.v5-stream-collapsed { background:rgba(63,63,70,.18); border-bottom:1px dashed #27272a; }
+.v5-stream-collapsed:hover { background:rgba(63,63,70,.30); }
+
+/* Wave-1 (#11) — cross-panel hover highlight. When a row in either
+   stream is hovered, the matching Scanner card pulses with a cyan
+   ring (and vice versa). The animation is intentionally short (220ms)
+   so it doesn't strobe during fast mouse moves. */
+@keyframes v5-cross-pulse {
+  0%   { box-shadow:0 0 0 0 rgba(34,211,238,.55) inset; }
+  100% { box-shadow:0 0 0 2px rgba(34,211,238,.55) inset; }
+}
+.v5-row-hover-cross { background:rgba(34,211,238,.06); }
+.v5-card-hover-cross {
+  background:rgba(34,211,238,.05) !important;
+  animation:v5-cross-pulse .22s ease-out forwards;
+}
+
+/* Wave-1 (#2) — counter-trend warning. Diagonal-stripe left border
+   + amber "CT" chip alongside the stage chip. Surfaces the v17
+   soft-gate matrix decision so the operator can spot trades fired
+   AGAINST the daily Setup at a glance. */
+.v5-card-counter-trend {
+  border-left:3px solid transparent;
+  background-image:
+    linear-gradient(transparent, transparent),
+    repeating-linear-gradient(45deg, #eab308 0 6px, transparent 6px 12px);
+  background-origin:border-box;
+  background-clip:padding-box, border-box;
+}
+.v5-chip-counter-trend {
+  color:#fde047;
+  border-color:#a16207;
+  background:rgba(234,179,8,.12);
+  font-weight:700;
+}
+
+/* Wave-4 (#8) — operator RLHF reaction buttons. Hidden until row hover
+   to keep the stream clean; visible permanently once labelled. */
+.v5-reactions { opacity:0; transition:opacity .15s ease-in-out; pointer-events:none; }
+.v5-stream-item:hover .v5-reactions,
+.v5-reactions:has(.active) { opacity:1; pointer-events:auto; }
+.v5-reaction-btn {
+  font-size:11px; line-height:1; padding:1px 4px; border-radius:3px;
+  background:transparent; border:1px solid transparent;
+  cursor:pointer; transition:background .12s, border-color .12s, transform .12s;
+  filter:saturate(.4) brightness(.9);
+}
+.v5-reaction-btn:hover { background:rgba(63,63,70,.6); filter:saturate(1) brightness(1); transform:scale(1.15); }
+.v5-reaction-btn.active.up   { background:rgba(34,197,94,.18); border-color:rgba(34,197,94,.5); filter:saturate(1) brightness(1.1); }
+.v5-reaction-btn.active.down { background:rgba(244,63,94,.18); border-color:rgba(244,63,94,.5); filter:saturate(1) brightness(1.1); }
 
 /* Briefings */
 .v5-briefing-card { padding:10px 12px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; position:relative; }

@@ -26,6 +26,8 @@ import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { TopMoversTile } from './v5/TopMoversTile';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
+import { DeepFeedV5 } from './v5/DeepFeedV5';
+import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
 import { HealthChip } from './v5/HealthChip';
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
@@ -213,6 +215,14 @@ export const SentComV5View = ({
   // Phase 5 stability bundle — freshness inspector modal visibility.
   const [inspectorOpen, setInspectorOpen] = useState(false);
 
+  // Wave-1 (#11) — cross-panel hover: hovering a row in either Stream
+  // panel pulses the matching Scanner card. Single source of truth so
+  // both Stream renderers + Scanner share the same `hoveredSymbol`.
+  const [hoveredSymbol, setHoveredSymbol] = useState(null);
+  const handleHoverSymbol = useCallback((sym) => {
+    setHoveredSymbol(sym ? String(sym).toUpperCase() : null);
+  }, []);
+
   return (
     <div
       data-testid="sentcom-v5-root"
@@ -348,6 +358,8 @@ export const SentComV5View = ({
                 messages={messages}
                 selectedSymbol={effectiveSymbol}
                 onSelectSymbol={handleOpenTicker}
+                hoveredSymbol={hoveredSymbol}
+                onHoverSymbol={handleHoverSymbol}
               />
             </PanelErrorBoundary>
           </div>
@@ -406,7 +418,8 @@ export const SentComV5View = ({
               <span className="v5-chip v5-chip-manage">live</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
-              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
+              <DayRollupBannerV5 apiBase={process.env.REACT_APP_BACKEND_URL || ''} />
+              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} hoveredSymbol={hoveredSymbol} onHoverSymbol={handleHoverSymbol} />
             </div>
             <div className="border-t border-zinc-800">
               {/* Chat is independent of IB Gateway — chat_server (port
@@ -497,8 +510,15 @@ export const SentComV5View = ({
               <div className="v5-panel-title">Stream · Deep Feed</div>
               <span className="v5-chip v5-chip-manage">history</span>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
-              <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PanelErrorBoundary label="deep-feed">
+                <DeepFeedV5
+                  apiBase={process.env.REACT_APP_BACKEND_URL || ''}
+                  onSymbolClick={handleOpenTicker}
+                  hoveredSymbol={hoveredSymbol}
+                  onHoverSymbol={handleHoverSymbol}
+                />
+              </PanelErrorBoundary>
             </div>
           </div>
         </div>

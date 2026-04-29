@@ -115,6 +115,103 @@ async def get_stream(limit: int = Query(20, ge=1, le=100)):
         }
 
 
+# 2026-04-30 v19.8 — Wave 2 (#9) — Stream · Deep Feed history endpoint.
+# Backed by the existing `sentcom_thoughts` Mongo collection (TTL 7 days,
+# already indexed on created_at + symbol + kind). The right-pane Deep
+# Feed previously rendered the SAME 30-row in-memory buffer as the
+# center Unified Stream — adding zero forensic value. This endpoint
+# turns it into the post-mortem tool: time-range chips + text search
+# + kind filter, all server-side so 500-row scans stay fast.
+@router.get("/stream/history")
+async def get_stream_history(
+    minutes: int = Query(60, ge=1, le=10080),  # default 1h, max 7d (TTL ceiling)
+    limit: int = Query(500, ge=1, le=2000),
+    symbol: Optional[str] = Query(None, description="Filter to a single symbol (case-insensitive)"),
+    kind: Optional[str] = Query(None, description="Filter by kind (scan / brain / order / fill / win / loss / skip / info / thought)"),
+    q: Optional[str] = Query(None, description="Text search across content + action_type"),
+):
+    """Deep-history stream events from `sentcom_thoughts` (TTL 7d).
+
+    Operator workflow:
+      • Quick chips: minutes=5/30/60/240/1440  (5m / 30m / 1h / 4h / 1d)
+      • Forensics:   q="WULF skip"             (text search across content)
+      • Symbol drill-in: symbol=AAPL           (case-insensitive)
+      • Severity drill-in: kind=loss           (matches stored `kind`)
+
+    Response shape mirrors `/api/sentcom/stream` so the frontend can
+    swap the messages array transparently.
+    """
+    from datetime import datetime, timezone, timedelta
+    import re
+
+    try:
+        from services.sentcom_service import THOUGHTS_COLLECTION
+        from services.sentcom_service import _get_db as _sentcom_get_db
+    except Exception as e:
+        logger.error(f"sentcom history import failed: {e}")
+        return {"success": False, "error": str(e), "messages": [], "count": 0}
+
+    try:
+        db = _sentcom_get_db()
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        query = {"created_at": {"$gte": cutoff}}
+        if symbol:
+            query["symbol"] = {"$regex": f"^{re.escape(symbol)}$", "$options": "i"}
+        if kind:
+            query["kind"] = kind.lower()
+        if q:
+            # Search across content + action_type. `re.escape` keeps
+            # operator-typed slashes / parens harmless.
+            pat = re.escape(q)
+            query["$or"] = [
+                {"content": {"$regex": pat, "$options": "i"}},
+                {"action_type": {"$regex": pat, "$options": "i"}},
+            ]
+
+        cursor = (
+            db[THOUGHTS_COLLECTION]
+            .find(query, {"_id": 0})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        rows = list(cursor)
+
+        # Massage into the same shape `/api/sentcom/stream` returns so
+        # the frontend can render via the same `<UnifiedStreamV5/>`.
+        messages = []
+        for r in rows:
+            ts = r.get("timestamp") or r.get("created_at")
+            if hasattr(ts, "isoformat"):
+                ts = ts.isoformat()
+            messages.append({
+                "id": r.get("id"),
+                "type": r.get("kind", "info"),
+                "kind": r.get("kind", "info"),
+                "action_type": r.get("action_type"),
+                "content": r.get("content"),
+                "text": r.get("content"),
+                "symbol": r.get("symbol"),
+                "confidence": r.get("confidence"),
+                "metadata": r.get("metadata") or {},
+                "timestamp": ts,
+            })
+
+        return {
+            "success": True,
+            "messages": messages,
+            "count": len(messages),
+            "filters": {
+                "minutes": minutes,
+                "symbol": symbol,
+                "kind": kind,
+                "q": q,
+            },
+        }
+    except Exception as e:
+        logger.exception(f"Error fetching sentcom stream history: {e}")
+        return {"success": False, "error": str(e), "messages": [], "count": 0}
+
+
 
 @router.post("/chat-test")
 async def chat_test(request: ChatRequest):

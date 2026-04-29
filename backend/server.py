@@ -53,6 +53,7 @@ from routers.trading_bot import router as trading_bot_router, init_trading_bot_r
 from routers.config import router as config_router
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
 from routers.sentcom import router as sentcom_router
+from routers.sentcom_labels import router as sentcom_labels_router  # Wave 4 (#8) — RLHF labels
 from routers.sentcom_chart import (
     router as sentcom_chart_router,
     init_sentcom_chart_router,
@@ -1473,6 +1474,7 @@ app.include_router(trading_bot_router)
 app.include_router(config_router)
 app.include_router(market_regime_router)
 app.include_router(sentcom_router)
+app.include_router(sentcom_labels_router)  # Wave 4 (#8)
 app.include_router(sentcom_chart_router)
 
 # Phase 1 — Live Data Architecture: pusher RPC + live-bar cache visibility

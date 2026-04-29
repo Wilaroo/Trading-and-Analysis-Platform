@@ -12,7 +12,7 @@
  * positions / messages arrays that the existing SentCom hooks already
  * produce and folds them into a single ranked list.
  */
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useLiveSubscriptions } from '../../../hooks/useLiveSubscription';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
@@ -121,6 +121,15 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       stage,
       stage_note: a.alert_type || a.setup_type || 'alert',
       change_pct: a.change_pct ?? null,
+      // Wave-1 (#2) — counter-trend warning. Surfaces the v17 soft-gate
+      // matrix decision so the operator can see when an alert is
+      // firing AGAINST the daily Setup (Bellafiore matrix).
+      is_countertrend: !!a.is_countertrend,
+      market_setup: a.market_setup || null,
+      // 2026-04-30 v19.8 — surface tier so the operator knows whether
+      // the symbol came from the live-tick scanner (intraday) or the
+      // bar-poll service (swing/investment).
+      tier: a.tier || a.symbol_tier || null,
       bot_text: a.reason || a.note || `${a.setup_type || 'alert'} · ${a.direction || ''}${a.gate_score ? ` · gate ${a.gate_score}` : ''}`,
       metrics: {
         gate: a.gate_score,
@@ -213,7 +222,7 @@ const relativeAge = (ts) => {
 };
 
 
-const ScannerCard = ({ card, active, onClick }) => {
+const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
   const botColor = BOT_TEXT_COLOR[card.stage] || 'text-zinc-400';
   const hasMetrics = card.metrics && (
@@ -222,6 +231,7 @@ const ScannerCard = ({ card, active, onClick }) => {
   );
   const change = formatPriceChange(card.change_pct);
   const age = relativeAge(card.timestamp);
+  const isHoverCross = hoveredSymbol && hoveredSymbol === card.symbol;
 
   // Stage chip label — mockup shows: "ORDER · 8s", "OPEN", "CLOSED W", "SKIP", "SCAN"
   let chipLabel;
@@ -234,7 +244,9 @@ const ScannerCard = ({ card, active, onClick }) => {
     <div
       data-testid={`v5-scanner-card-${card.symbol}`}
       onClick={onClick}
-      className={`v5-scanner-card ${active ? 'active' : ''}`}
+      onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
+      onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
+      className={`v5-scanner-card${active ? ' active' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
@@ -247,6 +259,15 @@ const ScannerCard = ({ card, active, onClick }) => {
           <span className={`v5-chip ${chipClass}`}>
             {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>
+          {card.is_countertrend && (
+            <span
+              className="v5-chip v5-chip-counter-trend"
+              title={card.market_setup ? `Counter-trend vs daily setup: ${card.market_setup}` : 'Firing against the daily setup matrix'}
+              data-testid={`scanner-card-counter-${card.symbol}`}
+            >
+              ⚠ CT
+            </span>
+          )}
         </div>
         {change && (
           <span className={`v5-mono text-[13px] font-bold ${Number(card.change_pct) >= 0 ? 'v5-up' : 'v5-down'}`}>
@@ -315,6 +336,43 @@ const ScannerCard = ({ card, active, onClick }) => {
   );
 };
 
+// Wave 3 (#1) — group cards by Market Setup. Cards without a market_setup
+// label fall into "OTHER" so nothing disappears. Empty groups are dropped.
+// Stable section order: known-setup names first (sorted by card count
+// desc), "neutral" / "OTHER" last so the operator's eye lands on the
+// REGIME-shaping setups before the noise.
+const _SETUP_LABEL_ORDER = [
+  'gap_and_go', 'range_break', 'day_2_continuation', 'day_2_failure',
+  'opening_drive', 'climactic_reversal', 'rotation_session',
+  'neutral', null,
+];
+
+const _humanizeSetup = (s) => {
+  if (!s) return 'OTHER';
+  return s.replace(/_/g, ' ').toUpperCase();
+};
+
+const groupCardsBySetup = (cards) => {
+  const groups = new Map();
+  for (const c of cards) {
+    const key = c.market_setup || null;  // null collapses to "OTHER"
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  // Sort: explicit order first, unknown setups (not in _SETUP_LABEL_ORDER)
+  // sort by count desc, then "neutral" / null at the end.
+  const known = _SETUP_LABEL_ORDER;
+  return Array.from(groups.entries()).sort(([a], [b]) => {
+    const ai = known.indexOf(a);
+    const bi = known.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    // Both unknown — sort alphabetically for stability
+    return String(a).localeCompare(String(b));
+  });
+};
+
 export const ScannerCardsV5 = ({
   setups,
   alerts,
@@ -322,10 +380,44 @@ export const ScannerCardsV5 = ({
   messages,
   selectedSymbol,
   onSelectSymbol,
+  hoveredSymbol,
+  onHoverSymbol,
 }) => {
   const cards = useMemo(
     () => buildCards({ setups, alerts, positions, messages }),
     [setups, alerts, positions, messages]
+  );
+
+  // Wave 3 (#1) — operator-toggleable grouping by Market Setup.
+  // Persisted to localStorage so the operator's choice survives reload.
+  // Defaults OFF so existing layout is preserved on first encounter
+  // — operator opts INTO grouping deliberately.
+  const [groupBySetup, setGroupBySetup] = useState(() => {
+    try { return localStorage.getItem('v5_scanner_group_by_setup') === 'true'; }
+    catch { return false; }
+  });
+  const toggleGrouping = useCallback(() => {
+    setGroupBySetup((v) => {
+      const next = !v;
+      try { localStorage.setItem('v5_scanner_group_by_setup', String(next)); } catch (_) { /* noop */ }
+      return next;
+    });
+  }, []);
+
+  // Collapsed-section state (per-setup). Operator can fold a section
+  // they don't care about right now (e.g. "Day 2 Failure").
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  const toggleGroup = useCallback((key) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const groups = useMemo(
+    () => groupBySetup ? groupCardsBySetup(cards) : null,
+    [groupBySetup, cards],
   );
 
   // Phase 2: auto-promote the top-10 scanner symbols to tick-level live
@@ -349,14 +441,78 @@ export const ScannerCardsV5 = ({
 
   return (
     <div data-testid="v5-scanner-cards-list" data-help-id="scanner-panel" className="flex flex-col">
-      {cards.map((c) => (
+      {/* Wave 3 (#1) — grouping toggle. Tiny chip in the panel header
+          row so the operator can flip between FLAT (legacy) and
+          GROUPED-BY-SETUP views without leaving the panel. */}
+      <div className="flex items-center justify-end gap-1 px-3 py-1 border-b border-zinc-900 bg-zinc-950/80 sticky top-0 z-[5]">
+        <button
+          type="button"
+          data-testid="v5-scanner-group-toggle"
+          onClick={toggleGrouping}
+          className={`v5-filter-chip ${groupBySetup ? 'active' : ''}`}
+          title={groupBySetup ? 'Switch to flat ranked view' : 'Group cards by Market Setup'}
+        >
+          {groupBySetup ? 'grouped ▾' : 'flat'}
+        </button>
+      </div>
+
+      {!groupBySetup && cards.map((c) => (
         <ScannerCard
           key={c.symbol + c.stage}
           card={c}
           active={selectedSymbol === c.symbol}
           onClick={() => onSelectSymbol?.(c.symbol)}
+          hoveredSymbol={hoveredSymbol}
+          onHoverSymbol={onHoverSymbol}
         />
       ))}
+
+      {groupBySetup && groups && groups.map(([setupKey, groupCards]) => {
+        const isCollapsed = collapsedGroups.has(setupKey ?? '__OTHER__');
+        const label = _humanizeSetup(setupKey);
+        const ctCount = groupCards.filter(c => c.is_countertrend).length;
+        return (
+          <div
+            key={setupKey ?? '__OTHER__'}
+            data-testid={`v5-scanner-group-${setupKey ?? 'OTHER'}`}
+            className="flex flex-col"
+          >
+            <button
+              type="button"
+              onClick={() => toggleGroup(setupKey ?? '__OTHER__')}
+              className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-900 bg-zinc-900/40 hover:bg-zinc-900/70 transition-colors"
+              data-testid={`v5-scanner-group-header-${setupKey ?? 'OTHER'}`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="v5-mono text-[11px] uppercase tracking-widest text-zinc-300 font-bold truncate">
+                  {label}
+                </span>
+                <span className="v5-mono text-[11px] text-zinc-500">
+                  ({groupCards.length})
+                </span>
+                {ctCount > 0 && (
+                  <span className="v5-chip v5-chip-counter-trend" title={`${ctCount} counter-trend trades in this section`}>
+                    {ctCount} CT
+                  </span>
+                )}
+              </div>
+              <span className="v5-mono text-[11px] text-zinc-500">
+                {isCollapsed ? '▸' : '▾'}
+              </span>
+            </button>
+            {!isCollapsed && groupCards.map((c) => (
+              <ScannerCard
+                key={c.symbol + c.stage}
+                card={c}
+                active={selectedSymbol === c.symbol}
+                onClick={() => onSelectSymbol?.(c.symbol)}
+                hoveredSymbol={hoveredSymbol}
+                onHoverSymbol={onHoverSymbol}
+              />
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 };
