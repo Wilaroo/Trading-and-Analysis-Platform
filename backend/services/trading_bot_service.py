@@ -1314,7 +1314,12 @@ class TradingBotService:
         returned None after Phase 4 Alpaca retirement → bot kept
         sizing on the $100k default no matter what the operator's IB
         account balance was. Now we read NetLiquidation from
-        `routers.ib._pushed_ib_data` first.
+        `routers.ib._pushed_ib_data` first, falling back to a direct
+        IB-pusher RPC call when the push-loop's payload is empty
+        (operator-flagged pre-RTH 2026-04-29: pusher RPC can be up
+        and streaming quotes while the POST push-loop is broken
+        upstream — the account dict was empty for hours and the bot
+        was sizing every trade off the $100k default).
         """
         # 1) IB account from the pushed data (preferred when pusher is up).
         try:
@@ -1333,6 +1338,45 @@ class TradingBotService:
                     return float(net_liq)
         except Exception as exc:
             logger.debug(f"_get_account_value: IB read failed: {exc}")
+
+        # 1b) IB account via direct RPC fallback. Same data source, but
+        # bypasses `_pushed_ib_data` so a broken push-loop doesn't leave
+        # the bot sizing on the hardcoded default. Synchronous RPC, ~50ms
+        # on the LAN — only fires when path #1 came up empty.
+        try:
+            from services.ib_pusher_rpc import get_account_snapshot
+            snap = get_account_snapshot()
+            if snap and isinstance(snap, dict):
+                # Pusher exposes NetLiquidation under a few different
+                # casings depending on the pusher build — try them all.
+                net_liq = None
+                for key in ("NetLiquidation", "NetLiquidation-S",
+                            "net_liquidation", "netLiquidation",
+                            "equity", "account_value"):
+                    v = snap.get(key)
+                    if v is None:
+                        continue
+                    if isinstance(v, dict):
+                        v = v.get("value") or v.get("amount")
+                    try:
+                        f = float(v)
+                        if f > 0:
+                            net_liq = f
+                            break
+                    except (TypeError, ValueError):
+                        continue
+                if net_liq:
+                    try:
+                        self.risk_params.starting_capital = float(net_liq)
+                    except Exception:
+                        pass
+                    logger.info(
+                        f"💰 Account value via RPC fallback: ${net_liq:,.0f} "
+                        f"(push-loop payload was empty)"
+                    )
+                    return float(net_liq)
+        except Exception as exc:
+            logger.debug(f"_get_account_value: pusher RPC fallback failed: {exc}")
 
         # 2) Alpaca (legacy fallback — almost always None after Phase 4).
         try:
