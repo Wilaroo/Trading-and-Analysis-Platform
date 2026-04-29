@@ -12,7 +12,7 @@
  * positions / messages arrays that the existing SentCom hooks already
  * produce and folds them into a single ranked list.
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveSubscriptions } from '../../../hooks/useLiveSubscription';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
@@ -222,7 +222,7 @@ const relativeAge = (ts) => {
 };
 
 
-const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol }) => {
+const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
   const botColor = BOT_TEXT_COLOR[card.stage] || 'text-zinc-400';
   const hasMetrics = card.metrics && (
@@ -243,6 +243,7 @@ const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol }) =>
   return (
     <div
       data-testid={`v5-scanner-card-${card.symbol}`}
+      data-card-index={dataCardIndex}
       onClick={onClick}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
@@ -382,6 +383,7 @@ export const ScannerCardsV5 = ({
   onSelectSymbol,
   hoveredSymbol,
   onHoverSymbol,
+  onScanProgress,
 }) => {
   const cards = useMemo(
     () => buildCards({ setups, alerts, positions, messages }),
@@ -420,6 +422,57 @@ export const ScannerCardsV5 = ({
     [groupBySetup, cards],
   );
 
+  // 2026-04-30 v19.10 — sticky "X / N hits" counter in the panel
+  // header. Tracks the topmost-visible card via a scroll listener on
+  // the closest scrollable ancestor and emits {topIdx, total} to the
+  // parent. RAF-throttled so 60fps scrolling stays smooth.
+  const wrapperRef = useRef(null);
+  useEffect(() => {
+    if (!onScanProgress || !wrapperRef.current) return;
+    onScanProgress({ topIdx: 0, total: cards.length });
+
+    // Walk up to find the closest overflow-y: auto/scroll ancestor.
+    let scrollParent = wrapperRef.current.parentElement;
+    while (scrollParent && scrollParent !== document.body) {
+      const oy = window.getComputedStyle(scrollParent).overflowY;
+      if (oy === 'auto' || oy === 'scroll') break;
+      scrollParent = scrollParent.parentElement;
+    }
+    if (!scrollParent || scrollParent === document.body) return;
+
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      if (!wrapperRef.current) return;
+      const rootTop = scrollParent.getBoundingClientRect().top;
+      const cardEls = wrapperRef.current.querySelectorAll('[data-card-index]');
+      for (let i = 0; i < cardEls.length; i++) {
+        const r = cardEls[i].getBoundingClientRect();
+        // First card whose bottom is below the scroll root's top edge
+        // is the topmost-visible card. +2px tolerance to avoid
+        // flicker on the boundary.
+        if (r.bottom > rootTop + 2) {
+          const idx = parseInt(cardEls[i].dataset.cardIndex, 10);
+          if (!Number.isNaN(idx)) onScanProgress({ topIdx: idx, total: cards.length });
+          return;
+        }
+      }
+      // Below all cards (scrolled past) — clamp to last
+      onScanProgress({ topIdx: Math.max(cards.length - 1, 0), total: cards.length });
+    };
+
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+
+    scrollParent.addEventListener('scroll', onScroll, { passive: true });
+    update();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      scrollParent.removeEventListener('scroll', onScroll);
+    };
+  }, [cards.length, groupBySetup, collapsedGroups, onScanProgress]);
+
   // Phase 2: auto-promote the top-10 scanner symbols to tick-level live
   // subs. As the ranked list shifts, the diff-based useLiveSubscriptions
   // hook adds new symbols and drops ones that fell out of the top-10.
@@ -440,7 +493,7 @@ export const ScannerCardsV5 = ({
   }
 
   return (
-    <div data-testid="v5-scanner-cards-list" data-help-id="scanner-panel" className="flex flex-col">
+    <div ref={wrapperRef} data-testid="v5-scanner-cards-list" data-help-id="scanner-panel" className="flex flex-col">
       {/* Wave 3 (#1) — grouping toggle. Tiny chip in the panel header
           row so the operator can flip between FLAT (legacy) and
           GROUPED-BY-SETUP views without leaving the panel. */}
@@ -456,7 +509,7 @@ export const ScannerCardsV5 = ({
         </button>
       </div>
 
-      {!groupBySetup && cards.map((c) => (
+      {!groupBySetup && cards.map((c, i) => (
         <ScannerCard
           key={c.symbol + c.stage}
           card={c}
@@ -464,55 +517,67 @@ export const ScannerCardsV5 = ({
           onClick={() => onSelectSymbol?.(c.symbol)}
           hoveredSymbol={hoveredSymbol}
           onHoverSymbol={onHoverSymbol}
+          dataCardIndex={i}
         />
       ))}
 
-      {groupBySetup && groups && groups.map(([setupKey, groupCards]) => {
-        const isCollapsed = collapsedGroups.has(setupKey ?? '__OTHER__');
-        const label = _humanizeSetup(setupKey);
-        const ctCount = groupCards.filter(c => c.is_countertrend).length;
-        return (
-          <div
-            key={setupKey ?? '__OTHER__'}
-            data-testid={`v5-scanner-group-${setupKey ?? 'OTHER'}`}
-            className="flex flex-col"
-          >
-            <button
-              type="button"
-              onClick={() => toggleGroup(setupKey ?? '__OTHER__')}
-              className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-900 bg-zinc-900/40 hover:bg-zinc-900/70 transition-colors"
-              data-testid={`v5-scanner-group-header-${setupKey ?? 'OTHER'}`}
+      {groupBySetup && groups && (() => {
+        // Walk groups in render order, assigning a flat 0..N-1 index
+        // to each card so the scroll-position tracker reports a
+        // consistent "card 12 of 47" regardless of grouping mode.
+        let flatIdx = 0;
+        return groups.map(([setupKey, groupCards]) => {
+          const isCollapsed = collapsedGroups.has(setupKey ?? '__OTHER__');
+          const label = _humanizeSetup(setupKey);
+          const ctCount = groupCards.filter(c => c.is_countertrend).length;
+          return (
+            <div
+              key={setupKey ?? '__OTHER__'}
+              data-testid={`v5-scanner-group-${setupKey ?? 'OTHER'}`}
+              className="flex flex-col"
             >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="v5-mono text-[11px] uppercase tracking-widest text-zinc-300 font-bold truncate">
-                  {label}
-                </span>
-                <span className="v5-mono text-[11px] text-zinc-500">
-                  ({groupCards.length})
-                </span>
-                {ctCount > 0 && (
-                  <span className="v5-chip v5-chip-counter-trend" title={`${ctCount} counter-trend trades in this section`}>
-                    {ctCount} CT
+              <button
+                type="button"
+                onClick={() => toggleGroup(setupKey ?? '__OTHER__')}
+                className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-900 bg-zinc-900/40 hover:bg-zinc-900/70 transition-colors"
+                data-testid={`v5-scanner-group-header-${setupKey ?? 'OTHER'}`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="v5-mono text-[11px] uppercase tracking-widest text-zinc-300 font-bold truncate">
+                    {label}
                   </span>
-                )}
-              </div>
-              <span className="v5-mono text-[11px] text-zinc-500">
-                {isCollapsed ? '▸' : '▾'}
-              </span>
-            </button>
-            {!isCollapsed && groupCards.map((c) => (
-              <ScannerCard
-                key={c.symbol + c.stage}
-                card={c}
-                active={selectedSymbol === c.symbol}
-                onClick={() => onSelectSymbol?.(c.symbol)}
-                hoveredSymbol={hoveredSymbol}
-                onHoverSymbol={onHoverSymbol}
-              />
-            ))}
-          </div>
-        );
-      })}
+                  <span className="v5-mono text-[11px] text-zinc-500">
+                    ({groupCards.length})
+                  </span>
+                  {ctCount > 0 && (
+                    <span className="v5-chip v5-chip-counter-trend" title={`${ctCount} counter-trend trades in this section`}>
+                      {ctCount} CT
+                    </span>
+                  )}
+                </div>
+                <span className="v5-mono text-[11px] text-zinc-500">
+                  {isCollapsed ? '▸' : '▾'}
+                </span>
+              </button>
+              {!isCollapsed && groupCards.map((c) => {
+                const idx = flatIdx++;
+                return (
+                  <ScannerCard
+                    key={c.symbol + c.stage}
+                    card={c}
+                    active={selectedSymbol === c.symbol}
+                    onClick={() => onSelectSymbol?.(c.symbol)}
+                    hoveredSymbol={hoveredSymbol}
+                    onHoverSymbol={onHoverSymbol}
+                    dataCardIndex={idx}
+                  />
+                );
+              })}
+              {isCollapsed && (() => { flatIdx += groupCards.length; return null; })()}
+            </div>
+          );
+        });
+      })()}
     </div>
   );
 };

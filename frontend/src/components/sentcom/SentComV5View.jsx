@@ -223,6 +223,12 @@ export const SentComV5View = ({
     setHoveredSymbol(sym ? String(sym).toUpperCase() : null);
   }, []);
 
+  // 2026-04-30 v19.10 — Scanner scroll-position tracker. The Scanner
+  // panel's header shows "X / N hits" so the operator always knows
+  // which card they're looking at as the list grows long. Updated by
+  // <ScannerCardsV5/> via the `onScanProgress` callback (RAF-throttled).
+  const [scanProgress, setScanProgress] = useState({ topIdx: 0, total: 0 });
+
   return (
     <div
       data-testid="sentcom-v5-root"
@@ -344,9 +350,14 @@ export const SentComV5View = ({
             </div>
             <div className="text-[11px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
               {(() => {
-                // Count unique symbols across setups/alerts/positions so the
-                // header matches the deduped card list below (a single
-                // NVDA setup + NVDA alert collapses into 1 card, not 2).
+                // 2026-04-30 v19.10 — when the scanner has cards,
+                // show "X / N hits" with X = topmost-visible card.
+                // Falls back to set-based count from raw inputs while
+                // ScannerCardsV5's effect is wiring up on first mount.
+                if (scanProgress.total > 0) {
+                  const x = Math.min(scanProgress.topIdx + 1, scanProgress.total);
+                  return `${x} / ${scanProgress.total} ${scanProgress.total === 1 ? 'hit' : 'hits'}`;
+                }
                 const syms = new Set();
                 (setups || []).forEach(s => s?.symbol && syms.add(String(s.symbol).toUpperCase()));
                 (alerts || []).forEach(a => a?.symbol && syms.add(String(a.symbol).toUpperCase()));
@@ -367,6 +378,7 @@ export const SentComV5View = ({
                 onSelectSymbol={handleOpenTicker}
                 hoveredSymbol={hoveredSymbol}
                 onHoverSymbol={handleHoverSymbol}
+                onScanProgress={setScanProgress}
               />
             </PanelErrorBoundary>
           </div>
