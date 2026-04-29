@@ -88,10 +88,16 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) =
   const winRate = closedCount ? Math.round((winsCount / closedCount) * 100) : null;
 
   return {
-    scan: (setups?.length ?? 0),
+    // 2026-04-30 v15 — operator flagged "SCAN 0 / EVAL 5" mismatch.
+    // Root cause: `setups` came from the deprecated predictive_scanner
+    // and is empty. The HUD's intent for SCAN is "what the live scanner
+    // produced this cycle"; that's what `alerts` actually represents
+    // post-deprecation. Falling back to alerts.length keeps the tile
+    // honest until predictive_scanner is fully retired.
+    scan: (setups?.length ?? 0) > 0 ? setups.length : (alerts?.length ?? 0),
     scan_sub: status?.scanner_bar_size || status?.active_timeframe
       ? `${status.scanner_bar_size || status.active_timeframe}${status?.scanner_universe_size ? ` · ${status.scanner_universe_size} symbols` : ''}`
-      : (setups?.length ? `${setups.length} setups` : '—'),
+      : (setups?.length ? `${setups.length} setups` : (alerts?.length ? `${alerts.length} alerts` : '—')),
     eval: (alerts?.length ?? 0),
     eval_sub: withGate.length
       ? `${gatePassPct}% gate pass${avgGate != null ? ` · avg ${avgGate}` : ''}`

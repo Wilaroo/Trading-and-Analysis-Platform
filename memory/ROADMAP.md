@@ -3,7 +3,25 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v14 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v15 fork)
+
+### 🎯 Just shipped 2026-04-30 v15 — see CHANGELOG (fifteenth commit)
+- ✅ **SentCom Intelligence 50-eval cap** removed — confidence_gate
+  hydration now counts today via Mongo `$group` aggregation (not the
+  50-doc deque), so "today_evaluated" reflects the real daily total.
+- ✅ **Alerts panel 5-cap** lifted — `useSentComAlerts.js` 5 → 20 on
+  both REST limit and WS slice.
+- ✅ **SCAN=0 vs EVAL=5 mismatch** fixed — `derivePipelineCounts` now
+  falls back to `alerts.length` when `setups` (predictive_scanner) is
+  empty.
+- ✅ **`/api/diagnostic/account-snapshot`** — walks the equity
+  resolution chain and returns operator-friendly verdict
+  (`pusher_disconnected` / `pushed_account_empty` / `net_liq_zero` /
+  `ok`).
+- ✅ **`/api/diagnostic/scanner-coverage?hours=N`** — surfaces RS-share,
+  pusher_sub_count vs. universe_size, and starved detectors so the
+  operator can prove the IB-subscription bottleneck without log diving.
+- 31/31 tests passing (2 new hydration regression guards).
 
 ### 🎯 Just shipped 2026-04-30 v14 — see CHANGELOG (fourteenth commit)
 - ✅ **`exc_info=True` / `logger.exception` sweep across the trade

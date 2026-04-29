@@ -121,6 +121,8 @@ re-introduction.
 | GET | `/api/diagnostic/rth-readiness` | 9-check pre-flight (single curl) |
 | GET | `/api/diagnostic/trade-funnel` | Stage-by-stage execution flow with kill_check |
 | GET | `/api/diagnostic/trade-drops?minutes=N&gate=X` | **NEW 2026-04-30 v12** — silent execution-drop forensics. `first_killing_gate` names the suspect; `recent[]` lists last 25 with context. |
+| GET | `/api/diagnostic/account-snapshot` | **NEW 2026-04-30 v15** — walks equity resolution chain (executor → pushed → RPC → extracted). Returns verdict ∈ {ok, pusher_disconnected, pushed_account_empty, net_liq_zero}. |
+| GET | `/api/diagnostic/scanner-coverage?hours=N` | **NEW 2026-04-30 v15** — RS-share, pusher_sub vs universe_size, starved detectors. Returns verdict ∈ {ok, rs_dominated, rs_skewed, no_alerts}. |
 | GET | `/api/trading-bot/status` | Bot mode, daily_stats, risk_params, account.equity |
 | POST | `/api/trading-bot/refresh-account` | Force-pull IB equity → starting_capital |
 | GET | `/api/scanner/setup-landscape` | Daily Bellafiore Setup classification + multi-index regime |

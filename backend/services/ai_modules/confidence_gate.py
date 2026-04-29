@@ -98,22 +98,56 @@ class ConfidenceGate:
             for d in recent:
                 self._decision_log.append(d)
             
-            # Compute today's stats directly from loaded decisions
+            # 2026-04-30 v15: count TODAY's decisions directly from the DB,
+            # not from the 50-doc deque hydrated above. Operator flagged
+            # that the SentCom Intelligence panel always reset to ≤50
+            # evaluations on restart even when the bot had evaluated 80+
+            # since midnight UTC. Root cause: `for d in recent` could only
+            # see the last 50 decisions, so today_evaluated was capped at
+            # min(len(recent_today), 50). Counting via Mongo aggregation
+            # surfaces the true daily totals while the deque continues to
+            # hold only the last 50 for the recent-decision log UI.
+            today_eval = 0
             today_go = 0
             today_reduce = 0
             today_skip = 0
-            today_eval = 0
-            for d in recent:
-                ts = str(d.get("timestamp", ""))
-                if ts.startswith(today):
-                    today_eval += 1
-                    dec = d.get("decision", "")
+            try:
+                today_pipeline = [
+                    {"$match": {"timestamp": {"$regex": f"^{today}"}}},
+                    {"$group": {
+                        "_id": "$decision",
+                        "n": {"$sum": 1},
+                    }},
+                ]
+                for row in self._db["confidence_gate_log"].aggregate(today_pipeline):
+                    n = int(row.get("n") or 0)
+                    today_eval += n
+                    dec = row.get("_id")
                     if dec == "GO":
-                        today_go += 1
+                        today_go = n
                     elif dec == "REDUCE":
-                        today_reduce += 1
+                        today_reduce = n
                     elif dec == "SKIP":
-                        today_skip += 1
+                        today_skip = n
+            except Exception as agg_err:
+                # Fall back to the deque-based count if aggregation fails
+                # (transient Mongo flap, etc.) so the UI still shows
+                # *something* useful.
+                logger.debug(
+                    "[ConfidenceGate] today aggregation fallback (%s); "
+                    "using deque count", agg_err,
+                )
+                for d in recent:
+                    ts = str(d.get("timestamp", ""))
+                    if ts.startswith(today):
+                        today_eval += 1
+                        dec = d.get("decision", "")
+                        if dec == "GO":
+                            today_go += 1
+                        elif dec == "REDUCE":
+                            today_reduce += 1
+                        elif dec == "SKIP":
+                            today_skip += 1
             
             # Compute lifetime stats from DB
             total = self._db["confidence_gate_log"].count_documents({})

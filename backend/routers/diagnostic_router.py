@@ -1018,3 +1018,275 @@ def trade_drops(
         **summary,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# ===========================================================================
+# /api/diagnostic/account-snapshot — why is EQUITY showing $-?
+# ===========================================================================
+@router.get("/account-snapshot")
+async def account_snapshot() -> Dict[str, Any]:
+    """Walk the equity-resolution chain and return what each layer sees.
+
+    Operator flagged 2026-04-30 v15: V5 HUD shows EQUITY=$- despite the
+    pusher being LIVE. This endpoint dumps every input to the equity
+    resolution chain so the operator can pinpoint which layer is empty
+    without log-grepping. Layers walked (same order as
+    /api/trading-bot/status):
+      1. _trade_executor.get_account_info()  (Alpaca / simulated only)
+      2. _pushed_ib_data["account"]           (IB pusher push-loop)
+      3. get_account_snapshot()               (IB pusher RPC fallback)
+      4. _extract_account_value() per key
+      5. Resolved account dict (same shape `/status` would surface)
+    """
+    layers: Dict[str, Any] = {
+        "executor_info": None,
+        "pushed_ib_data_account": None,
+        "rpc_account_snapshot": None,
+        "extracted_values": None,
+        "is_pusher_connected": None,
+        "resolved_account": None,
+    }
+    errors: Dict[str, str] = {}
+
+    # 1. executor info (Alpaca / simulated only)
+    try:
+        from routers.trading_bot import _trade_executor
+        if _trade_executor is not None:
+            try:
+                info = await _trade_executor.get_account_info()
+                layers["executor_info"] = info if isinstance(info, dict) else None
+            except Exception as e:
+                errors["executor_info"] = f"{type(e).__name__}: {e}"
+    except Exception as e:
+        errors["executor_info_import"] = f"{type(e).__name__}: {e}"
+
+    # 2. pushed_ib_data
+    try:
+        from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
+        layers["is_pusher_connected"] = bool(is_pusher_connected())
+        ib_account = (_pushed_ib_data or {}).get("account") or {}
+        layers["pushed_ib_data_account"] = {
+            "keys": sorted(ib_account.keys()) if isinstance(ib_account, dict) else "<not dict>",
+            "value_count": len(ib_account) if isinstance(ib_account, dict) else 0,
+            "sample": {
+                k: (str(v)[:80] if not isinstance(v, (int, float, bool, type(None))) else v)
+                for k, v in list(ib_account.items())[:30]
+            } if isinstance(ib_account, dict) else None,
+        }
+
+        # 3. RPC fallback
+        try:
+            from services.ib_pusher_rpc import get_account_snapshot
+            snap = get_account_snapshot() or {}
+            layers["rpc_account_snapshot"] = {
+                "success": bool(snap.get("success")),
+                "has_account": bool(snap.get("account")),
+                "account_keys": sorted((snap.get("account") or {}).keys()),
+                "error": snap.get("error"),
+            }
+            if not ib_account and snap.get("account"):
+                ib_account = snap["account"]
+        except Exception as e:
+            errors["rpc_snapshot"] = f"{type(e).__name__}: {e}"
+
+        # 4. _extract_account_value for standard keys
+        if isinstance(ib_account, dict) and ib_account:
+            extracted: Dict[str, Any] = {}
+            for key in ("NetLiquidation", "BuyingPower", "TotalCashBalance",
+                        "AvailableFunds", "UnrealizedPnL", "RealizedPnL",
+                        "GrossPositionValue", "EquityWithLoanValue"):
+                try:
+                    extracted[key] = _extract_account_value(ib_account, key, None)
+                except Exception as e:
+                    extracted[key] = f"<error: {type(e).__name__}>"
+            layers["extracted_values"] = extracted
+
+            # 5. Resolved account (mirror what /status would set)
+            net_liq = _extract_account_value(ib_account, "NetLiquidation", 0)
+            buying_power = _extract_account_value(ib_account, "BuyingPower", 0)
+            cash = _extract_account_value(ib_account, "TotalCashBalance", 0)
+            available_funds = _extract_account_value(
+                ib_account, "AvailableFunds", buying_power
+            )
+            if net_liq and net_liq > 0:
+                layers["resolved_account"] = {
+                    "equity": float(net_liq),
+                    "buying_power": float(buying_power),
+                    "cash": float(cash),
+                    "available_funds": float(available_funds),
+                    "source": "ib_pushed",
+                }
+            else:
+                layers["resolved_account"] = {
+                    "equity": None,
+                    "reason": "NetLiquidation is 0 or missing — paper account "
+                              "may be fresh, or pusher hasn't received the "
+                              "first accountSummary tick yet.",
+                }
+    except Exception as e:
+        errors["pushed_ib_data"] = f"{type(e).__name__}: {e}"
+
+    # Operator-friendly verdict
+    verdict = "unknown"
+    hint = None
+    resolved = layers.get("resolved_account") or {}
+    if resolved.get("equity"):
+        verdict = "ok"
+        hint = "Equity should render correctly on the V5 HUD."
+    elif not layers.get("is_pusher_connected"):
+        verdict = "pusher_disconnected"
+        hint = "IB pusher is not connected — start IB Gateway + the pusher process on the Windows PC."
+    elif layers.get("pushed_ib_data_account") and \
+            layers["pushed_ib_data_account"].get("value_count", 0) == 0:
+        verdict = "pushed_account_empty"
+        hint = ("Pusher is connected but the push-loop has not received an "
+                "accountSummary tick yet. Wait 5-10s and retry, or hit "
+                "POST /api/trading-bot/refresh-account.")
+    elif resolved.get("reason"):
+        verdict = "net_liq_zero"
+        hint = resolved["reason"]
+
+    return {
+        "success": True,
+        "verdict": verdict,
+        "hint": hint,
+        "layers": layers,
+        "errors": errors,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ===========================================================================
+# /api/diagnostic/scanner-coverage — why is RS-laggard dominating scans?
+# ===========================================================================
+@router.get("/scanner-coverage")
+def scanner_coverage(hours: int = 6) -> Dict[str, Any]:
+    """Surface the IB-subscription vs. universe-size gap for the operator.
+
+    Hypothesis (operator's perpetual complaint 2026-04-29 + v15): every
+    surfacing alert is `relative_strength_laggard` / `_leader`. Other
+    detectors (`9_ema_scalp`, `vwap_continuation`, `opening_range_break`)
+    almost never fire. The pusher subscription is small (~14 symbols
+    per SPARK_ACCESS) so live-tick-driven detectors are starved on
+    every other symbol, while RS detectors compute against SPY which
+    IS always pushed — RS fires for every universe symbol.
+
+    This endpoint exposes the raw inputs so the operator can prove or
+    disprove without a 10-min log dive.
+    """
+    from datetime import timedelta as _timedelta
+
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="DB not initialized")
+
+    cutoff = (datetime.now(timezone.utc) - _timedelta(hours=max(1, int(hours)))).isoformat()
+    by_setup: Dict[str, int] = {}
+    by_direction: Dict[str, int] = {"long": 0, "short": 0, "unknown": 0}
+    total_alerts = 0
+    try:
+        for row in db["live_alerts"].aggregate([
+            {"$match": {"timestamp": {"$gte": cutoff}}},
+            {"$group": {
+                "_id": "$setup_type",
+                "n": {"$sum": 1},
+                "long_n": {"$sum": {"$cond": [{"$eq": ["$direction", "long"]}, 1, 0]}},
+                "short_n": {"$sum": {"$cond": [{"$eq": ["$direction", "short"]}, 1, 0]}},
+            }},
+            {"$sort": {"n": -1}},
+        ]):
+            n = int(row.get("n") or 0)
+            by_setup[row.get("_id") or "unknown"] = n
+            total_alerts += n
+            by_direction["long"] += int(row.get("long_n") or 0)
+            by_direction["short"] += int(row.get("short_n") or 0)
+        by_direction["unknown"] = total_alerts - by_direction["long"] - by_direction["short"]
+    except Exception as e:
+        logger.warning(f"[scanner-coverage] live_alerts agg failed: {type(e).__name__}: {e}")
+
+    # Pusher subscription
+    pusher_subs: List[str] = []
+    pusher_sub_count = 0
+    try:
+        from routers.ib import _pushed_ib_data
+        subs_raw = (_pushed_ib_data or {}).get("subscriptions")
+        if subs_raw and isinstance(subs_raw, (list, set, tuple)):
+            pusher_subs = sorted(str(s).upper() for s in subs_raw)
+        else:
+            quotes = (_pushed_ib_data or {}).get("quotes") or {}
+            if isinstance(quotes, dict):
+                pusher_subs = sorted(str(s).upper() for s in quotes.keys())
+        pusher_sub_count = len(pusher_subs)
+    except Exception as e:
+        logger.debug(f"[scanner-coverage] pusher subs read failed: {e}")
+
+    # Canonical universe size
+    universe_size = 0
+    try:
+        universe_size = db["symbol_adv_cache"].count_documents({})
+    except Exception as e:
+        logger.debug(f"[scanner-coverage] symbol_adv_cache count failed: {e}")
+
+    # "Starved" detectors
+    starved_threshold = 1
+    starved = []
+    if universe_size >= 20:
+        expected_setups: List[str] = []
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            sc = get_enhanced_scanner()
+            expected_setups = sorted(getattr(sc, "_enabled_setups", set()) or [])
+        except Exception:
+            expected_setups = sorted(by_setup.keys())
+        for st in expected_setups:
+            if by_setup.get(st, 0) <= starved_threshold:
+                starved.append({"setup_type": st, "alerts_in_window": by_setup.get(st, 0)})
+
+    # Operator-facing verdict
+    verdict = "unknown"
+    hint = None
+    rs_share = 0.0
+    if total_alerts > 0:
+        rs_count = (
+            by_setup.get("relative_strength_laggard", 0)
+            + by_setup.get("relative_strength_leader", 0)
+        )
+        rs_share = rs_count / total_alerts
+        if rs_share >= 0.7:
+            verdict = "rs_dominated"
+            hint = (
+                f"RS-only setups account for {rs_share:.0%} of {total_alerts} "
+                f"alerts in the last {hours}h. Pusher subscription is "
+                f"{pusher_sub_count} symbols vs. {universe_size} canonical "
+                f"universe. Live-tick-driven detectors (RVOL, EMA9, OR break) "
+                f"are starved on the {max(0, universe_size - pusher_sub_count)} "
+                f"unsubscribed symbols. Action: expand pusher subscription "
+                f"on the Windows PC or accept RS-dominated breadth as a "
+                f"known constraint of the small subscription footprint."
+            )
+        elif rs_share >= 0.4:
+            verdict = "rs_skewed"
+            hint = f"RS setups are {rs_share:.0%} of breadth — borderline."
+        else:
+            verdict = "diverse"
+            hint = "Setup breadth looks healthy."
+    else:
+        verdict = "no_alerts"
+        hint = f"Zero alerts in the last {hours}h. Scanner may be off or pre-RTH."
+
+    return {
+        "success": True,
+        "verdict": verdict,
+        "hint": hint,
+        "hours": hours,
+        "total_alerts": total_alerts,
+        "by_setup": by_setup,
+        "by_direction": by_direction,
+        "rs_share": round(rs_share, 3),
+        "pusher_sub_count": pusher_sub_count,
+        "pusher_subs_sample": pusher_subs[:30],
+        "universe_size": universe_size,
+        "starved_setups": starved,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

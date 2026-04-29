@@ -16,7 +16,10 @@ export const useSentComAlerts = (pollInterval = 60000) => {
 
   const fetchAlerts = useCallback(async () => {
     try {
-      const data = await safeGet('/api/sentcom/alerts?limit=5');
+      // Bumped 5 → 20 (2026-04-30 v15) — operator flagged that the
+      // alerts panel could only ever surface 5 setups, masking the
+      // breadth of scanner output during fast tape sessions.
+      const data = await safeGet('/api/sentcom/alerts?limit=20');
       if (data?.success) {
         setAlerts(data.alerts || []);
         setCached('sentcomAlerts', data.alerts || [], 15000); // 15 second TTL (alerts update frequently)
@@ -47,7 +50,8 @@ export const useSentComAlerts = (pollInterval = 60000) => {
   // Subscribe to WS scanner alerts (supplements polling)
   useEffect(() => {
     if (!wsAlerts || wsAlerts.length === 0) return;
-    setAlerts(wsAlerts.slice(0, 5));
+    // Bumped 5 → 20 to match the REST limit (2026-04-30 v15).
+    setAlerts(wsAlerts.slice(0, 20));
     setLoading(false);
   }, [wsAlerts]);
 

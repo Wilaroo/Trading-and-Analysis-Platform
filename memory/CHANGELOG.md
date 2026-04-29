@@ -2,6 +2,74 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (fifteenth commit) — V5 HUD truth + diagnostic endpoints
+
+**Why**: After v13 unblocked the trade chain, the operator screenshot
+revealed 5 distinct UI/data complaints. Bundled fix surfaces all of
+them with code or a curl.
+
+### Patches
+
+#### 1. SentCom Intelligence "always resets to ~50 evals" — FIXED
+`services/ai_modules/confidence_gate.py::_load_from_db` was counting
+today's stats from a 50-doc deque. Now uses Mongo `$group` aggregation
+on the full `confidence_gate_log` collection so daily totals reflect
+the real number even when 80+ decisions exist for the day. Falls back
+to the deque count if aggregation crashes (transient Mongo flap).
+
+#### 2. "Only ever see 5 scans" — FIXED
+`useSentComAlerts.js` had two hardcoded `5`s — `?limit=5` on the REST
+fetch + `slice(0, 5)` on WS — making the alerts panel hide >5 setups
+during fast tape. Bumped both to 20.
+
+#### 3. "SCAN=0 but EVAL=5" — FIXED
+`SentComV5View.derivePipelineCounts` read `setups.length` for the SCAN
+tile, but the predictive_scanner was deprecated and `setups` is empty.
+Now falls back to `alerts.length` so the SCAN tile reflects what the
+live scanner actually produced.
+
+#### 4. Equity = $- — DIAGNOSTIC ENDPOINT
+New `GET /api/diagnostic/account-snapshot` walks the same equity
+resolution chain as `/status` (executor → `_pushed_ib_data["account"]`
+→ RPC fallback → `_extract_account_value` per key → resolved dict)
+and returns an operator-friendly verdict:
+- `pusher_disconnected` — start IB Gateway + pusher
+- `pushed_account_empty` — pusher live but no `accountSummary` tick yet
+- `net_liq_zero` — paper account fresh / NetLiquidation=0
+- `ok` — equity should render
+
+#### 5. RS-laggard dominating scans — DIAGNOSTIC ENDPOINT
+New `GET /api/diagnostic/scanner-coverage?hours=N` aggregates
+`live_alerts` by `setup_type`, computes `rs_share` (RS_laggard +
+RS_leader fraction), surfaces the IB-pusher subscription size vs.
+canonical universe size, and lists "starved" detectors (≤1 alert in
+window despite enabled). Operator-friendly verdict tells the operator
+whether to expand the pusher subscription or accept the small-footprint
+constraint as known.
+
+### Tests
+`tests/test_confidence_gate_hydration_v15.py` — 2 tests:
+1. `today_evaluated=80` even with 50-doc deque cap (v15 fix proven).
+2. Aggregation-crash fallback path doesn't raise.
+
+Total instrumentation suite: 31/31 passing.
+
+### Operator next steps (after pull + restart)
+
+```bash
+# Equity not showing? Walk the chain:
+curl -s http://localhost:8001/api/diagnostic/account-snapshot | python3 -m json.tool
+
+# RS-laggard dominating? Confirm the universe-vs-pusher gap:
+curl -s "http://localhost:8001/api/diagnostic/scanner-coverage?hours=6" | python3 -m json.tool
+
+# SentCom Intelligence "today_evaluated" should now match the real count:
+curl -s http://localhost:8001/api/ai-training/confidence-gate/summary \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print('today:', d.get('today'))"
+```
+
+
+
 ## 2026-04-30 (fourteenth commit) — exc_info=True / logger.exception sweep across the trade chain
 
 **Why**: The v13 `BotTrade.quantity` regression hid for 13 days because
