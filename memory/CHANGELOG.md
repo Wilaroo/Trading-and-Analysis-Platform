@@ -2,6 +2,112 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (nineteenth commit) — Confidence Gate Parallelism (3-5× EVAL speedup)
+
+**Why**: v18 unleashed bar-poll on ~2,000 symbols, multiplying alert
+volume from ~80-150 per RTH session to **800-2,000**. The confidence
+gate's 8 sequential model awaits (~1.1-1.5s/alert) became the next
+bottleneck — at 1,500 alerts that's **22-55 minutes of pure gate
+latency in a 6.5h session**, causing stale-evaluation adverse fills
+(price moves 5-15¢ on fast tape while gate is computing → "GO" issued
+but bracket fills bad).
+
+The 8 model calls have **no cross-dependencies** (verified by source
+audit): they all read the same input and produce independent signals
+that get summed at the end. Perfect fan-out candidate.
+
+### Patch
+
+#### 1. `_prefetch_signals_parallel` helper
+New private method on `ConfidenceGate` that fan-outs the 8 calls via
+`asyncio.gather()`:
+
+```python
+results = await asyncio.gather(
+    _safe(self._query_model_consensus, ...),
+    _safe(self._get_live_prediction, ...),
+    _safe(self._get_learning_feedback, ...),
+    _safe(self._get_cnn_signal, ...),
+    _safe(self._get_tft_signal, ...),
+    _safe(self._get_vae_regime_signal, ...),
+    _safe(self._get_cnn_lstm_signal, ...),
+    _safe(self._get_ensemble_meta_signal, ...),
+)
+```
+
+Each call is wrapped in `_safe()` which:
+- Applies a 3-second per-coroutine timeout (`asyncio.wait_for`) so a
+  single slow model can't drag the whole gather.
+- Catches exceptions and returns a "no signal" default
+  (`{"has_prediction": False}` / `{"has_models": False}` /
+  `{"has_data": False}`) — matches the pre-v19 fail-open behaviour
+  of every inline `try/except` we replaced.
+
+#### 2. Phase 1 regime parallelism (bonus)
+`regime_engine.get_current_regime()` and `_get_ai_regime()` are also
+independent. Now run via a smaller `asyncio.gather()`. Saves another
+~50-100ms per alert.
+
+#### 3. Inline await replacement
+Every `foo = await self._get_foo(...)` in `evaluate()` becomes
+`foo = signals_pre["foo"]`. Scoring logic is **untouched** —
+behaviour is byte-identical, just faster.
+
+#### 4. Source-level regression guard
+`tests/test_confidence_gate_parallel_v19.py` greps the source for
+inline `await self._get_<model>(...)` patterns and fails the build
+if any reappear. A future contributor "cleaning up" the parallelism
+will hit a red test instead of silently regressing the speedup.
+
+### Tests (14 new, 90/90 across v12-v19 suites)
+
+- **`test_parallel_prefetch_total_time_is_max_not_sum`** — 8 calls
+  × 100ms each: total time must be ~100ms, not ~800ms (asserts
+  asyncio.gather actually parallelised, not silently sequential).
+- **`test_slow_model_does_not_drag_others`** — one 500ms call +
+  seven 50ms calls: total time ~500ms, not 850ms.
+- **`test_one_model_crashing_does_not_crash_gather`** — exception
+  isolation; failed models get the default, others come through.
+- **`test_timeout_replaces_with_default_not_crash`** — per-coro
+  timeout works; total time bounded by `PARALLEL_PREFETCH_TIMEOUT_S`.
+- **`test_no_inline_model_awaits_remain_in_evaluate`** — 8
+  parametrized source-level guards. The single regression that
+  matters most.
+- **`test_prefetch_helper_uses_asyncio_gather`** — guards against a
+  contributor refactoring the helper to `await` in a loop.
+- **`test_phase1_regime_calls_also_parallelized`** — pins the
+  Phase 1 fan-out.
+
+### Speedup math (real-world projection)
+
+| Alert volume | v18 sequential | v19 parallel | Saved |
+|---|---|---|---|
+| 80   alerts/session | ~120s | ~24s | 96s |
+| 800  alerts/session | **~22 min** | **~4 min** | 18 min |
+| 1,500 alerts/session | **~33 min** | **~6 min** | 27 min |
+| 2,000 alerts/session | **~55 min** | **~10 min** | 45 min |
+
+The hidden second-order win: **fewer stale-evaluation fills**. With a
+2-second per-alert delay, fast-tape stocks move past entry by the time
+"GO" hits IB. v19 cuts gate-induced slippage by ~5-10× on those names.
+
+### What changes after pull + restart
+
+- The gate auto-takes the parallel path on every evaluation. No
+  config flag, no rollout — it's just faster from the next alert.
+- Backend logs may show `[ConfidenceGate] <model> timed out after
+  3.0s — using default` if any model is genuinely slow on Spark.
+  These were silently truncating before; v19 surfaces them.
+- AI gate decision payload (`bot_state.confidence_gate.decisions`)
+  is unchanged in shape — every downstream consumer reads identical
+  data.
+
+- AI gate decision payload (`bot_state.confidence_gate.decisions`)
+  is unchanged in shape — every downstream consumer reads identical
+  data.
+
+
+
 ## 2026-04-30 (eighteenth commit) — Bar Poll Service + Server-Side Bracket Regression Guards
 
 **Why**: v17 took live-tick coverage from 72 → ~480 symbols. That

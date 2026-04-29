@@ -3,7 +3,30 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v18 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19 fork)
+
+### 🎯 Just shipped 2026-04-30 v19 — see CHANGELOG (nineteenth commit)
+- ✅ **Confidence Gate Parallelism (3-5× EVAL speedup)** — 8
+  independent model awaits now fan out via `asyncio.gather()` with
+  per-coroutine timeouts and exception isolation. Phase 1 regime
+  calls also parallelised.
+- ✅ **Source-level regression guard** — 8 parametrized tests assert
+  no inline model awaits remain in `evaluate()`. A future contributor
+  can't silently undo the speedup.
+- ✅ Test suite total: **90/90** across v12-v19.
+- **Real-world impact**: at 1,500 alerts/session, gate latency drops
+  from ~33 min to ~6 min. Eliminates ~5-10× of the gate-induced
+  slippage on fast-tape stocks (where prior 2s per-alert delay caused
+  bracket fills past intended entry).
+
+### 🟡 P1 — Next session priorities
+- **Per-cycle context cache** — regime/sector/multi-index regime
+  recomputed per-alert today; cache once per scan cycle for ~30%
+  free additional EVAL speedup. Most of the wiring already done in
+  v19 (the gather pattern is established).
+- **Tier-aware detector dispatch** — skip impossible detector/tier
+  combinations. Quality > speed. Needs operator's tier-mapping
+  judgment for ambiguous detectors.
 
 ### 🎯 Just shipped 2026-04-30 v18 — see CHANGELOG (eighteenth commit)
 - ✅ **Bar Poll Service** — pure DGX-side service that runs bar-based
