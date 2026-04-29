@@ -775,7 +775,20 @@ class OpportunityEvaluator:
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
         max_shares_by_capital = int(max_position_value / entry_price)
-        shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
+
+        # 2026-04-30 v19.4 — Absolute notional clamp.
+        # `max_position_pct` floats with equity (50% of $1M = $500k vs 50%
+        # of $250k = $125k). Operators often want a HARD ceiling (e.g.,
+        # "never put more than $100k in one name regardless of equity")
+        # so the bot doesn't auto-fatten when the paper account compounds.
+        # Disabled when set to 0; otherwise the sizer can never produce a
+        # notional larger than this value.
+        max_notional = float(getattr(bot.risk_params, "max_notional_per_trade", 0) or 0)
+        if max_notional > 0:
+            max_shares_by_notional = int(max_notional / entry_price)
+            shares = max(min(max_shares_by_risk, max_shares_by_capital, max_shares_by_notional), 1)
+        else:
+            shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
         risk_amount = shares * risk_per_share
         if risk_amount > adjusted_max_risk:
             shares = int(adjusted_max_risk / risk_per_share)

@@ -86,7 +86,9 @@ class BotPersistence:
                         bot.risk_params.min_risk_reward = saved_risk_params["min_risk_reward"]
                     if "starting_capital" in saved_risk_params:
                         bot.risk_params.starting_capital = saved_risk_params["starting_capital"]
-                    logger.info(f"💰 Restored risk params: max_risk=${bot.risk_params.max_risk_per_trade:,.0f}, max_positions={bot.risk_params.max_open_positions}, min_rr={bot.risk_params.min_risk_reward}")
+                    if "max_notional_per_trade" in saved_risk_params:
+                        bot.risk_params.max_notional_per_trade = saved_risk_params["max_notional_per_trade"]
+                    logger.info(f"💰 Restored risk params: max_risk=${bot.risk_params.max_risk_per_trade:,.0f}, max_positions={bot.risk_params.max_open_positions}, min_rr={bot.risk_params.min_risk_reward}, max_notional=${bot.risk_params.max_notional_per_trade:,.0f}")
 
             # === 2. RESTORE EOD CONFIG ===
             eod_config = await asyncio.to_thread(bot._db.bot_config.find_one, {"_id": "eod_config"})
@@ -335,7 +337,8 @@ class BotPersistence:
                     "max_open_positions": bot.risk_params.max_open_positions,
                     "max_position_pct": bot.risk_params.max_position_pct,
                     "min_risk_reward": bot.risk_params.min_risk_reward,
-                    "starting_capital": bot.risk_params.starting_capital
+                    "starting_capital": bot.risk_params.starting_capital,
+                    "max_notional_per_trade": bot.risk_params.max_notional_per_trade
                 },
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }

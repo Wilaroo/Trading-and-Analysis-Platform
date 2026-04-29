@@ -3,7 +3,23 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.3 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.4 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.4 — see CHANGELOG (twenty-third commit)
+- ✅ **Position-sizer absolute-notional clamp** — new
+  `RiskParameters.max_notional_per_trade` field (default $100,000),
+  applied as a third `min()` clamp in `calculate_position_size`
+  alongside the existing risk + capital clamps. Decouples per-trade
+  size from equity so the sizer can never silently fatten as the
+  paper account compounds.
+- ✅ Operator's diagnostic curl finally named `safety_guardrail`
+  with `symbol_exposure: $267k exceeds cap $15k` — the two-curl
+  unblock raised the safety cap to $100k, but the structural fix
+  is the sizer clamp itself.
+- ✅ Persisted to Mongo; surfaced via `POST /api/trading-bot/risk-params`.
+- ✅ 7 new regression tests (clamp wins / risk clamp still wins /
+  zero disables / source-level guards / persistence + API round-trip).
+- ✅ **108/108 across v12-v19.4 suites.**
 
 ### 🎯 Just shipped 2026-04-30 v19.3 — see CHANGELOG (twenty-second commit)
 - ✅ **HOT-FIX**: live-tick scanner ALSO bombing pusher RPC.

@@ -2,6 +2,147 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-third commit, v19.4) — Position-sizer absolute-notional clamp
+
+**Why**: Operator's `/api/diagnostic/trade-drops` curl finally named
+the gate that was killing every autonomous trade for hours:
+
+```
+"first_killing_gate": "safety_guardrail",
+"by_gate": {"safety_guardrail": 44},
+"reason": "symbol_exposure: VRT exposure $267,351 exceeds cap $15,000"
+```
+
+The position sizer was producing **~$267k notional positions** (25%
+of $1.07M equity) on tight-stop intraday setups, while the safety
+guardrail's `max_symbol_exposure_usd` defaulted to **$15,000** —
+appropriate for a $50-100k account, completely wrong for $1M+.
+
+The two-curl operator unblock is documented elsewhere (raise
+`SAFETY_MAX_SYMBOL_EXPOSURE_USD` + drop `starting_capital` to a
+realistic $250k). But that just moves the goalposts: as the paper
+account compounds, `max_position_pct=50` × growing equity → notional
+fattens again, and the safety cap rejects all over.
+
+The right structural fix: an **absolute notional ceiling per trade**,
+decoupled from equity. Operator picks the dollar number; the sizer
+can never produce a fatter position regardless of how much the
+account compounds.
+
+### Patch
+
+#### 1. `RiskParameters.max_notional_per_trade` (default $100,000)
+
+New field on the `RiskParameters` dataclass. Default $100k matches
+operator's stated "max trade dollar size". Set to 0 to disable
+(restores the prior two-clamp behaviour for legacy setups that
+don't want this tightening).
+
+#### 2. Third clamp in `OpportunityEvaluator.calculate_position_size`
+
+```python
+max_shares_by_risk     = adjusted_max_risk / risk_per_share        # existing
+max_shares_by_capital  = (equity × max_position_pct%) / entry      # existing
+max_shares_by_notional = max_notional_per_trade / entry            # NEW
+shares = max(min(by_risk, by_capital, by_notional), 1)
+```
+
+The clamp is a hard `min()` with the prior two clamps — whichever is
+tightest wins. When `max_notional_per_trade=0`, the clamp is bypassed
+and the sizer falls back to the two-clamp logic.
+
+#### 3. Persistence round-trip
+
+`bot_persistence._sync_save` writes `max_notional_per_trade` into
+`bot_state.risk_params`; `_restore_state` reads it back on bot start.
+Survives backend restarts.
+
+#### 4. API surface
+
+`RiskParamsUpdate` Pydantic model accepts `max_notional_per_trade`
+so the operator can hot-patch via:
+
+```bash
+curl -s -X POST "http://localhost:8001/api/trading-bot/risk-params" \
+  -H "Content-Type: application/json" \
+  -d '{"max_notional_per_trade": 100000}' | jq
+```
+
+### Tests (`tests/test_position_sizer_notional_clamp_v19_4.py` — 7 tests)
+
+- **`test_risk_parameters_exposes_max_notional_per_trade`** — pins
+  the dataclass field + $100k default.
+- **`test_clamp_caps_oversized_notional`** — when capital cap would
+  allow $200k notional, the $100k notional clamp wins.
+- **`test_risk_clamp_wins_when_stop_is_wide`** — confirms the older
+  risk clamp still wins when it's tighter than the notional clamp.
+- **`test_clamp_disabled_when_zero`** — backward-compat: `max_notional=0`
+  returns to two-clamp behaviour.
+- **`test_sizer_source_contains_notional_clamp`** — source-level
+  guards on both `max_notional_per_trade` and `max_shares_by_notional`
+  references in the sizer.
+- **`test_persistence_round_trip_includes_max_notional`** — both save
+  and restore paths reference the new field.
+- **`test_riskparamsupdate_pydantic_model_accepts_max_notional`** —
+  API model dump pins the field name + Optional default.
+
+**108/108 across v12-v19.4 suites.**
+
+### Operator workflow on Spark (combined v19.3 + v19.4 + paper-reset)
+
+```bash
+# After resetting IB paper account to $250k starting capital:
+
+# 1. Bot risk_params (sized for $250k cash + 4× margin):
+curl -s -X POST "http://localhost:8001/api/trading-bot/risk-params" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "starting_capital": 250000,
+    "max_risk_per_trade": 2000,
+    "max_position_pct": 40,
+    "max_open_positions": 25,
+    "max_daily_loss": 5000,
+    "min_risk_reward": 1.5,
+    "max_notional_per_trade": 100000
+  }' | jq
+
+# 2. Safety guardrails (in-memory hot patch):
+curl -s -X PUT "http://localhost:8001/api/safety/config" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "max_symbol_exposure_usd": 100000,
+    "max_positions": 25,
+    "max_total_exposure_pct": 320,
+    "max_daily_loss_usd": 5000,
+    "max_quote_age_seconds": 10
+  }' | jq
+
+# 3. Persist safety env:
+cd ~/Trading-and-Analysis-Platform/backend && \
+sed -i '/^SAFETY_MAX_SYMBOL_EXPOSURE_USD=/d
+/^SAFETY_MAX_POSITIONS=/d
+/^SAFETY_MAX_TOTAL_EXPOSURE_PCT=/d
+/^SAFETY_MAX_DAILY_LOSS_USD=/d' .env && \
+cat >> .env <<'EOF'
+SAFETY_MAX_SYMBOL_EXPOSURE_USD=100000
+SAFETY_MAX_POSITIONS=25
+SAFETY_MAX_TOTAL_EXPOSURE_PCT=320
+SAFETY_MAX_DAILY_LOSS_USD=5000
+EOF
+
+# 4. Verify clean cap surface:
+curl -s "http://localhost:8001/api/safety/effective-risk-caps" | jq
+
+# 5. Wait 60s for next cycle then confirm drops are gone:
+curl -s "http://localhost:8001/api/diagnostic/trade-drops?minutes=2" | jq '{total, by_gate, first_killing_gate}'
+```
+
+If `total: 0` and `first_killing_gate: null` after the wait — the
+ORDER tile starts incrementing the moment the next eligible setup
+fires.
+
+
+
 ## 2026-04-30 (twenty-second commit, v19.3) — HOT-FIX: Live-tick scanner ALSO bombing pusher RPC
 
 **Why**: Operator pulled v19.2 + restarted. Within ~96 seconds of

@@ -29,6 +29,7 @@ class RiskParamsUpdate(BaseModel):
     max_position_pct: Optional[float] = None
     max_open_positions: Optional[int] = None
     min_risk_reward: Optional[float] = None
+    max_notional_per_trade: Optional[float] = None  # Hard absolute notional cap per trade ($). 0 = disabled. (added 2026-04-30 v19.4)
 
 
 class BotConfigUpdate(BaseModel):
