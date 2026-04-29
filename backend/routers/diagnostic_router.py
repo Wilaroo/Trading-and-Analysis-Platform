@@ -233,15 +233,17 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
         _coll_state = {}
     stages.append({
         "stage": "collection_mode_pause",
-        "label": "Collection-mode flag (when ACTIVE, the bot scan loop fully pauses)",
+        "label": "Collection-mode flag (when ACTIVE, pauses ALERT INTAKE only — open positions still managed)",
         "value": "ACTIVE" if coll_now else "INACTIVE",
         "count": 0 if coll_now else 1,
         "kill_check": coll_now and total_alerts == 0,
         "kill_reason": (
             "Collection mode is currently ACTIVE — the IB historical data-fill job "
-            "is running, which suspends the trading bot's scan loop entirely. "
-            "Either wait for the data-fill to finish or stop it via "
-            "POST /api/ib/collection-mode/stop."
+            "is running, which pauses NEW alert intake (so no fresh trades are created). "
+            "Open positions continue to be managed (stops / targets / trailing all run). "
+            "After 2026-04-30 fix this is safe; pre-fix the bot fully paused which "
+            "left open positions unattended. Stop the data-fill via "
+            "POST /api/ib/collection-mode/stop if you need fresh alerts now."
         ),
     })
 

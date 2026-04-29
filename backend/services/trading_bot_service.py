@@ -1722,31 +1722,40 @@ class TradingBotService:
         print(f"🤖 [TradingBot] Scan loop started - interval: {self._scan_interval}s")
         while self._running:
             try:
-                # Check if collection mode is active — suppress scanning to free backend resources
+                # 2026-04-30 — collection_mode + focus_mode guards now gate
+                # ONLY `_scan_for_opportunities` (new alert intake), NOT
+                # `_update_open_positions` / `_check_eod_close`. A live
+                # position with no bot polling is a real safety risk: a
+                # stop hit during a data-fill would never close, an EOD
+                # scalp would carry into next session. Position management
+                # must run during ALL of:
+                #   - collection mode (data-fill jobs)
+                #   - focus mode (training / backtesting)
+                # Account refresh + daily loss check + trading hours
+                # also stay up since the bot needs to know its own state
+                # before it tries to close anything.
+                pause_intake = False
+                pause_reason = ""
                 try:
                     from services.collection_mode import is_active as _collection_active
                     if _collection_active():
-                        if scan_count % 120 == 0:  # Log every ~60 min
-                            print("📦 [TradingBot] Collection mode active — scanning paused to free resources")
-                        await asyncio.sleep(self._scan_interval)
-                        scan_count += 1
-                        continue
+                        pause_intake = True
+                        pause_reason = "collection mode active"
                 except Exception:
                     pass
-                
-                # Check focus mode — pause during training/backtesting
-                try:
-                    from services.focus_mode_manager import focus_mode_manager
-                    if not focus_mode_manager.should_run_task('trading_bot_scan'):
-                        if scan_count % 120 == 0:
-                            print("[TradingBot] Focus mode: scanning paused (training/backtesting active)")
-                        await asyncio.sleep(self._scan_interval)
-                        scan_count += 1
-                        continue
-                except Exception:
-                    pass
+                if not pause_intake:
+                    try:
+                        from services.focus_mode_manager import focus_mode_manager
+                        if not focus_mode_manager.should_run_task('trading_bot_scan'):
+                            pause_intake = True
+                            pause_reason = "focus mode (training/backtesting)"
+                    except Exception:
+                        pass
+                if pause_intake and scan_count % 120 == 0:
+                    print(f"📦 [TradingBot] Alert intake paused ({pause_reason}); position management continues")
+
                 await self._update_account_from_ib()
-                
+
                 # Check daily loss limit (1% of account)
                 if self.risk_params.max_daily_loss > 0 and self._daily_stats.net_pnl <= -self.risk_params.max_daily_loss:
                     if not self._daily_stats.daily_limit_hit:
@@ -1754,7 +1763,7 @@ class TradingBotService:
                         print(f"🛑 [TradingBot] Daily loss limit hit: ${self._daily_stats.net_pnl:.2f}")
                     await asyncio.sleep(60)
                     continue
-                
+
                 # Check trading hours (7:30 AM - 5:00 PM ET)
                 if not self.is_within_trading_hours():
                     if scan_count % 60 == 0:  # Log every ~30 min
@@ -1762,12 +1771,12 @@ class TradingBotService:
                     await asyncio.sleep(self._scan_interval)
                     scan_count += 1
                     continue
-                
+
                 # Skip if paused
                 if self._mode == BotMode.PAUSED:
                     await asyncio.sleep(self._scan_interval)
                     continue
-                
+
                 # Log scan activity periodically
                 scan_count += 1
                 if scan_count % 10 == 1:  # Log every 10th scan (~5 min)
@@ -1775,20 +1784,28 @@ class TradingBotService:
                     open_count = len(self._open_trades)
                     pending_count = len(self._pending_trades)
                     pnl_str = f"${self._daily_stats.net_pnl:+,.2f}" if self._daily_stats.net_pnl != 0 else "$0"
-                    print(f"[TradingBot] Scan #{scan_count} | {mode_str} | Open: {open_count} | Pending: {pending_count} | P&L: {pnl_str}")
-                
-                # Scan for opportunities
-                await self._scan_for_opportunities()
-                
-                # Update open positions
+                    intake_tag = " | 📦 INTAKE-PAUSED" if pause_intake else ""
+                    print(f"[TradingBot] Scan #{scan_count} | {mode_str} | Open: {open_count} | Pending: {pending_count} | P&L: {pnl_str}{intake_tag}")
+
+                # Alert intake — gated by collection/focus mode. Keeps the
+                # bot from creating NEW trades during data-fills, but
+                # everything below still runs so OPEN trades stay managed.
+                if not pause_intake:
+                    await self._scan_for_opportunities()
+
+                # Update open positions — runs unconditionally so stops,
+                # targets, and trailing logic always trigger even during
+                # data-fills. THIS IS THE SAFETY-CRITICAL CHANGE.
                 await self._update_open_positions()
-                
-                # Check for EOD close on scalp/intraday trades
+
+                # Check for EOD close on scalp/intraday trades — also
+                # safety-critical during data-fills (an EOD scalp must
+                # close even if the data-fill is still running).
                 await self._check_eod_close()
-                
+
             except Exception as e:
                 print(f"❌ [TradingBot] Scan loop error: {e}")
-            
+
             await asyncio.sleep(self._scan_interval)
     def _compute_live_unrealized_pnl(self) -> tuple:
         """Sum unrealized P&L across all open trades, gated on quote freshness.
