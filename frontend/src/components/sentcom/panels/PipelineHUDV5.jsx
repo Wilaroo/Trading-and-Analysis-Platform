@@ -102,7 +102,11 @@ export const PipelineHUDV5 = ({
           SENTCOM
         </div>
 
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        {/* 2026-04-30 v19.7 — stages constrained to ~2/3 width so the
+            right-side metrics cluster (P&L / Equity / Buying Pwr / Phase)
+            gets enough room to display 7-figure dollar values fully on
+            margin accounts without truncating. */}
+        <div className="flex items-center gap-1.5 basis-2/3 min-w-0">
           <Stage stage="scan"   label="Scan"        count={scanCount}   sub={scanSub} />
           <span className="text-zinc-700 font-mono">→</span>
           <Stage stage="eval"   label="Evaluate"    count={evalCount}   sub={evalSub} />
@@ -114,7 +118,7 @@ export const PipelineHUDV5 = ({
           <Stage stage="close"  label="Close today" count={closeCount}  sub={closeSub}  accent={closeAccent} />
         </div>
 
-        <div className="flex items-center gap-3 pl-3 border-l border-zinc-800 shrink-0">
+        <div className="flex items-center justify-end gap-3 pl-3 border-l border-zinc-800 basis-1/3 min-w-0">
           {rightExtra}
           <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
           <Metric label="Equity"  value={formatEquity(equity)} />

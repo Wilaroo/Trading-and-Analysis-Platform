@@ -2,6 +2,35 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-sixth commit, v19.7) — V5 HUD layout: 2/3 ⇄ 1/3 split
+
+**Why**: With margin-account dollar values shipping in v19.6
+(`Buying Pwr` showing 7-figure numbers like `$4,278,685`), the
+right-cluster was getting squeezed by the 5-stage funnel. Operator
+screenshot showed metrics truncating / wrapping awkwardly.
+
+### Patch (1 file, layout-only)
+
+`PipelineHUDV5.jsx` — flex sizing change:
+- Stages container: `flex-1 min-w-0` → `basis-2/3 min-w-0`
+- Metrics container: `shrink-0` → `basis-1/3 min-w-0 justify-end`
+
+5 stages now consume **2/3** of the HUD width; the right cluster
+(P&L / Equity / Buying Pwr / Phase + any `rightExtra` button) gets
+the other **1/3**. `min-w-0` on both halves preserves graceful
+truncation on narrow viewports; `justify-end` on the metrics block
+keeps them flush against the right edge regardless of how wide the
+1/3 partition resolves to.
+
+### What stays the same
+- Stage proportions amongst themselves (5 even-flex stages within the
+  2/3 budget) — Scan / Evaluate / Order / Manage / Close Today still
+  share equal width.
+- Metric component, color rules, formatting — unchanged.
+- All `data-testid` hooks preserved.
+
+
+
 ## 2026-04-30 (twenty-fifth commit, v19.6) — V5 HUD: Buying Power replaces Latency
 
 **Why**: Operator on a 4× margin paper account asked for **real-time
