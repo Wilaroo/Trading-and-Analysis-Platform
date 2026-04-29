@@ -1419,3 +1419,226 @@ async def bar_poll_trigger(pool: str = "intraday_noncore") -> Dict[str, Any]:
             status_code=500,
             detail=f"Bar poll failed: {type(e).__name__}: {e}",
         )
+
+
+
+# ===========================================================================
+# /api/diagnostic/dlq-purge — clean up the historical-data dead-letter queue
+# ===========================================================================
+#
+# The V5 HUD shows a `N DLQ` badge for failed historical-data collection
+# requests (per `DeadLetterBadge.jsx`). It reads
+# `/api/ib-collector/queue-progress-detailed` and surfaces the `failed`
+# count.
+#
+# Two complementary endpoints already exist for this collection:
+#   • POST /api/ib-collector/retry-failed — re-queues failed items
+#   • GET  /api/ib-collector/failed-items — lists them
+#
+# What was missing: **purge**. Some failures are TERMINALLY bad and will
+# never succeed on retry:
+#   • `no security definition` (e.g., delisted symbols like "SLY")
+#   • `contract_not_found`
+#   • `no_data` for symbols that genuinely have no IB data
+#   • items older than N days (operator gave up on them)
+#
+# Retrying these wastes IB pacing budget and pollutes the DLQ count, so
+# the operator can't distinguish "5 transient failures we should retry"
+# from "47 permanent failures we should drop".
+#
+# This endpoint deletes them. Safe by default — only deletes items
+# matching a strict allowlist of known-permanent error patterns. Operator
+# can override with `force=true` to purge ALL failed items.
+# ===========================================================================
+@router.post("/dlq-purge")
+def dlq_purge(
+    permanent_only: bool = True,
+    older_than_hours: Optional[int] = None,
+    bar_size: Optional[str] = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Purge permanently-failed historical-data requests.
+
+    Args:
+        permanent_only: when True (default), only purge items whose error
+            matches a strict allowlist of "will-never-succeed" patterns
+            (no security definition, contract not found, etc.). When
+            False AND `force=True`, purge ALL failed items.
+        older_than_hours: additional filter — only purge items at least
+            this old. Useful for "drop all DLQ items older than 7 days".
+        bar_size: scope to a single bar_size (e.g., "1 min").
+        force: required when permanent_only=False, to prevent accidental
+            mass-deletion of retryable transient failures.
+        dry_run: when True, return what WOULD be purged without deleting.
+
+    Returns:
+        {
+          "success": True,
+          "purged_count": int,
+          "by_error_type": {"no_security_definition": 3, "no_data": 2},
+          "by_bar_size": {"1 min": 4, "5 mins": 1},
+          "dry_run": bool,
+        }
+    """
+    if not permanent_only and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=("permanent_only=False requires force=true to prevent "
+                    "accidental mass-deletion of retryable failures. Use "
+                    "the /retry-failed endpoint instead unless you really "
+                    "want to drop transient errors."),
+        )
+
+    try:
+        from services.historical_data_queue_service import (
+            get_historical_data_queue_service,
+        )
+        from datetime import timedelta
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"queue service unavailable: {type(e).__name__}: {e}",
+        )
+
+    service = get_historical_data_queue_service()
+    if not getattr(service, "_initialized", False):
+        try:
+            service.initialize()
+        except Exception:
+            pass
+    coll = service.collection
+
+    # Build the query
+    query: Dict[str, Any] = {"status": "failed"}
+
+    if permanent_only:
+        # Strict allowlist of patterns that indicate a "will-never-succeed"
+        # error. Anything outside this list is considered retryable and
+        # left alone.
+        permanent_patterns = [
+            "no security definition",       # IB error 200 — delisted/unknown
+            "contract not found",            # similar
+            "contract_not_found",
+            "no_data",                       # IB returned empty for valid contract
+            "Contract: Stock",               # generic IB contract error
+            "ambiguous contract",
+            "expired contract",
+        ]
+        regex = "|".join(permanent_patterns)
+        query["$or"] = [
+            {"failure_reason": {"$regex": regex, "$options": "i"}},
+            {"result_status": {"$regex": regex, "$options": "i"}},
+            {"error": {"$regex": regex, "$options": "i"}},
+        ]
+
+    if bar_size:
+        query["bar_size"] = bar_size
+
+    if older_than_hours:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=int(older_than_hours))
+        ).isoformat()
+        # Most failed records have either `completed_at` or `created_at`.
+        existing = query.get("$or", [])
+        timestamp_filter = [
+            {"completed_at": {"$lt": cutoff}},
+            {"created_at": {"$lt": cutoff}},
+        ]
+        # If we already had an $or for the regex, $and the two filters together.
+        if existing:
+            query.pop("$or", None)
+            query["$and"] = [
+                {"$or": existing},
+                {"$or": timestamp_filter},
+            ]
+        else:
+            query["$or"] = timestamp_filter
+
+    # Aggregate stats BEFORE delete (or in dry-run, just for reporting)
+    by_error_type: Dict[str, int] = {}
+    by_bar_size: Dict[str, int] = {}
+    sample: List[Dict[str, Any]] = []
+    try:
+        for doc in coll.find(query, {
+            "_id": 0, "symbol": 1, "bar_size": 1, "failure_reason": 1,
+            "result_status": 1, "error": 1, "completed_at": 1,
+        }).limit(2000):
+            err = (doc.get("failure_reason") or doc.get("result_status")
+                   or doc.get("error") or "unknown")[:80]
+            by_error_type[err] = by_error_type.get(err, 0) + 1
+            bs = doc.get("bar_size") or "unknown"
+            by_bar_size[bs] = by_bar_size.get(bs, 0) + 1
+            if len(sample) < 10:
+                sample.append({
+                    "symbol": doc.get("symbol"),
+                    "bar_size": doc.get("bar_size"),
+                    "error": err,
+                    "completed_at": doc.get("completed_at"),
+                })
+    except Exception as e:
+        logger.warning(
+            "[dlq-purge] aggregate-before-delete failed (%s): %s",
+            type(e).__name__, e, exc_info=True,
+        )
+
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "would_purge_count": sum(by_error_type.values()),
+            "by_error_type": by_error_type,
+            "by_bar_size": by_bar_size,
+            "sample": sample,
+            "permanent_only": permanent_only,
+            "older_than_hours": older_than_hours,
+            "bar_size": bar_size,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Actually delete
+    try:
+        result = coll.delete_many(query)
+        purged_count = int(getattr(result, "deleted_count", 0))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"DLQ purge delete failed: {type(e).__name__}: {e}",
+        )
+
+    # Audit log
+    try:
+        db = _get_db()
+        if db is not None:
+            db["dlq_purge_log"].insert_one({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts_dt": datetime.now(timezone.utc),
+                "purged_count": purged_count,
+                "by_error_type": by_error_type,
+                "by_bar_size": by_bar_size,
+                "permanent_only": permanent_only,
+                "older_than_hours": older_than_hours,
+                "bar_size": bar_size,
+                "force": force,
+            })
+            try:
+                db["dlq_purge_log"].create_index(
+                    "ts_dt", expireAfterSeconds=30 * 24 * 3600,  # 30d audit retention
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "dry_run": False,
+        "purged_count": purged_count,
+        "by_error_type": by_error_type,
+        "by_bar_size": by_bar_size,
+        "sample": sample,
+        "permanent_only": permanent_only,
+        "older_than_hours": older_than_hours,
+        "bar_size": bar_size,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
