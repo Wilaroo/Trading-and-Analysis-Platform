@@ -1372,3 +1372,50 @@ def pusher_rotation_rotate_now() -> Dict[str, Any]:
             status_code=500,
             detail=f"Rotation failed: {type(e).__name__}: {e}",
         )
+
+
+
+# ===========================================================================
+# /api/diagnostic/bar-poll-status — universe-coverage gap-filler (v18)
+# ===========================================================================
+@router.get("/bar-poll-status")
+def bar_poll_status() -> Dict[str, Any]:
+    """Surface bar-poll service state.
+
+    Companion to `/pusher-rotation-status`. The bar poll service runs
+    bar-based detectors on the universe-minus-pusher pool, reading
+    from `ib_historical_data` Mongo (no IB calls, no rate limits).
+
+    Returns:
+        - running: bool
+        - pools: list of {name, interval_s, last_run_ts, cursor}
+        - lifetime_alerts_emitted: int
+        - last_cycle_summary: dict (most recent poll batch)
+    """
+    from services.bar_poll_service import get_bar_poll_service
+    svc = get_bar_poll_service(db=_get_db())
+    out = svc.status()
+    out["timestamp"] = datetime.now(timezone.utc).isoformat()
+    return out
+
+
+@router.post("/bar-poll-trigger")
+async def bar_poll_trigger(pool: str = "intraday_noncore") -> Dict[str, Any]:
+    """Operator escape hatch — trigger a single bar-poll cycle on the
+    requested pool right now. Useful for ad-hoc testing or after a
+    market-hours fresh-bar update without waiting for the cadence."""
+    from services.bar_poll_service import get_bar_poll_service
+    svc = get_bar_poll_service(db=_get_db())
+    if pool not in {"intraday_noncore", "swing", "investment"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown pool '{pool}' — must be one of "
+                   "intraday_noncore, swing, investment",
+        )
+    try:
+        return await svc.poll_pool_once(pool)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Bar poll failed: {type(e).__name__}: {e}",
+        )

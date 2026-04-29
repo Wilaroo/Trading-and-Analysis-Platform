@@ -441,6 +441,13 @@ class LiveAlert:
     
     # Auto-execution
     auto_execute_eligible: bool = False
+
+    # 2026-04-30 v18 — provenance tag for the bar-poll service. Live-tick
+    # alerts default to `live_tick`; alerts produced by the bar_poll
+    # service from Mongo `ib_historical_data` (5-min bars, ~30s lag)
+    # stamp `bar_poll_5m`. The AI gate / shadow tracker can downweight
+    # bar-poll alerts if accuracy diverges from live.
+    data_source: str = "live_tick"
     
     # NEW: SMB Integration fields
     trade_style: str = "intraday"     # scalp, intraday, multi_day, swing, position

@@ -125,6 +125,8 @@ re-introduction.
 | GET | `/api/diagnostic/scanner-coverage?hours=N` | **NEW 2026-04-30 v15** — RS-share, pusher_sub vs universe_size, starved detectors. Returns verdict ∈ {ok, rs_dominated, rs_skewed, no_alerts}. |
 | GET | `/api/diagnostic/pusher-rotation-status?dry_run_preview=true` | **NEW 2026-04-30 v17** — rotation service state, active profile, budget, last rotation diff. With `dry_run_preview=true` shows what next rotation would do. |
 | POST | `/api/diagnostic/pusher-rotation-rotate-now` | **NEW 2026-04-30 v17** — operator escape hatch; force a rotation cycle right now. Audit-logged. |
+| GET | `/api/diagnostic/bar-poll-status` | **NEW 2026-04-30 v18** — bar poll service state, pool cursors, lifetime alerts emitted, last cycle summary. |
+| POST | `/api/diagnostic/bar-poll-trigger?pool=NAME` | **NEW 2026-04-30 v18** — manually trigger a single bar poll cycle on intraday_noncore / swing / investment. |
 | GET | `/api/trading-bot/status` | Bot mode, daily_stats, risk_params, account.equity |
 | POST | `/api/trading-bot/refresh-account` | Force-pull IB equity → starting_capital |
 | GET | `/api/scanner/setup-landscape` | Daily Bellafiore Setup classification + multi-index regime |

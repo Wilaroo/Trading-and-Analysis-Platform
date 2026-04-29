@@ -3,7 +3,33 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v17 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v18 fork)
+
+### 🎯 Just shipped 2026-04-30 v18 — see CHANGELOG (eighteenth commit)
+- ✅ **Bar Poll Service** — pure DGX-side service that runs bar-based
+  detectors on the universe-minus-pusher pool by reading
+  ``ib_historical_data`` Mongo (no IB calls, no rate limits). Three
+  pools: intraday-noncore (30s), swing (60s), investment (2h).
+- ✅ **`LiveAlert.data_source`** field — alerts stamped `live_tick`
+  vs `bar_poll_5m` so AI gate / shadow tracker / V5 UI can
+  distinguish.
+- ✅ **Server-side IB bracket exits** — discovered already shipped
+  in Phase 3 (2026-04-22). Added 4 regression guards so a future
+  contributor can't silently revert to legacy two-step entry+stop.
+- ✅ **`/api/diagnostic/bar-poll-status`** + manual trigger endpoint.
+- 11 new tests (76/76 across all instrumentation suites).
+- **Universe coverage now ~80%** of the 2,532 qualified universe,
+  up from 2.8% pre-v17.
+
+### 🟡 P1 — Next session priorities
+- **Confidence gate parallelism** (the 3-5× EVAL speedup) —
+  `asyncio.gather()` the independent model consultations.
+- **Per-cycle context cache** — regime/sector/multi-index regime are
+  recomputed per-alert today; cache once per scan cycle for ~30%
+  free EVAL speedup.
+- **Tier-aware detector dispatch** — skip impossible
+  detector/symbol-tier combinations (e.g. don't run `9_ema_scalp` on
+  swing-tier names).
 
 ### 🎯 Just shipped 2026-04-30 v17 — see CHANGELOG (seventeenth commit)
 - ✅ **Pusher Rotation Service** — DGX-side service that manages

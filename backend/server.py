@@ -4002,6 +4002,23 @@ async def startup_event():
         except Exception as e:
             print(f"Pusher Rotation: FAILED ({type(e).__name__}: {e})")
 
+        # 4.7 Bar Poll Service (2026-04-30 v18). Companion to the
+        # rotation service. Runs bar-based detectors on the
+        # universe-minus-pusher pool by reading `ib_historical_data`
+        # from Mongo (no IB calls). Closes the universe coverage gap
+        # from ~19% (live ticks only) to ~76%+ when active.
+        try:
+            from services.bar_poll_service import get_bar_poll_service
+            from services.enhanced_scanner import get_enhanced_scanner
+            bar_poll_svc = get_bar_poll_service(
+                db=db,
+                scanner=get_enhanced_scanner(),
+            )
+            await bar_poll_svc.start_loop()
+            print("Bar Poll Service: STARTED (3-pool, RTH-only)")
+        except Exception as e:
+            print(f"Bar Poll Service: FAILED ({type(e).__name__}: {e})")
+
         # 5. Startup summary
         print("")
         print("=" * 50)

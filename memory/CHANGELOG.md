@@ -2,6 +2,147 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (eighteenth commit) — Bar Poll Service + Server-Side Bracket Regression Guards
+
+**Why**: v17 took live-tick coverage from 72 → ~480 symbols. That
+still leaves ~2,000 of the 2,532 qualified universe with zero
+scanner attention. v18 closes that gap by reading the existing
+``ib_historical_data`` Mongo collection and running bar-based
+detectors on the universe-minus-pusher pool. **Pure DGX-side**
+service — no IB calls, no rate limits, no multi-client work needed.
+
+While auditing the trade-execution path for "server-side IB bracket
+exits" (the originally-promised v18 piece), discovered they were
+**already implemented in Phase 3 (2026-04-22)** — `place_bracket_order`
+is the default path and submits an atomic parent + OCA stop + OCA
+target to IB so the broker manages the exits even if DGX/pusher die
+mid-trade. Added regression guards instead so a future contributor
+can't accidentally revert.
+
+### What ships
+
+#### 1. `services/bar_poll_service.py` (~370 LOC)
+
+Background service that runs bar-based detectors on three pools:
+
+```
+Pool                    Source                        Cadence
+─────────────────────  ──────────────────────────    ──────────
+intraday_noncore       qualified intraday tier        30s
+                       MINUS pusher subscriptions
+swing                  ($10M-$50M ADV)                60s
+investment             ($2M-$10M ADV)                 2h
+```
+
+Each cycle:
+  1. Build pool (excluding live-streamed pusher symbols).
+  2. Round-robin batch (50 symbols/cycle) — full pool covered every
+     12-30 cycles depending on size.
+  3. Get `TechnicalSnapshot` from existing
+     `realtime_technical_service.get_batch_snapshots()` (Mongo reads).
+  4. Run 5 bar-based detectors per symbol: `squeeze`,
+     `mean_reversion`, `chart_pattern`, `breakout`, `hod_breakout`.
+  5. Stamp `data_source="bar_poll_5m"` on emitted `LiveAlert`.
+  6. Push into the scanner's `_live_alerts` dict — flows through the
+     **same** AI gate, priority ranking, auto-eligibility paths as
+     scanner-fired alerts.
+
+Live-tick-only detectors (`9_ema_scalp`, `vwap_continuation`,
+`opening_range_break`) are NOT in the bar-poll set — they need
+sub-second timing the bar pipeline can't deliver.
+
+#### 2. `LiveAlert.data_source` field — provenance stamp
+
+New default-`"live_tick"` field on the `LiveAlert` dataclass. The
+bar-poll service overrides to `"bar_poll_5m"` on its emitted alerts.
+The AI gate / shadow tracker / V5 UI can downweight bar-poll alerts
+if accuracy diverges from live-tick.
+
+#### 3. New diagnostic endpoints
+
+- **`GET /api/diagnostic/bar-poll-status`** — pool state, lifetime
+  alerts emitted, last cycle summary, detectors enabled.
+- **`POST /api/diagnostic/bar-poll-trigger?pool=intraday_noncore`** —
+  operator escape hatch; manually trigger a single cycle.
+
+#### 4. Server-side IB bracket: regression guards (4 new tests)
+
+The `place_bracket_order` path was already the default. New tests pin
+that contract so a future contributor can't silently regress:
+
+- **`test_execute_trade_calls_place_bracket_order_first`** — guards
+  the call order in `trade_execution.execute_trade`.
+- **`test_legacy_fallback_only_triggers_on_known_errors`** — the
+  `use_legacy` gate must accept ONLY `bracket_not_supported` (and the
+  current allowlist), not real broker errors. Otherwise a
+  `insufficient_buying_power` reject would silently fall back to the
+  pre-Phase-3 two-step entry+stop flow that left positions naked on
+  bot restart.
+- **`test_bracket_path_records_oca_group_and_child_ids`** — the
+  bracket result must propagate `stop_order_id`, `target_order_id`,
+  and `oca_group` so the bot can audit / cancel the broker-side
+  children later.
+- **`test_simulate_bracket_returns_complete_shape`** — simulated
+  bracket must return the same shape as live (downstream code is
+  mode-blind).
+
+#### 5. Server lifespan wiring
+
+`server.py` lifespan now starts the bar poll service alongside the
+pusher rotation service. Fails gracefully if dependencies missing.
+
+### Tests
+
+`tests/test_bar_poll_v18.py` — 11 tests:
+- 7 bar-poll behaviour (pool composition, cursor round-robin,
+  alert provenance, neutral tape contract, status snapshot,
+  RTH gating, exclude-pusher-subs)
+- 4 bracket-path regression guards (call order, fallback gate,
+  child-id propagation, simulate-bracket shape).
+
+Total across instrumentation suites: **76/76 passing**.
+
+### Coverage delta
+
+|  | Pre-v17 | Post-v17 | Post-v18 |
+|---|---|---|---|
+| Live tick | 72 | ~480 | ~480 |
+| Bar poll | 0 | 0 | **~2,000** |
+| Total reach | 72 (2.8%) | ~480 (19%) | **~2,000+ (78-80%)** |
+
+### What changes after pull + restart on Spark
+
+```bash
+# Bar poll service should start automatically. Confirm:
+curl -s http://localhost:8001/api/diagnostic/bar-poll-status \
+  | python3 -m json.tool
+
+# Within the first 30s of RTH, lifetime_alerts_emitted should
+# climb. The first cycle covers 50 symbols per pool; full pool
+# coverage takes 12-30 cycles depending on pool size.
+
+# To force a manual cycle:
+curl -X POST "http://localhost:8001/api/diagnostic/bar-poll-trigger?pool=intraday_noncore" \
+  | python3 -m json.tool
+
+# To watch the SCAN tile + EVAL tile climb on the V5 UI — they should
+# now reflect the dramatically expanded breadth (live + bar-poll combined).
+```
+
+### What does NOT ship in v18 (parked for v19)
+
+- **Multi-client IB session manager**. Was originally planned for
+  Phase 2 historical-data rate-limit clearance, but became
+  unnecessary once we discovered the existing `ib_historical_data`
+  Mongo collection is already kept fresh by the always-on
+  collectors. Bar poll just reads from Mongo. Multi-client IB might
+  still be useful for parallelizing order submission (Phase 4) but
+  isn't on the critical path now.
+- **Confidence gate parallelism** (the 3-5× EVAL speedup). Still
+  P1 next session.
+
+
+
 ## 2026-04-30 (seventeenth commit) — Pusher Rotation Service (500-line budget)
 
 **Why**: Operator confirmed 2026-04-30 IB upgrade — 5 Quote Booster
