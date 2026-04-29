@@ -160,20 +160,30 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
     })
 
     # ───────── 5. Bot master switch + mode ─────────
+    # Pull from the actual `bot_state` document (singleton; uses key
+    # `mode` not `bot_mode`). Also reads the live scanner's in-memory
+    # `_auto_execute_enabled` because that's what actually gates flow
+    # — the bot_state collection doesn't persist that flag separately.
     bot_state = db["bot_state"].find_one({}) or {}
-    auto_execute_enabled = bool(bot_state.get("auto_execute_enabled", False))
-    bot_mode = str(bot_state.get("bot_mode") or bot_state.get("mode") or "unknown")
+    bot_mode = str(bot_state.get("mode") or bot_state.get("bot_mode") or "unknown")
+    auto_execute_enabled = False
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        scanner = get_enhanced_scanner()
+        auto_execute_enabled = bool(getattr(scanner, "_auto_execute_enabled", False))
+    except Exception:
+        pass
     stages.append({
         "stage": "bot_master_switch",
-        "label": "Bot auto_execute_enabled flag",
+        "label": "Scanner _auto_execute_enabled (synced from bot mode on start/set)",
         "count": int(auto_execute_enabled),
         "value": auto_execute_enabled,
         "kill_check": auto_eligible > 0 and not auto_execute_enabled,
-        "kill_reason": "Eligible alerts existed but the bot's auto_execute master switch is OFF",
+        "kill_reason": "Eligible alerts existed but the scanner's auto_execute flag is OFF (was the bot started with mode=AUTONOMOUS?)",
     })
     stages.append({
         "stage": "bot_mode",
-        "label": "Bot mode",
+        "label": "Bot mode (persisted in bot_state.mode)",
         "value": bot_mode,
         "count": 1 if bot_mode.lower() == "autonomous" else 0,
         "kill_check": (auto_eligible > 0 and auto_execute_enabled
@@ -181,6 +191,47 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
         "kill_reason": (
             f"Bot mode is {bot_mode!r}, not AUTONOMOUS — eligible trades are queued "
             "in `_pending_trades` waiting for human confirmation"
+        ),
+    })
+
+    # Cross-check: bot_state says one mode but scanner has the opposite
+    # auto-execute state — the symptom of the 2026-04-30 startup-sync bug
+    # (now fixed but worth flagging on historical days).
+    sync_mismatch = (bot_mode.lower() == "autonomous") != auto_execute_enabled
+    stages.append({
+        "stage": "bot_scanner_sync",
+        "label": "Bot mode ↔ scanner auto-execute consistency check",
+        "value": "MISMATCH" if sync_mismatch else "OK",
+        "count": 0 if sync_mismatch else 1,
+        "kill_check": sync_mismatch,
+        "kill_reason": (
+            f"Sync drift: bot_state.mode={bot_mode!r} but scanner "
+            f"_auto_execute_enabled={auto_execute_enabled}. After 2026-04-30 fix, "
+            "bot.start() and set_mode() both keep these aligned. If you see this on "
+            "a *current* day, check that the trading_bot service actually started "
+            "(supervisor logs)."
+        ),
+    })
+
+    # Collection-mode is the silent killer: when the data-fill job is
+    # running, the bot scan loop fully skips every cycle. Surface it.
+    try:
+        from services.collection_mode import is_active as _coll_active, state as _coll_state
+        coll_now = bool(_coll_active())
+    except Exception:
+        coll_now = False
+        _coll_state = {}
+    stages.append({
+        "stage": "collection_mode_pause",
+        "label": "Collection-mode flag (when ACTIVE, the bot scan loop fully pauses)",
+        "value": "ACTIVE" if coll_now else "INACTIVE",
+        "count": 0 if coll_now else 1,
+        "kill_check": coll_now and total_alerts == 0,
+        "kill_reason": (
+            "Collection mode is currently ACTIVE — the IB historical data-fill job "
+            "is running, which suspends the trading bot's scan loop entirely. "
+            "Either wait for the data-fill to finish or stop it via "
+            "POST /api/ib/collection-mode/stop."
         ),
     })
 

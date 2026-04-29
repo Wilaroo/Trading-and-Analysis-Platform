@@ -2,6 +2,88 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (seventh commit) — Bot ↔ Scanner Auto-Execute Sync Fix + Diagnostic Upgrade
+
+### The bug the diagnostic uncovered
+
+The `/api/diagnostic/trade-funnel` endpoint shipped in the prior commit
+revealed exactly why no live trades were happening:
+
+  - `bot_state.mode = "autonomous"` was persisted (survives restarts).
+  - `scanner._auto_execute_enabled = False` was **in-memory only** —
+    defaults to False on every backend restart at line 895.
+  - The sync (`scanner.enable_auto_execute(True)`) only ran when the
+    operator manually hit `POST /api/trading-bot/mode` — there was no
+    automatic sync at bot startup.
+
+Net: every backend restart silently disabled auto-execution. Even when
+the bot was loaded with mode=AUTONOMOUS from `bot_state`, the scanner's
+auto-execute flag stayed False until someone re-toggled the mode via
+the API. HIGH-priority alerts kept firing, kept getting `tape_confirmation=True`,
+kept landing on `auto_execute_eligible=False` because the master switch
+they were checking against was always False after restart.
+
+### Shipped
+
+#### 1. Authoritative bot↔scanner sync (`services/trading_bot_service.py`)
+- `start()` now calls `scanner.enable_auto_execute(...)` in lockstep
+  with `self._mode == BotMode.AUTONOMOUS`. So on every backend restart,
+  the scanner's auto-execute flag matches the persisted bot mode.
+- `set_mode()` now also runs the same sync, so any path that changes
+  the mode (router endpoint, internal script, automation) keeps the
+  scanner aligned automatically. The previous design relied on the
+  *router endpoint* doing the sync, which was duplicated and skippable.
+- Both calls are wrapped in best-effort try/except — sync failure logs
+  a warning but never blocks bot startup.
+
+#### 2. Diagnostic upgrades (`routers/diagnostic_router.py`)
+- **`bot_master_switch`**: now reads from the live scanner's in-memory
+  `_auto_execute_enabled` (the real gate) instead of looking for an
+  `auto_execute_enabled` field on `bot_state` (which was never persisted).
+- **`bot_mode`**: standardized on `bot_state.mode` (the actual key in
+  storage; old code looked at `bot_state.bot_mode` first which never
+  existed).
+- **NEW `bot_scanner_sync` stage**: cross-checks `bot_state.mode ==
+  "autonomous"` against `scanner._auto_execute_enabled`. Flags MISMATCH
+  with a clear error message pointing at this very fix. After the fix,
+  this should always read OK on a live Spark deploy. If it ever flags
+  MISMATCH again, the message tells the operator to check supervisor
+  logs because the bot service didn't start.
+- **NEW `collection_mode_pause` stage**: the IB historical data-fill
+  job activates an in-process flag that fully pauses the bot's scan
+  loop. Now visible at a glance — if the operator notices the bot has
+  gone quiet during a data-fill, this stage explains why and points
+  at `POST /api/ib/collection-mode/stop`.
+
+### Files touched
+- `backend/services/trading_bot_service.py` (start() + set_mode() sync)
+- `backend/routers/diagnostic_router.py` (3 new/improved stages)
+- `memory/PRD.md`, `memory/ROADMAP.md`, `memory/CHANGELOG.md`
+
+### Operator workflow on Spark
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && \
+  sudo supervisorctl restart backend && sleep 5 && \
+  curl -s http://localhost:8001/api/diagnostic/trade-funnel | python3 -m json.tool
+```
+
+After the pull + restart, the `bot_scanner_sync` stage should read
+`"value": "OK"` and `auto_execute_enabled: true` — confirming the bot
+loaded mode=autonomous and synced the scanner. If RTH is open and a
+data-fill isn't running, the next scan cycle should start producing
+alerts (watch `_symbols_skipped_adv/_rvol` climb).
+
+### Remaining open question
+The `collection_mode` flag pauses the bot for the duration of every
+data-fill job — this is **by design** (frees compute for the IB
+collectors) but compounds the problem during RTH. Worth a future
+discussion: should collection mode pause only the *scanner* (which
+generates alerts) and not the *bot* (which manages live positions)?
+A live position with no bot polling is a real risk if a stop hits
+during a data-fill. Tracked as a P1 backlog item.
+
+
+
 ## 2026-04-30 (sixth commit) — Trade-Funnel Diagnostic Endpoint
 
 ### Why

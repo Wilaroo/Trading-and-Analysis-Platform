@@ -1450,9 +1450,26 @@ class TradingBotService:
     # ==================== CONFIGURATION ====================
     
     def set_mode(self, mode: BotMode):
-        """Set operating mode"""
+        """Set operating mode + sync scanner auto-execute state.
+
+        2026-04-30: the scanner sync used to live only in the router
+        endpoints that called this method, which meant any internal
+        call to `set_mode` (scripts, automation) silently bypassed it
+        and left scanner auto-execute out of sync. Sync is now
+        authoritative — happens whichever path triggers the change."""
         self._mode = mode
         logger.info(f"Bot mode changed to: {mode.value}")
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner is not None:
+                scanner.enable_auto_execute(
+                    enabled=(mode == BotMode.AUTONOMOUS),
+                    min_win_rate=0.55,
+                    min_priority="high",
+                )
+        except Exception as e:
+            logger.warning(f"Scanner sync on mode change failed (non-fatal): {e}")
         # Persist state asynchronously
         asyncio.create_task(self._save_state())
     
@@ -1642,6 +1659,28 @@ class TradingBotService:
         logger.info(f"🤖 Trading bot started in {self._mode.value} mode")
         logger.info(f"📊 Trading hours: {self.risk_params.trading_start_hour}:{self.risk_params.trading_start_minute:02d} - {self.risk_params.trading_end_hour}:{self.risk_params.trading_end_minute:02d} ET")
         logger.info(f"💰 Max position: {self.risk_params.max_position_pct}% of account, Max daily loss: {self.risk_params.max_daily_loss_pct}%")
+
+        # 2026-04-30 — sync scanner auto-execute with the bot's persisted
+        # mode on startup. Without this, every backend restart silently
+        # leaves `scanner._auto_execute_enabled = False` even when
+        # bot_state.mode == "autonomous", so HIGH-priority alerts never
+        # auto-fire until the operator manually re-hits POST /trading-bot/mode.
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner is not None:
+                scanner.enable_auto_execute(
+                    enabled=(self._mode == BotMode.AUTONOMOUS),
+                    min_win_rate=0.55,
+                    min_priority="high",
+                )
+                logger.info(
+                    f"⚙️  Scanner auto-execute synced from bot mode "
+                    f"(mode={self._mode.value}, scanner_enabled="
+                    f"{self._mode == BotMode.AUTONOMOUS})"
+                )
+        except Exception as e:
+            logger.warning(f"Scanner sync on bot start failed (non-fatal): {e}")
 
         # Phase 4 (2026-04-22): Protect any orphan IB positions on startup.
         # Runs in the background — never block start on broker round-trips.
