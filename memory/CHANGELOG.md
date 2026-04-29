@@ -179,6 +179,85 @@ glyph, alert-like-only dispatch, uppercase-symbol lookup contract.
 
 **239/239 passing** across all related suites (224 prior + 15 new).
 
+### 6. Pre-flight tooling — RTH Readiness Endpoint + Pre-warm Error Escalation (operator P0)
+
+After shipping the divergence badges, operator asked what we could
+do tonight to make tomorrow morning's RTH validation cleaner. Two
+P0 pre-flight items:
+
+**A. `GET /api/diagnostic/rth-readiness` — single curl, full pre-flight**
+
+Read-only by design (operator decides if/when to fix). Runs 9
+independent checks, each returning `{name, label, status, message,
+details}`:
+
+  1. **bot_state** — persisted mode=autonomous, running=true, risk_params
+  2. **bot_runtime** — in-process bot _running matches persisted state
+  3. **scanner_runtime** — `_running` + `_auto_execute_enabled` synced with bot mode
+  4. **collection_mode** — should be INACTIVE before market open
+  5. **pusher_health** — IB pusher reachable + IB Gateway connected
+  6. **universe_freshness** — `symbol_adv_cache` populated, refreshed within 48h
+  7. **data_request_queue** — historical_data_requests queue depth < 200
+  8. **landscape_prewarm** — SetupLandscapeService cache hot (<30min old)
+  9. **briefing_predictions** — today's morning prediction recorded for EOD grading
+
+Status semantics: GREEN (clean pass) | YELLOW (passed-but-degraded
+OR failed-but-non-blocker) | RED (blocker). Belt-and-braces wraps
+each check so a single helper raising can't 500 the endpoint.
+Top-level returns `overall_status`, `ready_for_rth`, `summary
+{green, yellow, red, total}`, `first_red_check`, ET-aware
+`trading_day_et` and `et_clock`.
+
+Operator workflow: curl at 23:00 ET tonight to verify state; curl
+at 09:25 ET tomorrow to confirm pre-flight is clean before market
+open. RED on any check tells the operator the SIMPLEST fix (table
+ordered most-fundamental first).
+
+**B. Pre-warm error escalation (`enhanced_scanner._prewarm_setup_landscape`)**
+
+Pre-fix shipped earlier this commit logged failures at `logger.debug`
+which silently swallowed errors — a broken overnight pre-warm was
+invisible. Post-fix:
+- Every failure now logs at `logger.warning` with the exception type
+  and message
+- Per-instance counter `_prewarm_failure_count` tracks consecutive
+  failures
+- 3+ consecutive failures escalates to `logger.critical` with an
+  unmissable banner so morning supervisor logs scream
+- Successful pre-warm resets the counter (transient blips don't
+  accumulate forever)
+
+### Tests
+- `backend/tests/test_rth_readiness_endpoint.py` — **23 tests**:
+  `_check_status` tri-state semantics (incl. the warn-on-fail bug),
+  9-check dispatch ordering pin, belt-and-braces around each check,
+  `ready_for_rth` falls False on any RED, ET trading-day reporting,
+  per-helper unit tests (bot_state, collection_mode, universe,
+  pusher, briefing_predictions, data_request_queue), pre-warm
+  escalation source-level guards.
+
+**262/262 passing** across all related suites (239 prior + 23 new).
+
+### Files touched (this section)
+- `backend/routers/diagnostic_router.py` (RTH-readiness endpoint
+  + 9 check helpers + tri-state status function)
+- `backend/services/enhanced_scanner.py` (pre-warm error escalation
+  with 3-strike CRITICAL banner)
+- NEW `backend/tests/test_rth_readiness_endpoint.py`
+- `memory/CHANGELOG.md`
+
+### Operator usage example
+```
+$ curl -s $BASE/api/diagnostic/rth-readiness | jq '.overall_status, .summary'
+"GREEN"
+{
+  "green": 9, "yellow": 0, "red": 0, "total": 9
+}
+
+$ curl -s $BASE/api/diagnostic/rth-readiness | jq '.checks[] | {name,status,message}'
+# ... 9-row checklist with per-check status + message
+```
+
 
 
 ## 2026-04-30 (tenth commit) — Trade Funnel: Bugs 1+2+3c+4a Fixed

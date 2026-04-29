@@ -5553,13 +5553,30 @@ class EnhancedBackgroundScanner:
           - PREMARKET (force_morning=True) → "morning"
           - Sat/Sun (any after-hours window)         → "weekend"
           - Mon-Fri after-hours                      → "morning" (next session)
+
+        2026-04-30 v11 (P0 escalation): silent failures bit us once —
+        this method previously logged at debug level only, meaning
+        a broken pre-warm during overnight wouldn't surface in
+        supervisor logs. Now: WARNING on every failure with the
+        exception name, CRITICAL after 3 consecutive failures so
+        the operator sees an unmissable banner the next morning.
         """
         try:
             from datetime import datetime as _dt
             from zoneinfo import ZoneInfo as _ZI
             from services.setup_landscape_service import get_setup_landscape_service
         except Exception as e:
-            logger.debug(f"_prewarm_setup_landscape import skipped: {e}")
+            self._prewarm_failure_count = getattr(self, "_prewarm_failure_count", 0) + 1
+            logger.warning(
+                f"📚 Landscape pre-warm import failed (#{self._prewarm_failure_count}): "
+                f"{type(e).__name__}: {e}"
+            )
+            if self._prewarm_failure_count >= 3:
+                logger.critical(
+                    f"📚 LANDSCAPE PRE-WARM FAILED {self._prewarm_failure_count}× IN A ROW — "
+                    f"morning briefing will pay full classify latency. "
+                    f"Last error: {type(e).__name__}: {e}"
+                )
             return
         # Choose context — weekend on Sat/Sun, morning otherwise.
         try:
@@ -5583,8 +5600,21 @@ class EnhancedBackgroundScanner:
                 f"📚 Landscape pre-warmed ({context}): {snap.classified}/"
                 f"{snap.sample_size} classified, regime={snap.multi_index_regime}"
             )
+            # Reset the consecutive-failure counter on success so a
+            # transient blip doesn't accumulate forever.
+            self._prewarm_failure_count = 0
         except Exception as e:
-            logger.debug(f"_prewarm_setup_landscape failed: {e}")
+            self._prewarm_failure_count = getattr(self, "_prewarm_failure_count", 0) + 1
+            logger.warning(
+                f"📚 Landscape pre-warm ({context}) failed (#{self._prewarm_failure_count}): "
+                f"{type(e).__name__}: {e}"
+            )
+            if self._prewarm_failure_count >= 3:
+                logger.critical(
+                    f"📚 LANDSCAPE PRE-WARM FAILED {self._prewarm_failure_count}× IN A ROW — "
+                    f"morning briefing will pay full classify latency. "
+                    f"Last error: {type(e).__name__}: {e}"
+                )
 
 
 

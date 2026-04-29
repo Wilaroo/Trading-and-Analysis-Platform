@@ -435,3 +435,485 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
         "bot_state_keys": sorted(list(bot_state.keys()))[:30] if bot_state else [],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# ────────────────────────────────────────────────────────────────────
+#  RTH READINESS — single curl, full pre-flight checklist.
+#
+#  Operator workflow: run this at 23:00 ET the night before, and again
+#  at 09:25 ET the morning of, to confirm every precondition for clean
+#  autonomous trading is in place. If any check is RED the trade-funnel
+#  validation tomorrow will be muddied by a plumbing issue, not the
+#  scanner / gate logic we actually want to validate.
+#
+#  Read-only by design — this endpoint never mutates state. Operator
+#  decides if/when to fix.
+#
+#  2026-04-30 v11 — operator-flagged P0 pre-flight tool.
+# ────────────────────────────────────────────────────────────────────
+
+
+def _check_status(passed: bool, warning: bool = False) -> str:
+    """Tri-state status: GREEN (passed) | YELLOW (warn-only) | RED (failed).
+
+    Semantics:
+      passed=True,  warning=False → GREEN (clean pass)
+      passed=True,  warning=True  → YELLOW (passed but degraded)
+      passed=False, warning=True  → YELLOW (failed but non-blocker)
+      passed=False, warning=False → RED (failed blocker)
+    """
+    if passed and not warning:
+        return "GREEN"
+    if warning:
+        return "YELLOW"
+    return "RED"
+
+
+def _check_bot_state(db) -> Dict[str, Any]:
+    """Bot persisted state: mode + running + risk_params present."""
+    bs = db["bot_state"].find_one({}) or {}
+    mode = str(bs.get("mode") or bs.get("bot_mode") or "").lower()
+    running = bool(bs.get("running"))
+    risk_present = bool(bs.get("risk_params"))
+    autonomous = mode == "autonomous"
+    passed = autonomous and running and risk_present
+    msg = (
+        "GREEN" if passed
+        else f"mode={mode!r}, running={running}, risk_params_present={risk_present} — "
+             "expected mode=autonomous, running=true, risk_params populated"
+    )
+    return {
+        "name": "bot_state",
+        "label": "Bot persisted state (bot_state collection)",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": {
+            "mode": mode,
+            "running": running,
+            "risk_params_present": risk_present,
+        },
+    }
+
+
+def _check_bot_runtime(db) -> Dict[str, Any]:
+    """In-process bot service: _running flag matches persisted state."""
+    try:
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
+        runtime_running = bool(getattr(bot, "_running", False))
+        runtime_mode = getattr(getattr(bot, "_mode", None), "value", "unknown")
+    except Exception as e:
+        return {
+            "name": "bot_runtime",
+            "label": "Bot service runtime state (in-process)",
+            "status": "RED",
+            "message": f"could not read bot service: {e}",
+            "details": {},
+        }
+
+    bs = db["bot_state"].find_one({}) or {}
+    persisted_running = bool(bs.get("running"))
+    persisted_mode = str(bs.get("mode") or "").lower()
+
+    in_sync = (
+        runtime_running == persisted_running
+        and str(runtime_mode).lower() == persisted_mode
+    )
+    autonomous_and_running = runtime_running and str(runtime_mode).lower() == "autonomous"
+    passed = in_sync and autonomous_and_running
+    msg = (
+        "GREEN" if passed
+        else f"runtime: running={runtime_running} mode={runtime_mode} | "
+             f"persisted: running={persisted_running} mode={persisted_mode}"
+    )
+    return {
+        "name": "bot_runtime",
+        "label": "Bot service runtime state (in-process)",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": {
+            "runtime_running": runtime_running,
+            "runtime_mode": runtime_mode,
+            "persisted_running": persisted_running,
+            "persisted_mode": persisted_mode,
+            "in_sync": in_sync,
+        },
+    }
+
+
+def _check_scanner_runtime(db) -> Dict[str, Any]:
+    """Scanner: running + auto_execute_enabled synced with bot mode."""
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        scanner = get_enhanced_scanner()
+        running = bool(getattr(scanner, "_running", False))
+        auto_execute = bool(getattr(scanner, "_auto_execute_enabled", False))
+        scan_count = int(getattr(scanner, "_scan_count", 0))
+    except Exception as e:
+        return {
+            "name": "scanner_runtime",
+            "label": "Enhanced scanner runtime state",
+            "status": "RED",
+            "message": f"could not read scanner service: {e}",
+            "details": {},
+        }
+
+    bs = db["bot_state"].find_one({}) or {}
+    bot_mode = str(bs.get("mode") or "").lower()
+    expected_auto = bot_mode == "autonomous"
+    sync_drift = expected_auto != auto_execute
+    passed = running and auto_execute and not sync_drift
+    msg = (
+        "GREEN" if passed
+        else f"running={running} auto_execute={auto_execute} expected_auto={expected_auto} "
+             f"sync_drift={sync_drift}"
+    )
+    return {
+        "name": "scanner_runtime",
+        "label": "Enhanced scanner runtime state",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": {
+            "running": running,
+            "auto_execute_enabled": auto_execute,
+            "scan_count": scan_count,
+            "bot_mode_persisted": bot_mode,
+            "sync_drift": sync_drift,
+        },
+    }
+
+
+def _check_collection_mode() -> Dict[str, Any]:
+    """Collection mode should be INACTIVE before market open. If active,
+    NEW alert intake is paused (positions still managed)."""
+    try:
+        from services.collection_mode import is_active, state
+        active = bool(is_active())
+        started_at = state.get("started_at")
+        instances = int(state.get("instances", 0))
+    except Exception as e:
+        return {
+            "name": "collection_mode",
+            "label": "IB historical-data fill mode (alert-intake pause)",
+            "status": "RED",
+            "message": f"could not read collection_mode: {e}",
+            "details": {},
+        }
+    passed = not active
+    msg = "INACTIVE — fresh alert intake is enabled" if passed else (
+        f"ACTIVE since {started_at} ({instances} instances) — NEW alerts paused. "
+        "Stop with POST /api/ib/collection-mode/stop"
+    )
+    return {
+        "name": "collection_mode",
+        "label": "IB historical-data fill mode (alert-intake pause)",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": {
+            "active": active,
+            "started_at": started_at,
+            "instances": instances,
+        },
+    }
+
+
+def _check_pusher_health() -> Dict[str, Any]:
+    """IB pusher (Windows-side) reachable + reporting IB Gateway connected."""
+    try:
+        from services.ib_pusher_rpc import get_pusher_rpc_client
+        rpc = get_pusher_rpc_client()
+        health = rpc.health()
+    except Exception as e:
+        return {
+            "name": "pusher_health",
+            "label": "IB pusher reachable + IB Gateway connected",
+            "status": "RED",
+            "message": f"pusher RPC import failed: {e}",
+            "details": {},
+        }
+    if health is None:
+        return {
+            "name": "pusher_health",
+            "label": "IB pusher reachable + IB Gateway connected",
+            "status": "RED",
+            "message": "pusher unreachable — Windows PC offline or IB_PUSHER_RPC_URL wrong",
+            "details": {},
+        }
+    ib_connected = bool(
+        health.get("ib_connected")
+        or health.get("connected")
+        or health.get("ib_gateway_connected")
+    )
+    passed = ib_connected
+    msg = (
+        "GREEN — pusher reachable, IB Gateway connected" if passed
+        else f"pusher reachable but IB Gateway NOT connected: {health}"
+    )
+    return {
+        "name": "pusher_health",
+        "label": "IB pusher reachable + IB Gateway connected",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": health,
+    }
+
+
+def _check_universe_freshness(db) -> Dict[str, Any]:
+    """`symbol_adv_cache` populated and refreshed within 48h."""
+    cache_count = db["symbol_adv_cache"].count_documents({})
+    if cache_count == 0:
+        return {
+            "name": "universe_freshness",
+            "label": "Symbol universe (symbol_adv_cache) freshness",
+            "status": "RED",
+            "message": "symbol_adv_cache is empty — RVOL / ADV gates can't fire",
+            "details": {"count": 0},
+        }
+    # Try multiple known timestamp fields used by different writers.
+    latest = None
+    for field in ("updated_at", "last_refresh_at", "cached_at"):
+        doc = db["symbol_adv_cache"].find_one(
+            {field: {"$exists": True}},
+            {"_id": 0, field: 1},
+            sort=[(field, -1)],
+        )
+        if doc and doc.get(field):
+            latest = doc[field]
+            break
+    age_hours = None
+    if latest:
+        try:
+            from datetime import datetime as _dt
+            ts = (
+                latest if isinstance(latest, datetime)
+                else _dt.fromisoformat(str(latest).replace("Z", "+00:00"))
+            )
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - ts
+            age_hours = round(age.total_seconds() / 3600, 1)
+        except Exception:
+            pass
+    fresh = age_hours is not None and age_hours <= 48
+    stale_warn = age_hours is not None and 24 < age_hours <= 48
+    if fresh and stale_warn:
+        return {
+            "name": "universe_freshness",
+            "label": "Symbol universe (symbol_adv_cache) freshness",
+            "status": "YELLOW",
+            "message": f"YELLOW — last refresh {age_hours}h ago (24-48h window, refresh recommended)",
+            "details": {"count": cache_count, "age_hours": age_hours},
+        }
+    passed = fresh
+    msg = (
+        f"GREEN — {cache_count} symbols, last refresh {age_hours}h ago" if passed
+        else f"stale — {cache_count} symbols, last refresh "
+             f"{'unknown' if age_hours is None else f'{age_hours}h'} ago "
+             "(>48h or no timestamp)"
+    )
+    return {
+        "name": "universe_freshness",
+        "label": "Symbol universe (symbol_adv_cache) freshness",
+        "status": _check_status(passed),
+        "message": msg,
+        "details": {"count": cache_count, "age_hours": age_hours},
+    }
+
+
+def _check_data_request_queue(db) -> Dict[str, Any]:
+    """historical_data_requests queue depth — high backlog = data fill
+    will likely be running into market open."""
+    try:
+        col = db["historical_data_requests"]
+        pending = col.count_documents({"status": {"$in": ["pending", "queued"]}})
+        in_flight = col.count_documents({"status": {"$in": ["in_progress", "running"]}})
+    except Exception as e:
+        return {
+            "name": "data_request_queue",
+            "label": "IB historical-data backfill queue depth",
+            "status": "YELLOW",
+            "message": f"could not read queue: {e}",
+            "details": {},
+        }
+    total = pending + in_flight
+    passed = total < 200
+    warn = 50 <= total < 200
+    msg = (
+        f"GREEN — {pending} pending + {in_flight} in-flight" if passed and not warn
+        else f"YELLOW — {total} jobs in queue (will keep collection_mode active)" if warn
+        else f"RED — {total} jobs in queue, risks running into market open"
+    )
+    return {
+        "name": "data_request_queue",
+        "label": "IB historical-data backfill queue depth",
+        "status": _check_status(passed, warning=warn),
+        "message": msg,
+        "details": {"pending": pending, "in_flight": in_flight, "total": total},
+    }
+
+
+def _check_landscape_prewarm() -> Dict[str, Any]:
+    """SetupLandscapeService cache is hot — confirms the after-hours
+    pre-warm fired AND the morning briefing won't pay full classify
+    latency."""
+    try:
+        from services.setup_landscape_service import get_setup_landscape_service
+        svc = get_setup_landscape_service()
+        snap = getattr(svc, "_snapshot", None)
+        snap_at = getattr(svc, "_snapshot_at", None)
+    except Exception as e:
+        return {
+            "name": "landscape_prewarm",
+            "label": "Setup landscape pre-warm (morning briefing latency hedge)",
+            "status": "YELLOW",
+            "message": f"could not read landscape service: {e}",
+            "details": {},
+        }
+    if snap is None or snap_at is None:
+        return {
+            "name": "landscape_prewarm",
+            "label": "Setup landscape pre-warm (morning briefing latency hedge)",
+            "status": "YELLOW",
+            "message": "no snapshot cached yet — first briefing will pay 200×classify latency",
+            "details": {"cached": False},
+        }
+    age_seconds = (datetime.now(timezone.utc) - snap_at).total_seconds()
+    fresh = age_seconds <= 30 * 60
+    passed = fresh
+    msg = (
+        f"GREEN — snapshot cached, {int(age_seconds)}s old" if passed
+        else f"YELLOW — snapshot is {int(age_seconds // 60)}min old, "
+             "next sweep should refresh it"
+    )
+    classified = getattr(snap, "classified", None)
+    sample_size = getattr(snap, "sample_size", None)
+    return {
+        "name": "landscape_prewarm",
+        "label": "Setup landscape pre-warm (morning briefing latency hedge)",
+        "status": _check_status(passed, warning=not fresh),
+        "message": msg,
+        "details": {
+            "cached": True,
+            "age_seconds": int(age_seconds),
+            "classified": classified,
+            "sample_size": sample_size,
+        },
+    }
+
+
+def _check_briefing_predictions(db) -> Dict[str, Any]:
+    """`landscape_predictions` collection should have today's morning
+    prediction for EOD grading. YELLOW if today's row hasn't been
+    written yet — the briefing endpoint will write it on first call."""
+    from datetime import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        today_et = _dt.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        today_et = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        count_today = db["landscape_predictions"].count_documents({
+            "trading_day": today_et,
+            "context": "morning",
+        })
+    except Exception as e:
+        return {
+            "name": "briefing_predictions",
+            "label": "Today's morning briefing prediction (EOD grading)",
+            "status": "YELLOW",
+            "message": f"could not read landscape_predictions: {e}",
+            "details": {"trading_day_et": today_et},
+        }
+    passed = count_today >= 1
+    msg = (
+        f"GREEN — today's morning prediction recorded ({count_today} rows)" if passed
+        else "YELLOW — no morning prediction for today yet. Will be written when "
+             "/api/assistant/coach/morning-briefing is first called."
+    )
+    return {
+        "name": "briefing_predictions",
+        "label": "Today's morning briefing prediction (EOD grading)",
+        "status": _check_status(passed, warning=not passed),
+        "message": msg,
+        "details": {"trading_day_et": today_et, "count": count_today},
+    }
+
+
+@router.get("/rth-readiness")
+def rth_readiness() -> Dict[str, Any]:
+    """Pre-flight checklist — single curl returns every precondition
+    for clean autonomous trading. Read-only.
+
+    Status semantics:
+      • GREEN  — check passed, no action needed.
+      • YELLOW — non-blocker; trades will still flow but something is
+                 sub-optimal (stale data, cache cold, etc).
+      • RED    — blocker; trades won't execute or won't be diagnosable
+                 until this is fixed.
+
+    Top-level ``ready_for_rth`` is True only when EVERY check is
+    GREEN or YELLOW — any RED forces False.
+    """
+    db = _get_db()
+    checks: List[Dict[str, Any]] = []
+
+    # Order matters — most fundamental first so a RED at the top tells
+    # the operator the simplest fix.
+    for fn, args in (
+        (_check_bot_state,            (db,)),
+        (_check_bot_runtime,          (db,)),
+        (_check_scanner_runtime,      (db,)),
+        (_check_collection_mode,      ()),
+        (_check_pusher_health,        ()),
+        (_check_universe_freshness,   (db,)),
+        (_check_data_request_queue,   (db,)),
+        (_check_landscape_prewarm,    ()),
+        (_check_briefing_predictions, (db,)),
+    ):
+        try:
+            checks.append(fn(*args))
+        except Exception as e:
+            # Belt-and-braces — a single check raising shouldn't kill the endpoint.
+            checks.append({
+                "name": getattr(fn, "__name__", "check").replace("_check_", ""),
+                "label": "Check raised",
+                "status": "RED",
+                "message": f"check raised {type(e).__name__}: {e}",
+                "details": {},
+            })
+
+    green = sum(1 for c in checks if c["status"] == "GREEN")
+    yellow = sum(1 for c in checks if c["status"] == "YELLOW")
+    red = sum(1 for c in checks if c["status"] == "RED")
+    overall = "GREEN" if red == 0 and yellow == 0 else "YELLOW" if red == 0 else "RED"
+    ready = red == 0
+    first_red = next((c for c in checks if c["status"] == "RED"), None)
+
+    # ET clock so the operator knows what trading day this represents.
+    try:
+        from zoneinfo import ZoneInfo
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        et_clock = et_now.strftime("%Y-%m-%d %H:%M:%S %Z")
+        trading_day_et = et_now.strftime("%Y-%m-%d")
+    except Exception:
+        et_clock = datetime.now(timezone.utc).isoformat()
+        trading_day_et = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    return {
+        "success": True,
+        "overall_status": overall,
+        "ready_for_rth": ready,
+        "summary": {
+            "green":  green,
+            "yellow": yellow,
+            "red":    red,
+            "total":  len(checks),
+        },
+        "first_red_check": first_red["name"] if first_red else None,
+        "first_red_message": first_red["message"] if first_red else None,
+        "checks": checks,
+        "trading_day_et": trading_day_et,
+        "et_clock": et_clock,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
