@@ -3,7 +3,16 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.18 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.19 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.19 — see CHANGELOG (thirty-eighth commit)
+Premarket scan cadence + heartbeat fixes:
+- ✅ Premarket cadence tightened `% 10` → `% 2` (20 min → 4 min real
+  scans). 37 refreshes over 7:00-9:30 AM ET instead of 7.
+- ✅ `_last_scan_time` stamped in premarket + after-hours branches
+  (was only RTH). Morning-readiness shows real scanner age now.
+- ✅ Fixed v19.18 typo — `_last_scan_at` → `_last_scan_time`.
+- ✅ 5 new source-level pins in `test_premarket_cadence_v19_19.py`.
 
 ### 🎯 Just shipped 2026-04-30 v19.18 — see CHANGELOG (thirty-seventh commit)
 Morning Readiness aggregator (pre-RTH go/no-go check):

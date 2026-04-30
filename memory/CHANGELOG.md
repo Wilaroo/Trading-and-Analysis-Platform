@@ -2,6 +2,68 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-eighth commit, v19.19) — Premarket cadence + heartbeat fixes
+
+Three small but operator-visible issues surfaced at 8:40 AM ET on
+the Spark (50 min before open). Ship coordinated fix.
+
+### 1. Premarket cadence way too slow
+
+The premarket branch of `_scan_loop` was gated on `self._scan_count
+% 10 == 0` with a 120s sleep between cycles → a real premarket
+scan only fired every **20 minutes**. Operator doing morning prep
+at 8:40 AM saw the watchlist stuck on quotes from 8:20 AM — too
+stale to inform opening-bell decisions.
+
+Tightened to `% 2` cadence = **4 min between real premarket
+scans**. 7:00-9:30 AM ET window → ~37 refreshes per session,
+enough to track gap evolution without thrashing the pusher.
+
+### 2. `_last_scan_time` not stamped during premarket / after-hours
+
+The `self._last_scan_time = datetime.now(timezone.utc)` assignment
+only lived inside the RTH branch. During premarket + after-hours,
+the attribute held whatever RTH value it had (or `None`). That
+made `/api/system/morning-readiness` report "scanner silent"
+falsely during the morning prep window — exactly when the operator
+is running `morning_check.sh` for go/no-go.
+
+Now stamped on EVERY tick (RTH, premarket, after-hours), so
+readiness checks see a fresh heartbeat regardless of time window.
+
+### 3. `morning_readiness_service` was reading wrong attr
+
+v19.18 shipped with `getattr(scanner, "_last_scan_at", None)` —
+wrong attribute name. The scanner's actual field is
+`_last_scan_time`. Consequence: `scan_age_s` was always `None` so
+the readiness output fell through to the "cycle_count=N" fallback
+message instead of showing real scanner activity age.
+
+Trivial rename fix now in `_check_scanner_running`.
+
+### What the operator sees now
+
+At 8:40 AM ET on Spark post-pull + restart:
+- Premarket scans fire every ~4 min.
+- Morning watchlist populates with gap_give_go / gap_fade /
+  gap_reversal / premarket_high_break alerts as the tape develops.
+- `/api/system/morning-readiness` correctly shows
+  `scanner_running: GREEN` with scan_age in seconds, not "cycle_count=2".
+
+### Tests (`test_premarket_cadence_v19_19.py` — 5 tests)
+
+Source-level pins:
+- Premarket block uses `% 2` cadence (guards against `% 10` revert).
+- `_last_scan_time` stamped in both premarket + after-hours branches.
+- morning_readiness reads `_last_scan_time` (not the old `_last_scan_at`).
+- Real scan interval is in the reasonable 3-6 min window (computes
+  `modulus × sleep` from source to catch silent drift).
+
+**86/86 across v19.14-v19.19 + morning readiness + smart backfill
++ tier dispatch + per-cycle cache + EOD close suites.**
+
+
+
 ## 2026-04-30 (thirty-seventh commit, v19.18) — Morning Readiness aggregator
 
 Single-call "is the bot ready for fully automated trading today?"

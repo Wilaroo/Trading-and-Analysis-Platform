@@ -299,7 +299,7 @@ def _check_scanner_running(db) -> Dict[str, Any]:
                 "detail": f"scanner unavailable: {type(e).__name__}: {e}"}
 
     issues: List[str] = []
-    last_scan = getattr(scanner, "_last_scan_at", None)
+    last_scan = getattr(scanner, "_last_scan_time", None)
     if last_scan:
         try:
             if isinstance(last_scan, str):

@@ -2131,6 +2131,10 @@ class EnhancedBackgroundScanner:
                             self._cleanup_expired_alerts()
                         except Exception as e:
                             logger.debug(f"After-hours daily scan error: {e}")
+                    # 2026-04-30 v19.19 — stamp _last_scan_time even during
+                    # after-hours so morning_readiness / health checks see
+                    # the scanner as alive (not falsely "silent").
+                    self._last_scan_time = datetime.now(timezone.utc)
                     self._scan_count += 1
                     await asyncio.sleep(300)  # 5 minutes between after-hours scans
                     continue
@@ -2140,7 +2144,16 @@ class EnhancedBackgroundScanner:
                     # plus a fresh landscape snapshot so the morning briefing
                     # cited tickers reflect this morning's gap data, not
                     # last night's stale daily-bar classification.
-                    if self._scan_count % 10 == 0 or self._scan_count == 0:
+                    #
+                    # 2026-04-30 v19.19 — cadence tightened from `% 10`
+                    # (20 min between real premarket scans) to `% 2`
+                    # (4 min). Premarket is where gap plays + opening-
+                    # drive watchlist crystallises; 20-min-old data
+                    # meant the operator's morning prep was always
+                    # looking at stale quotes. 4 min gives ~37 refreshes
+                    # over 7:00-9:30 AM ET — tight enough to track gap
+                    # evolution without thrashing the pusher.
+                    if self._scan_count % 2 == 0 or self._scan_count == 0:
                         logger.info("Pre-market — building morning watchlist + landscape pre-warm")
                         try:
                             await self._scan_premarket_setups()
@@ -2148,6 +2161,8 @@ class EnhancedBackgroundScanner:
                             self._cleanup_expired_alerts()
                         except Exception as e:
                             logger.debug(f"Pre-market scan error: {e}")
+                    # v19.19 — stamp _last_scan_time on every premarket tick.
+                    self._last_scan_time = datetime.now(timezone.utc)
                     self._scan_count += 1
                     await asyncio.sleep(120)  # 2 minutes between pre-market scans
                     continue
