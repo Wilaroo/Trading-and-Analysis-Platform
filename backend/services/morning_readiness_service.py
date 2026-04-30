@@ -221,10 +221,12 @@ def _check_trading_bot_configured(db, bot=None) -> Dict[str, Any]:
     """Check 3 — bot has the v19.14 EOD config + risk params."""
     if bot is None:
         try:
-            from services.trading_bot_service import get_trading_bot
-            bot = get_trading_bot()
-        except Exception:
-            return {"status": "red", "detail": "Trading bot not initialised"}
+            from services.trading_bot_service import get_trading_bot_service
+            bot = get_trading_bot_service()
+        except Exception as e:
+            return {"status": "red",
+                    "detail": f"Trading bot singleton unavailable: "
+                              f"{type(e).__name__}: {e}"}
     if bot is None:
         return {"status": "red", "detail": "Trading bot not initialised"}
 
@@ -346,8 +348,8 @@ def _check_open_positions_clean(db, bot=None) -> Dict[str, Any]:
     """
     if bot is None:
         try:
-            from services.trading_bot_service import get_trading_bot
-            bot = get_trading_bot()
+            from services.trading_bot_service import get_trading_bot_service
+            bot = get_trading_bot_service()
         except Exception:
             return {"status": "yellow",
                     "detail": "trading bot unavailable for position scan"}
