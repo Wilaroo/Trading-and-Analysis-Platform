@@ -2,6 +2,77 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (fifty-second commit, v19.29-validation-2) — Morning Play A reset script + runbook
+
+**Operator surfaced live state drift on Spark** during fork-tail debugging:
+9 stale `bot_trades` rows from yesterday's EOD chaos, with bot tracking
+33-50% of actual IB share counts on BP/CB/HOOD and a SOFI catastrophe
+(bot tracks LONG 1636 + SHORT 301 vs IB's actual LONG 427). Backend
+booted in degraded mode at 21:19 (IB Gateway timeout at startup),
+manage loop is RTH-gated so phantom sweep won't fire until 9:30 AM ET.
+
+Operator picked **Play A — flatten + clean slate**. To make 9:25 AM
+ET execution thoughtless, this commit ships:
+
+### What shipped
+- **`backend/scripts/reset_bot_open_trades.py`** — one-shot Mongo
+  cleanup script. Flips `bot_trades` `status: open` → `closed` with
+  `close_reason: manual_pre_open_reset_v19_29` and `closed_at` stamp.
+  Two-stage safety: `--dry-run` mandatory or `--confirm RESET` token
+  required. Symbol whitelist filter for partial resets. Audit log to
+  `bot_trades_reset_log` collection (TTL 30d) records every reset
+  with trade_ids + timestamp + operator-supplied filter for forensic
+  reconstruction. Pure pymongo, no backend dependency.
+- **`memory/MORNING_2026-05-02_PLAY_A.md`** — paste-and-follow morning
+  runbook. Five timed phases: 8:30 AM verification → 9:20 AM TWS
+  flatten → 9:25 AM bot reset → 9:27 AM clean restart → 9:30 AM watch
+  with verify_v19_29 + log tailing. Includes red-flag table, rollback
+  steps, and EOD report capture commands.
+- **16 new pytests** in `tests/test_reset_bot_open_trades.py` proving
+  dry-run is read-only, commit flips status correctly, symbol filter
+  uppercases, already-closed rows are left alone, audit log writes
+  only when affected count > 0, CLI safety guard aborts without
+  --confirm, render summary distinguishes DRY-RUN vs COMMITTED.
+  Realistic Spark fixture (BP×3, SOFI×2, TMUS, LITE, CB, HOOD).
+
+### Live verification
+- 52/52 combined pytests across reset (16) + verify_v19_29 harness
+  (21) + v19.29 hardening (15) suites. Ruff clean.
+- Dry-run smoke against local Mongo: clean output, 0 matched (empty
+  preview DB), no rows touched.
+- CLI safety guard verified: aborts without confirm, aborts with
+  wrong confirm token, only commits on `--confirm RESET`.
+
+### Why a script + runbook instead of a backend endpoint
+- The reset must run BEFORE backend restarts (otherwise the bot's
+  `_open_trades` rebuilds from the still-open Mongo rows).
+- Backend endpoints can't atomically operate on a stopped backend.
+- The script's audit trail (`bot_trades_reset_log`) survives
+  independently of the bot's normal close persistence path.
+
+### Operator workflow tomorrow morning
+1. 8:30 AM ET: run pre-open verification (4 commands).
+2. 9:20 AM ET: flatten in TWS UI.
+3. 9:25 AM ET: stop backend, run reset --dry-run, then --confirm RESET.
+4. 9:27 AM ET: restart backend, confirm "IB Gateway: CONNECTED" not
+   "degraded mode".
+5. 9:30 AM ET: launch verify_v19_29 --watch on side terminal.
+
+### What we observed about v19.29 in production
+- **Wired correctly** (grep confirms WRONG-DIR-SWEEP marker present,
+  harness F=PASS, reconciled_default_* defaults at 2.0% / 2.0:1).
+- **Did not fire** because manage loop is RTH-gated. This is by design
+  but means phantoms survive overnight resets. Logged as v19.30 P0
+  candidate ("Boot Hygiene Pack" — startup-time one-shot sweep).
+
+### Next session — v19.30 Boot Hygiene Pack candidates (~3-4h)
+1. Boot-time one-shot phantom sweep regardless of RTH.
+2. IB Gateway reconnect-on-timeout with exponential backoff (kill
+   the "boots into degraded paper mode forever" failure mode).
+3. Drift detector — emit CRITICAL Unified Stream event when bot
+   tracks <80% of IB shares for any symbol. Surface state drift
+   BEFORE it compounds into another EOD disaster.
+
 ## 2026-05-01 (fifty-first commit, v19.29-validation) — RTH validation harness for v19.29
 
 **Operator picked option (d)** at the start of this session: pause new

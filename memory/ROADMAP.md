@@ -3,7 +3,48 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.29-validation fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.29-validation-2 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.29-validation-2 — see CHANGELOG (fifty-second commit)
+**Morning Play A — clean slate reset for 2026-05-02 open.**
+- ✅ `backend/scripts/reset_bot_open_trades.py` — one-shot Mongo
+  cleanup script with --dry-run / --confirm RESET safety guard,
+  symbol whitelist, 30d audit log to `bot_trades_reset_log`.
+- ✅ `memory/MORNING_2026-05-02_PLAY_A.md` — paste-and-follow morning
+  runbook (8:30 AM verification → 9:20 TWS flatten → 9:25 reset →
+  9:27 restart → 9:30 watch).
+- ✅ 16 new pytests + lint clean. 52/52 across reset + verify_v19_29
+  harness + v19.29 hardening suites.
+- ✅ Live diagnostics revealed Spark backend booted at 21:19 in
+  degraded mode (IB Gateway TimeoutError at startup) — pusher works
+  but direct IB connection failed; manage loop is RTH-gated so the
+  v19.29 phantom sweep won't auto-fire until 9:30 AM ET. Hence the
+  manual reset path tomorrow.
+
+### 🔴 P0 — v19.30 Boot Hygiene Pack (~3-4h, scoped 2026-05-01 evening)
+After tomorrow's clean-open observation, the right next-feature is a
+3-piece pack that prevents tonight's diagnostic dance from recurring:
+
+1. **Boot-time one-shot phantom sweep** — runs once at backend init
+   regardless of RTH so phantoms don't survive backend restarts.
+   Currently the manage loop is RTH-gated (correct for trail-stop
+   ticks but wrong for phantom housekeeping).
+2. **IB Gateway reconnect-on-timeout** — replace the silent
+   `API connection failed: TimeoutError() → degraded paper mode
+   forever` path with exponential-backoff retry (1s → 2s → 4s → 8s,
+   max 30s, give up after 5min and surface CRITICAL alarm).
+3. **Drift detector** — emit CRITICAL Unified Stream event when bot
+   tracks <80% of IB shares for any symbol. Tonight we found BP at
+   33%, CB at 50%, HOOD at 37%, SOFI catastrophic — all silent.
+   Operator should see drift BEFORE it compounds.
+
+### 🔴 P0 — Choose ONE for the session AFTER v19.30 Boot Hygiene
+Both pre-scoped in this doc, ~6h each, pair beautifully:
+- **v19.31 — Pre-Aggregated Bar Pipeline** (cold chart load 400ms→30ms)
+- **v19.32 — Chart WebSockets** (live bar push, ~50ms vs 5s tail-poll)
+
+Operator picks based on which feels more painful after using v19.28
+Diagnostics + v19.30 Boot Hygiene for a few sessions.
 
 ### 🎯 Just shipped 2026-05-01 v19.29-validation — see CHANGELOG (fifty-first commit)
 **RTH validation harness for v19.29.**
