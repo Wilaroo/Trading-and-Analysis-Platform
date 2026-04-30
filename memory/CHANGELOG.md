@@ -2,6 +2,128 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-first commit, v19.13) — Manage-stage hardening (P0/P1/P2)
+
+Full audit of the manage stage uncovered 12 issues. Shipped fixes
+for the 8 that posed real damage risk for tomorrow's live trading;
+deferred 4 that need bigger surface changes (P1 #8 bid/ask plumbing;
+P1 #10 WS throttle; P2 #12 init-order race; P1 #4-stale-quote refinement).
+
+### P0 fixes
+
+#### P0 #1 — `_ib_close_position` cancels bracket children before close
+
+`services/trade_executor_service.py`: new helper
+`_cancel_ib_bracket_orders` runs FIRST inside `_ib_close_position`,
+canceling stop + target IB children for the trade before the close
+MKT goes out. Pre-fix race: bot's local stop fires → close MKT
+queued → IB bracket child fires same tick → DOUBLE-EXIT (long
+becomes short / short becomes long). The cancel narrows the race
+to milliseconds; even if a child filled in those ms, the close
+will then fail at IB with "insufficient quantity" instead of
+doubling the position.
+
+Also handles three legacy ID storage slots (`stop_order_id`,
+`target_order_id` singular, `target_order_ids` plural). Filters
+out non-numeric / simulated IDs (`SIM-STOP-uuid`).
+
+#### P0 #2 — `execute_partial_exit` propagates broker failures honestly
+
+`services/position_manager.py`: was returning `success: True,
+simulated: True` on broker exception, which decremented
+`remaining_shares` locally while leaving those shares OPEN at the
+broker → silent position drift between books and broker. Now
+exceptions / executor failures return `success: False` so the
+caller skips the local mutation. Legitimate paper-paper mode (no
+executor) still returns `simulated: True`.
+
+`check_and_execute_scale_out` callsite: added explicit `else`
+branch that logs the failure + records a `trade-drop` so the
+operator sees it in the diagnostic feed; manage loop retries on
+next pass when target is still hit.
+
+#### P0 #3 — `close_trade` returns `False` on executor failure
+
+`services/position_manager.py`: was marking trade `CLOSED`
+locally even when `_trade_executor.close_position()` returned
+`success: False`. Books said closed; broker still had the
+position open. Now hard-returns `False` so the trade stays OPEN
+locally and the manage loop retries; records a `trade-drop` for
+operator visibility.
+
+#### P0 #4 — Stale-quote guard
+
+`services/position_manager.py`: parses `_pushed_at` / `ts` /
+`timestamp` from the pushed quote, computes age in seconds. Skips
+local stop-checks when age > `MANAGE_STALE_QUOTE_SECONDS` (env
+default 30s). Server-side IB brackets still active and operate on
+real-time prices. Throttles the warning log to once per 60s per
+trade.
+
+### P1 fixes
+
+#### P1 #5 — Bare `except: pass` replaced with logged warning
+
+Pushed-quote lookup failures used to be silent. Now logs
+`manage: pushed-quote lookup failed for {sym}: {error}`. v8
+hardening rule satisfied.
+
+#### P1 #6 — `stop_adjustments` history capped at 100
+
+`services/stop_manager.py:_record_stop_adjustment`: caps history
+in-place at most-recent 100 entries. Long-running swing positions
+no longer bloat their BotTrade snapshot dict.
+
+#### P1 #7 — `StopManager.forget_trade` releases per-trade state on close
+
+New method releases `_last_resnap_at[trade_id]`. Called from BOTH
+close-trade paths (manual close + all-targets-hit close). Idempotent.
+Closes a small but real memory leak that accumulated closed-trade
+IDs over weeks.
+
+#### P1 #9 — UNSTOPPED-POSITION alarm
+
+`services/position_manager.py`: if `trade.stop_price` is falsy
+(None / 0) — meaning the local stop check is unreachable — log a
+`manage: UNSTOPPED POSITION` ERROR once per 5 minutes per trade
+so the operator can intervene. IB-side bracket should still cover
+it; the alarm just makes sure it doesn't pass quietly.
+
+### P2 fixes
+
+#### P2 #11 — Risk-fallback warns once per trade
+
+`services/position_manager.py`: when `risk_per_share` falls back
+to `2% × fill_price` (because `stop_price == fill_price`), emit a
+WARNING once per trade so operator knows R-multiple math is
+approximate.
+
+### Tests (`test_manage_stage_hardening_v19_13.py` — 9 tests)
+
+- `test_ib_close_cancels_bracket_children_first` — P0 #1 call ordering
+- `test_cancel_ib_bracket_skips_simulated_ids` — non-numeric IDs filtered
+- `test_cancel_ib_bracket_swallows_errors` — best-effort never raises
+- `test_partial_exit_propagates_broker_failure` — P0 #2 contract
+- `test_partial_exit_no_executor_returns_simulated_legitimately` — paper-paper preserved
+- `test_partial_exit_executor_returns_failure_passes_through` — executor's success=False propagates
+- `test_stop_adjustments_history_capped_at_100` — P1 #6
+- `test_stop_manager_forget_trade_releases_state` — P1 #7 + idempotency
+- `test_close_trade_returns_false_on_executor_failure` — P0 #3 contract
+
+**141/141 across v12-v19.13 backend tests.** Manage stage now safe
+for tomorrow's live trading.
+
+### Deferred
+
+| Issue | Why deferred |
+|---|---|
+| P1 #8 — stop trigger uses last not bid/ask | Needs quote.bid/ask plumbing; cross-cutting change. ~1h scoped session. |
+| P1 #10 — per-tick WS notification throttle | UX coordination needed (V5 HUD reads these). Post-live-trading task. |
+| P2 #12 — `original_shares` race on first tick | Theoretical only; would need a partial exit on the first manage tick of a new trade. Low risk vs cost. |
+| P1 #4 refinement — bid/ask staleness vs last staleness | Only matters for thin OTC names; current 30s last-tick cap is enough. |
+
+
+
 ## 2026-04-30 (thirtieth commit, v19.12) — Pre-execution guardrail max-notional cap raised + made env-tunable
 
 **Why**: Full audit of the 9 trade-drop gates downstream of

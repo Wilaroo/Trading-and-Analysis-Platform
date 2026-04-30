@@ -776,10 +776,21 @@ class TradeExecutorService:
             return {"success": False, "error": str(e)}
     
     async def _ib_close_position(self, trade) -> Dict[str, Any]:
-        """Close position via IB using order queue"""
+        """Close position via IB using order queue.
+
+        2026-04-30 v19.13 — cancels the bracket's stop/target children
+        BEFORE submitting the close MKT. Pre-fix, a race could leave
+        the local close + the IB bracket child both filling within the
+        same tick → double-exit (long → short / short → long). Even if
+        the cancel fails for some reason, we still attempt the close —
+        the cancel just narrows the race window. If a child filled in
+        the milliseconds before our cancel landed, the close will then
+        fail at IB with an "insufficient quantity" rejection instead
+        of doubling the position.
+        """
         try:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
-            
+
             if not is_pusher_connected():
                 logger.warning("IB pusher not connected - simulating close")
                 return {
@@ -788,7 +799,12 @@ class TradeExecutorService:
                     "fill_price": trade.current_price,
                     "simulated": True
                 }
-            
+
+            # v19.13 — cancel bracket children first. Best-effort; we
+            # never block the close on cancellation outcome (IB will
+            # reject a redundant close if the child already filled).
+            await self._cancel_ib_bracket_orders(trade)
+
             # Close order is opposite side
             action = "SELL" if trade.direction.value == "long" else "BUY"
             
@@ -836,6 +852,76 @@ class TradeExecutorService:
             logger.error(f"IB close position error: {e}")
             return {"success": False, "error": str(e)}
     
+    async def _cancel_ib_bracket_orders(self, trade) -> None:
+        """v19.13 — cancel the IB bracket's stop + target children for `trade`.
+
+        Best-effort: failures are logged at WARNING (NOT raised) because
+        the caller is about to submit a close MKT regardless — and IB
+        will reject duplicate fills, so the worst outcome of a cancel
+        miss is a benign IB-side rejection on the close, not a doubled
+        position.
+
+        Looks up order IDs from THREE possible places (legacy fields):
+          - `trade.stop_order_id`     — set in trade_execution.py:318
+          - `trade.target_order_id`   — set in trade_execution.py:319 (singular)
+          - `trade.target_order_ids`  — Alpaca legacy list field on the dataclass
+
+        Empty / non-numeric IDs are skipped silently (e.g.,
+        `SIM-STOP-<uuid>` from simulated/paper modes).
+        """
+        try:
+            from routers.ib import cancel_order as _ib_cancel_order
+        except Exception as e:
+            logger.warning(
+                f"v19.13: could not import IB cancel_order — skipping bracket "
+                f"cancellation for {trade.symbol}: {e}"
+            )
+            return
+
+        # Collect IDs from all three slots, dedupe, filter to int-castable.
+        candidates = []
+        for raw in (
+            getattr(trade, "stop_order_id", None),
+            getattr(trade, "target_order_id", None),
+            *(getattr(trade, "target_order_ids", []) or []),
+        ):
+            if raw is None or raw == "":
+                continue
+            try:
+                candidates.append(int(raw))
+            except (TypeError, ValueError):
+                # Sim/paper IDs like "SIM-STOP-<uuid>" land here — skip.
+                continue
+
+        # Dedupe while preserving order
+        seen = set()
+        ordered = [c for c in candidates if not (c in seen or seen.add(c))]
+
+        for oid in ordered:
+            try:
+                # Use the singleton IB service already wired into the
+                # app at startup. Avoids HTTP round-trip back through
+                # the router for an in-process cancel.
+                from routers.ib import _ib_service
+                if _ib_service is not None:
+                    ok = await _ib_service.cancel_order(oid)
+                    if not ok:
+                        logger.warning(
+                            f"v19.13: IB cancel returned False for order_id={oid} "
+                            f"({trade.symbol}) — child may have already filled or "
+                            f"been cancelled."
+                        )
+                else:
+                    logger.warning(
+                        f"v19.13: IB service unavailable for cancel order_id={oid} "
+                        f"({trade.symbol})"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"v19.13: bracket cancel raised for order_id={oid} "
+                    f"({trade.symbol}): {type(e).__name__}: {e}"
+                )
+
     async def _cancel_related_orders(self, trade):
         """Cancel stop and target orders for a trade"""
         if not self._alpaca_client:

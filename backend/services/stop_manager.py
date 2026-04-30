@@ -317,7 +317,13 @@ class StopManager:
                     )
 
     def _record_stop_adjustment(self, trade: 'BotTrade', old_stop: float, new_stop: float, reason: str):
-        """Record a stop adjustment in the trailing stop history."""
+        """Record a stop adjustment in the trailing stop history.
+
+        2026-04-30 v19.13 — caps history at the most-recent 100 entries
+        so a long-running swing position with hundreds of trail moves
+        doesn't bloat the BotTrade dict (Mongo round-trips, snapshot
+        size, log spam).
+        """
         adjustment = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'old_stop': old_stop,
@@ -325,4 +331,19 @@ class StopManager:
             'reason': reason,
             'price_at_adjustment': trade.current_price
         }
-        trade.trailing_stop_config.setdefault('stop_adjustments', []).append(adjustment)
+        history = trade.trailing_stop_config.setdefault('stop_adjustments', [])
+        history.append(adjustment)
+        # Cap at last 100 entries (drops oldest in-place)
+        if len(history) > 100:
+            del history[:-100]
+
+    def forget_trade(self, trade_id: str) -> None:
+        """v19.13 — release internal per-trade state when a trade closes.
+
+        The PositionManager's `close_trade` calls this so the
+        `_last_resnap_at` dict doesn't accumulate closed-trade IDs
+        forever (small but real memory leak over weeks of operation).
+        Safe to call multiple times.
+        """
+        if trade_id in self._last_resnap_at:
+            self._last_resnap_at.pop(trade_id, None)

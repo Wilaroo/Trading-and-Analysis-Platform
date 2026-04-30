@@ -12,6 +12,7 @@ Handles open position lifecycle:
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Dict, TYPE_CHECKING
 
@@ -28,9 +29,21 @@ class PositionManager:
         """Update P&L for open positions - uses IB data first, then Alpaca"""
         from services.trading_bot_service import TradeDirection, TradeStatus
 
+        # 2026-04-30 v19.13 — quote-staleness guard. If the pusher hangs
+        # (we just had 120s timeouts mid-session), an old tick can fire
+        # a "ghost" local stop. Reject any quote older than this many
+        # seconds; let server-side IB brackets handle the stop instead.
+        # Env-tunable so operators on slower / OTC universes can tune.
+        import os as _os
+        try:
+            STALE_QUOTE_S = float(_os.environ.get("MANAGE_STALE_QUOTE_SECONDS", "30"))
+        except (TypeError, ValueError):
+            STALE_QUOTE_S = 30.0
+
         for trade_id, trade in list(bot._open_trades.items()):
             try:
                 quote = None
+                quote_age_s = None
 
                 # Try IB pushed data first
                 try:
@@ -39,15 +52,54 @@ class PositionManager:
                         quotes = get_pushed_quotes()
                         if trade.symbol in quotes:
                             q = quotes[trade.symbol]
+                            # Compute quote age. `_pushed_at` (epoch
+                            # seconds) is set by the pusher hook; if
+                            # absent, treat as fresh (legacy quotes).
+                            try:
+                                pushed_at = q.get("_pushed_at") or q.get("ts") or q.get("timestamp")
+                                if pushed_at:
+                                    if isinstance(pushed_at, (int, float)):
+                                        quote_age_s = max(0.0, time.time() - float(pushed_at))
+                                    elif isinstance(pushed_at, str):
+                                        from datetime import datetime as _dt, timezone as _tz
+                                        # ISO fmt → epoch
+                                        dt = _dt.fromisoformat(pushed_at.replace("Z", "+00:00"))
+                                        if dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=_tz.utc)
+                                        quote_age_s = max(0.0, (_dt.now(_tz.utc) - dt).total_seconds())
+                            except Exception:
+                                quote_age_s = None  # treat as fresh on parse error
+
                             quote = {'price': q.get('last') or q.get('close') or 0}
-                except Exception:
-                    pass
+                except Exception as e:
+                    # v19.13 — was bare `except: pass`; that hid pusher
+                    # outages silently. Log + carry on (Alpaca fallback
+                    # still runs below).
+                    logger.warning(
+                        f"manage: pushed-quote lookup failed for {trade.symbol}: "
+                        f"{type(e).__name__}: {e}",
+                        exc_info=False,  # too noisy with full trace per tick
+                    )
 
                 # Fallback to Alpaca
                 if not quote and bot._alpaca_service:
                     quote = await bot._alpaca_service.get_quote(trade.symbol)
 
                 if not quote:
+                    continue
+
+                # v19.13 — staleness guard. Skip stop checks when quote
+                # is stale; the IB-side bracket is still active server-
+                # side and will fire on REAL-TIME prices.
+                if quote_age_s is not None and quote_age_s > STALE_QUOTE_S:
+                    if not getattr(trade, "_stale_quote_warned_at", None) \
+                       or (time.time() - float(getattr(trade, "_stale_quote_warned_at", 0))) > 60:
+                        logger.warning(
+                            f"manage: SKIP stop-check for {trade.symbol} — quote "
+                            f"is {quote_age_s:.1f}s old (cap {STALE_QUOTE_S}s). "
+                            f"Server-side IB bracket still active."
+                        )
+                        trade._stale_quote_warned_at = time.time()
                     continue
 
                 trade.current_price = quote.get('price', trade.current_price)
@@ -63,6 +115,26 @@ class PositionManager:
                     trade.trailing_stop_config['current_stop'] = trade.stop_price
                     trade.trailing_stop_config['mode'] = 'original'
 
+                # 2026-04-30 v19.13 — UNSTOPPED-POSITION alarm. A trade
+                # with `stop_price` falsy (None / 0) means our local
+                # stop-hit check `current_price <= 0` is unreachable
+                # for longs (and the symmetric path for shorts), so
+                # the position is silently unstopped. Surface this
+                # loudly — once per trade per 5 min — so the operator
+                # can intervene. The IB bracket should still cover it
+                # server-side, but we don't want this to pass quietly.
+                if not trade.stop_price or trade.stop_price <= 0:
+                    last_warn = getattr(trade, "_unstopped_warned_at", 0) or 0
+                    if (time.time() - float(last_warn)) > 300:
+                        logger.error(
+                            f"manage: UNSTOPPED POSITION {trade.symbol} "
+                            f"({trade.shares} sh, dir={trade.direction.value}, "
+                            f"entry=${trade.fill_price:.2f}) — stop_price is "
+                            f"{trade.stop_price!r}; local stop checks DISABLED. "
+                            f"Verify the IB-side bracket is active or close manually."
+                        )
+                        trade._unstopped_warned_at = time.time()
+
                 # Calculate unrealized P&L on remaining shares
                 if trade.direction == TradeDirection.LONG:
                     trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
@@ -74,7 +146,17 @@ class PositionManager:
                 if trade.fill_price and trade.fill_price > 0:
                     risk_per_share = abs(trade.fill_price - trade.stop_price) if trade.stop_price else trade.fill_price * 0.02
                     if risk_per_share == 0:
+                        # 2026-04-30 v19.13 — fallback distorts R-multiples.
+                        # Was silent; now warns ONCE per trade so the
+                        # operator knows the R-track is approximate.
                         risk_per_share = trade.fill_price * 0.02  # Fallback: 2% of entry
+                        if not getattr(trade, "_risk_fallback_warned", False):
+                            logger.warning(
+                                f"manage: {trade.symbol} fill_price={trade.fill_price} "
+                                f"== stop_price={trade.stop_price}; using 2% fallback "
+                                f"for R-multiple math (will distort R-tracking)."
+                            )
+                            trade._risk_fallback_warned = True
 
                     if trade.direction == TradeDirection.LONG:
                         # MFE: highest price since fill
@@ -331,6 +413,14 @@ class PositionManager:
                         del bot._open_trades[trade.id]
                         bot._closed_trades.append(trade)
 
+                        # v19.13 — release stop-manager per-trade state
+                        try:
+                            if hasattr(bot, '_stop_manager') and bot._stop_manager \
+                                    and hasattr(bot._stop_manager, 'forget_trade'):
+                                bot._stop_manager.forget_trade(trade.id)
+                        except Exception as e:
+                            logger.warning(f"scale-out: stop_manager.forget_trade failed: {e}")
+
                         await bot._notify_trade_update(trade, "closed")
                         await bot._save_trade(trade)
 
@@ -339,11 +429,48 @@ class PositionManager:
 
                         logger.info(f"Trade fully closed at Target {i+1}: {trade.symbol} Total P&L: ${trade.realized_pnl:.2f}")
                         return
+                else:
+                    # 2026-04-30 v19.13 — partial exit explicitly failed
+                    # at the broker. Local state has NOT been mutated
+                    # (per the new contract); log loudly + record a
+                    # trade-drop so the operator sees it. Manage loop
+                    # will retry on the next pass when target is still
+                    # hit.
+                    err = exit_result.get('error', 'unknown partial-exit failure')
+                    logger.error(
+                        f"Scale-out FAILED for {trade.symbol} T{i+1}: {err}. "
+                        f"Position state unchanged; will retry next manage cycle."
+                    )
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            trade,
+                            gate="execution_exception",
+                            context={
+                                "phase": "scale_out",
+                                "target_idx": i + 1,
+                                "target_price": target,
+                                "shares_to_sell": shares_to_sell,
+                                "error": str(err),
+                            },
+                        )
+                    except Exception as drop_err:
+                        logger.warning(f"scale-out: failed to record drop: {drop_err}")
 
     async def execute_partial_exit(self, trade: 'BotTrade', shares: int, target_price: float, target_idx: int, bot: 'TradingBotService') -> Dict:
-        """Execute a partial position exit (scale-out)"""
+        """Execute a partial position exit (scale-out).
+
+        2026-04-30 v19.13 — was silently faking `simulated: True` on
+        broker exceptions, which decremented `remaining_shares` locally
+        but left those shares OPEN at the broker → silent position
+        drift. Now exceptions / executor failures propagate as
+        `{success: False, error: ...}` so the caller can skip the local
+        state mutation. Simulated paths (no executor configured) still
+        return `simulated: True` cleanly because that IS legitimate
+        paper-trading behaviour.
+        """
         if not bot._trade_executor:
-            # Simulated exit
+            # Legitimate simulated exit — no executor wired (paper-paper mode).
             return {
                 'success': True,
                 'fill_price': trade.current_price,
@@ -352,21 +479,38 @@ class PositionManager:
             }
 
         try:
-            # Use trade executor to sell partial position
             result = await bot._trade_executor.execute_partial_exit(trade, shares)
+            # Trust the executor's own success flag — don't paper over a
+            # `success: False` from the broker.
             return result
         except Exception as e:
-            logger.error(f"Partial exit error: {e}")
-            # Fall back to simulated
+            logger.exception(
+                f"Partial exit raised for {trade.symbol} (target {target_idx + 1}, "
+                f"{shares} shares): {type(e).__name__}: {e}"
+            )
+            # PROPAGATE failure. Caller (check_and_execute_scale_out) must
+            # not decrement remaining_shares or mark the target as hit.
             return {
-                'success': True,
-                'fill_price': trade.current_price,
-                'shares': shares,
-                'simulated': True
+                'success': False,
+                'error': f'{type(e).__name__}: {e}',
+                'fill_price': None,
+                'shares': 0,
+                'symbol': trade.symbol,
+                'target_idx': target_idx,
             }
 
     async def close_trade(self, trade_id: str, bot: 'TradingBotService', reason: str = "manual"):
-        """Close an open trade (sells remaining shares)"""
+        """Close an open trade (sells remaining shares).
+
+        2026-04-30 v19.13 — pre-fix, an executor failure (broker
+        rejection, IB pusher offline, timeout, etc.) was silently
+        ignored: we'd still mark the trade CLOSED locally with
+        `exit_price = current_price`. Books say closed; broker still
+        has the position open. Now an executor `success: False` causes
+        a hard return — the trade stays OPEN locally so the manage
+        loop can retry on the next pass and the operator can see the
+        failure in the trade-drops feed.
+        """
         from services.trading_bot_service import TradeDirection, TradeStatus
 
         if trade_id not in bot._open_trades:
@@ -378,6 +522,7 @@ class PositionManager:
         shares_to_close = trade.remaining_shares if trade.remaining_shares > 0 else trade.shares
 
         try:
+            executor_failed = False
             if bot._trade_executor and shares_to_close > 0:
                 # Update trade.shares temporarily for the executor
                 original_shares = trade.shares
@@ -389,8 +534,38 @@ class PositionManager:
 
                 if result.get('success'):
                     trade.exit_price = result.get('fill_price', trade.current_price)
+                else:
+                    # v19.13 — broker rejected / timed out the close.
+                    # Do NOT mark CLOSED. Log + record a trade-drop so
+                    # the operator sees this in the diagnostic feed,
+                    # then return False so the caller knows nothing
+                    # changed at the broker.
+                    err = result.get('error', 'unknown executor failure')
+                    logger.error(
+                        f"close_trade: executor refused close for {trade.symbol} "
+                        f"({shares_to_close} shares, reason={reason}): {err}"
+                    )
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            trade,
+                            gate="execution_exception",
+                            context={
+                                "phase": "close",
+                                "reason": reason,
+                                "error": str(err),
+                                "shares_to_close": shares_to_close,
+                            },
+                        )
+                    except Exception as drop_err:
+                        logger.warning(f"close_trade: failed to record drop: {drop_err}")
+                    executor_failed = True
             else:
                 trade.exit_price = trade.current_price
+
+            if executor_failed:
+                # Trade stays OPEN. Manage loop will retry on next pass.
+                return False
 
             # Calculate realized P&L for remaining shares and add to cumulative
             if shares_to_close > 0:
@@ -426,6 +601,16 @@ class PositionManager:
             # Move to closed trades
             del bot._open_trades[trade_id]
             bot._closed_trades.append(trade)
+
+            # 2026-04-30 v19.13 — release internal stop-manager state
+            # for this trade id (small mem-leak fix; was accumulating
+            # closed-trade ids in `_last_resnap_at` indefinitely).
+            try:
+                if hasattr(bot, '_stop_manager') and bot._stop_manager \
+                        and hasattr(bot._stop_manager, 'forget_trade'):
+                    bot._stop_manager.forget_trade(trade_id)
+            except Exception as e:
+                logger.warning(f"close_trade: stop_manager.forget_trade failed: {e}")
 
             await bot._notify_trade_update(trade, "closed")
             await bot._save_trade(trade)
