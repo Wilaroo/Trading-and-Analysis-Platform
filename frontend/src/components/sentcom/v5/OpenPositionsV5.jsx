@@ -358,37 +358,172 @@ const PositionRow = ({ position, onClick, expanded, onToggle }) => {
 };
 
 
+// ───────────────────────────────────────────────────────────────────────
+// v19.27 — Symbol-level grouping. Multiple bot trades for the same
+// symbol+direction collapse to ONE aggregate row that's expandable to
+// reveal the underlying trades. Rationale: bot fires HOOD twice
+// (B-grade scan, then later A-grade) → 2 separate BotTrade records,
+// each with its own OCA bracket. IB nets them into one position.
+// Pre-v19.27 V5 panel rendered both rows independently which was
+// confusing — operator couldn't tell "is this 1 IB position or 2?"
+// ───────────────────────────────────────────────────────────────────────
+
+const SOURCE_BADGE = {
+  ib:        { label: 'ORPHAN',  color: 'bg-amber-900/40 text-amber-300 border-amber-800/60' },
+  partial:   { label: 'PARTIAL', color: 'bg-orange-900/40 text-orange-300 border-orange-800/60' },
+  stale_bot: { label: 'STALE',   color: 'bg-rose-900/40 text-rose-300 border-rose-800/60' },
+  bot:       null,  // no badge for clean tracking
+};
+
+const groupBySymbolDirection = (open) => {
+  const buckets = new Map();  // key: `${symbol}|${direction}` → { symbol, direction, members: [...] }
+  for (const p of open) {
+    if (!p || !p.symbol) continue;
+    const dir = (p.direction || p.side || 'long').toLowerCase();
+    const key = `${p.symbol.toUpperCase()}|${dir}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, { symbol: p.symbol, direction: dir, key, members: [] });
+    }
+    buckets.get(key).members.push(p);
+  }
+
+  // Build aggregate row per bucket
+  return Array.from(buckets.values()).map(bucket => {
+    const members = bucket.members;
+    const single = members.length === 1;
+
+    // Sum/aggregate fields. For weighted entry, use cost-basis math.
+    let totalShares = 0;
+    let totalNotional = 0;   // Σ shares × entry
+    let totalPnl = 0;
+    let worstSource = 'bot'; // any non-bot source dominates
+    let anyTracked = false;
+    let unclaimedShares = 0; // for partial rows
+    for (const m of members) {
+      const sh = Number(m.shares ?? m.remaining_shares ?? 0) || 0;
+      const ent = Number(m.entry_price ?? m.fill_price ?? 0) || 0;
+      totalShares += Math.abs(sh);
+      totalNotional += Math.abs(sh) * ent;
+      totalPnl += Number(m.unrealized_pnl ?? m.pnl ?? 0) || 0;
+      if (m.source && m.source !== 'bot' && worstSource === 'bot') worstSource = m.source;
+      if (m.source === 'bot') anyTracked = true;
+      if (m.source === 'ib' || m.source === 'partial') {
+        unclaimedShares += Math.abs(Number(m.unclaimed_shares ?? m.shares ?? 0)) || 0;
+      }
+    }
+    const avgEntry = totalShares > 0 ? totalNotional / totalShares : 0;
+
+    // Pick a representative for fields shared across the group
+    // (current_price, target_prices, stop_price, trail state, etc.).
+    // We sort so the bot-tracked, freshest record comes first.
+    const sorted = [...members].sort((a, b) => {
+      const aBot = a.source === 'bot' ? 1 : 0;
+      const bBot = b.source === 'bot' ? 1 : 0;
+      if (aBot !== bBot) return bBot - aBot;
+      const aTime = new Date(a.entry_time || a.executed_at || 0).getTime();
+      const bTime = new Date(b.entry_time || b.executed_at || 0).getTime();
+      return bTime - aTime;
+    });
+    const rep = sorted[0];
+
+    return {
+      ...rep,
+      symbol: bucket.symbol,
+      direction: bucket.direction,
+      shares: totalShares,
+      entry_price: avgEntry,
+      pnl: totalPnl,
+      unrealized_pnl: totalPnl,
+      source: worstSource,
+      _group_key: bucket.key,
+      _members: members,
+      _is_single: single,
+      _has_tracked_partner: anyTracked,
+      _unclaimed_shares: unclaimedShares,
+    };
+  });
+};
+
+// Inline mini-row used inside an expanded group to show each underlying
+// bot trade. Compact — just enough so operator can tell which bracket
+// is which (SMB grade, fill price, current SL, share size).
+const GroupMemberRow = ({ member, idx }) => {
+  const dir = (member.direction || '').toLowerCase();
+  const pnl = Number(member.unrealized_pnl ?? member.pnl ?? 0) || 0;
+  const pnlColor = pnl >= 0 ? 'v5-up' : 'v5-down';
+  const stop = (member.trailing_stop_state?.current_stop) || member.stop_price;
+  const targets = Array.isArray(member.target_prices) && member.target_prices.length > 0
+    ? member.target_prices
+    : (member.target_price != null ? [member.target_price] : []);
+  return (
+    <div
+      data-testid={`group-member-${member.symbol}-${idx}`}
+      className="px-2 py-1.5 ml-4 my-1 border-l-2 border-zinc-800 bg-zinc-950/40 text-[11px]"
+    >
+      <div className="flex items-baseline justify-between">
+        <div className="flex items-center gap-2 v5-mono text-zinc-300">
+          <span className="text-zinc-500">#{idx + 1}</span>
+          <span>{Math.round(Math.abs(Number(member.shares ?? 0)))}sh</span>
+          <span className="text-zinc-500">@</span>
+          <span>${formatPx(member.entry_price)}</span>
+          {member.smb_grade && (
+            <span className="px-1 py-0 bg-zinc-800 text-zinc-400 text-[9px] uppercase rounded">
+              SMB {member.smb_grade}
+            </span>
+          )}
+          {member.setup_type && (
+            <span className="text-zinc-500 truncate max-w-[120px]">
+              {humanizeStyle(member.setup_type)}
+            </span>
+          )}
+        </div>
+        <span className={`v5-mono ${pnlColor}`}>
+          {formatUsd(pnl)}
+        </span>
+      </div>
+      <div className="flex items-center gap-3 mt-0.5 text-[10px] text-zinc-500">
+        {stop != null && <span>SL ${formatPx(stop)}</span>}
+        {targets.length > 0 && <span>PT ${formatPx(targets[0])}</span>}
+        {member.risk_reward_ratio != null && (
+          <span>R:R {Number(member.risk_reward_ratio).toFixed(1)}</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
 export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition }) => {
   const open = useMemo(
     () => (positions || []).filter(p => p && p.status !== 'closed'),
     [positions],
   );
-  const [expandedSymbol, setExpandedSymbol] = useState(null);
+  // v19.27 — group by (symbol, direction) and surface aggregate rows.
+  const groups = useMemo(() => groupBySymbolDirection(open), [open]);
+  const [expandedKey, setExpandedKey] = useState(null);
   const [reconcileBusy, setReconcileBusy] = useState(false);
   const [reconcileMsg, setReconcileMsg] = useState(null);
 
-  const handleToggle = (sym) => {
-    setExpandedSymbol((prev) => (prev === sym ? null : sym));
+  const handleToggle = (key) => {
+    setExpandedKey((prev) => (prev === key ? null : key));
   };
 
-  // 2026-05-01 v19.24 — Orphan = IB-side position with no matching
-  // `bot_trades` row in `_open_trades`. `sentcom_service.get_our_positions`
-  // stamps `source: 'ib'` on these (vs `source: 'bot'` for trades the bot
-  // originated). Show "Reconcile" button when ≥1 orphan is present — lets
-  // the operator hand these positions over to the bot for active
-  // management (trail stops, scale-out, EOD close).
-  const orphans = useMemo(
-    () => open.filter(p => p && p.source === 'ib'),
-    [open],
+  // v19.27 — Reconcile target = ORPHANS (`source: 'ib'`) + PARTIAL
+  // unclaimed remainders. Both render as orphan-style rows with
+  // amber/orange badges and need bot management.
+  const reconcileTargets = useMemo(
+    () => groups.filter(g => g.source === 'ib' || g.source === 'partial'),
+    [groups],
   );
+  const reconcileCount = reconcileTargets.length;
 
   const handleReconcile = async () => {
     if (reconcileBusy) return;
-    const symbols = orphans.map(p => p.symbol).filter(Boolean);
+    const symbols = reconcileTargets.map(g => g.symbol).filter(Boolean);
     if (symbols.length === 0) return;
     const ok = typeof window !== 'undefined'
       ? window.confirm(
-          `Reconcile ${symbols.length} orphan position${symbols.length > 1 ? 's' : ''} (${symbols.join(', ')})?\n\n` +
+          `Reconcile ${symbols.length} position${symbols.length > 1 ? 's' : ''} (${symbols.join(', ')})?\n\n` +
           `The bot will materialize trade records with default 2.0% stop + 2.0 R:R ` +
           `and begin actively managing them (trail stops, scale-out, EOD).`
         )
@@ -430,9 +565,9 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
     <div data-testid="v5-open-positions" data-help-id="open-positions" className="flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-center gap-2">
-          <div className="v5-panel-title">Open ({open.length})</div>
+          <div className="v5-panel-title">Open ({groups.length})</div>
           <LiveDataChip compact />
-          {orphans.length > 0 && (
+          {reconcileCount > 0 && (
             <button
               type="button"
               onClick={handleReconcile}
@@ -443,9 +578,9 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
                   ? 'border-zinc-700 text-zinc-500 cursor-wait'
                   : 'border-amber-700/60 text-amber-300 hover:bg-amber-950/40'
               }`}
-              title={`Reconcile ${orphans.length} orphan IB position${orphans.length > 1 ? 's' : ''}`}
+              title={`Reconcile ${reconcileCount} untracked position${reconcileCount > 1 ? 's' : ''}`}
             >
-              {reconcileBusy ? 'Reconciling…' : `Reconcile ${orphans.length}`}
+              {reconcileBusy ? 'Reconciling…' : `Reconcile ${reconcileCount}`}
             </button>
           )}
         </div>
@@ -465,21 +600,74 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
       </div>
 
       <div className="flex-1 overflow-y-auto v5-scroll">
-        {loading && open.length === 0 && (
+        {loading && groups.length === 0 && (
           <div className="px-3 py-4 text-[13px] text-zinc-500">Loading positions…</div>
         )}
-        {!loading && open.length === 0 && (
+        {!loading && groups.length === 0 && (
           <div className="px-3 py-4 text-[13px] text-zinc-500">No open positions.</div>
         )}
-        {open.map(p => (
-          <PositionRow
-            key={p.id || p._id || p.trade_id || p.symbol}
-            position={p}
-            expanded={expandedSymbol === p.symbol}
-            onToggle={() => handleToggle(p.symbol)}
-            onClick={() => onSelectPosition?.(p)}
-          />
-        ))}
+        {groups.map(g => {
+          const isExpanded = expandedKey === g._group_key;
+          const sourceBadge = SOURCE_BADGE[g.source];
+          const memberCount = g._members.length;
+          return (
+            <div
+              key={g._group_key}
+              data-testid={`v5-open-group-${g.symbol}-${g.direction}`}
+            >
+              <div className="relative">
+                <PositionRow
+                  position={g}
+                  expanded={isExpanded}
+                  onToggle={() => handleToggle(g._group_key)}
+                  onClick={() => onSelectPosition?.(g)}
+                />
+                {/* Multi-trade indicator + source badge overlay */}
+                {(memberCount > 1 || sourceBadge) && (
+                  <div className="absolute right-3 top-2 flex items-center gap-1 pointer-events-none">
+                    {memberCount > 1 && (
+                      <span
+                        data-testid={`group-multi-badge-${g.symbol}`}
+                        className="px-1 py-0 text-[9px] uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700 rounded"
+                        title={`${memberCount} bot trades aggregated`}
+                      >
+                        {memberCount}×
+                      </span>
+                    )}
+                    {sourceBadge && (
+                      <span
+                        data-testid={`group-source-badge-${g.symbol}`}
+                        className={`px-1 py-0 text-[9px] uppercase tracking-wider border rounded ${sourceBadge.color}`}
+                        title={
+                          g.source === 'partial'
+                            ? `Bot tracks ${(g._members.find(m => m.source === 'bot')?.shares) ?? 0}sh, IB has more — ${g._unclaimed_shares}sh untracked`
+                            : g.source === 'stale_bot'
+                            ? 'Bot tracks shares IB does not show — phantom shares, will auto-sweep'
+                            : 'IB position with no bot tracking — click Reconcile to claim'
+                        }
+                      >
+                        {sourceBadge.label}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {isExpanded && memberCount > 1 && (
+                <div
+                  data-testid={`group-members-${g.symbol}`}
+                  className="bg-zinc-950/30 pb-1"
+                >
+                  <div className="px-2 pt-1 text-[10px] uppercase tracking-wider text-zinc-600">
+                    {memberCount} underlying bot trades
+                  </div>
+                  {g._members.map((m, idx) => (
+                    <GroupMemberRow key={m.trade_id || m.id || idx} member={m} idx={idx} />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

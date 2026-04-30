@@ -2,6 +2,116 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-eighth commit, v19.27) — Position panel reality reconciliation
+
+**Operator caught a multi-bug screenshot** mid-session (10 open
+positions, 4 misclassified as orphans even though the bot opened
+them, 2 symbols showing duplicate rows from multiple bot brackets,
+1 OKLO SHORT 0sh ghost). Three coordinated fixes ship together as
+v19.27.
+
+### Fix 1 — Smart `source` detection in `sentcom_service.get_our_positions`
+- New `SentComService._classify_source_v19_27(symbol, direction,
+  bot_total, ib_pos_by_symbol)` static helper. Replaces binary
+  `source: 'bot'/'ib'` with share-count reconciliation:
+  - `bot_shares == ib_shares` → `'bot'` (clean)
+  - `bot_shares < ib_shares`  → `'partial'` + emit extra orphan row
+                                for the unclaimed remainder
+  - `bot_shares > ib_shares`  → `'stale_bot'` (phantom shares,
+                                Fix 3 sweeps these on next manage cycle)
+  - `bot_shares == 0`         → `'ib'` (true orphan)
+  - Direction mismatch        → `'stale_bot'`
+  - ±1 share rounding tolerance to avoid false-partial spam
+- `get_our_positions` now pre-builds `bot_shares_by_symbol` and
+  `ib_pos_by_symbol` maps before iterating, then in the IB-position
+  loop:
+  - Clean match → skip (bot row covers it)
+  - Stale_bot → skip (auto-sweep cleans up)
+  - Partial → emit row for ONLY the unclaimed shares (not the full
+    IB position) so operator sees the gap, not a full duplicate
+  - True orphan → emit full row as before
+- Orphan rows now carry `ib_total_shares`, `bot_tracked_shares`,
+  `unclaimed_shares` so the V5 chip can render hover detail like
+  *"Bot tracks 5,000sh, IB has 18,364sh — 13,364sh untracked"*
+
+### Fix 2 — Symbol-level grouping in `OpenPositionsV5.jsx`
+- New `groupBySymbolDirection(open)` rolls up multiple `BotTrade`
+  records for same `(symbol, direction)` into ONE aggregate row:
+  - Total shares (Σ across members)
+  - Weighted avg entry (Σ shares×entry / Σ shares)
+  - Combined unrealized P&L (Σ across members)
+  - Worst source (any non-`bot` source dominates the badge)
+- New `GroupMemberRow` component shown on expand — compact inline
+  rows displaying each underlying trade's entry / SL / PT / SMB
+  grade / setup. Operator can see "this aggregate row is HOOD
+  252sh @ B-grade scan + HOOD 299sh @ A-grade scan, both with
+  same SL/PT bracket."
+- New `SOURCE_BADGE` map renders distinct chips:
+  - `ORPHAN` (amber, on `'ib'` rows)
+  - `PARTIAL` (orange, on `'partial'` rows with `unclaimed_shares` tooltip)
+  - `STALE` (rose, on `'stale_bot'` — auto-sweep will handle)
+  - `'bot'` rows get no badge (clean state)
+- `Reconcile N` button now counts `ib` + `partial` rows (was just
+  `ib`). Both need bot management; only the count differs.
+- `2×` badge appears on multi-trade groups so operator knows the
+  row aggregates multiple brackets.
+
+### Fix 3 — Auto-sweep 0sh phantoms in `position_manager.update_open_positions`
+- New v19.27 block at the top of `update_open_positions`:
+  - Build `(symbol, direction) → abs_qty` map from
+    `_pushed_ib_data["positions"]`. **Skip block entirely if pusher
+    disconnected** — never sweep based on stale data.
+  - For each `_open_trades` entry, if all 4 conditions hold:
+    - `status != CLOSED`
+    - `remaining_shares == 0` (firmly zero, not None/uninitialised)
+    - `executed_at` age >= 30s (avoid sweeping brand-new fills)
+    - IB shows 0 shares for `(symbol, direction)`
+  - …then transition `status: CLOSED`, set `close_reason:
+    'phantom_auto_swept_v19_27'`, persist, pop from `_open_trades`,
+    push to `_closed_trades`, emit `phantom_auto_swept` Unified
+    Stream event.
+- Pure janitorial cleanup — all MFE/MAE/realized P&L is already
+  preserved upstream by normal close paths. The phantom is just
+  the same trade with `status` not flipped.
+
+### Tests
+- 18 new pytests in `test_position_panel_reality_v19_27.py`:
+  - 6 covering `_classify_source_v19_27` (clean / partial /
+    stale_bot / direction-mismatch / ±1-share tolerance / pure-orphan)
+  - 3 source-level pins on `get_our_positions` aggregation +
+    partial-remainder emission + clean/stale skip
+  - 5 source-level pins on phantom sweep (block exists, pusher
+    guard, age guard, remaining_shares==0 strict check, stream
+    emit)
+  - 4 source-level pins on V5 grouping (`groupBySymbolDirection`,
+    `SOURCE_BADGE` map, Reconcile counts ib+partial, multi-count
+    badge)
+- **74/74 combined** with v19.23+v19.24+v19.25+v19.26 suites.
+  ESLint clean. Ruff: only pre-existing warnings (none from this
+  commit, verified by line numbers).
+
+### Live verification (preview env)
+- `/api/sentcom/positions`: HTTP 200 ✓
+- `/api/trading-bot/status`: HTTP 200 ✓
+- No new exceptions in backend.err.log
+
+### Operator action after Spark pull
+1. Pull + restart backend.
+2. Open V5 dashboard. The Open Positions panel should now show:
+   - **One row per symbol+direction** (HOOD + BP no longer duplicate)
+   - **`2×` badge** on grouped rows — click to expand and see each
+     underlying bot trade with its own SMB grade / setup / entry
+   - **Source badges** on non-clean rows: `ORPHAN` (amber),
+     `PARTIAL` (orange), `STALE` (rose)
+   - **`Reconcile N` count** now reflects orphans + partial
+     remainders, not just true orphans
+3. Wait one manage-cycle (≤5s during RTH). The OKLO SHORT 0sh
+   ghost should disappear automatically — watch the Unified Stream
+   for `🧹 Auto-swept phantom OKLO SHORT (0sh leftover)…`
+4. After clicking `Reconcile N` on partial rows, the orphan
+   remainder gets materialized → row source upgrades from
+   `partial` → `bot` on the next refresh.
+
 ## 2026-05-01 (forty-seventh commit, v19.26) — AI chat assistant data plumbing fixes
 
 **Operator-reported bugs in the same chat session** (2026-05-01 chat

@@ -47,72 +47,22 @@ complaint without WebSocket complexity.
 
 ### 🟡 Next session priorities
 
-#### 🔴 (P0 — TOP, NEW) v19.27 — Position panel reality reconciliation (operator approved 2026-05-01)
-**Why**: Operator hit a multi-bug screenshot today after several
-restarts: 4 of 10 open rows (SOFI/SBUX/MO/OKLO) rendered as orphans
-even though the bot opened them, HOOD and BP had duplicate rows
-(2 trade records each), and OKLO SHORT 0sh ghost. The orphan
-detection rule today is binary (in `_open_trades` = bot, else = ib),
-which misclassifies the share-count drift that accumulates across
-many bot fills + scale-outs + restarts.
+#### 🎯 Just shipped 2026-05-01 v19.27 — see CHANGELOG (forty-eighth commit)
+**Position panel reality reconciliation.** Operator caught a screenshot
+with 4 of 10 rows misclassified as orphans, duplicate HOOD/BP rows,
+and an OKLO SHORT 0sh ghost. Three coordinated fixes:
+- ✅ **Smart source detection**: `bot` / `partial` / `stale_bot` / `ib`
+  via share-count reconciliation in `_classify_source_v19_27`
+- ✅ **Symbol grouping**: HOOD's 2 trades collapse to 1 row + 2× badge
+  + expandable to see underlying brackets
+- ✅ **Auto-sweep phantoms**: OKLO 0sh ghosts auto-close via
+  `position_manager.update_open_positions` v19.27 block (with
+  pusher-connected guard + 30s age gate)
+- ✅ Source badges: ORPHAN (amber) / PARTIAL (orange) / STALE (rose)
+- ✅ Reconcile button now counts `ib` + `partial`
+- ✅ 18 new pytests (74/74 combined). ESLint + ruff clean on new code.
 
-**Locked spec (5 questions, all answered 2026-05-01)**:
-
-1. **Smart `source` detection in `sentcom_service.get_our_positions`**:
-   ```
-   for each IB position:
-     bot_shares = sum(t.shares for t in _open_trades if t.symbol == sym)
-     if bot_shares == 0 and ib_shares > 0:    → source: 'ib'         # true orphan
-     elif bot_shares == ib_shares:             → source: 'bot'        # clean
-     elif bot_shares < ib_shares:              → source: 'partial'    # bot tracks SOME
-                                               # render bot piece + orphan remainder
-     elif bot_shares > ib_shares:              → source: 'stale_bot'  # phantom shares
-   ```
-   Reconcile button only counts true orphans + the unclaimed
-   remainder of `partial` rows. `stale_bot` triggers a separate
-   "❌ Sweep stale" pill (auto-close phantoms in Fix 3).
-
-2. **Duplicate row grouping in `OpenPositionsV5.jsx`**:
-   - Collapse multiple `BotTrade` records for same symbol into 1 row
-   - Aggregate shares (252+299=551 HOOD), weighted-avg entry price,
-     combined P&L
-   - Click expands to show the 2 underlying trades (each with its own
-     SMB grade, setup, OCA bracket, trail-stop state)
-   - Bot's tracking stays unchanged — only the visual rolls up.
-
-3. **Auto-sweep 0sh phantoms in `position_manager.update_open_positions`**:
-   - If `trade.remaining_shares == 0 AND ib_position.shares == 0`
-     for the same symbol+direction → silently transition
-     `status: open → closed`, remove from `_open_trades`, persist
-   - Emit a `sentcom_thoughts` debug event so we can audit
-   - Pure janitorial — all MFE/MAE/realized P&L is already preserved
-     in the same `bot_trades` doc by upstream close paths
-
-4. **SOFI claim strategy**: **Preserve per-fill granularity** — do
-   NOT collapse 18,364 SOFI into one monster trade. The fragmented
-   bot record set is the ML-training truth. Fix 1's smart source
-   detection makes this state visually clear without losing data.
-
-5. **Sequence**: v19.27 BEFORE v19.28 chart WebSocket. Position bug
-   is hitting operator on 4/10 rows TODAY; chart latency is
-   sub-100ms after v19.25.
-
-**Tests to ship with it**:
-- `test_position_panel_reality_v19_27.py`:
-  - Source detection: 4 cases (orphan / bot / partial / stale_bot)
-  - Partial drift: bot tracks 5,000 SOFI, IB has 18,364 → render
-    one bot row (5,000 with full context) + one orphan row (13,364)
-  - Symbol-grouping in V5 collapses HOOD's 2 trades to 1 row +
-    expandable
-  - position_manager auto-sweep: trade.remaining_shares=0 +
-    ib_shares=0 → status: closed
-  - Source-level pin: `_open_trades` cleanup runs on
-    update_open_positions (regression guard)
-
-**Estimated effort**: ~3-4 hours. 5 backend changes + 1 frontend
-restructure + 5-7 pytests.
-
-#### 🔴 (P0) v19.28 — Tier 3 chart WebSocket layer
+#### 🔴 (P0 — TOP, NEXT) v19.28 — Tier 3 chart WebSocket layer
 **Goal**: Push new bars to the chart within ~50ms of IB delivering them,
 replacing the 5s polling cycle entirely. T1 (cache) + T2 (tail) already
 killed ~95% of the perceived slowness; Tier 3 closes the last 5%

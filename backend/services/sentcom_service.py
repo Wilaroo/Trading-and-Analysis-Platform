@@ -1884,6 +1884,50 @@ class SentComService:
                 "explanation": "Risk assessment failed - using standard sizing"
             }
     
+    @staticmethod
+    def _classify_source_v19_27(
+        symbol: str,
+        direction: str,
+        bot_total: int,
+        ib_pos_by_symbol: Dict[str, Dict[str, Any]],
+    ) -> str:
+        """v19.27 — Classify a position row's `source` based on share-
+        count reconciliation between bot's `_open_trades` peer-sum and
+        IB's net position. See `get_our_positions` docstring for the
+        full motivation.
+
+        Returns one of:
+          'bot'        — clean tracking (bot total matches IB net)
+          'partial'    — bot tracks SOME of the IB position; the rest
+                         is unclaimed and renders as a separate orphan
+                         row in the IB-position loop below
+          'stale_bot'  — bot tracks MORE than IB shows; phantom shares
+                         that the auto-sweep loop in position_manager
+                         (Fix 3) will close on the next manage cycle
+          'ib'         — IB has shares, bot has none (true orphan,
+                         Reconcile button counts these)
+        """
+        sym_upper = (symbol or "").upper()
+        dir_lower = (direction or "long").lower()
+        ib = ib_pos_by_symbol.get(sym_upper)
+        if not ib:
+            # Bot tracks but IB doesn't → phantom shares to be swept.
+            return "stale_bot" if (bot_total or 0) > 0 else "bot"
+        if ib.get("direction") != dir_lower:
+            # Direction mismatch — bot still has its long while IB is
+            # short (or vice versa). Treat as stale on the bot side;
+            # the IB row will render separately as an orphan in the
+            # IB-position loop with its own direction.
+            return "stale_bot"
+        ib_qty = int(ib.get("abs_qty", 0))
+        bot_qty = int(bot_total or 0)
+        # Tolerate ±1 share rounding noise (extremely rare but harmless).
+        if abs(bot_qty - ib_qty) <= 1:
+            return "bot"
+        if bot_qty < ib_qty:
+            return "partial"
+        return "stale_bot"
+
     async def get_our_positions(self) -> List[Dict[str, Any]]:
         """Get our current positions with P&L from both Trading Bot and IB.
         
@@ -1891,6 +1935,21 @@ class SentComService:
         - market_value, cost_basis, portfolio_weight
         - risk_level (ok/warning/danger/critical based on drawdown)
         - today_change data from IB quotes when available
+
+        v19.27 (2026-05-01) — Smart source detection. Pre-v19.27 the
+        source field was binary ("bot" if symbol in `_open_trades`
+        else "ib"). After many bot fills + scale-outs + restarts, this
+        misclassified the share-count drift between the bot's
+        `_open_trades` total and IB's net position. Now sourced via
+        share-count reconciliation:
+          - bot_shares == 0  AND  ib_shares > 0    → 'ib'         (true orphan)
+          - bot_shares == ib_shares                 → 'bot'        (clean)
+          - bot_shares < ib_shares                  → 'partial'    + an extra
+                                                     orphan row for the remainder
+          - bot_shares > ib_shares                  → 'stale_bot'  (phantom shares)
+        Reconcile button counts true orphans + the unclaimed remainder
+        of partial cases. `stale_bot` triggers a separate sweep
+        affordance (Fix 3 auto-sweep handles it on the manage loop).
         """
         trading_bot = self._get_trading_bot()
         
@@ -1905,6 +1964,50 @@ class SentComService:
                 ib_quotes[sym] = q
         except Exception:
             pass
+
+        # v19.27 — pre-build a (symbol, abs_qty, direction) map of IB
+        # positions so each bot-trade row can flag whether its shares
+        # match IB or are part of a larger / smaller IB net. This drives
+        # the smart `source` field below.
+        ib_pos_by_symbol: dict = {}
+        try:
+            from routers.ib import _pushed_ib_data
+            for _ip in (_pushed_ib_data.get("positions") or []):
+                _sym = (_ip.get("symbol") or "").upper()
+                if not _sym:
+                    continue
+                _qty = float(_ip.get("position", _ip.get("qty", 0)) or 0)
+                if abs(_qty) < 0.001:
+                    continue
+                ib_pos_by_symbol[_sym] = {
+                    "qty": _qty,
+                    "direction": "long" if _qty > 0 else "short",
+                    "abs_qty": int(abs(_qty)),
+                    "avg_cost": float(_ip.get("avgCost", _ip.get("avg_cost", 0)) or 0),
+                    "market_price": float(_ip.get("marketPrice", _ip.get("market_price", 0)) or 0),
+                }
+        except Exception:
+            pass
+
+        # v19.27 — sum bot _open_trades shares per (symbol, direction)
+        # so each bot row knows its peer-sum and we can compute the
+        # partial / stale_bot / clean cases below.
+        bot_shares_by_symbol: dict = {}
+        if trading_bot:
+            try:
+                _all_open = trading_bot.get_open_trades() or []
+                for _t in _all_open:
+                    _sym = (_t.get("symbol") or "").upper()
+                    _dir = (_t.get("direction") or "long").lower()
+                    if not _sym:
+                        continue
+                    rs = _t.get("remaining_shares")
+                    if rs in (None, 0):
+                        rs = _t.get("shares") or 0
+                    key = (_sym, _dir)
+                    bot_shares_by_symbol[key] = bot_shares_by_symbol.get(key, 0) + int(abs(rs or 0))
+            except Exception as e:
+                logger.debug(f"v19.27 bot_shares aggregation failed: {e}")
         
         # First, get bot-managed trades (these have more detailed tracking)
         if trading_bot:
@@ -1982,7 +2085,19 @@ class SentComService:
                             "trade_style": trade.get("trade_style", ""),
                             "entry_time": trade.get("executed_at"),
                             "trade_id": trade.get("id"),
-                            "source": "bot",
+                            # v19.27 — smart source detection. Default
+                            # 'bot' for clean tracking; if peer-sum
+                            # disagrees with IB net, downgrade to
+                            # 'partial' or 'stale_bot' so the V5 chip
+                            # can render an explicit drift badge.
+                            "source": self._classify_source_v19_27(
+                                symbol=symbol,
+                                direction=direction,
+                                bot_total=bot_shares_by_symbol.get(
+                                    ((symbol or "").upper(), (direction or "long").lower()), 0
+                                ),
+                                ib_pos_by_symbol=ib_pos_by_symbol,
+                            ),
                             "notes": trade.get("notes", ""),
                             "quality_score": trade.get("quality_score", 0),
                             "quality_grade": trade.get("quality_grade", ""),
@@ -2040,16 +2155,66 @@ class SentComService:
             
             for pos in ib_positions:
                 symbol = pos.get("symbol")
+                if not symbol:
+                    continue
+
+                # v19.27 — share-count reconciliation. The bot may
+                # already have a row for this symbol (clean tracking,
+                # OR `partial` where bot tracks fewer shares than IB
+                # net). In the partial case we still want to emit an
+                # extra orphan row for the *unclaimed remainder* so
+                # the operator can see + reconcile the missing shares.
+                ib_qty_raw = float(pos.get("position", 0) or 0)
+                if abs(ib_qty_raw) < 0.001:
+                    continue
+                ib_dir = "long" if ib_qty_raw > 0 else "short"
+                ib_abs = int(abs(ib_qty_raw))
+                bot_total_for_dir = bot_shares_by_symbol.get(
+                    (symbol.upper(), ib_dir), 0
+                )
+
+                # Already-tracked + matches IB cleanly → bot row covers it.
+                if bot_total_for_dir > 0 and abs(bot_total_for_dir - ib_abs) <= 1:
+                    seen_symbols.add(symbol)
+                    continue
+
+                # `stale_bot` (bot tracks MORE than IB) → bot row is
+                # already present and the auto-sweep loop will handle
+                # cleanup. Skip emitting an IB-side row.
+                if bot_total_for_dir > ib_abs:
+                    seen_symbols.add(symbol)
+                    continue
+
+                # Either: pure orphan (bot tracks 0) → render full
+                # IB position. Or: partial drift (bot tracks SOME) →
+                # render an orphan row for the UNCLAIMED REMAINDER so
+                # the operator sees + reconciles the gap.
+                if bot_total_for_dir > 0:
+                    orphan_shares_signed = ib_qty_raw - (
+                        bot_total_for_dir if ib_qty_raw > 0 else -bot_total_for_dir
+                    )
+                else:
+                    orphan_shares_signed = ib_qty_raw
+
+                shares = orphan_shares_signed
                 if symbol and symbol not in seen_symbols:
-                    shares = pos.get("position", 0)
                     avg_cost = pos.get("avgCost", 0) or pos.get("avg_cost", 0)
                     market_price = pos.get("marketPrice", 0) or pos.get("market_price", 0)
-                    unrealized_pnl = pos.get("unrealizedPnL") or pos.get("unrealizedPNL") or pos.get("unrealized_pnl")
+                    unrealized_pnl_full = pos.get("unrealizedPnL") or pos.get("unrealizedPNL") or pos.get("unrealized_pnl")
                     realized_pnl = pos.get("realizedPnL") or pos.get("realizedPNL") or pos.get("realized_pnl") or 0
-                    
-                    # Calculate P&L from prices if unrealized_pnl not available
-                    if unrealized_pnl is None and market_price and avg_cost and shares:
+
+                    # Pro-rate IB's unrealized P&L to ONLY the orphan
+                    # remainder so we don't double-count the bot row's
+                    # P&L and the orphan row's P&L.
+                    if bot_total_for_dir > 0 and ib_abs > 0:
+                        ratio = abs(shares) / ib_abs
+                    else:
+                        ratio = 1.0
+
+                    if unrealized_pnl_full is None and market_price and avg_cost and shares:
                         unrealized_pnl = (market_price - avg_cost) * shares
+                    else:
+                        unrealized_pnl = (unrealized_pnl_full or 0) * ratio
                     unrealized_pnl = unrealized_pnl or 0
                     
                     # Calculate P&L percent
@@ -2152,8 +2317,15 @@ class SentComService:
                         "entry_time": (lambda et: et.isoformat() if hasattr(et, "isoformat") else et)(
                             (enrich_trade or {}).get("executed_at")
                         ),
-                        "source": "ib",
+                        "source": "partial" if bot_total_for_dir > 0 else "ib",
                         "reconciled": bool(enrich_trade),
+                        # v19.27 — when the orphan row is part of a
+                        # `partial` (bot tracks SOME), surface the
+                        # share gap so the V5 chip + Reconcile button
+                        # render an explicit "13,364sh untracked" hint.
+                        "ib_total_shares": ib_abs,
+                        "bot_tracked_shares": int(bot_total_for_dir),
+                        "unclaimed_shares": int(abs(shares)),
                         "setup_type": (enrich_trade or {}).get("setup_type", ""),
                         "setup_variant": (enrich_trade or {}).get("setup_variant", ""),
                         "trade_style": (enrich_trade or {}).get("trade_style", ""),

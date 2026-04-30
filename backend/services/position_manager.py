@@ -40,6 +40,136 @@ class PositionManager:
         except (TypeError, ValueError):
             STALE_QUOTE_S = 30.0
 
+        # ── v19.27 (2026-05-01) Auto-sweep 0sh phantoms ────────────
+        # Operator caught OKLO SHORT 0sh ghost rows in the V5 panel —
+        # `BotTrade` records that fully scaled out / stopped out but
+        # whose `status` never transitioned `open → closed`. They
+        # render as zero-share rows in Open Positions and confuse
+        # share-count reconciliation in `sentcom_service.get_our_positions`.
+        # 
+        # Rule: if a trade has `remaining_shares == 0` AND IB has no
+        # matching shares for (symbol, direction), AND the trade has
+        # been around for >30s (avoid sweeping a brand-new fill that
+        # IB just hasn't reported yet), then transition `status →
+        # closed`, emit a thoughts event, and let the persistence
+        # layer remove it from `_open_trades` on the next cycle.
+        try:
+            ib_pos_map: dict = {}
+            try:
+                from routers.ib import _pushed_ib_data, is_pusher_connected
+                if is_pusher_connected():
+                    for _ip in (_pushed_ib_data.get("positions") or []):
+                        _sym = (_ip.get("symbol") or "").upper()
+                        _qty = float(_ip.get("position", 0) or 0)
+                        if not _sym or abs(_qty) < 0.001:
+                            continue
+                        _key = (_sym, "long" if _qty > 0 else "short")
+                        ib_pos_map[_key] = abs(_qty)
+                else:
+                    # If pusher is down we can't trust the map — skip
+                    # the sweep this cycle. Better to leave the phantom
+                    # in place than auto-close based on stale data.
+                    raise RuntimeError("pusher_not_connected")
+            except Exception:
+                ib_pos_map = None  # disable sweep this cycle
+
+            if ib_pos_map is not None:
+                from services.trading_bot_service import TradeStatus as _TS
+                # Snapshot keys so we don't mutate while iterating.
+                for _tid, _trade in list(bot._open_trades.items()):
+                    try:
+                        if _trade.status == _TS.CLOSED:
+                            continue
+                        _rem = getattr(_trade, "remaining_shares", None)
+                        # Only sweep when remaining shares is FIRMLY
+                        # zero. `_rem == 0` because we explicitly set
+                        # it after a successful close — skip None /
+                        # uninitialised states (line 119 below
+                        # initialises remaining_shares from shares for
+                        # brand-new fills that haven't been managed yet).
+                        if _rem is None or _rem != 0:
+                            continue
+                        # Must have been managed at least once — skip
+                        # brand-new fills where remaining_shares is 0
+                        # because we haven't initialised it yet. Use
+                        # `executed_at` age to gate this.
+                        _executed_at = getattr(_trade, "executed_at", None)
+                        if _executed_at:
+                            try:
+                                if isinstance(_executed_at, str):
+                                    from datetime import datetime as _dt
+                                    _ea = _dt.fromisoformat(
+                                        _executed_at.replace("Z", "+00:00")
+                                    )
+                                else:
+                                    _ea = _executed_at
+                                if _ea.tzinfo is None:
+                                    from datetime import timezone as _tz
+                                    _ea = _ea.replace(tzinfo=_tz.utc)
+                                from datetime import datetime as _dt2, timezone as _tz2
+                                age_s = (_dt2.now(_tz2.utc) - _ea).total_seconds()
+                                if age_s < 30:
+                                    continue  # too fresh, IB may not have caught up
+                            except Exception:
+                                pass  # age parsing failed → fall through
+                        _sym_u = (_trade.symbol or "").upper()
+                        _dir = (
+                            _trade.direction.value
+                            if hasattr(_trade.direction, "value")
+                            else str(_trade.direction)
+                        ).lower()
+                        if ib_pos_map.get((_sym_u, _dir), 0) > 0:
+                            continue  # IB still has shares — not a phantom
+                        # All clear — sweep.
+                        _trade.status = _TS.CLOSED
+                        _trade.close_reason = (
+                            getattr(_trade, "close_reason", None)
+                            or "phantom_auto_swept_v19_27"
+                        )
+                        if not getattr(_trade, "closed_at", None):
+                            from datetime import datetime as _dt3, timezone as _tz3
+                            _trade.closed_at = _dt3.now(_tz3.utc).isoformat()
+                        try:
+                            await asyncio.to_thread(bot._persist_trade, _trade)
+                        except Exception:
+                            pass
+                        # Move from _open_trades → _closed_trades so the
+                        # V5 panel stops rendering the ghost row.
+                        bot._open_trades.pop(_tid, None)
+                        try:
+                            bot._closed_trades.append(_trade)
+                        except Exception:
+                            pass
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "info",
+                                "event": "phantom_auto_swept",
+                                "symbol": _trade.symbol,
+                                "text": (
+                                    f"🧹 Auto-swept phantom {_trade.symbol} "
+                                    f"{_dir.upper()} (0sh leftover) — IB "
+                                    f"shows no shares, marking closed."
+                                ),
+                                "metadata": {
+                                    "trade_id": _trade.id,
+                                    "reason": "phantom_auto_swept_v19_27",
+                                },
+                            })
+                        except Exception:
+                            pass
+                        logger.info(
+                            f"[v19.27 SWEEP] {_trade.symbol} {_dir.upper()} "
+                            f"phantom (0sh, IB has 0) → status: closed, "
+                            f"trade_id={_trade.id}"
+                        )
+                    except Exception as _sweep_err:
+                        logger.debug(
+                            f"v19.27 phantom-sweep error on {_tid}: {_sweep_err}"
+                        )
+        except Exception as _outer_sweep:
+            logger.debug(f"v19.27 phantom-sweep block failed: {_outer_sweep}")
+
         for trade_id, trade in list(bot._open_trades.items()):
             try:
                 quote = None
