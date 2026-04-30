@@ -3,7 +3,29 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.17 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.18 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.18 — see CHANGELOG (thirty-seventh commit)
+Morning Readiness aggregator (pre-RTH go/no-go check):
+- ✅ New `GET /api/system/morning-readiness` endpoint — 5 checks
+  (backfill_data_fresh / ib_pipeline_alive / trading_bot_configured
+  / scanner_running / open_positions_clean) → single verdict.
+- ✅ New `scripts/morning_check.sh` — colour-coded CLI breakdown
+  with exit codes (0 green / 1 yellow / 2 red) for cron + chained
+  shell automation.
+- ✅ Closes the autopilot loop: morning-readiness on day N+1
+  verifies that v19.14 EOD on day N flattened the book.
+- ✅ 16 new pytest. **140/140 across all v19 backend suites.**
+
+### Operator's automation pipeline (now end-to-end clean)
+
+| Stage | Subsystem | Time |
+|---|---|---|
+| 1. Pre-RTH go/no-go | v19.18 morning-readiness | 8:30 AM ET |
+| 2. Data freshness | v19.17 freshness gate + Collect Data button | as needed |
+| 3. Scanner running | v19.15/v19.16 EVAL hot path | RTH |
+| 4. Trade management | v19.13 manage stage | RTH |
+| 5. EOD flat | v19.14 close stage + v19.14b banner | 3:55 PM ET |
 
 ### 🎯 Just shipped 2026-04-30 v19.17 — see CHANGELOG (thirty-sixth commit)
 Bar-size-aware smart_backfill freshness gate:

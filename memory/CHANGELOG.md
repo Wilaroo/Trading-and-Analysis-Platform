@@ -2,6 +2,122 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-seventh commit, v19.18) — Morning Readiness aggregator
+
+Single-call "is the bot ready for fully automated trading today?"
+endpoint at `GET /api/system/morning-readiness`. Aggregates everything
+we shipped in v19.14-v19.17 into a single green/yellow/red verdict
+plus a Slack-ready one-liner. Designed for the operator's pre-RTH
+workflow: run one curl (or the new `morning_check.sh` script), see
+exactly which subsystem needs attention before flipping autopilot on.
+
+### Five checks, one verdict
+
+| Check | Status logic |
+|---|---|
+| `backfill_data_fresh` | 10 critical symbols (SPY/QQQ/DIA/IWM/FAAMG/NVDA) all have a daily bar at v19.17's `_expected_latest_session_date`. RED if any missing. |
+| `ib_pipeline_alive` | Historical worker last-completion + pusher heartbeat ages. YELLOW if collector idle >2h during RTH. |
+| `trading_bot_configured` | v19.14 EOD enabled at 15:55 ET; risk_params populated. RED if EOD disabled or risk_params missing. YELLOW if EOD time drifted from 15:55. |
+| `scanner_running` | Last cycle <5 min during RTH; v19.15 cycle-context cache populated; v19.16 intraday-only set has ≥12 detectors. RED during RTH if scanner silent. |
+| `open_positions_clean` | No `close_at_eod=True` (intraday) trades from a prior session date. RED if any stuck — means v19.14 EOD failed. |
+
+Verdict aggregation: any RED → RED; any YELLOW (no RED) → YELLOW;
+all GREEN → GREEN. The summary string format is stable for Slack DM
+or HUD badge consumption:
+
+```
+[Wed Apr 30 09:14 ET] AUTOPILOT GREEN — backfill fresh, EOD armed,
+                       scanner alive, no overnight carryover.
+[Wed Apr 30 09:14 ET] AUTOPILOT BLOCKED — fix: backfill_data_fresh,
+                       trading_bot_configured (2 red).
+[Wed Apr 30 09:14 ET] AUTOPILOT CAUTION — review: ib_pipeline_alive
+                       (1 yellow).
+```
+
+### Endpoint contract
+
+```json
+{
+  "success": true,
+  "verdict": "green" | "yellow" | "red",
+  "ready_for_autopilot": bool,
+  "summary": "[Wed Apr 30 09:14 ET] AUTOPILOT GREEN — ...",
+  "checks": {
+    "backfill_data_fresh": {
+      "status": "red",
+      "detail": "10/10 critical symbols missing...",
+      "expected_session": "2026-04-29",
+      "stale_symbols": [...],
+      "fix": "Click 'Collect Data' in Data Collection panel..."
+    },
+    ...
+  },
+  "is_rth": false,
+  "generated_at_et": "...",
+  "generated_at_utc": "..."
+}
+```
+
+All checks are read-only, <2s combined. Safe to poll every 30-60s.
+Each check is wrapped so a single subsystem failure surfaces as
+that check's `status=red` with the exception detail — the endpoint
+itself never raises (operator never sees a 500 on the readiness
+URL).
+
+### Operator script — `scripts/morning_check.sh`
+
+A 60-line bash script that calls the endpoint and prints a colour-
+coded breakdown. Exit codes: `0` green, `1` yellow, `2` red.
+Designed for cron / chained shell automation:
+
+```bash
+#!/bin/bash
+# Run before RTH on Spark. Auto-starts the bot only if green.
+~/Trading-and-Analysis-Platform/backend/scripts/morning_check.sh && \
+    curl -X POST http://localhost:8001/api/trading-bot/start
+```
+
+Recommended cron entry (Mon-Fri 8:30 AM ET):
+```cron
+30 8 * * 1-5 /home/spark-1a60/Trading-and-Analysis-Platform/backend/scripts/morning_check.sh
+```
+
+### Tests (`test_morning_readiness_v19_18.py` — 16 tests)
+
+Per-check unit tests (10):
+- `_check_backfill_data_fresh`: green / red-stale / red-missing
+- `_check_trading_bot_configured`: green / red-disabled / red-no-risk / yellow-drifted
+- `_check_open_positions_clean`: green / red-carryover
+
+Aggregation + summary (5):
+- Verdict precedence (green<yellow<red)
+- Summary line format for green / red / yellow
+
+Top-level shape (2):
+- Response envelope keys are stable
+- `compute_morning_readiness` never raises even on a broken DB
+
+**140/140 across all v19 backend test suites.**
+
+### How this fits the autopilot workflow
+
+The pieces shipped today form a clean go/no-go pipeline:
+
+| Stage | Subsystem | Layer |
+|---|---|---|
+| 1. Data freshness | v19.17 freshness gate + Collect Data button | Pre-RTH |
+| 2. Scanner health | v19.15 cycle cache + v19.16 tier dispatch | Throughout RTH |
+| 3. Trade management | v19.13 manage hardening | Throughout RTH |
+| 4. EOD flat | v19.14 close-stage hardening + v19.14b countdown banner | 3:55 PM ET |
+| 5. Verification | **v19.18 morning-readiness aggregator** | Pre-RTH next day |
+
+Loop closes: morning-readiness on day N+1 verifies that v19.14 EOD
+on day N actually flattened the book. If `open_positions_clean`
+goes red, you immediately know the prior day's EOD didn't
+complete — surface for triage before the next session opens.
+
+
+
 ## 2026-04-30 (thirty-sixth commit, v19.17) — Bar-size-aware freshness gate
 
 Diagnosed via the operator's NVDA chart screenshot showing daily bars

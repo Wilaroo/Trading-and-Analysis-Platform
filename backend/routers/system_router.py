@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from typing import Optional
 import os
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["System Status"])
 
@@ -607,4 +610,52 @@ def system_health_v2():
             ],
             "build_ms": 0.0,
             "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+# ---- 2026-04-30 v19.18 — Morning Readiness aggregator ----------------------
+# One-call "ready for fully automated trading day?" check. Aggregates all
+# subsystems we shipped in v19.14-v19.17 so the operator sees a single
+# green/yellow/red verdict + a Slack-ready one-liner. Mounted at
+# /api/system/morning-readiness. See morning_readiness_service.py for the
+# 5 individual checks.
+
+@router.get("/api/system/morning-readiness")
+def morning_readiness():
+    """Morning go/no-go check for autopilot trading.
+
+    Five checks rolled into a single verdict:
+      1. backfill_data_fresh   — critical-10 daily bars match v19.17 expected session
+      2. ib_pipeline_alive     — historical worker + pusher heartbeats
+      3. trading_bot_configured — v19.14 EOD config + risk_params present
+      4. scanner_running       — scanner ticked recently; v19.15+v19.16 active
+      5. open_positions_clean  — no intraday carryover from prior session
+
+    Returns:
+      {
+        "verdict": "green" | "yellow" | "red",
+        "ready_for_autopilot": bool,
+        "summary": "one-line operator summary",
+        "checks": {check_name: {status, detail, ...}, ...},
+        "is_rth": bool,
+        "generated_at_et": "...",
+        "generated_at_utc": "..."
+      }
+
+    All checks are <2s combined, read-only. Safe to poll every minute.
+    Designed for: morning Slack DM, the V5 HUD's autopilot-ready badge,
+    a Spark-side `morning_check.sh` operator script.
+    """
+    try:
+        from services.morning_readiness_service import compute_morning_readiness
+        return compute_morning_readiness(_db)
+    except Exception as exc:
+        logger.error(f"morning-readiness failed: {exc}", exc_info=True)
+        return {
+            "success": False,
+            "verdict": "red",
+            "ready_for_autopilot": False,
+            "summary": f"check failed: {type(exc).__name__}: {str(exc)[:200]}",
+            "checks": {},
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         }
