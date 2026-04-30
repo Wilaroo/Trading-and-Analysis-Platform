@@ -494,3 +494,190 @@ async def test_eod_does_not_redo_closes_on_same_day():
         close_outcomes={"T1": True},
     )
     assert len(bot.closed_calls) == 0
+
+
+
+# --------------------------------------------------------------------------
+# /api/trading-bot/eod-status — countdown banner data source
+# --------------------------------------------------------------------------
+
+class _FakeEODBot:
+    """Stand-in for `_trading_bot` global in routers/trading_bot.py."""
+    def __init__(
+        self,
+        *,
+        enabled=True,
+        hour=15,
+        minute=55,
+        executed_today=False,
+        last_check_date=None,
+        open_trades=None,
+    ):
+        self._eod_close_enabled = enabled
+        self._eod_close_hour = hour
+        self._eod_close_minute = minute
+        self._eod_close_executed_today = executed_today
+        self._last_eod_check_date = last_check_date
+        self._open_trades = open_trades or {}
+
+
+def _eod_status_bot(**kwargs):
+    """Patch the module-level `_trading_bot` to a fake and return the result."""
+    from routers import trading_bot as router_mod
+    fake = _FakeEODBot(**kwargs)
+    with patch.object(router_mod, "_trading_bot", fake):
+        return router_mod.get_eod_status()
+
+
+def test_eod_status_idle_far_from_window():
+    """At 10:30 AM ET, status must be `idle` and the banner won't show."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_morning = _dt(2026, 5, 5, 10, 30, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_morning
+        result = _eod_status_bot(
+            open_trades={"T1": _Trade(close_at_eod=True)},
+        )
+    assert result["status"] == "idle"
+    assert result["eta_seconds"] > 300, (
+        "More than 5 min away — must be idle, not imminent"
+    )
+    assert result["intraday_positions_queued"] == 1
+
+
+def test_eod_status_idle_after_market_close_when_no_positions():
+    """At 9:00 PM ET with 0 positions, must be `idle` — NOT `imminent`.
+
+    Pre-fix bug: the 5-min `imminent` window matched any
+    `eta_seconds <= 300`, including the LARGE NEGATIVE values you get
+    after 3:55 PM. Result: the banner showed up overnight every day
+    saying "EOD CLOSE in -350:00" until midnight rolled over. Now
+    `imminent` is gated to `0 < eta <= 300`.
+    """
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_evening = _dt(2026, 5, 5, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_evening
+        result = _eod_status_bot(open_trades={})
+    assert result["status"] == "idle", (
+        f"Post-close + 0 positions must be idle, got {result['status']}"
+    )
+    assert result["eta_seconds"] < 0
+
+
+def test_eod_status_imminent_within_5_min_of_close():
+    """At 3:52 PM ET (3 min before 3:55 default), status flips to `imminent`."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 15, 52, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        result = _eod_status_bot(
+            open_trades={
+                "T1": _Trade(id="T1", symbol="AAPL", close_at_eod=True),
+                "T2": _Trade(id="T2", symbol="NVDA", close_at_eod=False),
+            },
+        )
+    assert result["status"] == "imminent"
+    assert 0 < result["eta_seconds"] <= 300
+    assert result["intraday_positions_queued"] == 1
+    assert result["swing_positions_holding"] == 1
+    assert "AAPL" in result["intraday_symbols"]
+    assert "NVDA" not in result["intraday_symbols"], (
+        "Swing symbols must NOT appear in intraday_symbols list"
+    )
+
+
+def test_eod_status_alarm_when_positions_open_past_4pm():
+    """At 4:05 PM ET with intraday positions still open → status=`alarm`."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 16, 5, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        result = _eod_status_bot(
+            open_trades={"T1": _Trade(close_at_eod=True)},
+            executed_today=False,
+        )
+    assert result["status"] == "alarm"
+    assert result["intraday_positions_queued"] == 1
+
+
+def test_eod_status_complete_after_executed_today():
+    """After successful EOD close, status=`complete`."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 15, 58, tzinfo=ZoneInfo("America/New_York"))
+    today = fake_now.strftime("%Y-%m-%d")
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        result = _eod_status_bot(
+            open_trades={},
+            executed_today=True,
+            last_check_date=today,
+        )
+    assert result["status"] == "complete"
+
+
+def test_eod_status_disabled_returns_idle():
+    """Operator-disabled EOD always returns `idle` regardless of clock."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 15, 53, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        result = _eod_status_bot(
+            enabled=False,
+            open_trades={"T1": _Trade(close_at_eod=True)},
+        )
+    assert result["status"] == "idle"
+
+
+def test_eod_status_half_day_window_flips_to_1255():
+    """With EOD_HALF_DAY_TODAY=true, the close window flips to 12:55 ET."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 12, 53, tzinfo=ZoneInfo("America/New_York"))
+    with patch.dict(os.environ, {"EOD_HALF_DAY_TODAY": "true"}):
+        with patch("routers.trading_bot.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            result = _eod_status_bot(
+                open_trades={"T1": _Trade(close_at_eod=True)},
+            )
+    assert result["status"] == "imminent"
+    assert result["close_hour"] == 12
+    assert result["close_minute"] == 55
+    assert result["is_half_day"] is True
+    assert result["market_close_hour_et"] == 13
+
+
+def test_eod_status_response_shape_pinned():
+    """Pin the response shape so the V5 banner doesn't quietly break
+    if a future contributor renames a field.
+    """
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    fake_now = _dt(2026, 5, 5, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+    with patch("routers.trading_bot.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        result = _eod_status_bot(open_trades={})
+
+    expected_keys = {
+        "success", "status", "eta_seconds", "intraday_positions_queued",
+        "swing_positions_holding", "intraday_symbols", "close_hour",
+        "close_minute", "close_time_et", "market_close_hour_et",
+        "is_half_day", "is_weekend", "enabled", "executed_today", "now_et",
+    }
+    assert expected_keys.issubset(set(result.keys())), (
+        f"Missing expected keys: {expected_keys - set(result.keys())}"
+    )

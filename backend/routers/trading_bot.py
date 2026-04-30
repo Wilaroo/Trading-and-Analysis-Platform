@@ -717,23 +717,27 @@ async def trigger_eod_close_now():
     total_pnl = 0.0
     results = []
     
+    # 2026-04-30 v19.14 — close_trade returns a BOOL, not a dict.
+    # Was calling `.get("success")` on the bool → silent AttributeError
+    # made every manual EOD attempt look like a no-op. Now we treat
+    # the bool correctly + read realized_pnl from the trade post-close.
     for trade_id, trade in list(_trading_bot._open_trades.items()):
         try:
-            result = await _trading_bot.close_trade(trade_id, reason="manual_eod_close")
-            if result.get("success"):
+            ok = await _trading_bot.close_trade(trade_id, reason="manual_eod_close")
+            if ok:
                 closed_count += 1
-                pnl = result.get("realized_pnl", 0)
+                pnl = float(getattr(trade, "realized_pnl", 0.0) or 0.0)
                 total_pnl += pnl
                 results.append({
                     "symbol": trade.symbol,
-                    "shares": trade.remaining_shares,
+                    "shares": getattr(trade, "remaining_shares", 0),
                     "pnl": pnl,
                     "status": "closed"
                 })
             else:
                 results.append({
                     "symbol": trade.symbol,
-                    "error": result.get("error"),
+                    "error": "close_trade returned False (broker refused / executor offline)",
                     "status": "failed"
                 })
         except Exception as e:
@@ -749,6 +753,102 @@ async def trigger_eod_close_now():
         "closed_count": closed_count,
         "total_pnl": total_pnl,
         "results": results
+    }
+
+
+@router.get("/eod-status")
+def get_eod_status():
+    """
+    EOD lookahead: countdown + intraday-positions-queued summary.
+
+    Drives the V5 EOD countdown banner (v19.14 — 2026-04-30). The
+    banner activates 5 min before the close window so the operator
+    has a last-minute window to flatten manually or extend a winning
+    position before auto-close fires.
+
+    Returns:
+      - status: "idle" / "imminent" (≤5 min) / "closing" / "complete" /
+                "alarm" (positions still open past 4:00 PM)
+      - eta_seconds: seconds until close window opens (negative once past)
+      - intraday_positions_queued: count of trades flagged close_at_eod=True
+      - swing_positions_holding: count of trades flagged close_at_eod=False
+      - close_time_et: human-readable close window
+      - is_half_day: env-flagged half-day mode
+      - executed_today / fully_done
+
+    Designed to be cheap and pollable every 5-10s during the
+    activation window.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+
+    import os as _os
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    is_half_day = _os.environ.get("EOD_HALF_DAY_TODAY", "").lower() in ("true", "1", "yes")
+    if is_half_day:
+        eod_hour, eod_minute, market_close_hour = 12, 55, 13
+    else:
+        eod_hour = _trading_bot._eod_close_hour
+        eod_minute = _trading_bot._eod_close_minute
+        market_close_hour = 16
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_str = now_et.strftime("%Y-%m-%d")
+    target = now_et.replace(hour=eod_hour, minute=eod_minute, second=0, microsecond=0)
+    eta_seconds = int((target - now_et).total_seconds())
+
+    intraday_queued = 0
+    swing_holding = 0
+    intraday_symbols = []
+    for trade in _trading_bot._open_trades.values():
+        if getattr(trade, "close_at_eod", True):
+            intraday_queued += 1
+            if len(intraday_symbols) < 25:
+                intraday_symbols.append(trade.symbol)
+        else:
+            swing_holding += 1
+
+    is_weekend = now_et.weekday() >= 5
+    is_after_close = now_et.hour >= market_close_hour
+    executed_today = (
+        _trading_bot._eod_close_executed_today
+        and _trading_bot._last_eod_check_date == today_str
+    )
+
+    if not _trading_bot._eod_close_enabled or is_weekend:
+        status = "idle"
+    elif executed_today:
+        status = "complete"
+    elif is_after_close and intraday_queued > 0:
+        status = "alarm"
+    elif eta_seconds <= 0 and intraday_queued > 0 and not is_after_close:
+        # Window has opened, closes are running. Bounded by market_close_hour.
+        status = "closing"
+    elif 0 < eta_seconds <= 300:  # 5-min imminent window
+        status = "imminent"
+    else:
+        status = "idle"
+
+    return {
+        "success": True,
+        "status": status,
+        "eta_seconds": eta_seconds,
+        "intraday_positions_queued": intraday_queued,
+        "swing_positions_holding": swing_holding,
+        "intraday_symbols": intraday_symbols,
+        "close_hour": eod_hour,
+        "close_minute": eod_minute,
+        "close_time_et": f"{eod_hour}:{eod_minute:02d} ET",
+        "market_close_hour_et": market_close_hour,
+        "is_half_day": is_half_day,
+        "is_weekend": is_weekend,
+        "enabled": _trading_bot._eod_close_enabled,
+        "executed_today": executed_today,
+        "now_et": now_et.strftime("%H:%M:%S"),
     }
 
 

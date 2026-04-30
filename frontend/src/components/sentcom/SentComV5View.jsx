@@ -28,6 +28,7 @@ import { TopMoversTile } from './v5/TopMoversTile';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { DeepFeedV5 } from './v5/DeepFeedV5';
 import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
+import { EodCountdownBannerV5 } from './v5/EodCountdownBannerV5';
 import { HealthChip } from './v5/HealthChip';
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
@@ -458,6 +459,7 @@ export const SentComV5View = ({
               <span className="v5-chip v5-chip-manage">live</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto v5-scroll">
+              <EodCountdownBannerV5 />
               <DayRollupBannerV5 apiBase={process.env.REACT_APP_BACKEND_URL || ''} />
               <UnifiedStreamV5 messages={messages} loading={streamLoading} onSymbolClick={handleOpenTicker} hoveredSymbol={hoveredSymbol} onHoverSymbol={handleHoverSymbol} />
             </div>

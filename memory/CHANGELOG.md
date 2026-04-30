@@ -2,6 +2,127 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-third commit, v19.14b) — V5 EOD Countdown Banner
+
+Operator-requested follow-up to v19.14: when the EOD close window
+gets close, surface a visible countdown + position list at the top
+of the V5 Unified Stream so the operator gets a 5-min heads-up to
+either flatten manually, extend a winning runner, or just sit on
+their hands and let the auto-close do its job.
+
+### What ships
+
+#### Backend — `GET /api/trading-bot/eod-status`
+
+New lightweight endpoint that aggregates the data the banner needs:
+
+```json
+{
+  "success": true,
+  "status": "imminent",            // idle | imminent | closing | complete | alarm
+  "eta_seconds": 173,              // seconds until close window opens
+  "intraday_positions_queued": 4,  // close_at_eod=True trades
+  "swing_positions_holding": 2,    // close_at_eod=False trades (NOT closing)
+  "intraday_symbols": ["AAPL","MSFT","NVDA","HIMS"],
+  "close_hour": 15, "close_minute": 55,
+  "close_time_et": "15:55 ET",
+  "market_close_hour_et": 16,
+  "is_half_day": false,
+  "is_weekend": false,
+  "enabled": true,
+  "executed_today": false,
+  "now_et": "15:52:07"
+}
+```
+
+Status state machine (precedence top-down):
+1. `idle` — disabled, weekend, or outside the 5-min window
+2. `complete` — `_eod_close_executed_today=True` for today
+3. `alarm` — past 4:00 PM ET with intraday positions still open
+4. `closing` — eta_seconds ≤ 0 with positions queued (window has opened)
+5. `imminent` — 0 < eta ≤ 300s (5-min countdown)
+6. `idle` — fallthrough
+
+The earlier draft of this logic mistakenly put `imminent` before
+the post-close gate, so at 9:00 PM ET the banner was reporting
+"EOD CLOSE in -350:00". Fixed by gating `imminent` to a STRICTLY
+positive eta — covered by
+`test_eod_status_idle_after_market_close_when_no_positions`.
+
+#### Drive-by fix — `/api/trading-bot/eod-close-now`
+
+Same bool/dict bug we squashed in `position_manager.check_eod_close`
+(v19.14 P0 #1) was lurking in the manual-trigger endpoint:
+
+```python
+result = await _trading_bot.close_trade(...)   # returns BOOL
+if result.get("success"):                       # AttributeError silently swallowed
+```
+
+Pre-fix: every operator-clicked "close all now" call returned
+`closed_count: 0` regardless of broker outcome. Now we treat the
+bool correctly + read `realized_pnl` from the trade post-close.
+
+This matters because the new banner offers a "CLOSE ALL NOW"
+override button — it would have been embarrassing for the button
+to silently no-op.
+
+#### Frontend — `EodCountdownBannerV5.jsx`
+
+New sticky banner mounted above `DayRollupBannerV5` inside the
+Unified Stream container. ~270 lines, no new dependencies.
+
+State-driven presentation:
+- **imminent** (amber) — `⏱ EOD CLOSE in 4:32 · queued 4 intraday · holding 2 swing · AAPL · MSFT · NVDA · HIMS`. Includes "CLOSE ALL NOW" button with 2-tap confirm.
+- **closing** (rose) — `⏵ EOD CLOSING · Closing 4 intraday positions now…`
+- **complete** (emerald) — `✓ EOD COMPLETE · All eligible intraday positions closed for today.` Auto-hides 60s after completion.
+- **alarm** (deep rose) — `⚠ EOD ALARM · 4 positions still OPEN past market close — verify IB-side state`. Includes "CLOSE ALL NOW" override.
+
+Adaptive polling: 5s while active, 30s while idle, so the operator
+never sees stale data during the critical window but the endpoint
+isn't hammered overnight. Client-side 1-Hz countdown ticker between
+polls so the MM:SS display feels live.
+
+Critical details:
+- Half-day banner shows "HALF-DAY" pill when `is_half_day=true`.
+- Swing position count shown but explicitly NOT included in the
+  close list, reinforcing the v19.14 contract.
+- Symbol list truncates at 8 with "+N" overflow.
+- All interactive elements have `data-testid` for testing.
+
+### Tests
+
+Extended `test_eod_close_v19_14.py` with 8 new tests covering the
+new endpoint:
+- `test_eod_status_idle_far_from_window`
+- `test_eod_status_idle_after_market_close_when_no_positions` (regression guard for the post-close-imminent bug)
+- `test_eod_status_imminent_within_5_min_of_close`
+- `test_eod_status_alarm_when_positions_open_past_4pm`
+- `test_eod_status_complete_after_executed_today`
+- `test_eod_status_disabled_returns_idle`
+- `test_eod_status_half_day_window_flips_to_1255`
+- `test_eod_status_response_shape_pinned` (frontend contract pin)
+
+**23/23 in test_eod_close_v19_14.py. 84/84 across all v19 backend
+suites.**
+
+### Operator workflow on Spark after pull + restart
+
+```bash
+# Smoke-test the new endpoint:
+curl -s http://localhost:8001/api/trading-bot/eod-status | jq
+
+# At 3:50 PM ET on a regular trading day, the banner appears at
+# the top of the V5 Unified Stream with a 5-min countdown and the
+# list of intraday symbols queued for close. Clicking "CLOSE ALL
+# NOW" + confirming triggers the manual close immediately.
+
+# At 4:01 PM ET if anything is still open locally, the banner flips
+# to red ALARM mode + the WS broadcasts eod_after_close_alarm.
+```
+
+
+
 ## 2026-04-30 (thirty-second commit, v19.14) — EOD Close-stage hardening
 
 Audit of `position_manager.check_eod_close` uncovered six issues

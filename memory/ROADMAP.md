@@ -3,7 +3,24 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.14 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.14b fork)
+
+### 🎯 Just shipped 2026-04-30 v19.14b — see CHANGELOG (thirty-third commit)
+V5 EOD Countdown Banner:
+
+- ✅ New `GET /api/trading-bot/eod-status` lookahead endpoint —
+  countdown + intraday vs swing position counts + state-machine
+  (idle/imminent/closing/complete/alarm).
+- ✅ New `EodCountdownBannerV5.jsx` mounted above `DayRollupBannerV5`
+  in the Unified Stream container. 5-min countdown, position list,
+  CLOSE ALL NOW override button (2-tap confirm), auto-hides on
+  completion, alarm state past 4:00 PM ET.
+- ✅ Drive-by fix: `/api/trading-bot/eod-close-now` had the same
+  bool/dict bug we just killed in `check_eod_close` (v19.14 P0 #1).
+  Now treats `close_trade` return as bool. Operator's "CLOSE ALL NOW"
+  button actually works.
+- ✅ 8 new pytest covering all 5 banner states + shape pin. **23/23
+  in test_eod_close_v19_14.py.**
 
 ### 🎯 Just shipped 2026-04-30 v19.14 — see CHANGELOG (thirty-second commit)
 EOD close-stage hardening — full audit + 6 fixes:
