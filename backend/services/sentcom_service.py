@@ -1918,6 +1918,21 @@ class SentComService:
                         
                         entry = trade.get("fill_price") or trade.get("entry_price", 0) or 0
                         current = trade.get("current_price") or entry
+                        # 2026-05-01 v19.22.3 — ALWAYS prefer the fresh
+                        # pushed quote over `trade.current_price`. Operator
+                        # caught the bug when 4 brand-new bracket fills
+                        # showed +$0 P&L while legacy positions ticked
+                        # normally. Cause: position_manager.update_open_
+                        # positions runs on a timer and hadn't refreshed
+                        # `trade.current_price` for symbols that just
+                        # filled. The pusher's quote stream is already
+                        # subscribed (via PusherRotation pinning), so the
+                        # quote is HERE — we just weren't using it.
+                        symbol_for_quote = (trade.get("symbol") or "").upper()
+                        live_quote = ib_quotes.get(symbol_for_quote, {}) if symbol_for_quote else {}
+                        live_price = live_quote.get("last") or live_quote.get("close")
+                        if live_price and float(live_price) > 0:
+                            current = float(live_price)
                         shares = trade.get("shares") or trade.get("quantity", 0) or 0
                         direction = trade.get("direction", "long")
                         
@@ -1978,6 +1993,42 @@ class SentComService:
                             "market_regime": trade.get("market_regime", ""),
                             "close_reason": trade.get("close_reason"),
                             "timeframe": trade.get("timeframe", ""),
+                            # 2026-05-01 v19.22.3 — operator wants rich
+                            # detail visible per position: scan tier, time
+                            # horizon, why-the-bot-took-it, plan A/B,
+                            # current management state. Backend already
+                            # has all of this on the BotTrade record; we
+                            # were just dropping it on the way out.
+                            "scan_tier": trade.get("entry_context", {}).get("scan_tier")
+                                          or trade.get("scan_tier")
+                                          or trade.get("timeframe", "intraday"),
+                            "estimated_duration": trade.get("estimated_duration", ""),
+                            "tape_score": trade.get("tape_score", 0),
+                            "smb_is_a_plus": trade.get("entry_context", {}).get("smb_is_a_plus", False),
+                            "exit_rule": trade.get("entry_context", {}).get("exit_rule", ""),
+                            "trading_approach": trade.get("entry_context", {}).get("trading_approach", ""),
+                            "reasoning": trade.get("entry_context", {}).get("reasoning", []),
+                            # Scale-out + trailing-stop state — what the
+                            # bot is actively MANAGING right now.
+                            "scale_out_state": {
+                                "enabled": (trade.get("scale_out_config") or {}).get("enabled", False),
+                                "targets_hit": (trade.get("scale_out_config") or {}).get("targets_hit", []),
+                                "partial_exits": (trade.get("scale_out_config") or {}).get("partial_exits", []),
+                            },
+                            "trailing_stop_state": {
+                                "enabled": (trade.get("trailing_stop_config") or {}).get("enabled", False),
+                                "mode": (trade.get("trailing_stop_config") or {}).get("mode", "original"),
+                                "current_stop": (trade.get("trailing_stop_config") or {}).get("current_stop", 0.0),
+                                "high_water_mark": (trade.get("trailing_stop_config") or {}).get("high_water_mark", 0.0),
+                                "low_water_mark": (trade.get("trailing_stop_config") or {}).get("low_water_mark", 0.0),
+                            },
+                            # Risk math the operator wants at-a-glance
+                            "risk_amount": trade.get("risk_amount", 0),
+                            "risk_reward_ratio": trade.get("risk_reward_ratio", 0),
+                            "potential_reward": trade.get("potential_reward", 0),
+                            "remaining_shares": trade.get("remaining_shares", shares),
+                            "original_shares": trade.get("original_shares", shares),
+                            "regime_score": trade.get("regime_score", 0),
                         })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
