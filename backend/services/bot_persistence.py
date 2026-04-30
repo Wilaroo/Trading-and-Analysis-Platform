@@ -88,6 +88,11 @@ class BotPersistence:
                         bot.risk_params.starting_capital = saved_risk_params["starting_capital"]
                     if "max_notional_per_trade" in saved_risk_params:
                         bot.risk_params.max_notional_per_trade = saved_risk_params["max_notional_per_trade"]
+                    # 2026-05-01 v19.24 — reconcile endpoint defaults
+                    if "reconciled_default_stop_pct" in saved_risk_params:
+                        bot.risk_params.reconciled_default_stop_pct = float(saved_risk_params["reconciled_default_stop_pct"])
+                    if "reconciled_default_rr" in saved_risk_params:
+                        bot.risk_params.reconciled_default_rr = float(saved_risk_params["reconciled_default_rr"])
                     # 2026-05-01 v19.21 — round-trip per-setup R:R overrides.
                     # Saved dict MERGES into the code defaults so newly-shipped
                     # setups (e.g. `the_3_30_trade` added in v19.20) get their
@@ -353,6 +358,9 @@ class BotPersistence:
                     "min_risk_reward": bot.risk_params.min_risk_reward,
                     "starting_capital": bot.risk_params.starting_capital,
                     "max_notional_per_trade": bot.risk_params.max_notional_per_trade,
+                    # 2026-05-01 v19.24 — reconcile endpoint defaults
+                    "reconciled_default_stop_pct": bot.risk_params.reconciled_default_stop_pct,
+                    "reconciled_default_rr": bot.risk_params.reconciled_default_rr,
                     # 2026-05-01 v19.21 — persist per-setup R:R overrides
                     # so operator tweaks (e.g. /api/trading-bot/risk-params
                     # PUT) survive backend restarts.

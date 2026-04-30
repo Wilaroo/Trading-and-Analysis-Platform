@@ -30,7 +30,8 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `GET /api/portfolio` — IB pushed positions + manual fallback; quote_ready guard
 - `POST /api/portfolio/flatten-paper?confirm=FLATTEN` — flatten paper account, 120s cooldown
 - `GET /api/sentcom/positions` — bot + IB merged positions; injects live `_pushed_ib_data.quotes` into `current_price` so PnL doesn't lag the timer-driven `position_manager.update_open_positions` (2026-05-01 v19.22.3); exposes V5-rich fields `scan_tier / trade_style / reasoning[] / exit_rule / scale_out_state / trailing_stop_state / risk_reward_ratio / remaining_shares` (v19.23)
-- `GET /api/sentcom/stream/history?symbol=X&minutes=N` — chart bot-thought bubbles read this for per-symbol bot reasoning timeline (v19.23)
+- `GET /api/sentcom/stream/history?symbol=X&minutes=N` — Used to fetch `sentcom_thoughts` for chart bubbles and per-symbol bot reasoning timeline (v19.23)
+- `POST /api/trading-bot/reconcile` — **v19.24 (2026-05-01)** — proper write-through reconcile of IB-only orphan positions. Materializes real `bot_trades` + in-memory `_open_trades` so manage-loop can actively trail stops / scale-out / EOD-close positions the bot didn't originate. Safety: `{all:true}` requires `{confirm:"RECONCILE_ALL"}`; stop-already-breached skip; idempotent (already-tracked skip). Body: `{symbols:[...]}` or `{all:true, confirm:"RECONCILE_ALL"}` with optional `stop_pct`/`rr` overrides. Counterpart to lazy-reconcile in `sentcom_service.get_our_positions` (v19.23.1) which only patched UI display.
 - `GET /api/assistant/coach/morning-briefing` — Setup-landscape + multi-index-regime grounded morning briefing in 1st-person voice (2026-04-30 v4)
 - `GET /api/assistant/coach/eod-briefing` — retrospective EOD coaching (2026-04-29 v3)
 - `GET /api/assistant/coach/weekend-prep-briefing` — Sunday-night prep (2026-04-29 v3)

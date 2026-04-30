@@ -3,7 +3,69 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.23.1 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.24 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.24 — see CHANGELOG (forty-fifth commit)
+**P0 proper reconcile + MultiIndexRegime source-level pins.**
+- ✅ **`POST /api/trading-bot/reconcile`** — write-through
+  counterpart to v19.23.1 lazy-reconcile. Materializes real
+  BotTrade records for IB-only orphans (SBUX/SOFI/OKLO) so the bot's
+  manage loop can actively trail stops, scale-out, and EOD-close
+  them. Modes: `{symbols: [...]}` (explicit) or `{all: true,
+  confirm: "RECONCILE_ALL"}` (sweep). Per-request `stop_pct`/`rr`
+  overrides.
+- ✅ **`RiskParameters.reconciled_default_stop_pct=2.0`** +
+  `reconciled_default_rr=2.0`. Persisted through
+  `bot_state.risk_params`, surfaced in `/api/trading-bot/status`.
+- ✅ **Safety guards** — stop-already-breached skip (never insta-stop
+  trades), already-tracked skip (idempotent), no-ib-position skip,
+  pusher-disconnected fail-closed, `all=true` requires confirm token.
+- ✅ **`OpenPositionsV5` Reconcile N button** — appears in panel
+  header only when ≥1 orphan (`source === 'ib'`) is present.
+  `window.confirm` → POST → toast with counts.
+- ✅ **MultiIndexRegime source-level pins** — `_apply_setup_context`
+  + `LiveAlert` + `_refresh_cycle_context` contracts pinned at
+  pytest time so a future refactor can't silently drop the
+  `multi_index_regime` stamping path.
+- ✅ **21/21 new pytests**, **27/27 combined w/ v19.23 suite.**
+  ESLint clean.
+
+### 🟡 Next session priorities
+- **(P0 — user verification on Spark)** After pulling v19.24:
+  1. Restart backend.
+  2. Confirm `reconciled_default_stop_pct=2.0` / `reconciled_default_rr=2.0`
+     via `curl localhost:8001/api/trading-bot/risk-params`.
+  3. Click **Reconcile 3** button in V5 Open Positions header on
+     SBUX/SOFI/OKLO and verify the 3 positions switch from
+     `source:ib` to the full bot-managed payload + begin appearing in
+     manage-loop actions (trail stop ticks, scale-out on PT hit, etc.)
+  4. **MultiIndexRegime live check**:
+     `curl localhost:8001/api/scanner/live-alerts?limit=5 |
+      jq '.alerts[].multi_index_regime'` — should print real labels
+     (`risk_on_broad`, etc.), not `"unknown"`. If `"unknown"`,
+     investigate `_refresh_cycle_context` cache hookup.
+- **(P1) HOOD chart wrong-prices `useEffect` chain** investigation in
+  `ChartPanel.jsx`.
+- **(P1) Per-setup R:R overrides as code defaults** — operator
+  curled 7 overrides in this session. Promote into `RiskParameters.
+  setup_min_rr` defaults so fresh deploys pick them up without
+  curl-merge.
+- **(P1) Wire `cpu_relief_manager.is_active()` into more deferable
+  paths** (EVAL historical, daily collect, periodic backfill).
+- **(P1) Auto-trigger relief based on RPC latency**.
+- **(P1) `SectorRegimeClassifier` end-to-end verification** — same
+  pattern as MultiIndexRegime: pin in pytest + curl on Spark.
+- **(P2) Setup-landscape EOD self-grading tracker.**
+- **(P2) Mean-reversion metrics (Hurst + OU half-life).**
+- **(P2) Liquidity-aware trail in `stop_manager.py`.**
+- **(P3) Scanner card "Proven / Maturing / Cold-start" confidence
+  badge** based on `strategy_stats.r_outcomes` length.
+- **(P3) Chart bubble click → fire `sentcom:focus-symbol` event so
+  operator can chat-coach any moment in the day with one click.**
+- **(P3) SEC EDGAR 8-K integration for material events.**
+- **(P3) Safely retire Alpaca fallback.**
+- **(P3) Break up monolithic `server.py`** (Wait until pipeline is
+  100% stable).
 
 ### 🎯 Just shipped 2026-05-01 v19.23.1 — see CHANGELOG (forty-fourth commit)
 **Operator screenshot review on v19.23 deploy → 4 follow-ups in one commit.**

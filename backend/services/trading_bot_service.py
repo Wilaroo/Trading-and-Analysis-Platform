@@ -515,6 +515,18 @@ class RiskParameters:
     })
     max_slippage_pct: float = 0.5           # Maximum acceptable slippage %
 
+    # 2026-05-01 v19.24 — Defaults for `POST /api/trading-bot/reconcile`.
+    # When the bot claims an IB-only (orphan) position that it didn't
+    # originate, it has NO setup context to anchor stop/target on. These
+    # are the "wide-but-finite" fallback defaults — 2.0% stop gives the
+    # orphan breathing room so it isn't insta-stopped on noise, 2.0 R:R
+    # keeps math symmetric. The trailing-stop manager ratchets the stop
+    # up as price moves in our favor, so it's a STARTING stance, not a
+    # permanent wide stop. Operator can override per-request via the
+    # endpoint's `stop_pct` / `rr` body params.
+    reconciled_default_stop_pct: float = 2.0   # % from avgCost for orphan reconcile
+    reconciled_default_rr: float = 2.0         # R:R applied to the default bracket
+
     # Trading hours (Eastern Time)
     trading_start_hour: int = 7              # Start trading at 7:30 AM ET
     trading_start_minute: int = 30
@@ -2609,6 +2621,8 @@ class TradingBotService:
                 "min_risk_reward": self.risk_params.min_risk_reward,
                 "max_notional_per_trade": self.risk_params.max_notional_per_trade,
                 "setup_min_rr": dict(self.risk_params.setup_min_rr or {}),
+                "reconciled_default_stop_pct": self.risk_params.reconciled_default_stop_pct,
+                "reconciled_default_rr": self.risk_params.reconciled_default_rr,
             },
             "enabled_setups": self._enabled_setups,
             "strategy_configs": self.get_strategy_configs(),
@@ -2659,6 +2673,27 @@ class TradingBotService:
     async def full_position_sync(self) -> Dict:
         """Full IB position sync — delegated to PositionReconciler module."""
         return await self._position_reconciler.full_position_sync(self)
+    
+    async def reconcile_orphan_positions(
+        self,
+        symbols: Optional[List[str]] = None,
+        all_orphans: bool = False,
+        stop_pct: Optional[float] = None,
+        rr: Optional[float] = None,
+    ) -> Dict:
+        """Proper reconcile for IB-only orphan positions — delegated to
+        PositionReconciler. Materializes bot_trades + _open_trades so the
+        manage loop can actively trail stops / scale out / EOD-close
+        positions the bot didn't originate. See PositionReconciler.
+        reconcile_orphan_positions for the full contract + safety guards.
+        """
+        return await self._position_reconciler.reconcile_orphan_positions(
+            self,
+            symbols=symbols,
+            all_orphans=all_orphans,
+            stop_pct=stop_pct,
+            rr=rr,
+        )
     
     # ==================== REGIME PERFORMANCE LOGGING ====================
     

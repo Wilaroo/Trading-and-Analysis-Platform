@@ -364,9 +364,66 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
     [positions],
   );
   const [expandedSymbol, setExpandedSymbol] = useState(null);
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState(null);
 
   const handleToggle = (sym) => {
     setExpandedSymbol((prev) => (prev === sym ? null : sym));
+  };
+
+  // 2026-05-01 v19.24 — Orphan = IB-side position with no matching
+  // `bot_trades` row in `_open_trades`. `sentcom_service.get_our_positions`
+  // stamps `source: 'ib'` on these (vs `source: 'bot'` for trades the bot
+  // originated). Show "Reconcile" button when ≥1 orphan is present — lets
+  // the operator hand these positions over to the bot for active
+  // management (trail stops, scale-out, EOD close).
+  const orphans = useMemo(
+    () => open.filter(p => p && p.source === 'ib'),
+    [open],
+  );
+
+  const handleReconcile = async () => {
+    if (reconcileBusy) return;
+    const symbols = orphans.map(p => p.symbol).filter(Boolean);
+    if (symbols.length === 0) return;
+    const ok = typeof window !== 'undefined'
+      ? window.confirm(
+          `Reconcile ${symbols.length} orphan position${symbols.length > 1 ? 's' : ''} (${symbols.join(', ')})?\n\n` +
+          `The bot will materialize trade records with default 2.0% stop + 2.0 R:R ` +
+          `and begin actively managing them (trail stops, scale-out, EOD).`
+        )
+      : true;
+    if (!ok) return;
+
+    setReconcileBusy(true);
+    setReconcileMsg(null);
+    try {
+      const base = process.env.REACT_APP_BACKEND_URL || '';
+      const res = await fetch(`${base}/api/trading-bot/reconcile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        setReconcileMsg({
+          kind: 'error',
+          text: data?.detail || data?.error || `Reconcile failed (${res.status})`,
+        });
+      } else {
+        const nRec = (data.reconciled || []).length;
+        const nSkip = (data.skipped || []).length;
+        setReconcileMsg({
+          kind: 'ok',
+          text: `Reconciled ${nRec}${nSkip > 0 ? `, skipped ${nSkip}` : ''}`,
+        });
+      }
+    } catch (err) {
+      setReconcileMsg({ kind: 'error', text: String(err?.message || err) });
+    } finally {
+      setReconcileBusy(false);
+      setTimeout(() => setReconcileMsg(null), 6000);
+    }
   };
 
   return (
@@ -375,9 +432,35 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
         <div className="flex items-center gap-2">
           <div className="v5-panel-title">Open ({open.length})</div>
           <LiveDataChip compact />
+          {orphans.length > 0 && (
+            <button
+              type="button"
+              onClick={handleReconcile}
+              disabled={reconcileBusy}
+              data-testid="open-positions-reconcile-btn"
+              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border transition-colors ${
+                reconcileBusy
+                  ? 'border-zinc-700 text-zinc-500 cursor-wait'
+                  : 'border-amber-700/60 text-amber-300 hover:bg-amber-950/40'
+              }`}
+              title={`Reconcile ${orphans.length} orphan IB position${orphans.length > 1 ? 's' : ''}`}
+            >
+              {reconcileBusy ? 'Reconciling…' : `Reconcile ${orphans.length}`}
+            </button>
+          )}
         </div>
-        <div className={`v5-mono text-[12px] ${Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
-          {totalPnl != null ? formatUsd(totalPnl) : ''}
+        <div className="flex items-center gap-2">
+          {reconcileMsg && (
+            <span
+              data-testid="open-positions-reconcile-msg"
+              className={`text-[11px] ${reconcileMsg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
+            >
+              {reconcileMsg.text}
+            </span>
+          )}
+          <div className={`v5-mono text-[12px] ${Number(totalPnl) >= 0 ? 'v5-up' : 'v5-down'}`}>
+            {totalPnl != null ? formatUsd(totalPnl) : ''}
+          </div>
         </div>
       </div>
 

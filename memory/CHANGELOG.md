@@ -2,6 +2,102 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-fifth commit, v19.24) — Proper reconcile endpoint + MultiIndex regime pin
+
+**P0 shipped**: `POST /api/trading-bot/reconcile` — the write-through
+reconcile that v19.23.1 lazy-reconcile was the read-only precursor to.
+Closes the loop so IB-only orphan positions (SBUX/SOFI/OKLO) can be
+actively managed by the bot (trail stops, scale-out, EOD close), not
+just rendered on the UI.
+
+### Why
+Lazy-reconcile (v19.23.1) fixed the V5 UI by scanning Mongo
+`bot_trades` and stamping SL/TP on the IB-only position payload. But
+the bot's in-memory `_open_trades` is still empty for those positions,
+so the manage loop (`stop_manager.update_trailing_stop`, scale-out,
+EOD close-all) never touches them. If SBUX gapped up, the bot would
+miss the chance to trail to breakeven. If the operator ended the day
+with 3 unmanaged orphans, EOD auto-close would skip them.
+
+### What shipped
+- **`RiskParameters.reconciled_default_stop_pct=2.0`** +
+  `reconciled_default_rr=2.0`. Wider than the global 1.7 min R:R
+  because orphans have no setup context to justify tight stops; 2.0
+  gives breathing room + symmetric R:R, and the trailing-stop manager
+  ratchets up from there.
+- **`PositionReconciler.reconcile_orphan_positions(bot, symbols=[...],
+  all_orphans=False, stop_pct=None, rr=None)`** — materializes a real
+  `BotTrade(setup_type='reconciled_orphan', quality_grade='R',
+  trade_style='reconciled', close_at_eod=False)` record, inserts into
+  `_open_trades`, persists via `bot._persist_trade`, and fires an
+  `emit_stream_event(event='trade_reconciled')` so the V5 Unified
+  Stream shows "Reconciled SBUX @ $100.12 · 150sh · SL $98.00 · PT
+  $104.00 · R:R 2.0".
+- **Safety: stop-already-breached guard**. If current_price ≤ proposed
+  stop (for long, or ≥ for short), reconcile SKIPS with reason=
+  `stop_already_breached` and `suggest_manual: true`. Never silently
+  materialize a trade that would insta-stop on the next tick.
+- **Safety: idempotent**. Already-tracked symbols are SKIPPED with
+  reason=`already_tracked`; never double-insert.
+- **`POST /api/trading-bot/reconcile`** (new router endpoint).
+  - `{"symbols": ["SBUX"]}` → explicit, always works
+  - `{"all": true, "confirm": "RECONCILE_ALL"}` → sweep all orphans
+    (confirm token prevents accidental sweeps during IB blips, mirrors
+    `/api/portfolio/flatten-paper?confirm=FLATTEN`)
+  - `{"all": true}` or empty body → 400 with actionable message
+  - Per-request `stop_pct` / `rr` overrides
+- **`OpenPositionsV5` frontend**: new "Reconcile N" button in the panel
+  header, visible only when ≥1 orphan (`source === 'ib'`) is present.
+  Click → `window.confirm` → POST → toast with success/skip counts.
+- **Persistence**: new defaults round-trip through `bot_state.risk_params`
+  via `bot_persistence.save_state` / `load_state`.
+- **`get_status`**: exposes the two new fields in the `risk_params`
+  block so operator can see current defaults via
+  `GET /api/trading-bot/status`.
+
+### Also shipped — MultiIndexRegime source-level regression pins
+Handoff flagged P0 verification: confirm `MultiIndexRegimeClassifier`
+is actually stamping `LiveAlert.multi_index_regime` (not leaving it at
+`"unknown"`). 3 new source-level pins assert the plumbing is intact at
+pytest time instead of requiring an RTH curl on Spark:
+- `_apply_setup_context` must write to `alert.multi_index_regime` and
+  must reference `_get_cycle_context` + `multi_index_regime_classifier`
+- `LiveAlert` must have the `multi_index_regime` field
+- `_refresh_cycle_context` must prefetch the regime once per cycle
+  via `get_multi_index_regime_classifier`
+
+Operator still needs to run `curl /api/scanner/live-alerts?limit=5 |
+jq '.alerts[].multi_index_regime'` on Spark during RTH to confirm
+end-to-end, but the pin catches any future code-level regression.
+
+### Tests
+- 21 new pytest in `test_proper_reconcile_endpoint_v19_24.py` covering:
+  defaults, persistence, bracket math (long + short), stop-already-
+  breached guard, already-tracked skip, no-ib-position skip,
+  all_orphans sweep, pusher-disconnected guard, per-request overrides,
+  4 endpoint-level contract tests (empty body reject, all-without-
+  confirm reject, symbols-accept, all-with-confirm accept), 503 when
+  bot not initialized, and 3 MultiIndexRegime source pins.
+- **21/21 passing** locally + **27/27 combined with v19.23
+  payload test suite**. ESLint clean. Ruff clean (1 pre-existing
+  F841 on unrelated `reason` local unchanged).
+
+### Operator action after Spark pull
+1. `sudo supervisorctl restart backend` (auto-reloads on DGX via
+   existing ENV, or manual `pkill + nohup python server.py`).
+2. Verify defaults: `curl localhost:8001/api/trading-bot/risk-params |
+   jq '.risk_params.reconciled_default_stop_pct,
+                           .risk_params.reconciled_default_rr'`
+   → should print `2.0` / `2.0`.
+3. On SBUX/SOFI/OKLO orphans: click the **Reconcile 3** button in the
+   V5 Open Positions header → confirm → expect 3 reconciled rows in
+   the response and the positions switching from `source: ib` to the
+   full bot-managed payload.
+4. Multi-index regime check:
+   `curl localhost:8001/api/scanner/live-alerts?limit=5 |
+    jq '.alerts[].multi_index_regime'` — should print real labels
+   (`risk_on_broad`, `bullish_divergence`, etc.) not `"unknown"`.
+
 ## 2026-05-01 (forty-fourth commit, v19.23.1) — Lazy reconcile + share size everywhere + chart bubble fix
 
 Operator follow-up review on v19.23 deploy: SBUX/SOFI/OKLO showing

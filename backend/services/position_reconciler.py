@@ -463,6 +463,336 @@ class PositionReconciler:
             return report
 
 
+    # ==================== PROPER RECONCILE (v19.24 — 2026-05-01) =====================
+
+    async def reconcile_orphan_positions(
+        self,
+        bot: 'TradingBotService',
+        symbols: list = None,
+        all_orphans: bool = False,
+        stop_pct: float = None,
+        rr: float = None,
+    ) -> Dict:
+        """Materialize bot_trades for IB-only (orphan) positions so the bot
+        can actively manage them (trail stops, scale-out, EOD close).
+
+        v19.23.1 shipped a read-only "lazy reconcile" in `sentcom_service`
+        that enriches the UI payload for orphan positions by scanning
+        `bot_trades` for matching symbols. That fix only patches display —
+        the bot's in-memory `_open_trades` is still empty so the manage
+        loop cannot touch stops/scale-outs/EOD on those positions.
+
+        This method is the PROPER write-through fix: it picks up orphan
+        IB positions, computes a default bracket (stop at ±stop_pct from
+        avgCost, target at avgCost ± stop_distance*rr), creates a real
+        BotTrade record, persists it to Mongo, and inserts into
+        `bot._open_trades` — at which point the manage loop owns it.
+
+        Safety:
+          - If the proposed stop is ALREADY BREACHED at reconcile time
+            (e.g. long position's current price < proposed stop), the
+            symbol is SKIPPED with `reason='stop_already_breached'` so
+            the operator decides manually — never materialize a trade
+            that would insta-stop on the next tick.
+          - If the symbol is already tracked by the bot (in `_open_trades`),
+            it's SKIPPED with `reason='already_tracked'` — idempotent.
+          - If the symbol has no matching IB position, SKIPPED with
+            `reason='no_ib_position'`.
+
+        Args:
+            bot: TradingBotService instance.
+            symbols: Explicit list of symbols to reconcile. Takes priority
+                over `all_orphans`.
+            all_orphans: If True and `symbols` is empty/None, reconciles
+                ALL orphan positions. Caller (router) guards this behind
+                a confirm token for safety.
+            stop_pct: Per-request stop % override. Falls back to
+                `bot.risk_params.reconciled_default_stop_pct`.
+            rr: Per-request R:R override. Falls back to
+                `bot.risk_params.reconciled_default_rr`.
+
+        Returns:
+            Dict: {
+              success: bool,
+              timestamp: iso str,
+              reconciled: [ {symbol, trade_id, shares, direction, entry,
+                             stop, target, risk_reward_ratio}, ... ],
+              skipped: [ {symbol, reason}, ... ],
+              errors: [ {symbol, error}, ... ],
+            }
+        """
+        from services.trading_bot_service import (
+            TradeDirection, TradeStatus, BotTrade,
+        )
+
+        report = {
+            "success": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reconciled": [],
+            "skipped": [],
+            "errors": [],
+        }
+
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+
+            if not is_pusher_connected():
+                report["success"] = False
+                report["error"] = "IB pusher not connected — cannot reconcile"
+                return report
+
+            # Resolve defaults from bot risk_params if caller didn't override.
+            default_stop_pct = float(
+                stop_pct
+                if stop_pct is not None
+                else getattr(bot.risk_params, "reconciled_default_stop_pct", 2.0)
+            )
+            default_rr = float(
+                rr
+                if rr is not None
+                else getattr(bot.risk_params, "reconciled_default_rr", 2.0)
+            )
+            if default_stop_pct <= 0:
+                report["success"] = False
+                report["error"] = f"stop_pct must be > 0, got {default_stop_pct}"
+                return report
+            if default_rr <= 0:
+                report["success"] = False
+                report["error"] = f"rr must be > 0, got {default_rr}"
+                return report
+
+            # Build IB position map (upper-cased symbols).
+            ib_positions = _pushed_ib_data.get("positions", []) or []
+            ib_pos_map = {}
+            for pos in ib_positions:
+                sym = (pos.get("symbol") or pos.get("contract", {}).get("symbol") or "").upper()
+                if not sym:
+                    continue
+                qty = float(pos.get("position", pos.get("qty", 0)) or 0)
+                if abs(qty) < 0.01:
+                    continue  # zero-qty ghost, skip
+                ib_pos_map[sym] = {
+                    "symbol": sym,
+                    "qty": qty,
+                    "avg_cost": float(pos.get("avgCost", pos.get("avg_cost", 0)) or 0),
+                    "market_price": float(
+                        pos.get("marketPrice", pos.get("market_price", 0)) or 0
+                    ),
+                }
+
+            # Bot-tracked symbols (so we skip already-managed positions).
+            bot_tracked = {t.symbol.upper() for t in bot._open_trades.values()}
+
+            # Resolve candidate list.
+            if symbols:
+                candidates = [s.upper() for s in symbols if s]
+            elif all_orphans:
+                candidates = [s for s in ib_pos_map.keys() if s not in bot_tracked]
+            else:
+                report["success"] = False
+                report["error"] = "Provide symbols=[...] or all_orphans=True"
+                return report
+
+            if not candidates:
+                # Nothing to do — not an error, just a no-op.
+                return report
+
+            # IB quote map for live current_price (best-effort).
+            ib_quotes = _pushed_ib_data.get("quotes", {}) or {}
+
+            for sym in candidates:
+                try:
+                    if sym in bot_tracked:
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "already_tracked",
+                        })
+                        continue
+
+                    ib_pos = ib_pos_map.get(sym)
+                    if not ib_pos:
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "no_ib_position",
+                        })
+                        continue
+
+                    qty = ib_pos["qty"]
+                    avg_cost = ib_pos["avg_cost"]
+                    if avg_cost <= 0:
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "invalid_avg_cost",
+                        })
+                        continue
+
+                    direction = TradeDirection.LONG if qty > 0 else TradeDirection.SHORT
+                    abs_qty = int(abs(qty))
+
+                    # Current price — prefer live quote, fall back to
+                    # marketPrice from position, finally avgCost.
+                    quote = ib_quotes.get(sym, {}) or {}
+                    current_price = (
+                        float(quote.get("last") or quote.get("close") or 0)
+                        or ib_pos["market_price"]
+                        or avg_cost
+                    )
+
+                    # Compute stop + target from defaults anchored on avgCost.
+                    stop_distance = avg_cost * (default_stop_pct / 100.0)
+                    target_distance = stop_distance * default_rr
+                    if direction == TradeDirection.LONG:
+                        stop_price = avg_cost - stop_distance
+                        target_1 = avg_cost + target_distance
+                    else:
+                        stop_price = avg_cost + stop_distance
+                        target_1 = avg_cost - target_distance
+
+                    # Safety guard: stop already breached at current price.
+                    breached = (
+                        (direction == TradeDirection.LONG and current_price <= stop_price)
+                        or (direction == TradeDirection.SHORT and current_price >= stop_price)
+                    )
+                    if breached:
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "stop_already_breached",
+                            "avg_cost": avg_cost,
+                            "current_price": current_price,
+                            "proposed_stop": round(stop_price, 4),
+                            "direction": direction.value,
+                            "suggest_manual": True,
+                        })
+                        continue
+
+                    risk_per_share = stop_distance
+                    reward_per_share = target_distance
+
+                    trade_id = str(uuid.uuid4())[:8]
+
+                    trade = BotTrade(
+                        id=trade_id,
+                        symbol=sym,
+                        direction=direction,
+                        status=TradeStatus.OPEN,
+                        setup_type="reconciled_orphan",
+                        timeframe="intraday",
+                        quality_score=50,
+                        quality_grade="R",  # "R" for Reconciled
+                        entry_price=avg_cost,
+                        current_price=current_price,
+                        stop_price=stop_price,
+                        target_prices=[target_1],
+                        shares=abs_qty,
+                        risk_amount=risk_per_share * abs_qty,
+                        potential_reward=reward_per_share * abs_qty,
+                        risk_reward_ratio=default_rr,
+                        trade_style="reconciled",
+                        smb_grade="R",
+                        close_at_eod=False,  # orphan reconciles default to hold overnight
+                    )
+                    trade.fill_price = avg_cost
+                    trade.remaining_shares = abs_qty
+                    trade.original_shares = abs_qty
+                    trade.entry_time = datetime.now(timezone.utc)
+                    trade.executed_at = datetime.now(timezone.utc).isoformat()
+                    trade.created_at = datetime.now(timezone.utc).isoformat()
+                    trade.notes = (
+                        f"Reconciled from IB orphan — stop at {default_stop_pct:.1f}% "
+                        f"from avg_cost, R:R {default_rr:.1f}"
+                    )
+                    # Initialize trailing stop config so the manage loop
+                    # picks up the starting stop cleanly.
+                    trade.trailing_stop_config["original_stop"] = stop_price
+                    trade.trailing_stop_config["current_stop"] = stop_price
+                    # Rich entry context so the V5 UI expanded row has
+                    # the same shape as a bot-originated trade.
+                    trade.entry_context = {
+                        "scan_tier": "reconciled",
+                        "smb_is_a_plus": False,
+                        "exit_rule": f"default {default_stop_pct:.1f}% stop, {default_rr:.1f}:1 R:R",
+                        "trading_approach": "reconciled orphan (bot claiming untracked IB position)",
+                        "reasoning": [
+                            f"Reconciled from IB orphan on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+                            f"Entry anchored to IB avgCost ${avg_cost:.2f}",
+                            f"Default bracket: stop ${stop_price:.2f} ({default_stop_pct:.1f}%), target ${target_1:.2f} ({default_rr:.1f} R:R)",
+                        ],
+                        "reconciled": True,
+                        "reconcile_defaults": {
+                            "stop_pct": default_stop_pct,
+                            "rr": default_rr,
+                        },
+                    }
+
+                    # Insert into in-memory + persist.
+                    bot._open_trades[trade.id] = trade
+                    await asyncio.to_thread(bot._persist_trade, trade)
+
+                    # Best-effort: emit stream event so the V5 Unified
+                    # Stream shows "Reconciled SBUX @ $100.12 · 150sh".
+                    try:
+                        from services.sentcom_service import emit_stream_event
+                        await emit_stream_event({
+                            "kind": "info",
+                            "text": (
+                                f"Reconciled {sym} {direction.value.upper()} "
+                                f"{abs_qty}sh @ ${avg_cost:.2f} · "
+                                f"SL ${stop_price:.2f} · PT ${target_1:.2f} · "
+                                f"R:R {default_rr:.1f}"
+                            ),
+                            "symbol": sym,
+                            "event": "trade_reconciled",
+                            "metadata": {
+                                "trade_id": trade.id,
+                                "shares": abs_qty,
+                                "direction": direction.value,
+                                "avg_cost": avg_cost,
+                                "stop_price": stop_price,
+                                "target_price": target_1,
+                                "risk_reward_ratio": default_rr,
+                                "source": "reconcile_orphan_positions",
+                            },
+                        })
+                    except Exception as emit_err:
+                        logger.debug(f"Reconcile stream emit failed for {sym}: {emit_err}")
+
+                    logger.info(
+                        f"[RECONCILE] {sym} {direction.value.upper()} "
+                        f"{abs_qty}sh @ ${avg_cost:.2f} · SL ${stop_price:.2f} · "
+                        f"PT ${target_1:.2f} · trade_id={trade.id}"
+                    )
+
+                    report["reconciled"].append({
+                        "symbol": sym,
+                        "trade_id": trade.id,
+                        "shares": abs_qty,
+                        "direction": direction.value,
+                        "entry_price": avg_cost,
+                        "current_price": current_price,
+                        "stop_price": round(stop_price, 4),
+                        "target_price": round(target_1, 4),
+                        "risk_reward_ratio": default_rr,
+                        "stop_pct": default_stop_pct,
+                    })
+
+                except Exception as inner_err:
+                    logger.exception(
+                        f"reconcile_orphan_positions({sym}) failed: {inner_err}"
+                    )
+                    report["errors"].append({
+                        "symbol": sym,
+                        "error": str(inner_err),
+                    })
+
+            return report
+
+        except Exception as e:
+            logger.exception(f"reconcile_orphan_positions error: {e}")
+            report["success"] = False
+            report["error"] = str(e)
+            return report
+
+
     # ==================== EMERGENCY STOP PROTECTION (Phase 4 — 2026-04-22) ==================
 
     async def protect_orphan_positions(

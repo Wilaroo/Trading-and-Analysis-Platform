@@ -1090,6 +1090,80 @@ async def close_phantom_trade(trade_id: str, reason: str = "manual_close"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== PROPER RECONCILE (v19.24 — 2026-05-01) =====================
+
+class ReconcileRequest(BaseModel):
+    """Body for POST /api/trading-bot/reconcile.
+
+    Either `symbols=[...]` must be provided OR `all=True` with
+    `confirm="RECONCILE_ALL"` — the `confirm` token prevents accidental
+    sweeps when an IB connectivity blip briefly flashes stale positions
+    (mirrors the /api/portfolio/flatten-paper?confirm=FLATTEN safety
+    pattern). Optional `stop_pct` / `rr` overrides the per-bot defaults
+    on `RiskParameters.reconciled_default_{stop_pct,rr}`.
+    """
+    symbols: Optional[List[str]] = None
+    all: bool = False
+    confirm: Optional[str] = None
+    stop_pct: Optional[float] = None
+    rr: Optional[float] = None
+
+
+@router.post("/reconcile")
+async def reconcile_orphan_positions(req: ReconcileRequest):
+    """Materialize bot_trades for IB-only (orphan) positions so the bot
+    can actively manage them (trail stops, scale-out, EOD close).
+    
+    v19.23.1 shipped read-only "lazy reconcile" in sentcom_service that
+    fixed the V5 UI display only. This endpoint is the proper write-
+    through path — after POST, the orphan positions are in the bot's
+    in-memory `_open_trades` AND persisted to Mongo `bot_trades`, so the
+    manage loop will trail stops / scale out / EOD-close them.
+    
+    Body:
+      - `symbols`: explicit list (recommended, always works)
+          POST /reconcile {"symbols": ["SBUX", "SOFI", "OKLO"]}
+      - `all` + `confirm`: sweep all orphans (requires confirm token)
+          POST /reconcile {"all": true, "confirm": "RECONCILE_ALL"}
+      - `stop_pct` / `rr`: per-request overrides for default bracket
+    
+    Response:
+      {
+        success: bool,
+        reconciled: [{symbol, trade_id, shares, stop_price, target_price, …}],
+        skipped: [{symbol, reason: "already_tracked" | "no_ib_position" |
+                   "stop_already_breached" | "invalid_avg_cost"}],
+        errors: [{symbol, error}]
+      }
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    # Safety: `all=true` requires explicit confirm token.
+    if req.all and req.confirm != "RECONCILE_ALL":
+        raise HTTPException(
+            status_code=400,
+            detail="all=true requires confirm='RECONCILE_ALL'",
+        )
+    if not req.all and not req.symbols:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide symbols=[...] or all=true with confirm='RECONCILE_ALL'",
+        )
+    
+    try:
+        result = await _trading_bot.reconcile_orphan_positions(
+            symbols=req.symbols,
+            all_orphans=req.all,
+            stop_pct=req.stop_pct,
+            rr=req.rr,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Reconcile error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.get("/trades")
 def get_trades_list():
