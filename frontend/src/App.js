@@ -44,6 +44,9 @@ import {
 import CommandCenterPage from './pages/CommandCenterPage';
 import GlossaryPage from './pages/GlossaryPage';
 import SettingsPage from './pages/SettingsPage';
+// v19.28 — Diagnostics tab (Decision Trail + Module Scorecard +
+// markdown export for operator-driven tuning suggestions).
+import DiagnosticsPage from './pages/DiagnosticsPage';
 import NIA from './components/NIA';
 
 import './App.css';
@@ -439,6 +442,7 @@ function App() {
       case 'trade-journal': return <ErrorBoundary name="Trade Journal"><TradeJournalPage /></ErrorBoundary>;
       case 'glossary': return <ErrorBoundary name="Glossary"><GlossaryPage /></ErrorBoundary>;
       case 'settings': return <ErrorBoundary name="Settings"><SettingsPage audioEnabled={audioEnabled} setAudioEnabled={setAudioEnabled} alertThreshold={alertThreshold} setAlertThreshold={setAlertThreshold} /></ErrorBoundary>;
+      case 'diagnostics': return <ErrorBoundary name="Diagnostics"><DiagnosticsPage /></ErrorBoundary>;
       default: return null;
     }
   };

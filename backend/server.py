@@ -381,6 +381,13 @@ def _init_all_services():
         print("Alpaca fallback DISABLED (IB-only). Phase 4 retirement active.")
     stock_service.set_db(db)  # Wire MongoDB for IB data queries
     market_context_service.set_db(db)  # Wire MongoDB for IB historical data
+    # v19.28 — Diagnostics tab joins scanner_alerts + shadow_decisions
+    # + bot_trades + sentcom_thoughts. Wire the DB here so the Decision
+    # Trail Explorer is live the moment startup completes.
+    try:
+        _set_diagnostics_db(db)
+    except Exception as _diag_err:
+        logger.warning(f"diagnostics router db wire failed: {_diag_err}")
 
     # Seed strategies if not already done
     if not strategy_service.is_seeded():
@@ -1503,6 +1510,15 @@ app.include_router(weekend_briefing_router)
 # Built 2026-04-30 to answer "why no trades today" without log grepping.
 from routers.diagnostic_router import router as diagnostic_router  # noqa: E402
 app.include_router(diagnostic_router)
+# v19.28 (2026-05-01) — `/api/diagnostics/*` Decision Trail Explorer
+# powers the new "Diagnostics" side-nav tab. Joins scanner_alerts +
+# shadow_decisions + bot_trades + sentcom_thoughts so operator can
+# trace any setup end-to-end and export a markdown report for tuning.
+from routers.diagnostics import (  # noqa: E402
+    router as diagnostics_router,
+    set_db as _set_diagnostics_db,
+)
+app.include_router(diagnostics_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)

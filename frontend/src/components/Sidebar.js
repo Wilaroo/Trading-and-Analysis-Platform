@@ -8,7 +8,8 @@ import {
   ChevronRight,
   BookOpen,
   Settings,
-  Brain
+  Brain,
+  Microscope,
 } from 'lucide-react';
 
 const navItems = [
@@ -18,6 +19,10 @@ const navItems = [
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'glossary', icon: BookOpen, label: 'Glossary & Logic' },
   { id: 'settings', icon: Settings, label: 'Settings' },
+  // v19.28 (2026-05-01) — Diagnostics tab. Decision Trail Explorer +
+  // Module Scorecard + markdown report export. Powers operator's
+  // "feed it back to Emergent for tuning suggestions" workflow.
+  { id: 'diagnostics', icon: Microscope, label: 'Diagnostics', isNew: true },
 ];
 
 export const Sidebar = ({ activeTab, setActiveTab }) => {

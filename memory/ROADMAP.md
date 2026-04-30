@@ -47,22 +47,71 @@ complaint without WebSocket complexity.
 
 ### 🟡 Next session priorities
 
-#### 🎯 Just shipped 2026-05-01 v19.27 — see CHANGELOG (forty-eighth commit)
-**Position panel reality reconciliation.** Operator caught a screenshot
-with 4 of 10 rows misclassified as orphans, duplicate HOOD/BP rows,
-and an OKLO SHORT 0sh ghost. Three coordinated fixes:
-- ✅ **Smart source detection**: `bot` / `partial` / `stale_bot` / `ib`
-  via share-count reconciliation in `_classify_source_v19_27`
-- ✅ **Symbol grouping**: HOOD's 2 trades collapse to 1 row + 2× badge
-  + expandable to see underlying brackets
-- ✅ **Auto-sweep phantoms**: OKLO 0sh ghosts auto-close via
-  `position_manager.update_open_positions` v19.27 block (with
-  pusher-connected guard + 30s age gate)
-- ✅ Source badges: ORPHAN (amber) / PARTIAL (orange) / STALE (rose)
-- ✅ Reconcile button now counts `ib` + `partial`
-- ✅ 18 new pytests (74/74 combined). ESLint + ruff clean on new code.
+#### 🎯 Just shipped 2026-05-01 v19.28 — see CHANGELOG (forty-ninth commit)
+**Diagnostics tab MVP** — new top-level side-nav tab unifying shadow
+trades / actual trades / scans / AI reasoning into one drilldown
++ aggregate views. 5 read-only endpoints powering 4 sub-tabs:
+- ✅ **Trail Explorer**: pick any decision → see scanner alert / AI
+  module votes / bot decision / bot thoughts as a vertical timeline
+- ✅ **Module Scorecard**: per-AI-module accuracy / P&L (followed vs
+  ignored) / weight / 🔴 kill-candidate flag
+- ✅ **Pipeline Funnel**: emitted → AI-passed → risk-passed → fired
+  → winners with conversion %, abnormal drops highlighted
+- ✅ **Export Report**: one-click markdown for paste-to-Emergent
+  tuning conversations
+- ✅ 16 new pytests (90/90 combined). Live verified — all 5 endpoints
+  HTTP 200, frontend renders cleanly.
 
-#### 🔴 (P0 — TOP, NEXT) v19.28 — Tier 3 chart WebSocket layer
+#### 🟡 Next session menu — pick what helps tuning most:
+
+**Option A (most leverage)**: v19.29 — **EOD Insight Stream + Inline drilldowns** (~6h)
+- New "Insights" sub-tab on Diagnostics: LLM auto-generates 3-7
+  bullets each EOD ("Debate's bear vote was right 80% on momentum
+  but you ignored it 70% — consider weighting Bear higher on
+  momentum-class setups"). Uses chat_server stack.
+- Inline drilldown drawer: click any row in V5 Open Positions /
+  Scanner Cards / Unified Stream → trail opens in a side drawer.
+  Eliminates the "open Diagnostics, search, find it" friction.
+
+**Option B**: v19.29 — **Tier 3 chart WebSocket** (~6-8h)
+- Push new bars to charts within ~50ms (replaces 5s polling).
+- Operator approved earlier; full design spec below.
+
+**Option C**: v19.29 — **Cohort Comparator + Counterfactual Playground** (~12h)
+- "Pick 2 cohorts (e.g. all SOFI long where Debate=BUY but bot
+  passed) and compare R-distributions side-by-side"
+- "If I'd raised setup_min_rr on momentum from 1.7 → 2.0 last 30d,
+  here's what would've happened"
+- Heaviest piece, but the prize for closed-loop calibration.
+
+**Option D**: Operator chooses based on first-day Diagnostics use.
+
+#### 🔴 (P0 — verify on Spark)
+- **v19.28**: Pull + open Diagnostics tab → Trail Explorer / Module
+  Scorecard / Funnel / Export should all populate with real data.
+- **v19.27**: Smart source detection on positions panel — partial
+  drift rendered correctly, OKLO 0sh phantom auto-swept.
+- **v19.26**: Chat assistant — SOFI stop, SQQQ live quote.
+- **v19.25**: Chart cache + tail polling latency.
+- **MultiIndexRegime live curl during RTH.**
+
+#### 🟡 P1 backlog
+- HOOD chart wrong-prices `useEffect` — likely resolved by v19.25
+- Per-setup R:R operator overrides → `RiskParameters.setup_min_rr` defaults
+- `cpu_relief_manager.is_active()` into deferable paths + RPC-latency auto-trigger
+- `SectorRegimeClassifier` end-to-end verification
+
+#### 🟢 P2 / P3 backlog
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics (Hurst + OU half-life)
+- Liquidity-aware trail in `stop_manager.py`
+- Scanner card "Proven / Maturing / Cold-start" badge
+- Chart bubble click → `sentcom:focus-symbol`
+- SEC EDGAR 8-K integration
+- Safely retire Alpaca fallback
+- Break up monolithic `server.py`
+
+#### 🔴 (P0 conditional — only ship if v19.25 not enough) v19.30 — Tier 3 chart WebSocket layer
 **Goal**: Push new bars to the chart within ~50ms of IB delivering them,
 replacing the 5s polling cycle entirely. T1 (cache) + T2 (tail) already
 killed ~95% of the perceived slowness; Tier 3 closes the last 5%

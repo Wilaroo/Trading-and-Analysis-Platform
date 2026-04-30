@@ -2,6 +2,142 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-ninth commit, v19.28) — Diagnostics tab MVP (Decision Trail spine + Module Scorecard + Pipeline Funnel + Export Report)
+
+**Operator asked**: "now that we have ton of shadow trades, actual
+trades, scans and evals, AI reasons/decisions, etc. we need a
+framework or reporting feature to bring all of these stats and
+messages together so that we can compare and contrast to start tuning
+our whole pipeline further and making our entire system smarter."
+
+**Locked answer (5 questions answered 2026-05-01)**:
+1. Start with **Decision Trail Explorer** (the data spine)
+2. Live in a new top-level **"Diagnostics" side-nav tab** (between
+   Settings and bottom). Inline drilldowns deferred to v19.29.
+3. **Hybrid tuning** — operator drives, can also dump report to
+   Emergent for suggestions
+4. **Both real-time + EOD** insights cadence
+5. Sequence: ship maximum-insight scaffolding now
+
+### Backend
+
+**`services/decision_trail.py`** (new) — cross-collection joins:
+- `build_decision_trail(db, identifier)` — given any of `alert_id`,
+  `trade_id`, or `shadow_decision_id`, joins `bot_trades` +
+  `shadow_decisions` + `sentcom_thoughts` (TTL 7d, ±30min/+2h
+  window) + synthesised alert summary from `entry_context`. Returns
+  a structured trail with sections `{alert, shadow, module_votes,
+  trade, thoughts, meta}`. Outcome derivation handles win/loss/
+  scratch/open/shadow_*.
+- `list_recent_decisions(db, limit, symbol, setup, outcome,
+  only_disagreements)` — paginated mixed list of bot trades + non-
+  executed shadow decisions, dedup by `was_executed=True` so
+  shadows that became real trades only count once. Disagreement
+  filter shows shadows where `combined_recommendation` diverged
+  from `debate.consensus`.
+- `build_module_scorecard(db, days)` — per-AI-module aggregate
+  from `shadow_module_performance` collection augmented with
+  `shadow_module_weights`. Computes `kill_candidate` flag
+  (accuracy < 50% AND followed-P&L < ignored-P&L) and sorts kill
+  candidates first.
+- `build_pipeline_funnel(db, days)` — 5-stage funnel (emitted →
+  ai_passed → risk_passed → fired → winners) with conversion %
+  between consecutive stages.
+- `export_report_markdown(db, days)` — clean markdown dump
+  combining funnel + scorecard + recent decisions + disagreements.
+  Schema-stable so when operator pastes into chat with Emergent,
+  the LLM gets predictable structure to reason from.
+
+**`routers/diagnostics.py`** (new) — 5 read-only endpoints all
+prefixed `/api/diagnostics`:
+- `GET /recent-decisions?limit&symbol&setup&outcome&only_disagreements`
+- `GET /decision-trail/{identifier}`
+- `GET /module-scorecard?days`
+- `GET /funnel?days`
+- `GET /export-report?days&fmt=markdown`
+
+**`server.py`** — registered router + `set_db()` on startup so the
+endpoints are live the moment uvicorn boots.
+
+### Frontend
+
+**`pages/DiagnosticsPage.jsx`** (new) — full operator view with 4
+sub-tabs:
+1. **Trail Explorer** (default) — left rail recent-decisions list
+   with symbol filter + disagreements toggle + refresh; right pane
+   per-decision drilldown showing 4 sections (Scanner Alert / AI
+   Module Votes / Bot Decision / Bot Thoughts).
+2. **Module Scorecard** — sortable table with kill-candidate row
+   highlight (rose tint), 1d/7d/30d window switcher.
+3. **Pipeline Funnel** — horizontal bar chart with conversion %
+   between stages, abnormal drops (<30%) highlighted in rose.
+4. **Export Report** — fetch + Copy-to-Clipboard markdown dump
+   for tuning conversations with Emergent.
+
+**`components/Sidebar.js`** — new "Diagnostics" nav entry with
+`Microscope` icon and `NEW` badge.
+
+**`App.js`** — `case 'diagnostics'` route renders DiagnosticsPage
+inside an ErrorBoundary.
+
+### Tests
+- 16 new pytests in `test_diagnostics_v19_28.py`:
+  - 5 covering trail builder (resolve by trade_id / alert_id /
+    shadow_only / no-match / outcome derivation corner cases)
+  - 3 covering recent-decisions filtering (symbol+outcome,
+    skip-executed-shadows, disagreements filter)
+  - 1 module scorecard kill-candidate logic + sort order
+  - 1 pipeline funnel stage count + conversion %
+  - 1 markdown export schema (sections, paste-back footer)
+  - 2 router pins (all 5 endpoints registered, set_db works)
+  - 3 frontend source-level pins (DiagnosticsPage subtabs,
+    sidebar nav entry, App.js route case)
+- **90/90 combined** with v19.23 + v19.24 + v19.25 + v19.26 +
+  v19.27 suites. ESLint + ruff clean on all new code.
+
+### Live verification
+- All 5 backend endpoints HTTP 200 ✓
+- Frontend renders the Diagnostics page on tab click ✓
+  (screenshot: header reads "DIAGNOSTICS V19.28", 4 sub-tab
+  buttons visible, Trail Explorer empty-state hint shown)
+- `Diagnostics NEW` nav entry visible in side rail ✓
+
+### What this unlocks
+- **Real-time tuning surface**: operator can pick any trade /
+  shadow / alert and see the full decision chain in one drilldown
+- **Module governance**: kill-candidate flag highlights modules
+  losing money vs ignoring them — supports operator's hybrid
+  tuning workflow
+- **Funnel observability**: spot when AI gate or risk gate is
+  rejecting abnormally
+- **Tuning-suggestion workflow**: one-click markdown copy →
+  paste into chat → Emergent has stable schema to suggest tuning
+
+### Operator action after Spark pull
+1. Pull + restart backend.
+2. Open V5. Side nav now has "Diagnostics" with `NEW` badge
+   between Settings and the bottom.
+3. **Trail Explorer**: pick a recent SOFI / HOOD / SBUX trade →
+   verify all 4 sections (alert / module votes / bot decision /
+   thoughts) populate.
+4. **Module Scorecard**: 7d view → look for any 🔴 kill-candidate
+   rows. These are modules to consider downweighting or retiring.
+5. **Pipeline Funnel**: 1d view → spot the biggest drop. If AI
+   gate rejected 80% today vs 40% median, something's tuned wrong.
+6. **Export Report** → Copy markdown → paste into chat with
+   Emergent → ask "what should I tune?"
+
+### Deferred to v19.29 (if you want them)
+- **Inline drilldown drawer** in V5 Open Positions / Scanner
+  Cards / Unified Stream → click any row → opens trail
+- **EOD Insight Stream** sub-tab — LLM summary of "3 things to
+  pay attention to tomorrow"
+- **Counterfactual Playground** — "if I'd raised setup_min_rr
+  on momentum from 1.7 → 2.0 last 30d, here's what would've
+  happened"
+- **Cohort Comparator** — pick 2 sub-populations, R-distribution
+  histograms, win-rate diff
+
 ## 2026-05-01 (forty-eighth commit, v19.27) — Position panel reality reconciliation
 
 **Operator caught a multi-bug screenshot** mid-session (10 open
