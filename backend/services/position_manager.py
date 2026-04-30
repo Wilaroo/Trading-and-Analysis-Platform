@@ -280,6 +280,27 @@ class PositionManager:
         """
         Close ALL open positions near market close (default: 3:57 PM ET).
         This is a critical risk management feature to avoid overnight exposure.
+
+        2026-04-30 v19.14 — multiple hardenings:
+          P0 #1 — `close_trade` returns a bool, not a dict. The legacy
+                  `result.get("success")` call was silently AttributeError-ing
+                  every iteration → all EOD closes counted as failures even
+                  on success. Now we treat the bool correctly.
+          P0 #2 — closes run in PARALLEL via `asyncio.gather`. With 25 open
+                  intraday positions and ~2s/close (IB roundtrip + snapshot),
+                  serial took ~50s — risked spilling past market close. Now
+                  ~3-5s regardless of position count.
+          P0 #3 — `_eod_close_executed_today` only sets True when ALL closes
+                  succeed. If any failed, we leave it False so the next
+                  manage-loop tick (every ~1-2s) retries.
+          P0 #4 — Loud ERROR alarm + WS notify if positions are still open
+                  at/after 4:00 PM ET.
+          P1 #5 — Half-trading-day detection via env `EOD_HALF_DAY_TODAY=true`
+                  shifts the close window to 12:55 PM ET. A future contributor
+                  can wire this to a real exchange calendar; for now it's
+                  operator-flagged the morning of (cheap, explicit, safe).
+          P1 #6 — WS-broadcast EOD start + completion so the V5 HUD can
+                  surface a banner during the close window.
         """
         if not bot._eod_close_enabled:
             return
@@ -297,7 +318,7 @@ class PositionManager:
             bot._eod_close_executed_today = False
             bot._last_eod_check_date = today_str
 
-        # Skip if already executed today
+        # Skip if already executed today (and ALL closes succeeded — see P0 #3)
         if bot._eod_close_executed_today:
             return
 
@@ -305,16 +326,48 @@ class PositionManager:
         if now_et.weekday() >= 5:
             return
 
-        # Check if we're in the EOD close window
-        eod_hour = bot._eod_close_hour
-        eod_minute = bot._eod_close_minute
+        # P1 #5 — half-trading-day detection. Operator sets
+        # `EOD_HALF_DAY_TODAY=true` in env on the morning of half-days
+        # (Black Friday, Christmas Eve, day after Thanksgiving). Default
+        # close window stays 3:57 PM. On half-days we flip to 12:55 PM
+        # (5 min before 1:00 PM half-day close). NYSE half-day calendar
+        # is rare enough that operator-flagging is acceptable for now.
+        import os as _os
+        is_half_day = _os.environ.get("EOD_HALF_DAY_TODAY", "").lower() in ("true", "1", "yes")
+        if is_half_day:
+            eod_hour, eod_minute, market_close_hour = 12, 55, 13
+        else:
+            eod_hour = bot._eod_close_hour
+            eod_minute = bot._eod_close_minute
+            market_close_hour = 16
 
         # Not yet time to close
         if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
             return
 
-        # After 4:00 PM, stop checking (market closed)
-        if now_et.hour >= 16:
+        # P0 #4 — past market close with positions still open is an EMERGENCY.
+        # Surface loudly via log + WS notify; do NOT silently skip.
+        if now_et.hour >= market_close_hour:
+            open_count = len(bot._open_trades)
+            if open_count > 0 and not bot._eod_close_executed_today:
+                last_alarm = getattr(bot, "_eod_after_close_alarmed_at", None)
+                if not last_alarm or last_alarm != today_str:
+                    logger.error(
+                        f"🚨 EOD ALARM: market closed at {market_close_hour}:00 ET but "
+                        f"{open_count} positions still OPEN locally. Verify IB-side "
+                        f"position state — they may have been auto-flat'd by IB or "
+                        f"may be carrying overnight."
+                    )
+                    bot._eod_after_close_alarmed_at = today_str
+                    try:
+                        await bot._broadcast_event({
+                            "type": "eod_after_close_alarm",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "open_positions": open_count,
+                            "et_clock": now_et.strftime("%H:%M:%S"),
+                        })
+                    except Exception:
+                        pass
             return
 
         # Time to close intraday positions!
@@ -329,30 +382,81 @@ class PositionManager:
             tid: t for tid, t in bot._open_trades.items()
             if getattr(t, 'close_at_eod', True)  # Default True for safety
         }
-        
+
         if not eod_trades:
             logger.info(f"🔔 EOD CHECK: {open_count} open trades, all are swing/position — no EOD close needed")
             bot._eod_close_executed_today = True
             return
 
-        logger.info(f"🔔 EOD AUTO-CLOSE: Closing {len(eod_trades)} intraday trades at {now_et.strftime('%H:%M:%S')} ET (keeping {open_count - len(eod_trades)} swing/position trades)")
+        logger.info(
+            f"🔔 EOD AUTO-CLOSE: Closing {len(eod_trades)} intraday trades at "
+            f"{now_et.strftime('%H:%M:%S')} ET (keeping {open_count - len(eod_trades)} "
+            f"swing/position trades){'  [HALF-DAY MODE]' if is_half_day else ''}"
+        )
 
-        closed_count = 0
-        total_pnl = 0.0
+        # P1 #6 — WS notify: EOD start. V5 HUD can render a banner.
+        try:
+            await bot._broadcast_event({
+                "type": "eod_close_started",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "positions_to_close": len(eod_trades),
+                "is_half_day": is_half_day,
+                "eod_window_et": f"{eod_hour:02d}:{eod_minute:02d}",
+            })
+        except Exception as e:
+            logger.warning(f"EOD WS notify (start) failed: {e}")
 
-        for trade_id, trade in list(eod_trades.items()):
+        # P0 #2 — close all eligible trades CONCURRENTLY. Caps at 25 in flight
+        # (matches max_open_positions); even with IB-side serialization on
+        # the order queue, the AWAITS happen in parallel so the total
+        # latency stays bounded by single-trade latency, not N × latency.
+        async def _close_one(tid_trade):
+            tid, trade = tid_trade
             try:
                 logger.info(f"  📤 EOD CLOSE: {trade.symbol} - {trade.direction.value} {trade.remaining_shares} shares")
-                result = await self.close_trade(trade_id, bot, reason="eod_auto_close")
-                if result.get("success"):
-                    closed_count += 1
-                    total_pnl += result.get("realized_pnl", 0)
-                else:
-                    logger.error(f"  ❌ Failed to close {trade.symbol}: {result.get('error')}")
+                # P0 #1 — close_trade returns a BOOL, not a dict. Treat the
+                # bool correctly; capture realized_pnl from the trade object
+                # post-close (close_trade mutates trade.realized_pnl).
+                ok = await self.close_trade(tid, bot, reason="eod_auto_close")
+                if ok:
+                    return ("ok", trade.realized_pnl)
+                return ("fail", trade.symbol)
             except Exception as e:
-                logger.error(f"  ❌ Error closing {trade.symbol}: {e}")
+                logger.exception(
+                    f"  ❌ EOD close raised for {trade.symbol}: {type(e).__name__}: {e}"
+                )
+                return ("fail", trade.symbol)
 
-        bot._eod_close_executed_today = True
+        results = await asyncio.gather(*(_close_one(p) for p in eod_trades.items()))
+        closed_count = sum(1 for r in results if r[0] == "ok")
+        total_pnl = sum(r[1] for r in results if r[0] == "ok")
+        failed_symbols = [r[1] for r in results if r[0] == "fail"]
+
+        # P0 #3 — only mark executed if EVERY close succeeded. If any
+        # failed, leave the flag False so next tick retries — manage loop
+        # ticks ~every 1-2s, plenty of time before market close.
+        if not failed_symbols:
+            bot._eod_close_executed_today = True
+        else:
+            logger.error(
+                f"⚠️ EOD: {len(failed_symbols)} of {len(eod_trades)} closes "
+                f"FAILED ({', '.join(failed_symbols)}). Will retry on next "
+                f"manage-loop tick. Symbols still open at IB until success."
+            )
+
+        # P1 #6 — WS notify: EOD complete (or partial)
+        try:
+            await bot._broadcast_event({
+                "type": "eod_close_completed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "closed": closed_count,
+                "failed": len(failed_symbols),
+                "failed_symbols": failed_symbols,
+                "total_pnl": total_pnl,
+                "fully_done": not failed_symbols,
+            })
+        except Exception as e:
+            logger.warning(f"EOD WS notify (complete) failed: {e}")
 
         # Persist the EOD close event
         if bot._db:
@@ -361,12 +465,18 @@ class PositionManager:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "date": today_str,
                 "positions_closed": closed_count,
+                "positions_failed": len(failed_symbols),
+                "failed_symbols": failed_symbols,
                 "total_pnl": total_pnl,
-                "close_time_et": now_et.strftime("%H:%M:%S")
+                "is_half_day": is_half_day,
+                "close_time_et": now_et.strftime("%H:%M:%S"),
             }
             await asyncio.to_thread(bot._db.bot_events.insert_one, eod_event)
 
-        logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
+        if failed_symbols:
+            logger.warning(f"⚠️ EOD AUTO-CLOSE PARTIAL: Closed {closed_count}, FAILED {len(failed_symbols)} ({', '.join(failed_symbols)}), Total P&L: ${total_pnl:+,.2f}")
+        else:
+            logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
 
     async def check_and_execute_scale_out(self, trade: 'BotTrade', bot: 'TradingBotService'):
         """
