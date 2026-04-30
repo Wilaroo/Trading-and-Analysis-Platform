@@ -348,23 +348,31 @@ export const SentComV5View = ({
               <div className="v5-panel-title">Scanner · Live</div>
               <LiveDataChip compact />
             </div>
-            <div className="text-[11px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
-              {(() => {
-                // 2026-04-30 v19.10 — when the scanner has cards,
-                // show "X / N hits" with X = topmost-visible card.
-                // Falls back to set-based count from raw inputs while
-                // ScannerCardsV5's effect is wiring up on first mount.
-                if (scanProgress.total > 0) {
-                  const x = Math.min(scanProgress.topIdx + 1, scanProgress.total);
-                  return `${x} / ${scanProgress.total} ${scanProgress.total === 1 ? 'hit' : 'hits'}`;
-                }
-                const syms = new Set();
-                (setups || []).forEach(s => s?.symbol && syms.add(String(s.symbol).toUpperCase()));
-                (alerts || []).forEach(a => a?.symbol && syms.add(String(a.symbol).toUpperCase()));
-                (positions || []).forEach(p => p?.symbol && syms.add(String(p.symbol).toUpperCase()));
-                const n = syms.size;
-                return `${n} ${n === 1 ? 'hit' : 'hits'}`;
-              })()}
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] v5-mono text-zinc-600 hidden sm:inline"
+                title="Keyboard navigation: ↓/↑ move cursor, Enter opens chart"
+              >
+                ↓↑ ⏎
+              </span>
+              <div className="text-[11px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
+                {(() => {
+                  // 2026-04-30 v19.10 — when the scanner has cards,
+                  // show "X / N hits" with X = topmost-visible card.
+                  // Falls back to set-based count from raw inputs while
+                  // ScannerCardsV5's effect is wiring up on first mount.
+                  if (scanProgress.total > 0) {
+                    const x = Math.min(scanProgress.topIdx + 1, scanProgress.total);
+                    return `${x} / ${scanProgress.total} ${scanProgress.total === 1 ? 'hit' : 'hits'}`;
+                  }
+                  const syms = new Set();
+                  (setups || []).forEach(s => s?.symbol && syms.add(String(s.symbol).toUpperCase()));
+                  (alerts || []).forEach(a => a?.symbol && syms.add(String(a.symbol).toUpperCase()));
+                  (positions || []).forEach(p => p?.symbol && syms.add(String(p.symbol).toUpperCase()));
+                  const n = syms.size;
+                  return `${n} ${n === 1 ? 'hit' : 'hits'}`;
+                })()}
+              </div>
             </div>
           </div>
           <div className="overflow-y-auto flex-1 v5-scroll">

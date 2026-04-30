@@ -2,6 +2,71 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (twenty-ninth commit, v19.10 + v19.11) — Scanner UX: "X / N hits" + keyboard nav
+
+### v19.10 — Sticky "X / N hits" counter
+
+`<ScannerCardsV5/>` exposes a new `onScanProgress` prop emitting
+`{ topIdx, total }`. Scroll listener on the closest `overflow-y:auto`
+ancestor finds the topmost-visible card via `getBoundingClientRect()`,
+RAF-throttled to 60fps. Each card carries `data-card-index={i}` for
+the lookup; flat index works across both flat AND grouped modes
+(collapsed groups still advance the counter so total stays accurate).
+
+`SentComV5View.jsx` reads the progress + renders `"12 / 47 hits"` in
+the panel header. Falls back to set-based count during first-mount
+before the effect wires up.
+
+### v19.11 — Keyboard navigation
+
+Power-user workflow on the now-tall Scanner column:
+
+- **↓ / ↑** — moves a "preview cursor" through cards. Visual only;
+  doesn't reload the chart, so scanning 47 cards isn't 47 chart
+  reloads.
+- **Enter** — commits the cursor: opens the chart for the previewed
+  ticker (same effect as clicking the card).
+
+#### Visual
+
+`.v5-scanner-card.previewed` adds a 1px cyan outline + faint cyan
+background tint. Composes cleanly with `.active` (current chart
+symbol — the cyan brightens) and `.v5-card-hover-cross` (mouse hover
+from the Stream side — the inset shadow still pulses).
+
+#### Smart syncing
+
+- Cursor syncs from `selectedSymbol` on prop change (chart click
+  externally → cursor jumps to the matching card).
+- Cursor clamps when the deck shrinks (alerts age out → `cards`
+  rebuilds smaller → cursor doesn't dangle past the end).
+- `scrollIntoView({block:'nearest', behavior:'smooth'})` on cursor
+  move so the operator can SEE which card is selected as they
+  arrow-key through.
+
+#### Input-field guard
+
+`document` keydown listener bails on `INPUT / TEXTAREA / SELECT /
+contentEditable` targets so the Deep Feed search box, chat composer,
+and any future input doesn't get hijacked. Modifier keys
+(`Alt/Ctrl/Meta`) also skip handling so browser shortcuts aren't
+shadowed.
+
+#### Tiny header hint
+
+Scanner panel header now reads `↓↑ ⏎  12 / 47 hits` (the keyboard
+glyphs only show on `sm` viewport-width and up so they don't crowd
+the badge on narrow drawer-resized layouts). Hover the glyphs for
+the full "Keyboard navigation: ↓/↑ move cursor, Enter opens chart"
+tooltip.
+
+### Files touched
+- `components/sentcom/v5/ScannerCardsV5.jsx` (+~80 lines: scroll tracker + keyboard handler + previewed prop)
+- `components/sentcom/SentComV5View.jsx` (+~15 lines: scanProgress state + header glyphs)
+- `components/sentcom/v5/useV5Styles.js` (+9 lines: `.previewed` outline)
+
+
+
 ## 2026-04-30 (twenty-eighth commit, v19.9) — V5 layout: Scanner full-height, drawer aligned to chart
 
 **Why**: Operator asked to move the bottom "SentCom Intelligence"

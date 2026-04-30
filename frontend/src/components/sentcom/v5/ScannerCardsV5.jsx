@@ -222,7 +222,7 @@ const relativeAge = (ts) => {
 };
 
 
-const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
+const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
   const botColor = BOT_TEXT_COLOR[card.stage] || 'text-zinc-400';
   const hasMetrics = card.metrics && (
@@ -247,7 +247,7 @@ const ScannerCard = ({ card, active, onClick, hoveredSymbol, onHoverSymbol, data
       onClick={onClick}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
-      className={`v5-scanner-card${active ? ' active' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}`}
+      className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
@@ -473,6 +473,78 @@ export const ScannerCardsV5 = ({
     };
   }, [cards.length, groupBySetup, collapsedGroups, onScanProgress]);
 
+  // 2026-04-30 v19.11 — Keyboard navigation for power-user workflow.
+  //
+  //   ↓ / ↑   move a "preview cursor" through cards (visual only —
+  //            doesn't reload the chart, so scanning 47 cards isn't
+  //            47 chart reloads)
+  //   Enter   commits the cursor: opens the chart for that ticker
+  //
+  // Mouse click still works exactly as before (commits immediately).
+  // Pairs with the data-card-index attributes the scroll-counter
+  // already uses, so we get free auto-scroll-into-view via
+  // `scrollIntoView({block:'nearest'})`.
+  const [previewIdx, setPreviewIdx] = useState(-1);
+
+  // Sync the cursor when the parent changes selectedSymbol externally
+  // (e.g., from chart click). Keeps Enter and arrows in lockstep.
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const idx = cards.findIndex(c => c.symbol === selectedSymbol);
+    if (idx >= 0) setPreviewIdx(idx);
+  }, [selectedSymbol, cards]);
+
+  // Reset the cursor when the deck shrinks below the cursor (e.g.,
+  // alerts time out and `cards` rebuilds smaller). Avoids a stale
+  // cursor pointing past the end.
+  useEffect(() => {
+    if (previewIdx >= cards.length) setPreviewIdx(cards.length - 1);
+  }, [cards.length, previewIdx]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      // Ignore when the operator is typing — text inputs, search
+      // boxes (Deep Feed), chat composer, code editors, etc. all
+      // need their arrows.
+      const t = e.target;
+      if (t && t.nodeType === 1) {
+        const tag = t.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+            || t.isContentEditable) return;
+      }
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (cards.length === 0) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setPreviewIdx((idx) => Math.min((idx < 0 ? -1 : idx) + 1, cards.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setPreviewIdx((idx) => Math.max((idx < 0 ? cards.length : idx) - 1, 0));
+      } else if (e.key === 'Enter') {
+        // Only act if there's a cursor — don't surprise the operator
+        // when Enter is pressed in some other context.
+        if (previewIdx >= 0 && cards[previewIdx]) {
+          e.preventDefault();
+          onSelectSymbol?.(cards[previewIdx].symbol);
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [cards, previewIdx, onSelectSymbol]);
+
+  // Auto-scroll the preview card into view as the cursor moves.
+  // `block:'nearest'` minimises scroll thrash when the card is
+  // already visible.
+  useEffect(() => {
+    if (previewIdx < 0 || !wrapperRef.current) return;
+    const el = wrapperRef.current.querySelector(`[data-card-index="${previewIdx}"]`);
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [previewIdx]);
+
   // Phase 2: auto-promote the top-10 scanner symbols to tick-level live
   // subs. As the ranked list shifts, the diff-based useLiveSubscriptions
   // hook adds new symbols and drops ones that fell out of the top-10.
@@ -514,6 +586,7 @@ export const ScannerCardsV5 = ({
           key={c.symbol + c.stage}
           card={c}
           active={selectedSymbol === c.symbol}
+          previewed={previewIdx === i}
           onClick={() => onSelectSymbol?.(c.symbol)}
           hoveredSymbol={hoveredSymbol}
           onHoverSymbol={onHoverSymbol}
@@ -566,6 +639,7 @@ export const ScannerCardsV5 = ({
                     key={c.symbol + c.stage}
                     card={c}
                     active={selectedSymbol === c.symbol}
+                    previewed={previewIdx === idx}
                     onClick={() => onSelectSymbol?.(c.symbol)}
                     hoveredSymbol={hoveredSymbol}
                     onHoverSymbol={onHoverSymbol}
