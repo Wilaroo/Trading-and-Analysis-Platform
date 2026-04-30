@@ -113,9 +113,9 @@ const CSS = `
 .v5-reaction-btn.active.down { background:rgba(244,63,94,.18); border-color:rgba(244,63,94,.5); filter:saturate(1) brightness(1.1); }
 
 /* v19.11 — keyboard navigation cursor on Scanner cards. The "preview"
-   cursor is moved by ↓/↑ without reloading the chart; Enter commits.
-   Outline (instead of box-shadow) so it composes cleanly with the
-   existing `.v5-card-hover-cross` inset shadow + `.active` border. */
+   cursor is moved by arrow keys without reloading the chart; Enter
+   commits. Outline (instead of box-shadow) so it composes cleanly
+   with the existing v5-card-hover-cross inset shadow + active border. */
 .v5-scanner-card.previewed {
   outline:1px solid rgba(34,211,238,.65);
   outline-offset:-1px;
