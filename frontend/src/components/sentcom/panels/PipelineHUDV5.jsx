@@ -29,19 +29,19 @@ const Stage = ({ stage, label, count, sub, accent }) => {
   return (
     <div
       data-testid={`v5-pipeline-stage-${stage}`}
-      className={`flex-1 min-w-0 px-3 py-2 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block`}
+      className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className={`text-[12px] uppercase tracking-[0.18em] font-bold ${c.text}`}>{label}</span>
-        <div className="flex items-baseline gap-1.5">
+      <div className="flex items-center justify-between gap-1.5">
+        <span className={`text-[11px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
+        <div className="flex items-baseline gap-1">
           {accent && (
-            <span className={`v5-mono text-[12px] font-bold ${accent.color}`}>{accent.text}</span>
+            <span className={`v5-mono text-[11px] font-bold ${accent.color}`}>{accent.text}</span>
           )}
-          <span className="v5-mono text-2xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
+          <span className="v5-mono text-xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
         </div>
       </div>
       {sub && (
-        <div className="text-[12px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
+        <div className="text-[11px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
       )}
     </div>
   );
@@ -105,20 +105,24 @@ export const PipelineHUDV5 = ({
         {/* 2026-04-30 v19.7 — stages constrained to ~2/3 width so the
             right-side metrics cluster (P&L / Equity / Buying Pwr / Phase)
             gets enough room to display 7-figure dollar values fully on
-            margin accounts without truncating. */}
-        <div className="flex items-center gap-1.5 basis-2/3 min-w-0">
+            margin accounts without truncating.
+            2026-05-01 v19.23 — tightened to basis-3/5 + flex-shrink on
+            stages so the metrics cluster never gets clipped on smaller
+            displays. Operator flagged the cluster overlapping HealthChip
+            / ConnectivityCheck / FlattenAll on the V5 mockup review. */}
+        <div className="flex items-center gap-1 basis-3/5 min-w-0 shrink">
           <Stage stage="scan"   label="Scan"        count={scanCount}   sub={scanSub} />
-          <span className="text-zinc-700 font-mono">→</span>
+          <span className="text-zinc-700 font-mono shrink-0">→</span>
           <Stage stage="eval"   label="Evaluate"    count={evalCount}   sub={evalSub} />
-          <span className="text-zinc-700 font-mono">→</span>
+          <span className="text-zinc-700 font-mono shrink-0">→</span>
           <Stage stage="order"  label="Order"       count={orderCount}  sub={orderSub} />
-          <span className="text-zinc-700 font-mono">→</span>
+          <span className="text-zinc-700 font-mono shrink-0">→</span>
           <Stage stage="manage" label="Manage"      count={manageCount} sub={manageSub} accent={manageAccent} />
-          <span className="text-zinc-700 font-mono">→</span>
+          <span className="text-zinc-700 font-mono shrink-0">→</span>
           <Stage stage="close"  label="Close today" count={closeCount}  sub={closeSub}  accent={closeAccent} />
         </div>
 
-        <div className="flex items-center justify-end gap-3 pl-3 border-l border-zinc-800 basis-1/3 min-w-0">
+        <div className="flex items-center justify-end gap-3 pl-3 border-l border-zinc-800 basis-2/5 min-w-0 shrink-0">
           {rightExtra}
           <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
           <Metric label="Equity"  value={formatEquity(equity)} />

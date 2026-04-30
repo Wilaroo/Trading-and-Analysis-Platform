@@ -2,6 +2,108 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-third commit, v19.23) — V5 expandable Open Positions + chart bot-thought bubbles
+
+Operator's V5 mockup review. Five tickets in one shipment, all surfacing
+the bot's reasoning AT the trade-time so the operator can audit each
+position at a glance.
+
+### v19.23 — Expandable Open Positions row (Issue #1)
+
+**Operator pain:** "open positions are showing $0 PnL. need more detail
+— current price, thesis, plan, tier"
+
+**Backend (already shipped v19.22.3):** `sentcom_service.get_our_positions()`
+merges `_pushed_ib_data.quotes` into `current_price` and exposes the rich
+trade context (`scan_tier`, `trade_style`, `reasoning[]`, `exit_rule`,
+`scale_out_state`, `trailing_stop_state`, `risk_amount`,
+`risk_reward_ratio`, `potential_reward`, `remaining_shares`,
+`original_shares`).
+
+**Frontend:** `OpenPositionsV5.jsx` rewritten to operator-spec:
+- **Compact mode** (default): symbol + tier chip (e.g. `DAY long`,
+  `SHORT REV`) + sparkline + PnL/R + 1-line "model trail" subtitle
+  (mirrors mockup's `TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull`).
+- **Expanded mode** (click chevron or row): 4-cell price grid (Entry /
+  Last / Stop / PT), risk math row (R:R · Risk · Reward · Shares ·
+  P(win)), trail-state line, scale-out targets-hit, exit-rule plan,
+  AI reasoning bullets (top 4), setup/grade/regime footer.
+- All new elements carry stable `data-testid` attributes.
+
+### v19.23 — Chart bot-thought bubbles overlay (Issue #3)
+
+**Operator request:** "markers for entry and exits. lines for SL/TP.
+chat bubbles with bot thoughts/reasoning at the time that it had them"
+
+- New `ChartThoughtBubblesOverlay.jsx` reads
+  `/api/sentcom/stream/history?symbol=X&minutes=1440&limit=40` and
+  renders chat-bubble annotations directly over the chart pane.
+- Time-anchored via `chart.timeScale().timeToCoordinate()` — bubbles
+  follow pan/zoom; off-screen bubbles disappear automatically.
+- Color-coded by `kind`: scanner=violet, brain/eval=cyan, alert=amber,
+  fill=emerald, skip/rejection=slate (matches mockup's visual lanes).
+- Bottom timeline rail with one dot per bubble — click to jump (sets
+  `setVisibleRange` ±90min around the moment).
+- Hover/click toggles bubble pin-state for full-text view.
+- 30s same-(kind, content[:80]) dedup so the rejection-narrative path
+  doesn't spam.
+- Toggleable via new `Bot` indicator button in the chart header.
+
+### v19.23 — V5 chart header context strip (Issue #3 sub)
+
+`V5ChartHeader` now mirrors the mockup chip strip:
+`Symbol · STATUS·age · $price · ±change% · Entry · SL · PT · R:R · Nsh`.
+Status chip uses `position.status` (OPEN/ORDER/MANAGE), age computed
+from `entry_time`. Live current_price + direction-aware change% added
+between status chip and the price grid. R:R now reads
+`risk_reward_ratio` (correct backend field name) with legacy
+`risk_reward` fallback.
+
+### v19.23 — Pipeline HUD width tightening (Issue #2)
+
+`PipelineHUDV5` stages shrunk from `basis-2/3` to `basis-3/5` with
+explicit `shrink` allowance + arrows pinned `shrink-0`. Right cluster
+(P&L / Equity / Buying Pwr / Phase + safety + Flatten) bumped to
+`basis-2/5 shrink-0` so 7-figure margin numbers and the inline
+operator chips never get clipped. Stage internals tightened
+(`px-3 py-2 → px-2 py-1.5`, `text-2xl → text-xl`) so the funnel reads
+as one tight horizontal strip without losing legibility.
+
+### v19.23 — Scanner cards: tier + setup chips + reasoning enrichment (Issue #4)
+
+`ScannerCardsV5` now renders three context chips inline:
+1. **Stage chip** (existing): SCAN / EVAL / ORDER / OPEN / CLOSED W / SKIP
+2. **Tier chip** (NEW): INTRADAY / SWING / POSITION / INVESTMENT — soft
+   context, never gates the alert
+3. **Setup chip** (NEW): humanized `setup_type` — surfaces the
+   Bellafiore Trade name (e.g. "opening range break", "9 ema scalp")
+
+Alert `bot_text` fallback now joins the first 2 entries from
+`reasoning[]` when available so the inline narrative carries the bot's
+chain-of-thought (e.g. "ORB long · gate 78 · PMH break with vol +180%
+RVol · Regime risk-on, sector XLF leading").
+
+### Tests
+
+New `backend/tests/test_open_positions_payload_v19_23.py` (5 cases) —
+pins the `/api/sentcom/positions` payload contract: live-quote merge,
+short-position PnL, rich V5 fields, fallback when `entry_context`
+empty, IB-only position passthrough. **5/5 passing locally**, ESLint
+clean across all touched JSX files.
+
+### Operator action
+
+Pull on Spark + frontend hot-reload. Verify:
+1. Open Positions: row shows live PnL ≠ $0 within ~5s of any open
+   trade. Click chevron → expanded panel renders with Entry/Last/Stop/PT
+   grid + reasoning bullets.
+2. Chart: focus a position. Bubbles appear at scanner-flag /
+   AI-eval / fill timestamps. Bottom rail dots clickable.
+3. Pipeline HUD: stages don't overlap with HealthChip /
+   ConnectivityCheck / FlattenAll on any width.
+4. Scanner cards: each shows tier + setup chip alongside stage chip.
+
+
 ## 2026-05-01 (forty-second commit, v19.22.1 + v19.22.2) — Bracket execution + reset durability
 
 Live operator ticket during RTH:

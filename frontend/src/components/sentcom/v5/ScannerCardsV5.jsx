@@ -116,6 +116,16 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
     const blocked = a.blocked || a.vetoed;
     const stage = blocked ? 'veto' : (a.gate_score ? 'eval' : 'scan');
     const existing = bySymbol.get(sym);
+    // 2026-05-01 v19.23 — when the alert carries a `reasoning` array
+    // (multi-step bot thinking), join the first 2 bullets into the
+    // "Bot:" line so the operator gets richer context inline. The
+    // existing single-line `reason` / `note` paths still win when
+    // present.
+    const reasoningArr = Array.isArray(a.reasoning) ? a.reasoning.filter(Boolean) : [];
+    const reasoningJoined = reasoningArr.length
+      ? reasoningArr.slice(0, 2).join(' · ')
+      : null;
+    const fallbackText = `${a.setup_type || 'alert'} · ${a.direction || ''}${a.gate_score ? ` · gate ${a.gate_score}` : ''}${reasoningJoined ? ` · ${reasoningJoined}` : ''}`;
     const card = {
       symbol: sym,
       stage,
@@ -129,8 +139,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       // 2026-04-30 v19.8 — surface tier so the operator knows whether
       // the symbol came from the live-tick scanner (intraday) or the
       // bar-poll service (swing/investment).
-      tier: a.tier || a.symbol_tier || null,
-      bot_text: a.reason || a.note || `${a.setup_type || 'alert'} · ${a.direction || ''}${a.gate_score ? ` · gate ${a.gate_score}` : ''}`,
+      tier: a.tier || a.symbol_tier || a.scan_tier || null,
+      bot_text: a.reason || a.note || fallbackText,
+      reasoning: reasoningArr,
       metrics: {
         gate: a.gate_score,
         p_win: a.p_win,
@@ -250,7 +261,7 @@ const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverS
       className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}`}
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <span
             className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors"
             data-testid={`scanner-card-symbol-${card.symbol}`}
@@ -260,6 +271,31 @@ const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverS
           <span className={`v5-chip ${chipClass}`}>
             {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>
+          {/* 2026-05-01 v19.23 — surface tier + setup-type so the
+              operator can read at-a-glance what scan tier (intraday /
+              swing / position) and which Bellafiore setup type the
+              alert belongs to. Both are SOFT context — visible always
+              but never gates the alert. */}
+          {card.tier && (
+            <span
+              className="v5-chip"
+              style={{ borderColor: 'rgba(82, 82, 91, 0.6)', color: '#a1a1aa' }}
+              data-testid={`scanner-card-tier-${card.symbol}`}
+              title={`Scan tier: ${card.tier}`}
+            >
+              {String(card.tier).toUpperCase()}
+            </span>
+          )}
+          {card.stage_note && card.stage_note !== 'setup' && card.stage !== 'manage' && card.stage !== 'close' && (
+            <span
+              className="v5-chip"
+              style={{ borderColor: 'rgba(6, 182, 212, 0.4)', color: '#67e8f9' }}
+              data-testid={`scanner-card-setup-${card.symbol}`}
+              title="Setup type"
+            >
+              {String(card.stage_note).toLowerCase().replace(/_/g, ' ')}
+            </span>
+          )}
           {card.is_countertrend && (
             <span
               className="v5-chip v5-chip-counter-trend"

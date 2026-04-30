@@ -3,7 +3,68 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.22.x fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.23 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.23 — see CHANGELOG (forty-third commit)
+**V5 mockup compliance pass — operator surfaced 4 paper-cuts after the
+v19.22.x bracket save, all addressed in one commit.**
+- ✅ **Issue #1 — Open Positions $0 PnL + missing detail.** Frontend
+  `OpenPositionsV5.jsx` now renders the v19.22.3 backend payload:
+  compact rows with sparkline + tier chip + 1-line model trail; click
+  chevron to expand into Entry/Last/Stop/PT grid + R:R/Risk/Reward/Shares
+  + trailing-stop state + scale-out targets + AI reasoning bullets +
+  setup/grade footer.
+- ✅ **Issue #3 — Chart annotations.** New
+  `ChartThoughtBubblesOverlay.jsx` paints chat-bubble annotations from
+  `sentcom_thoughts` over the chart, color-coded by kind, anchored to
+  bar timestamps via `timeScale.timeToCoordinate`. Bottom timeline rail
+  with click-to-jump. New `Bot` toggle in chart header. Existing E/SL/PT
+  price lines + entry/exit markers preserved.
+- ✅ **Issue #3 sub — V5 chart header strip.** Mirrors the mockup:
+  Symbol · STATUS·age · $price · ±change% · Entry · SL · PT · R:R · Nsh.
+  Live current_price + direction-aware change%. Status chip reads
+  `position.status` and shows age relative to `entry_time`. R:R now
+  uses correct `risk_reward_ratio` field with legacy fallback.
+- ✅ **Issue #2 — Pipeline HUD width.** Stages basis-2/3 → 3/5 with
+  shrink allowance; right cluster basis-1/3 → 2/5 with shrink-0 so
+  7-figure margin balances + 6 inline chips never clip. Stage
+  internals tightened (px-2 py-1.5, text-xl) without losing legibility.
+- ✅ **Issue #4 — Scanner card tier + setup + reasoning.**
+  `ScannerCardsV5` renders tier chip (INTRADAY/SWING/POSITION) +
+  setup-type chip (Bellafiore Trade name, humanized) inline alongside
+  the stage chip. Alert `bot_text` fallback now joins first 2
+  `reasoning[]` entries so chain-of-thought rides the headline.
+- ✅ 5 new pytests in `tests/test_open_positions_payload_v19_23.py`
+  pinning the position payload contract. **5/5 passing.** ESLint clean.
+
+### 🟡 Next session priorities
+
+- **(P0) MultiIndexRegimeClassifier** verification curl on Spark — was
+  shipped 2026-04-30 per CHANGELOG but operator hasn't confirmed
+  `LiveAlert.multi_index_regime` is firing on live alerts. Run:
+  `curl -s http://localhost:8001/api/scanner/live-alerts?limit=5 |
+  jq '.alerts[].multi_index_regime'`. If null, investigate
+  `_apply_setup_context` per-cycle cache hookup.
+- **(P1) `/api/trading-bot/reconcile`** — let the bot claim untracked
+  IB positions (NVDA/TSLA/GOOGL — operator pinned). New endpoint posts
+  `{symbols: [...]}` + uses pusher's account snapshot to materialize
+  bot trades + apply default stop/target overlays + start RTH
+  management.
+- **(P1) HOOD chart wrong-prices UI bug** — operator hard-refresh fix;
+  investigate `useEffect`/symbol-prop chain in `ChartPanel.jsx` to make
+  re-fetch deterministic on symbol change.
+- **(P1) Per-setup R:R overrides as code (not curl)** — operator
+  curled in 7 extras this session. Add to `RiskParameters.setup_min_rr`
+  dict default in `trading_bot_service.py` so a fresh deploy picks
+  them up without curl-merge.
+- **(P1) Wire `cpu_relief_manager.is_active()` into more deferable
+  paths** (EVAL historical, daily collect, periodic backfill).
+- **(P1) Auto-trigger relief based on RPC latency.**
+- **(P2) Setup-landscape self-grading tracker EOD wiring.**
+- **(P2) Mean-reversion metrics (Hurst + OU half-life).**
+- **(P2) Liquidity-aware trail in `stop_manager.py`.**
+- **(P3) Scanner card "Proven / Maturing / Cold-start" confidence
+  badge** based on `strategy_stats.r_outcomes` length.
 
 ### 🎯 Just shipped 2026-05-01 v19.22.1 + v19.22.2 — see CHANGELOG (forty-second commit)
 **Live RTH save: HOOD GO 52pts → fill in 60s of deploy.**

@@ -626,6 +626,30 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
     onChangeSymbol?.(next);
     setDraft('');
   }, [draft, symbol, onChangeSymbol]);
+
+  // 2026-05-01 v19.23 — derive trade status + age + change% to mirror
+  // the V5 mockup chip strip ("ORDER · 8s · $880.30 · +2.4% · Entry · SL · PT · R:R").
+  const status = (position?.status || '').toUpperCase();
+  const ageStr = (() => {
+    const ts = position?.entry_time;
+    if (!ts) return null;
+    const t = new Date(ts).getTime();
+    if (Number.isNaN(t)) return null;
+    const diffSec = Math.floor((Date.now() - t) / 1000);
+    if (diffSec < 60) return `${diffSec}s`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+    return `${Math.floor(diffSec / 86400)}d`;
+  })();
+
+  const currentPx = position?.current_price ?? position?.entry_price;
+  const entryPx = position?.entry_price;
+  const changePct = (() => {
+    if (currentPx == null || entryPx == null || !entryPx) return null;
+    const sign = dir === 'short' ? -1 : 1;
+    return sign * ((Number(currentPx) - Number(entryPx)) / Number(entryPx)) * 100;
+  })();
+
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-3 min-w-0">
@@ -667,19 +691,40 @@ const V5ChartHeader = ({ symbol, position, focusedSymbolIsPosition, onSymbolClic
           currentChartSymbol={symbol}
         />
         {focusedSymbolIsPosition && (
-          <span className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}>
-            {dir === 'short' ? 'SHORT' : 'LONG'}{position?.setup_type ? ` · ${position.setup_type}` : ''}
+          <span
+            className={`v5-chip ${dir === 'short' ? 'v5-chip-veto' : 'v5-chip-manage'}`}
+            data-testid="chart-header-status-chip"
+          >
+            {status || (dir === 'short' ? 'SHORT' : 'LONG')}{ageStr ? ` · ${ageStr}` : ''}
           </span>
+        )}
+        {focusedSymbolIsPosition && currentPx != null && (
+          <div className="flex items-baseline gap-1.5 v5-mono text-[12px]">
+            <span className="font-bold text-zinc-100">${Number(currentPx).toFixed(2)}</span>
+            {changePct != null && (
+              <span
+                className={changePct >= 0 ? 'v5-up font-semibold' : 'v5-down font-semibold'}
+                data-testid="chart-header-change-pct"
+              >
+                {changePct >= 0 ? '+' : ''}{changePct.toFixed(1)}%
+              </span>
+            )}
+          </div>
         )}
         {position && (
           <div className="flex items-center gap-2 pl-3 border-l border-zinc-800 text-[12px] v5-mono">
-            {position.entry_price != null && (<><span className="v5-dim">E</span><span className="v5-warn font-bold">{Number(position.entry_price).toFixed(2)}</span></>)}
+            {position.entry_price != null && (<><span className="v5-dim">Entry</span><span className="v5-warn font-bold">{Number(position.entry_price).toFixed(2)}</span></>)}
             {position.stop_price != null && (<><span className="v5-dim ml-1">SL</span><span className="v5-down font-bold">{Number(position.stop_price).toFixed(2)}</span></>)}
             {(() => {
               const pt = position.target_price ?? (Array.isArray(position.target_prices) ? position.target_prices[0] : null);
               return pt != null ? (<><span className="v5-dim ml-1">PT</span><span className="v5-up font-bold">{Number(pt).toFixed(2)}</span></>) : null;
             })()}
-            {position.risk_reward != null && (<><span className="v5-dim ml-1">R:R</span><span className="font-bold text-zinc-200">{Number(position.risk_reward).toFixed(1)}</span></>)}
+            {(() => {
+              const rr = position.risk_reward_ratio ?? position.risk_reward;
+              return rr != null && Number(rr) > 0 ? (
+                <><span className="v5-dim ml-1">R:R</span><span className="font-bold text-zinc-200">{Number(rr).toFixed(1)}</span></>
+              ) : null;
+            })()}
             {(() => {
               // Backend bot/IB positions provide `shares`; some legacy rows provide `quantity`.
               const q = position.shares ?? position.quantity;

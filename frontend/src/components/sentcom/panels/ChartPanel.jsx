@@ -19,6 +19,7 @@ import {
 } from '../../../utils/timeET';
 import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
 import { VolumeProfileOverlay } from './VolumeProfileOverlay';
+import { ChartThoughtBubblesOverlay } from './ChartThoughtBubblesOverlay';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
 const TIMEFRAMES = [
@@ -82,6 +83,12 @@ export const ChartPanel = ({
   const [showSmartLevels, setShowSmartLevels] = useState(true);
   const smartLinesRef = useRef([]);                     // IPriceLine[] managed by smart-S/R effect
   const [showVolumeProfile, setShowVolumeProfile] = useState(true);
+  // 2026-05-01 v19.23 — Bot-thought bubbles overlay toggle. Renders
+  // chat-bubble annotations sourced from `sentcom_thoughts` directly
+  // over the chart so the operator sees the bot's reasoning AT the
+  // moment it had it (scanner flag → macro check → AI vision →
+  // trigger → fill). Default ON for the focused symbol.
+  const [showThoughtBubbles, setShowThoughtBubbles] = useState(true);
   // 2026-04-28e: Point-of-Control price from the volume profile —
   // surfaced from VolumeProfileOverlay as a horizontal price line on
   // the candle pane so it's readable at a glance (same idiom as
@@ -859,6 +866,26 @@ export const ChartPanel = ({
                 ? <Eye className="w-3 h-3 opacity-60" />
                 : <EyeOff className="w-3 h-3 opacity-40" />}
             </button>
+            {/* 2026-05-01 v19.23 — Bot-thought bubbles toggle */}
+            <button
+              data-testid="chart-thoughts-toggle"
+              onClick={() => setShowThoughtBubbles((v) => !v)}
+              title="Toggle bot-thought bubbles — sentcom_thoughts annotations over the chart"
+              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
+                showThoughtBubbles
+                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: '#22d3ee', opacity: showThoughtBubbles ? 1 : 0.4 }}
+              />
+              <span>Bot</span>
+              {showThoughtBubbles
+                ? <Eye className="w-3 h-3 opacity-60" />
+                : <EyeOff className="w-3 h-3 opacity-40" />}
+            </button>
           </div>
 
           {/* Timeframe + refresh */}
@@ -924,6 +951,12 @@ export const ChartPanel = ({
           bars={normalizedBars}
           visible={showVolumeProfile}
           onPocChange={setPocPrice}
+        />
+        <ChartThoughtBubblesOverlay
+          symbol={symbol}
+          chartRef={chartRef}
+          visible={showThoughtBubbles}
+          minutes={1440}
         />
       </div>
 
