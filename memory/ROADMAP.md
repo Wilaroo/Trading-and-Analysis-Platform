@@ -43,6 +43,24 @@ EOD close-stage hardening — 6 fixes + 3:55 PM ET default + 15 tests.
 
 ### 🟡 P1 — Next session priorities
 
+- **Detector confidence tier badge on V5 Scanner cards** (parked
+  2026-04-30 v19.16). With the EVAL hot path now lean post-v19.15/16,
+  the next quality lever is making per-detector evidence visibility
+  on the alert UI. Badge spec:
+    - 🟢 **Proven** — detector has ≥30 graded R-outcomes
+      (`strategy_stats.r_outcomes` length ≥ 30)
+    - 🟡 **Maturing** — 5-29 graded R-outcomes
+    - ⚪ **Cold-start** — <5 graded R-outcomes
+  Plus a tooltip on hover showing `N trades · win-rate% · avg-R · last-fired`.
+  Gives the operator an at-a-glance signal of which alerts are
+  riding on real evidence vs which are still gathering data —
+  particularly relevant for the v16-introduced setups
+  (`the_3_30_trade`, `bouncy_ball`, `premarket_high_break`) that
+  have few graded outcomes yet.
+  Implementation: small badge component on `<ScannerCardV5/>`,
+  reads from existing `strategy_stats` field already plumbed onto
+  the alert. No new endpoint needed. ~30 min of work.
+
 - **Divergence drill-in panel (Shadow vs Real)**: every shadow-vs-real
   disagreement becomes a labelled training sample. ~2-3h.
 - **Setup-landscape self-grading EOD tracker**: record briefing
