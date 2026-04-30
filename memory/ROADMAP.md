@@ -3,7 +3,59 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.16 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.17 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.17 — see CHANGELOG (thirty-sixth commit)
+Bar-size-aware smart_backfill freshness gate:
+- ✅ New `_expected_latest_session_date(bar_size, now_dt)` helper —
+  daily bars require today's session post-4pm ET; intraday require
+  today during RTH; weekly require most recent Friday.
+- ✅ Replaced `days_behind <= freshness_days` gate with `last_session
+  >= expected_session`. Daily bars no longer get silently skipped
+  when they're 1-2 days behind.
+- ✅ Diagnosed via operator's NVDA chart screenshot showing Apr 27
+  as latest bar despite two backfill runs.
+- ✅ 23 new pytest including direct pin of the Apr 28 NVDA scenario.
+
+### 🟡 P1 — Next session priorities
+
+- **Nightly auto-backfill schedule** (parked here from v19.17):
+  Add a systemd timer (or APScheduler job in `server.py`) on Spark
+  that runs `smart_backfill` at 17:30 ET nightly. With the v19.17
+  freshness gate now correct, the only remaining gap is the
+  manual-trigger requirement. ~15 min of work; mostly a Spark-side
+  systemd unit. Sample unit:
+  ```ini
+  # /etc/systemd/system/smart-backfill.service
+  [Unit]
+  Description=SentCom nightly smart_backfill
+  [Service]
+  Type=oneshot
+  ExecStart=/usr/bin/curl -fsS -X POST http://localhost:8001/api/ib-collector/smart-backfill
+  ```
+  Plus a `.timer` unit firing at `OnCalendar=Mon..Fri 17:30 America/New_York`.
+
+- **Detector confidence tier badge on V5 Scanner cards** (parked
+  2026-04-30 v19.16). With the EVAL hot path now lean post-v19.15/16,
+  the next quality lever is making per-detector evidence visibility
+  on the alert UI. Badge spec:
+    - 🟢 **Proven** — detector has ≥30 graded R-outcomes
+      (`strategy_stats.r_outcomes` length ≥ 30)
+    - 🟡 **Maturing** — 5-29 graded R-outcomes
+    - ⚪ **Cold-start** — <5 graded R-outcomes
+  Plus a tooltip on hover showing `N trades · win-rate% · avg-R · last-fired`.
+  Implementation: small badge component on `<ScannerCardV5/>`,
+  reads from existing `strategy_stats` field already plumbed onto
+  the alert. No new endpoint needed. ~30 min of work.
+
+- **Divergence drill-in panel (Shadow vs Real)**: every shadow-vs-real
+  disagreement becomes a labelled training sample. ~2-3h.
+- **Setup-landscape self-grading EOD tracker**: record briefing
+  predictions, grade EOD against `alert_outcomes`, surface as
+  receipts in next morning's briefing.
+- **Tier-tag backfill for symbol_adv_cache**: GICS-aligned tags
+  on symbols beyond the static map (Finnhub fallback already
+  shipped, just needs a one-shot CLI to flush the universe).
 
 ### 🎯 Just shipped 2026-04-30 v19.16 — see CHANGELOG (thirty-fifth commit)
 Tier-aware detector dispatch:

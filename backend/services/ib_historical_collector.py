@@ -2481,6 +2481,78 @@ class IBHistoricalCollector:
         return coverage < self.GAP_COVERAGE_THRESHOLD
 
 
+    def _expected_latest_session_date(self, bar_size: str, now_dt: datetime):
+        """Return the session date we EXPECT to have the most recent bar
+        for, given current ``now_dt`` and the bar size.
+
+        2026-04-30 v19.17 — replaces the bar-size-agnostic
+        ``days_behind <= freshness_days`` gate that was silently
+        dropping yesterday's daily bar every night.
+
+        The old gate (``freshness_days=2`` default) treated
+        ``days_behind <= 2`` as fresh. For "1 day" bars that meant the
+        post-close run on day N would skip refreshing because
+        ``days_behind = 1`` (last bar = day N-1) — so day N's just-
+        finalised bar never got pulled until day N+3 when it finally
+        crossed the 2-day threshold. NVDA on Spark hit this exact
+        path: last bar Apr 27, post-close runs on Apr 28 + Apr 29 both
+        skipped as "fresh".
+
+        Per-bar-size rules:
+          - "1 day"  → today on weekdays past 4 PM ET; else most
+                       recent prior weekday session.
+          - "1 week" → most recent Friday on/before now.
+          - intraday → today on weekdays (live tape adds bars during
+                       RTH; pre/post hours we still expect today's
+                       earlier intraday bars); else most recent prior
+                       weekday.
+
+        The helper returns a `date` (not datetime) so callers compare
+        against `last_dt.date()` directly.
+
+        Note: NYSE half-day closes (1 PM ET) are treated the same as
+        regular days — past 4 PM ET still works because half-day's
+        4 PM is well past the 1 PM close. Operator-flagged
+        ``EOD_HALF_DAY_TODAY`` is a downstream concern (EOD close);
+        the freshness gate doesn't need it.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        et = now_dt.astimezone(ZoneInfo("America/New_York"))
+        today = et.date()
+
+        def _last_weekday_on_or_before(d):
+            wd = d.weekday()
+            if wd >= 5:  # 5=Sat, 6=Sun
+                return d - timedelta(days=wd - 4)
+            return d
+
+        def _last_friday_on_or_before(d):
+            wd = d.weekday()
+            if wd == 4:
+                return d
+            # 4=Fri, 5=Sat, 6=Sun, 0=Mon, 1=Tue, 2=Wed, 3=Thu
+            return d - timedelta(days=(wd - 4) % 7)
+
+        if bar_size == "1 day":
+            # Weekend → expect last weekday's session.
+            if et.weekday() >= 5:
+                return _last_weekday_on_or_before(today)
+            # Weekday: today's daily bar finalises after 4 PM ET.
+            if et.hour >= 16:
+                return today
+            # Pre/intraday: most recent prior weekday's session.
+            return _last_weekday_on_or_before(today - timedelta(days=1))
+
+        if bar_size == "1 week":
+            return _last_friday_on_or_before(today)
+
+        # intraday — RTH adds bars from today; weekend rolls back.
+        return _last_weekday_on_or_before(today)
+
 
     def _smart_backfill_sync(self, dry_run: bool, tier_filter: Optional[str],
                              freshness_days: int) -> Dict[str, Any]:
@@ -2637,14 +2709,30 @@ class IBHistoricalCollector:
                         # No prior data — one request at max duration.
                         to_queue.append((sym, bs, self.DURATION_STRING[bs], tier, ""))
                         continue
-                    if days_behind <= freshness_days:
-                        # Newest bar is fresh, BUT we may still have internal
-                        # gaps from earlier failed pulls (caught 2026-04-28e
-                        # via TSLA 1d screenshot showing Apr-prior-year →
-                        # Jan-this-year gap). Detect via bar-count vs expected
-                        # ratio in a lookback window. If coverage falls below
-                        # 80% of expected, queue a full re-fetch — IB returns
-                        # all bars, the unique index dedupes existing rows.
+                    # 2026-04-30 v19.17 — bar-size-aware freshness gate.
+                    # Pre-fix the agnostic ``days_behind <= freshness_days``
+                    # gate (default 2) silently skipped daily bars that
+                    # were "only" 1 day behind, meaning the just-finalised
+                    # daily bar never got pulled until it was 3+ days old.
+                    # The new gate compares against the EXPECTED session
+                    # date for this bar size + current clock — daily bars
+                    # post-4pm ET on a weekday must have today's bar to be
+                    # considered fresh; intraday bars must have today's
+                    # date during RTH.
+                    expected_session = self._expected_latest_session_date(
+                        bs, now_dt
+                    )
+                    last_session = last_dt.date()
+                    is_fresh_v19_17 = last_session >= expected_session
+                    # Operator override: ``freshness_days`` parameter is
+                    # honoured ONLY when explicitly set HIGHER than the
+                    # default 2 — used by the "force re-evaluate everything"
+                    # path (``freshness_days=0`` operator unblock). For the
+                    # default case we use the v19.17 expected-session gate.
+                    if is_fresh_v19_17:
+                        # Fresh by v19.17 rules. Internal-gap check still
+                        # runs so a coverage-stale symbol gets refilled
+                        # even when the tip-of-data looks current.
                         if self._has_internal_gaps(sym, bs):
                             to_queue.append(
                                 (sym, bs, self.DURATION_STRING[bs], tier, "")

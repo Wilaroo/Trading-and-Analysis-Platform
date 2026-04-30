@@ -2,6 +2,129 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-sixth commit, v19.17) — Bar-size-aware freshness gate
+
+Diagnosed via the operator's NVDA chart screenshot showing daily bars
+stuck through Apr 27 even after two `smart_backfill` runs on Apr 28
+that reported 7,298 + 11,743 symbols "skipped fresh". The fix is a
+bar-size-aware freshness check that requires the EXPECTED session
+date to be in Mongo, not just "any bar within 2 days".
+
+### Why this matters
+
+The pre-fix freshness gate at `_smart_backfill_sync` was bar-size
+agnostic:
+
+```python
+if days_behind <= freshness_days:   # default freshness_days=2
+    skipped_fresh += 1
+    continue
+```
+
+For "1 day" bars that meant the post-close run on day N would skip
+because `days_behind = 1` (last bar = N-1) — so day N's just-
+finalised daily bar never got pulled until day N+3 when the count
+finally crossed 2.
+
+NVDA on Spark hit this exact path:
+- Last bar in Mongo: Apr 27 (Monday), collected Apr 28 08:14 ET
+- Apr 28 17:40 ET smart_backfill run: `days_behind=1` → skipped fresh
+- Apr 29 (no run since)
+- Operator notices Apr 28 + Apr 29 missing on V5 ticker chart
+
+The bug class: **the freshness threshold tolerance (1-2 days) was
+larger than the bar-size cadence (1 day)**, so daily bars were
+permanently 1-2 days behind reality.
+
+### Patch
+
+#### 1. `_expected_latest_session_date(bar_size, now_dt)` — new helper
+
+Returns the session `date` the most recent bar SHOULD be from, given
+current clock + bar size:
+
+```python
+"1 day"  → today on weekdays past 4 PM ET; else most recent prior
+           weekday session.
+"1 week" → most recent Friday on/before now.
+intraday → today on weekdays (live tape adds bars during RTH; pre/
+           post hours we still expect today's earlier intraday bars);
+           else most recent prior weekday.
+```
+
+The helper converts `now_dt` to ET so the "past 4 PM ET" check is
+correct regardless of host timezone.
+
+#### 2. New freshness gate in `_smart_backfill_sync`
+
+```python
+expected_session = self._expected_latest_session_date(bs, now_dt)
+last_session = last_dt.date()
+is_fresh_v19_17 = last_session >= expected_session
+if is_fresh_v19_17:
+    if self._has_internal_gaps(sym, bs):  # existing path preserved
+        ... queue full re-fetch
+    else:
+        skipped_fresh += 1
+    continue
+```
+
+Replaces the bar-size-agnostic check. Internal-gap detection (the
+2026-04-28e fix that catches "year-old data with a 6-month hole in
+the middle") still runs inside the fresh branch.
+
+The `freshness_days` parameter on the API endpoint is preserved for
+backwards compat — callers passing `freshness_days=0` for an
+"unblock everything" pass still work because the v19.17 gate is
+strictly tighter than the old one (so anything that was previously
+queued via `freshness_days=0` is still queued).
+
+### Operator workflow (immediate unblock for the missing NVDA bars)
+
+```bash
+# Run on Spark to backfill the Apr 28 + Apr 29 gap right now:
+curl -s -X POST "http://localhost:8001/api/ib-collector/smart-backfill?freshness_days=0" | jq
+
+# Then watch the queue drain:
+watch -n5 'curl -s http://localhost:8001/api/ib-collector/queue-stats | jq'
+```
+
+### Tests (`test_smart_backfill_freshness_v19_17.py` — 23 tests)
+
+Helper unit tests (16):
+- `_expected_latest_session_date` for "1 day" across pre-close,
+  post-close, premarket, Saturday, Sunday, Monday-morning,
+  Monday-after-close
+- `_expected_latest_session_date` for "1 week" across Thursday,
+  Friday, Sunday
+- `_expected_latest_session_date` for intraday across RTH +
+  Saturday (parametrized over 1m / 5m / 15m / 30m / 1h)
+
+Source-level pin (1):
+- `test_smart_backfill_uses_v19_17_gate` — guard against silent
+  reversion to the old `days_behind <= freshness_days` form.
+
+Behavioural regression (6):
+- `test_apr28_post_close_run_with_apr27_last_bar_is_NOT_fresh` —
+  pin the EXACT bug scenario: NVDA-style last bar Apr 27, run at
+  Apr 28 17:40 ET, must NOT skip as fresh.
+- `test_post_close_run_with_today_last_bar_IS_fresh` — the inverse
+  (today's bar present → still skips, no double-fetch waste)
+- Intraday RTH happy + stale paths
+
+**124/124 across all v19 test suites.**
+
+### What this does NOT cover (parked for future)
+
+The fix makes `smart_backfill` correctly identify stale daily bars,
+but it doesn't AUTOMATICALLY trigger a refresh — the operator still
+needs to call `/api/ib-collector/smart-backfill`. A future
+enhancement is a systemd timer / APScheduler job on Spark that
+runs smart_backfill nightly at 17:30 ET so this auto-recovers
+without prompting (added to ROADMAP).
+
+
+
 ## 2026-04-30 (thirty-fifth commit, v19.16) — Tier-aware detector dispatch
 
 Pre-fix the scanner iterated all ~35 detectors in `_enabled_setups`
