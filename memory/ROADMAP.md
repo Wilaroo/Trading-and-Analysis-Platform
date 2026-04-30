@@ -31,7 +31,116 @@ complaint without WebSocket complexity.
   ESLint clean. Live curl shows cache HIT in ~0.003ms.
 
 ### 🟡 Next session priorities
-- **(P0 — operator verification on Spark)** After pull + restart:
+
+#### 🔴 (P0 — TOP) Tier 3 — Chart WebSocket layer (operator approved 2026-05-01)
+**Goal**: Push new bars to the chart within ~50ms of IB delivering them,
+replacing the 5s polling cycle entirely. T1 (cache) + T2 (tail) already
+killed ~95% of the perceived slowness; Tier 3 closes the last 5%
+poll-cycle latency for fast-tape moments.
+
+**Design (locked-in spec — ship as-is unless operator overrides)**:
+
+**Backend** — new `routers/chart_ws.py`
+```
+WS endpoint: /api/ws/chart/{symbol}/{timeframe}
+  - On connect:
+      1. server.send_json({"type": "hydrate", ...full /chart payload})
+         — sourced from chart_response_cache for instant hydration
+         (zero compute, ~0.003ms cache hit + ~5ms wire time)
+      2. server enrolls (symbol, tf) in pub-sub registry
+  - On every new bar from the pusher:
+      server.send_json({"type": "bar", "bar": {...}, "indicators_tail": {...}})
+  - On bot fill for symbol:
+      server.send_json({"type": "marker", "marker": {...}})
+  - On disconnect:
+      Remove from pub-sub registry. No reconnect logic on backend
+      (frontend handles exponential backoff).
+```
+
+**Backend pub-sub** — new `services/chart_ws_broker.py`
+- Process-wide singleton `ChartWSBroker`
+- `subscribe(ws, symbol, tf)` / `unsubscribe(ws)` 
+- `await broker.publish_bar(symbol, tf, bar_dict)` — fanout to all WS
+  clients subscribed to (symbol, tf). Best-effort: dropped clients
+  cleaned up silently.
+- Hook publish_bar into TWO places that already see fresh bars:
+  1. `services/bar_poll_service.py` — when a new bar lands in
+     `ib_historical_data`, publish.
+  2. `routers/ib.py` `_pushed_ib_data["quotes"]` update path — when
+     a new tick assembles into a partial bar, publish.
+- Hook `publish_marker` into `services/trade_execution.py` right
+  next to the existing `chart_response_cache.invalidate(...)` call.
+
+**Frontend** — new hook `frontend/src/hooks/useChartLiveStream.js`
+```js
+useChartLiveStream(symbol, timeframe, {
+  onBar:    (bar)    => candleSeries.update(bar),
+  onMarker: (marker) => setMarkers(prev => [...prev, marker]),
+  onHydrate:(payload)=> setBars(payload.bars), // first-paint fallback
+})
+- Auto-connects on mount, reconnects with exponential backoff
+  (1s, 2s, 4s, 8s, max 30s) on disconnect
+- Pauses when document.visibilityState !== 'visible' (same rule as
+  the smart-polling loop)
+- Clean unmount on symbol/tf change
+- Returns {connected: bool, lastBarTs: number} for the
+  ChartHeader status chip
+```
+
+**Wire into `ChartPanel.jsx`**:
+- Add `useChartLiveStream(symbol, active.value, {...callbacks})`
+- Keep `/api/sentcom/chart` cold-load fetch (still needed for
+  cacheKey-driven hydration on cold cache)
+- KEEP smart-polling 5s `/chart-tail` as a FALLBACK when WS is
+  disconnected — don't rip it out, just gate it on
+  `wsConnected === false`. Belt-and-braces.
+
+**Backend integration with existing pusher pipeline**:
+- The pusher already pushes ticks via `POST /api/ib/push-data` →
+  `_pushed_ib_data["quotes"]`. The bar assembly happens in
+  `bar_poll_service.py`. So the WS broker just needs to be called
+  from the existing assembly path — no new RPC/IB integration.
+
+**Estimated effort**: 6-8 hours
+- Backend broker + ws router: 3h
+- Frontend hook + ChartPanel wire: 2h
+- Pub-sub hooks into bar_poll_service + trade_execution: 1h
+- Tests (mock WS connections via httpx-ws or starlette TestClient
+  with WS support): 2h
+
+**Tests to ship with it**:
+- `test_chart_ws_broker.py` — subscribe/unsubscribe/publish/cleanup
+- `test_chart_ws_router.py` — connect → hydrate → bar push → disconnect
+- `test_useChartLiveStream.js` — exponential backoff, visibility pause
+- Source-level pin asserting `chart_ws_broker.publish_bar` is called
+  from `bar_poll_service` (regression guard for v18 architecture)
+
+**Operator-facing surfaces**:
+- `GET /api/diagnostic/chart-ws-status` — connected client count,
+  per-symbol subscription count, p95 publish latency
+- V5 ChartHeader chip showing `LIVE` (WS connected) / `POLL` (WS
+  fallback to /chart-tail) so operator sees the state
+
+**Risk / things to watch**:
+- WS connection limits — Spark is single-process, but FastAPI/
+  Uvicorn handles ~10K concurrent WS by default. Operator unlikely
+  to ever hit this. Document the ceiling for future scale.
+- Backpressure — if a client falls behind (slow network), don't
+  block the publish path. Use `asyncio.wait_for(send, timeout=0.5)`
+  and drop the client on timeout.
+- Hot-reload safety — broker MUST survive uvicorn reload during dev.
+  Singleton pattern + module-level registration handles this.
+
+**Why NOT do this now**:
+- T1 + T2 already eliminate ~95% of the perceived slowness without
+  the complexity of WS reconnect logic, backpressure handling, and
+  pub-sub state.
+- Operator wants to verify T1 + T2 on Spark first. If they're
+  satisfied, T3 becomes optional polish. If they still feel lag,
+  T3 is the fix and the design above is ready to ship.
+
+#### Other priorities (after Tier 3 ships)
+- **(P0 — operator verification on Spark — v19.25)** After pull + restart:
   1. Check `cache: 'hit'` field appears on `/api/sentcom/chart`
      responses in the network tab on the second+ load.
   2. Confirm `/api/sentcom/chart-tail?since=<ts>` polls every 5s
@@ -40,14 +149,10 @@ complaint without WebSocket complexity.
      instant (no spinner, chart re-paints sub-100ms).
   4. After a real trade fills, the new entry marker should appear
      on the chart within 5s (next tail poll), not 30s+.
-- **(P0 — reconcile UX verification, carried from v19.24)** — operator
-  action item: click **Reconcile N** on SBUX/SOFI/OKLO once IB pusher
-  is live, confirm bot picks them up.
+- **(P0 — reconcile UX verification — v19.24)** — operator action item:
+  click **Reconcile N** on SBUX/SOFI/OKLO once IB pusher is live,
+  confirm bot picks them up.
 - **(P0 verify)** MultiIndexRegime live curl on Spark during RTH.
-- **(P1 — Tier 3 chart WS)** Optional next layer if smart polling
-  still feels laggy: `/api/ws/chart/{symbol}/{tf}` server-pushed bar
-  updates. Eliminates the 5s polling poll-cycle latency. ~6-8h of
-  work; not needed unless operator reports T1+T2 isn't enough.
 - **(P1) HOOD chart wrong-prices `useEffect` chain** — likely
   resolved as a side-effect of v19.25 cacheKey-driven hydration but
   worth confirming with the operator.
