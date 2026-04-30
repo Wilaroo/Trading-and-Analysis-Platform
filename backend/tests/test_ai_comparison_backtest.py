@@ -15,7 +15,7 @@ import os
 import time
 import concurrent.futures
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sentcom-regime.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sentcom-reconcile.preview.emergentagent.com').rstrip('/')
 
 
 class TestAIComparisonStatus:
