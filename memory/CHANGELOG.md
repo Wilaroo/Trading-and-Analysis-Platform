@@ -2,6 +2,189 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-second commit, v19.14) — EOD Close-stage hardening
+
+Audit of `position_manager.check_eod_close` uncovered six issues
+that were silently leaving intraday positions open past the 4:00 PM
+bell. All six fixes shipped + new regression suite.
+
+### Why this matters
+
+EOD auto-close is the bot's last line of defence against unintended
+overnight exposure on intraday strategies. A book-keeping crash here
+quietly costs real money via gap risk and option assignment risk
+(SPY/QQQ-correlated names move materially on overnight news /
+earnings / Asia tape).
+
+### Default close window: 3:57 → 3:55 PM ET
+
+Operator request — give intraday closes a full 5-minute cushion
+before 4:00 PM. With ~25 open positions and IB roundtrip latency
+(~2-3s per close in fast tape), the prior 3:57 default cut it close.
+3:55 leaves room for the v19.14 partial-failure retry (P0 #3) to
+attempt a second pass before the bell.
+
+Changes:
+- `services/trading_bot_service.py:723` — `_eod_close_minute` default
+  flipped 57 → 55. Comment notes the v19.14 reason and that the
+  filter only applies to trades flagged `close_at_eod=True`.
+- `services/bot_persistence.py:98` — restore-default for
+  `bot_config.eod_config.close_minute` also flipped 57 → 55. Same
+  rationale; if the bot ever starts before any `eod_config` doc has
+  been written, this is the value used.
+
+### P0 fixes inside `check_eod_close`
+
+#### P0 #1 — `close_trade` returns a bool, not a dict
+
+The legacy loop did `result = await self.close_trade(...);
+result.get("success")`. `close_trade` actually returns
+`True`/`False` (see line 685 of `position_manager.py`), so every
+iteration silently raised `AttributeError: 'bool' object has no
+attribute 'get'`, which got swallowed by the surrounding try/except
+and counted as a failure.
+
+Net pre-fix behaviour: even when broker-side closes succeeded, the
+bot logged "0 closed, N failed". Operator-visible: every EOD close
+appeared to fail, so the bot left `_eod_close_executed_today=False`,
+ran the close loop again on the next manage tick, hit the same
+AttributeError, and so on until 4:00 PM rolled past with positions
+still locally "open" (even though they were actually closed at IB).
+
+Now: capture `ok = await self.close_trade(...)` directly as bool;
+read `trade.realized_pnl` post-close (`close_trade` mutates it).
+
+#### P0 #2 — Closes run in parallel via `asyncio.gather`
+
+Pre-fix: serial loop. With 25 open positions × ~2s per close → ~50s
+wall-time for a complete EOD pass. On a fast-tape afternoon you
+risk spilling past the 4:00 PM bell entirely.
+
+Now: a coroutine per trade, all dispatched via `asyncio.gather`,
+total wall-time bounded by single-trade latency (~2-3s) regardless
+of position count. Test
+`test_eod_closes_run_in_parallel_not_serial` pins the contract: 5
+closes × 200ms each must finish in under 600ms (parallel) — would
+fail if a future contributor reverts to serial.
+
+#### P0 #3 — `_eod_close_executed_today` only flips True on full success
+
+Pre-fix: flag set unconditionally after the loop. If 1 of 25 closes
+failed, the failing position was forever marked "EOD-handled" and
+never retried. Operator finds it open the next morning.
+
+Now: flag only flips True when `failed_symbols == []`. On partial
+failure, the manage loop tick (~every 1-2s) re-enters
+`check_eod_close` and retries the failed close, until either it
+succeeds OR market_close_hour rolls past (P0 #4 fires the alarm
+then).
+
+#### P0 #4 — After-close alarm with WS broadcast
+
+Pre-fix: if `now >= 4:00 PM ET` we silently `return`. Operator had
+no way to know the EOD attempt failed end-of-day; only the next
+morning's "huh, I'm still in MSFT?" surfaces it.
+
+Now: log a loud `🚨 EOD ALARM: market closed at 16:00 ET but N
+positions still OPEN locally...` ERROR + broadcast
+`eod_after_close_alarm` event over the WS so the V5 HUD can render
+a banner. Throttled to once per day per occurrence.
+
+### P1 fixes
+
+#### P1 #5 — Half-trading-day window
+
+Operator sets `EOD_HALF_DAY_TODAY=true` in env on the morning of
+NYSE half-days (Black Friday, Christmas Eve, day after
+Thanksgiving). Window flips from 3:55 PM → 12:55 PM ET (5 min
+before the 1:00 PM half-day close), `market_close_hour` flips
+16 → 13. NYSE half-days are rare enough that operator-flagging is
+acceptable; a future contributor can wire to a real exchange
+calendar.
+
+#### P1 #6 — WS broadcast EOD start + completion
+
+Two new events on the WS stream:
+- `eod_close_started` — fires when the close window opens; carries
+  `positions_to_close`, `is_half_day`, `eod_window_et`. V5 HUD can
+  render a "Closing N positions..." banner.
+- `eod_close_completed` — fires after all closes attempted; carries
+  `closed`, `failed`, `failed_symbols`, `total_pnl`, `fully_done`.
+
+### Intraday-only — explicitly NOT applied to swing/position trades
+
+The filter `eod_trades = {tid: t ... if getattr(t, 'close_at_eod',
+True)}` skips any trade with `close_at_eod=False`. That flag is
+set per-strategy in `STRATEGY_CONFIGS` (line 298+ of
+`trading_bot_service.py`):
+
+- `close_at_eod=True` (intraday/scalp/day): vwap_continuation,
+  9_ema_scalp, opening_range_break, the_3_30_trade, opening_drive,
+  bouncy_ball, big_dog, second_chance, ... (~35 strategies)
+- `close_at_eod=False` (swing/position): squeeze, trend_continuation,
+  daily_squeeze, daily_breakout, earnings_momentum, sector_rotation,
+  base_breakout, accumulation_entry, relative_strength_position,
+  position_trade (~10 strategies)
+
+A swing trade in NVDA opened on Tuesday must NOT be auto-closed at
+3:55 PM. The filter ensures this; tests
+`test_eod_only_closes_intraday_trades` and
+`test_eod_skips_when_all_positions_are_swing` pin the behaviour.
+
+### Tests (`test_eod_close_v19_14.py` — 15 tests)
+
+Default-time guards (3):
+- `test_default_eod_close_minute_is_55`
+- `test_default_eod_close_hour_is_15`
+- `test_persistence_default_eod_close_minute_is_55`
+
+P0 contract guards (4):
+- `test_eod_treats_close_trade_return_as_bool`
+- `test_eod_partial_failure_keeps_flag_false_for_retry`
+- `test_eod_closes_run_in_parallel_not_serial`
+- `test_eod_alarms_if_positions_open_past_4pm`
+
+P1 half-day (2):
+- `test_eod_half_day_close_window_at_1255`
+- `test_eod_half_day_does_not_fire_before_window`
+
+Intraday-only filter (2):
+- `test_eod_only_closes_intraday_trades`
+- `test_eod_skips_when_all_positions_are_swing`
+
+Non-trigger fast-fail paths (4):
+- `test_eod_does_not_fire_before_trigger_minute`
+- `test_eod_disabled_short_circuits`
+- `test_eod_does_not_fire_on_weekend`
+- `test_eod_does_not_redo_closes_on_same_day`
+
+**76/76 across v19.2 + v19.3 + v19.4 + v19.5 + v19.8 + v19.12 +
+v19.13 + v19.14 backend test suites.**
+
+### Operator workflow on Spark after pull + restart
+
+```bash
+# Confirm new default in the bot status:
+curl -s http://localhost:8001/api/trading-bot/status | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); \
+   print('EOD close at:', d.get('eod_close_hour','?'), ':', \
+         d.get('eod_close_minute','?'))"
+# Expected: EOD close at: 15 : 55
+
+# Half-day operation (Black Friday / Christmas Eve / etc):
+echo "EOD_HALF_DAY_TODAY=true" >> backend/.env
+# (Then restart backend; close window flips to 12:55 PM ET that day.)
+```
+
+After 3:55 PM ET on a regular trading day:
+- All intraday open positions get a close MKT.
+- Swing/position trades stay open.
+- WS stream surfaces `eod_close_started` then `eod_close_completed`.
+- If any close fails, the manage loop retries on next tick until
+  4:00 PM, then fires `eod_after_close_alarm` if positions remain.
+
+
+
 ## 2026-04-30 (thirty-first commit, v19.13) — Manage-stage hardening (P0/P1/P2)
 
 Full audit of the manage stage uncovered 12 issues. Shipped fixes

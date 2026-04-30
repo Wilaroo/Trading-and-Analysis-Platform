@@ -130,3 +130,23 @@ is the operator's source of truth for which Trade fits which Setup;
 - Backend restart: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &` (Spark uses `.venv`, not supervisor)
 
 
+## EOD Auto-Close (v19.14 — 2026-04-30)
+
+- **Default window**: 3:55 PM ET on regular trading days, 12:55 PM ET
+  on half-days (operator sets `EOD_HALF_DAY_TODAY=true` in env that
+  morning). Configurable via `bot_config.eod_config.{close_hour,
+  close_minute, enabled}` in Mongo.
+- **Scope**: ONLY applies to trades flagged `close_at_eod=True` in
+  `STRATEGY_CONFIGS` (intraday/scalp/day strategies). Swing
+  (`squeeze`, `daily_*`, `earnings_momentum`, `sector_rotation`) and
+  Position (`base_breakout`, `accumulation_entry`,
+  `relative_strength_position`, `position_trade`) trades are
+  explicitly held overnight.
+- **Parallel closes**: `asyncio.gather` over all eligible trades
+  bounds wall-time to single-trade IB-roundtrip latency.
+- **Retry-on-partial**: if any close fails, the manage-loop tick
+  (~every 1-2s) retries until either all succeed OR market_close_hour
+  passes — at which point an `eod_after_close_alarm` WS event fires.
+- **WS surface**: `eod_close_started` (window opens) + `eod_close_completed`
+  (final state) + `eod_after_close_alarm` (positions still open after 4:00 PM).
+

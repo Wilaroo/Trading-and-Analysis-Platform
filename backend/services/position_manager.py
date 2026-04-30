@@ -278,8 +278,11 @@ class PositionManager:
 
     async def check_eod_close(self, bot: 'TradingBotService'):
         """
-        Close ALL open positions near market close (default: 3:57 PM ET).
+        Close ALL open positions near market close (default: 3:55 PM ET).
         This is a critical risk management feature to avoid overnight exposure.
+
+        ONLY closes intraday trades (those flagged `close_at_eod=True`).
+        Swing and position trades are explicitly held overnight.
 
         2026-04-30 v19.14 — multiple hardenings:
           P0 #1 — `close_trade` returns a bool, not a dict. The legacy
@@ -329,7 +332,7 @@ class PositionManager:
         # P1 #5 — half-trading-day detection. Operator sets
         # `EOD_HALF_DAY_TODAY=true` in env on the morning of half-days
         # (Black Friday, Christmas Eve, day after Thanksgiving). Default
-        # close window stays 3:57 PM. On half-days we flip to 12:55 PM
+        # close window stays 3:55 PM. On half-days we flip to 12:55 PM
         # (5 min before 1:00 PM half-day close). NYSE half-day calendar
         # is rare enough that operator-flagging is acceptable for now.
         import os as _os

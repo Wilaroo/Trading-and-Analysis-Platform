@@ -95,7 +95,7 @@ class BotPersistence:
             if eod_config:
                 bot._eod_close_enabled = eod_config.get("enabled", True)
                 bot._eod_close_hour = eod_config.get("close_hour", 15)
-                bot._eod_close_minute = eod_config.get("close_minute", 57)
+                bot._eod_close_minute = eod_config.get("close_minute", 55)
                 logger.info(f"⏰ Restored EOD config: {bot._eod_close_hour}:{bot._eod_close_minute:02d} PM ET, enabled={bot._eod_close_enabled}")
 
             # === 3. RESTORE DAILY STATS ===

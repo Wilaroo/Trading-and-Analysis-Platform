@@ -712,9 +712,15 @@ class TradingBotService:
         self._watchlist: List[str] = []
         
         # EOD Auto-Close Configuration
+        # 2026-04-30 v19.14 — moved from 3:57 → 3:55 PM ET so intraday
+        # closes complete a full 5 min before the 4:00 PM bell, leaving
+        # margin for IB roundtrip latency / partial-fail retries. Only
+        # applies to trades flagged `close_at_eod=True` (intraday/scalp/day
+        # — see `check_eod_close` filter); swing/position trades are
+        # explicitly kept overnight.
         self._eod_close_enabled = True
         self._eod_close_hour = 15  # 3 PM ET
-        self._eod_close_minute = 57  # 3:57 PM ET
+        self._eod_close_minute = 55  # 3:55 PM ET
         self._eod_close_executed_today = False
         self._last_eod_check_date = None
         

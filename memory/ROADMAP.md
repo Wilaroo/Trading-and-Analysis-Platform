@@ -3,7 +3,35 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.8 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.14 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.14 — see CHANGELOG (thirty-second commit)
+EOD close-stage hardening — full audit + 6 fixes:
+
+- ✅ **Default close window 3:57 → 3:55 PM ET** per operator request
+  (extra 2-min cushion before the 4:00 PM bell). Updated the live
+  default + the bot_persistence restore default so the change
+  survives restarts and fresh-DB starts.
+- ✅ **P0 #1**: `close_trade` returns a bool, not a dict — was raising
+  silent AttributeError on every close attempt. Now treated as bool.
+- ✅ **P0 #2**: closes run in PARALLEL via `asyncio.gather` (was
+  serial; risked spilling past 4:00 PM with 25 open positions).
+- ✅ **P0 #3**: `_eod_close_executed_today` only flips True on full
+  success; partial failure leaves the flag False so the manage-loop
+  tick retries the failed close before the bell.
+- ✅ **P0 #4**: After-close alarm — if positions are still locally
+  open at/after 4:00 PM, log loud ERROR + broadcast
+  `eod_after_close_alarm` event so the V5 HUD can render a banner.
+- ✅ **P1 #5**: Half-trading-day detection — `EOD_HALF_DAY_TODAY=true`
+  flips the window to 12:55 PM ET (5 min before 1:00 PM close).
+- ✅ **P1 #6**: WS-broadcast `eod_close_started` + `eod_close_completed`
+  events for V5 HUD visibility.
+- ✅ **Intraday-only**: explicit pin via `close_at_eod=True` filter —
+  swing/position trades are NEVER auto-closed.
+
+**Tests**: 15 new pytest in `test_eod_close_v19_14.py`. **76/76 across
+v19.2 + v19.3 + v19.4 + v19.5 + v19.8 + v19.12 + v19.13 + v19.14 backend
+test suites.**
 
 ### 🎯 Just shipped 2026-04-30 v19.8 — see CHANGELOG (twenty-seventh commit)
 All 4 stream-improvement waves shipped together:
