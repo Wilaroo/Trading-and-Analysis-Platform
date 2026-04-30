@@ -2,6 +2,63 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-first commit, v19.22) — News pruning + ML Feature Audit panel
+
+Operator follow-up: "for news providers I only want to get rid of FLY
+and BRFUPDN" + "yes let's add the ML Feature Audit panel" (the
+enhancement suggested in the v19.21 finish note).
+
+### News provider pruning — operator-precise control
+
+The v19.21 ship added `IB_NEWS_PROVIDER_OVERRIDE=BZ,DJ,BRFG` (lock to
+exactly those). That works but it's the wrong granularity for "I just
+want to drop two specific vendors." This commit adds a SECOND env that
+behaves as a filter on top of the live IB-subscribed list:
+
+  • `IB_NEWS_PROVIDER_EXCLUDE=FLY,BRFUPDN` — drops those two from
+    whatever `reqNewsProviders()` returns, keeping the rest.
+  • `IB_NEWS_PROVIDER_OVERRIDE` still wins absolutely when set (the
+    exclude list is ignored if override is set — semantics match
+    operator intent: "lock OR filter, not both at once").
+  • Trimmed default fallback (when `reqNewsProviders` returns empty)
+    from `[BZ, FLY, DJ, BRFG, BRFUPDN]` → `[BZ, DJ, BRFG]` so even
+    worst-case the bot's preference matches the operator's.
+
+Setting `IB_NEWS_PROVIDER_EXCLUDE=FLY,BRFUPDN` in `/app/backend/.env`
+on the DGX achieves exactly what the operator asked for — every
+`get_historical_news` call from this point on asks IB only for the
+non-excluded providers, regardless of what's subscribed in Gateway.
+
+### `MLFeatureAuditPanel.jsx` — verify the ML loop without a terminal
+
+Drop-in panel that wraps the v19.21 `GET /api/scanner/ml-feature-
+preview/{symbol}` endpoint and renders three colored label badges
+(market_setup, multi_index_regime, sector_regime) plus an active-
+features list (the one-hot bins that fired = 1.0). Includes:
+
+  • Editable symbol input that auto-prefills from
+    `sentcom:focus-symbol` events. Click any `$TICKER` chip anywhere
+    (gap scanner, gameplan card, narrative, etc.) → symbol input
+    populates, fetch fires, panel re-renders with the new audit.
+  • Wiring-status traffic light — green "Wired ✓ — N of M bins
+    active" when the loop is alive, amber "Cold start" when nothing
+    fires (data sparse / weekend / pre-warmup).
+  • Re-emit `sentcom:focus-symbol` from the audit's own symbol
+    chip so chat + audit stay in lockstep.
+  • Mounted in `SentComV5View.jsx` right column above OpenPositions
+    alongside the new `CpuReliefBadge` (the v19.21 throttle UI).
+
+### Verification
+
+- 6 new pytest cases in `test_news_provider_pruning_v19_22.py` —
+  override wins, exclude filters live list (case-insensitive), no-env
+  returns full list, empty live list uses trimmed default, override
+  takes precedence over exclude.
+- 147 / 147 tests pass across the v19 stack.
+- ESLint clean on `MLFeatureAuditPanel.jsx`, `SentComV5View.jsx`.
+- Frontend smoke-tested.
+
+
 ## 2026-05-01 (fortieth commit, v19.21) — HOOD R:R fix + verification surfaces + briefing widgets + CPU relief
 
 Operator opened the Deep Feed during RTH and saw HOOD `gap_fade` LONG

@@ -35,6 +35,8 @@ import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
 import { BriefingsCompactStrip } from './v5/BriefingsCompactStrip';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
+import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
+import CpuReliefBadge from './v5/CpuReliefBadge';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
 import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
@@ -495,6 +497,27 @@ export const SentComV5View = ({
                 onSymbolClick={handleOpenTicker}
                 onOpenDeepDive={onOpenBriefingDeepDive}
               />
+            </PanelErrorBoundary>
+          </div>
+
+          {/* 2026-05-01 v19.22 — ML Feature Audit panel.
+              Lets the operator click any $TICKER (gap-scanner, briefing
+              chip, etc.) and instantly see which label-features fired
+              (market_setup + multi_index_regime + sector_regime) — i.e.
+              "is the learning loop wired for this trade?". Listens for
+              the same `sentcom:focus-symbol` event the chat hook uses,
+              so a single click on any chip lights up BOTH this panel
+              and the chat. CpuReliefBadge sits next to it as a small
+              status chip — manual toggle for the throttle. */}
+          <div
+            className="border-b border-zinc-800 px-2 py-2 flex-shrink-0 space-y-2"
+            data-testid="ml-audit-strip-container"
+          >
+            <div className="flex items-center justify-end">
+              <CpuReliefBadge />
+            </div>
+            <PanelErrorBoundary label="ml-audit-panel">
+              <MLFeatureAuditPanel />
             </PanelErrorBoundary>
           </div>
 

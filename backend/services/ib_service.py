@@ -1009,14 +1009,24 @@ class IBWorkerThread(threading.Thread):
             con_id = contract.conId
             logger.info(f"Getting historical news for {symbol} (conId: {con_id})")
             
-            # If no providers specified, try to get user's subscribed providers
+            # If no providers specified, build the provider list.
             if not provider_codes:
-                # 2026-05-01 v19.21 — operator can clamp the list via env to
-                # a tighter subset (e.g. drop FLY + BRFUPDN duplicates) so
-                # `get_historical_news` only ever asks for the providers the
-                # operator actually wants to consume. Set
-                # `IB_NEWS_PROVIDER_OVERRIDE=BZ,DJ,BRFG` to lock it down.
-                # Empty / unset → fall through to live IB-subscribed list.
+                # 2026-05-01 v19.21+v19.22 — provider resolution chain:
+                #
+                # 1. `IB_NEWS_PROVIDER_OVERRIDE` env wins absolutely. e.g.
+                #    set `IB_NEWS_PROVIDER_OVERRIDE=BZ,DJ,BRFG` to lock the
+                #    bot to those 3 even if all 5 are subscribed in Gateway.
+                # 2. `IB_NEWS_PROVIDER_EXCLUDE` env filters the live IB list
+                #    after `reqNewsProviders()` returns it. e.g. set
+                #    `IB_NEWS_PROVIDER_EXCLUDE=FLY,BRFUPDN` to keep
+                #    everything you have subscribed except FLY and the
+                #    Briefing.com upgrades/downgrades feed (operator
+                #    request 2026-05-01 — drops 2 redundant streams from
+                #    Gateway-side CPU pressure).
+                # 3. If neither env is set, use the live IB-subscribed list.
+                # 4. If `reqNewsProviders()` returns empty (Gateway not
+                #    yet ready), fall back to the trimmed default
+                #    [BZ, DJ, BRFG] which matches operator preference.
                 import os as _os
                 _override = (_os.environ.get("IB_NEWS_PROVIDER_OVERRIDE") or "").strip()
                 if _override:
@@ -1027,13 +1037,28 @@ class IBWorkerThread(threading.Thread):
                 else:
                     providers = self.ib.reqNewsProviders()
                     self.ib.sleep(0.3)
+                    _exclude_raw = (_os.environ.get("IB_NEWS_PROVIDER_EXCLUDE") or "").strip()
+                    _excluded = {
+                        p.strip().upper() for p in _exclude_raw.split(",") if p.strip()
+                    }
                     if providers:
-                        # Use all available providers
-                        provider_codes = [p.providerCode for p in providers if hasattr(p, 'providerCode')]
-                        logger.info(f"Using providers: {provider_codes}")
+                        provider_codes = [
+                            p.providerCode for p in providers
+                            if hasattr(p, 'providerCode')
+                            and (p.providerCode or "").upper() not in _excluded
+                        ]
+                        if _excluded:
+                            logger.info(
+                                f"Using IB providers (excluded {sorted(_excluded)}): {provider_codes}"
+                            )
+                        else:
+                            logger.info(f"Using providers: {provider_codes}")
                     else:
-                        # Default common providers
-                        provider_codes = ["BZ", "FLY", "DJ", "BRFG", "BRFUPDN"]
+                        # 2026-05-01 v19.22 — trimmed default. FLY + BRFUPDN
+                        # dropped per operator pruning request; remaining
+                        # set covers retail (BZ), macro (DJ), and pre-mkt
+                        # commentary (BRFG) without the duplicate streams.
+                        provider_codes = ["BZ", "DJ", "BRFG"]
             
             # Set date range (default: last 7 days)
             if not end_date:

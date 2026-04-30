@@ -3,7 +3,22 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.21 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.22 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.22 — see CHANGELOG (forty-first commit)
+News pruning + ML Feature Audit panel:
+- ✅ `IB_NEWS_PROVIDER_EXCLUDE=FLY,BRFUPDN` env — filters live IB list
+  without touching Gateway settings. Override env still wins absolutely.
+- ✅ Trimmed default fallback `[BZ, DJ, BRFG]` (was 5-vendor).
+- ✅ `MLFeatureAuditPanel.jsx` mounted in V5 right column —
+  click any $TICKER → instant audit of which label-features fire
+  (market_setup + multi_index_regime + sector_regime).
+- ✅ `CpuReliefBadge` mounted next to it — manual throttle toggle.
+- ✅ 6 new pytests, 147/147 pass across full v19 stack.
+
+**Operator action needed on DGX**: add `IB_NEWS_PROVIDER_EXCLUDE=FLY,BRFUPDN`
+to `/app/backend/.env` and `sudo supervisorctl restart backend` — the
+filter only takes effect on next backend boot.
 
 ### 🎯 Just shipped 2026-05-01 v19.21 — see CHANGELOG (fortieth commit)
 HOOD R:R fix + verification surfaces + briefing widgets + CPU relief:
