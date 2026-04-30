@@ -501,6 +501,14 @@ class OpportunityEvaluator:
                 stop_price=stop_price,
                 target_prices=target_prices,
                 shares=shares,
+                # 2026-04-30 v19.13 — initialize remaining_shares +
+                # original_shares at TRADE-CREATE time, not on first
+                # manage-loop tick. Pre-fix: a partial exit landing
+                # before the first manage tick would decrement
+                # remaining_shares while original_shares was still 0,
+                # distorting all percentage-based scale-out math.
+                remaining_shares=shares,
+                original_shares=shares,
                 risk_amount=risk_amount,
                 potential_reward=potential_reward,
                 risk_reward_ratio=risk_reward_ratio,

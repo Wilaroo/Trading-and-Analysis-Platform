@@ -70,7 +70,18 @@ class PositionManager:
                             except Exception:
                                 quote_age_s = None  # treat as fresh on parse error
 
-                            quote = {'price': q.get('last') or q.get('close') or 0}
+                            quote = {
+                                'price': q.get('last') or q.get('close') or 0,
+                                # 2026-04-30 v19.13 — capture bid/ask too so the
+                                # stop-trigger logic can use the tradable side
+                                # (long-exit fills at bid; short-exit at ask).
+                                # Last-trade alone can be MISLEADING when spread
+                                # is wide on thin stocks — last tick at $50.00
+                                # but bid is $49.85 → a sale fills at the worse
+                                # price than the trigger suggested.
+                                'bid': q.get('bid'),
+                                'ask': q.get('ask'),
+                            }
                 except Exception as e:
                     # v19.13 — was bare `except: pass`; that hid pusher
                     # outages silently. Log + carry on (Alpaca fallback
@@ -190,17 +201,41 @@ class PositionManager:
                 if trade.trailing_stop_config.get('enabled', True):
                     await bot._update_trailing_stop(trade)
 
-                # Automatic stop-loss monitoring using current_stop (which may be trailing)
+                # 2026-04-30 v19.13 — bid/ask-aware stop trigger.
+                # Long position exits at the BID; short exits at the ASK.
+                # Triggering on `last` can fire prematurely (last printed
+                # below stop but bid actually still above) OR fire LATE
+                # (last above stop but bid already deep below). Either
+                # case mis-prices the operator's exit. Use the tradable
+                # side; fall back to last if bid/ask not in feed.
                 effective_stop = trade.trailing_stop_config.get('current_stop', trade.stop_price)
+                trigger_price = trade.current_price  # last-trade default
+                _bid = quote.get('bid')
+                _ask = quote.get('ask')
                 stop_hit = False
                 if trade.direction == TradeDirection.LONG:
-                    if trade.current_price <= effective_stop:
+                    # Long exit fills at bid → that's the price we'd ACTUALLY
+                    # get. Use it for the trigger when available + sane.
+                    if _bid and _bid > 0:
+                        trigger_price = float(_bid)
+                    if trigger_price <= effective_stop:
                         stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} <= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
+                        logger.warning(
+                            f"STOP HIT: {trade.symbol} {('bid' if _bid and _bid > 0 else 'last')} "
+                            f"${trigger_price:.4f} <= stop ${effective_stop:.4f} "
+                            f"(mode: {trade.trailing_stop_config.get('mode')})"
+                        )
                 else:  # SHORT
-                    if trade.current_price >= effective_stop:
+                    # Short exit fills at ask.
+                    if _ask and _ask > 0:
+                        trigger_price = float(_ask)
+                    if trigger_price >= effective_stop:
                         stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} >= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
+                        logger.warning(
+                            f"STOP HIT: {trade.symbol} {('ask' if _ask and _ask > 0 else 'last')} "
+                            f"${trigger_price:.4f} >= stop ${effective_stop:.4f} "
+                            f"(mode: {trade.trailing_stop_config.get('mode')})"
+                        )
 
                 if stop_hit:
                     stop_mode = trade.trailing_stop_config.get('mode', 'original')
@@ -213,10 +248,33 @@ class PositionManager:
                 if trade.target_prices and trade.scale_out_config.get('enabled', True):
                     await self.check_and_execute_scale_out(trade, bot)
 
-                await bot._notify_trade_update(trade, "updated")
+                # 2026-04-30 v19.13 — throttle per-tick WS notifications.
+                # With 25 open positions × ~1-2s loop = 12-25 WS msgs/sec
+                # was overwhelming the V5 HUD. Now we only emit when:
+                #   • first tick after open (no _last_notified_at yet)
+                #   • >= 2s since last emit (heartbeat)
+                #   • |unrealized P&L| moved by > 5% of entry-side risk
+                #     (so the operator sees meaningful shifts in real-time)
+                # State-change paths (scale_out, closed) emit unconditionally
+                # via separate notify calls below.
+                _now = time.time()
+                _last_at = float(getattr(trade, "_last_notified_at", 0) or 0)
+                _last_pnl = float(getattr(trade, "_last_notified_pnl", 0) or 0)
+                _cur_pnl = float(getattr(trade, "unrealized_pnl", 0) or 0)
+                _risk = max(1.0, abs(float(trade.risk_amount or 0)))
+                _pnl_delta_pct = abs(_cur_pnl - _last_pnl) / _risk
+                _due = (
+                    _last_at == 0  # first tick
+                    or (_now - _last_at) >= 2.0  # heartbeat
+                    or _pnl_delta_pct >= 0.05  # 5% of risk
+                )
+                if _due:
+                    trade._last_notified_at = _now
+                    trade._last_notified_pnl = _cur_pnl
+                    await bot._notify_trade_update(trade, "updated")
 
             except Exception as e:
-                logger.error(f"Error updating position {trade_id}: {e}")
+                logger.exception(f"Error updating position {trade_id}: {type(e).__name__}: {e}")
 
     async def check_eod_close(self, bot: 'TradingBotService'):
         """

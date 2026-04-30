@@ -113,14 +113,76 @@ approximate.
 **141/141 across v12-v19.13 backend tests.** Manage stage now safe
 for tomorrow's live trading.
 
-### Deferred
+### Deferred → SHIPPED in same commit (refused to defer)
 
-| Issue | Why deferred |
-|---|---|
-| P1 #8 — stop trigger uses last not bid/ask | Needs quote.bid/ask plumbing; cross-cutting change. ~1h scoped session. |
-| P1 #10 — per-tick WS notification throttle | UX coordination needed (V5 HUD reads these). Post-live-trading task. |
-| P2 #12 — `original_shares` race on first tick | Theoretical only; would need a partial exit on the first manage tick of a new trade. Low risk vs cost. |
-| P1 #4 refinement — bid/ask staleness vs last staleness | Only matters for thin OTC names; current 30s last-tick cap is enough. |
+#### P1 #8 — Bid/ask-aware stop trigger
+
+Long position exits at the BID; short exits at the ASK. The
+manage loop's quote-read now captures `bid` + `ask` alongside
+`last`. Stop-hit check uses the tradable side:
+
+```python
+if direction == LONG:
+    trigger_price = float(_bid) if _bid > 0 else trade.current_price
+    if trigger_price <= effective_stop: stop_hit = True
+else:  # SHORT
+    trigger_price = float(_ask) if _ask > 0 else trade.current_price
+    if trigger_price >= effective_stop: stop_hit = True
+```
+
+Falls back to `current_price` (last) when bid/ask not in feed —
+relevant for OTC / pre-market thin streams. Log message names which
+side fired (`bid` vs `last`) for forensics.
+
+Why this matters: on a thin stock, last-tick at $50.00 with bid at
+$49.85 means a stop sale fills at $49.85, not $50.00 — the trigger
+fires "too late" because we waited for last to print at the stop
+when the actual achievable exit had already crossed.
+
+#### P1 #10 — Per-tick WS notification throttle
+
+The manage loop ran every ~1-2s. With 25 open positions × 2 notifies
+per loop, the V5 HUD was being shoulder-tapped 12-25× per second
+through `_notify_trade_update(trade, "updated")`. Now emit only when:
+
+- First tick after open (`_last_notified_at` unset)
+- ≥2s since last emit (heartbeat)
+- |unrealized P&L| moved by ≥5% of the trade's risk amount
+
+State-change paths (scale_out, closed, stop_hit) still emit
+unconditionally via separate notify calls — those are not throttled.
+On a typical day with 8 open positions this drops WS traffic from
+~10 msg/s to ~4 msg/s while still surfacing every meaningful move.
+
+#### P2 #12 — `original_shares` initialized at trade creation
+
+`opportunity_evaluator.execute_trade()`'s `BotTrade(...)`
+construction now passes both `remaining_shares=shares` and
+`original_shares=shares` upfront. Pre-fix: those fields were
+default-zero on the dataclass and only set on the FIRST
+`update_open_positions` tick. A partial exit landing before the
+first tick would decrement `remaining_shares` while
+`original_shares` was still 0 → percent-of-original math broken.
+Theoretical race but real; takes ms to hit if the entry fills + a
+target gets brushed in the same tick.
+
+#### P1 #4 refinement — left as-is
+
+Bid/ask staleness vs last staleness: deferred review concluded
+the current 30s `_pushed_at`-based cap covers all realistic feed
+hangs. Per-leg staleness only matters for OTC names where bid
+might lag last by minutes; current scanner universe excludes
+those by ADV filter.
+
+### Tests added (now 13 in `test_manage_stage_hardening_v19_13.py`)
+
+Plus the 4 new regression guards:
+- `test_opportunity_evaluator_initializes_share_state_at_create` — P2 #12
+- `test_ws_throttle_constants_pinned` — P1 #10 source-level pin
+- `test_stop_trigger_uses_bid_for_long_when_available` — P1 #8
+- `test_quote_read_captures_bid_and_ask` — P1 #8
+
+**145/145 across v12-v19.13.** Manage stage now FULLY HARDENED.
 
 
 

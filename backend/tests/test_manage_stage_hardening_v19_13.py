@@ -286,3 +286,89 @@ async def test_close_trade_returns_false_on_executor_failure():
     )
     # Trade still in open_trades (NOT moved to closed_trades)
     assert "T1" in fake_bot._open_trades
+
+
+# --------------------------------------------------------------------------
+# P2 #12 — original_shares + remaining_shares initialized at trade-create
+# --------------------------------------------------------------------------
+
+def test_opportunity_evaluator_initializes_share_state_at_create():
+    """Verify the BotTrade construction passes both `shares`,
+    `remaining_shares`, AND `original_shares` so a partial exit
+    landing on the first manage tick can't distort the math.
+
+    Source-level check: the construction call site MUST mention all
+    three field names. Using the source-grep approach (cheaper than
+    spinning up the full evaluator)."""
+    import inspect
+    from services import opportunity_evaluator
+    src = inspect.getsource(opportunity_evaluator)
+    # Find the trade = BotTrade(...) construction block. Use a generous
+    # lookahead (200 lines) since the constructor has nested parens
+    # (e.g., `str(uuid.uuid4())`).
+    idx = src.find("trade = BotTrade(")
+    assert idx >= 0, "Could not locate BotTrade(...) construction"
+    # Slurp ~3,000 chars after the opening to safely contain the full call
+    body = src[idx : idx + 3000]
+    for field in ("shares=", "remaining_shares=", "original_shares="):
+        assert field in body, (
+            f"v19.13 P2 #12 REGRESSION: BotTrade construction missing "
+            f"`{field}`. A partial exit on the first manage tick would "
+            f"distort scale-out percentages."
+        )
+
+
+# --------------------------------------------------------------------------
+# P1 #10 — WS notification throttle
+# --------------------------------------------------------------------------
+
+def test_ws_throttle_constants_pinned():
+    """Source-level pin: the throttle MUST keep the 2s heartbeat
+    floor + 5% risk-relative P&L delta trigger so a future contributor
+    doesn't silently flip back to per-tick spam."""
+    import inspect
+    from services import position_manager
+    src = inspect.getsource(position_manager)
+    # Two anchors: the 2.0s heartbeat and the 0.05 (5%) delta gate.
+    assert "_now - _last_at) >= 2.0" in src or "_last_at) >= 2.0" in src, (
+        "v19.13 P1 #10 REGRESSION: WS throttle 2s heartbeat lost."
+    )
+    assert "_pnl_delta_pct >= 0.05" in src, (
+        "v19.13 P1 #10 REGRESSION: WS throttle 5% P&L-delta trigger lost."
+    )
+
+
+# --------------------------------------------------------------------------
+# P1 #8 — bid/ask-aware stop trigger
+# --------------------------------------------------------------------------
+
+def test_stop_trigger_uses_bid_for_long_when_available():
+    """Source-level pin: the long-stop check uses bid (not last) when
+    bid is present + sane. Critical for thin-stock fills where
+    last >> bid."""
+    import inspect
+    from services import position_manager
+    src = inspect.getsource(position_manager)
+    # Pin the structure: trigger_price gets bid for long, ask for short
+    assert "trigger_price = float(_bid)" in src, (
+        "v19.13 P1 #8 REGRESSION: long stop must use bid for trigger."
+    )
+    assert "trigger_price = float(_ask)" in src, (
+        "v19.13 P1 #8 REGRESSION: short stop must use ask for trigger."
+    )
+    assert "trigger_price <= effective_stop" in src and \
+           "trigger_price >= effective_stop" in src, (
+        "v19.13 P1 #8 REGRESSION: stop comparisons must use trigger_price, "
+        "not current_price/last."
+    )
+
+
+def test_quote_read_captures_bid_and_ask():
+    """Pin that the quote dict the manage-loop builds carries bid + ask."""
+    import inspect
+    from services import position_manager
+    src = inspect.getsource(position_manager)
+    assert "'bid': q.get('bid')" in src and "'ask': q.get('ask')" in src, (
+        "v19.13 P1 #8 REGRESSION: quote dict must capture bid/ask "
+        "so stop-trigger logic can use the tradable side."
+    )
