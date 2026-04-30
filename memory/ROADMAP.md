@@ -3,7 +3,54 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.14b fork)
+## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.16 fork)
+
+### 🎯 Just shipped 2026-04-30 v19.16 — see CHANGELOG (thirty-fifth commit)
+Tier-aware detector dispatch:
+- ✅ New `_intraday_only_setups` SUPERSET of `_intraday_setups` —
+  pin-listed 28 detectors that have explicit sub-5min timing or
+  playbook "intraday only" specs.
+- ✅ Dispatch loop early-skip BEFORE `_check_setup` when the
+  symbol's tier is non-intraday and the detector is in the
+  intraday-only set.
+- ✅ Conservative inclusion — ambiguous detectors (`squeeze`,
+  `breakout`, `chart_pattern`, `mean_reversion`, etc.) explicitly
+  pinned as MUST-be-OFF the list to defend against silent
+  suppression of swing/position alerts.
+- ✅ ~40% reduction in detector dispatch volume on 2,000-symbol
+  universe + cleaner AI training data (no more stale-snapshot
+  9-EMA scalp signals on swing-tier symbols).
+- ✅ 7 new pytest. Fixed pre-existing stale canary test.
+
+### 🎯 Just shipped 2026-04-30 v19.15 — see CHANGELOG (thirty-fourth commit)
+Per-cycle context cache:
+- ✅ New `_refresh_cycle_context()` runs ONCE per scan cycle —
+  prefetches multi-index regime + sector regime market-wide.
+- ✅ `_apply_setup_context` reads from the cache; falls back to
+  per-alert classifier when cache stale/missing.
+- ✅ ~15s/session of EVAL latency reclaimed at 1,500 alerts/day.
+  Compounds with v19's parallel gate.
+- ✅ Defensive `getattr` so test scaffolding (`__new__`-bypass
+  pattern in detector_stats / scanner_canary) keeps working.
+- ✅ 10 new pytest. **101/101 across all v19 backend suites + 221/222
+  across full scanner-adjacent suite (1 pre-existing unrelated failure).**
+
+### 🎯 Just shipped 2026-04-30 v19.14b — see CHANGELOG (thirty-third commit)
+V5 EOD Countdown Banner — 5-min lookahead + CLOSE ALL NOW button.
+
+### 🎯 Just shipped 2026-04-30 v19.14 — see CHANGELOG (thirty-second commit)
+EOD close-stage hardening — 6 fixes + 3:55 PM ET default + 15 tests.
+
+### 🟡 P1 — Next session priorities
+
+- **Divergence drill-in panel (Shadow vs Real)**: every shadow-vs-real
+  disagreement becomes a labelled training sample. ~2-3h.
+- **Setup-landscape self-grading EOD tracker**: record briefing
+  predictions, grade EOD against `alert_outcomes`, surface as
+  receipts in next morning's briefing.
+- **Tier-tag backfill for symbol_adv_cache**: GICS-aligned tags
+  on symbols beyond the static map (Finnhub fallback already
+  shipped, just needs a one-shot CLI to flush the universe).
 
 ### 🎯 Just shipped 2026-04-30 v19.14b — see CHANGELOG (thirty-third commit)
 V5 EOD Countdown Banner:

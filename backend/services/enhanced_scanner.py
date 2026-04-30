@@ -21,6 +21,7 @@ Data Source Hierarchy:
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass, asdict, field
@@ -826,6 +827,37 @@ class EnhancedBackgroundScanner:
             "back_through_open", "up_through_open", "opening_drive",
             "orb", "hitchhiker", "spencer_scalp", "9_ema_scalp", "abc_scalp"
         }
+
+        # 2026-04-30 v19.16 — tier-aware detector dispatch.
+        # `_intraday_only_setups` is a SUPERSET of `_intraday_setups`
+        # listing every detector that is physically nonsensical on a
+        # swing/investment tier symbol (which is only snapshotted every
+        # 30-120s by the bar-poll service). Running e.g. `9_ema_scalp`
+        # on a stock the bar-poll only freshens every 60s produces a
+        # signal computed from stale data — worse than slow, actively
+        # WRONG training data for the AI gate.
+        # Conservative inclusion criteria — a detector must be on this
+        # list ONLY if it has an explicit sub-5min timing dependency
+        # OR its playbook spec says "intraday only". Everything
+        # ambiguous (squeeze, breakout, chart_pattern, mean_reversion)
+        # stays OFF the list so it keeps running across all tiers.
+        self._intraday_only_setups = self._intraday_setups | {
+            # VWAP continuation / bounce / fade — all need live VWAP
+            "vwap_continuation", "vwap_bounce", "vwap_fade",
+            # Time-bounded setups
+            "premarket_high_break",     # first 5-min OR break
+            "the_3_30_trade",            # 3:30 PM specific
+            # Gap plays — only meaningful in the first 30-90 min
+            "gap_fade", "gap_give_go", "gap_pick_roll",
+            # Intraday mean-reversion (rubber band / tidal wave)
+            "rubber_band", "tidal_wave",
+            # Intraday momentum / position
+            "hod_breakout",
+            "fashionably_late", "off_sides", "backside",
+            "second_chance",
+            "big_dog", "puppy_dog",
+            "bouncy_ball",
+        }
         
         # Watchlist — sourced from the canonical AI-training universe at
         # set_db() time. Until db is wired we keep a tiny ETF-only safety
@@ -908,6 +940,22 @@ class EnhancedBackgroundScanner:
         # Bounded ring-buffer (max 200 samples per setup) keeps memory
         # fixed and naturally drops stale samples.
         self._detector_proximity: Dict[str, List[Dict[str, float]]] = {}
+
+        # 2026-04-30 v19.15 — Per-cycle context cache.
+        # Pre-v19.15: every alert's `_apply_setup_context` did 3
+        # awaited classifier calls (multi-index regime + sector regime
+        # + setup classifier). The first two are market-wide so calling
+        # them per-alert was pure overhead — they're TTL-cached but
+        # still pay function-dispatch + lock overhead × 1,500 alerts/day
+        # post-v18 bar-poll (~22-45s/session).
+        # v19.15: prefetch ONCE per scan cycle into `_cycle_context`;
+        # per-alert path becomes a dict lookup. The MarketSetup classifier
+        # stays per-alert because it needs the per-symbol intraday snapshot.
+        self._cycle_context: Optional[Dict[str, Any]] = None
+        self._cycle_context_at: Optional[float] = None  # monotonic ts
+        self._cycle_context_hits = 0
+        self._cycle_context_misses = 0
+        self._cycle_context_ttl_s = 60  # safety fallback if loop misses
         self._PROXIMITY_MAX_SAMPLES = 200
         
         # Market context
@@ -2157,6 +2205,97 @@ class EnhancedBackgroundScanner:
                 traceback.print_exc()
                 await asyncio.sleep(10)
     
+    async def _refresh_cycle_context(self) -> None:
+        """Prefetch market-wide context ONCE per scan cycle.
+
+        2026-04-30 v19.15 — populates ``self._cycle_context`` with the
+        results of the two market-wide classifiers (multi-index regime,
+        sector regime). ``_apply_setup_context`` reads from this cache
+        instead of awaiting the classifiers per-alert.
+
+        Net behaviour preserved: when prefetch fails or the cache is
+        stale (>``_cycle_context_ttl_s`` old), ``_apply_setup_context``
+        falls back to the original per-alert path. The classifiers
+        themselves still keep their own 5-min TTL caches as a second
+        layer of defence.
+        """
+        ctx: Dict[str, Any] = {
+            "captured_at_monotonic": time.monotonic(),
+            "cycle_id": self._scan_count,
+            "multi_index_regime": "unknown",
+            "multi_index_confidence": 0.0,
+            "sector_regime_by_etf": {},  # ETF -> regime label string
+            "spy_5d_return_pct": None,
+            "fresh": False,
+        }
+
+        # Multi-index regime — single market-wide call.
+        try:
+            from services.multi_index_regime_classifier import (
+                get_multi_index_regime_classifier,
+            )
+            regime_classifier = get_multi_index_regime_classifier(db=self.db)
+            regime_res = await regime_classifier.classify()
+            ctx["multi_index_regime"] = regime_res.label.value
+            ctx["multi_index_confidence"] = float(regime_res.confidence or 0.0)
+        except Exception as e:
+            logger.debug(f"_refresh_cycle_context: multi_index classify failed: {e}")
+
+        # Sector regime — classify ALL 11 sector ETFs in one pass; per-symbol
+        # mapping happens at the read site via `SectorTagService.tag_symbol`.
+        try:
+            from services.sector_regime_classifier import (
+                get_sector_regime_classifier,
+            )
+            sector_classifier = get_sector_regime_classifier(db=self.db)
+            sector_res = await sector_classifier.classify_all_sectors()
+            for etf, snap in (sector_res.sectors or {}).items():
+                regime = getattr(snap, "regime", None)
+                if regime is not None:
+                    ctx["sector_regime_by_etf"][etf] = regime.value
+            ctx["spy_5d_return_pct"] = float(sector_res.spy_5d_return_pct or 0.0)
+        except Exception as e:
+            logger.debug(f"_refresh_cycle_context: sector classify failed: {e}")
+
+        ctx["fresh"] = True
+        self._cycle_context = ctx
+        self._cycle_context_at = ctx["captured_at_monotonic"]
+
+    def _get_cycle_context(self) -> Optional[Dict[str, Any]]:
+        """Return the current cycle context if it's still fresh.
+
+        ``None`` when no context has been captured yet OR the captured
+        context is older than ``_cycle_context_ttl_s`` (60s default).
+        Stale returns force the per-alert fallback path so the
+        operator never sees an alert tagged with a regime label that's
+        more than a minute behind reality.
+
+        Defensive `getattr` reads guard against test scaffolding that
+        bypasses `__init__` via `EnhancedBackgroundScanner.__new__()`
+        (used by the legacy detector_stats / scanner_canary suites).
+        """
+        ctx = getattr(self, "_cycle_context", None)
+        ctx_at = getattr(self, "_cycle_context_at", None)
+        ttl = getattr(self, "_cycle_context_ttl_s", 60)
+        if not ctx or ctx_at is None:
+            try:
+                self._cycle_context_misses = getattr(self, "_cycle_context_misses", 0) + 1
+            except Exception:
+                pass
+            return None
+        age = time.monotonic() - ctx_at
+        if age > ttl:
+            try:
+                self._cycle_context_misses = getattr(self, "_cycle_context_misses", 0) + 1
+            except Exception:
+                pass
+            return None
+        try:
+            self._cycle_context_hits = getattr(self, "_cycle_context_hits", 0) + 1
+        except Exception:
+            pass
+        return ctx
+
     async def _run_optimized_scan(self):
         """
         Run optimized scan with ADV as FIRST checkpoint and tiered frequency.
@@ -2177,6 +2316,15 @@ class EnhancedBackgroundScanner:
         # Cumulative totals (`_detector_*_total`) persist across cycles.
         self._detector_evals = {}
         self._detector_hits = {}
+
+        # 2026-04-30 v19.15 — populate the per-cycle market-context cache
+        # ONCE so all alerts in this scan tick share the same regime +
+        # sector snapshot. Failure here is non-fatal: alerts fall back
+        # to per-alert classifier calls (which are already TTL cached).
+        try:
+            await self._refresh_cycle_context()
+        except Exception as e:
+            logger.debug(f"_refresh_cycle_context skipped: {e}")
         
         # Get candidate symbols from wave scanner
         all_candidates = await self._get_active_symbols()
@@ -2695,13 +2843,35 @@ class EnhancedBackgroundScanner:
 
             alerts = []
             current_window = self._get_current_time_window()
-            
+
+            # 2026-04-30 v19.16 — tier-aware detector dispatch.
+            # Look up the symbol's ADV-classified tier ONCE per symbol
+            # so we can skip nonsensical detector/tier combinations
+            # (e.g. `9_ema_scalp` on a swing-tier symbol that's only
+            # snapshotted every 60s by bar-poll). Tier cache is
+            # populated by `_rebuild_tier_cache` and refreshed hourly;
+            # missing-cache entries fall through to the existing
+            # volume gate below as a safety net.
+            symbol_tier = self._tier_cache.get(symbol)
+
             # Check each enabled setup
             for setup_type in self._enabled_setups:
                 # Check time and regime validity
                 if not self._is_setup_valid_now(setup_type):
                     continue
-                
+
+                # v19.16 tier filter — if this is an intraday-only detector
+                # AND the symbol is classified as swing/investment tier,
+                # skip dispatch entirely. Saves ~40-60% of detector calls
+                # on the swing+investment cohort + prevents stale-data
+                # alerts polluting the AI training pipeline.
+                if (
+                    symbol_tier is not None
+                    and symbol_tier != "intraday"
+                    and setup_type in self._intraday_only_setups
+                ):
+                    continue
+
                 # Intraday/scalp setups require HIGHER volume threshold
                 # (General ADV threshold already passed in pre-filter)
                 if setup_type in self._intraday_setups:
@@ -5194,27 +5364,45 @@ class EnhancedBackgroundScanner:
 
         # Multi-index regime tag — market-wide, soft (no priority change),
         # stamped purely as metadata + feature signal. Never blocks alerts.
-        try:
-            from services.multi_index_regime_classifier import (
-                get_multi_index_regime_classifier,
-            )
-            regime_classifier = get_multi_index_regime_classifier(db=self.db)
-            regime_res = await regime_classifier.classify()
-            alert.multi_index_regime = regime_res.label.value
-        except Exception as e:
-            logger.debug(f"_apply_regime_context({symbol}) failed: {e}")
+        # 2026-04-30 v19.15 — read from per-cycle cache first; per-alert
+        # fallback preserved when cache is stale or absent.
+        cycle_ctx = self._get_cycle_context()
+        if cycle_ctx and cycle_ctx.get("multi_index_regime", "unknown") != "unknown":
+            alert.multi_index_regime = cycle_ctx["multi_index_regime"]
+        else:
+            try:
+                from services.multi_index_regime_classifier import (
+                    get_multi_index_regime_classifier,
+                )
+                regime_classifier = get_multi_index_regime_classifier(db=self.db)
+                regime_res = await regime_classifier.classify()
+                alert.multi_index_regime = regime_res.label.value
+            except Exception as e:
+                logger.debug(f"_apply_regime_context({symbol}) failed: {e}")
 
-        # Sector regime tag — per-symbol, derived from the 11 SPDR sector
-        # ETFs. Same soft-gate pattern: stamp the label on the alert,
-        # never modify priority. Symbols outside the static sector tag
-        # map stay 'unknown'.
+        # Sector regime tag — per-symbol via `tag_symbol` static map →
+        # ETF, then look up ETF's regime label. v19.15 reads the
+        # ETF→regime map from the per-cycle cache (was a per-alert
+        # `await sector_classifier.classify_for_symbol(symbol)`).
+        # Fallback chain preserved when cache miss / unknown ETF.
         try:
             from services.sector_regime_classifier import (
                 get_sector_regime_classifier,
             )
-            sector_classifier = get_sector_regime_classifier(db=self.db)
-            sector_label = await sector_classifier.classify_for_symbol(symbol)
-            alert.sector_regime = sector_label.value
+            from services.sector_tag_service import get_sector_tag_service
+            tag_svc = get_sector_tag_service(db=self.db)
+            etf = tag_svc.tag_symbol(symbol)
+            if etf is None:
+                # Async fallback (Mongo cache / Finnhub) — unchanged from
+                # pre-v19.15 behaviour.
+                etf = await tag_svc.tag_symbol_async(symbol)
+            if etf and cycle_ctx and etf in cycle_ctx.get("sector_regime_by_etf", {}):
+                alert.sector_regime = cycle_ctx["sector_regime_by_etf"][etf]
+            else:
+                # Cache miss path — keep the per-alert call as a safety net.
+                sector_classifier = get_sector_regime_classifier(db=self.db)
+                sector_label = await sector_classifier.classify_for_symbol(symbol)
+                alert.sector_regime = sector_label.value
         except Exception as e:
             logger.debug(f"_apply_sector_regime({symbol}) failed: {e}")
 

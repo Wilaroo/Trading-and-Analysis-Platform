@@ -56,11 +56,14 @@ def test_canary_scanner_pillar_setups_have_checkers():
     from services.enhanced_scanner import EnhancedBackgroundScanner
 
     s = EnhancedBackgroundScanner()
+    # 2026-04-30 v19.16 — `relative_strength` was REMOVED from
+    # `_enabled_setups` in v16 (CHANGELOG: "RS detector OFF, alert
+    # caps lifted end-to-end"). The pillar list is updated to match
+    # the current `_enabled_setups` truth.
     pillars = {
         "rubber_band",
         "vwap_bounce",
         "squeeze",
-        "relative_strength",
         "opening_drive",
         "orb",
         "breakout",

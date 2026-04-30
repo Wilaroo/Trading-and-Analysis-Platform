@@ -132,6 +132,25 @@ is the operator's source of truth for which Trade fits which Setup;
 - Backend restart: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &` (Spark uses `.venv`, not supervisor)
 
 
+## Scanner runtime architecture (v19.15 + v19.16 — 2026-04-30)
+
+### Per-cycle context cache (v19.15)
+At the top of each `_run_optimized_scan()` tick, `_refresh_cycle_context()`
+prefetches the two market-wide classifiers (Multi-Index Regime + Sector
+Regime) into a `Dict[str, Any]` on the scanner. `_apply_setup_context`
+reads from this dict for all alerts in the same cycle instead of
+awaiting the classifiers per-alert. TTL: 60s; on miss we fall back
+to the per-alert path which is also TTL-cached internally (5 min).
+
+### Tier-aware detector dispatch (v19.16)
+`_intraday_only_setups` is a superset of `_intraday_setups` listing
+every detector with explicit sub-5min timing or playbook "intraday
+only" spec. The dispatch loop in `_scan_symbol_all_setups` skips
+these detectors when the symbol's tier (from `_tier_cache`) is
+non-intraday. Saves ~40% of detector calls on swing+investment
+cohort and prevents stale-snapshot signals from polluting the AI
+training pipeline.
+
 ## EOD Auto-Close (v19.14 — 2026-04-30)
 
 - **Default window**: 3:55 PM ET on regular trading days, 12:55 PM ET

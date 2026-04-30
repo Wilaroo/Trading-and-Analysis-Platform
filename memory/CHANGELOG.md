@@ -2,6 +2,257 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirty-fifth commit, v19.16) — Tier-aware detector dispatch
+
+Pre-fix the scanner iterated all ~35 detectors in `_enabled_setups`
+for every symbol regardless of tier. A symbol classified as
+`swing` tier (~$2M-$10M ADV, snapshotted every 60s by bar-poll)
+was running through ALL intraday-timing detectors
+(`9_ema_scalp`, `vwap_continuation`, `the_3_30_trade`,
+`opening_drive`, gap plays, etc.) — each producing physically
+nonsensical signals computed from data that's 30-90s stale.
+
+### Why this matters (quality, not just speed)
+
+The post-v18 bar-poll service made universe coverage jump from
+2.8% → ~80% (~2,000 symbols). That's a great breadth win, but the
+swing/investment cohort was getting flooded with intraday-style
+signals that should never have fired:
+- `9_ema_scalp` on a stock the bar-poll only freshens every 60s →
+  the 9-EMA distance reading is from data that's already 30+s
+  stale by the time the alert hits the AI gate.
+- `the_3_30_trade` on an investment-tier symbol that's only
+  scanned at 11:00 AM and 3:45 PM → the trigger logic fires once
+  per scan and produces a "3:30 PM range break" signal in the
+  3:45 PM scan window, computed against bars from a different
+  time of day.
+
+These weren't just slow — they were **actively wrong** training
+data feeding the AI gate's labelled outcomes.
+
+### Patch
+
+#### 1. `_intraday_only_setups` — new attribute on EnhancedBackgroundScanner
+
+A SUPERSET of the existing `_intraday_setups` (which was the
+volume-gate set). Listing every detector with explicit sub-5min
+timing or playbook "intraday only" specs:
+
+```python
+self._intraday_only_setups = self._intraday_setups | {
+    "vwap_continuation", "vwap_bounce", "vwap_fade",
+    "premarket_high_break", "the_3_30_trade",
+    "gap_fade", "gap_give_go", "gap_pick_roll",
+    "rubber_band", "tidal_wave",
+    "hod_breakout",
+    "fashionably_late", "off_sides", "backside",
+    "second_chance",
+    "big_dog", "puppy_dog",
+    "bouncy_ball",
+}
+```
+
+**Conservative inclusion criteria**: a detector is on this list
+ONLY if it has explicit sub-5min timing dependency OR its
+playbook spec says "intraday only". Anything ambiguous
+(`squeeze`, `breakout`, `chart_pattern`, `mean_reversion`,
+`trend_continuation`, `daily_squeeze`, `daily_breakout`,
+`base_breakout`, `earnings_momentum`, `sector_rotation`) stays
+OFF so it keeps running across all tiers.
+
+#### 2. Dispatch loop — early skip BEFORE `_check_setup`
+
+```python
+symbol_tier = self._tier_cache.get(symbol)
+for setup_type in self._enabled_setups:
+    if not self._is_setup_valid_now(setup_type):
+        continue
+    # NEW v19.16 tier-skip — runs BEFORE _check_setup dispatch.
+    if (
+        symbol_tier is not None
+        and symbol_tier != "intraday"
+        and setup_type in self._intraday_only_setups
+    ):
+        continue
+    # Existing volume gate retained as safety net for symbols
+    # whose tier-cache hasn't been populated yet.
+    if setup_type in self._intraday_setups:
+        if snapshot.avg_volume < self._min_adv_intraday:
+            continue
+    alert = await self._check_setup(setup_type, symbol, snapshot, tape)
+```
+
+The skip runs BEFORE `_check_setup` is invoked, saving the
+function dispatch + log + counter increment. When `_tier_cache`
+hasn't been populated yet for a symbol, the existing volume gate
+still applies as a defence-in-depth safety net.
+
+### Speedup math (real-world projection)
+
+Pre-v19.16 per-cycle dispatch volume on a 2,000-symbol universe:
+~2,000 symbols × ~35 detectors = 70,000 detector calls/cycle.
+
+Post-v19.16 with ~50% non-intraday tier symbols and ~28
+intraday-only detectors out of 35:
+- intraday tier (~1,000 symbols): 35,000 calls (unchanged)
+- swing+investment tier (~1,000 symbols): only ~7 cross-tier
+  detectors run = 7,000 calls (was 35,000)
+- **Total: 42,000 → was 70,000 = -40%**
+
+Combined with v19's parallel gate, this materially reduces the
+EVAL backlog on busy tape days (~800-2,000 alerts/session).
+
+### Tests (`test_tier_aware_dispatch_v19_16.py` — 7 tests)
+
+- `test_intraday_only_setups_attribute_declared` — pin the
+  attribute exists and is the SUPERSET of `_intraday_setups`
+- `test_dispatch_loop_checks_tier_before_check_setup` —
+  source-level pin: skip MUST run before dispatch
+- `test_dispatch_loop_reads_symbol_tier_from_cache` — pin the
+  cheap-cache read (no live IB call snuck in)
+- `test_intraday_only_is_superset_of_intraday_setups` —
+  membership invariant
+- `test_known_intraday_only_detectors_present` — 22 detectors
+  pinned as MUST-be-on-list
+- `test_ambiguous_detectors_explicitly_NOT_in_intraday_only` —
+  10 detectors pinned as MUST-be-OFF (defends against silent
+  suppression of swing/position alerts)
+- `test_intraday_only_does_not_grow_unboundedly` — sanity bound
+  at 35 to flag copy/paste regressions
+
+Plus drive-by fix: `test_canary_scanner_pillar_setups_have_checkers`
+in `test_scanner_canary.py` was a stale assertion (still listed
+`relative_strength` removed in v16) — updated to match current
+`_enabled_setups` truth.
+
+### Behaviour verification
+
+- Backend boots cleanly post-pull.
+- `_tier_cache` is populated via `_rebuild_tier_cache` (existing
+  hourly refresh) — no new code path needed.
+- Symbols not in `_tier_cache` (cold-start) fall through to the
+  existing volume gate, no regression on first-tick coverage.
+- 221/222 across all v19.* + scanner-adjacent test suites
+  (1 pre-existing failure in `test_detector_stats_aggregates...`
+  unrelated to v19.16).
+
+
+
+## 2026-04-30 (thirty-fourth commit, v19.15) — Per-cycle context cache
+
+Pre-fix every alert's `_apply_setup_context` ran 3 awaited
+classifier calls (multi-index regime + sector regime + setup
+classifier). The first two are MARKET-WIDE so calling them
+per-alert was pure overhead — they're TTL-cached internally but
+still pay function-dispatch + await + lock overhead × 1,500
+alerts/day post-v18 bar-poll (~22-45s/session of pure dispatch
+latency in the EVAL critical path).
+
+### Why this matters
+
+v18 bar-poll bumped alert volume from ~80-150/session →
+**800-2,000/session**. v19 parallelized the AI gate's 8 model
+fanout (3-5× speedup). The next bottleneck was the synchronous
+3-await regime/sector context tagging running per-alert.
+
+### Patch
+
+#### 1. `_cycle_context` — new attribute on EnhancedBackgroundScanner
+
+```python
+self._cycle_context: Optional[Dict[str, Any]] = None
+self._cycle_context_at: Optional[float] = None  # monotonic ts
+self._cycle_context_hits = 0
+self._cycle_context_misses = 0
+self._cycle_context_ttl_s = 60  # safety fallback if loop misses
+```
+
+#### 2. `_refresh_cycle_context()` — new prefetch helper
+
+Runs ONCE per scan cycle at the top of `_run_optimized_scan`.
+Issues exactly TWO awaits:
+- `MultiIndexRegimeClassifier.classify()` — single market-wide call
+- `SectorRegimeClassifier.classify_all_sectors()` — single
+  11-ETF pass
+
+Returned data flattened into a dict:
+```python
+{
+    "captured_at_monotonic": time.monotonic(),
+    "cycle_id": self._scan_count,
+    "multi_index_regime": "bullish_divergence",
+    "multi_index_confidence": 0.78,
+    "sector_regime_by_etf": {"XLK": "strong", "XLE": "weak", ...},
+    "spy_5d_return_pct": 1.4,
+    "fresh": True,
+}
+```
+
+Failure-resilient: classifier exceptions caught + logged; cache
+still gets created with default `unknown` values, alerts fall
+back to per-alert classifier calls inside `_apply_setup_context`.
+
+#### 3. `_get_cycle_context()` — staleness gate
+
+Returns the cached payload only when age ≤ TTL. Defensive
+`getattr` reads guard against test scaffolding that bypasses
+`__init__` via `EnhancedBackgroundScanner.__new__()` (used by
+the legacy `test_detector_stats` / `test_scanner_canary` suites).
+
+#### 4. `_apply_setup_context` — read-from-cache path
+
+```python
+cycle_ctx = self._get_cycle_context()
+# Multi-index: cache hit → dict lookup; miss → fall back to
+# per-alert classifier.classify()
+if cycle_ctx and cycle_ctx.get("multi_index_regime", "unknown") != "unknown":
+    alert.multi_index_regime = cycle_ctx["multi_index_regime"]
+else:
+    # ... per-alert path preserved as fallback
+```
+
+The Sector path is slightly more involved because it still needs
+the per-symbol → ETF mapping (`SectorTagService.tag_symbol`
+static map → ETF). Once ETF is known, look up its regime from
+the cycle cache instead of awaiting `classify_for_symbol`.
+Symbols with unknown sector tag fall through to the existing
+async tag fallback chain.
+
+The `MarketSetupClassifier` stays per-alert because it genuinely
+needs the per-symbol intraday snapshot.
+
+### Speedup math
+
+Pre-v19.15 per-alert overhead in `_apply_setup_context`:
+- 3 × dynamic import lookup
+- 3 × `get_*_classifier(db=self.db)` accessor
+- 3 × `await classifier.X()` event-loop dispatch
+- 3 × TTL check + lock + counter increment
+- 3 × debug log line
+
+Post-v19.15:
+- 1 × `import` (MarketSetup classifier — still per-alert)
+- 1 × cache dict lookup (regime)
+- 1 × cache dict lookup (sector via ETF)
+- 1 × `tag_symbol(symbol)` (sync static map, ~1µs)
+- 1 × `await classifier.classify(symbol, snapshot)` (MarketSetup, unchanged)
+
+At 1,500 alerts/session × ~10ms saved per alert = **~15s of EVAL
+latency reclaimed** on top of v19's parallelization. More
+importantly: removes a per-alert hot path that compounds linearly
+with alert volume.
+
+### Tests (`test_per_cycle_context_cache_v19_15.py` — 10 tests)
+
+- 4 source-level pins (init fields declared, helper exists,
+  refresh runs before symbol fanout, read-from-cache pattern)
+- 3 staleness-gate behaviour tests (none/fresh/stale)
+- 2 prefetch behaviour tests (populates cache, resilient to
+  classifier failure)
+- 1 SPDR-ETF coverage smoke test (all 11 sectors land in cache)
+
+
+
 ## 2026-04-30 (thirty-third commit, v19.14b) — V5 EOD Countdown Banner
 
 Operator-requested follow-up to v19.14: when the EOD close window
