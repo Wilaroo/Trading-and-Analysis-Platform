@@ -2372,6 +2372,25 @@ class IBDataPusher:
         limit_price = order.get("limit_price")
         stop_price = order.get("stop_price")
 
+        # 2026-05-01 v19.22.1 — Bracket-order detection. The backend's
+        # opportunity_evaluator queues bracket orders (parent + stop + target
+        # legs in a single document with `order_type="bracket"`). Without
+        # bracket handling here, every bracket dropped into the
+        # "Unknown order type" else branch and 184 / 323 orders today (~63%)
+        # got rejected. We detect bracket UP FRONT before the action/quantity
+        # idempotency checks so the parent's action/quantity (nested under
+        # `parent`) gets used instead of the empty top-level fields.
+        is_bracket = (
+            (order.get("type") or "").lower() == "bracket"
+            or (order_type or "").lower() == "bracket"
+        )
+        if is_bracket:
+            parent_payload = order.get("parent") or {}
+            action = parent_payload.get("action", action)
+            quantity = parent_payload.get("quantity", quantity)
+            limit_price = parent_payload.get("limit_price", limit_price)
+            order_type = (parent_payload.get("order_type") or "LMT").upper()
+
         # Skip orders that have already failed to claim multiple times
         if not hasattr(self, '_claim_failures'):
             self._claim_failures = {}
@@ -2419,7 +2438,107 @@ class IBDataPusher:
             
             # Create IB order
             from ib_insync import MarketOrder, LimitOrder, StopOrder, StopLimitOrder
-            
+
+            # 2026-05-01 v19.22.1 — Atomic bracket placement. We construct
+            # parent + stop + target with linked parentId / transmit chain
+            # so IB executes them as one unit (target+stop are OCA, either
+            # one filling cancels the other). Without this branch every
+            # bracket order from the backend rejected with "Unknown order
+            # type: bracket" (the `else` clause below). Submitting the
+            # children with `transmit=False` on parent and the LAST child
+            # `transmit=True` is the canonical IB pattern — submitting one
+            # at a time with all `transmit=True` causes IB to route the
+            # parent before the children attach, producing naked entries.
+            if is_bracket:
+                stop_payload = order.get("stop") or {}
+                target_payload = order.get("target") or {}
+
+                opp_action = "SELL" if action.upper() == "BUY" else "BUY"
+                qty = int(quantity)
+
+                parent_ib = LimitOrder(action.upper(), qty, float(limit_price))
+                parent_ib.orderId = self.ib.client.getReqId()
+                parent_ib.tif = (parent_payload.get("time_in_force") or "DAY").upper()
+                parent_ib.outsideRth = bool(parent_payload.get("outside_rth", False))
+                parent_ib.transmit = False  # hold while we attach children
+
+                tgt_ib = LimitOrder(
+                    opp_action, qty,
+                    float(target_payload.get("limit_price", 0) or 0),
+                )
+                tgt_ib.orderId = self.ib.client.getReqId()
+                tgt_ib.parentId = parent_ib.orderId
+                tgt_ib.tif = (target_payload.get("time_in_force") or "GTC").upper()
+                tgt_ib.outsideRth = bool(target_payload.get("outside_rth", True))
+                tgt_ib.transmit = False
+
+                stp_ib = StopOrder(
+                    opp_action, qty,
+                    float(stop_payload.get("stop_price", 0) or 0),
+                )
+                stp_ib.orderId = self.ib.client.getReqId()
+                stp_ib.parentId = parent_ib.orderId
+                stp_ib.tif = (stop_payload.get("time_in_force") or "GTC").upper()
+                stp_ib.outsideRth = bool(stop_payload.get("outside_rth", True))
+                stp_ib.transmit = True  # last leg flushes the bracket to TWS
+
+                logger.info(
+                    f"[OrderQueue] Submitting BRACKET {order_id}: "
+                    f"{action} {qty} {symbol} @ ${limit_price:.2f} "
+                    f"(stop ${stp_ib.auxPrice:.2f} / target ${tgt_ib.lmtPrice:.2f})"
+                )
+                parent_trade = self.ib.placeOrder(contract, parent_ib)
+                self.ib.placeOrder(contract, tgt_ib)
+                self.ib.placeOrder(contract, stp_ib)
+                # Stamp idempotency cache after parent submission so a
+                # claim-retry storm doesn't reroute the same bracket.
+                self._recently_submitted[order_id] = (now_ts, parent_ib.orderId)
+
+                # Wait for parent fill (children sit GTC on the book).
+                max_wait = 30
+                start_time = time.time()
+                while time.time() - start_time < max_wait:
+                    self.ib.sleep(0.5)
+                    s = parent_trade.orderStatus.status
+                    if s == "Filled":
+                        logger.info(
+                            f"[OrderQueue] Bracket {order_id} parent FILLED @ "
+                            f"${parent_trade.orderStatus.avgFillPrice} "
+                            f"(target+stop attached)"
+                        )
+                        self._report_order_result(
+                            order_id,
+                            "filled",
+                            fill_price=float(parent_trade.orderStatus.avgFillPrice),
+                            filled_qty=int(parent_trade.orderStatus.filled),
+                            ib_order_id=parent_ib.orderId,
+                        )
+                        return
+                    if s in ("Cancelled", "ApiCancelled"):
+                        logger.warning(f"[OrderQueue] Bracket {order_id} parent CANCELLED")
+                        self._report_order_result(order_id, "cancelled", error="Parent cancelled")
+                        return
+                    if s == "Inactive":
+                        logger.warning(f"[OrderQueue] Bracket {order_id} parent REJECTED by IB")
+                        self._report_order_result(order_id, "rejected", error="Parent rejected by IB")
+                        return
+                # Timeout — leave parent working, report as pending so the
+                # backend tracks fills via reconciliation.
+                logger.warning(f"[OrderQueue] Bracket {order_id} parent still pending after {max_wait}s")
+                self._report_order_result(
+                    order_id,
+                    "pending",
+                    fill_price=(
+                        float(parent_trade.orderStatus.avgFillPrice)
+                        if parent_trade.orderStatus.avgFillPrice else None
+                    ),
+                    filled_qty=int(parent_trade.orderStatus.filled or 0),
+                    remaining_qty=int(parent_trade.orderStatus.remaining or qty),
+                    ib_order_id=parent_ib.orderId,
+                    error="Bracket parent still pending — children GTC on book",
+                )
+                return
+
             if order_type == "MKT":
                 ib_order = MarketOrder(action, quantity)
             elif order_type == "LMT":
