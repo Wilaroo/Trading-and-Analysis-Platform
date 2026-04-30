@@ -12,18 +12,46 @@ stops so tight they're guaranteed to get hit on normal tick chop.
 
 These rules are setup-agnostic and intentionally conservative. They live in a
 pure module so we can unit-test without Mongo/IB.
+
+2026-04-30 v19.12 — `MAX_POSITION_NOTIONAL_PCT` was 0.01 (1% of equity)
+under the assumption "temporary ceiling while bracket migration is in
+progress". Bracket migration shipped (IB_BRACKET_ORDER_MIGRATION.md
+checked off Phase 3). For a $250k margin account where the operator
+sized `max_notional_per_trade=$100,000` (40% of equity), the 1% cap
+would VETO every trade with `notional_over_cap`. Default raised to 0.40
+and made env-tunable via `EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT` so
+future operators on different account sizes don't hit the same wall.
+The position-sizer's `max_notional_per_trade` is now the primary cap
+(belt-and-braces); this guardrail just catches accidents from the
+sizer, not normal sizing.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 
+def _env_float(key: str, default: float) -> float:
+    """Read float env var with default; ignore typos / blank."""
+    raw = os.environ.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 # Defaults — tuneable but intentionally conservative.
-MIN_STOP_DISTANCE_ATR_MULT = 0.3       # stop must be ≥ 0.3 × ATR(14) from entry
-MIN_STOP_DISTANCE_PCT = 0.001          # fallback if ATR unavailable — 10 bps
-MAX_POSITION_NOTIONAL_PCT = 0.01       # cap per-trade notional at 1% equity
-                                       # (in effect until bracket migration done)
+# Stop must be ≥ this × ATR(14) from entry (or fallback %, if ATR unavailable).
+MIN_STOP_DISTANCE_ATR_MULT = _env_float("EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT", 0.3)
+MIN_STOP_DISTANCE_PCT = _env_float("EXECUTION_GUARDRAIL_MIN_STOP_PCT", 0.001)  # 10 bps
+# 2026-04-30 v19.12 — was 0.01 (1%); raised to 0.40 (40%) and made env-
+# tunable. Operator's `max_notional_per_trade` (RiskParameters) is now
+# the primary per-trade notional cap; this guardrail catches sizer
+# accidents, not normal sizing decisions.
+MAX_POSITION_NOTIONAL_PCT = _env_float("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
 
 
 @dataclass
@@ -76,13 +104,20 @@ def check_max_position_notional(
     entry_price: float,
     shares: int,
     account_equity: float,
-    max_pct: float = MAX_POSITION_NOTIONAL_PCT,
+    max_pct: Optional[float] = None,
 ) -> GuardrailResult:
     """Reject when position notional > `max_pct` of account equity.
 
     Small positions = small damage if a stop fails. Temporary ceiling while
     bracket migration is in progress.
+
+    `max_pct=None` re-reads the env at call-time so a hot config tweak
+    takes effect on the next trade without a backend restart.
     """
+    # Re-read env on each call when caller didn't supply an explicit value.
+    # `EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT` is the operator-facing knob.
+    if max_pct is None:
+        max_pct = _env_float("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
     if not (entry_price and entry_price > 0 and shares and shares > 0):
         return GuardrailResult(False, "invalid_size")
     if not (account_equity and account_equity > 0):

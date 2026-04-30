@@ -2,6 +2,75 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-04-30 (thirtieth commit, v19.12) — Pre-execution guardrail max-notional cap raised + made env-tunable
+
+**Why**: Full audit of the 9 trade-drop gates downstream of
+`safety_guardrail` revealed a SIBLING blocker. Gate
+`pre_exec_guardrail_veto` (run by `execution_guardrails.run_all_guardrails`)
+had `MAX_POSITION_NOTIONAL_PCT = 0.01` (1% of equity) hardcoded
+under a comment marked "temporary ceiling while bracket migration
+in progress". Bracket migration shipped weeks ago but the cap was
+left tightened. For the operator's $250k account targeting $100k
+max trade notional, every trade would have been vetoed at this
+gate with `notional_over_cap: 100000 > 1.00%×equity (2500)`.
+
+### Patch (`services/execution_guardrails.py`)
+
+1. Default `MAX_POSITION_NOTIONAL_PCT` raised 0.01 → 0.40 (matches
+   the operator's chosen sizing on the $250k account).
+2. Made env-tunable via `EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT` so
+   future operators on different account sizes don't hit the same
+   wall.
+3. Also added env hooks for the stop-distance rules
+   (`EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT`,
+   `EXECUTION_GUARDRAIL_MIN_STOP_PCT`) — same default, just
+   tunable.
+4. `check_max_position_notional(max_pct=None)` re-reads env at
+   call-time so a hot config tweak takes effect on the next trade
+   without a backend restart.
+
+The position-sizer's `max_notional_per_trade` (RiskParameters,
+v19.4) is now the **primary** per-trade notional cap. This
+guardrail is the **secondary** catch — for sizer accidents, not
+normal sizing decisions.
+
+### Tests (`test_execution_guardrail_max_notional_v19_12.py` — 10 tests)
+
+- `test_default_allows_100k_notional_on_250k_account` — operator's intended sizing passes
+- `test_default_blocks_obviously_oversized_notional` — 80% notional still blocked
+- `test_env_override_relaxes_to_70_percent` / `test_env_override_tightens_to_5_percent` — env tuning round-trip
+- `test_explicit_max_pct_arg_overrides_env` — caller-supplied wins over env
+- `test_invalid_size_still_rejected` / `test_missing_equity_falls_back_to_allow` — defensive paths preserved
+- `test_module_default_is_40_percent` — module-level default pinned
+- `test_tight_stop_still_rejected` — sister stop-distance guardrail untouched
+- `test_run_all_guardrails_returns_first_failure` — pipeline contract
+
+**132/132 across v12-v19.12 backend tests.**
+
+### Pipeline audit summary
+
+Full audit of the 9 known trade-drop gates downstream of safety:
+
+| Gate | Status | Notes |
+|---|---|---|
+| safety_guardrail | ✅ FIXED | v19.4 + v19.5 + operator PUT |
+| safety_guardrail_crash | ✅ FIXED | defensive variant of safety_guardrail |
+| pre_exec_guardrail_veto | ✅ FIXED | v19.12 |
+| strategy_paper_phase | ✅ N/A | `paper_account_mode=True` default → bypassed |
+| strategy_simulation_phase | ✅ N/A | same |
+| account_guard | ✅ N/A | listed in known-gates allow-list but no production path actually fires it; only drives UI chip. Fail-open if env unconfigured. |
+| no_trade_executor | ✅ WIRED | `set_services()` called at server startup line 464; verify with curl |
+| broker_rejected | ⚠️ N/A | only fires on actual IB rejection (margin / contract issue); cannot pre-vet |
+| execution_exception | ⚠️ N/A | code-bug catch-all; cannot pre-vet |
+
+The 7 verifiable gates are now fixed/N-A. The 2 cannot-pre-vet
+gates (`broker_rejected`, `execution_exception`) are the only
+remaining unknowns — and they'll only fire on actual IB-side or
+runtime-error conditions, which the v12 instrumentation will name
+within 30 seconds if they do.
+
+
+
 ## 2026-04-30 (twenty-ninth commit, v19.10 + v19.11 + v19.11.1) — Scanner UX: hits counter + keyboard nav
 
 ### v19.11.1 — HOT-FIX: blank screen after v19.11 pull
