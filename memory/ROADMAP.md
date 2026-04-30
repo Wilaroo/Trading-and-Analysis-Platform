@@ -77,14 +77,29 @@ trades / actual trades / scans / AI reasoning into one drilldown
 - Push new bars to charts within ~50ms (replaces 5s polling).
 - Operator approved earlier; full design spec below.
 
-**Option C**: v19.29 — **Cohort Comparator + Counterfactual Playground** (~12h)
+**Option C**: v19.29 — **Pre-aggregated bar pipeline** (~6h, scoped 2026-05-01)
+- Eliminates on-the-fly bar aggregation. When a 1-min bar lands
+  in Mongo, write the corresponding 5m/15m/1h bars at the same
+  time. Chart cold-load drops from ~400-1200ms to ~30-60ms.
+- Backfill strategy: **lazy + warm pool on startup** — the 30
+  most-recently-viewed symbols × last 30 days get pre-aggregated
+  in the background (~10min total); all other symbols use
+  fallback path until first viewed, then self-warm. Self-
+  optimizing — frequently-used symbols stay fast forever.
+- Skip 1day timeframe (180s v19.25 cache already covers it).
+- Pairs perfectly with WebSocket (Option B): the aggregator's
+  `on_bucket_close(symbol, tf, bar)` hook is exactly what the
+  WS publisher needs to push new 5m/15m/1h bars.
+- Full spec section below.
+
+**Option D**: v19.29 — **Cohort Comparator + Counterfactual Playground** (~12h)
 - "Pick 2 cohorts (e.g. all SOFI long where Debate=BUY but bot
   passed) and compare R-distributions side-by-side"
 - "If I'd raised setup_min_rr on momentum from 1.7 → 2.0 last 30d,
   here's what would've happened"
 - Heaviest piece, but the prize for closed-loop calibration.
 
-**Option D**: Operator chooses based on first-day Diagnostics use.
+**Option E**: Operator chooses based on first-day Diagnostics use.
 
 #### 🔴 (P0 — verify on Spark)
 - **v19.28**: Pull + open Diagnostics tab → Trail Explorer / Module
@@ -116,6 +131,119 @@ trades / actual trades / scans / AI reasoning into one drilldown
 replacing the 5s polling cycle entirely. T1 (cache) + T2 (tail) already
 killed ~95% of the perceived slowness; Tier 3 closes the last 5%
 poll-cycle latency for fast-tape moments.
+
+#### 🔴 (P0 — fully scoped 2026-05-01) v19.31 — Pre-Aggregated Bar Pipeline
+**Goal**: Eliminate on-the-fly bar aggregation. When a 1-min bar lands
+in Mongo, immediately write the corresponding 5m / 15m / 1h bars at
+the same time. Chart cold-load drops from ~400-1200ms to ~30-60ms
+(no aggregation compute, just a key lookup). This is the single
+remaining architectural gap between SentCom and the consumer
+charting platforms (TradingView, TC2000, Finviz) — they all
+pre-aggregate on ingest, never on read.
+
+**Cost**: $0 — all work runs on existing DGX CPU + disk you own.
+3-5× storage growth on `ib_historical_data` (1m + 5m + 15m + 1h
+rows per symbol-bucket) is free disk.
+
+**Skip 1day** — the v19.25 180s cache already makes daily charts
+feel instant. Adding daily pre-aggregation = complexity for no win.
+
+**Backfill strategy: lazy + warm pool**
+1. **On startup**, read `chart_response_cache` history → identify
+   the 30 most-recently-viewed symbols.
+2. Background-aggregate those 30 symbols × last 30 days
+   (~10 min total). Non-blocking, gated by
+   `cpu_relief_manager.is_active()` so it backs off if RTH is busy.
+3. **On every chart load**, if no pre-aggregated bars exist for
+   the requested window:
+   - Serve via the existing on-the-fly fallback (~400-1200ms,
+     same as today)
+   - Trigger a background aggregation of THAT symbol's full history
+   - Next load is instant
+4. Self-optimizing: symbols you actively chart get fast and stay
+   fast; symbols you never look at never waste compute.
+
+**Storage shape (extends current schema, no new collections)**
+```
+ib_historical_data {
+  symbol, timeframe, time, open, high, low, close, volume, vwap,
+  source, partial?
+  // existing rows: timeframe = "1min"
+  // v19.31 adds rows where timeframe ∈ {"5min", "15min", "1hour"}
+}
+```
+Existing compound index `(symbol, timeframe, time)` already covers
+the new query path. No schema migration needed.
+
+**Aggregation engine** (`services/bar_aggregator.py`, new)
+```
+On every 1-min bar write:
+  bucket_5m  = align(bar.time, 5min)   # 09:30, 09:35, 09:40...
+  bucket_15m = align(bar.time, 15min)
+  bucket_1h  = align(bar.time, 60min)
+  for each higher_tf:
+    upsert ib_historical_data {symbol, tf, time: bucket_start}:
+      open  = first 1m bar in bucket
+      high  = max(high) across bars
+      low   = min(low) across bars
+      close = latest 1m bar
+      volume = Σ(volume)
+      vwap   = Σ(typical_price × volume) / Σ(volume)
+      partial = true if bucket isn't full (last bar of session)
+```
+
+**Boundary alignment**
+- Anchored to session open (RTH = 9:30 ET, premarket = 4:00 ET)
+- Last 5m of RTH may be a 4-min "partial" bar at 15:56-16:00 ET —
+  flagged with `partial: true` so the chart can render correctly
+- Out-of-order 1m arrival re-computes the affected higher-TF
+  bucket atomically via `findAndModify` upsert
+
+**Integration points**
+| Component | Change |
+|---|---|
+| `bar_poll_service` | After persisting a 1-min bar, call `bar_aggregator.on_new_bar(symbol, bar)` |
+| `routers/ib._pushed_ib_data` writer | Same hook — when ticks assemble into a partial bar, the in-memory partial is broadcast at every TF boundary |
+| `hybrid_data_service.get_bars` | Reads pre-aggregated rows directly via `find({symbol, timeframe})`. Fallback to on-the-fly if zero docs found. |
+| `sentcom_chart` router | Unchanged |
+| `chart_response_cache` (v19.25) | Unchanged — but each cache miss is now ~50ms instead of ~500ms |
+| `chart_ws` (v19.30 when shipped) | Aggregator's `on_bucket_close(symbol, tf, bar)` hook becomes the WS publisher trigger |
+| `bot_state.aggregator_cursors` | New persisted dict `{symbol: last_aggregated_iso}` so backfill resumes after restart |
+
+**Expected numbers**
+| Metric | Today | After v19.31 |
+|---|---|---|
+| Cold chart load (5m, 5d) | ~400-1200ms | **~30-60ms** |
+| Hot chart load (v19.25 cached) | ~5ms | ~3ms |
+| Storage `ib_historical_data` per symbol/yr | ~120MB at 1m | ~150MB (5m=20%, 15m=7%, 1h=2%) |
+| Aggregation CPU per new 1m bar | 0 | ~30-80ms (fits in 5s scanner cycle) |
+| WebSocket publish latency (when v19.30 ships) | N/A | ~50ms IB tick → frontend candle update |
+
+**Risk + safety**
+- Backfill during RTH: gated by `cpu_relief_manager.is_active()`
+  to cap at ~5% CPU
+- Out-of-order arrivals: atomic upsert re-computes affected bucket
+- Bug-corrupted higher-TF rows: `--rebuild` flag drops + re-
+  aggregates all higher-TF for a symbol, ~1min per year of data
+- Storage sprawl: per-symbol `pre_aggregated_storage_kb` stat in
+  Diagnostics > Funnel sub-tab; alert if total >10GB
+
+**Tests** (`test_bar_aggregator_v19_31.py`)
+- 5m alignment: 9:30, 9:35, 9:40 (not 9:31, 9:36)
+- High/low/volume math correctness on a known 5-bar set
+- Partial last-bar flag when bucket isn't full
+- Idempotent re-run produces identical output
+- Out-of-order 1m arrival re-computes affected buckets
+- Backfill cursor resumes correctly after restart
+- `cpu_relief_manager` gate skips aggregation when CPU pressure high
+- Falls back to on-the-fly when pre-aggregated row missing
+- Lazy backfill triggers on first chart-load miss
+- Warm pool seeds 30 most-recently-viewed symbols on startup
+
+**Effort**: ~6 hours. Best paired with v19.30 WebSocket since the
+aggregator's `on_bucket_close` hook is exactly what the WS publisher
+needs. Can ship before or after — operator decides after using
+v19.28 Diagnostics for a few sessions.
 
 **Design (locked-in spec — ship as-is unless operator overrides)**:
 
