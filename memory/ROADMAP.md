@@ -3,7 +3,22 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.25 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.26 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.26 — see CHANGELOG (forty-seventh commit)
+**AI chat assistant data plumbing** — operator caught two same-session
+bugs (SOFI stop missing, SQQQ no live quote) both rooted in
+`chat_server._get_portfolio_context` reading from incomplete sources.
+- ✅ **Bug 1 (SOFI stop)**: lazy-reconcile lookup in chat context
+  surfaces `bot_trades.stop_price` + `target_prices` for IB orphans
+  the bot doesn't track in `_open_trades`. Mirrors v19.23.1 V5 UI fix
+  on the chat side.
+- ✅ **Bug 2 (SQQQ no quote)**: ticker extraction from user message
+  with trading-jargon denylist + live-snapshot + technicals fetched
+  for up to 5 mentioned symbols, not just held positions and
+  hardcoded indices.
+- ✅ 12 new pytests (56/56 combined). Real `timedelta` shadow bug
+  caught and fixed by ruff during this commit.
 
 ### 🎯 Just shipped 2026-05-01 v19.25 — see CHANGELOG (forty-sixth commit)
 **Chart performance hardening — Tier 1 (cache) + Tier 2 (tail refresh).**

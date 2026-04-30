@@ -2,6 +2,93 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-seventh commit, v19.26) — AI chat assistant data plumbing fixes
+
+**Operator-reported bugs in the same chat session** (2026-05-01 chat
+log, message timestamps 2:10:21 PM and 2:13:38 PM ET, both during RTH):
+
+  - **Bug 1**: "what is our stop on SOFI?" → bot answered *"I don't
+    have a stop price recorded for the SOFI long position"* despite
+    the V5 UI clearly showing SOFI's SL/TP (lazy-reconciled from
+    `bot_trades`).
+  - **Bug 2**: "should i go long SQQQ or go short SQQQ right now?" →
+    bot answered *"I don't have a live quote on SQQQ right now"*
+    despite SQQQ being a high-volume ETF with available bars in
+    Mongo.
+
+### Diagnosis
+- **Bug 1 root cause**: `chat_server._get_portfolio_context()` reads
+  `bot_open_trades` directly from `ib_live_snapshot`. SOFI/SBUX/OKLO
+  are IB-only orphans with NO entry there. v19.23.1 lazy-reconcile
+  only patched `sentcom_service.get_our_positions` (the SentCom V5
+  panel) — it never reached the chat context builder.
+- **Bug 2 root cause**: `chat_server` only fetches
+  `/api/live/symbol-snapshot` for held positions + hardcoded indices
+  (SPY/QQQ/IWM/VIX). SQQQ wasn't in either list, so no live data
+  reached the LLM context. The system prompt's safety rule ("never
+  guess prices for symbols not in LIVE DATA") then forced the
+  refusal.
+
+### Fix Bug 1 — Lazy-reconcile orphans in chat context
+- New block in `_get_portfolio_context`: for every IB position not
+  matched in `bot_open_trades`, query `bot_trades` for the most recent
+  trade matching the symbol (open OR closed within last 30d) and
+  surface its `stop_price` + `target_prices` into the bot-tracked
+  trades context section.
+- Reconciled rows are tagged `(lazy-reconciled from <status>)` in the
+  setup_type so the LLM can tell the operator "the stop on SOFI is
+  $X.XX from yesterday's filled trade" instead of "I have no stop."
+- `debug.lazy_reconciled` carries the list of symbols that got the
+  lookup so audit trails are clean.
+
+### Fix Bug 2 — Hydrate live data for user-mentioned tickers
+- New helper `_extract_user_mentioned_tickers(user_message, limit=5)`:
+  - Regex `\b[A-Z][A-Z0-9.]{0,4}\b` for ticker-shaped tokens.
+  - Trading-jargon denylist (LONG/SHORT/VWAP/RSI/EMA/ATR/RVOL/FOMC/
+    EOD/etc) prevents false positives.
+  - Capped at 5 to prevent context bloat.
+  - Handles dotted tickers (BRK.A / BRK.B).
+- `_get_portfolio_context()` signature gains `user_message: Optional[str]`.
+- `chat()` endpoint passes `request.message` through.
+- Live-snapshot fetch loop's target list now includes user-mentioned
+  tickers FIRST after held positions (operator's question is the
+  highest-priority context).
+- Technicals fetch loop also bumped from 12 → 15 symbols and includes
+  user-mentioned tickers.
+- Net effect: when operator asks about SQQQ (or any other non-held
+  symbol), live snapshot + RSI/VWAP/EMA technicals now land in the
+  context block. The LLM has real numbers to answer with.
+
+### Tests
+- 12 new pytests in `test_chat_assistant_v19_26.py`:
+  - Ticker extraction: SQQQ basic case, multi-symbol order, jargon
+    filter (RSI/VWAP/EMA/ATR/RVOL/FOMC/EOD), 5-symbol cap, defensive
+    None/empty/non-string inputs, lowercase rejection, dotted tickers.
+  - Source-level pin on `bot_trades.find_one` lazy-reconcile lookup
+    + `tracked_symbols` / `orphan_positions` set logic.
+  - Source-level pin on signature having `user_message` parameter.
+  - Source-level pin that `chat()` passes `request.message` to
+    `_get_portfolio_context`.
+  - Source-level pin on snapshot/technicals cap bumped to 15 + extractor
+    runs BEFORE the snapshot fetch loop.
+- **56/56 combined** with v19.23 + v19.24 + v19.25 suites. Ruff cleared
+  the real `F823` (duplicate inner timedelta import); 6 remaining
+  lint warnings are pre-existing.
+
+### Operator action after Spark pull
+1. **Pull + restart `chat_server.py`** (port 8002).
+2. Test Bug 1: ask the bot *"what is our stop on SOFI?"* — should
+   reply with the actual stop price + targets from `bot_trades`,
+   tagged `(lazy-reconciled from <status>)` so you know it came
+   from the historical lookup.
+3. Test Bug 2: ask *"should i go long SQQQ or short SQQQ?"* — should
+   reply with real numbers (price, RSI, VWAP, EMA20, RVOL, ATR%) and
+   give an actionable view, not refuse.
+4. Test no-regression: ask about a ticker the bot is unlikely to find
+   (e.g. *"what about ZZZZ?"*) — should still gracefully say "I don't
+   have a quote on ZZZZ" because the snapshot fetch returns
+   success=false.
+
 ## 2026-05-01 (forty-sixth commit, v19.25) — Chart performance hardening (Tier 1 + Tier 2)
 
 **Operator flagged**: "very very delayed chart loading across the

@@ -13,7 +13,7 @@ import sys
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,10 +83,79 @@ class ChatHistory(BaseModel):
     limit: int = 50
 
 
-def _get_portfolio_context() -> dict:
+def _extract_user_mentioned_tickers(user_message: Optional[str], limit: int = 5) -> list:
+    """v19.26 Bug-2 fix — extract ticker-shaped tokens from the user's
+    last message so the chat context can hydrate live data for symbols
+    the operator is asking about (e.g. "go long SQQQ or short SQQQ?")
+    even when those symbols aren't held positions or in the index list.
+
+    Returns up to `limit` tickers in the order they appeared. Filters
+    out the long list of all-caps words that COULD be tickers but are
+    almost always plain English in our trading vocabulary (LONG, SHORT,
+    VWAP, RSI, etc.). Cap of 5 prevents the LLM context from bloating
+    when the operator dumps a paragraph of names.
+
+    The caller fetches live snapshots + technicals for every returned
+    ticker. The downstream endpoints already fall back to
+    `ib_historical_data` when a symbol isn't live-subscribed, so we
+    get useful data on any symbol with Mongo bars.
+    """
+    if not user_message or not isinstance(user_message, str):
+        return []
+    import re
+
+    # Trading-specific denylist — terms that match `\b[A-Z]{1,5}\b` but
+    # are NEVER tickers in our chat. Built from operator's actual chat
+    # corpus + common trading shorthand.
+    denylist = {
+        # Pronouns / common
+        "I", "A", "AM", "PM", "OK", "OKAY", "GO", "DO", "GOT", "GOOD",
+        "BAD", "BUY", "SELL", "HOLD", "LONG", "SHORT", "FLAT", "UP",
+        "DOWN", "IN", "OUT", "ON", "OFF", "OFF", "BIG", "TOP", "LOW",
+        "HIGH", "NEW", "OLD", "NOW", "YES", "NO", "NOT",
+        # Acronyms / market jargon
+        "BTW", "FYI", "TBH", "IMO", "IMHO", "ATM", "ITM", "OTM", "ATH",
+        "ATL", "VWAP", "RVOL", "RSI", "EMA", "SMA", "ATR", "MACD",
+        "ETF", "ETN", "USD", "EOD", "EOC", "MOC", "MOO", "RTH", "ORB",
+        "AI", "UI", "UX", "API", "URL", "CSV", "CEO", "CFO", "COO",
+        "IPO", "SEC", "FED", "FOMC", "GDP", "CPI", "PPI", "ISM", "PMI",
+        "TBD", "SL", "TP", "PT", "PNL", "USA", "EU", "UK", "CN", "JP",
+        "MAX", "MIN", "AVG", "STD", "ML", "LLC", "IRA", "ROI", "ROC",
+        "DD", "DR", "CR", "RR", "RVR", "VOL", "OCO", "OCA", "GTC",
+        "DAY", "OK", "AH", "ET", "EST", "PST", "CST", "EST", "EOD",
+        # Setup names operator uses
+        "VWAP", "ORB", "EMA",
+    }
+
+    # Gather candidates, keep first occurrence order, dedup.
+    seen: set = set()
+    out: list = []
+    # `\b[A-Z]{1,5}\b` — strict all-caps tokens of 1-5 chars. The
+    # `re.findall` with case-sensitive default keeps lowercase words
+    # like "long" out of the candidate set entirely.
+    for match in re.findall(r"\b[A-Z][A-Z0-9.]{0,4}\b", user_message or ""):
+        token = match.upper()
+        if token in denylist:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
     """Build rich portfolio context from MongoDB only.
     No HTTP calls to main backend — avoids thread pool exhaustion hangs.
-    Returns dict with 'text' (for LLM) and 'debug' (for diagnostics)."""
+    Returns dict with 'text' (for LLM) and 'debug' (for diagnostics).
+
+    v19.26 (2026-05-01) — `user_message` is the raw operator message
+    so we can extract ticker mentions and hydrate live data + bot
+    trade lookups for symbols the operator is asking about (fixes
+    "I don't have a quote on SQQQ" + "no stop on SOFI" bugs).
+    """
     parts = []
     debug = {}
     
@@ -193,6 +262,78 @@ def _get_portfolio_context() -> dict:
             
             # Bot-tracked trades with stops/targets
             bot_trades = snapshot.get("bot_open_trades", [])
+            # v19.26 Bug-1 fix: lazy-reconcile orphan IB positions into
+            # the bot-tracked-trades list. SOFI/SBUX/OKLO are real IB
+            # positions but the bot has no `_open_trades` record for
+            # them, so the snapshot's `bot_open_trades` list is missing
+            # them. The V5 UI fixes this in `sentcom_service.
+            # get_our_positions` by querying `bot_trades` for matching
+            # symbols. The chat assistant was missing that lookup
+            # entirely — so `bot test "what is our stop on SOFI?"`
+            # answered "no stop recorded" even though the position has
+            # a documented stop in the trades collection.
+            tracked_symbols = {bt.get("symbol", "").upper() for bt in bot_trades}
+            orphan_positions = [
+                p for p in (positions or [])
+                if p.get("symbol", "").upper()
+                and p.get("symbol", "").upper() not in tracked_symbols
+            ]
+            for pos in orphan_positions:
+                sym = pos.get("symbol", "").upper()
+                qty = pos.get("quantity", pos.get("position", 0)) or 0
+                pos_dir = "long" if qty > 0 else "short"
+                try:
+                    # Mirror the lazy-reconcile lookup window from
+                    # `sentcom_service.get_our_positions` — most recent
+                    # trade for this symbol+direction, open or recently
+                    # closed (last 30d), so the chat surfaces the same
+                    # SL/TP the chart bubble + V5 panel already show.
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                    bt_doc = db["bot_trades"].find_one(
+                        {
+                            "symbol": sym,
+                            "$or": [
+                                {"status": {"$in": ["open", "filled", "active"]}},
+                                {"created_at": {"$gte": cutoff.isoformat()}},
+                            ],
+                        },
+                        sort=[("created_at", -1)],
+                        projection={
+                            "_id": 0,
+                            "symbol": 1,
+                            "direction": 1,
+                            "entry_price": 1,
+                            "stop_price": 1,
+                            "target_prices": 1,
+                            "setup_type": 1,
+                            "shares": 1,
+                            "status": 1,
+                            "created_at": 1,
+                        },
+                    )
+                except Exception as lazy_err:
+                    debug.setdefault("lazy_reconcile_errors", []).append(
+                        f"{sym}: {lazy_err}"
+                    )
+                    bt_doc = None
+                if bt_doc and bt_doc.get("stop_price"):
+                    bot_trades = list(bot_trades) + [{
+                        "symbol": sym,
+                        "direction": bt_doc.get("direction", pos_dir),
+                        "entry_price": bt_doc.get("entry_price", 0)
+                            or pos.get("avgCost", pos.get("avg_cost", 0)) or 0,
+                        "stop_price": bt_doc.get("stop_price", 0),
+                        "target_prices": bt_doc.get("target_prices", []) or [],
+                        "setup_type": (
+                            (bt_doc.get("setup_type") or "")
+                            + " (lazy-reconciled from "
+                            + (bt_doc.get("status", "?")) + ")"
+                        ).strip(),
+                        "shares": int(abs(qty)) or bt_doc.get("shares", 0),
+                        "_lazy_reconciled": True,
+                    }]
+                    debug.setdefault("lazy_reconciled", []).append(sym)
+
             if bot_trades:
                 bot_lines = []
                 for bt in bot_trades[:10]:
@@ -488,7 +629,6 @@ def _get_portfolio_context() -> dict:
 
     # 8. Confidence gate stats (today's decisions)
     try:
-        from datetime import timedelta
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
         gate_stats = db["confidence_gate_log"].aggregate([
             {"$match": {"timestamp": {"$gte": today_start.isoformat()}}},
@@ -555,6 +695,15 @@ def _get_portfolio_context() -> dict:
     # Sourced from /api/live/symbol-snapshot (Windows pusher RPC + TTL cache).
     # When pusher RPC is down the endpoint gracefully returns success=false —
     # we silently skip those rows so the assistant doesn't hallucinate data.
+    #
+    # v19.26 Bug-2 fix: ALSO hydrate snapshots for symbols the operator
+    # mentioned in the current message (e.g. "go long SQQQ?"). Without
+    # this, the system prompt's "say 'I don't have a quote' if not in
+    # LIVE DATA" rule fires and the assistant refuses to answer about
+    # any ticker that isn't held or in the hardcoded SPY/QQQ/IWM/VIX
+    # index list.
+    user_mentioned_tickers = _extract_user_mentioned_tickers(user_message, limit=5)
+    debug["user_mentioned_tickers"] = user_mentioned_tickers
     try:
         import requests as _live_req
         _live_snapshot_targets: list = []
@@ -569,11 +718,18 @@ def _get_portfolio_context() -> dict:
         for _s in _held:
             if _s and _s not in _live_snapshot_targets:
                 _live_snapshot_targets.append(_s)
+        # User-mentioned tickers FIRST after held — operator's question
+        # is the highest-priority context.
+        for _um in user_mentioned_tickers:
+            if _um and _um not in _live_snapshot_targets:
+                _live_snapshot_targets.append(_um)
         for _idx in ("SPY", "QQQ", "IWM", "VIX"):
             if _idx not in _live_snapshot_targets:
                 _live_snapshot_targets.append(_idx)
         _snap_lines = []
-        for _sym in _live_snapshot_targets[:10]:
+        # Bumped from 10 → 15 so the user-mentioned tickers don't get
+        # truncated when the operator already has 6+ open positions.
+        for _sym in _live_snapshot_targets[:15]:
             try:
                 _r = _live_req.get(
                     f"http://127.0.0.1:8001/api/live/symbol-snapshot/{_sym}",
@@ -610,6 +766,12 @@ def _get_portfolio_context() -> dict:
         # Get symbols from positions
         snapshot = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0, "positions": 1})
         held_symbols = [p.get("symbol") for p in (snapshot or {}).get("positions", []) if p.get("symbol")]
+        # v19.26 Bug-2 fix: user-mentioned tickers also get a technicals
+        # row so the assistant can answer "is SQQQ overbought?" with
+        # actual RSI/VWAP/EMA numbers, not "I don't have technicals."
+        for _um in user_mentioned_tickers:
+            if _um and _um not in held_symbols:
+                held_symbols.append(_um)
         # Add key indices
         for idx in ["SPY", "QQQ"]:
             if idx not in held_symbols:
@@ -617,8 +779,9 @@ def _get_portfolio_context() -> dict:
         
         tech_lines = []
         symbols_without_tech = []
-        # Batch fetch technicals for held positions (limit to top 12)
-        for sym in held_symbols[:12]:
+        # Batch fetch technicals — bumped 12 → 15 so user-mentioned
+        # tickers don't get truncated when there's a busy book.
+        for sym in held_symbols[:15]:
             try:
                 resp = requests.get(f"http://127.0.0.1:8001/api/technicals/{sym}", timeout=2)
                 if resp.status_code == 200:
@@ -1070,8 +1233,9 @@ def chat(request: ChatRequest):
     """Process a chat message — fully sync, dedicated process"""
     start = time.time()
     
-    # Build context
-    ctx = _get_portfolio_context()
+    # Build context — pass user message so we can hydrate live data for
+    # any ticker mentioned (v19.26 Bug-2 fix).
+    ctx = _get_portfolio_context(user_message=request.message)
     context = ctx["text"]
     session_mode = ctx.get("debug", {}).get("session_mode", "unknown")
     history = _get_chat_history(request.session_id, limit=20)
