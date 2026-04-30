@@ -2,6 +2,84 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (fifty-first commit, v19.29-validation) — RTH validation harness for v19.29
+
+**Operator picked option (d)** at the start of this session: pause new
+features and ship a validation harness so the v19.29 hardening pass
+can be observed end-to-end during the upcoming RTH session without
+log greps. v19.29 had 105/105 unit tests green but no on-Spark live
+verification — the 5 fixes (intent dedup, direction-stable reconcile,
+phantom sweep, no-new-entries gate, flatten alarm) all surface
+through stream events / trade-drops, but each requires a different
+endpoint query to confirm.
+
+### What shipped
+- **`backend/scripts/verify_v19_29.py`** — read-only Python harness.
+  6 checks, colored verdicts (PASS / FAIL / PENDING_RTH / NO_DATA /
+  ERROR), JSON-export mode, watch mode (re-runs every 30s during
+  RTH), optional `--probe-reconcile SYM` flag for actively
+  exercising gate B. Stdlib-only (no requests / aiohttp dep).
+- **6 checks per fix**:
+  - F. Pipeline health smoke — `/api/sentcom/positions` + bot status
+    + v19.24 `reconciled_default_*` defaults present
+  - A. Order intent dedup — `/api/diagnostic/trade-drops` for
+    `reason=intent_already_pending` rows
+  - B. Direction-stable reconcile — stream history search for
+    `direction_unstable` events
+  - C. Wrong-direction phantom sweep — stream history search for
+    `wrong_direction_phantom` events
+  - D. EOD no-new-entries — stream history search for
+    `eod_no_new_entries` (soft + hard) events
+  - E. EOD flatten escalation — stream history search for
+    `eod_flatten_failed` events
+- **`memory/V19_29_VALIDATION.md`** — operator runbook with curl
+  one-liners, verdict legend, post-pull workflow (smoke before RTH
+  → SOFI catastrophe verification → opening-30-min watch →
+  3:40-3:55pm window watch → 3:55-4:00pm flatten window watch),
+  and failure-mode remediation table.
+- **21 new pytests** in `tests/test_verify_v19_29_harness.py`
+  exercising every check function against monkey-patched HTTP
+  fixtures. No live backend required.
+
+### Why this matters
+- v19.29's 5 fixes only fire when their triggering condition occurs
+  (e.g. soft EOD warn only fires 3:45-3:55pm). Without a harness,
+  validating each one requires waiting for the right window AND
+  knowing which endpoint surfaces the event. The harness collapses
+  all 5 to one command.
+- Off-hours mode correctly distinguishes "gate hasn't fired because
+  the window hasn't opened yet" (`PENDING_RTH`) from "gate hasn't
+  fired and we expected it to" (`NO_DATA`) — actionable signal vs
+  noise.
+
+### Live verification (preview env smoke)
+- Single-shot run: F=PASS, A=PENDING_RTH, B=NO_DATA, C=NO_DATA,
+  D=PENDING_RTH, E=NO_DATA. Exit code 0. Off-hours timestamp
+  correctly tagged.
+- JSON mode parses cleanly; 6 results returned.
+- `python -m backend.scripts.verify_v19_29` and direct
+  `python backend/scripts/verify_v19_29.py` both work.
+- `--probe-reconcile` deliberately not run on preview backend (no
+  IB orphans here; real-Spark-only path).
+
+### Operator flow (recommended)
+1. After Spark pull + restart:
+   `python -m backend.scripts.verify_v19_29` → expect F=PASS, rest
+   NO_DATA / PENDING.
+2. Verify SOFI catastrophe cleared:
+   `curl -s localhost:8001/api/sentcom/positions | jq '.positions[]
+   | select(.symbol=="SOFI")'`
+3. During opening 30 min RTH:
+   `python -m backend.scripts.verify_v19_29 --watch`
+4. At 3:40-4:00pm: same `--watch` mode running on a side terminal.
+5. Post-RTH: re-run, paste `--json` output into chat for tuning
+   discussion.
+
+### Next session
+- Operator validates v19.29 in production using this harness.
+- Once verified, choose v19.30 (chart WebSockets) or v19.31
+  (pre-aggregated bar pipeline) — both fully scoped in ROADMAP.md.
+
 ## 2026-05-01 (fiftieth commit, v19.29) — Critical Trade Pipeline Hardening (5 fixes from EOD screenshot)
 
 **Operator-flagged disaster window 2026-05-01 EOD**: 5 distinct

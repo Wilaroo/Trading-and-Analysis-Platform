@@ -39,6 +39,18 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 - `GET /api/scanner/setup-landscape?context=morning|midday|eod|weekend` — universe-wide Bellafiore-Setup snapshot + 1st-person narrative (now leads with multi-index regime line + cites yesterday's grade — 2026-04-30 v4)
 - `GET /api/scanner/landscape-receipts?days=7&context=morning` — recent graded landscape predictions (closes the AI feedback loop — 2026-04-30 v4)
 - `POST /api/scanner/landscape-grade?trading_day=YYYY-MM-DD` — manual trigger of EOD grading job (2026-04-30 v4)
+- `POST /api/trading-bot/reconcile` — proper write-through reconcile of IB-only orphan positions; v19.29 added 30s direction stability gate (`direction_unstable` skip if observation history < 30s) preventing direction-mismatched claims.
+- `GET /api/diagnostic/trade-drops?minutes=N&gate=X&limit=N` — silent execution-drop forensics; v19.29 instruments order-intent dedup blocks via `safety_guardrail` + `reason=intent_already_pending`.
+
+## v19.29 validation harness (2026-05-01)
+
+`backend/scripts/verify_v19_29.py` — read-only Python harness that
+queries 6 backend surfaces to confirm v19.29's 5 fixes are wired and
+observable end-to-end. Documented in `memory/V19_29_VALIDATION.md`.
+Run during/after RTH:
+```
+python -m backend.scripts.verify_v19_29 --watch
+```
 - `GET /api/scanner/setup-trade-matrix` — full Trade × Setup matrix + classifier stats (2026-04-29 v2)
 - `GET /api/scanner/sector-regime` — per-sector regime snapshot (11 SPDR ETFs + SPY benchmark, soft-gate ML feature — 2026-04-30 v6)
 - `POST /api/scanner/backfill-sector-tags` — populate `symbol_adv_cache.sector` from the static GICS map (idempotent — 2026-04-30 v6)

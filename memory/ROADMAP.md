@@ -3,7 +3,31 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.26 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.29-validation fork)
+
+### 🎯 Just shipped 2026-05-01 v19.29-validation — see CHANGELOG (fifty-first commit)
+**RTH validation harness for v19.29.**
+- ✅ `backend/scripts/verify_v19_29.py` — 6 read-only checks with
+  colored output / JSON export / watch mode / optional active
+  reconcile probe.
+- ✅ `memory/V19_29_VALIDATION.md` — operator runbook with curl
+  one-liners + post-pull workflow + failure-mode remediation.
+- ✅ 21 new pytests; no production code touched.
+- ✅ Smoke verified on preview backend: F=PASS / A,D=PENDING_RTH /
+  B,C,E=NO_DATA (off-hours).
+
+**Operator action — Spark side**:
+1. `python -m backend.scripts.verify_v19_29` after pull + restart.
+2. `--watch` mode during opening 30 min of RTH and again at
+   3:40-4:00pm to validate gates D + E.
+3. Once green sweep observed in production, pick v19.30 or v19.31.
+
+### 🔴 P0 — pick after v19.29 RTH validation
+- **v19.30 — Chart WebSockets** (~6-8h, fully scoped below)
+- **v19.31 — Pre-Aggregated Bar Pipeline** (~6h, fully scoped below)
+- These pair beautifully — v19.31's `on_bucket_close` hook becomes
+  v19.30's WS publisher trigger. Operator picks based on which
+  hurts more after using v19.28 Diagnostics for a few sessions.
 
 ### 🎯 Just shipped 2026-05-01 v19.26 — see CHANGELOG (forty-seventh commit)
 **AI chat assistant data plumbing** — operator caught two same-session
