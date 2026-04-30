@@ -2,6 +2,132 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (fiftieth commit, v19.29) — Critical Trade Pipeline Hardening (5 fixes from EOD screenshot)
+
+**Operator-flagged disaster window 2026-05-01 EOD**: 5 distinct
+critical bugs surfaced at once on operator's IB Orders + Trades log
+combined with the SentCom V5 panel screenshot showing 5 positions
+still open past market close.
+
+### Bugs caught (with evidence)
+1. **Order spam: 300+ duplicate cancelled orders 2:17pm-3:55pm** — bot
+   re-fired the same `(symbol, side, qty±5%, price±0.5%)` limit on
+   every scanner cycle while the previous one was still pending. BP
+   ~30 dups, SOFI ~25, BKNG ~30, V ~20, HOOD ~25, MA/TMUS/CB/STX/COHR
+   all showed the same pattern. All cancelled at end-of-day.
+2. **New entries fired 3:55-3:59pm** with OCA brackets that
+   auto-cancelled at 4:00pm — left raw long positions overnight
+   w/no protection (LITE 12sh @ $902.77 entered at 3:59pm, SOFI
+   +886sh, HOOD +177sh, BP +336sh, CB +151sh, TMUS +255sh).
+3. **EOD flatten failed silently** — 3:59pm SOFI 1636 / BP 450 / BP
+   315 market sells all CANCELLED, never escalated.
+4. **SOFI auto-reconciled SHORT but IB had it LONG** —
+   catastrophic risk; if bot tried to manage that "short" it would
+   BUY shares to close a non-existent short, doubling exposure at
+   the worst moment. Caused by reconcile snapshotting direction
+   during the 3:51pm flatten transit when net was briefly negative.
+5. **TMUS reconciled at 100sh while IB had 255sh** — drift from
+   3:55pm late fill not pulled into the bot's `_open_trades`.
+
+### Five coordinated fixes
+**A — Order intent dedup** (`services/order_intent_dedup.py`, new)
+- Process-wide registry of pending IB intents keyed by
+  `(symbol, side, qty±5%, price±0.5%)`
+- `is_already_pending()` check called from `trade_execution.
+  execute_trade` BEFORE `place_bracket_order`. Blocks duplicate
+  intents within 90s TTL with `intent_already_pending` reason.
+- `clear_filled()` called from both fill (success) and rejection
+  paths so the dedup never out-lives the actual order state.
+- Stops the 300+ cancellation cascade. Limits buy/sell separately.
+
+**B — Direction-safe reconcile**
+(`services/position_reconciler._ib_direction_history` + 30s gate)
+- New module-level direction observation tracker
+  `record_ib_direction_observation(symbol, direction)` called every
+  manage-loop tick from `position_manager.update_open_positions`.
+- New `is_direction_stable(symbol, expected)` checks for
+  consecutive matching observations spanning ≥30s. Walks back from
+  newest, breaks on disagreement; "streak length" must clear the
+  threshold.
+- `reconcile_orphan_positions` now skips with `direction_unstable`
+  reason if stability gate fails. Today's SOFI bug becomes
+  impossible — you'd need 30s of continuous SHORT observation
+  before the reconcile claims SHORT.
+
+**C — Wrong-direction phantom sweep** (extends v19.27 sweeper)
+- `position_manager.update_open_positions` now also detects bot
+  trades whose direction disagrees with IB's net direction for the
+  symbol (e.g. bot tracks SOFI SHORT 2014sh while IB has SOFI LONG
+  2364sh). These are auto-closed with reason
+  `wrong_direction_phantom_swept_v19_29`, no IB action fired.
+- Today's SOFI catastrophe will be auto-cleaned at startup once
+  v19.29 lands, no manual intervention needed.
+- CRITICAL Unified Stream event emitted so operator sees the sweep
+  in real-time.
+
+**D — EOD no-new-entries gate**
+(`services/opportunity_evaluator.evaluate_opportunity`)
+- Soft cut at **3:45pm ET**: warn-only, log + Unified Stream
+  notice, but trade still allowed (operator wanted 5min grace for
+  late afternoon momentum)
+- Hard cut at **3:55pm ET**: `evaluate_opportunity` returns None,
+  records `eod_no_new_entries` rejection, emits filter Unified
+  Stream event.
+- Skips weekends. Flatten window 3:55-4:00pm exclusively owned by
+  EOD close loop.
+
+**E — EOD flatten escalation alarm**
+(`services/position_manager.check_eod_close`)
+- When EOD close has any `failed_symbols`, emit a CRITICAL/HIGH/
+  WARNING Unified Stream alarm sized by minutes-to-close.
+- Pre-v19.29 this was a `logger.error` only — backend log noise the
+  operator never sees. Now lights up V5 banner with
+  `🚨 [CRITICAL] EOD FLATTEN FAILED — 3 of 5 closes didn't fill...
+   USE 'CLOSE ALL NOW' BUTTON OR FLATTEN IN TWS.`
+
+### Tests
+- 15 new pytests in `test_critical_pipeline_hardening_v19_29.py`:
+  - 5 covering intent dedup (block / clear / TTL / buy-vs-sell /
+    source pin on trade_execution wiring)
+  - 4 covering direction stability (no-history / detect-flip /
+    pass-after-30s / source pin on reconcile)
+  - 1 wrong-direction phantom sweep source pin
+  - 2 EOD no-new-entries gate (existence + return-None)
+  - 1 EOD flatten escalation alarm
+  - 2 integration pins (clear-on-fill, record observations)
+- **105/105 combined** with v19.23 + v19.24 + v19.25 + v19.26 +
+  v19.27 + v19.28 + v19.29 suites.
+- v19.24 reconcile tests updated to pre-populate direction history.
+- Ruff clean on all new code; pre-existing F841/F821 warnings
+  unchanged (verified by line numbers).
+
+### Live verification (preview env)
+- `/api/sentcom/positions`: HTTP 200 ✓
+- `/api/trading-bot/status`: HTTP 200 ✓
+- `/api/diagnostics/recent-decisions`: HTTP 200 ✓
+- No new exceptions in backend.err.log
+
+### Operator action after Spark pull
+1. **TONIGHT before tomorrow open**: manually set stops in TWS or
+   close the overnight orphan positions (LITE 12sh, CB 151sh,
+   HOOD 177sh, SOFI 886sh, BP 336sh, TMUS 255sh — last-5-min
+   fills with auto-cancelled brackets). If you hold any to open,
+   they're naked.
+2. Pull v19.29 + restart backend.
+3. **Wrong-direction SOFI**: at restart the v19.29 phantom sweep
+   will auto-close the SOFI SHORT 2014sh phantom (logging + stream
+   event). No IB action fired — bot's record only.
+4. **Order spam**: monitor IB Orders count tomorrow during RTH.
+   Expected: way fewer cancellations. If you see same-intent dups,
+   share the pattern and I'll tune `INTENT_TTL_SECONDS` /
+   `PRICE_TOLERANCE_PCT`.
+5. **3:45-3:55pm window**: tomorrow watch for the Unified Stream
+   warnings ("Late-day SOFI…in the 10-min grace window") and at
+   3:55pm hard cuts ("⏰ Passing on … past 3:55pm ET, EOD flatten
+   window owns the last 5 minutes").
+6. **3:55-4:00pm flatten**: if any close fails, expect the
+   CRITICAL alarm to fire prominently in the V5 banner.
+
 ## 2026-05-01 (forty-ninth commit, v19.28) — Diagnostics tab MVP (Decision Trail spine + Module Scorecard + Pipeline Funnel + Export Report)
 
 **Operator asked**: "now that we have ton of shadow trades, actual

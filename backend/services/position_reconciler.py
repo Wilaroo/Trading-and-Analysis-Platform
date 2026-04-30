@@ -10,13 +10,87 @@ Handles IB position reconciliation:
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.trading_bot_service import TradingBotService
 
 logger = logging.getLogger(__name__)
+
+# v19.29 (2026-05-01) — Direction stability tracker for reconcile.
+# Operator caught SOFI being auto-reconciled as SHORT mid-flatten on
+# 2026-05-01 even though the position was actually LONG — the IB
+# position briefly transitioned through net-flat → small-short during
+# the 3:51pm sell wave, and the reconcile snapshot caught the wrong
+# direction. To prevent repeats: track every IB position direction
+# observation per (symbol) with timestamps, and refuse to reconcile
+# unless the direction has been stable for ≥30s. Module-level so
+# observations from the position-manager loop accumulate across
+# reconcile calls.
+_DIRECTION_STABILITY_SECONDS = 30
+_ib_direction_history: Dict[str, list] = {}  # symbol → [(ts, direction), ...]
+
+
+def record_ib_direction_observation(symbol: str, direction: str) -> None:
+    """Append a (timestamp, direction) observation for a symbol. Call
+    this on every position-manager update so reconcile has fresh data.
+
+    Keeps last 10 minutes of history per symbol; older entries pruned.
+    """
+    if not symbol or not direction:
+        return
+    sym = symbol.upper()
+    dir_l = direction.lower()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=10)
+    hist = _ib_direction_history.setdefault(sym, [])
+    hist.append((now, dir_l))
+    # Prune in-place
+    while hist and hist[0][0] < cutoff:
+        hist.pop(0)
+
+
+def is_direction_stable(symbol: str, expected_direction: str) -> tuple:
+    """Has `(symbol, expected_direction)` been continuously observed
+    for ≥`_DIRECTION_STABILITY_SECONDS`?
+
+    Algorithm: walk back from newest observation. Collect consecutive
+    matching observations. The "streak length" = (now - oldest match).
+    Stable iff streak length ≥ threshold. Catches today's SOFI bug
+    where direction flipped 5s ago — only 5s of "long" history is
+    NOT 30s of stability, even if "long" was true 60s ago before
+    the flip.
+
+    Returns (stable: bool, reason: str). Reason is empty when stable.
+    """
+    if not symbol or not expected_direction:
+        return False, "no_direction_provided"
+    sym = symbol.upper()
+    dir_l = expected_direction.lower()
+    hist = _ib_direction_history.get(sym, [])
+    if not hist:
+        return False, "no_history_yet"
+    now = datetime.now(timezone.utc)
+    oldest_consecutive = None
+    for ts, d in reversed(hist):
+        if d != dir_l:
+            break
+        oldest_consecutive = ts
+    if oldest_consecutive is None:
+        return False, "newest_observation_disagrees"
+    streak_seconds = (now - oldest_consecutive).total_seconds()
+    if streak_seconds >= _DIRECTION_STABILITY_SECONDS:
+        return True, ""
+    # Identify what the disagreement was for the error message
+    flipped_to = None
+    for ts, d in reversed(hist):
+        if d != dir_l:
+            flipped_to = d
+            break
+    if flipped_to:
+        return False, f"direction_flipped_within_{_DIRECTION_STABILITY_SECONDS}s_to_{flipped_to}_streak_{streak_seconds:.1f}s"
+    return False, f"insufficient_history_streak_{streak_seconds:.1f}s"
 
 
 class PositionReconciler:
@@ -628,6 +702,33 @@ class PositionReconciler:
 
                     direction = TradeDirection.LONG if qty > 0 else TradeDirection.SHORT
                     abs_qty = int(abs(qty))
+
+                    # v19.29 (2026-05-01) — Direction stability gate.
+                    # Operator caught SOFI auto-reconciled as SHORT
+                    # 2026-05-01 because the IB position briefly went
+                    # net-flat → small-short during the 3:51pm
+                    # flatten. The snapshot caught the wrong direction
+                    # and froze it. Refuse to reconcile unless we've
+                    # observed the same direction continuously for
+                    # ≥30s. Symbols without enough history get
+                    # `direction_unstable` skipped — operator can
+                    # retry once steady-state is reached.
+                    _stable, _reason = is_direction_stable(sym, direction.value)
+                    if not _stable:
+                        logger.warning(
+                            "🛑 [v19.29 RECONCILE] %s direction-unstable — "
+                            "%s. Refusing to claim until stability >= %ds.",
+                            sym, _reason, _DIRECTION_STABILITY_SECONDS,
+                        )
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "direction_unstable",
+                            "detail": _reason,
+                            "current_direction": direction.value,
+                            "stability_required_seconds": _DIRECTION_STABILITY_SECONDS,
+                            "suggest_manual": True,
+                        })
+                        continue
 
                     # Current price — prefer live quote, fall back to
                     # marketPrice from position, finally avgCost.

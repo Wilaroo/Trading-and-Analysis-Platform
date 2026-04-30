@@ -47,6 +47,22 @@ complaint without WebSocket complexity.
 
 ### 🟡 Next session priorities
 
+#### 🎯 Just shipped 2026-05-01 v19.29 — see CHANGELOG (fiftieth commit)
+**Critical Trade Pipeline Hardening** — operator caught 5 stacked
+bugs from EOD screenshot 2026-05-01:
+- ✅ **Order intent dedup** — kills the 300+ duplicate cancelled
+  orders pattern (BP/SOFI/BKNG/V/HOOD/MA spam)
+- ✅ **Direction-safe reconcile** — 30s stability gate prevents
+  catastrophic SOFI-SHORT-while-LONG bug from recurring
+- ✅ **Wrong-direction phantom sweep** — auto-cleans the existing
+  SOFI catastrophe at startup, no IB action fired
+- ✅ **EOD no-new-entries gate** — soft cut 3:45pm / hard cut 3:55pm
+- ✅ **EOD flatten escalation alarm** — CRITICAL Unified Stream
+  event with minutes-to-close severity tier when flatten fails
+- ✅ 15 new pytests (105/105 combined). Ruff clean on new code.
+
+#### 🟡 Next session menu (unchanged from v19.28 — pick what helps tuning most):
+
 #### 🎯 Just shipped 2026-05-01 v19.28 — see CHANGELOG (forty-ninth commit)
 **Diagnostics tab MVP** — new top-level side-nav tab unifying shadow
 trades / actual trades / scans / AI reasoning into one drilldown

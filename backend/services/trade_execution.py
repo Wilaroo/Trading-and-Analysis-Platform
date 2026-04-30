@@ -34,7 +34,7 @@ class TradeExecution:
         - Currently executes in SIMULATED mode (orders tracked but not sent to broker)
         - Full IB order execution requires local IB Gateway order routing (future enhancement)
         """
-        from services.trading_bot_service import TradeStatus
+        from services.trading_bot_service import TradeStatus, TradeDirection
 
         print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
 
@@ -243,6 +243,81 @@ class TradeExecution:
             # over the legacy two-step entry→stop flow so stops can't die on
             # bot restart. Falls back automatically if pusher hasn't been
             # upgraded yet (Phase 2 pusher contract in PUSHER_BRACKET_SPEC.md).
+            #
+            # v19.29 (2026-05-01) — Order-level intent dedup. Operator caught
+            # 300+ duplicate cancelled orders 2:17pm-3:55pm because the bot
+            # re-fired the same `(symbol, side, qty±5%, price±0.5%)` intent
+            # every scanner cycle while the previous one was still pending
+            # in IB. We block that here BEFORE placing — symbol-level
+            # cooldown is too coarse for this pattern.
+            try:
+                from services.order_intent_dedup import get_order_intent_dedup
+                _dedup = get_order_intent_dedup()
+                _intent_side = "buy" if trade.direction == TradeDirection.LONG else "sell"
+                _intent_price = float(trade.entry_price or 0)
+                _intent_qty = int(trade.shares or 0)
+                _existing = _dedup.is_already_pending(
+                    symbol=trade.symbol,
+                    side=_intent_side,
+                    qty=_intent_qty,
+                    price=_intent_price,
+                )
+                if _existing is not None:
+                    logger.warning(
+                        "🛑 [v19.29 INTENT-DEDUP] Skipping %s %s %dsh @ $%.2f — "
+                        "matching intent already pending in IB (submitted %s, "
+                        "trade_id=%s). Will retry once it fills or expires.",
+                        trade.symbol, _intent_side.upper(), _intent_qty,
+                        _intent_price,
+                        _existing.submitted_at.isoformat(),
+                        _existing.trade_id,
+                    )
+                    trade.status = TradeStatus.VETOED
+                    trade.notes = (trade.notes or "") + " [INTENT-DEDUP-SKIP]"
+                    trade.close_reason = "intent_already_pending"
+                    if trade.id in bot._pending_trades:
+                        del bot._pending_trades[trade.id]
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="intent_dedup",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=(
+                                trade.direction.value if hasattr(trade.direction, "value")
+                                else str(trade.direction)
+                            ),
+                            reason="intent_already_pending",
+                            context={
+                                "existing_trade_id": _existing.trade_id,
+                                "submitted_at": _existing.submitted_at.isoformat(),
+                                "qty": _intent_qty,
+                                "price": _intent_price,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    await bot._save_trade(trade)
+                    return
+                # Stamp the intent BEFORE submitting so a fast loop can't
+                # squeak through. clear_filled() is called from the fill /
+                # cancel paths below.
+                _dedup.mark_pending(
+                    symbol=trade.symbol,
+                    side=_intent_side,
+                    qty=_intent_qty,
+                    price=_intent_price,
+                    trade_id=trade.id,
+                )
+            except Exception as _dedup_err:
+                # NEVER fail-closed on dedup — better to risk a duplicate
+                # order than block a legitimate trade. Log and proceed.
+                logger.warning(
+                    "v19.29 intent-dedup error (allowing trade): %s: %s",
+                    type(_dedup_err).__name__, _dedup_err,
+                )
+
             print("   📤 [_execute_trade] Calling trade_executor.place_bracket_order...")
             bracket_result = await bot._trade_executor.place_bracket_order(trade)
             use_legacy = (
@@ -280,6 +355,21 @@ class TradeExecution:
                 trade.fill_price = result.get('fill_price', trade.entry_price)
                 trade.executed_at = datetime.now(timezone.utc).isoformat()
                 trade.entry_order_id = result.get('order_id')
+
+                # v19.29 — clear the pending-intent stamp so the next
+                # legitimate same-symbol entry isn't blocked by the
+                # dedup. We use the symbol+side+qty+price tuple we
+                # registered above.
+                try:
+                    from services.order_intent_dedup import get_order_intent_dedup
+                    get_order_intent_dedup().clear_filled(
+                        symbol=trade.symbol,
+                        side=("buy" if trade.direction == TradeDirection.LONG else "sell"),
+                        qty=int(trade.shares or 0),
+                        price=float(trade.entry_price or 0),
+                    )
+                except Exception:
+                    pass
 
                 # Initialize MFE/MAE at fill price (starting point)
                 trade.mfe_price = trade.fill_price
@@ -406,6 +496,19 @@ class TradeExecution:
             else:
                 trade.status = TradeStatus.REJECTED
                 logger.warning(f"Trade rejected: {result.get('error')}")
+                # v19.29 — clear pending-intent stamp on rejection so
+                # the symbol can be re-attempted on the next cycle
+                # (the dedup is "pending in IB", not "previously failed").
+                try:
+                    from services.order_intent_dedup import get_order_intent_dedup
+                    get_order_intent_dedup().clear_filled(
+                        symbol=trade.symbol,
+                        side=("buy" if trade.direction == TradeDirection.LONG else "sell"),
+                        qty=int(trade.shares or 0),
+                        price=float(trade.entry_price or 0),
+                    )
+                except Exception:
+                    pass
                 # ──────────────────────────────────────────────────────
                 # Forensic instrumentation (2026-04-30) — root-cause of
                 # the April 16 silent regression. The legacy code path

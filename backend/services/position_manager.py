@@ -65,34 +65,100 @@ class PositionManager:
                             continue
                         _key = (_sym, "long" if _qty > 0 else "short")
                         ib_pos_map[_key] = abs(_qty)
+                        # v19.29 — record direction observation for
+                        # the reconcile direction-stability gate.
+                        try:
+                            from services.position_reconciler import (
+                                record_ib_direction_observation,
+                            )
+                            record_ib_direction_observation(
+                                _sym, "long" if _qty > 0 else "short"
+                            )
+                        except Exception:
+                            pass
                 else:
-                    # If pusher is down we can't trust the map — skip
-                    # the sweep this cycle. Better to leave the phantom
-                    # in place than auto-close based on stale data.
                     raise RuntimeError("pusher_not_connected")
             except Exception:
-                ib_pos_map = None  # disable sweep this cycle
+                ib_pos_map = None
 
             if ib_pos_map is not None:
                 from services.trading_bot_service import TradeStatus as _TS
-                # Snapshot keys so we don't mutate while iterating.
+                # v19.29 — extend phantom sweep to catch DIRECTION-MISMATCH
+                # phantoms (operator hit this 2026-05-01 with SOFI
+                # tracked SHORT while IB had it LONG). If the bot
+                # tracks `(symbol, direction)` but IB only has the
+                # OPPOSITE direction for that symbol, the bot's row
+                # is fully phantom — close-state it without firing
+                # any IB action so the bot doesn't try to "manage"
+                # a position that doesn't exist.
                 for _tid, _trade in list(bot._open_trades.items()):
                     try:
                         if _trade.status == _TS.CLOSED:
                             continue
+                        _sym_u = (_trade.symbol or "").upper()
+                        _dir = (
+                            _trade.direction.value
+                            if hasattr(_trade.direction, "value")
+                            else str(_trade.direction)
+                        ).lower()
+                        # Direction-mismatch phantom: bot has direction X,
+                        # IB only has direction Y (opposite) for same symbol.
+                        opp = "short" if _dir == "long" else "long"
+                        ib_qty_my_dir = ib_pos_map.get((_sym_u, _dir), 0)
+                        ib_qty_opp_dir = ib_pos_map.get((_sym_u, opp), 0)
+                        if ib_qty_my_dir == 0 and ib_qty_opp_dir > 0:
+                            # IB has the opposite direction — bot's row
+                            # is wrong-direction phantom (today's SOFI
+                            # bug exactly). Sweep it.
+                            _trade.status = _TS.CLOSED
+                            _trade.close_reason = "wrong_direction_phantom_swept_v19_29"
+                            from datetime import datetime as _dt3, timezone as _tz3
+                            if not getattr(_trade, "closed_at", None):
+                                _trade.closed_at = _dt3.now(_tz3.utc).isoformat()
+                            try:
+                                await asyncio.to_thread(bot._persist_trade, _trade)
+                            except Exception:
+                                pass
+                            bot._open_trades.pop(_tid, None)
+                            try:
+                                bot._closed_trades.append(_trade)
+                            except Exception:
+                                pass
+                            try:
+                                from services.sentcom_service import emit_stream_event
+                                await emit_stream_event({
+                                    "kind": "warning",
+                                    "event": "wrong_direction_phantom_swept",
+                                    "symbol": _trade.symbol,
+                                    "text": (
+                                        f"⚠️ Wrong-direction phantom swept: "
+                                        f"{_trade.symbol} tracked {_dir.upper()} "
+                                        f"but IB has {opp.upper()} {int(ib_qty_opp_dir)}sh. "
+                                        f"Bot's record closed (no IB action) — "
+                                        f"v19.29 critical fix."
+                                    ),
+                                    "metadata": {
+                                        "trade_id": _trade.id,
+                                        "bot_direction": _dir,
+                                        "ib_direction": opp,
+                                        "ib_qty": ib_qty_opp_dir,
+                                        "reason": "wrong_direction_phantom",
+                                    },
+                                })
+                            except Exception:
+                                pass
+                            logger.critical(
+                                "[v19.29 WRONG-DIR-SWEEP] %s tracked %s but IB has %s %dsh — "
+                                "swept bot record, no IB action, trade_id=%s",
+                                _trade.symbol, _dir.upper(), opp.upper(),
+                                int(ib_qty_opp_dir), _trade.id,
+                            )
+                            continue  # done with this trade
+
+                        # Original v19.27 phantom sweep: 0sh leftover
                         _rem = getattr(_trade, "remaining_shares", None)
-                        # Only sweep when remaining shares is FIRMLY
-                        # zero. `_rem == 0` because we explicitly set
-                        # it after a successful close — skip None /
-                        # uninitialised states (line 119 below
-                        # initialises remaining_shares from shares for
-                        # brand-new fills that haven't been managed yet).
                         if _rem is None or _rem != 0:
                             continue
-                        # Must have been managed at least once — skip
-                        # brand-new fills where remaining_shares is 0
-                        # because we haven't initialised it yet. Use
-                        # `executed_at` age to gate this.
                         _executed_at = getattr(_trade, "executed_at", None)
                         if _executed_at:
                             try:
@@ -109,18 +175,11 @@ class PositionManager:
                                 from datetime import datetime as _dt2, timezone as _tz2
                                 age_s = (_dt2.now(_tz2.utc) - _ea).total_seconds()
                                 if age_s < 30:
-                                    continue  # too fresh, IB may not have caught up
+                                    continue
                             except Exception:
-                                pass  # age parsing failed → fall through
-                        _sym_u = (_trade.symbol or "").upper()
-                        _dir = (
-                            _trade.direction.value
-                            if hasattr(_trade.direction, "value")
-                            else str(_trade.direction)
-                        ).lower()
+                                pass
                         if ib_pos_map.get((_sym_u, _dir), 0) > 0:
-                            continue  # IB still has shares — not a phantom
-                        # All clear — sweep.
+                            continue  # IB still has shares
                         _trade.status = _TS.CLOSED
                         _trade.close_reason = (
                             getattr(_trade, "close_reason", None)
@@ -133,8 +192,6 @@ class PositionManager:
                             await asyncio.to_thread(bot._persist_trade, _trade)
                         except Exception:
                             pass
-                        # Move from _open_trades → _closed_trades so the
-                        # V5 panel stops rendering the ghost row.
                         bot._open_trades.pop(_tid, None)
                         try:
                             bot._closed_trades.append(_trade)
@@ -576,6 +633,52 @@ class PositionManager:
                 f"FAILED ({', '.join(failed_symbols)}). Will retry on next "
                 f"manage-loop tick. Symbols still open at IB until success."
             )
+            # ── v19.29 (2026-05-01) — EOD flatten escalation alarm ───
+            # Operator caught 3:59pm flatten cancellations on
+            # 2026-05-01 (SOFI 1636 / BP 450 / BP 315 all cancelled,
+            # left raw long overnight). Surface a CRITICAL Unified
+            # Stream event so operator sees the failure in real time
+            # in the V5 banner — the existing logger.error went to
+            # backend logs only.
+            try:
+                from services.sentcom_service import emit_stream_event
+                # Compute minutes remaining to RTH close so the alarm
+                # severity reflects urgency.
+                from datetime import datetime as _dt_eod
+                try:
+                    from zoneinfo import ZoneInfo as _ZI
+                    et_now = _dt_eod.now(_ZI("America/New_York"))
+                    et_minutes = et_now.hour * 60 + et_now.minute
+                    minutes_to_close = max(0, (16 * 60) - et_minutes)
+                except Exception:
+                    minutes_to_close = -1
+                severity = (
+                    "CRITICAL" if minutes_to_close <= 2
+                    else "HIGH" if minutes_to_close <= 5
+                    else "WARNING"
+                )
+                await emit_stream_event({
+                    "kind": "alarm",
+                    "event": "eod_flatten_failed",
+                    "symbol": failed_symbols[0] if len(failed_symbols) == 1 else None,
+                    "text": (
+                        f"🚨 [{severity}] EOD FLATTEN FAILED — "
+                        f"{len(failed_symbols)} of {len(eod_trades)} closes "
+                        f"didn't fill ({', '.join(failed_symbols[:5])}"
+                        f"{'…' if len(failed_symbols) > 5 else ''}). "
+                        f"{minutes_to_close}min to close. "
+                        f"USE 'CLOSE ALL NOW' BUTTON OR FLATTEN IN TWS."
+                    ),
+                    "metadata": {
+                        "failed_symbols": failed_symbols,
+                        "total_attempted": len(eod_trades),
+                        "minutes_to_close": minutes_to_close,
+                        "severity": severity,
+                        "retry_will_continue": True,
+                    },
+                })
+            except Exception as alarm_err:
+                logger.warning(f"v19.29 EOD alarm emit failed: {alarm_err}")
 
         # P1 #6 — WS notify: EOD complete (or partial)
         try:

@@ -36,6 +36,90 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+            # ── v19.29 (2026-05-01) — EOD no-new-entries gate ────────
+            # Operator caught LITE 12sh @ $902.77 entered at 3:59pm
+            # 2026-05-01 with OCA bracket auto-cancelled at 4:00pm,
+            # leaving raw long overnight w/ no protection. Soft cut at
+            # 3:45pm ET (warn-only, log + stream notice), HARD cut at
+            # 3:55pm ET (refuse all new entries). EOD flatten window
+            # 3:55-4:00pm exclusively owned by `eod_close_loop`.
+            try:
+                from datetime import datetime as _dt_eod
+                from zoneinfo import ZoneInfo as _ZI
+                _et_now = _dt_eod.now(_ZI("America/New_York"))
+                if _et_now.weekday() < 5:  # Mon-Fri only
+                    _et_minutes = _et_now.hour * 60 + _et_now.minute
+                    HARD_CUT = 15 * 60 + 55   # 3:55pm
+                    SOFT_CUT = 15 * 60 + 45   # 3:45pm
+                    if _et_minutes >= HARD_CUT:
+                        logger.warning(
+                            "🛑 [v19.29 EOD-HARD-CUT] %s %s rejected at "
+                            "%02d:%02d ET — past 3:55pm, EOD flatten "
+                            "window owns the last 5 minutes.",
+                            symbol, setup_type, _et_now.hour, _et_now.minute,
+                        )
+                        try:
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type,
+                                direction=direction_str,
+                                reason_code="eod_no_new_entries",
+                                context={
+                                    "et_time": _et_now.isoformat(),
+                                    "policy": "hard cut at 15:55 ET",
+                                },
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "filter",
+                                "event": "eod_no_new_entries_hard",
+                                "symbol": symbol,
+                                "text": (
+                                    f"⏰ Passing on {symbol} {setup_type} — "
+                                    f"past 3:55pm ET, EOD flatten window "
+                                    f"owns the last 5 minutes."
+                                ),
+                                "metadata": {
+                                    "policy": "v19.29_eod_hard_cut",
+                                    "cutoff_et": "15:55",
+                                },
+                            })
+                        except Exception:
+                            pass
+                        return None
+                    elif _et_minutes >= SOFT_CUT:
+                        # Soft cut: log + stream warn, but still let the
+                        # trade through. Operator wanted 5min grace for
+                        # late afternoon momentum.
+                        logger.info(
+                            "⚠️ [v19.29 EOD-SOFT-CUT] %s %s after 3:45pm "
+                            "ET — late afternoon momentum window. Allowing "
+                            "but flagging for review.",
+                            symbol, setup_type,
+                        )
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "warning",
+                                "event": "eod_no_new_entries_soft",
+                                "symbol": symbol,
+                                "text": (
+                                    f"⚠️ Late-day {symbol} {setup_type} — "
+                                    f"past 3:45pm ET, in the 10-min grace "
+                                    f"window. Hard cut at 3:55pm."
+                                ),
+                                "metadata": {
+                                    "policy": "v19.29_eod_soft_cut",
+                                    "cutoff_et": "15:45",
+                                },
+                            })
+                        except Exception:
+                            pass
+            except Exception as _eod_err:
+                logger.debug(f"v19.29 EOD gate check error: {_eod_err}")
+
             # V5 Unified Stream — surface "I'm thinking about this one now"
             # so the operator sees the bot's reasoning trail in real time
             # instead of having to grep logs. Fires once per evaluation

@@ -65,6 +65,23 @@ def _mock_bot(open_trades_map=None):
     return bot
 
 
+def _prep_direction_history(symbol: str, direction: str = "long",
+                            stable_for_seconds: int = 60) -> None:
+    """v19.29 — Pre-populate the direction-stability history so the
+    reconcile direction-stability gate passes. Without this, every
+    reconcile call after v19.29 would skip with 'direction_unstable'
+    because the history starts empty in unit tests."""
+    from datetime import datetime, timedelta, timezone
+    from services.position_reconciler import _ib_direction_history
+    sym = (symbol or "").upper()
+    now = datetime.now(timezone.utc)
+    _ib_direction_history[sym] = [
+        (now - timedelta(seconds=stable_for_seconds), direction.lower()),
+        (now - timedelta(seconds=max(1, stable_for_seconds // 2)), direction.lower()),
+        (now - timedelta(seconds=1), direction.lower()),
+    ]
+
+
 # --------------------------------------------------------------------------
 # 1. RiskParameters defaults
 # --------------------------------------------------------------------------
@@ -134,6 +151,7 @@ def test_reconcile_creates_bot_trade_for_orphan_position():
     bot = _mock_bot()
     ib_positions = [_mock_ib_position("SBUX", qty=150, avg_cost=100.00, market_price=100.50)]
     ib_quotes = {"SBUX": {"last": 100.50}}
+    _prep_direction_history("SBUX", "long")  # v19.29 stability gate
 
     pr = PositionReconciler()
 
@@ -191,6 +209,7 @@ def test_reconcile_short_position_flips_stop_and_target_correctly():
     bot = _mock_bot()
     ib_positions = [_mock_ib_position("TSLA", qty=-100, avg_cost=50.00, market_price=49.80)]
     ib_quotes = {"TSLA": {"last": 49.80}}
+    _prep_direction_history("TSLA", "short")  # v19.29 stability gate
 
     pr = PositionReconciler()
 
@@ -269,6 +288,7 @@ def test_reconcile_skips_stop_already_breached_long():
     # avg_cost=100, 2% stop = 98. Current price = 97 (already breached).
     ib_positions = [_mock_ib_position("OKLO", qty=200, avg_cost=100.00, market_price=97.00)]
     ib_quotes = {"OKLO": {"last": 97.00}}
+    _prep_direction_history("OKLO", "long")  # v19.29 stability gate
 
     pr = PositionReconciler()
 
@@ -319,6 +339,10 @@ def test_reconcile_all_orphans_when_all_true():
         "SOFI": {"last": 10.20},
         "OKLO": {"last": 50.50},
     }
+    # v19.29 stability gate — pre-populate history for all 3 symbols
+    _prep_direction_history("SBUX", "long")
+    _prep_direction_history("SOFI", "long")
+    _prep_direction_history("OKLO", "long")
 
     pr = PositionReconciler()
 
@@ -358,6 +382,7 @@ def test_reconcile_respects_per_request_stop_pct_and_rr_overrides():
     bot = _mock_bot()
     ib_positions = [_mock_ib_position("AAPL", qty=50, avg_cost=200.00, market_price=201.00)]
     ib_quotes = {"AAPL": {"last": 201.00}}
+    _prep_direction_history("AAPL", "long")  # v19.29 stability gate
 
     pr = PositionReconciler()
 
