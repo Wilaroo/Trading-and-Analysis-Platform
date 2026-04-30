@@ -4174,7 +4174,21 @@ class EnhancedBackgroundScanner:
         elif direction == "short" and tape.confirmation_for_short and priority != AlertPriority.CRITICAL:
             priority = AlertPriority.HIGH
         
-        stop = snapshot.bb_lower if direction == "long" else snapshot.bb_upper
+        # 2026-05-01 v19.20 — Bounded Squeeze stop so R:R stays viable on
+        # mega-caps. Previously `stop = bb_lower` could be >1.5 ATR away on
+        # wide-BB names (KO, PG, LIN), which pushed R:R below the 1.5 gate
+        # every cycle and the setup was effectively dead. Clamping the stop
+        # to within 1.0 ATR of the current price caps downside while still
+        # honouring the BB band structure — whichever is TIGHTER (closer to
+        # price) wins, so the BB still governs when it's tight enough.
+        if direction == "long":
+            raw_stop = snapshot.bb_lower
+            atr_floor = snapshot.current_price - (snapshot.atr * 1.0)
+            stop = max(raw_stop, atr_floor)  # LONG: higher stop = tighter
+        else:
+            raw_stop = snapshot.bb_upper
+            atr_ceil = snapshot.current_price + (snapshot.atr * 1.0)
+            stop = min(raw_stop, atr_ceil)  # SHORT: lower stop = tighter
         target = snapshot.current_price + (snapshot.atr * 2.5) if direction == "long" else snapshot.current_price - (snapshot.atr * 2.5)
         risk = abs(snapshot.current_price - stop)
         rr = abs(target - snapshot.current_price) / risk if risk > 0 else 1

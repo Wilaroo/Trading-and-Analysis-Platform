@@ -3,7 +3,50 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-04-30 v19.19 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.20 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.20 — see CHANGELOG (thirty-ninth commit)
+Deep Feed noise cleanup (Phase 1) + Morning Briefing depth (Phase 2):
+- ✅ Enabled 11 real playbook setups that were silently sitting in
+  `setup_disabled` limbo (`bouncy_ball`, `the_3_30_trade`,
+  `vwap_continuation`, `premarket_high_break`, `trend_continuation`,
+  `base_breakout`, `accumulation_entry`, `back_through_open`,
+  `up_through_open`, `daily_breakout`, `daily_squeeze`).
+- ✅ Base-setup splitter now also strips `_confirmed` so
+  `range_break_confirmed` / `breakout_confirmed` / `breakdown_confirmed`
+  resolve to their enabled base setups.
+- ✅ Watchlist-only setups (`day_2_continuation`, `carry_forward_watch`,
+  `gap_fill_open`, `approaching_*`) bypass the bot evaluator silently.
+- ✅ Sizer now clamps to SafetyGuardrails `max_symbol_exposure_usd`
+  so sizes never exceed the safety cap → killed the
+  `symbol_exposure $49,986 > $15,000` rejection cascade.
+- ✅ Squeeze stop clamped to `max(bb_lower, current - atr*1.0)`
+  — R:R holds above 1.5 on mega-caps now.
+- ✅ Rejection dedup — 2-min TTL cache by `(symbol, setup, reason)`
+  kills duplicate feed spam.
+- ✅ New `gameplan_narrative_service.py` + `/api/journal/gameplan/narrative/{symbol}`
+  endpoint — returns bullets, levels grid, and an Ollama GPT-OSS 120B
+  2-3 sentence trader narrative with `$TICKER` clickable chips.
+- ✅ New `GamePlanStockCard.jsx` wired into `MorningBriefingModal.jsx`
+  — per-stock expandable cards with levels, triggers, targets,
+  invalidation, and AI read.
+- ✅ 13 new pytest cases (`test_feed_noise_fixes_v19_20.py`,
+  `test_gameplan_narrative_v19_20.py`). 122/122 pass across v19
+  + market-setup + landscape suites.
+
+### 🟡 P0/P1 — Next session priorities
+- **(P0) Build `MultiIndexRegimeClassifier`** — read SPY/QQQ/IWM/DIA
+  daily+intraday, compute breadth + divergence, emit a composite
+  regime label plumbed into `LiveAlert` as a soft-gate ML feature.
+- **(P1) Build `POST /api/trading-bot/reconcile`** — let the bot
+  explicitly claim the 3 untracked IB positions (NVDA, TSLA, GOOGL)
+  into `_open_trades` so they get RTH management + EOD handling.
+- **(P1) Close the ML learning loop** — plumb `market_setup` +
+  `multi_index_regime` into the per-Trade ML feature vector.
+- **(P1) Premarket Gap-Scanner UI widget** — scrollable list of
+  what gapped in the last 8 mins.
+- **(P1) SectorRegimeClassifier** — per-sector ETF regime tags
+  feeding `LiveAlert.sector_regime`.
 
 ### 🎯 Just shipped 2026-04-30 v19.19 — see CHANGELOG (thirty-eighth commit)
 Premarket scan cadence + heartbeat fixes:

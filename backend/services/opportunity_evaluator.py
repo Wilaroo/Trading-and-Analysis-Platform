@@ -797,6 +797,47 @@ class OpportunityEvaluator:
             shares = max(min(max_shares_by_risk, max_shares_by_capital, max_shares_by_notional), 1)
         else:
             shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
+
+        # 2026-05-01 v19.20 — Safety-cap-aware sizing (operator request).
+        # The opportunity sizer and the downstream SafetyGuardrails had two
+        # independent ceilings (max_position_pct=50% vs max_symbol_exposure_usd=$15k)
+        # that routinely collided: sizer produced a $50k notional, safety
+        # rejected it, the bot logged "symbol_exposure exceeds cap" every
+        # cycle → Deep Feed flooded with rejections and no trades ever hit
+        # the broker. Clamping the sizer here to the SMALLER of the two caps
+        # means the bot sizes down to fit the safety rail instead of being
+        # blocked by it. Existing exposure on the same symbol is subtracted
+        # so stacking into an already-held name still respects the cap.
+        try:
+            from services.safety_guardrails import get_safety_guardrails
+            _safety_cap = float(get_safety_guardrails().config.max_symbol_exposure_usd or 0)
+            if _safety_cap > 0 and entry_price > 0:
+                _existing_sym_exposure = 0.0
+                if symbol:
+                    sym_upper = symbol.upper()
+                    for _t in (bot._open_trades or {}).values():
+                        try:
+                            if (getattr(_t, "symbol", "") or "").upper() == sym_upper:
+                                _existing_sym_exposure += (
+                                    float(getattr(_t, "entry_price", 0) or 0)
+                                    * float(getattr(_t, "shares", 0) or 0)
+                                )
+                        except Exception:
+                            continue
+                _remaining_cap = max(0.0, _safety_cap - _existing_sym_exposure)
+                _max_shares_by_safety = int(_remaining_cap / entry_price)
+                if _max_shares_by_safety > 0:
+                    shares = max(min(shares, _max_shares_by_safety), 1)
+                else:
+                    # Symbol already at/over cap — return 0 shares so the
+                    # upstream flow rejects cleanly as position_size_zero
+                    # instead of a wasted evaluate → safety-block cycle.
+                    shares = 0
+        except Exception as _cap_err:
+            # Never let the safety-cap lookup break sizing; fall through to
+            # legacy behaviour if the guardrail is misconfigured.
+            logger.debug(f"safety-cap sizer clamp skipped: {_cap_err}")
+
         risk_amount = shares * risk_per_share
         if risk_amount > adjusted_max_risk:
             shares = int(adjusted_max_risk / risk_per_share)

@@ -29,6 +29,7 @@ import { X, RefreshCw, Sun, Coffee, Zap, Moon } from 'lucide-react';
 import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
 import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
+import GamePlanStockCard from './sentcom/v5/GamePlanStockCard';
 import { fmtET12 } from '../utils/timeET';
 
 // Briefing variant table — drives header label, accent colour and icon.
@@ -377,15 +378,39 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                   )}
                   {stocksInPlay.length > 0 && (
                     <div>
-                      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider mb-1">Stocks in play</div>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider mb-2">
+                        Stocks in play ({stocksInPlay.length})
+                      </div>
+                      {/* v19.20 — expandable per-stock cards with bullets,
+                          level grid, and AI narrative (Ollama gpt-oss 120B).
+                          Falls back to a compact chip row if the entries are
+                          bare strings (legacy shape). */}
+                      <div
+                        className="space-y-1.5"
+                        data-testid="briefing-stocks-in-play-list"
+                      >
                         {stocksInPlay.slice(0, 12).map((s, i) => {
                           const sym = typeof s === 'string' ? s : (s.symbol || s.ticker);
-                          const catalyst = typeof s === 'string' ? null : s.catalyst;
+                          if (!sym) return null;
+                          // Legacy string entry — render a compact clickable chip
+                          // so the upgrade path is lossless for older gameplans.
+                          if (typeof s === 'string') {
+                            return (
+                              <span
+                                key={i}
+                                className="v5-chip v5-chip-eval inline-block mr-1"
+                              >
+                                {sym}
+                              </span>
+                            );
+                          }
                           return (
-                            <span key={i} className="v5-chip v5-chip-eval">
-                              {sym}{catalyst && <span className="v5-dim"> · {catalyst}</span>}
-                            </span>
+                            <GamePlanStockCard
+                              key={`${sym}-${i}`}
+                              stock={s}
+                              date={gp?.date}
+                              marketBias={marketBias}
+                            />
                           );
                         })}
                       </div>

@@ -2,6 +2,108 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (thirty-ninth commit, v19.20) — Deep-Feed noise cleanup + briefing depth
+
+Operator opened the Deep Feed at 4:01 PM and saw the bot spamming
+`setup_disabled` for real playbook setups, `dedup_cooldown` on a
+re-emit loop, and `symbol_exposure $49,986 > $15,000` on every
+VWAP fade evaluation. Separately: the Morning Briefing "Stocks in
+play" card was printing `KO · Technical Setup` with zero guidance —
+no levels, no triggers, no narrative. Both issues shipped together.
+
+### Phase 1 — Feed-noise + wasted-cycle fixes
+
+Five distinct root causes, all addressed.
+
+**(A) Bucket A — real playbook setups silently not enabled.** The
+scanner emits alerts for `bouncy_ball`, `the_3_30_trade`,
+`vwap_continuation`, `premarket_high_break`, `trend_continuation`,
+`base_breakout`, `accumulation_entry`, `back_through_open`,
+`up_through_open`, `daily_breakout`, `daily_squeeze` — all with
+full `_check_*` detectors. But none of them were in
+`TradingBotService._enabled_setups`, so every cycle the bot
+logged `setup_disabled` and the Deep Feed looked like the bot
+was ignoring good trades. All 11 now enabled by default.
+
+**(B) Bucket B — base-setup splitter didn't strip `_confirmed`.**
+`range_break_confirmed`, `breakout_confirmed`, `breakdown_confirmed`
+were perpetually rejected because the splitter only stripped
+`_long`/`_short`. Splitter now also strips `_confirmed`, so these
+confirmation variants resolve to their enabled base setups.
+
+**(C) Bucket C — watchlist-only alerts flooding live evaluation.**
+`day_2_continuation`, `carry_forward_watch`, `gap_fill_open` fire
+at EOD for TOMORROW'S plan (they're carry-forward tags). And the
+`approaching_*` family are pre-trigger proximity warnings, not
+tradeable signals. All 7 now live in `_watchlist_only_setups` and
+bypass the bot evaluator silently — they still populate the
+gameplan and journal watchlist.
+
+**(D) Sizer → SafetyGuardrails cascade.** `max_position_pct=50%`
+on a $100k account = $50k notionals; `max_symbol_exposure_usd=$15k`
+rejected every single one. Fix: the sizer now queries the safety
+singleton's cap and clamps shares to `(safety_cap - existing_exposure) / entry_price`
+so it NEVER produces a notional that the guardrail would reject.
+When the symbol is already at/past the cap, sizer returns 0 shares
+for a clean `position_size_zero` upstream reject instead of a
+wasted evaluate→safety-block cycle.
+
+**(E) Squeeze R:R chronically below 1.5.** Mega-caps (KO, PG, LIN)
+have BB bands wider than 1 ATR, so `stop = bb_lower` put risk above
+reward and the setup was effectively dead. Fix: stop clamped to
+`max(bb_lower, current_price - atr*1.0)` — BB still governs when
+it's tight, ATR bounds it when it's wide.
+
+**(F) Rejection dedup.** `record_rejection` now maintains a 2-min
+TTL cache keyed on `(symbol, setup_type, reason_code)`. First hit
+records normally; duplicates within the window are silenced from
+the Bot's Brain buffer and unified stream. The opportunity
+evaluator still sees them (no change to gating logic); only the
+user-facing stream is dedup'd.
+
+### Phase 2 — Game Plan depth upgrade (Ollama GPT-OSS 120B)
+
+Briefing UI now renders per-stock expandable cards with:
+
+- Deterministic bullets that always display (setup description,
+  plan levels, trigger, invalidation) — computed from live
+  `TechnicalSnapshot` (VWAP, ORH/ORL, HOD/LOD, support/resistance,
+  ATR, RSI) merged with the stock's stored `key_levels`.
+- 12-cell grid of key levels (Entry / Stop / T1 / T2 / VWAP /
+  Price / HOD / LOD / ORH / ORL / Support / Resistance).
+- AI narrative paragraph (2-3 sentences, trader jargon) from
+  Ollama `gpt-oss:120b-cloud` via the existing HTTP proxy. Uses
+  `$TICKER` syntax so the frontend parses tickers into
+  clickable chips that dispatch a `sentcom:focus-symbol` custom
+  event.
+- Graceful degradation when Ollama is offline: narrative is blank,
+  bullets still render the full plan.
+- Cached 5 minutes per `(symbol, date)` so the briefing auto-refresh
+  doesn't hammer the LLM.
+
+**New service** `/app/backend/services/gameplan_narrative_service.py`
+— composes the card.
+**New endpoint** `GET /api/journal/gameplan/narrative/{symbol}?date=YYYY-MM-DD&use_llm=true`
+— returns `{ bullets, narrative, referenced_symbols, levels, llm_used }`.
+**New component** `/app/frontend/src/components/sentcom/v5/GamePlanStockCard.jsx`
+— renders the per-stock card with clickable `$TICKER` chips.
+**Rewired** `MorningBriefingModal.jsx` to use the new card list
+instead of plain chips.
+
+### Verification
+
+Backend:
+- `tests/test_feed_noise_fixes_v19_20.py` — 7 pytest cases covering
+  Bucket A/B/C, sizer safety cap, and rejection dedup.
+- `tests/test_gameplan_narrative_v19_20.py` — 6 pytest cases
+  covering bullets without snapshot, bullets with snapshot, cache
+  behaviour, $TICKER extraction, playbook-setup descriptions, and
+  LLM-offline fallback.
+- All 122 tests in the v19.* + market-setup + landscape suite pass.
+- `curl /api/journal/gameplan/narrative/KO?use_llm=false` returns a
+  well-formed card with bullets + levels even without Ollama.
+
+
 ## 2026-04-30 (thirty-eighth commit, v19.19) — Premarket cadence + heartbeat fixes
 
 Three small but operator-visible issues surfaced at 8:40 AM ET on

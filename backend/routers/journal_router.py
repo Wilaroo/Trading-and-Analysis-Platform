@@ -390,12 +390,52 @@ async def update_game_plan(date: str, updates: GamePlanUpdate):
         raise HTTPException(status_code=404, detail="Game Plan not found")
     return {"success": True, "game_plan": plan}
 
-@router.get("/gameplan/stats")
-async def get_game_plan_stats(days: int = 30):
-    """Get Game Plan statistics"""
+# 2026-05-01 v19.20 — per-stock narrative cards for the Morning Briefing.
+# Fetches the gameplan row, locates the requested symbol, enriches with live
+# TechnicalSnapshot levels, composes deterministic bullets, and asks Ollama
+# GPT-OSS 120B for a 2-3 sentence trader narrative. Falls back to bullets-
+# only when the LLM proxy is offline so the UI always renders something.
+@router.get("/gameplan/narrative/{symbol}")
+async def get_gameplan_narrative(symbol: str, date: Optional[str] = None, use_llm: bool = True):
+    """Per-symbol trader-style briefing card for the morning briefing UI."""
     _, _, gameplan_svc = get_services()
-    stats = await _in_thread(gameplan_svc.get_game_plan_stats(days=days))
-    return {"success": True, **stats}
+    target_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    plan = await _in_thread(gameplan_svc.get_game_plan(target_date))
+    if not plan:
+        raise HTTPException(status_code=404, detail="Game plan not found for date")
+
+    sym_upper = (symbol or "").upper()
+    stock_entry = next(
+        (s for s in plan.get("stocks_in_play", []) if (s.get("symbol") or "").upper() == sym_upper),
+        None,
+    )
+    if not stock_entry:
+        # Allow narrative requests on any symbol tied to today's watchlist
+        # even if the gameplan doc hasn't promoted it into stocks_in_play yet.
+        stock_entry = {"symbol": sym_upper, "setup_type": "", "direction": "long"}
+
+    from services.gameplan_narrative_service import get_gameplan_narrative_service
+    service = get_gameplan_narrative_service()
+    # Lazy-bind the technical service singleton so every request gets the
+    # same cache-warmed TechnicalSnapshot feeder used by the scanner.
+    if service._technical_service is None:
+        try:
+            from services.realtime_technical_service import get_realtime_technical_service
+            service.set_technical_service(get_realtime_technical_service())
+        except Exception:
+            pass
+
+    big = plan.get("big_picture") or {}
+    card = await service.build_card(
+        symbol=sym_upper,
+        stock_in_play=stock_entry,
+        gameplan_date=target_date,
+        market_bias=plan.get("bias") or big.get("bias"),
+        market_regime=big.get("market_regime"),
+        use_llm=use_llm,
+    )
+    return {"success": True, "card": card}
+
 
 @router.post("/gameplan/date/{date}/stocks")
 async def add_stock_in_play(date: str, stock: StockInPlay):

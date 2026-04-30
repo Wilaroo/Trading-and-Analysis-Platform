@@ -707,7 +707,37 @@ class TradingBotService:
             # Additional VWAP scanner bases (2026-04-24) — for SHORT_VWAP
             # (Sharpe 1.76, promoted) beyond vwap_bounce/vwap_fade already covered
             "vwap_reclaim", "vwap_rejection",
+            # 2026-05-01 v19.20 — ENABLE real playbook setups that were built into
+            # the scanner (have their own detectors) but were silently missing from
+            # the bot's enabled list. Operator saw these as "setup_disabled" spam
+            # every cycle even though they are valid, live, Bellafiore-aligned trades.
+            # All have dedicated `_check_*` methods in enhanced_scanner.py.
+            "bouncy_ball",           # Bellafiore SHORT playbook: failed bounce + support break
+            "the_3_30_trade",        # Bellafiore LONG playbook: power-hour range break
+            "vwap_continuation",     # VWAP momentum continuation (both long/short)
+            "premarket_high_break",  # Gap & Go continuation: break of PMH on volume
+            "trend_continuation",    # Intraday trend continuation
+            "base_breakout",         # Chart pattern: base/flag breakout
+            "accumulation_entry",    # Smart-money accumulation entry
+            "back_through_open",     # Reversal through the opening print
+            "up_through_open",       # Reversal through the opening print (long)
+            "daily_breakout",        # Daily timeframe breakout (EOD setup)
+            "daily_squeeze",         # Daily timeframe squeeze (EOD setup)
         ]
+
+        # 2026-05-01 v19.20 — WATCHLIST-ONLY setups: these fire from the scanner
+        # for TOMORROW'S plan (EOD carry-forward / next-day watchlist) or as
+        # pre-trigger proximity warnings. They are NOT live-tradeable signals
+        # and must skip the bot evaluator entirely so the Stream/Deep Feed
+        # doesn't get flooded with "setup_disabled" messages every cycle.
+        # Consumed silently by gameplan_service for journal watchlists.
+        self._watchlist_only_setups = {
+            # EOD carry-forward tags (promoted near close for tomorrow's plan)
+            "day_2_continuation", "carry_forward_watch", "gap_fill_open",
+            # Pre-trigger proximity warnings (scanner early-warning system)
+            "approaching_breakout", "approaching_hod",
+            "approaching_orb", "approaching_range_break",
+        }
         self._scan_interval = 30  # seconds - faster scanning for autonomous trading
         self._watchlist: List[str] = []
         
@@ -1006,6 +1036,38 @@ class TradingBotService:
         is already wired.
         """
         ctx = context or {}
+        # 2026-05-01 v19.20 — Rejection dedup. The Deep Feed was being
+        # flooded with the same (symbol, setup_type, reason_code) rejection
+        # every 30-60 seconds for the entire dedup cooldown window (several
+        # minutes). The buffer and stream are now suppressed for duplicates
+        # within _REJECTION_DEDUP_WINDOW_SECONDS. The first hit still records
+        # — so the operator sees that the bot DID consider it — but the
+        # follow-on spam is silenced. TTL auto-evicts so the dict does not
+        # grow unbounded.
+        now_ts = datetime.now(timezone.utc).timestamp()
+        if not hasattr(self, "_rejection_dedup_cache"):
+            self._rejection_dedup_cache: Dict[tuple, float] = {}
+            self._REJECTION_DEDUP_WINDOW_SECONDS = 120.0
+        dedup_key = (symbol, setup_type, reason_code)
+        last_emitted = self._rejection_dedup_cache.get(dedup_key)
+        if last_emitted and (now_ts - last_emitted) < self._REJECTION_DEDUP_WINDOW_SECONDS:
+            # Silent suppression — still mark cycle as "had a rejection" so
+            # the evaluator_veto_unknown catch-all upstream doesn't double-
+            # count. Return narrative composed for caller logging but skip
+            # the buffer/stream emission.
+            self._last_evaluator_rejection_recorded = True
+            return self._compose_rejection_narrative(
+                symbol=symbol, setup_type=setup_type, direction=direction,
+                reason_code=reason_code, ctx=ctx,
+            )
+        # Evict expired entries opportunistically (cheap — dict <2KB typical).
+        if len(self._rejection_dedup_cache) > 500:
+            stale = [k for k, t in self._rejection_dedup_cache.items()
+                     if (now_ts - t) > self._REJECTION_DEDUP_WINDOW_SECONDS]
+            for k in stale:
+                self._rejection_dedup_cache.pop(k, None)
+        self._rejection_dedup_cache[dedup_key] = now_ts
+
         # 2026-04-29 (afternoon-14): mark that *some* rejection was
         # recorded for the current evaluation cycle so the catch-all
         # `evaluator_veto_unknown` in `_scan_for_setups` doesn't double-
@@ -2082,8 +2144,29 @@ class TradingBotService:
                     'auto_execute_eligible': alert.auto_execute_eligible
                 }
                 
-                # Check if setup is enabled
-                base_setup = alert.setup_type.split("_long")[0].split("_short")[0]
+                # 2026-05-01 v19.20 — skip watchlist-only setups silently.
+                # These are EOD carry-forward tags and pre-trigger proximity
+                # warnings that fire for tomorrow's plan / early warnings,
+                # not for live evaluation. Surfacing them as "setup_disabled"
+                # rejections every cycle was flooding the Deep Feed with
+                # noise while the alerts themselves are still consumed by
+                # gameplan_service for next-day watchlists.
+                if alert.setup_type in self._watchlist_only_setups:
+                    continue
+
+                # Check if setup is enabled.
+                # 2026-05-01 v19.20 — also strip `_confirmed` suffix so
+                # confirmation variants (e.g. `range_break_confirmed`,
+                # `breakout_confirmed`, `breakdown_confirmed`) resolve to
+                # their already-enabled base setup. Previously the splitter
+                # only stripped `_long`/`_short`, leaving confirmation
+                # variants perpetually rejected as "setup_disabled".
+                base_setup = (
+                    alert.setup_type
+                    .rsplit("_long", 1)[0]
+                    .rsplit("_short", 1)[0]
+                    .rsplit("_confirmed", 1)[0]
+                )
                 if base_setup in self._enabled_setups or alert.setup_type in self._enabled_setups:
                     alerts.append(alert_dict)
                     print(f"   ✅ {alert.symbol} {alert.setup_type} passed filter")
