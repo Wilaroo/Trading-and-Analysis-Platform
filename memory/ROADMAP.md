@@ -3,7 +3,66 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.24 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.25 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.25 — see CHANGELOG (forty-sixth commit)
+**Chart performance hardening — Tier 1 (cache) + Tier 2 (tail refresh).**
+Closes operator's "very very delayed chart loading across the app"
+complaint without WebSocket complexity.
+- ✅ **`services/chart_response_cache.py`** — Mongo-backed TTL cache
+  (30s intraday / 180s daily) on `/api/sentcom/chart`. Survives
+  backend restarts via Mongo TTL index. ~0.003ms hit time vs full
+  compute (~hundreds of ms - several seconds). Schema-versioned.
+- ✅ **`/api/sentcom/chart-tail`** — incremental refresh endpoint.
+  Returns only bars + indicator points + markers newer than `since`.
+  Capped at 50 bars by default. Reads through the same cache.
+- ✅ **`ChartPanel.jsx` stale-while-revalidate** — in-component cache
+  hydrates state immediately on symbol/tf change, no spinner on
+  refetch. Symbol-switch feels instant on previously-visited
+  symbols.
+- ✅ **Smart polling** — 5s `/chart-tail` polls during RTH on the
+  focused chart, 30s outside RTH, paused entirely when tab hidden.
+  Replaces the legacy 30s blanket polling that re-shipped 5,000
+  bars every cycle.
+- ✅ **Cache invalidation on fills** — `trade_execution.execute_trade`
+  drops chart cache for the filled symbol so the new entry marker
+  shows on the next render without waiting for TTL.
+- ✅ 17 new pytests (44/44 combined with v19.23+v19.24). Ruff +
+  ESLint clean. Live curl shows cache HIT in ~0.003ms.
+
+### 🟡 Next session priorities
+- **(P0 — operator verification on Spark)** After pull + restart:
+  1. Check `cache: 'hit'` field appears on `/api/sentcom/chart`
+     responses in the network tab on the second+ load.
+  2. Confirm `/api/sentcom/chart-tail?since=<ts>` polls every 5s
+     during RTH, paused outside RTH, paused when tab hidden.
+  3. Symbol-switch on a previously-visited symbol should feel
+     instant (no spinner, chart re-paints sub-100ms).
+  4. After a real trade fills, the new entry marker should appear
+     on the chart within 5s (next tail poll), not 30s+.
+- **(P0 — reconcile UX verification, carried from v19.24)** — operator
+  action item: click **Reconcile N** on SBUX/SOFI/OKLO once IB pusher
+  is live, confirm bot picks them up.
+- **(P0 verify)** MultiIndexRegime live curl on Spark during RTH.
+- **(P1 — Tier 3 chart WS)** Optional next layer if smart polling
+  still feels laggy: `/api/ws/chart/{symbol}/{tf}` server-pushed bar
+  updates. Eliminates the 5s polling poll-cycle latency. ~6-8h of
+  work; not needed unless operator reports T1+T2 isn't enough.
+- **(P1) HOOD chart wrong-prices `useEffect` chain** — likely
+  resolved as a side-effect of v19.25 cacheKey-driven hydration but
+  worth confirming with the operator.
+- **(P1) Per-setup R:R overrides as code defaults.**
+- **(P1) `cpu_relief_manager.is_active()` into deferable paths.**
+- **(P1) Auto-trigger relief based on RPC latency.**
+- **(P1) `SectorRegimeClassifier` end-to-end verification.**
+- **(P2) Setup-landscape EOD self-grading tracker.**
+- **(P2) Mean-reversion metrics (Hurst + OU half-life).**
+- **(P2) Liquidity-aware trail in `stop_manager.py`.**
+- **(P3) Scanner card "Proven / Maturing / Cold-start" badge.**
+- **(P3) Chart bubble click → `sentcom:focus-symbol`.**
+- **(P3) SEC EDGAR 8-K integration.**
+- **(P3) Safely retire Alpaca fallback.**
+- **(P3) Break up monolithic `server.py`.**
 
 ### 🎯 Just shipped 2026-05-01 v19.24 — see CHANGELOG (forty-fifth commit)
 **P0 proper reconcile + MultiIndexRegime source-level pins.**

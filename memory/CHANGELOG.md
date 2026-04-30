@@ -2,6 +2,103 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-sixth commit, v19.25) — Chart performance hardening (Tier 1 + Tier 2)
+
+**Operator flagged**: "very very delayed chart loading across the
+app." Diagnosis: every chart load (cold open, symbol switch, 30s
+auto-refresh) was running the full chain — Mongo bar query + pusher
+RPC roundtrip to Windows + Python recompute of EMA20/50/200 + BB20 +
+VWAP + markers + session filter — for ~5,000 bars. Polling pattern
+re-shipped the entire window every 30s. No HTTP-level response cache.
+
+This commit ships **Tier 1 (cache) + Tier 2 (tail-only refresh)** —
+the operator-approved combo that eliminates ~95% of perceived AND
+actual slowness without WebSocket complexity.
+
+### Tier 1 — Backend response cache
+- **`services/chart_response_cache.py`** — Mongo-backed TTL cache for
+  `/api/sentcom/chart` responses. **Caches survive backend restarts**
+  via Mongo TTL index on `expires_at`. Two-tier: in-memory dict for
+  hot reads + Mongo for durability.
+- **TTL**: 30s for intraday, 180s for daily (`chart_cache_ttl_for`).
+- **Key**: `(symbol_upper, tf_lower, session, days)` — case + session
+  variations collapse to the same entry.
+- **Wiring**: `routers/sentcom_chart.py::get_chart_bars` checks
+  `cache.get` BEFORE the live compute path. Hits return in
+  ~0.003ms regardless of bar count, indicator math, or pusher
+  latency. Misses fall through to compute, then `cache.set` writes
+  back for the next request. Response stamps `cache: 'hit'|'miss'`
+  for observability.
+- **Invalidation**: `services/trade_execution.py::execute_trade` now
+  calls `chart_response_cache.invalidate(trade.symbol)` after a fill
+  so the new entry/exit marker shows on the very next chart render
+  without waiting for the TTL.
+- **Schema-versioned**: `_CACHE_VERSION = 1` on every doc; future
+  payload changes bump the version so old entries get treated as
+  MISS without manual flush.
+
+### Tier 2 — Tail-only refresh endpoint
+- **`GET /api/sentcom/chart-tail?symbol=X&timeframe=5min&since=<ts>`**
+  — returns ONLY new bars + their indicator values + new markers
+  since the operator's last-seen timestamp. Reads through the same
+  cache as `/chart` (cache hit = O(N_new_bars) slice; cache miss
+  delegates to full path). Capped at 50 bars by default; max 500.
+- **Where the win comes from**: 30s polling now ships 1-3 bars per
+  poll instead of 5,000. ~95% bandwidth + Python compute saved on
+  the auto-refresh hot path.
+
+### Frontend — Stale-while-revalidate + smart polling
+- **`ChartPanel.jsx`**:
+  - **`lastBarsCacheRef`** — in-component `Map<key, {bars, indicators,
+    markers, ts}>` keyed by `${symbol}|${tf}|${days}`. Hydrates state
+    immediately from cache on cacheKey change, then triggers a
+    background refetch. Symbol-switch on a previously-visited
+    symbol now feels instant.
+  - **No spinner on refetch when cache is present** — the legacy
+    `setLoading(true)` call now only fires on a true cold load. Hot
+    refetches are silent. Eliminates the "blank chart on every
+    poll" perception bug.
+  - **Smart-polling** — replaces the legacy 30s `setInterval(fetchBars)`
+    with a recursive `setTimeout` loop that:
+    - Calls `/api/sentcom/chart-tail`, not `/chart`
+    - Polls every **5s during RTH** (9:30-16:00 ET, weekdays)
+    - Backs off to **30s outside RTH**
+    - **Pauses entirely when the tab is hidden**
+      (`document.visibilityState !== 'visible'`)
+    - Skips the `1day` timeframe (daily bars don't need tail polling)
+  - **Tail merge** — new bars merged onto state with last-bar
+    overlap dedup. Indicator points spliced onto each series' tail.
+    Markers appended. Frontend lightweight-charts paints the new
+    bars via the existing data-push effect.
+
+### Tests
+- **17 new pytests** in `test_chart_response_cache_v19_25.py` —
+  cache get/set/invalidate, TTL math, key normalization, set
+  rejection of garbage payloads, expired-entry eviction, endpoint
+  cache integration order, tail slicing, cap enforcement, empty-
+  tail empty-response, source-level pin on trade_execution
+  invalidation, source-level pin on ChartPanel.jsx stale-while-
+  revalidate pattern.
+- **44/44 combined with v19.23 + v19.24 suites.** Ruff + ESLint clean.
+
+### Live verification (preview env)
+- `cache.set(1234 bars)`: 0.02ms
+- `cache.get HIT`: 0.003ms ← ~1000× faster than the recompute path
+- `cache.invalidate(SPY)`: drops all entries for symbol cleanly
+- `/api/sentcom/chart-tail` registered + serving 200 OK
+
+### Operator action after Spark pull
+1. Pull + restart backend.
+2. Open the V5 dashboard. The first chart load is the cold path
+   (still pays the full compute cost). Switch away and back, or
+   wait for the 5s tail-poll — should feel **instant** now.
+3. Watch for the `cache: 'hit'` field in the `/api/sentcom/chart`
+   network tab response after the second load — confirms the cache
+   is firing.
+4. Watch for `/api/sentcom/chart-tail` calls every 5s during RTH
+   in the network tab. Should return ~1-3 bars per call instead
+   of the full 5,000-bar payload.
+
 ## 2026-05-01 (forty-fifth commit, v19.24) — Proper reconcile endpoint + MultiIndex regime pin
 
 **P0 shipped**: `POST /api/trading-bot/reconcile` — the write-through

@@ -278,12 +278,45 @@ export const ChartPanel = ({
   // symbols would inherit the previous symbol's pan position.
   useEffect(() => { hasFittedRef.current = false; }, [symbol]);
 
+  // ── v19.25 Tier 1: in-component bars cache so symbol switches feel
+  // instant. Keyed by `${symbol}|${timeframe}|${days}`. Read on mount,
+  // write on every successful full-fetch. The browser also has the
+  // backend's 30s/180s response cache as a second layer, so a remount
+  // after a brief tab-switch hits memory, then disk-Mongo-cache, then
+  // the live compute path. ────────────────────────────────────────────
+  const lastBarsCacheRef = useRef(new Map()); // Map<key, {bars, indicators, markers, ts}>
+  const cacheKey = useMemo(
+    () => `${symbol || ''}|${active.value}|${daysLoaded || active.daysBack}`,
+    [symbol, active, daysLoaded],
+  );
+
+  // Hydrate from in-component cache the moment the cacheKey changes.
+  // This is the "stale-while-revalidate" pattern: render immediately
+  // from whatever we previously loaded for this (symbol, tf, days)
+  // tuple, THEN trigger a network refetch in the background. The user
+  // never sees a blank chart on a re-visited symbol.
+  useEffect(() => {
+    const cached = lastBarsCacheRef.current.get(cacheKey);
+    if (cached) {
+      setBars(cached.bars || []);
+      setIndicators(cached.indicators || {});
+      setMarkers(cached.markers || []);
+      setError(null);
+      // Do NOT setLastUpdated — fresh fetch will stamp the real value.
+    }
+  }, [cacheKey]);
+
   // Fetch bars for current symbol + timeframe. Honours the lazy-loaded
   // `daysLoaded` window so subsequent refetches keep older bars on screen.
+  // Important: only show the spinner on COLD loads (no cached data) so
+  // hot-path refetches don't blank the chart.
   const fetchBars = useCallback(async () => {
     if (!symbol) return;
     const days = daysLoaded || active.daysBack;
-    setLoading(true);
+    const cached = lastBarsCacheRef.current.get(cacheKey);
+    if (!cached) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const resp = await safeGet(
@@ -291,20 +324,33 @@ export const ChartPanel = ({
         `&timeframe=${encodeURIComponent(active.value)}&days=${days}`
       );
       if (!resp) {
-        setError('Bar fetch failed');
+        if (!cached) setError('Bar fetch failed');
         return;
       }
       if (resp.success === false) {
-        setError(resp.error || 'Backend returned no bars');
-        setBars([]);
-        setIndicators({});
-        setMarkers([]);
+        if (!cached) {
+          setError(resp.error || 'Backend returned no bars');
+          setBars([]);
+          setIndicators({});
+          setMarkers([]);
+        }
         return;
       }
       const fetchedBars = Array.isArray(resp.bars) ? resp.bars : [];
+      const fetchedIndicators = (resp.indicators && typeof resp.indicators === 'object')
+        ? resp.indicators
+        : {};
+      const fetchedMarkers = Array.isArray(resp.markers) ? resp.markers : [];
       setBars(fetchedBars);
-      setIndicators(resp.indicators && typeof resp.indicators === 'object' ? resp.indicators : {});
-      setMarkers(Array.isArray(resp.markers) ? resp.markers : []);
+      setIndicators(fetchedIndicators);
+      setMarkers(fetchedMarkers);
+      // Persist to in-component cache so the next visit hydrates instantly.
+      lastBarsCacheRef.current.set(cacheKey, {
+        bars: fetchedBars,
+        indicators: fetchedIndicators,
+        markers: fetchedMarkers,
+        ts: Date.now(),
+      });
       setStaleInfo({
         stale: !!resp.stale,
         reason: resp.stale_reason || null,
@@ -314,22 +360,134 @@ export const ChartPanel = ({
       });
       setLastUpdated(Date.now());
     } catch (err) {
-      setError(err?.message || 'Failed to fetch bars');
+      if (!cached) setError(err?.message || 'Failed to fetch bars');
     } finally {
       setLoading(false);
       backfillInFlightRef.current = false;
     }
-  }, [symbol, active, daysLoaded]);
+  }, [symbol, active, daysLoaded, cacheKey]);
 
   // Refetch whenever symbol / timeframe changes
   useEffect(() => { fetchBars(); }, [fetchBars]);
 
-  // Auto-refresh (lightweight — 2b will replace with a WS subscription)
+  // ── v19.25 Tier 2: tail-only refresh. Polls `/api/sentcom/chart-tail`
+  // every 5s during RTH on the focused chart, returning ONLY new/updated
+  // bars + last indicator values. Frontend merges via lightweight-charts
+  // `update()` for partial bar updates instead of `setData()` for the
+  // full series. Drops the auto-refresh cost from ~5,000 bars / 30s to
+  // ~1-3 bars / 5s. Auto-pauses when the tab is hidden or outside RTH so
+  // it doesn't burn cycles when the operator isn't watching. ──────────
+  const isRthEt = useCallback(() => {
+    try {
+      // ET local hours/minutes via toLocaleString trick (DST-safe).
+      const etNow = new Date(
+        new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+      );
+      const day = etNow.getDay();
+      if (day === 0 || day === 6) return false; // weekend
+      const minutes = etNow.getHours() * 60 + etNow.getMinutes();
+      return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
+    } catch (_) {
+      return false;
+    }
+  }, []);
+
+  const fetchTail = useCallback(async () => {
+    if (!symbol) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return;
+    }
+    // Only intraday timeframes get tail-polled — daily bars change once
+    // per session and the 180s full-cache TTL is plenty.
+    if (active.value === '1day') return;
+
+    // Find the latest bar time we already have so we don't re-ship it.
+    const latestTime = bars.length > 0
+      ? Number(bars[bars.length - 1]?.time || 0)
+      : 0;
+    try {
+      const resp = await safeGet(
+        `/api/sentcom/chart-tail?symbol=${encodeURIComponent(symbol)}` +
+        `&timeframe=${encodeURIComponent(active.value)}&since=${latestTime}`
+      );
+      if (!resp || resp.success === false) return;
+      const newBars = Array.isArray(resp.bars) ? resp.bars : [];
+      if (newBars.length === 0) {
+        setLastUpdated(Date.now());
+        return;
+      }
+      // Merge new bars onto state. lightweight-charts handles update()
+      // via the dedicated effect below; we just keep React state in sync.
+      setBars(prev => {
+        // De-dupe in case the tail's first bar overlaps the last bar
+        // we already have (matching `time`). Last wins (freshest).
+        const merged = [...prev];
+        for (const nb of newBars) {
+          const t = Number(nb.time);
+          if (merged.length > 0 && Number(merged[merged.length - 1].time) === t) {
+            merged[merged.length - 1] = nb;
+          } else {
+            merged.push(nb);
+          }
+        }
+        return merged;
+      });
+      // Splice tail-indicator points onto each indicator series.
+      if (resp.indicators && typeof resp.indicators === 'object') {
+        setIndicators(prev => {
+          const next = { ...prev };
+          for (const [key, points] of Object.entries(resp.indicators)) {
+            if (!Array.isArray(points) || points.length === 0) continue;
+            const existing = Array.isArray(next[key]) ? next[key] : [];
+            // Drop overlapping last bar to prevent duplicate-time warnings.
+            const tailTimes = new Set(points.map(p => Number(p.time)));
+            const cleaned = existing.filter(p => !tailTimes.has(Number(p.time)));
+            next[key] = [...cleaned, ...points];
+          }
+          return next;
+        });
+      }
+      // Append new markers if any.
+      if (Array.isArray(resp.markers) && resp.markers.length > 0) {
+        setMarkers(prev => {
+          const newTimes = new Set(resp.markers.map(m => Number(m.time)));
+          return [...prev.filter(m => !newTimes.has(Number(m.time))), ...resp.markers];
+        });
+      }
+      setLastUpdated(Date.now());
+    } catch (err) {
+      // Silent — the next full fetchBars on next remount/symbol-switch
+      // will recover. Don't surface tail-poll errors to the user.
+    }
+  }, [symbol, active, bars]);
+
+  // Smart-polling loop: 5s tail-poll during RTH while the tab is visible
+  // AND we already have cold-load bars for this symbol. Outside RTH it
+  // backs off to a single 30s poll so end-of-day extended-hours ticks
+  // still trickle in. autoRefreshMs=0 disables polling entirely.
   useEffect(() => {
     if (!autoRefreshMs) return undefined;
-    const id = setInterval(fetchBars, autoRefreshMs);
-    return () => clearInterval(id);
-  }, [fetchBars, autoRefreshMs]);
+    if (active.value === '1day') return undefined;
+
+    let cancelled = false;
+    let timerId = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      try { await fetchTail(); } catch (_) { /* ignore */ }
+      if (cancelled) return;
+      const interval = isRthEt() ? 5_000 : 30_000;
+      timerId = setTimeout(tick, interval);
+    };
+    // First poll fires after the RTH-aware interval so we don't pile on
+    // top of the cold-load fetch from `useEffect(fetchBars)` above.
+    timerId = setTimeout(tick, isRthEt() ? 5_000 : 30_000);
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [autoRefreshMs, fetchTail, isRthEt, active.value]);
 
   // Push data into the series whenever bars change
   useEffect(() => {

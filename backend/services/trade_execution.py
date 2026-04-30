@@ -368,6 +368,17 @@ class TradeExecution:
                 except Exception:
                     pass
 
+                # ── v19.25: invalidate chart response cache so the new
+                # entry/exit marker shows up on the next chart render
+                # without waiting for the 30s/180s TTL.
+                try:
+                    from services.chart_response_cache import (
+                        get_chart_response_cache,
+                    )
+                    await get_chart_response_cache().invalidate(trade.symbol)
+                except Exception:
+                    pass
+
             elif result.get('status') == 'timeout':
                 # TIMEOUT HANDLING: Order may still execute - save as pending for sync
                 trade.status = TradeStatus.OPEN  # Assume it went through

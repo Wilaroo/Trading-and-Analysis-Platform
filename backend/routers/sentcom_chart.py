@@ -475,6 +475,24 @@ async def get_chart_bars(
             detail=f"Unsupported timeframe '{timeframe}'. Supported: {sorted(_SUPPORTED_TFS)}",
         )
 
+    # ── v19.25 Tier 1: response cache. Try to serve from the
+    # `chart_response_cache` collection FIRST. Hits return in <50ms
+    # regardless of bar count, indicator math, or pusher latency. Cache
+    # is keyed by (symbol, tf, session, days). Survives backend restarts
+    # via Mongo TTL index. Best-effort — any failure falls through to
+    # the live compute path below. ────────────────────────────────────
+    from services.chart_response_cache import (
+        get_chart_response_cache, make_cache_key, chart_cache_ttl_for,
+    )
+
+    cache = get_chart_response_cache(db=_db)
+    cache_key = make_cache_key(symbol.upper(), tf, session, days)
+    cached_response = await cache.get(cache_key)
+    if cached_response is not None:
+        # Stamp `cache: 'hit'` so the frontend can surface freshness
+        # in dev tooling without the operator needing a separate curl.
+        return {**cached_response, "cache": "hit"}
+
     result = await _hybrid_data_service.get_bars(
         symbol=symbol.upper(),
         timeframe=tf,
@@ -654,7 +672,7 @@ async def get_chart_bars(
     # Overlay markers (executed trades). Silent no-op if db isn't wired.
     markers = _fetch_trade_markers(symbol, times[0], times[-1])
 
-    return {
+    response = {
         "success": True,
         "symbol": symbol.upper(),
         "timeframe": tf,
@@ -680,6 +698,217 @@ async def get_chart_bars(
             "bb_lower": _as_series(times, bb_lower),
         },
         "markers": markers,
+    }
+
+    # ── v19.25 Tier 1: persist to cache for subsequent requests.
+    # TTL is bar-size aware (30s intraday / 180s daily). Best-effort —
+    # never blocks the response. ──────────────────────────────────────
+    try:
+        ttl = chart_cache_ttl_for(tf)
+        await cache.set(cache_key, response, ttl_seconds=ttl)
+    except Exception as cache_err:
+        logger.debug(f"chart cache write failed for {symbol} {tf}: {cache_err}")
+
+    return {**response, "cache": "miss"}
+
+
+# ─── v19.25 Tier 2: tail-only refresh endpoint ──────────────────────────────
+# `/chart` returns the full window — bars + indicators + markers. The
+# frontend used to poll this endpoint every 30s, re-shipping ~5,000 bars
+# to draw 1 new bar. `/chart-tail` returns only what changed since the
+# operator's last poll: new bars, last indicator values, new markers.
+# Frontend uses lightweight-charts `update()` for partial bar updates
+# instead of `setData()` for the full series.
+
+@router.get("/chart-tail")
+async def get_chart_tail(
+    symbol: str = Query(..., min_length=1, max_length=10),
+    timeframe: str = Query("5min"),
+    since: int = Query(
+        0,
+        ge=0,
+        description=(
+            "Unix-seconds timestamp of the most recent bar the client "
+            "already has. The endpoint returns only bars with `time > "
+            "since`, plus indicator values for those bars. `since=0` "
+            "(the default) returns the last 50 bars — useful for the "
+            "first poll after a stale-while-revalidate hydration."
+        ),
+    ),
+    session: str = Query("rth_plus_premarket"),
+    rth_only: bool = Query(None),
+    cap: int = Query(
+        50, ge=1, le=500,
+        description=(
+            "Max number of trailing bars returned. The tail endpoint is "
+            "designed for incremental updates so the cap is intentionally "
+            "low — set higher only when bridging a longer client gap."
+        ),
+    ),
+) -> Dict[str, Any]:
+    """Return ONLY new/updated bars since `since` + matching indicator
+    values + any new trade markers. Designed for high-frequency polling
+    (5s during RTH on the focused chart) so the auto-refresh path
+    drops from ~5,000 bars / 30s to ~1-3 bars / 5s.
+
+    Reads through the same `chart_response_cache` as `/chart` — if the
+    cache has a fresh entry, we slice the tail off it without re-paying
+    the indicator math. On cache miss, we delegate to the live path
+    (which itself populates the cache for the next request).
+
+    Response shape:
+      {
+        success: bool,
+        symbol, timeframe, since, latest_time,
+        bar_count: int,                # new bars only
+        bars: [{time, open, high, low, close, volume}, ...],
+        indicators: {                  # latest values only — frontend
+                                       # can splice them onto its series
+          vwap: [{time, value}, ...],
+          ema_20: ..., ema_50: ..., ema_200: ...,
+          bb_upper: ..., bb_middle: ..., bb_lower: ...,
+        },
+        markers: [...],                # markers with time > since
+        from_cache: bool,
+      }
+
+    No stale flags, partial flags, or session-filter info — those don't
+    change tail-to-tail and are already on the full `/chart` response
+    the client hydrated from.
+    """
+    if _hybrid_data_service is None:
+        raise HTTPException(status_code=503, detail="hybrid_data_service not initialised")
+
+    if rth_only is True:
+        session = "rth"
+    elif rth_only is False:
+        session = "all"
+
+    tf = timeframe.lower()
+    if tf not in _SUPPORTED_TFS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported timeframe '{timeframe}'. Supported: {sorted(_SUPPORTED_TFS)}",
+        )
+
+    sym_upper = symbol.upper()
+
+    from services.chart_response_cache import (
+        get_chart_response_cache, make_cache_key,
+    )
+    cache = get_chart_response_cache(db=_db)
+
+    # Probe a few common day-window sizes so a /chart-tail call after
+    # a /chart hydrate finds the matching cache entry. The frontend
+    # passes `daysLoaded` on the full /chart load, so the cache key is
+    # already (sym, tf, session, days). We try the tf-canonical default
+    # first, then the broader windows we ship from the V5 frontend.
+    tf_default_days = {
+        "1min": 1, "5min": 5, "15min": 10, "1hour": 30, "1day": 365,
+    }
+    candidate_days = [
+        tf_default_days.get(tf, 5),
+        5, 10, 30, 90, 365,
+    ]
+    seen = set()
+    cached_full = None
+    for d in candidate_days:
+        if d in seen:
+            continue
+        seen.add(d)
+        key = make_cache_key(sym_upper, tf, session, d)
+        cached_full = await cache.get(key)
+        if cached_full is not None:
+            break
+
+    if cached_full is not None:
+        # Slice the tail off the cached full payload.
+        all_bars = cached_full.get("bars") or []
+        new_bars = [b for b in all_bars if int(b.get("time", 0)) > int(since)]
+        if cap and len(new_bars) > cap:
+            new_bars = new_bars[-cap:]
+
+        new_times = {int(b.get("time", 0)) for b in new_bars}
+        sliced_indicators: Dict[str, list] = {}
+        for ind_key, series in (cached_full.get("indicators") or {}).items():
+            sliced_indicators[ind_key] = [
+                pt for pt in (series or [])
+                if int(pt.get("time", 0)) in new_times
+            ]
+        sliced_markers = [
+            m for m in (cached_full.get("markers") or [])
+            if int(m.get("time", 0)) > int(since)
+        ]
+        latest_time = (
+            int(all_bars[-1].get("time", 0)) if all_bars else int(since)
+        )
+        return {
+            "success": True,
+            "symbol": sym_upper,
+            "timeframe": tf,
+            "since": int(since),
+            "latest_time": latest_time,
+            "bar_count": len(new_bars),
+            "bars": new_bars,
+            "indicators": sliced_indicators,
+            "markers": sliced_markers,
+            "from_cache": True,
+            "cache": "hit",
+        }
+
+    # Cache miss — fall back to the full path so we (a) build the cache
+    # for next call and (b) return a usable tail. The cap on returned
+    # bars keeps the response small.
+    full = await get_chart_bars(
+        symbol=sym_upper,
+        timeframe=tf,
+        days=tf_default_days.get(tf, 5),
+        session=session,
+        rth_only=None,
+    )
+    if not full or not full.get("success"):
+        return {
+            "success": False,
+            "symbol": sym_upper,
+            "timeframe": tf,
+            "since": int(since),
+            "latest_time": int(since),
+            "bar_count": 0,
+            "bars": [],
+            "indicators": {},
+            "markers": [],
+            "from_cache": False,
+            "cache": "miss",
+            "error": (full or {}).get("error", "no_data"),
+        }
+    all_bars = full.get("bars") or []
+    new_bars = [b for b in all_bars if int(b.get("time", 0)) > int(since)]
+    if cap and len(new_bars) > cap:
+        new_bars = new_bars[-cap:]
+    new_times = {int(b.get("time", 0)) for b in new_bars}
+    sliced_indicators = {}
+    for ind_key, series in (full.get("indicators") or {}).items():
+        sliced_indicators[ind_key] = [
+            pt for pt in (series or [])
+            if int(pt.get("time", 0)) in new_times
+        ]
+    sliced_markers = [
+        m for m in (full.get("markers") or [])
+        if int(m.get("time", 0)) > int(since)
+    ]
+    latest_time = int(all_bars[-1].get("time", 0)) if all_bars else int(since)
+    return {
+        "success": True,
+        "symbol": sym_upper,
+        "timeframe": tf,
+        "since": int(since),
+        "latest_time": latest_time,
+        "bar_count": len(new_bars),
+        "bars": new_bars,
+        "indicators": sliced_indicators,
+        "markers": sliced_markers,
+        "from_cache": False,
+        "cache": full.get("cache", "miss"),
     }
 
 
