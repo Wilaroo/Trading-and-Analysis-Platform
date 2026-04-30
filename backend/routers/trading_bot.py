@@ -30,6 +30,10 @@ class RiskParamsUpdate(BaseModel):
     max_open_positions: Optional[int] = None
     min_risk_reward: Optional[float] = None
     max_notional_per_trade: Optional[float] = None  # Hard absolute notional cap per trade ($). 0 = disabled. (added 2026-04-30 v19.4)
+    # 2026-05-01 v19.21 — per-setup R:R overrides (mean-reversion plays
+    # with bounded targets get a relaxed floor; trend/breakout setups stay
+    # strict). Operator can hot-patch via PUT /api/trading-bot/risk-params.
+    setup_min_rr: Optional[Dict[str, float]] = None
 
 
 class BotConfigUpdate(BaseModel):
@@ -627,6 +631,68 @@ def update_risk_params(params: RiskParamsUpdate):
     _trading_bot.update_risk_params(**updates)
     
     return {"success": True, "risk_params": _trading_bot.get_status()["risk_params"]}
+
+
+# 2026-05-01 v19.21 — explicit GET so the operator can verify what's
+# actually live without parsing the full bot status payload. Also returns
+# the per-setup R:R map and which "effective" floor each enabled setup
+# resolves to (so a glance at this endpoint shows whether your tuning
+# took effect).
+@router.get("/risk-params")
+def get_risk_params():
+    """Return the live risk parameters + effective per-setup R:R floors."""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    risk = _trading_bot.get_status()["risk_params"]
+    # Compute the resolved (effective) R:R for every enabled setup so the
+    # operator can see e.g. `vwap_fade_long → 1.5 (override)` vs
+    # `breakout → 2.0 (override)` vs `accumulation_entry → 1.7 (global)`.
+    enabled = list(getattr(_trading_bot, "_enabled_setups", []) or [])
+    effective_by_setup: Dict[str, Dict[str, Any]] = {}
+    for s in enabled:
+        eff = _trading_bot.risk_params.effective_min_rr(s)
+        is_override = eff != _trading_bot.risk_params.min_risk_reward
+        effective_by_setup[s] = {
+            "effective_rr": eff,
+            "source": "override" if is_override else "global",
+        }
+    return {
+        "success": True,
+        "risk_params": risk,
+        "effective_by_setup": effective_by_setup,
+    }
+
+
+# 2026-05-01 v19.21 — One-curl rescue endpoint. Forces global +
+# per-setup R:R floors back to the v19.21 ship defaults. Useful when
+# Mongo persisted state has drifted from the code defaults (e.g. the
+# operator's HOOD-feed bug where saved global was 2.5 even though the
+# code default and operator preference said otherwise).
+@router.post("/reset-rr-defaults")
+def reset_rr_defaults():
+    """Reset min_risk_reward + setup_min_rr to v19.21 ship defaults."""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    from services.trading_bot_service import RiskParameters
+    fresh = RiskParameters()
+    _trading_bot.risk_params.min_risk_reward = fresh.min_risk_reward
+    # Replace the dict wholesale (this endpoint INTENTIONALLY clobbers).
+    _trading_bot.risk_params.setup_min_rr = dict(fresh.setup_min_rr)
+    # Persist to Mongo immediately (don't wait for the next save tick).
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_trading_bot._save_state())
+        else:
+            loop.run_until_complete(_trading_bot._save_state())
+    except Exception:
+        pass  # State will save on next tick regardless.
+    return {
+        "success": True,
+        "message": "R:R defaults reset to v19.21 ship values.",
+        "risk_params": _trading_bot.get_status()["risk_params"],
+    }
 
 
 # ==================== EOD AUTO-CLOSE ====================

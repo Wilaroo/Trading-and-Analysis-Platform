@@ -5937,10 +5937,44 @@ async def get_pusher_health():
                 "elapsed_minutes": _collection_mode_status.get("elapsed_minutes", 0),
                 "last_progress_update": _collection_mode_status.get("last_update"),
             },
+            # 2026-05-01 v19.21 — surface CPU-relief state alongside the
+            # other health metrics so the UI badge has a single endpoint
+            # to subscribe to.
+            "cpu_relief": _cpu_relief_status_safe(),
             "checked_at": now.isoformat(),
         }
 
     return await asyncio.to_thread(_snapshot)
+
+
+def _cpu_relief_status_safe() -> dict:
+    """Wrap the singleton call so a missing import never breaks pusher-health."""
+    try:
+        from services.cpu_relief_manager import get_cpu_relief_manager
+        return get_cpu_relief_manager().status()
+    except Exception:
+        return {"active": False, "error": "manager unavailable"}
+
+
+# 2026-05-01 v19.21 — CPU-relief toggle endpoints. Operator flips this on
+# during CPU pressure; non-critical RPC paths (smart-backfill, historical
+# pulls, daily collect) consult `is_active()` and defer themselves. Live
+# tick streams are intentionally left alone.
+@router.post("/cpu-relief")
+def cpu_relief_set(enable: bool, until: Optional[str] = None, reason: Optional[str] = None):
+    """Toggle CPU-relief mode. `until` is HH:MM Eastern (optional auto-off)."""
+    from services.cpu_relief_manager import get_cpu_relief_manager
+    mgr = get_cpu_relief_manager()
+    if enable:
+        return {"success": True, **mgr.enable(until_hhmm_et=until, reason=reason)}
+    return {"success": True, **mgr.disable()}
+
+
+@router.get("/cpu-relief")
+def cpu_relief_status():
+    """Read current CPU-relief state + deferred-call counter."""
+    from services.cpu_relief_manager import get_cpu_relief_manager
+    return {"success": True, **get_cpu_relief_manager().status()}
 
 
 

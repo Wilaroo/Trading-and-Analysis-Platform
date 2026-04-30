@@ -430,14 +430,22 @@ class OpportunityEvaluator:
             potential_reward = abs(primary_target - entry_price) * shares
             risk_reward_ratio = potential_reward / risk_amount if risk_amount > 0 else 0
 
-            if risk_reward_ratio < bot.risk_params.min_risk_reward:
-                print(f"   ❌ R:R {risk_reward_ratio:.2f} < {bot.risk_params.min_risk_reward} min required")
+            if risk_reward_ratio < bot.risk_params.effective_min_rr(setup_type):
+                # 2026-05-01 v19.21 — Per-setup R:R override. Mean-reversion
+                # setups (gap_fade, vwap_fade, etc.) have bounded targets and
+                # need a relaxed floor; trend/breakout setups have unbounded
+                # targets and keep the strict 2.0 gate. The narrative now
+                # surfaces the SETUP-SPECIFIC threshold, not the global one,
+                # so the operator's Bot's Brain stream shows the right number.
+                _eff_min = bot.risk_params.effective_min_rr(setup_type)
+                print(f"   ❌ R:R {risk_reward_ratio:.2f} < {_eff_min} min required (setup={setup_type})")
                 bot.record_rejection(
                     symbol=symbol, setup_type=setup_type, direction=direction_str,
                     reason_code="rr_below_min",
                     context={
                         "rr_ratio": round(risk_reward_ratio, 2),
-                        "min_required": bot.risk_params.min_risk_reward,
+                        "min_required": _eff_min,
+                        "global_min": bot.risk_params.min_risk_reward,
                         "entry_price": float(entry_price),
                         "stop_price": float(stop_price),
                         "primary_target": float(primary_target),

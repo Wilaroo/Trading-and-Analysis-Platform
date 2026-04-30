@@ -467,21 +467,88 @@ class RiskParameters:
     max_position_pct: float = 50.0           # Maximum % of capital per position (user requested 50%)
     max_notional_per_trade: float = 100000.0  # Hard absolute notional ceiling per trade ($) — belt-and-braces vs `max_position_pct` (which floats with equity). 0 = disabled. (added 2026-04-30 v19.4)
     max_open_positions: int = 10             # Maximum concurrent positions (unlimited = high number)
-    min_risk_reward: float = 1.5             # Minimum risk/reward ratio (1.5:1 = risk $1 to make $1.50)
+    # 2026-05-01 v19.21 — Operator picked 1.7 as the global floor after the
+    # HOOD gap_fade R:R 2.05 < 2.5 reject taught us that 2.5 is too strict
+    # for mean-reversion plays with bounded targets. See `setup_min_rr`
+    # below for per-setup overrides where this floor is intentionally too
+    # tight (gap fades, VWAP fades, etc. naturally cap at ~1.5-2.0 R:R).
+    min_risk_reward: float = 1.7             # Minimum risk/reward ratio (1.7:1 = risk $1 to make $1.70)
+    # 2026-05-01 v19.21 — Per-setup R:R overrides. The global `min_risk_reward`
+    # acts as the catch-all floor; setups in this dict override it. Mean-
+    # reversion plays (gap_fade, vwap_fade, mean_reversion, rubber_band,
+    # bouncy_ball, squeeze) have BOUNDED targets — prev close, VWAP, EMA9 —
+    # so their R:R is mathematically capped by the stop distance. Demanding
+    # 1.7+ on those rejects 60-80% of valid alerts; demanding 1.5 still
+    # filters the trash while letting bounded-target plays through.
+    # Trend / breakout setups have UNBOUNDED targets (the next swing high/
+    # low can run 3-5× risk), so we keep them at 2.0 as a quality bar.
+    setup_min_rr: Dict[str, float] = field(default_factory=lambda: {
+        # Mean-reversion (bounded targets) — relax floor.
+        "gap_fade":            1.5,
+        "vwap_fade":           1.5,
+        "vwap_fade_long":      1.5,
+        "vwap_fade_short":     1.5,
+        "vwap_bounce":         1.5,
+        "mean_reversion":      1.5,
+        "mean_reversion_long": 1.5,
+        "mean_reversion_short": 1.5,
+        "rubber_band":         1.5,
+        "rubber_band_long":    1.5,
+        "rubber_band_short":   1.5,
+        "rubber_band_scalp":   1.5,
+        "bouncy_ball":         1.5,
+        "squeeze":             1.5,
+        "tidal_wave":          1.5,
+        # Trend / breakout (unbounded targets) — keep tighter.
+        "breakout":            2.0,
+        "base_breakout":       2.0,
+        "hod_breakout":        2.0,
+        "orb":                 2.0,
+        "orb_long":            2.0,
+        "orb_short":           2.0,
+        "trend_continuation":  2.0,
+        "vwap_continuation":   2.0,
+        "the_3_30_trade":      2.0,
+        "premarket_high_break": 2.0,
+        "9_ema_scalp":         2.0,
+        "nine_ema_scalp":      2.0,
+    })
     max_slippage_pct: float = 0.5           # Maximum acceptable slippage %
-    
+
     # Trading hours (Eastern Time)
     trading_start_hour: int = 7              # Start trading at 7:30 AM ET
     trading_start_minute: int = 30
     trading_end_hour: int = 17               # Stop trading at 5:00 PM ET
     trading_end_minute: int = 0
-    
+
     # Volatility-adjusted position sizing
     use_volatility_sizing: bool = True       # Enable ATR-based position sizing
     base_atr_multiplier: float = 1.5         # Stop distance = ATR * multiplier
     volatility_scale_factor: float = 1.0     # Scale position size by volatility (1.0 = neutral)
     min_atr_multiplier: float = 1.0          # Minimum stop distance in ATRs
     max_atr_multiplier: float = 3.0          # Maximum stop distance in ATRs
+
+    def effective_min_rr(self, setup_type: str) -> float:
+        """Return the effective R:R floor for a setup — per-setup override
+        if defined, else the global `min_risk_reward`. Strips _long/_short/
+        _confirmed suffixes so e.g. `vwap_fade_long` resolves to the
+        `vwap_fade_long` override (or `vwap_fade` if only the base is set).
+        """
+        if not setup_type:
+            return self.min_risk_reward
+        # Direct match first.
+        if setup_type in self.setup_min_rr:
+            return self.setup_min_rr[setup_type]
+        # Suffix-stripped match.
+        base = (
+            setup_type
+            .rsplit("_long", 1)[0]
+            .rsplit("_short", 1)[0]
+            .rsplit("_confirmed", 1)[0]
+        )
+        if base in self.setup_min_rr:
+            return self.setup_min_rr[base]
+        return self.min_risk_reward
 
 
 @dataclass
@@ -1592,7 +1659,22 @@ class TradingBotService:
     def update_risk_params(self, **kwargs):
         """Update risk parameters and persist to MongoDB"""
         for key, value in kwargs.items():
-            if hasattr(self.risk_params, key):
+            if not hasattr(self.risk_params, key):
+                continue
+            # 2026-05-01 v19.21 — special-case dict merge for per-setup R:R
+            # overrides so a partial PUT doesn't wipe other operator-set
+            # entries. PUT { "setup_min_rr": {"squeeze": 1.3} } now merges
+            # `squeeze: 1.3` in instead of replacing the whole dict.
+            if key == "setup_min_rr" and isinstance(value, dict):
+                merged = dict(self.risk_params.setup_min_rr or {})
+                for k, v in value.items():
+                    try:
+                        merged[k] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                self.risk_params.setup_min_rr = merged
+                logger.info(f"Risk param merged: setup_min_rr += {len(value)} entries")
+            else:
                 setattr(self.risk_params, key, value)
                 logger.info(f"Risk param updated: {key} = {value}")
         
@@ -2524,7 +2606,9 @@ class TradingBotService:
                 "starting_capital": self.risk_params.starting_capital,
                 "max_position_pct": self.risk_params.max_position_pct,
                 "max_open_positions": self.risk_params.max_open_positions,
-                "min_risk_reward": self.risk_params.min_risk_reward
+                "min_risk_reward": self.risk_params.min_risk_reward,
+                "max_notional_per_trade": self.risk_params.max_notional_per_trade,
+                "setup_min_rr": dict(self.risk_params.setup_min_rr or {}),
             },
             "enabled_setups": self._enabled_setups,
             "strategy_configs": self.get_strategy_configs(),

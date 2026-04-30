@@ -1011,15 +1011,29 @@ class IBWorkerThread(threading.Thread):
             
             # If no providers specified, try to get user's subscribed providers
             if not provider_codes:
-                providers = self.ib.reqNewsProviders()
-                self.ib.sleep(0.3)
-                if providers:
-                    # Use all available providers
-                    provider_codes = [p.providerCode for p in providers if hasattr(p, 'providerCode')]
-                    logger.info(f"Using providers: {provider_codes}")
+                # 2026-05-01 v19.21 — operator can clamp the list via env to
+                # a tighter subset (e.g. drop FLY + BRFUPDN duplicates) so
+                # `get_historical_news` only ever asks for the providers the
+                # operator actually wants to consume. Set
+                # `IB_NEWS_PROVIDER_OVERRIDE=BZ,DJ,BRFG` to lock it down.
+                # Empty / unset → fall through to live IB-subscribed list.
+                import os as _os
+                _override = (_os.environ.get("IB_NEWS_PROVIDER_OVERRIDE") or "").strip()
+                if _override:
+                    provider_codes = [p.strip() for p in _override.split(",") if p.strip()]
+                    logger.info(
+                        f"Using IB_NEWS_PROVIDER_OVERRIDE providers: {provider_codes}"
+                    )
                 else:
-                    # Default common providers
-                    provider_codes = ["BZ", "FLY", "DJ", "BRFG", "BRFUPDN"]
+                    providers = self.ib.reqNewsProviders()
+                    self.ib.sleep(0.3)
+                    if providers:
+                        # Use all available providers
+                        provider_codes = [p.providerCode for p in providers if hasattr(p, 'providerCode')]
+                        logger.info(f"Using providers: {provider_codes}")
+                    else:
+                        # Default common providers
+                        provider_codes = ["BZ", "FLY", "DJ", "BRFG", "BRFUPDN"]
             
             # Set date range (default: last 7 days)
             if not end_date:

@@ -30,6 +30,7 @@ import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
 import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
 import GamePlanStockCard from './sentcom/v5/GamePlanStockCard';
+import PremarketGapScannerWidget from './sentcom/v5/PremarketGapScannerWidget';
 import { fmtET12 } from '../utils/timeET';
 
 // Briefing variant table — drives header label, accent colour and icon.
@@ -416,6 +417,23 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                       </div>
                     </div>
                   )}
+
+                  {/* v19.21 — Live gap-scanner so operators see fresh
+                      momentum names alongside the planned stocks. Scanner
+                      polls every 30s; symbols are clickable and dispatch
+                      `sentcom:focus-symbol` so the chat panel auto-fires
+                      "walk me through $SYM right now". */}
+                  <div data-testid="briefing-premarket-gap-scanner">
+                    <div className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider mb-2">
+                      Live gap scanner
+                    </div>
+                    <PremarketGapScannerWidget
+                      windowMinutes={8}
+                      minGapPct={2.0}
+                      maxResults={20}
+                      height={280}
+                    />
+                  </div>
                   {focusSetups && (
                     <div className="v5-why">
                       <span className="v5-mono text-[12px] text-zinc-500 uppercase tracking-wider">Focus: </span>

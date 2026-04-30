@@ -88,6 +88,20 @@ class BotPersistence:
                         bot.risk_params.starting_capital = saved_risk_params["starting_capital"]
                     if "max_notional_per_trade" in saved_risk_params:
                         bot.risk_params.max_notional_per_trade = saved_risk_params["max_notional_per_trade"]
+                    # 2026-05-01 v19.21 — round-trip per-setup R:R overrides.
+                    # Saved dict MERGES into the code defaults so newly-shipped
+                    # setups (e.g. `the_3_30_trade` added in v19.20) get their
+                    # default override even on bots that persisted before the
+                    # ship. Operator-saved values still win over code defaults.
+                    saved_setup_min_rr = saved_risk_params.get("setup_min_rr")
+                    if isinstance(saved_setup_min_rr, dict):
+                        merged_setup_min_rr = dict(bot.risk_params.setup_min_rr or {})
+                        for k, v in saved_setup_min_rr.items():
+                            try:
+                                merged_setup_min_rr[k] = float(v)
+                            except (TypeError, ValueError):
+                                continue
+                        bot.risk_params.setup_min_rr = merged_setup_min_rr
                     logger.info(f"💰 Restored risk params: max_risk=${bot.risk_params.max_risk_per_trade:,.0f}, max_positions={bot.risk_params.max_open_positions}, min_rr={bot.risk_params.min_risk_reward}, max_notional=${bot.risk_params.max_notional_per_trade:,.0f}")
 
             # === 2. RESTORE EOD CONFIG ===
@@ -338,7 +352,11 @@ class BotPersistence:
                     "max_position_pct": bot.risk_params.max_position_pct,
                     "min_risk_reward": bot.risk_params.min_risk_reward,
                     "starting_capital": bot.risk_params.starting_capital,
-                    "max_notional_per_trade": bot.risk_params.max_notional_per_trade
+                    "max_notional_per_trade": bot.risk_params.max_notional_per_trade,
+                    # 2026-05-01 v19.21 — persist per-setup R:R overrides
+                    # so operator tweaks (e.g. /api/trading-bot/risk-params
+                    # PUT) survive backend restarts.
+                    "setup_min_rr": dict(bot.risk_params.setup_min_rr or {}),
                 },
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }

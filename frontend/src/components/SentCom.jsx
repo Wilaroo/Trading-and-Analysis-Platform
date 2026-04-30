@@ -194,6 +194,38 @@ const SentCom = ({ compact = false, embedded = false }) => {
     }
   };
 
+  // 2026-05-01 v19.21 — `sentcom:focus-symbol` global event hook.
+  // The Game Plan stock card (and the Premarket Gap-Scanner widget) emit
+  // `window.dispatchEvent(new CustomEvent('sentcom:focus-symbol', ...))`
+  // when the operator clicks a $TICKER chip. We listen here so the click
+  // immediately fires off a coach-style chat query — closing the loop
+  // briefing → chat → trade plan in one gesture, no copy-paste required.
+  // Debounced 600ms so a double-click on the same chip doesn't fan out
+  // two chat calls.
+  useEffect(() => {
+    let lastFireKey = '';
+    let lastFireAt = 0;
+    const onFocus = (evt) => {
+      const sym = (evt?.detail?.symbol || '').toUpperCase();
+      if (!sym) return;
+      const now = Date.now();
+      if (sym === lastFireKey && now - lastFireAt < 600) return;
+      lastFireKey = sym;
+      lastFireAt = now;
+      // Optional override message (e.g. for context-rich callers)
+      const customMsg = evt?.detail?.message;
+      const prompt = customMsg || `Walk me through $${sym} right now — what's the setup, key levels, what are you watching, and what would make you take it vs pass.`;
+      try {
+        handleChat(prompt);
+      } catch (err) {
+        console.error('focus-symbol chat dispatch failed:', err);
+      }
+    };
+    window.addEventListener('sentcom:focus-symbol', onFocus);
+    return () => window.removeEventListener('sentcom:focus-symbol', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatLoading]);
+
   // Handle quick action clicks
   const handleQuickAction = async (action) => {
     setQuickActionLoading(action.id);

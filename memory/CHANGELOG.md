@@ -2,6 +2,125 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (fortieth commit, v19.21) — HOOD R:R fix + verification surfaces + briefing widgets + CPU relief
+
+Operator opened the Deep Feed during RTH and saw HOOD `gap_fade` LONG
+rejected at R:R 2.05 vs 2.5 minimum — exactly the same pattern as the
+v19.20 Squeeze fix but for a different setup family. Concurrent issues:
+the Stocks-In-Play card had no live gap context, the chat panel
+required copy-paste to switch focus, and IB Gateway was at 80% CPU
+with no operator-side relief lever.
+
+### Phase 1 — R:R floor reset + per-setup overrides
+
+**Root cause:** Mongo `bot_state.risk_params.min_risk_reward = 2.5` (saved
+from a stale prior session) was overriding the code default. A previous
+fork explicitly told the operator "lower it operator-side after 30 min
+of fresh data" but the lower value was never persisted.
+
+**Fix shipped:**
+- Code default `min_risk_reward` reset to **1.7** (operator's call).
+- New `RiskParameters.setup_min_rr` dict — per-setup R:R overrides:
+  - Mean-reversion plays (gap_fade, vwap_fade, mean_reversion,
+    rubber_band, bouncy_ball, squeeze, tidal_wave) → **1.5** floor
+    (bounded targets — prev close, VWAP, EMA9 — limit how asymmetric
+    the trade can be by definition).
+  - Trend / breakout setups (orb, breakout, trend_continuation,
+    the_3_30_trade, premarket_high_break, 9_ema_scalp) → **2.0** floor
+    (unbounded targets — these can run 3-5× risk).
+  - Default catch-all → 1.7.
+- New `RiskParameters.effective_min_rr(setup_type)` resolver — strips
+  `_long`/`_short`/`_confirmed` suffixes so e.g. `vwap_fade_long`
+  resolves to the `vwap_fade_long` override (or `vwap_fade` base).
+- `opportunity_evaluator.py` now consults the resolver instead of the
+  global `min_risk_reward`. Rejection narrative shows the SETUP-SPECIFIC
+  threshold AND the global so the operator can see both.
+- `update_risk_params(setup_min_rr={...})` now MERGES into the existing
+  dict instead of replacing — partial PUT doesn't wipe other entries.
+- `bot_persistence` round-trips `setup_min_rr` (saved + restored, with
+  merge-into-defaults so newly-shipped setups always get their default).
+- New endpoint `GET /api/trading-bot/risk-params` returns live params
+  + an `effective_by_setup` map showing the resolved floor for every
+  enabled setup (operator can verify "did my tuning take?" at a glance).
+- New endpoint `POST /api/trading-bot/reset-rr-defaults` — one-curl
+  rescue when Mongo state has drifted from code defaults.
+- New endpoint `GET /api/scanner/ml-feature-preview/{symbol}` — returns
+  the live label-feature dict (market_setup + multi_index_regime +
+  sector_regime one-hots) that would attach to the per-Trade ML feature
+  vector RIGHT NOW. Closes the loop on "is the learning loop wired?"
+  by exposing all three feature layers in one call.
+
+### Phase 2 — Briefing widgets + chat hook
+
+**`PremarketGapScannerWidget.jsx`** — scrollable list of recent gappers
+backed by new endpoint `GET /api/live-scanner/premarket-gappers?
+window_minutes=8&min_gap_pct=2.0`. Joins live alerts with gap-related
+setup types (gap_fade, gap_give_go, gap_pick_roll,
+premarket_high_break, gap_fill_open) PLUS any alert whose metadata
+carries `gap_pct` ≥ threshold. Each row renders symbol (clickable
+`$TICKER` chip), gap %, current price, setup type, alert age, and a
+counter-trend warning chip. Polls every 30s. Mounted in
+`MorningBriefingModal.jsx` next to "Stocks in play".
+
+**`sentcom:focus-symbol` chat hook** — `SentCom.jsx` now listens for
+the global custom event the gap-scanner widget and `GamePlanStockCard`
+both dispatch on click. The listener auto-fires `handleChat()` with
+"Walk me through $SYM right now — what's the setup, key levels, what
+are you watching, and what would make you take it vs pass." Debounced
+600ms so a double-click doesn't fan out two LLM calls. Closes the loop
+briefing → chat → trade plan in one gesture.
+
+### Phase 3 — CPU-relief toggle (opt-in throttle)
+
+**`services/cpu_relief_manager.py`** — single-source-of-truth toggle.
+Operator flips ON during CPU pressure; non-critical RPC paths consult
+`is_active()` and defer themselves. Live tick subscriptions are LEFT
+ALONE (operator's explicit ask: "live ticks are the freshest data we
+have, keep them full").
+
+**Activation:**
+- `POST /api/ib/cpu-relief?enable=true` — on indefinitely
+- `POST /api/ib/cpu-relief?enable=true&until=15:30` — auto-off at 3:30 PM ET
+- `POST /api/ib/cpu-relief?enable=false` — off
+- `GET /api/ib/cpu-relief` — live status + deferred-call counter
+- Same fields are also embedded in `GET /api/ib/pusher-health`
+  under `cpu_relief` so the existing UI tile picks them up automatically.
+
+**What gets deferred when active:**
+- `smart_backfill` (non-dry-run) — short-circuits with
+  `{"deferred": True, ...}` and increments the counter. Dry-run still
+  runs (cheap planning data).
+- Other paths are wired-ready (the `is_active()` check is cheap and
+  free for any caller to add).
+
+**`CpuReliefBadge.jsx`** — clickable UI chip. Renders amber "Relief on"
+when active with tooltip showing deferred count + auto-off time;
+zinc "Relief" when off. One-click toggle.
+
+### Phase 4 — News provider override
+
+**`IB_NEWS_PROVIDER_OVERRIDE` env** — operator can clamp the news
+provider list without touching IB Gateway settings. e.g.
+`IB_NEWS_PROVIDER_OVERRIDE=BZ,DJ,BRFG` means `get_historical_news`
+only ever asks IB for those three vendors. Empty/unset → falls
+through to live IB-subscribed list (current behavior).
+
+### Verification
+
+- 17 new pytest cases:
+  - `test_per_setup_rr_v19_21.py` — 8 cases (global default, per-setup
+    overrides, resolver, merge semantics, persistence round-trip,
+    HOOD-specific regression).
+  - `test_cpu_relief_and_gap_scanner_v19_21.py` — 9 cases (relief
+    toggle, auto-disable window, deferred counter, gap-scanner filter
+    + dedup + empty, smart_backfill defers when relief is on, dry-run
+    bypass).
+- All 141 tests in v19 + market-setup + landscape suites pass.
+- Curl end-to-end verified: GET/POST /risk-params, /reset-rr-defaults,
+  /ml-feature-preview, /premarket-gappers, /cpu-relief.
+- Frontend smoke-tested. ESLint clean.
+
+
 ## 2026-05-01 (thirty-ninth commit, v19.20) — Deep-Feed noise cleanup + briefing depth
 
 Operator opened the Deep Feed at 4:01 PM and saw the bot spamming

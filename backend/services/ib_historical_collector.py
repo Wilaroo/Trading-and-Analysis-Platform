@@ -2820,6 +2820,32 @@ class IBHistoricalCollector:
         Persists non-dry-run results to `ib_smart_backfill_history` so the UI can
         show the last run's summary without re-running the whole plan."""
         import asyncio
+
+        # 2026-05-01 v19.21 — CPU-relief gate. When the operator flips the
+        # CPU-relief toggle ON (POST /api/ib/cpu-relief?enable=true) we
+        # defer the smart-backfill burst entirely — live ticks stay full
+        # but we don't pile new historical-data RPC calls onto an already-
+        # struggling Gateway. Dry-run always runs (it's cheap and the
+        # operator might be using it to plan their next move during a
+        # CPU spike).
+        if not dry_run:
+            try:
+                from services.cpu_relief_manager import get_cpu_relief_manager
+                relief = get_cpu_relief_manager()
+                if relief.is_active():
+                    relief.record_deferred("smart_backfill")
+                    return {
+                        "success": False,
+                        "deferred": True,
+                        "reason": "CPU relief active — smart_backfill paused",
+                        "queued": 0,
+                        "skipped_fresh": 0,
+                        "skipped_already_queued": 0,
+                    }
+            except Exception:
+                # Manager unavailable → fall through to normal behaviour.
+                pass
+
         result = await asyncio.to_thread(
             self._smart_backfill_sync, dry_run, tier_filter, freshness_days
         )

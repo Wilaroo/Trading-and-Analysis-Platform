@@ -5,7 +5,7 @@ Provides real-time push notifications for trade alerts
 from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import asyncio
 import json
@@ -514,3 +514,117 @@ def check_blacklist(symbol: str):
         "is_blacklisted": is_blacklisted
     }
 
+
+# 2026-05-01 v19.21 — Premarket Gap-Scanner endpoint backing the new
+# operator UI widget. Surfaces "what gapped recently" by joining live
+# scanner alerts (gap_*, premarket_high_break, gap_pick_roll) with the
+# pushed IB quote stream (for current price + gap_pct snapshot). Returns
+# a sorted scrollable list — biggest gappers first.
+@router.get("/premarket-gappers")
+def get_premarket_gappers(
+    window_minutes: int = 8,
+    min_gap_pct: float = 2.0,
+    max_results: int = 25,
+):
+    """
+    List symbols that gapped within the last `window_minutes` — sorted by
+    absolute gap %. Each row carries the current price, prev close, gap %,
+    rvol, the alert setup type that fired, and how long ago the alert hit.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+
+    from datetime import datetime, timezone, timedelta
+
+    # Window cutoff (UTC).
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(1, window_minutes))
+
+    # Pull live alerts and filter to gap-related setups in the window.
+    GAP_SETUPS = {
+        "gap_fade", "gap_give_go", "gap_pick_roll",
+        "premarket_high_break", "gap_fill_open",
+        # Bare alerts that carry gap_pct on the snapshot are still
+        # surfaced via the gap_pct threshold below — these are the
+        # explicit setup-type matches for the "freshly gapped" feed.
+    }
+
+    alerts = _scanner.get_live_alerts() or []
+    rows: List[Dict[str, Any]] = []
+    seen_symbols = set()
+    for a in alerts:
+        try:
+            # Skip non-gap alerts unless they carry a meaningful gap_pct.
+            atype = getattr(a, "setup_type", "") or ""
+            atime_raw = getattr(a, "alert_time", None)
+            if atime_raw is None:
+                continue
+            # alert_time is normally an ISO string; tolerate datetime too.
+            if isinstance(atime_raw, str):
+                try:
+                    atime = datetime.fromisoformat(atime_raw.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            else:
+                atime = atime_raw
+            if atime.tzinfo is None:
+                atime = atime.replace(tzinfo=timezone.utc)
+            if atime < cutoff:
+                continue
+
+            sym = (getattr(a, "symbol", "") or "").upper()
+            if not sym or sym in seen_symbols:
+                continue
+
+            # Pull gap_pct from the alert metadata if available.
+            meta = getattr(a, "metadata", None) or {}
+            gap_pct = meta.get("gap_pct") if isinstance(meta, dict) else None
+            try:
+                gap_pct = float(gap_pct) if gap_pct is not None else None
+            except (TypeError, ValueError):
+                gap_pct = None
+
+            # Hard filter: only gap setups, OR any setup with |gap_pct| >= min.
+            if atype in GAP_SETUPS:
+                pass  # always include
+            elif gap_pct is not None and abs(gap_pct) >= min_gap_pct:
+                pass
+            else:
+                continue
+
+            seen_symbols.add(sym)
+            current_price = getattr(a, "current_price", None) or getattr(a, "trigger_price", None)
+            row = {
+                "symbol": sym,
+                "setup_type": atype,
+                "direction": getattr(a, "direction", None),
+                "current_price": current_price,
+                "trigger_price": getattr(a, "trigger_price", None),
+                "gap_pct": gap_pct,
+                "rvol": meta.get("rvol") if isinstance(meta, dict) else None,
+                "prev_close": meta.get("prev_close") if isinstance(meta, dict) else None,
+                "alert_time": atime.isoformat(),
+                "alert_age_seconds": int((datetime.now(timezone.utc) - atime).total_seconds()),
+                "priority": getattr(getattr(a, "priority", None), "value", None) or str(getattr(a, "priority", "")),
+                "market_setup": getattr(a, "market_setup", None),
+                "is_countertrend": bool(getattr(a, "is_countertrend", False)),
+            }
+            rows.append(row)
+        except Exception:
+            # Defensive — never fail the whole feed for one bad alert.
+            continue
+
+    # Sort by absolute gap % descending; alerts without gap_pct go last.
+    rows.sort(
+        key=lambda r: (r["gap_pct"] is None, -abs(r["gap_pct"] or 0)),
+    )
+    rows = rows[:max_results]
+
+    return {
+        "success": True,
+        "window_minutes": window_minutes,
+        "min_gap_pct": min_gap_pct,
+        "count": len(rows),
+        "gappers": rows,
+        "scanner_running": getattr(_scanner, "_running", False),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }

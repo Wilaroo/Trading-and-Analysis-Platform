@@ -3,7 +3,45 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.20 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.21 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.21 — see CHANGELOG (fortieth commit)
+HOOD R:R fix + verification surfaces + briefing widgets + CPU relief:
+- ✅ Per-setup R:R floors (mean-reversion=1.5, breakout/trend=2.0,
+  global=1.7). Gap_fade @ 2.05 R:R now passes; HOOD regression closed.
+- ✅ `RiskParameters.effective_min_rr()` resolver with suffix stripping
+  (`_long`/`_short`/`_confirmed`).
+- ✅ `update_risk_params(setup_min_rr={...})` merges, doesn't replace.
+- ✅ Persistence round-trip is lossless for `setup_min_rr`.
+- ✅ New endpoints: `GET /api/trading-bot/risk-params` (live + resolved),
+  `POST /api/trading-bot/reset-rr-defaults` (one-curl rescue),
+  `GET /api/scanner/ml-feature-preview/{symbol}` (verifies all 3 ML
+  label-feature layers fire).
+- ✅ Premarket Gap-Scanner widget — live scrollable list of gappers
+  in last N min, mounted in `MorningBriefingModal`.
+- ✅ `sentcom:focus-symbol` global event wired into `SentCom.jsx` chat —
+  any `$TICKER` click auto-fires "walk me through $SYM right now".
+- ✅ CPU-relief toggle (`/api/ib/cpu-relief`) with `until=HH:MM` window,
+  deferred-call counter, UI badge. Smart-backfill respects it.
+- ✅ `IB_NEWS_PROVIDER_OVERRIDE` env so operator can clamp news vendors.
+- ✅ 17 new pytest cases. 141/141 pass across the v19 stack.
+
+### 🟡 Next session priorities
+- **(P1) Wire `cpu_relief_manager.is_active()` into more deferable paths**
+  (eval-time historical pulls, daily collect, periodic backfill loops).
+  Right now only `smart_backfill` defers. The infrastructure is in
+  place — each new caller is a one-line check.
+- **(P1) Auto-trigger relief based on RPC latency** — watch
+  `/api/ib/pusher-health` avg latency. If >2s sustained 60s, flip on;
+  reset when latency drops <800ms 60s. (Operator chose manual+timed
+  this round; auto is a future enhancement.)
+- **(P1) Setup-landscape self-grading tracker** — record briefing
+  predictions, grade EOD, feed AI training pipeline.
+- **(P2) Mean-reversion metrics service** — Hurst exponent +
+  Ornstein-Uhlenbeck half-life per symbol.
+- **(P2) Realtime stop-guard re-check** — liquidity-aware trail in
+  `stop_manager.py`.
+- **(P3) Break up monolithic `server.py`.**
 
 ### 🎯 Just shipped 2026-05-01 v19.20 — see CHANGELOG (thirty-ninth commit)
 Deep Feed noise cleanup (Phase 1) + Morning Briefing depth (Phase 2):

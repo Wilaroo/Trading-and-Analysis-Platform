@@ -1149,3 +1149,143 @@ def get_universe_stats():
     except Exception as e:
         logger.error(f"Error getting universe stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# 2026-05-01 v19.21 — ML feature preview endpoint.
+# Operator concern: "are market_setup / multi_index_regime / sector_regime
+# actually feeding the per-Trade ML model's feature vector at predict time?"
+# This endpoint resolves the current label features for a symbol (using the
+# same `build_label_features` helper the trainer + predictor use) and
+# returns the one-hot feature dict so the operator can see at a glance
+# whether each layer is firing. Read-only; no DB writes.
+@router.get("/ml-feature-preview/{symbol}")
+async def ml_feature_preview(symbol: str):
+    """Return the live label-feature dict (setup + regime + sector one-hots)
+    that would be appended to the ML feature vector RIGHT NOW for `symbol`.
+    Useful for verifying the learning loop is closed end-to-end."""
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    # 1. Resolve multi-index regime (composite SPY/QQQ/IWM/DIA label).
+    multi_index_regime_label = "unknown"
+    multi_index_regime_meta: Dict[str, Any] = {}
+    try:
+        from services.multi_index_regime_classifier import (
+            get_multi_index_regime_classifier,
+        )
+        from database import get_database
+        db = get_database()
+        classifier = get_multi_index_regime_classifier(db=db)
+        regime_res = await classifier.classify()
+        multi_index_regime_label = regime_res.label.value
+        multi_index_regime_meta = {
+            "confidence": getattr(regime_res, "confidence", None),
+            "reasoning": getattr(regime_res, "reasoning", None),
+        }
+    except Exception as exc:
+        multi_index_regime_meta = {"error": str(exc)}
+
+    # 2. Resolve per-symbol sector regime.
+    sector_regime_label = "unknown"
+    sector_regime_meta: Dict[str, Any] = {}
+    try:
+        from services.sector_regime_classifier import (
+            get_sector_regime_classifier,
+        )
+        from database import get_database
+        db = get_database()
+        sector_classifier = get_sector_regime_classifier(db=db)
+        # 2026-05-01 v19.21 — `classify_for_symbol` already does sector-tag
+        # lookup + classification in one call, returning a SectorRegime enum.
+        # That matches what `build_label_features` expects exactly.
+        sector_regime_enum = await sector_classifier.classify_for_symbol(sym)
+        sector_regime_label = (
+            sector_regime_enum.value if hasattr(sector_regime_enum, "value")
+            else str(sector_regime_enum)
+        )
+        sector_regime_meta = {"regime": sector_regime_label}
+    except Exception as exc:
+        sector_regime_meta = {"error": str(exc)}
+
+    # 3. Market setup — use the live cached snapshot if available, else
+    # classify from the symbol's daily bars.
+    market_setup_label = "neutral"
+    market_setup_meta: Dict[str, Any] = {}
+    try:
+        from services.market_setup_classifier import MarketSetupClassifier
+        from database import get_database
+        db = get_database()
+        classifier = MarketSetupClassifier(db=db) if MarketSetupClassifier.__init__.__code__.co_argcount > 1 else MarketSetupClassifier()
+        # Pull last ~30 daily bars for this symbol.
+        cursor = db["ib_historical_data"].find(
+            {"symbol": sym, "bar_size": "1 day"},
+            {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},
+        ).sort("date", -1).limit(30)
+        bars_desc = list(cursor)
+        bars = list(reversed(bars_desc))
+        if bars:
+            try:
+                # Static helper used by the trainer keeps semantics identical.
+                res = MarketSetupClassifier._sync_classify_window(bars)
+                # MarketSetupClassifier returns either an enum or a string —
+                # normalise to a value string for build_label_features.
+                if hasattr(res, "value"):
+                    market_setup_label = res.value
+                else:
+                    market_setup_label = str(res)
+                market_setup_meta = {"bars_used": len(bars)}
+            except Exception as cls_exc:
+                market_setup_meta = {"error": f"classify failed: {cls_exc}"}
+        else:
+            market_setup_meta = {"bars_used": 0, "note": "No daily bars in ib_historical_data"}
+    except Exception as exc:
+        market_setup_meta = {"error": str(exc)}
+
+    # 4. Build the same label feature dict the trainer + predictor use.
+    label_features: Dict[str, float] = {}
+    try:
+        from services.ai_modules.composite_label_features import (
+            ALL_LABEL_FEATURE_NAMES, build_label_features,
+        )
+        label_features = build_label_features(
+            market_setup=market_setup_label,
+            multi_index_regime=multi_index_regime_label,
+            sector_regime=sector_regime_label,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "symbol": sym,
+            "error": f"build_label_features failed: {exc}",
+            "market_setup": market_setup_label,
+            "multi_index_regime": multi_index_regime_label,
+            "sector_regime": sector_regime_label,
+        }
+
+    # Pretty: list the features that are 1.0 (active one-hot bins) so the
+    # operator can see at a glance which layers actually fired vs which
+    # fell through to UNKNOWN/NEUTRAL baseline.
+    active_features = [k for k, v in label_features.items() if v >= 0.5]
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "labels": {
+            "market_setup":       market_setup_label,
+            "multi_index_regime": multi_index_regime_label,
+            "sector_regime":      sector_regime_label,
+        },
+        "meta": {
+            "market_setup":       market_setup_meta,
+            "multi_index_regime": multi_index_regime_meta,
+            "sector_regime":      sector_regime_meta,
+        },
+        "feature_vector": {
+            "all_feature_names":  ALL_LABEL_FEATURE_NAMES,
+            "label_features":     label_features,
+            "active_features":    active_features,
+            "feature_count":      len(label_features),
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
