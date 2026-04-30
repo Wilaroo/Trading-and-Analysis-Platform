@@ -3,7 +3,51 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.23 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.23.1 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.23.1 — see CHANGELOG (forty-fourth commit)
+**Operator screenshot review on v19.23 deploy → 4 follow-ups in one commit.**
+- ✅ **Lazy-reconcile SL/TP for IB-only positions.** `get_our_positions`
+  scans Mongo `bot_trades` for matching symbols and stamps stop/target +
+  rich entry context onto IB-side positions. SBUX/SOFI/OKLO now show
+  red SL + green PT lines on the chart and real values in the OPEN
+  panel grid. Status normalized `ib_position` → `open`.
+- ✅ **Tier chip humanization.** 22-name `STYLE_HUMAN_MAP` so
+  `trade_2_hold` → `DAY 2`, `opening_range_break` → `ORB`,
+  `9_ema_scalp` → `9-EMA`, etc. Unknowns fall back to underscore-strip
+  + 12-char truncate.
+- ✅ **Share size visible everywhere.** `Nsh` is now the lead element
+  on the OpenPositionsV5 model-trail subtitle, a chip on
+  ScannerCardsV5 manage-stage cards, the lead in the bot narrative
+  line, and the right-edge of the V5ChartHeader chip strip.
+- ✅ **Chart bubble kind filter loosened.** Allows `filter` and `info`
+  events with non-empty `content`. Operator's SBUX deep-feed events
+  should now render as bubbles.
+- ✅ 6/6 backend pytests passing (added
+  `test_lazy_reconcile_enriches_ib_position_with_bot_trade_levels`).
+  ESLint clean.
+
+### 🟡 Next session priorities
+
+- **(P0) `POST /api/trading-bot/reconcile`** (proper, heavier).
+  Lazy-reconcile is read-only — it doesn't materialize bot_trade rows
+  for orphaned IB positions, so the bot can't actively manage them
+  (trail stop, scale-out, EOD-close). Build proper endpoint that
+  POSTs `{symbols: [...]}` and creates real bot_trades, applies
+  default stop/target overlays, and starts RTH management.
+- **(P0) MultiIndexRegimeClassifier** verification curl on Spark.
+- **(P1) HOOD chart wrong-prices `useEffect` chain** investigation.
+- **(P1) Per-setup R:R overrides as code defaults.**
+- **(P1) Wire `cpu_relief_manager.is_active()` into more deferable
+  paths** (EVAL historical, daily collect, periodic backfill).
+- **(P1) Auto-trigger relief based on RPC latency.**
+- **(P2) Setup-landscape EOD self-grading.**
+- **(P2) Mean-reversion metrics (Hurst + OU half-life).**
+- **(P2) Liquidity-aware trail in `stop_manager.py`.**
+- **(P3) Scanner card "Proven / Maturing / Cold-start" confidence
+  badge** based on `strategy_stats.r_outcomes` length.
+- **(P3) Chart bubble click → fire `sentcom:focus-symbol` event so
+  operator can chat-coach any moment in the day with one click.**
 
 ### 🎯 Just shipped 2026-05-01 v19.23 — see CHANGELOG (forty-third commit)
 **V5 mockup compliance pass — operator surfaced 4 paper-cuts after the

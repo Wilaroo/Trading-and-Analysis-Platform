@@ -2,6 +2,94 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-fourth commit, v19.23.1) — Lazy reconcile + share size everywhere + chart bubble fix
+
+Operator follow-up review on v19.23 deploy: SBUX/SOFI/OKLO showing
+STOP — / TARGET — on the Open panel, no SL/TP price-lines on the
+chart, and tier chip read `TRADE 2 HOLD long` (verbose).
+
+### v19.23.1 — Lazy-reconcile SL/TP for IB-only positions
+
+`sentcom_service.get_our_positions()` now scans Mongo `bot_trades` for
+each IB-only symbol and stamps the most recent matching trade's
+`stop_price` + `target_prices` + rich entry context onto the position
+payload. Result:
+
+- Chart `priceLinesRef` effect can now draw the red SL line + green PT
+  line for SBUX/SOFI/OKLO etc. that previously showed only the yellow
+  Entry line.
+- Open Positions expanded grid shows real `STOP` / `TARGET` values
+  instead of literal dashes.
+- Tier chip can read `VWAP day` / `ORB long` / `9-EMA scalp` etc.
+  instead of falling back to bare `LONG` / `SHORT`.
+- `reasoning[]` / `exit_rule` / `risk_reward_ratio` / `smb_grade`
+  / `remaining_shares` / `original_shares` all populated for the
+  expanded V5 row from the matching bot_trade.
+- New boolean `reconciled` field on the payload exposes whether the
+  position was matched. Frontend can later badge "RECONCILED" /
+  "ORPHANED" if useful.
+
+Status field normalized: `"ib_position"` → `"open"` (matches the V5
+mockup chip strip which expects `OPEN`).
+
+### v19.23.1 — Tier chip humanization
+
+`OpenPositionsV5.STYLE_HUMAN_MAP` adds explicit display labels for the
+22 named Bellafiore Trades (`opening_range_break` → `ORB`,
+`9_ema_scalp` → `9-EMA`, `vwap_continuation` → `VWAP`,
+`day_2_continuation` → `DAY 2`, `relative_strength_position` → `RS POS`,
+etc.). Unknown styles fall back to `replace(_, ' ').toUpperCase()`
+truncated to 12 chars.
+
+### v19.23.1 — Share size visible everywhere
+
+Operator request: "make sure that share size is visible for each trade
+wherever it needs to be displayed."
+
+- **OpenPositionsV5 compact row**: `Nsh` is now the lead element on the
+  model-trail subtitle so position size is the first thing the eye
+  picks up after the symbol+pnl.
+- **ScannerCardsV5**: new `Nsh` chip alongside the stage chip on
+  manage-stage cards. Bot narrative for managed positions now also
+  prepends `Nsh ·` so the operator can read it when chips wrap.
+- **V5ChartHeader**: `Nsh` already in the header chip strip from
+  v19.23 (e.g. `2858sh` on SBUX).
+
+### v19.23.1 — Chart bubble kind filter loosened
+
+Operator screenshot showed SBUX in Deep Feed with multiple events but
+no chart bubbles rendered. Root cause: the kind allowlist was too
+strict (excluded `filter` and `info` kinds even when they had
+operator-facing content). Now allows `scan / brain / evaluation /
+thought / fill / alert / rejection / skip / filter / info`, gated on
+`(content || text)` non-empty so truly empty system noise is still
+excluded. Color/label mapping already covered all 11 kinds.
+
+### Tests
+
+`test_open_positions_payload_v19_23.py` updated:
+- New test `test_lazy_reconcile_enriches_ib_position_with_bot_trade_levels`
+  pins the SBUX-style scenario: IB position with no in-memory bot_trade,
+  Mongo-side bot_trade record with full SL/TP/reasoning, payload comes
+  back with everything stamped through.
+- Existing test updated for `status: "open"` (not `"ib_position"`) and
+  `reconciled: False` when no Mongo match.
+- **6/6 passing locally.** ESLint clean.
+
+### Operator action on Spark
+
+1. Pull → backend hot-reload (sentcom_service is hot-reloadable).
+2. Open V5: refocus SBUX. Verify red SL line + green PT line render on
+   the chart. STOP / TARGET cells in the OPEN panel show real numbers.
+3. Verify tier chip reads humanized name (e.g. "VWAP day" instead of
+   "TRADE 2 HOLD long") for symbols that had bot_trade records.
+4. Verify the `Nsh` chip / share count is visible on every position
+   card and the OpenPositions row.
+5. Verify chart bubbles now appear over the focused-symbol chart for
+   any symbol with sentcom_thoughts events in the last 24h.
+
+
+
 ## 2026-05-01 (forty-third commit, v19.23) — V5 expandable Open Positions + chart bot-thought bubbles
 
 Operator's V5 mockup review. Five tickets in one shipment, all surfacing

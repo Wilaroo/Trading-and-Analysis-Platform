@@ -271,7 +271,12 @@ class TestOpenPositionsPayloadV19_23:
             "unrealizedPnL": 135.0,
             "realizedPnL": 0.0,
         }]
-        with patch.dict("routers.ib._pushed_ib_data", ib_blob, clear=True):
+        # Stub Mongo so the lazy-reconcile path returns no match
+        with patch.dict("routers.ib._pushed_ib_data", ib_blob, clear=True), \
+             patch("services.sentcom_service._get_db") as mock_db:
+            mock_collection = MagicMock()
+            mock_collection.find_one = MagicMock(return_value=None)
+            mock_db.return_value = {"bot_trades": mock_collection}
             positions = await svc.get_our_positions()
 
         assert len(positions) == 1
@@ -279,8 +284,93 @@ class TestOpenPositionsPayloadV19_23:
         assert p["symbol"] == "GOOGL"
         assert p["source"] == "ib"
         assert p["pnl"] == pytest.approx(135.0)
+        # Status normalized to "open" (was "ib_position" pre-v19.23.1)
+        assert p["status"] == "open"
+        # Reconciled flag exposes whether lazy-reconcile found a match
+        assert p["reconciled"] is False
         # Required fields exist (even as empty strings) so the V5 row
         # renders without throwing
         for key in ("setup_type", "trade_style", "market_regime",
                     "timeframe", "quality_grade", "notes"):
             assert key in p
+
+    @pytest.mark.asyncio
+    async def test_lazy_reconcile_enriches_ib_position_with_bot_trade_levels(self):
+        """v19.23.1 — when the bot has an open bot_trade record for an
+        IB-side symbol (typical after a backend restart), get_our_positions
+        should inject SL/TP/reasoning into the IB position so the V5 chart
+        + Open Positions panel show real protective levels."""
+        from services.sentcom_service import SentComService
+
+        svc = SentComService.__new__(SentComService)
+        bot = MagicMock()
+        bot.get_open_trades = MagicMock(return_value=[])  # in-memory list empty
+        svc._get_trading_bot = lambda: bot
+
+        ib_blob = _mock_pushed_data("SBUX", 105.28)
+        ib_blob["positions"] = [{
+            "symbol": "SBUX",
+            "position": 2858,
+            "avgCost": 104.89,
+            "marketPrice": 105.28,
+            "unrealizedPnL": 1114.62,
+            "realizedPnL": 0.0,
+        }]
+        # Mongo returns an open bot_trade for SBUX with full context
+        bot_trade_doc = {
+            "id": "trade-sbux-1",
+            "symbol": "SBUX",
+            "status": "open",
+            "executed_at": "2026-05-01T13:32:00Z",
+            "stop_price": 103.50,
+            "target_prices": [107.00, 109.00],
+            "setup_type": "vwap_continuation",
+            "trade_style": "day",
+            "scan_tier": "intraday",
+            "smb_grade": "B+",
+            "risk_amount": 397.0,
+            "risk_reward_ratio": 1.85,
+            "potential_reward": 734.0,
+            "remaining_shares": 2858,
+            "original_shares": 2858,
+            "entry_context": {
+                "scan_tier": "intraday",
+                "exit_rule": "trail to 9-EMA after PT1",
+                "trading_approach": "VWAP continuation long",
+                "reasoning": [
+                    "VWAP reclaim with vol +120% RVol",
+                    "Sector XLY leading; risk-on regime",
+                ],
+            },
+            "market_regime": "RISK_ON",
+            "quality_grade": "B+",
+            "notes": "VWAP continuation post-pullback",
+        }
+        with patch.dict("routers.ib._pushed_ib_data", ib_blob, clear=True), \
+             patch("services.sentcom_service._get_db") as mock_db:
+            mock_collection = MagicMock()
+            mock_collection.find_one = MagicMock(return_value=bot_trade_doc)
+            mock_db.return_value = {"bot_trades": mock_collection}
+            positions = await svc.get_our_positions()
+
+        assert len(positions) == 1
+        p = positions[0]
+        # SL/TP injected from bot_trade
+        assert p["stop_price"] == pytest.approx(103.50)
+        assert p["target_prices"] == [107.00, 109.00]
+        assert p["target_price"] == pytest.approx(107.00)
+        # Rich V5 fields populated
+        assert p["setup_type"] == "vwap_continuation"
+        assert p["trade_style"] == "day"
+        assert p["scan_tier"] == "intraday"
+        assert p["smb_grade"] == "B+"
+        assert p["risk_reward_ratio"] == pytest.approx(1.85)
+        assert p["remaining_shares"] == 2858
+        assert p["original_shares"] == 2858
+        assert p["reasoning"][0].startswith("VWAP reclaim")
+        assert p["exit_rule"] == "trail to 9-EMA after PT1"
+        # Reconciled flag is True
+        assert p["reconciled"] is True
+        # entry_time copied from bot_trade
+        assert p["entry_time"] is not None
+        assert "2026-05-01" in str(p["entry_time"])

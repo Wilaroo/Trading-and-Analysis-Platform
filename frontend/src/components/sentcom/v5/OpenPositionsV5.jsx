@@ -37,6 +37,46 @@ const formatPx = (v) => {
   return Number(v).toFixed(2);
 };
 
+// 2026-05-01 v19.23.1 — humanize known multi-word setup/style names so
+// the tier chip reads cleanly (operator review: "TRADE 2 HOLD long" was
+// verbose). Maps strict identifier → tighter display label. Unknown
+// names get a generic underscore-strip + 12-char truncation.
+const STYLE_HUMAN_MAP = {
+  trade_2_hold:               'DAY 2',
+  trade_2_continuation:       'DAY 2',
+  day_2_continuation:         'DAY 2',
+  day_2_failure:              'DAY 2 FAIL',
+  relative_strength_position: 'RS POS',
+  relative_strength:          'RS',
+  base_breakout:              'BREAKOUT',
+  accumulation_entry:         'ACCUM',
+  earnings_momentum:          'EARN MOM',
+  sector_rotation:            'ROTATION',
+  opening_range_break:        'ORB',
+  opening_drive:              'ORD',
+  the_3_30_trade:             '3:30',
+  '9_ema_scalp':              '9-EMA',
+  vwap_continuation:          'VWAP',
+  vwap_bounce:                'VWAP',
+  premarket_high_break:       'PMH',
+  bouncy_ball:                'BOUNCY',
+  bella_fade:                 'FADE',
+  off_sides_short:            'OFF SIDES',
+  off_sides:                  'OFF SIDES',
+  back_through_open:          'BACK THRU',
+  up_through_open:            'UP THRU',
+  gap_pick_roll:              'PICK ROLL',
+  gap_fade:                   'GAP FADE',
+};
+
+const humanizeStyle = (raw) => {
+  if (!raw) return '';
+  const key = String(raw).toLowerCase();
+  if (STYLE_HUMAN_MAP[key]) return STYLE_HUMAN_MAP[key];
+  // Fallback: drop underscores, uppercase, truncate to 12 chars
+  return key.replace(/_/g, ' ').toUpperCase().slice(0, 12);
+};
+
 // Derive the visible "tier chip" text from the position. Mirrors the
 // mockup: SCALP long, SHORT_REV, DAY long, SWING short, etc.
 const tierLabel = (pos) => {
@@ -46,10 +86,11 @@ const tierLabel = (pos) => {
   // "swing", "day", "position"). scan_tier is the universe-level tier
   // (intraday/swing/position/investment). Prefer trade_style; fall back
   // to scan_tier; finally, timeframe.
-  const style = (pos.trade_style || pos.scan_tier || pos.timeframe || '').toString();
-  const styleClean = style.replace(/_/g, ' ').toUpperCase();
-  if (!styleClean) return dirText.toUpperCase();
-  return `${styleClean} ${dirText}`;
+  const style = humanizeStyle(pos.trade_style)
+    || humanizeStyle(pos.scan_tier)
+    || humanizeStyle(pos.timeframe);
+  if (!style) return dirText.toUpperCase();
+  return `${style} ${dirText}`;
 };
 
 // Synthesize a "model trail / why" sub-line from whatever the bot wrote
@@ -57,6 +98,11 @@ const tierLabel = (pos) => {
 //   "TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull"
 const modelTrailLine = (pos) => {
   const parts = [];
+  // 2026-05-01 v19.23.1 — operator wants share size visible on every
+  // row at-a-glance. Lead with `Nsh` so the position size is the first
+  // thing the eye picks up after the symbol+pnl.
+  const sh = pos.shares ?? pos.quantity;
+  if (sh != null) parts.push(`${Math.round(Math.abs(Number(sh)))}sh`);
   const trail = pos.trailing_stop_state || {};
   if (trail.enabled && trail.current_stop) {
     const mode = (trail.mode || 'trail').toUpperCase();

@@ -2081,6 +2081,56 @@ class SentComService:
                     elif pnl_pct < -7:
                         risk_level = "warning"
                     
+                    # 2026-05-01 v19.23.1 — Lazy-reconcile SL/TP for
+                    # untracked IB-only positions. When the bot
+                    # restarted (or operator inherited a position), the
+                    # IB position has no bot_trade record, so the V5 UI
+                    # was rendering STOP — / TARGET — and the chart
+                    # priceLines effect couldn't draw red/green lines.
+                    # We look in Mongo `bot_trades` for the most recent
+                    # OPEN trade matching this symbol — the operator's
+                    # bot logged stop_price + target_prices when it
+                    # placed the original bracket. Fall back to the
+                    # most recent CLOSED trade so even fully-orphaned
+                    # positions show the operator's last-known
+                    # protective levels.
+                    enrich_stop = None
+                    enrich_targets = []
+                    enrich_trade = None
+                    try:
+                        db = _get_db()
+                        if db is not None:
+                            # Prefer status=open / placed; fall back to
+                            # any trade on this symbol within the last
+                            # 30d so the operator at least sees the
+                            # bot's intended levels.
+                            from datetime import timedelta as _td
+                            cutoff = datetime.now(timezone.utc) - _td(days=30)
+                            doc = await asyncio.to_thread(
+                                lambda: db["bot_trades"].find_one(
+                                    {
+                                        "symbol": symbol,
+                                        "$or": [
+                                            {"status": "open"},
+                                            {"status": "placed"},
+                                            {"executed_at": {"$gte": cutoff}},
+                                        ],
+                                    },
+                                    {"_id": 0},
+                                    sort=[("executed_at", -1)],
+                                )
+                            )
+                            if doc:
+                                enrich_stop = doc.get("stop_price")
+                                _t = doc.get("target_prices") or []
+                                if isinstance(_t, list):
+                                    enrich_targets = [float(t) for t in _t if t is not None]
+                                elif doc.get("target_price"):
+                                    enrich_targets = [float(doc["target_price"])]
+                                enrich_trade = doc
+                    except Exception as _e:
+                        logger.debug(f"Lazy-reconcile failed for {symbol}: {_e}")
+
                     positions.append({
                         "symbol": symbol,
                         "shares": abs_shares,
@@ -2095,18 +2145,32 @@ class SentComService:
                         "today_change": round(today_change * abs_shares, 2) if today_change else 0,
                         "today_change_pct": round(today_change_pct, 2) if today_change_pct else 0,
                         "risk_level": risk_level,
-                        "stop_price": None,
-                        "target_prices": [],
-                        "status": "ib_position",
-                        "entry_time": None,
+                        "stop_price": float(enrich_stop) if enrich_stop is not None else None,
+                        "target_prices": enrich_targets,
+                        "target_price": enrich_targets[0] if enrich_targets else None,
+                        "status": "open",
+                        "entry_time": (lambda et: et.isoformat() if hasattr(et, "isoformat") else et)(
+                            (enrich_trade or {}).get("executed_at")
+                        ),
                         "source": "ib",
-                        "setup_type": "",
-                        "setup_variant": "",
-                        "trade_style": "",
-                        "market_regime": "",
-                        "timeframe": "",
-                        "quality_grade": "",
-                        "notes": "",
+                        "reconciled": bool(enrich_trade),
+                        "setup_type": (enrich_trade or {}).get("setup_type", ""),
+                        "setup_variant": (enrich_trade or {}).get("setup_variant", ""),
+                        "trade_style": (enrich_trade or {}).get("trade_style", ""),
+                        "scan_tier": (enrich_trade or {}).get("scan_tier", "") or (enrich_trade or {}).get("entry_context", {}).get("scan_tier", ""),
+                        "market_regime": (enrich_trade or {}).get("market_regime", ""),
+                        "timeframe": (enrich_trade or {}).get("timeframe", ""),
+                        "quality_grade": (enrich_trade or {}).get("quality_grade", ""),
+                        "smb_grade": (enrich_trade or {}).get("smb_grade", ""),
+                        "risk_amount": (enrich_trade or {}).get("risk_amount", 0),
+                        "risk_reward_ratio": (enrich_trade or {}).get("risk_reward_ratio", 0),
+                        "potential_reward": (enrich_trade or {}).get("potential_reward", 0),
+                        "remaining_shares": (enrich_trade or {}).get("remaining_shares", abs_shares),
+                        "original_shares": (enrich_trade or {}).get("original_shares", abs_shares),
+                        "reasoning": ((enrich_trade or {}).get("entry_context") or {}).get("reasoning", []),
+                        "exit_rule": ((enrich_trade or {}).get("entry_context") or {}).get("exit_rule", ""),
+                        "trading_approach": ((enrich_trade or {}).get("entry_context") or {}).get("trading_approach", ""),
+                        "notes": (enrich_trade or {}).get("notes", ""),
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")

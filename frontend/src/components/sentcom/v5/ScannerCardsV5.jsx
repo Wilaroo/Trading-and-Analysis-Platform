@@ -164,16 +164,22 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
     // Backend may return `target_prices` (array, one per scale-out) OR
     // `target_price` (legacy scalar). Pick the first usable value.
     const pt = p.target_price ?? (Array.isArray(p.target_prices) ? p.target_prices[0] : null);
+    const sh = p.shares ?? p.quantity;
     bySymbol.set(sym, {
       symbol: sym,
       stage: 'manage',
       stage_note: `${dir === 'short' ? 'SHORT' : 'LONG'}${p.setup_type ? ' ' + p.setup_type : ''}`,
       change_pct: p.change_pct ?? null,
+      // 2026-05-01 v19.23.1 — operator wants share size visible on
+      // every position card. Prepend `Nsh` to the bot narrative so
+      // the first thing the eye picks up is the position size.
       bot_text:
         p.bot_note ||
+        `${sh != null ? `${Math.round(Math.abs(Number(sh)))}sh · ` : ''}` +
         `Holding ${sym}${p.entry_price ? ` @ ${formatNum(p.entry_price, 2)}` : ''}` +
         `${p.stop_price ? ` · SL ${formatNum(p.stop_price, 2)}` : ''}` +
         `${pt ? ` · PT ${formatNum(pt, 2)}` : ''}.`,
+      shares: sh,
       metrics: {
         gate: p.gate_score,
         p_win: p.p_win,
@@ -294,6 +300,19 @@ const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverS
               title="Setup type"
             >
               {String(card.stage_note).toLowerCase().replace(/_/g, ' ')}
+            </span>
+          )}
+          {/* 2026-05-01 v19.23.1 — operator wants share size visible on
+              every position card. Renders compact `Nsh` chip alongside
+              the stage chip when shares > 0. */}
+          {card.shares != null && Number(card.shares) > 0 && card.stage === 'manage' && (
+            <span
+              className="v5-chip"
+              style={{ borderColor: 'rgba(82, 82, 91, 0.6)', color: '#d4d4d8' }}
+              data-testid={`scanner-card-shares-${card.symbol}`}
+              title="Position size"
+            >
+              {Math.round(Math.abs(Number(card.shares)))}sh
             </span>
           )}
           {card.is_countertrend && (

@@ -103,14 +103,21 @@ export const ChartThoughtBubblesOverlay = ({
         );
         if (cancelled) return;
         const messages = Array.isArray(resp?.messages) ? resp.messages : [];
-        // Filter to chart-worthy events. Drop pure 'system'/'info' noise.
+        // 2026-05-01 v19.23.1 — operator review screenshot showed SBUX
+        // had Deep-Feed events but no chart bubbles rendered. Root
+        // cause: kind filter was too strict — bot writes some events
+        // with kind="filter" (rejection-narrative) and kind="info"
+        // (system messages with content) that ARE chart-worthy.
+        // Loosened filter: drop only kinds with truly no narrative
+        // (system-internal hydration / heartbeat). Anything with
+        // operator-facing content stays.
+        const ALLOWED_KINDS = new Set([
+          'scan', 'brain', 'evaluation', 'thought', 'fill', 'alert',
+          'rejection', 'skip', 'filter', 'info',
+        ]);
         const filtered = messages
-          .filter((m) => m && m.timestamp)
-          .filter((m) => {
-            const k = (m.kind || m.type || '').toLowerCase();
-            return ['scan', 'brain', 'evaluation', 'thought', 'fill', 'alert', 'rejection', 'skip']
-              .includes(k);
-          })
+          .filter((m) => m && m.timestamp && (m.content || m.text))
+          .filter((m) => ALLOWED_KINDS.has((m.kind || m.type || '').toLowerCase()))
           .map((m) => ({
             id: m.id || `${m.timestamp}-${(m.kind || '').slice(0, 4)}`,
             kind: (m.kind || m.type || 'thought').toLowerCase(),
