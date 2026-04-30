@@ -2479,7 +2479,14 @@ class IBDataPusher:
                 stp_ib.orderId = self.ib.client.getReqId()
                 stp_ib.parentId = parent_ib.orderId
                 stp_ib.tif = (stop_payload.get("time_in_force") or "GTC").upper()
-                stp_ib.outsideRth = bool(stop_payload.get("outside_rth", True))
+                # 2026-05-01 v19.22.2 — IB rejects `outsideRth=True` on STP
+                # orders with Warning 2109 ("Attribute 'Outside Regular
+                # Trading Hours' is ignored based on the order type and
+                # destination"). Drop the flag explicitly so the warning
+                # doesn't pollute the pusher log on every bracket. Stop
+                # triggers RTH-only either way; the take-profit LMT keeps
+                # `outsideRth=True` because IB DOES honour it on LMTs.
+                stp_ib.outsideRth = False
                 stp_ib.transmit = True  # last leg flushes the bracket to TWS
 
                 logger.info(

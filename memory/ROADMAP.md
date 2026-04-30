@@ -3,7 +3,42 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.22 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.22.x fork)
+
+### 🎯 Just shipped 2026-05-01 v19.22.1 + v19.22.2 — see CHANGELOG (forty-second commit)
+**Live RTH save: HOOD GO 52pts → fill in 60s of deploy.**
+- ✅ **v19.22.1** Bracket order handler in Windows pusher — was rejecting
+  ~63% of orders with "Unknown order type: bracket". Now constructs
+  proper IB 3-leg parent + stop + target with linked parentId/transmit
+  chain. Live proof: 14 fills in 15 min post-deploy.
+- ✅ **v19.22.1** Dropped `outsideRth=True` on STP leg (IB ignores +
+  warns). TP leg keeps it.
+- ✅ **v19.22.2** `/reset-rr-defaults` async fix — handler now `async
+  def` and awaits Mongo save, returns `persisted_to_mongo` flag.
+  Previously fire-and-forget create_task() lost the write across
+  restarts.
+- ✅ Operator applied via curl: global `min_risk_reward=1.7`,
+  added 7 mean-reversion setup overrides (`off_sides`, `volume_
+  capitulation`, `backside`, `bella_fade`=1.5, `fashionably_late`=2.0).
+- ✅ 24 / 24 pytests pass across v19.20 + v19.21 + v19.22.x.
+
+### 🟡 Next session priorities
+- **(P1) HOOD chart wrong-prices UI bug** — backend returns correct
+  $73 bars, frontend renders $265-$280 (likely stale symbol state).
+  Operator hard-refresh fixed it ad-hoc; investigate the
+  `useEffect`/symbol-prop chain in `ChartPanel.jsx` to make the
+  re-fetch deterministic on symbol change.
+- **(P1) Apply per-setup R:R overrides as code (not curl)** — operator
+  curled in 7 extras this session. Add them to the
+  `RiskParameters.setup_min_rr` dict default in
+  `trading_bot_service.py` so a fresh deploy picks them up without
+  needing the curl-merge dance.
+- **(P1) Wire `cpu_relief_manager.is_active()` into more deferable
+  paths** (EVAL historical, daily collect, periodic backfill).
+- **(P1) Auto-trigger relief based on RPC latency.**
+- **(P1) Setup-landscape self-grading tracker.**
+- **(P2) Mean-reversion metrics (Hurst + OU half-life).**
+- **(P2) Liquidity-aware trail in `stop_manager.py`.**
 
 ### 🎯 Just shipped 2026-05-01 v19.22 — see CHANGELOG (forty-first commit)
 News pruning + ML Feature Audit panel:

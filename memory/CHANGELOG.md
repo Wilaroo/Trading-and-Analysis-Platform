@@ -2,6 +2,95 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (forty-second commit, v19.22.1 + v19.22.2) — Bracket execution + reset durability
+
+Live operator ticket during RTH:
+> "we are getting alot of scans and evals, but still no trades taken"
+
+Root cause turned out to be **two distinct bugs working together**, both
+shipped in this commit. Live verification: HOOD `gap_fade` GO 52pts —
+which had been failing for 12+ rejections all morning — filled at $73.35
+within 60 seconds of the deploy.
+
+### v19.22.1 — Pusher bracket-order handler
+
+**Bug:** Every bracket order from the backend (`order_type="bracket"` +
+parent / stop / target legs in one document) was rejected by the
+Windows pusher with `"Unknown order type: bracket"`. The pusher's
+`_execute_queued_order()` only handled MKT, LMT, STP, STP_LMT — anything
+else hit the catch-all else branch and returned a synthetic rejection
+without ever talking to IB. **184 of 323 orders today (~63%) died here**;
+the operator had been seeing scan→eval→reject loops with zero broker
+contact since the bracket order type was introduced.
+
+**Fix:** Added a `is_bracket` detection branch UP FRONT in the pusher
+that:
+1. Reads `parent / stop / target` payloads from the order doc.
+2. Builds three IB orders with linked `parentId` + `transmit` chain:
+   - Parent (LMT entry): `transmit=False` (hold while children attach).
+   - Take-profit (opposite-side LMT, GTC): `parentId=parent.orderId`,
+     `transmit=False`.
+   - Stop loss (opposite-side STP, GTC): `parentId=parent.orderId`,
+     `transmit=True` — last leg flushes the bracket atomically.
+3. Submits all three with `ib.placeOrder()`, waits for parent fill (30s
+   max), reports `filled`/`pending`/`cancelled`/`rejected` to the
+   backend with the same idempotency stamping the regular paths use.
+
+Live proof from operator's pusher log post-deploy:
+```
+11:51:21 [OrderQueue] Submitting BRACKET 0f53abb7: BUY 953 SBUX @ $104.92
+11:51:21 [OrderQueue] Bracket 0f53abb7 parent FILLED @ $104.896 (target+stop attached)
+11:51:22 [OrderQueue] Submitting BRACKET 59253cb7: BUY 538 HOOD @ $73.48 (stop $68.33 / target $82.07)
+11:51:22 [OrderQueue] Bracket 59253cb7 parent FILLED @ $73.35 (target+stop attached)
+```
+
+Also dropped `outsideRth=True` on the STP leg specifically — IB silently
+ignores it on STP orders and emits Warning 2109 every time. The TP leg
+keeps `outsideRth=True` because IB DOES honour it on LMT.
+
+### v19.22.2 — Reset endpoint Mongo-write durability
+
+**Bug:** `POST /api/trading-bot/reset-rr-defaults` was a sync handler
+that fired-and-forgot the Mongo persistence write via
+`asyncio.create_task(_trading_bot._save_state())`. The response returned
+the new in-memory state immediately; if the operator restarted the
+backend before that background task finished (which the operator did
+this morning to deploy v19.21), the Mongo write was lost and the next
+state restore reloaded the OLD `min_risk_reward = 2.5` value. Operator
+caught it — global RR floor wouldn't stick.
+
+**Fix:** Promoted handler to `async def` and `await _save_state()`.
+Mongo write now completes BEFORE the response returns. Response payload
+includes a new `persisted_to_mongo: bool` field so the operator can
+verify the write hit disk. If Mongo is unavailable, the in-memory state
+still gets reset (so the bot trades correctly for the rest of the
+session) and `persisted_to_mongo: false` flags it for retry.
+
+### Operator-applied configuration this session
+
+In addition to the code patches, the operator applied these via curl:
+- `POST /reset-rr-defaults` — global → 1.7, setup_min_rr → ship defaults
+- `POST /risk-params` merge: added 7 more setup overrides
+  (`off_sides`, `off_sides_short`, `off_sides_long`, `volume_capitulation`,
+  `backside`, `bella_fade` → 1.5; `fashionably_late` → 2.0). These are
+  bounded-target mean-reversion plays that should not be subject to the
+  asymmetric-trade 1.7 floor.
+
+### Verification
+
+- `tests/test_pusher_bracket_handling_v19_22_1.py` — 6 cases covering
+  bracket detection (via `type` field, via `order_type` field, case-
+  insensitive), parent-payload lifting, regular-order pass-through,
+  defensive missing-parent fallback.
+- `tests/test_reset_rr_endpoint_v19_22_2.py` — 3 cases covering async-
+  handler promotion, awaited-save semantics, save-failure graceful
+  degradation.
+- All 24 v19.20 + v19.21 + v19.22.x tests pass.
+- **Live operator verification at 11:51 ET**: 14 fills in 15 minutes
+  post-deploy, 0 "Unknown order type: bracket" errors, HOOD/SBUX/CB/BP/
+  SOFI/OKLO all bracket-filled with target+stop attached as GTC OCA.
+
+
 ## 2026-05-01 (forty-first commit, v19.22) — News pruning + ML Feature Audit panel
 
 Operator follow-up: "for news providers I only want to get rid of FLY

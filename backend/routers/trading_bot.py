@@ -668,9 +668,20 @@ def get_risk_params():
 # Mongo persisted state has drifted from the code defaults (e.g. the
 # operator's HOOD-feed bug where saved global was 2.5 even though the
 # code default and operator preference said otherwise).
+# 2026-05-01 v19.22.2 — converted to `async def` + `await _save_state()`
+# so the Mongo write completes BEFORE the response returns. The earlier
+# sync-handler version fired-and-forgot the save via
+# `asyncio.create_task(...)`; if the operator restarted the backend
+# moments later (which the operator did this morning to deploy v19.21),
+# the Mongo write was lost and persistence pulled the OLD 2.5 back on
+# the next state restore. Operator caught it via:
+#   $ curl POST /reset-rr-defaults  # in-memory says 1.7
+#   $ curl POST /risk-params {merge}  # response shows 2.5 again
+# This change makes the reset durable through restarts.
 @router.post("/reset-rr-defaults")
-def reset_rr_defaults():
-    """Reset min_risk_reward + setup_min_rr to v19.21 ship defaults."""
+async def reset_rr_defaults():
+    """Reset min_risk_reward + setup_min_rr to v19.21 ship defaults.
+    Awaits the Mongo persistence write so the value survives restart."""
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     from services.trading_bot_service import RiskParameters
@@ -678,19 +689,21 @@ def reset_rr_defaults():
     _trading_bot.risk_params.min_risk_reward = fresh.min_risk_reward
     # Replace the dict wholesale (this endpoint INTENTIONALLY clobbers).
     _trading_bot.risk_params.setup_min_rr = dict(fresh.setup_min_rr)
-    # Persist to Mongo immediately (don't wait for the next save tick).
+    persisted = False
     try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(_trading_bot._save_state())
-        else:
-            loop.run_until_complete(_trading_bot._save_state())
-    except Exception:
-        pass  # State will save on next tick regardless.
+        await _trading_bot._save_state()
+        persisted = True
+    except Exception as exc:
+        # Persistence failure is logged but not fatal — the in-memory
+        # state is correct, the next periodic save tick will retry.
+        import logging
+        logging.getLogger(__name__).warning(
+            f"reset-rr-defaults save_state failed: {exc} (in-memory still set)"
+        )
     return {
         "success": True,
         "message": "R:R defaults reset to v19.21 ship values.",
+        "persisted_to_mongo": persisted,
         "risk_params": _trading_bot.get_status()["risk_params"],
     }
 
