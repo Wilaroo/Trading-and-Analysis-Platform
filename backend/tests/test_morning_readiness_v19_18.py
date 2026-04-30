@@ -291,6 +291,57 @@ def test_open_positions_clean_red_when_intraday_carried_overnight():
     assert "CLOSE ALL NOW" in out["fix"]
 
 
+def test_open_positions_clean_yellow_when_ib_has_positions_bot_doesnt_track():
+    """v19.18 add — IB account has positions the bot isn't tracking
+    (manual holdings, seeds, out-of-scope trades). Bot will NOT
+    auto-close these at EOD; surface as YELLOW so operator decides.
+    """
+    from services.morning_readiness_service import _check_open_positions_clean
+
+    bot = _FakeBot(open_trades={})  # bot tracks nothing
+
+    def _fake_get_positions():
+        return [
+            {"symbol": "NVDA", "position": 50, "avg_cost": 200.0},
+            {"symbol": "TSLA", "position": 25, "avg_cost": 180.0},
+            {"symbol": "GOOGL", "position": 10, "avg_cost": 170.0},
+        ]
+
+    with patch("routers.ib.is_pusher_connected", return_value=True), \
+         patch("routers.ib.get_pushed_positions", side_effect=_fake_get_positions):
+        out = _check_open_positions_clean(MagicMock(), bot=bot)
+
+    assert out["status"] == "yellow"
+    assert len(out["ib_only_positions"]) == 3
+    symbols = {p["symbol"] for p in out["ib_only_positions"]}
+    assert symbols == {"NVDA", "TSLA", "GOOGL"}
+    assert "not tracked by bot" in out["detail"]
+
+
+def test_open_positions_clean_green_when_bot_tracks_all_ib_positions():
+    """If bot's tracked positions match IB's account state, status is
+    green — everything is bot-managed and will auto-close correctly."""
+    from services.morning_readiness_service import _check_open_positions_clean
+
+    now = datetime.now(timezone.utc)
+    bot = _FakeBot(open_trades={
+        "T1": _FakeTrade(symbol="NVDA", close_at_eod=True, opened_at=now),
+        "T2": _FakeTrade(symbol="TSLA", close_at_eod=True, opened_at=now),
+    })
+
+    def _fake_get_positions():
+        return [
+            {"symbol": "NVDA", "position": 50, "avg_cost": 200.0},
+            {"symbol": "TSLA", "position": 25, "avg_cost": 180.0},
+        ]
+
+    with patch("routers.ib.is_pusher_connected", return_value=True), \
+         patch("routers.ib.get_pushed_positions", side_effect=_fake_get_positions):
+        out = _check_open_positions_clean(MagicMock(), bot=bot)
+
+    assert out["status"] == "green"
+
+
 # --------------------------------------------------------------------------
 # Aggregation + verdict
 # --------------------------------------------------------------------------

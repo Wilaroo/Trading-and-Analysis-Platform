@@ -241,25 +241,46 @@ def _check_trading_bot_configured(db, bot=None) -> Dict[str, Any]:
             f"(expected 15:55)"
             if eod_min is not None else "EOD close window not set"
         )
-    risk = getattr(bot, "_risk_params", None) or {}
-    if not risk:
+
+    # Risk params — try both access patterns (dataclass attr `risk_params`
+    # on TradingBotService, and legacy dict `_risk_params` used by some
+    # test fixtures + rebuild paths).
+    risk_obj = getattr(bot, "risk_params", None)
+    if risk_obj is None:
+        risk_obj = getattr(bot, "_risk_params", None)
+
+    def _risk_field(name):
+        """Read a field whether risk_params is a dataclass or a dict."""
+        if risk_obj is None:
+            return None
+        if isinstance(risk_obj, dict):
+            return risk_obj.get(name)
+        return getattr(risk_obj, name, None)
+
+    starting_capital = _risk_field("starting_capital")
+    max_daily_loss = _risk_field("max_daily_loss")
+
+    if risk_obj is None:
         issues.append("risk_params not set")
-    elif not risk.get("starting_capital"):
-        issues.append("starting_capital missing")
+    elif not starting_capital:
+        issues.append("starting_capital missing or zero")
 
     open_count = len(getattr(bot, "_open_trades", {}) or {})
     if not issues:
         return {
             "status": "green",
             "detail": (f"EOD enabled at {eod_hr}:{eod_min:02d} ET; "
-                       f"risk_params populated; {open_count} open trades."),
+                       f"starting_capital=${starting_capital:,.0f}; "
+                       f"{open_count} open trades."),
             "eod_window_et": f"{eod_hr}:{eod_min:02d}",
             "open_trades": open_count,
-            "starting_capital": risk.get("starting_capital"),
+            "starting_capital": starting_capital,
+            "max_daily_loss": max_daily_loss,
         }
     return {
-        "status": "red" if "DISABLED" in " ".join(issues)
-                  or "not set" in " ".join(issues) else "yellow",
+        "status": "red" if ("DISABLED" in " ".join(issues)
+                            or "not set" in " ".join(issues)
+                            or "missing" in " ".join(issues)) else "yellow",
         "detail": "; ".join(issues),
         "eod_window_et": (f"{eod_hr}:{eod_min:02d}"
                           if eod_min is not None else "unset"),
@@ -405,6 +426,56 @@ def _check_open_positions_clean(db, bot=None) -> Dict[str, Any]:
             "fix": ("Manually close via 'CLOSE ALL NOW' on the EOD "
                     "Countdown Banner OR POST /api/trading-bot/eod-close-now"),
         }
+
+    # v19.18 add — surface IB account positions that the bot ISN'T tracking.
+    # These are "manual holdings" in the IB account (from seeds, prior
+    # sessions, or the operator opening a trade outside the bot). They're
+    # not bot-managed, so the bot won't auto-close them at EOD. Surface
+    # as YELLOW so the operator sees "the IB account has these; the bot
+    # will leave them alone" and can decide to flatten or keep.
+    ib_only_positions: List[Dict[str, Any]] = []
+    try:
+        from routers.ib import get_pushed_positions, is_pusher_connected
+        if is_pusher_connected():
+            bot_symbols = {
+                getattr(t, "symbol", "")
+                for t in (bot._open_trades or {}).values()
+            }
+            for pos in (get_pushed_positions() or []):
+                sym = pos.get("symbol", "")
+                shares = pos.get("position", 0) or pos.get("qty", 0)
+                if not sym or not shares:
+                    continue
+                if sym not in bot_symbols:
+                    ib_only_positions.append({
+                        "symbol": sym,
+                        "shares": shares,
+                        "avg_cost": round(
+                            pos.get("avg_cost", 0) or pos.get("avgCost", 0), 4
+                        ),
+                    })
+    except Exception:
+        pass  # pusher not available — skip IB-divergence check
+
+    if ib_only_positions:
+        sample = ", ".join(
+            f"{p['symbol']}({p['shares']}sh)"
+            for p in ib_only_positions[:5]
+        )
+        more = (f" +{len(ib_only_positions) - 5} more"
+                if len(ib_only_positions) > 5 else "")
+        return {
+            "status": "yellow",
+            "detail": (f"{len(ib_only_positions)} IB position(s) not "
+                       f"tracked by bot: {sample}{more}. Bot will NOT "
+                       f"auto-close these at EOD."),
+            "intraday_open_today": intraday_carryover_safe,
+            "swing_holding": swing_count,
+            "ib_only_positions": ib_only_positions,
+            "fix": ("Flatten manually in IB, or let them run as swing "
+                    "holds — bot treats them as out-of-scope."),
+        }
+
     return {
         "status": "green",
         "detail": (f"No stuck intraday carryovers. "
