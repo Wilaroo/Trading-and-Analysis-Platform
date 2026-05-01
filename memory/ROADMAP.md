@@ -3,6 +3,36 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.12 + Windows network fix)
+
+### 🟢 Today fully resolved — all data channels healthy
+- ✅ v19.30.11 — Pusher RPC throttle/circuit-breaker/dedup + skip-restart-if-healthy + system banner
+- ✅ v19.30.12 — Distinguish push-channel vs RPC-channel pusher health (4-quadrant severity matrix)
+- ✅ Windows network classification fix — 10GbE adapter set to Private (was Public), so `IB Pusher RPC 8765` allow rule is now honored. Spark→Windows on :8765 succeeds. SystemBanner clears, RPC chip green.
+
+### 🔴 P0 — Top of next session
+- **Diagnostics Data Quality Pack** — fix Pipeline Funnel `ai_passed`/`bot_fired` consistency + Module Scorecard `shadow_module_performance` per-vote breakdown
+- **Verify v19.24 Reconcile endpoint live on Spark** on SBUX/SOFI/OKLO orphans
+- **Bot Thoughts content capture** — Trail Explorer empty `content` field for fired trades
+
+### 🟡 P1 (operator-facing improvements)
+- **`.bat` health screen probes pusher actually**: replace `WINDOWTITLE eq [IB PUSHER]` check with `curl -s -f -m 3 http://localhost:8765/rpc/health` so operator sees real status, not "window open = OK"
+- **Pusher auto-restart on Windows**: wrap CMD launch in `pusher_watchdog.bat` loop that re-spawns on crash
+- **Shadow-vs-Real gap drilldown** (71% shadow vs 32% real)
+- **Drift detector** — CRITICAL stream when bot tracks <80% of IB shares
+- **Async-pymongo audit follow-up** — 51 remaining sync-mongo-in-async sites (was 53)
+
+### 🟢 P2 / P3
+- v19.31 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.32 Chart WebSockets (Tier 3 — kill remaining 5s polling latency)
+- IB Gateway auto-login resilience (more robust SendKeys + foreground verification)
+- Setup-landscape EOD self-grading tracker
+- Audit Pass 1: lint sweep + dead-code (370 ruff fixes)
+- Break up 4 monoliths (ib.py 6349, server.py 4643, enhanced_scanner.py 7090, training_pipeline.py 3869)
+- Safely retire Alpaca fallback (32 reference sites)
+
+---
+
 ## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.11 fork)
 
 ### 🎯 Just shipped 2026-05-01 v19.30.11 — see CHANGELOG (sixty-third commit)

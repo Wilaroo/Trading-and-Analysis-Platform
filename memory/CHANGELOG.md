@@ -2,6 +2,38 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (afternoon recovery, post-deploy operations) — Network classification fix on Windows side
+
+**Closed the underlying network bug** that v19.30.11/.12 banner correctly diagnosed but couldn't fix from Spark.
+
+After all backend fixes shipped (skip-restart guard, pusher RPC throttle/circuit-breaker/dedup, dual-channel health, action-aware banner), the SystemBanner correctly fired the `pusher_rpc_blocked` warning with the inline `netsh` firewall command. Operator added the firewall rule (`netsh advfirewall firewall add rule name="IB Pusher RPC 8765" dir=in action=allow protocol=TCP localport=8765`), but Spark→Windows on :8765 still timed out. Added rule was scoped to `Domain,Private,Public` profiles correctly — but the 10GbE adapter on Windows was classified as **Public** under "Unidentified network", and Public profile silently overrides allow rules on this network even when explicitly added.
+
+### Diagnostic chain
+1. ✅ `Get-NetConnectionProfile` → 10GbE adapter (`Ethernet 3`) classified as `Public`, `IPv4Connectivity: LocalNetwork`
+2. ✅ Temporarily disabling firewall (`netsh advfirewall set allprofiles state off`) → ping + curl Spark→Windows succeeded → confirmed firewall as the layer
+3. ✅ `Set-NetConnectionProfile -InterfaceAlias "Ethernet 3" -NetworkCategory Private` → reclassified the 10GbE link as Private
+4. ✅ Re-test with firewall ON → ping 0.15ms RTT, curl 200 OK with full pusher health
+
+### Why the fix works
+The direct 10GbE point-to-point cable between Spark (192.168.50.2) and Windows (192.168.50.1) is semantically a private trusted link, not a hostile public network. Windows' Public profile applies stricter overrides than the per-rule allow we added. Reclassifying as Private makes Windows honor the existing allow rule. No firewall rule changes needed — only the network category.
+
+### What this confirms about the v19.30.11/.12 fixes
+The full diagnostic stack worked exactly as designed:
+- v19.30.11 SystemBanner displayed clearly across the top — operator couldn't miss it
+- v19.30.12 nuanced detail told operator "live data still flowing" so they didn't panic-restart Spark
+- Inline `netsh` action command was correct (firewall rule needed to be added)
+- And when that didn't fully resolve, the banner stayed yellow (not red) because `push_fresh` was True — exact severity matrix worked
+- `Get-NetConnectionProfile`/`Set-NetConnectionProfile` chain was the Windows-side fix the banner couldn't surface from Spark
+
+### Operator action — Permanent fix (already applied)
+```powershell
+# As Admin (one-time, persists through reboots):
+Set-NetConnectionProfile -InterfaceAlias "Ethernet 3" -NetworkCategory Private
+```
+The firewall stays ON. The existing `IB Pusher RPC 8765` allow rule is now honored.
+
+---
+
 ## 2026-05-01 (sixty-fourth commit, v19.30.12) — Distinguish push-channel vs RPC-channel pusher health
 
 **Operator's v19.30.11 deploy surfaced a real edge case:** SystemBanner showed "Windows IB Pusher unreachable, 19 consecutive failures over 150s" *while the pusher's own log showed `Push OK every 10s` and 72 quotes streaming successfully*.
