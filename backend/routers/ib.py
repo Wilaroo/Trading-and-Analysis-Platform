@@ -1089,124 +1089,78 @@ def get_pushed_quote(symbol: str):
 
 
 # ===================== Account Endpoints =====================
-
-@router.get("/account/summary")
-async def get_account_summary_alt():
-    """Alternative IB account summary path (delegates to direct IB
-    service when reachable; falls back to pushed data otherwise).
-
-    NOTE: FastAPI uses the FIRST-registered handler for `/account/summary`,
-    which is the sync `def get_account_summary()` defined earlier in this
-    file (it already has a pusher-snapshot fallback). This async variant
-    is kept here as a defensive safety net should the registration order
-    ever change. Both return 200 with the pusher snapshot in degraded
-    mode — neither raises 503 anymore (v19.30.9, 2026-05-02).
-    """
-    pushed_account = _pushed_ib_data.get("account") or {}
-    pushed_connected = bool(_pushed_ib_data.get("connected"))
-
-    def _pushed_payload(reason: str) -> Dict[str, Any]:
-        try:
-            net_liq = float(pushed_account.get("NetLiquidation") or 0)
-        except (TypeError, ValueError):
-            net_liq = 0.0
-        try:
-            buying_power = float(pushed_account.get("BuyingPower") or 0)
-        except (TypeError, ValueError):
-            buying_power = 0.0
-        try:
-            available_funds = float(pushed_account.get("AvailableFunds") or 0)
-        except (TypeError, ValueError):
-            available_funds = 0.0
-        try:
-            total_cash = float(pushed_account.get("TotalCashValue") or 0)
-        except (TypeError, ValueError):
-            total_cash = 0.0
-        try:
-            unrealized = float(pushed_account.get("UnrealizedPnL") or 0)
-        except (TypeError, ValueError):
-            unrealized = 0.0
-        try:
-            realized = float(pushed_account.get("RealizedPnL") or 0)
-        except (TypeError, ValueError):
-            realized = 0.0
-        return {
-            "success": net_liq > 0 or buying_power > 0,
-            "net_liquidation": net_liq,
-            "buying_power": buying_power,
-            "available_funds": available_funds,
-            "total_cash": total_cash,
-            "realized_pnl": realized,
-            "unrealized_pnl": unrealized,
-            "daily_pnl": realized + unrealized,
-            "daily_pnl_percent": 0.0,
-            "account_id": pushed_account.get("AccountCode") or pushed_account.get("account_id"),
-            "connected": pushed_connected,
-            "source": "pusher" if pushed_connected else "pusher_stale",
-            "degraded": True,
-            "reason": reason,
-        }
-
-    if not _ib_service:
-        return _pushed_payload("ib_service_not_initialized")
-
-    try:
-        return await _ib_service.get_account_summary()
-    except ConnectionError as e:
-        return _pushed_payload(f"ib_gateway_unavailable: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching account summary: {str(e)}")
+# NOTE: `/account/summary` resolves to the primary sync handler at line 804
+# (it reads `_pushed_ib_data["account"]` with an RPC fallback). The alt
+# async variant that previously sat here was removed in v19.30.10 — it
+# was dead code (FastAPI uses first-registered route) and the "degraded
+# mode" framing was operator-flagged as conceptual noise.
 
 
 @router.get("/account/positions")
 async def get_positions():
     """Get all current positions.
 
-    v19.30.9 (2026-05-02) — falls back to the pushed-data snapshot
-    (`_pushed_ib_data["positions"]`) when the direct IB Gateway
-    connection is unavailable. The Spark backend frequently boots in
-    "degraded mode" where the only IB data path is via the Windows
-    pusher; previously this endpoint returned a blanket 503 in that
-    state, breaking the V5 HUD positions panel and Top Movers tile.
-    The pusher snapshot is authoritative for the operator's positions
-    (it's also the source the trading bot reads from), so falling
-    back here is correctness-preserving.
+    v19.30.10 (2026-05-02) — simplified per operator feedback. The
+    DGX backend never connects to IB Gateway directly (the Windows
+    pusher does), so the previous "try direct IB → fall back to
+    pusher" pattern was theatre. We always read from the pusher
+    snapshot, with two tiers:
+
+      1. In-memory `_pushed_ib_data["positions"]` — freshest, ~2s
+         old, written on every pusher push.
+      2. Mongo `ib_live_snapshot._id="current"` — written by
+         `/api/ib/push-data` on every push. Survives backend
+         restarts; covers the ~10-30s window after restart before
+         the first pusher cycle has populated `_pushed_ib_data`.
+
+    Response shape (unchanged for back-compat):
+      {
+        positions: [...],
+        count: int,
+        source: "memory" | "mongo_snapshot" | "empty",
+        last_update: Optional[str],   # ISO timestamp of underlying push
+      }
     """
-    pushed_positions = _pushed_ib_data.get("positions") or []
-    pushed_connected = bool(_pushed_ib_data.get("connected"))
-
-    if not _ib_service:
-        # Direct IB service not wired at all — pusher fallback is the
-        # only path. Surface explicitly so the UI can decide whether
-        # to render a "degraded" badge.
+    # Tier 1: in-memory (hot path)
+    in_mem = _pushed_ib_data.get("positions") or []
+    if in_mem:
         return {
-            "positions": pushed_positions,
-            "count": len(pushed_positions),
-            "source": "pusher" if pushed_connected else "pusher_stale",
-            "degraded": True,
-            "reason": "ib_service_not_initialized",
+            "positions": in_mem,
+            "count": len(in_mem),
+            "source": "memory",
+            "last_update": _pushed_ib_data.get("last_update"),
         }
 
+    # Tier 2: Mongo snapshot (warm path — covers post-restart window)
     try:
-        positions = await _ib_service.get_positions()
-        return {
-            "positions": positions,
-            "count": len(positions),
-            "source": "ib_direct",
-            "degraded": False,
-        }
-    except ConnectionError as e:
-        # Direct IB Gateway connection is down — fall back to pushed
-        # data instead of 503'ing the whole endpoint.
-        return {
-            "positions": pushed_positions,
-            "count": len(pushed_positions),
-            "source": "pusher" if pushed_connected else "pusher_stale",
-            "degraded": True,
-            "reason": f"ib_gateway_unavailable: {e}",
-        }
+        from database import get_database
+        _db = get_database()
+        if _db is not None:
+            snap = await asyncio.to_thread(
+                lambda: _db["ib_live_snapshot"].find_one(
+                    {"_id": "current"},
+                    {"_id": 0, "positions": 1, "last_update": 1},
+                )
+            )
+            if snap and snap.get("positions"):
+                positions = snap["positions"]
+                return {
+                    "positions": positions,
+                    "count": len(positions),
+                    "source": "mongo_snapshot",
+                    "last_update": snap.get("last_update"),
+                }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching positions: {str(e)}")
+        logger.debug(f"ib_live_snapshot read skipped: {e}")
+
+    # Tier 3: nothing yet — pusher hasn't pushed and Mongo has no
+    # prior snapshot. UI renders empty state.
+    return {
+        "positions": [],
+        "count": 0,
+        "source": "empty",
+        "last_update": None,
+    }
 
 
 # ===================== Market Data Endpoints =====================

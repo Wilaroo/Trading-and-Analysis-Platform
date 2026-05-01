@@ -1,30 +1,31 @@
 """
-v19.30.9 (2026-05-02) — Degraded-mode UI fixes + cancel-all-pending-orders.
+v19.30.9 + v19.30.10 (2026-05-02) — Pusher-source-of-truth simplification +
+async-safety hardening + cancel-all-pending-orders.
 
-Three independent surface bugs were filed by the operator on the post-
-v19.30.8 deploy:
+Operator pushback: "why do we need degraded mode at all? didn't yesterday's
+chart change fix this?". Two distinct points addressed:
 
-  1. `/api/ib/account/positions` returned blanket 503 whenever the
-     direct IB Gateway connection was unavailable, even though the
-     Windows pusher was healthily delivering positions via
-     `_pushed_ib_data["positions"]`. The V5 Top Movers / positions
-     panels rendered "Failed to fetch".
-  2. "Bar fetch failed" on the SPY chart — root-cause was a sync
-     pymongo `find().sort()` cursor materialisation inside
-     `hybrid_data_service._get_from_cache` that could tie the event
-     loop up long enough for the 30s axios timeout on the frontend
-     to fire. Same wedge class as v19.30.1 / v19.30.2 / v19.30.7,
-     different call site.
-  3. No pre-open safety endpoint to cancel pending GTC bracket
-     orders before the bell. If an operator manually flattened a
-     position via TWS, the IB-side OCA stop/target legs lingered
-     and could trigger naked shorts on the next entry.
+  1. The chart fix (v19.25 cache + tail-polling) was unrelated to the
+     positions 503. The 503 was a separate bug: `/account/positions`
+     was calling a dead `_ib_service.get_positions()` path that has
+     never worked in this deployment (the DGX backend has no direct
+     IB Gateway connection — the Windows pusher does).
 
-The tests below pin each fix at source level so a future refactor
-can't silently drop them.
+  2. The "try direct IB → fall back to pusher" pattern was theatre.
+     v19.30.10 simplifies to a clean two-tier read: in-memory
+     `_pushed_ib_data["positions"]` first, then the Mongo
+     `ib_live_snapshot.current` collection (which the push-data
+     handler writes on every push) as a post-restart safety net.
+     No "degraded" flag, no doomed direct-IB call.
 
-NOTE: These are pure unit tests (no IB, no live MongoDB, no DGX
-hardware). They run inside the standard pytest container.
+Plus the async-safety pin on `_get_from_cache` / `_cache_bars` from
+v19.30.9 is preserved (those WERE the actual cause of "Bar fetch
+failed" via 30s axios timeout), and the new
+`POST /api/trading-bot/cancel-all-pending-orders` endpoint stays
+unchanged.
+
+NOTE: These are pure unit tests — no IB, no live MongoDB, no DGX
+hardware. They run inside the standard pytest container.
 """
 from __future__ import annotations
 
@@ -36,115 +37,126 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-# ─── Fix 1: /api/ib/account/positions degraded-mode fallback ─────────────────
+# ─── Fix 1: /api/ib/account/positions — pusher source of truth ───────────────
 
 
-def test_positions_endpoint_falls_back_to_pushed_data_when_ib_unavailable():
-    """ConnectionError from direct IB must NOT 503 — fall back to pusher.
-
-    The Spark backend frequently boots in degraded mode (IB Gateway
-    TimeoutError on initial qualify). Pre-v19.30.9 the positions
-    endpoint raised 503 in that state, breaking the V5 HUD. The fix
-    catches ConnectionError and returns the pusher snapshot with a
-    `degraded: True` flag.
+def test_positions_endpoint_returns_in_memory_pusher_data():
+    """Hot path: when `_pushed_ib_data["positions"]` is populated,
+    the endpoint returns it immediately as `source: "memory"` without
+    hitting Mongo or any IB direct call.
     """
     from routers import ib as ib_module
 
     fake_pushed = {
-        "connected": True,
+        "last_update": "2026-05-02T18:00:00+00:00",
         "positions": [
             {"symbol": "SBUX", "qty": 100, "avg_cost": 95.50},
             {"symbol": "SOFI", "qty": 200, "avg_cost": 18.75},
         ],
     }
-    fake_ib = MagicMock()
-    fake_ib.get_positions = AsyncMock(side_effect=ConnectionError("ib gateway down"))
 
-    with patch.object(ib_module, "_pushed_ib_data", fake_pushed), \
-         patch.object(ib_module, "_ib_service", fake_ib):
+    with patch.object(ib_module, "_pushed_ib_data", fake_pushed):
         result = asyncio.run(ib_module.get_positions())
 
     assert result["count"] == 2
-    assert result["degraded"] is True
-    assert result["source"] == "pusher"
+    assert result["source"] == "memory"
+    assert result["last_update"] == "2026-05-02T18:00:00+00:00"
     assert result["positions"][0]["symbol"] == "SBUX"
-    assert "ib_gateway_unavailable" in result["reason"]
+    # `degraded` flag intentionally removed (v19.30.10)
+    assert "degraded" not in result
+    assert "reason" not in result
 
 
-def test_positions_endpoint_uses_ib_direct_when_connected():
-    """Happy path: when IB is reachable, return its data and mark
-    degraded=False so the UI doesn't show a stale badge.
+def test_positions_endpoint_falls_back_to_mongo_snapshot():
+    """When in-memory `_pushed_ib_data["positions"]` is empty (the
+    classic post-backend-restart window before the pusher's first push
+    has landed), fall back to the Mongo `ib_live_snapshot.current`
+    document. This collection is written by `/api/ib/push-data` on
+    every push so it survives backend restarts.
     """
     from routers import ib as ib_module
 
-    fake_ib = MagicMock()
-    fake_ib.get_positions = AsyncMock(return_value=[
-        {"symbol": "SPY", "qty": 50, "avg_cost": 580.0},
-    ])
+    fake_pushed = {"last_update": None, "positions": []}
 
-    with patch.object(ib_module, "_ib_service", fake_ib):
+    fake_db = MagicMock()
+    fake_db["ib_live_snapshot"].find_one.return_value = {
+        "positions": [{"symbol": "SPY", "qty": 50, "avg_cost": 580.0}],
+        "last_update": "2026-05-02T17:55:00+00:00",
+    }
+
+    with patch.object(ib_module, "_pushed_ib_data", fake_pushed), \
+         patch("database.get_database", return_value=fake_db):
         result = asyncio.run(ib_module.get_positions())
 
     assert result["count"] == 1
-    assert result["degraded"] is False
-    assert result["source"] == "ib_direct"
+    assert result["source"] == "mongo_snapshot"
+    assert result["last_update"] == "2026-05-02T17:55:00+00:00"
+    assert result["positions"][0]["symbol"] == "SPY"
 
 
-def test_positions_endpoint_handles_no_ib_service_gracefully():
-    """If _ib_service is None at all (initialisation race), still
-    return pushed positions instead of crashing the endpoint.
+def test_positions_endpoint_returns_empty_when_nothing_available():
+    """Both in-memory and Mongo empty → return clean empty payload
+    with `source: "empty"` so the UI can render "no positions" state
+    without showing an error banner.
     """
     from routers import ib as ib_module
 
-    fake_pushed = {"connected": False, "positions": []}
+    fake_pushed = {"last_update": None, "positions": []}
+
+    fake_db = MagicMock()
+    fake_db["ib_live_snapshot"].find_one.return_value = None
 
     with patch.object(ib_module, "_pushed_ib_data", fake_pushed), \
-         patch.object(ib_module, "_ib_service", None):
+         patch("database.get_database", return_value=fake_db):
         result = asyncio.run(ib_module.get_positions())
 
     assert result["count"] == 0
-    assert result["degraded"] is True
-    assert result["source"] == "pusher_stale"
-    assert result["reason"] == "ib_service_not_initialized"
+    assert result["source"] == "empty"
+    assert result["positions"] == []
+    assert result["last_update"] is None
 
 
-def test_account_summary_alt_falls_back_to_pushed_data():
-    """Same degraded-mode pattern for the async ALT account summary
-    handler. The PRIMARY `/account/summary` route resolves to a sync
-    handler defined earlier in `routers/ib.py` that already reads
-    pushed data; this async variant is the defensive safety net should
-    registration order ever change.
+def test_positions_endpoint_handles_mongo_error_gracefully():
+    """If the Mongo read raises (db down, schema mismatch, etc.),
+    swallow and return empty — never 503 the operator's HUD.
     """
     from routers import ib as ib_module
 
-    fake_pushed = {
-        "connected": True,
-        "account": {
-            "NetLiquidation": "108543.21",
-            "BuyingPower": "215000.00",
-            "AvailableFunds": "32100.00",
-            "TotalCashValue": "12000.00",
-            "RealizedPnL": "0.0",
-            "UnrealizedPnL": "1234.56",
-            "AccountCode": "DU1234567",
-        },
-    }
-    fake_ib = MagicMock()
-    fake_ib.get_account_summary = AsyncMock(side_effect=ConnectionError("ib down"))
+    fake_pushed = {"last_update": None, "positions": []}
 
     with patch.object(ib_module, "_pushed_ib_data", fake_pushed), \
-         patch.object(ib_module, "_ib_service", fake_ib):
-        result = asyncio.run(ib_module.get_account_summary_alt())
+         patch("database.get_database", side_effect=Exception("db unreachable")):
+        result = asyncio.run(ib_module.get_positions())
 
-    assert result["degraded"] is True
-    assert result["source"] == "pusher"
-    assert pytest.approx(result["net_liquidation"]) == 108543.21
-    assert pytest.approx(result["buying_power"]) == 215000.0
-    assert pytest.approx(result["unrealized_pnl"]) == 1234.56
-    assert result["account_id"] == "DU1234567"
+    assert result["count"] == 0
+    assert result["source"] == "empty"
 
 
-# ─── Fix 2: hybrid_data_service async-safety pin ─────────────────────────────
+def test_positions_endpoint_no_longer_calls_direct_ib():
+    """Source-level pin: the endpoint must NOT touch
+    `_ib_service.get_positions()`. The whole point of v19.30.10 is
+    that the DGX backend never connects directly to IB Gateway, so
+    that call was always a dead path. A future contributor can't
+    silently re-introduce it.
+    """
+    from routers import ib as ib_module
+    src = inspect.getsource(ib_module.get_positions)
+    assert "_ib_service.get_positions" not in src, (
+        "v19.30.10 simplification: get_positions must read pusher "
+        "data unconditionally, not call the dead direct-IB path."
+    )
+    assert "ConnectionError" not in src, (
+        "ConnectionError handling implies direct-IB attempts. The "
+        "endpoint should never raise on IB Gateway state."
+    )
+    # Must use asyncio.to_thread for the Mongo find_one (event-loop
+    # safety per v19.30 audit contract).
+    assert "asyncio.to_thread(" in src, (
+        "Mongo find_one in async handler must run via asyncio.to_thread"
+    )
+
+
+# ─── Fix 2: hybrid_data_service async-safety pin (preserved from v19.30.9) ───
 
 
 def test_get_from_cache_offloads_sync_pymongo_to_to_thread():
@@ -152,20 +164,17 @@ def test_get_from_cache_offloads_sync_pymongo_to_to_thread():
     via `asyncio.to_thread` so the event loop stays responsive even
     when the bars collection has millions of rows.
 
-    Source-level pin: a future contributor can't silently re-introduce
-    the bare `list(self._bars_collection.find(...))` pattern that was
-    flagged in the v19.30 audit and very likely caused the
-    "Bar fetch failed" UI symptom on the SPY chart.
+    Source-level pin: this WAS the actual cause of "Bar fetch failed"
+    on the V5 chart panel — slow Mongo round-trip ties up the loop
+    long enough for the 30s axios timeout on the frontend to fire.
     """
     import services.hybrid_data_service as mod
     src = inspect.getsource(mod.HybridDataService._get_from_cache)
-    # Must NOT do bare list(self._bars_collection.find(...)) at top level
     forbidden = "bars = list(self._bars_collection.find("
     assert forbidden not in src, (
         "Source-level regression: bare sync pymongo find() reintroduced "
         "in HybridDataService._get_from_cache. Wrap in asyncio.to_thread."
     )
-    # Must call asyncio.to_thread at least twice (window query + stale fallback)
     assert src.count("asyncio.to_thread(") >= 2, (
         "_get_from_cache should offload BOTH the window query AND the "
         "stale-fallback query via asyncio.to_thread."
@@ -174,9 +183,7 @@ def test_get_from_cache_offloads_sync_pymongo_to_to_thread():
 
 def test_cache_bars_offloads_sync_upserts_to_to_thread():
     """The per-bar sync `update_one(..., upsert=True)` loop in
-    `_cache_bars` must run inside `asyncio.to_thread` — N round-trips
-    inside a coroutine is exactly the wedge profile v19.30 was built
-    to prevent.
+    `_cache_bars` must run inside `asyncio.to_thread`.
     """
     import services.hybrid_data_service as mod
     src = inspect.getsource(mod.HybridDataService._cache_bars)
@@ -300,11 +307,7 @@ def test_cancel_all_pending_orders_dry_run_does_not_mutate():
 
 
 def test_cancel_all_pending_orders_symbol_filter():
-    """`symbols=[...]` must scope which queue rows are cancelled.
-
-    Operator's prime use case: SOFI bracket misbehaving, kill only
-    SOFI's pending orders without nuking SPY/SBUX.
-    """
+    """`symbols=[...]` must scope which queue rows are cancelled."""
     from routers import trading_bot as tb_module
     from services import order_queue_service as oq_module
 
@@ -387,24 +390,10 @@ def test_cancel_all_pending_orders_cancels_ib_open_orders_when_connected():
 
 
 def test_cancel_all_pending_orders_source_level_async_safety_pin():
-    """The handler must wrap the queue drain in `asyncio.to_thread`.
-
-    Without this, every row in the order_queue (often 50+) does a
-    sync `update_one` round-trip inline on the event loop — exactly
-    the wedge pattern v19.30.x exists to prevent.
-    """
+    """The handler must wrap the queue drain in `asyncio.to_thread`."""
     from routers import trading_bot as tb_module
     src = inspect.getsource(tb_module.cancel_all_pending_orders)
     assert "asyncio.to_thread(" in src, (
         "cancel_all_pending_orders must use asyncio.to_thread for the "
         "Mongo order_queue drain (avoid event-loop wedge under load)."
     )
-
-
-# ─── Pytest config ───────────────────────────────────────────────────────────
-
-
-@pytest.fixture(autouse=True)
-def _cleanup_event_loop():
-    """Tests use plain asyncio.run() — no extra event-loop hygiene needed."""
-    yield

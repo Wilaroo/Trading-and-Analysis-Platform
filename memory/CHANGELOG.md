@@ -2,6 +2,44 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (sixty-second commit, v19.30.10) — Drop the "degraded mode" theatre on /account/positions
+
+**Operator pushback on the v19.30.9 ship:** "why do we need degraded mode at all? didn't yesterday's chart change fix this?".
+
+Both points correct, addressed:
+
+### Point 1 — Yesterday's "chart change" was v19.25 cache + tail-polling, not WebSockets
+
+What shipped 2026-05-01 was Tier 1 (Mongo-backed `chart_response_cache`) + Tier 2 (`/api/sentcom/chart-tail` 5s incremental refresh). That's smart HTTP polling, not WebSockets. **Tier 3 chart WebSockets are still parked as v19.32 in the roadmap — fully scoped, no code yet.** And neither tier had anything to do with the positions 503 — that was a totally separate endpoint with a totally separate bug.
+
+### Point 2 — The "try direct IB → fall back to pusher" pattern was theatre
+
+The DGX backend has never connected directly to IB Gateway in this deployment — the Windows pusher does. So `_ib_service.get_positions()` was always going to fail. Wrapping that doomed call in a `degraded:true` fallback was conceptual noise.
+
+**Fix (`backend/routers/ib.py`)**: simplified `/account/positions` to a clean two-tier read:
+
+1. **Hot path** — in-memory `_pushed_ib_data["positions"]` (~2s old, written on every pusher push) → `source: "memory"`.
+2. **Warm path** — Mongo `ib_live_snapshot.current` document (written by `/api/ib/push-data` on every push, survives backend restarts, covers the ~10-30s post-restart window before in-memory is repopulated) → `source: "mongo_snapshot"`. Read wrapped in `asyncio.to_thread` for event-loop safety.
+3. **Empty** — both tiers empty → `source: "empty"`.
+
+No more `degraded` flag, no more doomed `_ib_service.get_positions()` call, no more `ConnectionError` handling. Source-level pin asserts a future contributor can't silently re-introduce direct-IB calls into this handler.
+
+Also removed: the dead `get_account_summary_alt` async handler at line 1094 (FastAPI uses first-registered route, so it was unreachable). The primary sync `/account/summary` at line 804 already reads pusher data the right way.
+
+### Tests
+15 pytests in `tests/test_degraded_mode_fixes_v19_30_9.py` (5 for the simplified positions endpoint, 3 for hybrid_data_service async-safety pins, 7 for cancel-all-pending-orders). **40/40 across v19.30 stack.** Live-validated: `GET /api/ib/account/positions` returns `{ source: "empty" }` in this container instead of HTTP 503.
+
+### Operator action — Spark deploy
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+curl -s -m 5 localhost:8001/api/ib/account/positions | jq .
+# When pusher is live → { source: "memory", count: N, ... }
+# Right after restart → { source: "mongo_snapshot", count: N, ... }
+# Pusher off + no prior snapshot → { source: "empty", count: 0, ... }
+```
+
+---
+
 ## 2026-05-02 (sixty-first commit, v19.30.9) — Degraded-mode UI fixes + cancel-all-pending-orders
 
 **3 surface bugs filed by operator post-v19.30.8 deploy. All wedge-immune fixes (no new sync-in-async sites added).**
