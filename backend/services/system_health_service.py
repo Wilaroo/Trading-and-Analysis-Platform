@@ -96,6 +96,29 @@ def _check_mongo(db) -> SubsystemHealth:
 
 
 def _check_pusher_rpc() -> SubsystemHealth:
+    """Health of the Spark→pusher RPC channel (separate from push-data).
+
+    v19.30.12 (2026-05-01) — distinguish pusher-fully-dead from
+    pusher-RPC-blocked. Two signals, two channels:
+
+      * Push channel  (Windows :8765 → Spark :8001):
+        push-data POST. Reflected in `_pushed_ib_data["last_update"]`.
+      * RPC channel   (Spark → Windows :8765):
+        Spark calls /rpc/latest-bars etc. Reflected in
+        `pusher_rpc_client.consecutive_failures`.
+
+    Asymmetric network failures (e.g. Windows firewall blocking inbound
+    on :8765) mean these can be in different states. Pre-v19.30.12 we
+    only looked at the RPC channel, so the operator saw "pusher
+    unreachable" even when 72 quotes/sec were flowing fine.
+
+    New severity matrix:
+
+        push fresh (<60s) | RPC working      → GREEN
+        push fresh (<60s) | RPC failing      → YELLOW (rpc_blocked)
+        push stale (>60s) | RPC working      → YELLOW (push_blocked)
+        push stale (>60s) | RPC failing      → RED    (fully_dead)
+    """
     try:
         from services.ib_pusher_rpc import get_pusher_rpc_client
         client = get_pusher_rpc_client()
@@ -116,29 +139,99 @@ def _check_pusher_rpc() -> SubsystemHealth:
                 detail="IB_PUSHER_RPC_URL not set",
                 metrics=s,
             )
+
+        # ─── Read the push channel state ─────────────────────────────────
+        # Reach into routers.ib._pushed_ib_data for last_update timestamp.
+        # We deliberately import-on-demand to avoid a hard module dep at
+        # health_service import time AND we read the module attribute
+        # directly (NOT the get_pushed_ib_data helper) because the HTTP
+        # route at routers.ib:615 shadows the sync helper with an async
+        # endpoint of the same name, so any callable lookup picks up
+        # the coroutine instead of the dict.
+        push_age_s: Optional[float] = None
+        try:
+            import routers.ib as ib_module
+            pushed = getattr(ib_module, "_pushed_ib_data", None) or {}
+            last_update = pushed.get("last_update")
+            if last_update:
+                from datetime import datetime
+                try:
+                    if isinstance(last_update, str):
+                        s_clean = last_update.rstrip("Z").replace("Z", "")
+                        dt = datetime.fromisoformat(s_clean)
+                        if dt.tzinfo is None:
+                            from datetime import timezone as _tz
+                            dt = dt.replace(tzinfo=_tz.utc)
+                        push_age_s = (
+                            datetime.now(dt.tzinfo) - dt
+                        ).total_seconds()
+                except Exception:
+                    push_age_s = None
+        except Exception:
+            push_age_s = None
+
+        push_fresh = push_age_s is not None and push_age_s < 60.0
+
+        # ─── RPC channel state ──────────────────────────────────────────
         failures = int(s.get("consecutive_failures") or 0)
         last_success = s.get("last_success_ts")
         age = None
         if last_success:
             age = round(time.time() - float(last_success), 1)
-        status = "green"
-        detail_parts = []
-        if failures >= 5:
+        rpc_failing = failures >= 5
+
+        # ─── Severity matrix ────────────────────────────────────────────
+        detail_parts: list = []
+        if push_fresh and not rpc_failing:
+            status = "green"
+            if last_success:
+                detail_parts.append(f"last ok {age}s ago")
+            else:
+                detail_parts.append("push healthy")
+        elif push_fresh and rpc_failing:
+            # Live data is flowing via push-data, but Spark's outbound
+            # RPC calls to the pusher are failing. Most likely cause:
+            # Windows firewall blocking inbound on :8765. On-demand
+            # historical bar fetches degrade to Mongo cache; live
+            # quotes/positions/account fields keep flowing fine.
+            status = "yellow"
+            detail_parts.append("rpc_blocked")
+            detail_parts.append(f"{failures} consecutive RPC failures")
+            detail_parts.append(
+                f"push fresh ({push_age_s:.1f}s ago) — live data IS flowing"
+            )
+        elif (push_age_s is None or not push_fresh) and rpc_failing:
+            # Both channels failing — pusher is fully dead.
             status = "red"
-            detail_parts.append(f"{failures} consecutive failures")
-        elif failures >= 1:
+            detail_parts.append("fully_dead")
+            detail_parts.append(f"{failures} consecutive RPC failures")
+            if push_age_s is not None:
+                detail_parts.append(f"push stale ({push_age_s:.1f}s ago)")
+            else:
+                detail_parts.append("no push data ever received")
+        elif (push_age_s is None or not push_fresh) and not rpc_failing:
+            # RPC works but push direction blocked — weird, surface as yellow.
             status = "yellow"
-            detail_parts.append(f"{failures} recent failures")
-        elif last_success is None:
-            status = "yellow"
-            detail_parts.append("never reached")
+            detail_parts.append("push_blocked")
+            if push_age_s is not None:
+                detail_parts.append(f"push stale ({push_age_s:.1f}s ago)")
+            else:
+                detail_parts.append("no push data yet (recent boot?)")
         else:
-            detail_parts.append(f"last ok {age}s ago")
+            # Defensive default
+            status = "yellow"
+            detail_parts.append(f"{failures} recent RPC failures")
+
         return SubsystemHealth(
             name="pusher_rpc",
             status=status,
             detail=" · ".join(detail_parts),
-            metrics={**s, "last_success_age_s": age},
+            metrics={
+                **s,
+                "last_success_age_s": age,
+                "push_age_s": push_age_s,
+                "push_fresh": push_fresh,
+            },
         )
     except Exception as exc:
         return _error("pusher_rpc", exc)

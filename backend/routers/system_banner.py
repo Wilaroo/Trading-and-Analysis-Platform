@@ -116,32 +116,121 @@ async def get_system_banner() -> Dict[str, Any]:
     # ─── Critical-level checks (in priority order) ─────────────────────
 
     # 1. Windows pusher dead? Single most important signal — kills the
-    # entire live-data pipeline.
+    # entire live-data pipeline. v19.30.12 distinguishes:
+    #   - fully_dead  (push stale + RPC fail)        → CRITICAL
+    #   - rpc_blocked (push fresh + RPC fail, e.g. firewall) → WARNING
     pusher = subsystems.get("pusher_rpc", {})
-    pusher_red = pusher.get("status") == "red"
-    pusher_red_for = _seconds_red("pusher_rpc", pusher_red)
-    # Only fire after 30s to avoid flashing during transient blips.
-    if pusher_red and (pusher_red_for or 0) >= 30:
-        failures = pusher.get("metrics", {}).get("consecutive_failures", "?")
-        return {
-            "level": "critical",
-            "message": "Windows IB Pusher is unreachable",
-            "detail": (
-                f"{failures} consecutive failures over {pusher_red_for}s. "
-                "Live IB data is NOT flowing — backend is otherwise healthy."
-            ),
-            "action": (
-                "Check Windows side: is the [IB PUSHER] CMD window still "
-                "showing a healthy log? If it crashed, restart it via "
-                "the .bat orchestrator OR re-run "
-                "C:\\Users\\13174\\Trading-and-Analysis-Platform\\"
-                "documents\\scripts\\ib_data_pusher.py manually. "
-                "Do NOT restart the Spark backend — it's healthy."
-            ),
-            "since_seconds": pusher_red_for,
-            "subsystem": "pusher_rpc",
-            "as_of": snapshot.get("as_of"),
-        }
+    pusher_status = pusher.get("status")
+    pusher_metrics = pusher.get("metrics") or {}
+    failures = pusher_metrics.get("consecutive_failures", 0)
+    push_age_s = pusher_metrics.get("push_age_s")
+    push_fresh = bool(pusher_metrics.get("push_fresh"))
+
+    if pusher_status == "red":
+        # Pusher subsystem returned red. Two sub-cases by push freshness.
+        if push_fresh:
+            # Live data IS flowing via push-data, but RPC channel is
+            # broken. This shouldn't normally land in `red` (the new
+            # _check_pusher_rpc emits yellow for this case), but defend
+            # against a stale snapshot or future regression.
+            sub_key = "pusher_rpc_blocked"
+            level = "warning"
+        else:
+            sub_key = "pusher_rpc_dead"
+            level = "critical"
+    elif pusher_status == "yellow" and not push_fresh:
+        # Stale push + RPC borderline — keep it as warning until either
+        # channel firmly fails.
+        sub_key = "pusher_rpc_partial"
+        level = "warning"
+    elif (
+        pusher_status == "yellow"
+        and push_fresh
+        and int(failures or 0) >= 5
+    ):
+        # The clean "rpc_blocked" path: push fresh, RPC consistently failing.
+        sub_key = "pusher_rpc_blocked"
+        level = "warning"
+    else:
+        # Pusher fine — clear all trackers.
+        _red_since_ts["pusher_rpc_dead"] = None
+        _red_since_ts["pusher_rpc_blocked"] = None
+        _red_since_ts["pusher_rpc_partial"] = None
+        sub_key = None
+        level = None
+
+    if sub_key is not None and level is not None:
+        # Reset the OTHER trackers so we don't carry stale "since" counts.
+        for k in ("pusher_rpc_dead", "pusher_rpc_blocked", "pusher_rpc_partial"):
+            if k != sub_key:
+                _red_since_ts[k] = None
+
+        red_for = _seconds_red(sub_key, True)
+        threshold = 30  # seconds before banner fires (avoid flash on transients)
+        if (red_for or 0) >= threshold:
+            if sub_key == "pusher_rpc_dead":
+                return {
+                    "level": "critical",
+                    "message": "Windows IB Pusher is DOWN",
+                    "detail": (
+                        f"{failures} consecutive RPC failures, "
+                        f"no push received in "
+                        f"{push_age_s if push_age_s is not None else '?'}s. "
+                        "Live IB data is NOT flowing — backend is "
+                        "otherwise healthy."
+                    ),
+                    "action": (
+                        "Check Windows side: is the [IB PUSHER] CMD window "
+                        "still showing a healthy log? If the process "
+                        "crashed, restart it via the .bat orchestrator. "
+                        "Do NOT restart the Spark backend — it's healthy."
+                    ),
+                    "since_seconds": red_for,
+                    "subsystem": "pusher_rpc",
+                    "as_of": snapshot.get("as_of"),
+                }
+            if sub_key == "pusher_rpc_blocked":
+                push_age_str = (
+                    f"{push_age_s:.1f}s ago"
+                    if push_age_s is not None
+                    else "recently"
+                )
+                return {
+                    "level": "warning",
+                    "message": "Spark→pusher RPC blocked — live data still flowing",
+                    "detail": (
+                        f"{failures} consecutive RPC failures, but push "
+                        f"channel is HEALTHY (last push {push_age_str}). "
+                        "Live quotes/positions/account are fine. "
+                        "On-demand chart-bar RPC fetches degrade to Mongo cache."
+                    ),
+                    "action": (
+                        "Most likely Windows firewall blocking inbound :8765. "
+                        "On Windows (Run as Admin): "
+                        'netsh advfirewall firewall add rule '
+                        'name="IB Pusher RPC 8765" dir=in action=allow '
+                        'protocol=TCP localport=8765 — '
+                        "then verify from Spark: "
+                        "curl -m 3 http://192.168.50.1:8765/rpc/health"
+                    ),
+                    "since_seconds": red_for,
+                    "subsystem": "pusher_rpc",
+                    "as_of": snapshot.get("as_of"),
+                }
+            if sub_key == "pusher_rpc_partial":
+                return {
+                    "level": "warning",
+                    "message": "Pusher in partial state",
+                    "detail": pusher.get("detail") or "Pusher status uncertain.",
+                    "action": (
+                        "Check both: (1) [IB PUSHER] window on Windows is "
+                        "still pushing OK every 10s, AND (2) Spark can reach "
+                        "http://192.168.50.1:8765/rpc/health."
+                    ),
+                    "since_seconds": red_for,
+                    "subsystem": "pusher_rpc",
+                    "as_of": snapshot.get("as_of"),
+                }
 
     # 2. MongoDB dead? Game over for everything.
     mongo = subsystems.get("mongo", {})
@@ -173,14 +262,32 @@ async def get_system_banner() -> Dict[str, Any]:
         # fired, no need to fire again here.
         pass
     elif snapshot.get("overall") == "yellow":
-        # Some other yellow — surface as a thin warning strip.
+        # Some other yellow — surface as a thin warning strip. Skip
+        # `pusher_rpc` (its own dedicated banners above already covered
+        # rpc_blocked / partial; if those didn't fire we don't want to
+        # double up with a generic "degraded" message).
+        degraded = [
+            s for s in snapshot.get("subsystems", [])
+            if s.get("status") in ("yellow", "red")
+            and s.get("name") != "pusher_rpc"
+        ]
+        if not degraded:
+            # Only pusher_rpc was yellow and we already handled it.
+            return {
+                "level": None,
+                "message": None,
+                "detail": None,
+                "action": None,
+                "since_seconds": None,
+                "subsystem": None,
+                "as_of": snapshot.get("as_of"),
+            }
         return {
             "level": "warning",
             "message": "Some subsystems are degraded",
             "detail": ", ".join(
                 f"{s['name']}: {s.get('detail') or s['status']}"
-                for s in snapshot.get("subsystems", [])
-                if s.get("status") in ("yellow", "red")
+                for s in degraded
             ) or None,
             "action": "Check /api/system/health for the full breakdown.",
             "since_seconds": None,

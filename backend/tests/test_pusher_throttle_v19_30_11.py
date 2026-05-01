@@ -376,9 +376,13 @@ def test_banner_endpoint_exists():
     assert callable(get_system_banner)
 
 
-def test_banner_returns_critical_when_pusher_red_30s():
-    """Pusher_rpc red for ≥30s → critical banner with explicit operator
-    action telling them NOT to restart Spark backend.
+def test_banner_returns_critical_when_pusher_fully_dead_30s():
+    """Pusher fully dead (push stale + RPC fail) for ≥30s → critical
+    banner with explicit operator action telling them NOT to restart
+    Spark backend.
+
+    v19.30.12 (2026-05-01) — banner now distinguishes fully-dead from
+    rpc-blocked. Push channel must ALSO be stale to fire critical.
     """
     from routers import system_banner as bm
 
@@ -388,27 +392,118 @@ def test_banner_returns_critical_when_pusher_red_30s():
             {
                 "name": "pusher_rpc",
                 "status": "red",
-                "detail": "42 consecutive failures",
-                "metrics": {"consecutive_failures": 42},
+                "detail": "fully_dead · 42 consecutive RPC failures · "
+                          "no push data ever received",
+                "metrics": {
+                    "consecutive_failures": 42,
+                    "push_age_s": None,
+                    "push_fresh": False,
+                },
             },
             {"name": "mongo", "status": "green"},
         ],
         "as_of": "2026-05-01T19:00:00Z",
     }
 
-    # Pre-seed the red-since tracker so we cross the 30s threshold.
-    bm._red_since_ts["pusher_rpc"] = bm._now_ts() - 35
+    bm._red_since_ts.clear()
+    bm._red_since_ts["pusher_rpc_dead"] = bm._now_ts() - 35
 
     with patch("services.system_health_service.build_health", return_value=fake_health):
         result = asyncio.run(bm.get_system_banner())
 
     assert result["level"] == "critical"
     assert result["subsystem"] == "pusher_rpc"
-    assert "Windows IB Pusher" in result["message"]
-    assert "42 consecutive failures" in result["detail"]
-    # The action MUST tell the operator NOT to restart Spark — that
-    # specific copy is what prevents recurrence of today's footgun.
-    assert "NOT" in result["action"] or "Do NOT" in result["action"]
+    assert "DOWN" in result["message"] or "Down" in result["message"]
+    assert "42" in result["detail"]
+    # Action MUST tell the operator NOT to restart Spark.
+    assert "Do NOT" in result["action"]
+
+
+def test_banner_returns_warning_when_pusher_rpc_blocked_only():
+    """Push channel fresh + RPC failing → YELLOW banner with firewall
+    diagnosis (asymmetric network, e.g. Windows firewall blocking :8765).
+
+    This is the EXACT case the operator hit on 2026-05-01: pusher was
+    pushing fine to Spark (so live quotes/positions flowed) but Spark
+    couldn't reach the pusher's RPC server inbound.
+    """
+    from routers import system_banner as bm
+
+    fake_health = {
+        "overall": "yellow",
+        "subsystems": [
+            {
+                "name": "pusher_rpc",
+                "status": "yellow",
+                "detail": "rpc_blocked · 19 consecutive RPC failures · "
+                          "push fresh (8.2s ago) — live data IS flowing",
+                "metrics": {
+                    "consecutive_failures": 19,
+                    "push_age_s": 8.2,
+                    "push_fresh": True,
+                },
+            },
+            {"name": "mongo", "status": "green"},
+        ],
+        "as_of": "2026-05-01T19:00:00Z",
+    }
+
+    bm._red_since_ts.clear()
+    bm._red_since_ts["pusher_rpc_blocked"] = bm._now_ts() - 35
+
+    with patch("services.system_health_service.build_health", return_value=fake_health):
+        result = asyncio.run(bm.get_system_banner())
+
+    assert result["level"] == "warning"
+    assert result["subsystem"] == "pusher_rpc"
+    detail_lower = result["detail"].lower()
+    assert (
+        "live quotes" in detail_lower
+        or "live data" in detail_lower
+        or "flowing" in detail_lower
+        or "healthy" in detail_lower
+    ), f"banner detail must reassure operator that push is healthy: {result['detail']}"
+    # Action must mention the firewall fix command.
+    assert "8765" in result["action"]
+    assert "netsh advfirewall" in result["action"] or "firewall" in result["action"].lower()
+
+
+def test_banner_does_not_double_fire_when_pusher_yellow_and_overall_yellow():
+    """If pusher_rpc is yellow AND that's the only degradation, the
+    dedicated rpc_blocked banner fires. Don't ALSO fire the generic
+    "Some subsystems are degraded" banner.
+    """
+    from routers import system_banner as bm
+
+    fake_health = {
+        "overall": "yellow",
+        "subsystems": [
+            {
+                "name": "pusher_rpc",
+                "status": "yellow",
+                "detail": "rpc_blocked · 5 consecutive RPC failures",
+                "metrics": {
+                    "consecutive_failures": 5,
+                    "push_age_s": 8.0,
+                    "push_fresh": True,
+                },
+            },
+            {"name": "mongo", "status": "green"},
+        ],
+        "as_of": "2026-05-01T19:00:00Z",
+    }
+
+    # Less than 30s — dedicated banner won't fire YET.
+    bm._red_since_ts.clear()
+    bm._red_since_ts["pusher_rpc_blocked"] = bm._now_ts() - 5
+
+    with patch("services.system_health_service.build_health", return_value=fake_health):
+        result = asyncio.run(bm.get_system_banner())
+
+    # During the <30s grace, NO banner — not even the generic one.
+    # Otherwise we'd flash "Some subsystems are degraded" then switch
+    # to the specific message at 30s, which is jarring.
+    assert result["level"] is None
 
 
 def test_banner_returns_null_when_all_green():
@@ -437,27 +532,27 @@ def test_banner_returns_null_when_all_green():
 
 
 def test_banner_does_not_fire_for_pusher_red_under_30s():
-    """Pusher red <30s → no banner yet (avoid flashing on transient blips)."""
+    """Pusher fully_dead <30s → no banner yet (avoid flashing on transient blips)."""
     from routers import system_banner as bm
 
     fake_health = {
         "overall": "red",
         "subsystems": [
             {"name": "pusher_rpc", "status": "red",
-             "detail": "3 consecutive failures",
-             "metrics": {"consecutive_failures": 3}},
+             "detail": "fully_dead · 3 consecutive RPC failures",
+             "metrics": {"consecutive_failures": 3, "push_age_s": None,
+                         "push_fresh": False}},
             {"name": "mongo", "status": "green"},
         ],
         "as_of": "2026-05-01T19:00:00Z",
     }
 
-    # Reset and let the tracker start fresh — 3s old.
-    bm._red_since_ts["pusher_rpc"] = bm._now_ts() - 3
+    bm._red_since_ts.clear()
+    bm._red_since_ts["pusher_rpc_dead"] = bm._now_ts() - 3
 
     with patch("services.system_health_service.build_health", return_value=fake_health):
         result = asyncio.run(bm.get_system_banner())
 
-    # Below threshold — no banner yet.
     assert result["level"] is None
 
 

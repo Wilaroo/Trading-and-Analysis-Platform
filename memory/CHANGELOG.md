@@ -2,6 +2,68 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (sixty-fourth commit, v19.30.12) — Distinguish push-channel vs RPC-channel pusher health
+
+**Operator's v19.30.11 deploy surfaced a real edge case:** SystemBanner showed "Windows IB Pusher unreachable, 19 consecutive failures over 150s" *while the pusher's own log showed `Push OK every 10s` and 72 quotes streaming successfully*.
+
+Both signals correct from their respective vantage points:
+- **Push channel** (Windows :8765 → Spark :8001 via `POST /api/ib/push-data`): ✅ Working — 72 quotes / 5 positions every 10s.
+- **RPC channel** (Spark → Windows :8765 via `/rpc/latest-bars`, `/rpc/health`, etc.): ❌ Failing.
+
+Asymmetric network — most likely **Windows firewall blocking inbound on :8765**, so Spark's outbound RPC calls couldn't reach the pusher's RPC server even though the pusher's outbound push HTTP calls worked fine. v19.30.11 banner was a sledgehammer that conflated the two channels into a single "pusher dead" message.
+
+### Fix — health-service distinguishes channels
+
+**File:** `backend/services/system_health_service.py::_check_pusher_rpc()`
+
+New severity matrix:
+
+| push fresh (<60s) | RPC working | → status | detail prefix |
+|---|---|---|---|
+| ✅ | ✅ | **green** | `last ok …s ago` |
+| ✅ | ❌ | **yellow** | `rpc_blocked` (push HEALTHY, only RPC degraded) |
+| ❌ | ✅ | **yellow** | `push_blocked` (weird state; usually transient) |
+| ❌ | ❌ | **red** | `fully_dead` (pusher process is down) |
+
+Reads `routers.ib._pushed_ib_data["last_update"]` directly via module attribute (NOT via `get_pushed_ib_data()` — that helper is shadowed by an async HTTP endpoint of the same name at routers/ib.py:615, so callable lookup gets the coroutine). Adds `push_age_s` and `push_fresh` to subsystem metrics so the banner can render them.
+
+### Banner copy — three distinct cases
+
+**File:** `backend/routers/system_banner.py`
+
+- `pusher_rpc_dead` → **CRITICAL** banner: "Windows IB Pusher is DOWN" + "Do NOT restart the Spark backend — it's healthy" action.
+- `pusher_rpc_blocked` → **WARNING** banner: "Spark→pusher RPC blocked — live data still flowing" + the actual `netsh advfirewall firewall add rule name="IB Pusher RPC 8765" dir=in action=allow protocol=TCP localport=8765` command in the action text.
+- `pusher_rpc_partial` → **WARNING** banner: covers any future weird state.
+
+Generic "Some subsystems are degraded" suppressed when `pusher_rpc` is the only yellow subsystem (its dedicated banner already covered it).
+
+### Tests
+8 new pytests in `tests/test_pusher_health_dual_channel_v19_30_12.py` (all 4 quadrants of the severity matrix + banner double-fire suppression + module-level patching pattern). 3 banner tests rewritten in `tests/test_pusher_throttle_v19_30_11.py` to match the new fully_dead/rpc_blocked detail tokens. **69/69 passing across the v19.30 stack.**
+
+### Operator action — Spark deploy
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull
+./start_backend.sh   # safe — skip-if-healthy guard from v19.30.11 means no-op if already up
+
+# Verify the new banner copy after 30s
+curl -s localhost:8001/api/system/banner | jq .
+# When push fresh + RPC blocked → level: "warning", message includes "RPC blocked"
+# When push stale + RPC fail   → level: "critical", message: "Windows IB Pusher is DOWN"
+```
+
+### To fix the underlying Windows firewall (optional but recommended)
+On Windows (Run as Administrator):
+```cmd
+netsh advfirewall firewall add rule name="IB Pusher RPC 8765" dir=in action=allow protocol=TCP localport=8765
+```
+Then verify from Spark:
+```bash
+curl -m 3 http://192.168.50.1:8765/rpc/health
+```
+If that returns 200, RPC channel is open and the banner will flip green within 10s. If it still fails, check Windows Defender Firewall → Inbound Rules manually and ensure no other firewall (corporate/3rd-party) is blocking.
+
+---
+
 ## 2026-05-01 (sixty-third commit, v19.30.11) — Pusher overload protection + skip-restart-if-healthy + system banner
 
 **Operator hit a real problem 2026-05-01 afternoon:** dashboard appeared empty → assumed Spark backend was broken → ran `./start_backend.sh` → script killed a perfectly healthy backend AND ate 60-90s of cold boot. Diagnostic data proved the actual cause was the **Windows IB Pusher had died** (overload-induced — concurrent `/rpc/latest-bars` calls fanned out into IB Gateway's 6-concurrent-`reqHistoricalData` limit; IB closed the socket; pusher process couldn't recover). Three independent fixes shipped together to prevent recurrence:
