@@ -304,14 +304,24 @@ class HybridDataService:
         start_dt: datetime,
         end_dt: datetime
     ) -> Dict[str, Any]:
-        """Get bars from MongoDB ib_historical_data collection"""
+        """Get bars from MongoDB ib_historical_data collection.
+
+        v19.30.9 (2026-05-02) — sync pymongo `find().sort()` cursor
+        materialisation is now wrapped in `asyncio.to_thread` so it
+        never blocks the event loop. Pre-fix this was a wedge candidate
+        per the v19.30 audit (53 sync-mongo-in-async sites identified)
+        and was the likely cause of intermittent "Bar fetch failed"
+        on the V5 chart panel: a slow Mongo round-trip would tie up
+        the loop long enough for the 30s axios timeout on the frontend
+        to fire, which in turn renders as a blanket "Bar fetch failed".
+        """
         if self._bars_collection is None:
             return {"success": False, "bars": [], "bar_count": 0}
-        
+
         try:
             tf_config = self.TIMEFRAMES.get(timeframe, {})
             bar_size = tf_config.get("ib_bar_size", "1 day")
-            
+
             # Query ib_historical_data using its actual field names
             query = {
                 "symbol": symbol,
@@ -321,8 +331,11 @@ class HybridDataService:
                     "$lte": end_dt.strftime("%Y-%m-%d") if timeframe == "1day" else end_dt.isoformat()
                 }
             }
-            
-            bars = list(self._bars_collection.find(query, {"_id": 0}).sort("date", 1))
+
+            def _sync_query_window() -> List[Dict[str, Any]]:
+                return list(self._bars_collection.find(query, {"_id": 0}).sort("date", 1))
+
+            bars = await asyncio.to_thread(_sync_query_window)
 
             # Normalize field names for compatibility
             for bar in bars:
@@ -338,12 +351,16 @@ class HybridDataService:
             # fresh bars but live pusher quotes keep the app "feeling" live.
             if not bars:
                 fallback_count = _estimate_fallback_bar_count(timeframe, start_dt, end_dt)
-                stale_bars = list(
-                    self._bars_collection
-                        .find({"symbol": symbol, "bar_size": bar_size}, {"_id": 0})
-                        .sort("date", -1)
-                        .limit(fallback_count)
-                )
+
+                def _sync_query_stale() -> List[Dict[str, Any]]:
+                    return list(
+                        self._bars_collection
+                            .find({"symbol": symbol, "bar_size": bar_size}, {"_id": 0})
+                            .sort("date", -1)
+                            .limit(fallback_count)
+                    )
+
+                stale_bars = await asyncio.to_thread(_sync_query_stale)
                 if stale_bars:
                     stale_bars.reverse()  # chronological order for chart
                     for bar in stale_bars:
@@ -468,26 +485,34 @@ class HybridDataService:
             return {"success": False, "bars": [], "error": str(e)}
     
     async def _cache_bars(self, symbol: str, timeframe: str, bars: List[Dict]):
-        """Store bars in MongoDB cache"""
+        """Store bars in MongoDB cache.
+
+        v19.30.9 (2026-05-02) — wraps the per-bar sync upsert loop in
+        `asyncio.to_thread` so the event loop isn't tied up doing N
+        round-trips when an IB fetch returns a fresh batch.
+        """
         if self._bars_collection is None or not bars:
             return
-        
+
         now = datetime.now(timezone.utc).isoformat()
-        
-        for bar in bars:
-            try:
-                bar_doc = {**bar, "cached_at": now}
-                self._bars_collection.update_one(
-                    {
-                        "symbol": symbol,
-                        "timeframe": timeframe,
-                        "timestamp": bar["timestamp"]
-                    },
-                    {"$set": bar_doc},
-                    upsert=True
-                )
-            except Exception as e:
-                logger.warning(f"Error caching bar: {e}")
+
+        def _sync_upsert_all() -> None:
+            for bar in bars:
+                try:
+                    bar_doc = {**bar, "cached_at": now}
+                    self._bars_collection.update_one(
+                        {
+                            "symbol": symbol,
+                            "timeframe": timeframe,
+                            "timestamp": bar["timestamp"]
+                        },
+                        {"$set": bar_doc},
+                        upsert=True
+                    )
+                except Exception as e:
+                    logger.warning(f"Error caching bar: {e}")
+
+        await asyncio.to_thread(_sync_upsert_all)
     
     async def prefetch_symbols(
         self,

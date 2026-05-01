@@ -1178,6 +1178,192 @@ async def reconcile_orphan_positions(req: ReconcileRequest):
 
 
 
+# ==================== CANCEL ALL PENDING ORDERS (v19.30.9 — 2026-05-02) ===========
+
+class CancelAllPendingRequest(BaseModel):
+    """Body for POST /api/trading-bot/cancel-all-pending-orders.
+
+    Defense-in-depth pre-open safety endpoint. Requires explicit
+    `confirm="CANCEL_ALL_PENDING"` token to fire — same pattern as
+    /api/portfolio/flatten-paper?confirm=FLATTEN and the
+    /reconcile {all:true} sweep.
+
+    Optional `symbols=[...]` filter scopes the cancel to a subset
+    (handy when only one symbol is misbehaving). When omitted (and
+    confirm is present), every pending+claimed order in the queue
+    AND every IB-side open order (when direct IB is connected) is
+    cancelled.
+    """
+    confirm: Optional[str] = None
+    symbols: Optional[List[str]] = None
+    dry_run: bool = False
+
+
+@router.post("/cancel-all-pending-orders")
+async def cancel_all_pending_orders(req: CancelAllPendingRequest):
+    """Cancel every pending bracket / GTC order before the bell.
+
+    Why this matters: the operator manually flattens stuck positions
+    via TWS sometimes; the IB-side OCA brackets that were attached
+    to those positions don't auto-cancel. If the bot then re-fires a
+    new entry, the orphaned stop/target legs from the prior bracket
+    can convert into naked shorts when triggered. This endpoint
+    nukes everything pre-open so the next session starts with a
+    clean book.
+
+    Two layers of cancellation, in order:
+
+    1. **Mongo `order_queue`** (always available) — flips every
+       `pending` + `claimed` row to `cancelled`. The Windows pusher
+       polls this queue, so anything not yet submitted to IB is
+       killed atomically.
+    2. **Direct IB Gateway open orders** (when connected) — iterates
+       `_ib_service.get_open_orders()` and cancels each. Falls back
+       gracefully when direct IB isn't reachable from Spark
+       (degraded mode, pusher-only).
+
+    Body:
+      - `confirm`: must be `"CANCEL_ALL_PENDING"` to fire (required).
+      - `symbols`: optional list to scope the cancel.
+      - `dry_run`: optional preview — counts what WOULD be cancelled
+        without changing state. Default False.
+
+    Response shape:
+      {
+        success: bool,
+        dry_run: bool,
+        queue_cancelled: int,         # Mongo order_queue rows flipped
+        queue_skipped: int,           # rows scoped out by `symbols`
+        ib_cancelled: int,            # IB-side cancellations sent
+        ib_skipped: int,              # rows scoped out by `symbols`
+        ib_unavailable: bool,         # True when direct IB unreachable
+        ib_error: Optional[str],
+        details: {
+          queue: [{order_id, symbol, status_before}, ...],
+          ib_orders_open_before: [{order_id, symbol, ...}, ...],
+        }
+      }
+    """
+    if req.confirm != "CANCEL_ALL_PENDING":
+        raise HTTPException(
+            status_code=400,
+            detail="confirm='CANCEL_ALL_PENDING' is required to fire this endpoint",
+        )
+
+    sym_filter: Optional[set] = None
+    if req.symbols:
+        sym_filter = {s.strip().upper() for s in req.symbols if s and s.strip()}
+
+    # ─── Layer 1: Mongo `order_queue` ────────────────────────────────────
+    queue_cancelled = 0
+    queue_skipped = 0
+    queue_details: List[Dict[str, Any]] = []
+    try:
+        from services.order_queue_service import get_order_queue_service, OrderStatus
+        queue_service = get_order_queue_service()
+
+        def _sync_drain_queue() -> Dict[str, Any]:
+            cancelled = 0
+            skipped = 0
+            details: List[Dict[str, Any]] = []
+            # Re-use the service's pending+claimed query rather than touching
+            # the collection directly so future schema changes propagate.
+            for status_value in (OrderStatus.PENDING.value, OrderStatus.CLAIMED.value):
+                rows = queue_service.get_orders_by_status(status_value) or []
+                for row in rows:
+                    sym = (row.get("symbol") or "").upper()
+                    if sym_filter is not None and sym not in sym_filter:
+                        skipped += 1
+                        continue
+                    order_id = row.get("order_id")
+                    if not order_id:
+                        continue
+                    if not req.dry_run:
+                        ok = queue_service.cancel_order(order_id)
+                        if not ok:
+                            # Race — already moved past pending/claimed.
+                            continue
+                    cancelled += 1
+                    details.append({
+                        "order_id": order_id,
+                        "symbol": sym,
+                        "status_before": status_value,
+                    })
+            return {"cancelled": cancelled, "skipped": skipped, "details": details}
+
+        result = await asyncio.to_thread(_sync_drain_queue)
+        queue_cancelled = int(result["cancelled"])
+        queue_skipped = int(result["skipped"])
+        queue_details = list(result["details"])
+    except Exception as e:
+        logger.error(f"cancel-all-pending: queue drain error: {e}", exc_info=True)
+
+    # ─── Layer 2: Direct IB Gateway open orders ──────────────────────────
+    # The Spark backend frequently runs in "degraded mode" where the only
+    # IB pipeline is via the Windows pusher. We attempt the direct cancel
+    # path here for completeness — when it fails we surface that fact in
+    # the response so the operator knows to flatten via TWS / Workbench.
+    ib_cancelled = 0
+    ib_skipped = 0
+    ib_unavailable = False
+    ib_error: Optional[str] = None
+    ib_open_before: List[Dict[str, Any]] = []
+    try:
+        from routers.ib import _ib_service as _direct_ib_service  # type: ignore
+    except Exception:
+        _direct_ib_service = None  # type: ignore
+
+    if _direct_ib_service is None:
+        ib_unavailable = True
+        ib_error = "ib_service_not_initialized"
+    else:
+        try:
+            open_orders = await _direct_ib_service.get_open_orders()
+            ib_open_before = list(open_orders or [])
+            for o in ib_open_before:
+                sym = (o.get("symbol") or "").upper()
+                if sym_filter is not None and sym not in sym_filter:
+                    ib_skipped += 1
+                    continue
+                ib_order_id = o.get("order_id") or o.get("orderId") or o.get("id")
+                if ib_order_id is None:
+                    continue
+                if not req.dry_run:
+                    try:
+                        ok = await _direct_ib_service.cancel_order(int(ib_order_id))
+                        if ok:
+                            ib_cancelled += 1
+                    except Exception as cancel_err:
+                        logger.warning(
+                            f"cancel-all-pending: IB cancel for order {ib_order_id} "
+                            f"({sym}) raised: {cancel_err}"
+                        )
+                else:
+                    ib_cancelled += 1  # dry-run: count as if cancelled
+        except ConnectionError as e:
+            ib_unavailable = True
+            ib_error = f"ib_gateway_unavailable: {e}"
+        except Exception as e:
+            ib_error = f"ib_open_orders_fetch_failed: {e}"
+            logger.warning(f"cancel-all-pending: {ib_error}", exc_info=True)
+
+    return {
+        "success": True,
+        "dry_run": bool(req.dry_run),
+        "queue_cancelled": queue_cancelled,
+        "queue_skipped": queue_skipped,
+        "ib_cancelled": ib_cancelled,
+        "ib_skipped": ib_skipped,
+        "ib_unavailable": ib_unavailable,
+        "ib_error": ib_error,
+        "details": {
+            "queue": queue_details,
+            "ib_orders_open_before": ib_open_before,
+        },
+    }
+
+
+
 @router.get("/trades")
 def get_trades_list():
     """

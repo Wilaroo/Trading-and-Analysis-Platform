@@ -3,6 +3,72 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.9 fork)
+
+### 🎯 Just shipped 2026-05-02 v19.30.9 — see CHANGELOG (sixty-first commit)
+**Degraded-mode UI fixes + cancel-all-pending-orders.**
+
+3 surface bugs operator filed after the v19.30.8 wedge-immunity deploy:
+
+- ✅ `/api/ib/account/positions` no longer 503's in degraded mode —
+  falls back to `_pushed_ib_data["positions"]` with explicit
+  `degraded:true` + `source:"pusher"|"pusher_stale"` flags. Same
+  treatment applied to the alt `/account/summary` async handler.
+- ✅ "Bar fetch failed" on V5 chart → root cause was sync pymongo
+  `find().sort()` in `hybrid_data_service._get_from_cache` blocking
+  the loop long enough for the 30s axios timeout. Both window
+  query + stale fallback now `asyncio.to_thread`-wrapped. Same
+  treatment applied to `_cache_bars` per-bar upsert loop.
+- ✅ NEW `POST /api/trading-bot/cancel-all-pending-orders` —
+  pre-open safety endpoint. Drains Mongo `order_queue` of
+  pending+claimed rows + cancels direct IB-side open orders when
+  reachable (graceful degradation). Requires `confirm:"CANCEL_ALL_PENDING"`
+  token. Optional `symbols=[...]` scope + `dry_run:true` preview.
+- ✅ 14 new pytests, **39/39 across v19.30 stack** (25 prior + 14
+  new). 2 source-level pins so a future refactor can't silently
+  re-introduce sync-mongo-in-async to the cache helpers.
+
+Operator action:
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+```
+
+### 🔴 P0 — Now unblocked by v19.30.9
+1. **Diagnostics Data Quality Pack** — fix Pipeline Funnel
+   `ai_passed`/`bot_fired` mutual consistency; fix Module Scorecard
+   plumbing for `shadow_module_performance` per-vote breakdown.
+2. **Bot Thoughts content capture** — Trail Explorer empty `content`.
+3. **Verify v19.24 Reconcile endpoint live on Spark** — already
+   shipped per PRD but never confirmed in production. Click
+   "Reconcile N" in V5 Open Positions header on SBUX/SOFI/OKLO
+   and verify they switch from `source:ib` to bot-managed payload.
+
+### 🟡 P1 (unchanged from v19.30.8)
+- Shadow-vs-Real gap drilldown (71% shadow vs 32% real).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares.
+- **Async-pymongo audit follow-up** — 51 remaining sync-mongo-in-async
+  sites (was 53; v19.30.9 closed 2 in `hybrid_data_service`).
+- "PUSHER RED" while pusher is actually pushing (is_connected stale).
+- `monitor_training.sh:149: [: 0: integer expression expected` bash
+  arithmetic bug.
+
+### 🟢 P2 / P3 (unchanged)
+- v19.31 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.32 Chart WebSockets (live bar push, ~50ms vs 5s tail-poll)
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics (Hurst + OU half-life)
+- Liquidity-aware trail in `stop_manager.py`
+- Scanner card "Proven / Maturing / Cold-start" badge
+- Chart bubble click → `sentcom:focus-symbol`
+- SEC EDGAR 8-K integration
+- Safely retire Alpaca fallback (32 reference sites)
+- **Audit Pass 1** — lint sweep + dead-code (370 ruff auto-fixes,
+  61 bare excepts, 6 orphaned services, 3 dup function names in ib.py)
+- **Audit Pass 3** — break up 4 monoliths (ib.py 6331, server.py
+  4643, enhanced_scanner.py 7090, training_pipeline.py 3869)
+
+---
+
 ## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.2 fork)
 
 ### 🎯 Just shipped 2026-05-02 v19.30.2 — see CHANGELOG (fifty-fourth commit)

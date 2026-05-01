@@ -2,6 +2,55 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (sixty-first commit, v19.30.9) — Degraded-mode UI fixes + cancel-all-pending-orders
+
+**3 surface bugs filed by operator post-v19.30.8 deploy. All wedge-immune fixes (no new sync-in-async sites added).**
+
+### Bug #1 — `/api/ib/account/positions` returned blanket 503 in degraded mode
+The Spark backend frequently boots in "degraded mode" where the direct IB Gateway connection is unavailable but the Windows pusher is healthily delivering positions via `_pushed_ib_data["positions"]`. Pre-v19.30.9 the endpoint raised 503 in that state, breaking the V5 HUD positions panel and Top Movers tile.
+
+**Fix (`backend/routers/ib.py`)**: catch `ConnectionError`, fall back to the pusher snapshot with explicit `degraded:true` + `source:"pusher"|"pusher_stale"` flags so the UI can render a clear "degraded" badge instead of a blanket "Failed to fetch" red state. Same defensive `_pushed_payload()` helper added to the alternate `/account/summary` async handler (kept as a defense-in-depth safety net; the primary route resolves to the pre-existing sync handler that already reads pushed data).
+
+### Bug #2 — "Bar fetch failed" on V5 SPY chart
+Same wedge class as v19.30.1 / v19.30.2 / v19.30.7, different call site. Sync pymongo `find().sort()` cursor materialisation inside `hybrid_data_service._get_from_cache` could tie the event loop up long enough for the 30s axios timeout on the frontend to fire, which `safeGet` swallows and the UI renders as "Bar fetch failed".
+
+**Fix (`backend/services/hybrid_data_service.py`)**: wrap both the window query AND the stale-fallback query in `asyncio.to_thread`. Same treatment applied to `_cache_bars` (per-bar sync `update_one(upsert=True)` loop offloaded to a thread). Closes 2 of the 53 sync-mongo-in-async sites flagged in `CODEBASE_AUDIT_2026_05_02.md`.
+
+### Bug #3 — No pre-open safety endpoint to cancel pending GTC orders
+If an operator manually flattened a position via TWS, the IB-side OCA stop/target legs lingered. The bot's next entry could trigger a naked short when those orphaned legs converted.
+
+**Fix (`backend/routers/trading_bot.py`)**: new `POST /api/trading-bot/cancel-all-pending-orders` endpoint with two layers:
+1. Mongo `order_queue` drain (always available, wraps the per-row sync update_one loop in `asyncio.to_thread`) — flips every `pending`+`claimed` row to `cancelled` so the pusher won't submit them
+2. Direct IB Gateway `get_open_orders` + `cancel_order` per row (when reachable; gracefully degrades with `ib_unavailable:true` flag when not)
+
+Defense-in-depth: `confirm:"CANCEL_ALL_PENDING"` token required (mirrors `/flatten-paper?confirm=FLATTEN`). Optional `symbols=[...]` scopes the cancel; `dry_run:true` previews without mutation.
+
+### Tests
+14 new pytests in `tests/test_degraded_mode_fixes_v19_30_9.py` (including 2 source-level pins so a future refactor can't silently re-introduce sync-mongo-in-async to `_get_from_cache` / `_cache_bars`). **39/39 across the v19.30 stack** (25 prior + 14 new). Live-validated on the local backend: positions endpoint returns 200 with `degraded:true`, cancel-all-pending dry-run returns expected counts, account summary surfaces pushed data.
+
+### Operator action — Spark deploy
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh
+
+# Verify positions endpoint no longer 503's
+curl -s -m 5 localhost:8001/api/ib/account/positions | jq .source
+# → "pusher" or "pusher_stale" (was: HTTP 503)
+
+# Verify SPY chart returns bars
+curl -s -m 5 'localhost:8001/api/sentcom/chart?symbol=SPY&timeframe=5min&days=5' | jq '.bar_count'
+# → > 0 (was: empty / timeout)
+
+# Smoke-test new endpoint (dry-run; no state change)
+curl -s -m 5 -X POST -H "Content-Type: application/json" \
+  -d '{"confirm":"CANCEL_ALL_PENDING","dry_run":true}' \
+  localhost:8001/api/trading-bot/cancel-all-pending-orders | jq .
+```
+
+---
+
+
 ## 2026-05-02 (sixtieth commit, v19.30.8) — Wedge-watchdog round 2: account_snapshot + sync requests in async
 
 **Operator-pasted v19.30.6 watchdog dumps showed two NEW wedge classes after the v19.30.7 fixes landed:**
