@@ -1493,7 +1493,13 @@ class TradingBotService:
         # on the LAN — only fires when path #1 came up empty.
         try:
             from services.ib_pusher_rpc import get_account_snapshot
-            snap = get_account_snapshot()
+            # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+            # Same wedge class as Wedge #1 today: get_account_snapshot
+            # holds the pusher RPC's threading.Lock + does sync HTTP.
+            # `_get_account_value` is awaited from the bot scan loop and
+            # the position sizer hot path — a wedge here pins the loop
+            # for the full RPC timeout (5s).
+            snap = await asyncio.to_thread(get_account_snapshot)
             if snap and isinstance(snap, dict):
                 # Pusher exposes NetLiquidation under a few different
                 # casings depending on the pusher build — try them all.

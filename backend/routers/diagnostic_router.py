@@ -39,6 +39,7 @@ sees the answer at a glance.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
@@ -1078,7 +1079,11 @@ async def account_snapshot() -> Dict[str, Any]:
         # 3. RPC fallback
         try:
             from services.ib_pusher_rpc import get_account_snapshot
-            snap = get_account_snapshot() or {}
+            # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+            # Diagnostic endpoint is rarely called but must not wedge
+            # the loop when an operator hits the diagnostic page during
+            # a busy moment.
+            snap = await asyncio.to_thread(get_account_snapshot) or {}
             layers["rpc_account_snapshot"] = {
                 "success": bool(snap.get("success")),
                 "has_account": bool(snap.get("account")),

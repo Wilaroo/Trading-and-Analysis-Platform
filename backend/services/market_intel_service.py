@@ -126,10 +126,20 @@ class MarketIntelService:
         # Fallback: Fetch real market news from Finnhub directly
         if self._finnhub_key:
             try:
-                resp = requests.get(
+                # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+                # `requests.get` blocks the event loop on SSL recv. Pre-fix
+                # this fired during the market_intel scheduler tick from
+                # async context (`start_scheduler -> generate_report ->
+                # _gather_market_news -> requests.get`) and wedged the
+                # loop for the full HTTP timeout window. Captured by the
+                # v19.30.6 wedge-watchdog 2026-05-02 evening at the
+                # _gather_ticker_specific_news call site, but this site
+                # is the same wedge class.
+                resp = await asyncio.to_thread(
+                    requests.get,
                     "https://finnhub.io/api/v1/news",
                     params={"category": "general", "token": self._finnhub_key},
-                    timeout=10
+                    timeout=10,
                 )
                 if resp.status_code == 200:
                     news_items = resp.json()
@@ -402,7 +412,13 @@ class MarketIntelService:
                 from_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
                 to_date = datetime.now().strftime("%Y-%m-%d")
                 
-                resp = requests.get(
+                # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+                # This was the EXACT call site captured by the v19.30.6
+                # wedge-watchdog as a 5s+ event-loop block — sync SSL
+                # recv inside async `_gather_ticker_specific_news` called
+                # from the market_intel scheduler.
+                resp = await asyncio.to_thread(
+                    requests.get,
                     "https://finnhub.io/api/v1/company-news",
                     params={
                         "symbol": symbol,
@@ -410,7 +426,7 @@ class MarketIntelService:
                         "to": to_date,
                         "token": self._finnhub_key
                     },
-                    timeout=5
+                    timeout=5,
                 )
                 
                 if resp.status_code == 200:
@@ -615,14 +631,20 @@ class MarketIntelService:
             from_date = datetime.now().strftime("%Y-%m-%d")
             to_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
             
-            resp = requests.get(
+            # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread —
+            # same wedge class as the news/ticker-news fixes in this
+            # file. Earnings calendar is fetched from the market_intel
+            # scheduler async path; without to_thread, a slow Finnhub
+            # response wedged the loop for the full timeout window.
+            resp = await asyncio.to_thread(
+                requests.get,
                 "https://finnhub.io/api/v1/calendar/earnings",
                 params={
                     "from": from_date,
                     "to": to_date,
                     "token": self._finnhub_key
                 },
-                timeout=10
+                timeout=10,
             )
             
             if resp.status_code != 200:

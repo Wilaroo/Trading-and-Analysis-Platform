@@ -2,6 +2,90 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (sixtieth commit, v19.30.8) — Wedge-watchdog round 2: account_snapshot + sync requests in async
+
+**Operator-pasted v19.30.6 watchdog dumps showed two NEW wedge classes after the v19.30.7 fixes landed:**
+
+### Wedge #1 (different pusher RPC method)
+```
+MainThread BLOCKED in:
+  routers/trading_bot.py:231        get_bot_status
+  → get_account_snapshot()                          # SYNC HELPER
+  services/ib_pusher_rpc.py:175     account_snapshot
+  services/ib_pusher_rpc.py:124     _request
+  → with self._lock:                                # blocked on lock
+```
+v19.30.7's audit only checked `subscriptions`, `get_subscribed_set`, etc. — missed `account_snapshot` and the module-level `get_account_snapshot()` helper. Multiple async callers were violating the contract.
+
+### Wedge #2 (entirely new wedge class)
+```
+MainThread BLOCKED in:
+  services/market_intel_service.py:1100  start_scheduler
+  services/market_intel_service.py:884   generate_report
+  services/market_intel_service.py:405   _gather_ticker_specific_news
+  → requests.get(...)                               # SYNC HTTP
+  ssl.read(...)                                     # blocked on SSL recv
+```
+Sync `requests.get()` inside an async function — entirely different wedge class from the pusher RPC ones. Any sync HTTP library (requests, urllib3, urllib) called from async = wedge.
+
+### What shipped — 6 surgical patches + comprehensive audit test
+
+#### A — All 4 async callers of `get_account_snapshot()` wrapped in `to_thread`
+- `routers/trading_bot.py:231` (get_bot_status — the wedge #1 smoking gun)
+- `routers/trading_bot.py:319` (refresh_account)
+- `routers/diagnostic_router.py:1081` (account_snapshot diag — added missing `import asyncio` too)
+- `services/trading_bot_service.py:1496` (`_get_account_value` — called from scan loop hot path; would have wedged the loop on every bot tick when push-data wasn't seeding account)
+
+#### B — All 3 sync `requests.get` sites in `market_intel_service.py` wrapped in `to_thread`
+- `_gather_market_news` (line 129) — Finnhub general news
+- `_gather_ticker_specific_news` (line 405) — the wedge #2 smoking gun
+- `_gather_earnings_calendar` (line 618) — Finnhub earnings calendar
+
+#### C — Comprehensive audit test (`tests/test_async_sync_blockers_v19_30_8.py`)
+- AST walk of entire backend tree
+- Two violation classes detected:
+  1. Any sync method on `_PusherRPCClient` (full method list, not just the 4 from v19.30.7) called from async without `to_thread`
+  2. Any `requests.<method>` / `urllib3.<method>` / `urllib.<method>` called from async without `to_thread`
+- 5 new pytest cases. **Catch-all test** maintains a `DOCUMENTED_BACKLOG_VIOLATIONS` allowlist for known-but-deferred sites (scheduled tasks, not on dashboard hot path) — adding a NEW violator outside that list fails the test at PR time.
+- Backlog-allowlist currently covers 7 services (perf, news, web research, setup landscape, ai assistant, fundamental data, quality service, earnings service, BriefMe agent) — all on Audit Pass 2a roadmap.
+
+### Verification
+
+- 5/5 new tests pass.
+- **138/138 across full v19 stack** (v19.23 → v19.30.8). Ruff clean.
+- The codebase-wide audit confirms ZERO **NEW** sync-in-async violations outside the documented backlog. Adding any new violator (e.g., in a future feature) fails this test.
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh
+# After 5-10 min of normal operation:
+grep -c "WEDGE WATCHDOG TRIGGERED" /tmp/backend.log
+# Expected: 0 (or 1-2 boot-time wedges from un-fixed scheduled-task callers
+# that fire once on first scheduler tick — those are P1/Audit Pass 2a)
+```
+
+If wedges still occur and the watchdog stack points at any of the
+documented-backlog files, that's expected and tracked. If it points
+anywhere else, paste it and we ship v19.30.9.
+
+### v19.30.x series progress
+
+- v19.30.1: push-data hot-path wedge (anyio thread pool saturation)
+- v19.30.2: bar-poll degraded-IB wedge (sync pusher RPC inline)
+- v19.30.3: Spark launcher venv discovery + port cleanup
+- v19.30.4-.6: wedge auto-detection (thread-based watchdog catches main thread mid-wedge)
+- v19.30.7: surgical fix for first watchdog smoking gun (hybrid_data + pusher_rotation)
+- **v19.30.8**: surgical fix for round-2 watchdog smoking guns (account_snapshot + sync requests in async) + codebase-wide enforcement test
+
+The dashboard hot path (chart, positions, status, push-data, scanner)
+should now be fully wedge-immune. Remaining wedges (if any) live in
+scheduled-task code paths documented in Audit Pass 2a — these only
+fire on scheduler ticks (every 5/15/60 min) so the operator-impact
+is bounded to the tile that scheduler powers.
+
 ## 2026-05-02 (fifty-ninth commit, v19.30.7) — Surgical fix from wedge-watchdog smoking gun
 
 **Operator-pasted stack capture from v19.30.6's wedge-watchdog this evening.**

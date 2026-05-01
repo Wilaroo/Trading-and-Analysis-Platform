@@ -228,7 +228,16 @@ async def get_bot_status():
             if not ib_account:
                 try:
                     from services.ib_pusher_rpc import get_account_snapshot
-                    snap = get_account_snapshot() or {}
+                    # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+                    # `get_account_snapshot()` is a module-level helper that
+                    # calls `get_pusher_rpc_client().account_snapshot()` —
+                    # which does sync HTTP under the pusher RPC's
+                    # threading.Lock. Pre-fix this blocked the event loop
+                    # for up to 5s on every /api/trading-bot/status call
+                    # when push-data wasn't seeding `_pushed_ib_data.account`
+                    # (often during boot / pusher cold-start). Captured by
+                    # wedge-watchdog 2026-05-02 evening.
+                    snap = await asyncio.to_thread(get_account_snapshot) or {}
                     if snap.get("success") and snap.get("account"):
                         ib_account = snap["account"]
                         _pushed_ib_data["account"] = ib_account
@@ -307,7 +316,11 @@ async def refresh_account():
         # Try push-loop first, then RPC fallback.
         ib_account = (_pushed_ib_data or {}).get("account") or {}
         if not ib_account:
-            snap = get_account_snapshot() or {}
+            # v19.30.8 (2026-05-02 evening): wrap in asyncio.to_thread.
+            # Same wedge class as get_bot_status fix earlier in this
+            # commit; refresh_account is operator-triggered and
+            # tolerant of latency, but still must not block the loop.
+            snap = await asyncio.to_thread(get_account_snapshot) or {}
             if snap.get("success") and snap.get("account"):
                 ib_account = snap["account"]
                 _pushed_ib_data["account"] = ib_account
