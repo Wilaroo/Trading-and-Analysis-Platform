@@ -21,9 +21,38 @@ else
     exit 1
 fi
 
-# 2. Kill any stale server
-pkill -f "python server.py" 2>/dev/null || true
-sleep 1
+# 2. Kill any stale server (by port, not by cmdline — pkill -f misses
+# processes whose cmdline doesn't exactly match. v19.30.2 hardening
+# after Spark deploy 2026-05-02 hit "address already in use" because
+# the old session's PID had a different cmdline.).
+echo "killing any process bound to :8001..."
+# fuser -k SIGTERMs anything bound to that TCP port — works even when
+# cmdline match fails. Fall back to pkill if fuser isn't installed.
+if command -v fuser >/dev/null 2>&1; then
+    fuser -k 8001/tcp 2>/dev/null || true
+else
+    pkill -f "python server.py" 2>/dev/null || true
+    pkill -f "python3 server.py" 2>/dev/null || true
+fi
+
+# Wait for the port to actually be released (TIME_WAIT can take a few
+# seconds). Bail with a clear error after 10s instead of letting the
+# new server hit "address already in use".
+for i in {1..10}; do
+    if ! ss -tln 2>/dev/null | grep -q ':8001 '; then
+        if [[ $i -gt 1 ]]; then
+            echo "  ✓ port 8001 released (after ${i}s)"
+        fi
+        break
+    fi
+    if [[ $i -eq 10 ]]; then
+        echo "ERROR: port 8001 still bound after 10s. Try:" >&2
+        echo "  sudo lsof -i :8001" >&2
+        echo "  sudo kill -9 <pid-from-above>" >&2
+        exit 1
+    fi
+    sleep 1
+done
 
 # 3. Launch in background
 cd backend
