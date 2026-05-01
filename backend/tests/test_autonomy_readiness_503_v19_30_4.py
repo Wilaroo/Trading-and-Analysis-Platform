@@ -133,6 +133,29 @@ def test_event_loop_monitor_dumps_task_stacks_on_wedge():
         "v19.30.5 monitor must sort by NUMERIC Task-N order — the "
         "alphabetical sort dropped Task-2..Task-9 past the 30-task cap"
     )
+    # v19.30.6: thread-based watchdog that captures the main thread's
+    # stack WHILE the loop is wedged (the asyncio-internal dump can
+    # only run AFTER the wedge resolves). The watchdog code lives
+    # OUTSIDE the monitor coroutine (sync function spawned by the
+    # parent startup_event scope), so search the full source.
+    full_src = src
+    assert "WEDGE WATCHDOG" in full_src, (
+        "v19.30.6 must add a thread-based watchdog labelled "
+        "'WEDGE WATCHDOG TRIGGERED' that fires WHILE the wedge is "
+        "active — the asyncio-internal dump can't catch the actual "
+        "blocker frame because it runs after the wedge resolves"
+    )
+    assert "_wedge_watchdog_thread" in full_src or "wedge-watchdog" in full_src, (
+        "v19.30.6 must spin a daemon thread named 'wedge-watchdog'"
+    )
+    assert "_current_frames()" in full_src or "sys._current_frames" in full_src, (
+        "v19.30.6 thread watchdog must use sys._current_frames() to "
+        "capture the main thread's stack from outside the loop"
+    )
+    assert "_loop_heartbeat" in full_src, (
+        "v19.30.6 must use a heartbeat counter that the asyncio loop "
+        "bumps and the watchdog thread reads"
+    )
 
 
 # ── 3. Behavioural — gather makes the 7 sub-checks parallel ───────────

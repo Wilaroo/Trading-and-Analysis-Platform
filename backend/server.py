@@ -3815,90 +3815,186 @@ async def startup_event():
     # against transient wedges (often impossible since wedges resolve before
     # py-spy can attach). With this, EVERY wedge >5s leaves a smoking-gun
     # stack trace in the log naming the exact file:line of the blocker.
+    #
+    # v19.30.6 (2026-05-02 evening) — switched to a thread-based watchdog.
+    # The asyncio-internal version (v19.30.4/.5) had a fundamental design
+    # flaw: it could only dump AFTER its own `await asyncio.sleep(0)`
+    # returned — i.e., AFTER the wedge resolved. By that point the blocker
+    # task had already advanced past its sync call site, so the dump
+    # showed lots of post-wedge state but never the actual blocker frame.
+    # The fix: spin a daemon Python thread that watches a heartbeat
+    # counter the loop bumps every 0.5s. If the counter stops moving for
+    # >5s, the thread does `sys._current_frames()` from outside the loop
+    # — capturing the main thread's REAL current frame WHILE it's still
+    # stuck on the sync call. That's the smoking gun.
+    import threading as _threading_mod
+    import sys as _sys_mod
+    import traceback as _traceback_mod
+    import io as _io_mod
+    import time as _time_mod
+
+    _loop_heartbeat = [0]   # mutable container so closures share state
+    _heartbeat_seen_t = [_time_mod.monotonic()]
+    _watchdog_last_dump_t = [0.0]
+    _WATCHDOG_THRESHOLD_S = 5.0
+    _WATCHDOG_COOLDOWN_S = 30.0
+
+    def _wedge_watchdog_thread():
+        """Daemon thread that watches the asyncio loop heartbeat. If the
+        heartbeat goes stale for >5s, dumps every Python thread's stack
+        — catching the main thread mid-wedge (unlike the asyncio-internal
+        dump which can only run AFTER the wedge resolves).
+        """
+        last_seen = _loop_heartbeat[0]
+        last_seen_t = _time_mod.monotonic()
+        while True:
+            try:
+                _time_mod.sleep(1.0)
+                now = _time_mod.monotonic()
+                cur = _loop_heartbeat[0]
+                if cur != last_seen:
+                    last_seen = cur
+                    last_seen_t = now
+                    _heartbeat_seen_t[0] = now
+                    continue
+                stuck_for = now - last_seen_t
+                if (
+                    stuck_for >= _WATCHDOG_THRESHOLD_S
+                    and (now - _watchdog_last_dump_t[0]) >= _WATCHDOG_COOLDOWN_S
+                ):
+                    _watchdog_last_dump_t[0] = now
+                    buf = _io_mod.StringIO()
+                    buf.write(
+                        f"\n=== WEDGE WATCHDOG TRIGGERED "
+                        f"(main thread stuck for {stuck_for:.1f}s) ===\n"
+                    )
+                    buf.write(
+                        "Python thread stacks captured WHILE the loop "
+                        "is wedged (the asyncio-internal dump that "
+                        "follows runs after the wedge resolves and "
+                        "shows different state).\n"
+                    )
+                    frames = _sys_mod._current_frames()
+                    # Identify the loop thread by name (uvicorn's MainThread)
+                    main_ident = _threading_mod.main_thread().ident
+                    for thread in _threading_mod.enumerate():
+                        tid = thread.ident
+                        if tid not in frames:
+                            continue
+                        is_main = " ← MAIN/LOOP THREAD" if tid == main_ident else ""
+                        buf.write(
+                            f"\n--- Thread '{thread.name}' "
+                            f"(tid={tid}, daemon={thread.daemon}){is_main} ---\n"
+                        )
+                        try:
+                            _traceback_mod.print_stack(
+                                frames[tid], limit=20, file=buf
+                            )
+                        except Exception as _se:
+                            buf.write(f"  (could not print stack: {_se})\n")
+                    buf.write("=== END WEDGE WATCHDOG ===\n")
+                    print(buf.getvalue())
+            except Exception as _werr:
+                # Never let the watchdog thread crash; print and continue.
+                try:
+                    print(f"[wedge-watchdog] error: {_werr}")
+                except Exception:
+                    pass
+
+    # Spin the watchdog as a daemon BEFORE the asyncio monitor — it will
+    # idle silently waiting for heartbeats to stop.
+    _watchdog_thread = _threading_mod.Thread(
+        target=_wedge_watchdog_thread,
+        name="wedge-watchdog",
+        daemon=True,
+    )
+    _watchdog_thread.start()
+
     async def _event_loop_monitor():
         """Periodically check event loop responsiveness. If asyncio.sleep(0)
-        takes >500ms, something is blocking. If it takes >5s, dump task stacks."""
-        import time
-        import io
+        takes >500ms, something is blocking. If it takes >5s, dump task stacks.
+
+        Two complementary outputs:
+          * `WEDGE WATCHDOG TRIGGERED` — produced by a SEPARATE Python
+            thread the moment a wedge >5s is detected. Captures
+            `sys._current_frames()` while the main thread is still stuck.
+            This is the smoking gun (v19.30.6).
+          * `ASYNCIO TASK STACK DUMP` — produced by this coroutine
+            AFTER the wedge resolves. Useful for additional context
+            (which other tasks were queued up). v19.30.4.
+        """
         await asyncio.sleep(5)
-        # Cooldown so a sustained wedge doesn't spam the log every 2s with
-        # stack dumps (still records every block in the lag print).
         last_dump_t = 0.0
         DUMP_COOLDOWN_S = 30.0
         DUMP_THRESHOLD_S = 5.0
         while True:
-            t0 = time.monotonic()
+            # Bump heartbeat — the watchdog thread reads this to detect wedges.
+            _loop_heartbeat[0] += 1
+
+            t0 = _time_mod.monotonic()
             await asyncio.sleep(0)
-            lag = time.monotonic() - t0
+            lag = _time_mod.monotonic() - t0
             if lag > 0.5:  # 500ms threshold
                 print(f"⚠️ EVENT LOOP BLOCKED for {lag:.1f}s! Check for synchronous calls.")
                 # v19.30.4: auto-dump task stacks on serious wedges
-                now = time.monotonic()
+                now = _time_mod.monotonic()
                 if lag >= DUMP_THRESHOLD_S and (now - last_dump_t) >= DUMP_COOLDOWN_S:
                     last_dump_t = now
                     try:
-                        buf = io.StringIO()
+                        buf = _io_mod.StringIO()
                         buf.write(
                             f"\n=== ASYNCIO TASK STACK DUMP (lag={lag:.1f}s, "
                             f"trigger=event_loop_monitor) ===\n"
                         )
                         tasks = [t for t in asyncio.all_tasks() if not t.done()]
 
-                        # v19.30.5 (2026-05-02): two important fixes after
-                        # operator-flagged dump quality issues 2026-05-02 evening.
-                        #
-                        # 1) Filter out IDLE tasks (waiting on asyncio.sleep
-                        #    or asyncio.wait_for via Future). These are not
-                        #    the blocker. Removing them frees the budget for
-                        #    the actually-active tasks where the blocker is
-                        #    hiding.
-                        # 2) Sort by numeric Task ID, not alphabetically.
-                        #    Pre-fix: "Task-2" sorted AFTER "Task-19" so
-                        #    Task-2 through Task-9 (which often include the
-                        #    trading bot loop, scanner loop, etc.) got
-                        #    dropped past the 30-task cap. Now Task-1, 2, 3
-                        #    show first.
+                        # v19.30.5/.6: classify tasks by what they're awaiting.
+                        # We can't reliably detect "idle in asyncio.sleep" via
+                        # the top frame (it's the calling coro, not sleep),
+                        # so use task._fut_waiter — every pending task is
+                        # waiting on some Future. If that Future is the
+                        # internal sleep Future, we treat the task as idle.
+                        # Heuristic: the top stack frame's filename is
+                        # in the streaming-loops region of server.py and
+                        # the source line contains 'sleep'.
                         import re
-                        def _is_idle(_t):
-                            """A task is idle if its top frame is a sleep/Future-wait."""
+                        def _is_idle_sleeper(_t):
                             try:
-                                stk = _t.get_stack(limit=1)
+                                stk = _t.get_stack(limit=2)
                                 if not stk:
                                     return True
-                                top_func = stk[0].f_code.co_name
-                                return top_func in (
-                                    "sleep", "_step", "wait", "wait_for", "shield",
-                                    "as_completed",
+                                # Look at the top frame's source line
+                                top = stk[0]
+                                fname = top.f_code.co_filename
+                                lineno = top.f_lineno
+                                # Read the actual source line (cached by Python)
+                                import linecache
+                                src_line = linecache.getline(fname, lineno).strip()
+                                return (
+                                    "asyncio.sleep" in src_line
+                                    or "await asyncio.sleep" in src_line
+                                    or "await sleep(" in src_line
                                 )
                             except Exception:
                                 return False
 
                         def _task_sort_key(_t):
-                            """Sort: real coros by qualname, then numeric Task-N
-                            order. Keeps the dump readable and prevents the
-                            alphabetical-cap bug."""
                             name = _t.get_name() or ""
                             m = re.fullmatch(r"Task-(\d+)", name)
                             if m:
                                 return (1, int(m.group(1)), "")
                             return (0, 0, name.lower())
 
-                        active = [t for t in tasks if not _is_idle(t)]
-                        idle = [t for t in tasks if _is_idle(t)]
+                        active = [t for t in tasks if not _is_idle_sleeper(t)]
+                        idle = [t for t in tasks if _is_idle_sleeper(t)]
                         active.sort(key=_task_sort_key)
                         idle.sort(key=_task_sort_key)
                         buf.write(
                             f"Active tasks total: {len(tasks)} "
-                            f"(non-idle: {len(active)}, idle/sleeping: {len(idle)})\n"
-                        )
-                        buf.write(
-                            "Showing non-idle first (the blocker is here); "
-                            "idle stream-loop tasks suppressed for clarity.\n"
+                            f"(non-sleeping: {len(active)}, "
+                            f"sleeping: {len(idle)})\n"
                         )
 
-                        # Bumped task cap 30 → 50, frame limit 8 → 16. The
-                        # active filter means we don't waste the budget on
-                        # idle sleepers anymore.
                         TASK_CAP = 50
                         FRAME_LIMIT = 16
                         for t in active[:TASK_CAP]:
@@ -3914,24 +4010,22 @@ async def startup_event():
                             buf.write(
                                 f"\n... ({len(active) - TASK_CAP} more active tasks not shown)\n"
                             )
-                        # One-line summary of idle tasks (don't dump their
-                        # stacks — wastes log volume)
                         if idle:
                             buf.write(
-                                f"\n--- IDLE TASKS ({len(idle)}, stacks suppressed) ---\n"
+                                f"\n--- SLEEPING TASKS ({len(idle)}, stacks suppressed) ---\n"
                             )
                             for t in idle[:30]:
                                 coro = getattr(t, "get_coro", lambda: None)()
                                 coro_name = getattr(coro, "__qualname__", str(coro))
                                 buf.write(f"  · {t.get_name()}: {coro_name}\n")
                             if len(idle) > 30:
-                                buf.write(f"  · ... ({len(idle) - 30} more idle)\n")
+                                buf.write(f"  · ... ({len(idle) - 30} more sleeping)\n")
                         buf.write("=== END STACK DUMP ===\n")
                         print(buf.getvalue())
                     except Exception as _dump_err:
                         # Never let the monitor itself crash the loop
                         print(f"[event-loop-monitor] stack dump failed: {_dump_err}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.5)  # bump heartbeat 2× per second
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
     
     # Master cache refresh — ONE thread replaces 26+ per cycle

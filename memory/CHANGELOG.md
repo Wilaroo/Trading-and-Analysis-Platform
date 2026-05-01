@@ -2,6 +2,65 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-eighth commit, v19.30.6) — Thread-based wedge watchdog
+
+**Operator-flagged 2026-05-02 evening, after v19.30.4/.5 stack dumps showed every task as "ACTIVE" but never the actual blocker.**
+
+### Why the v19.30.4/.5 dumps weren't useful
+
+The previous dumps (v19.30.4 and the v19.30.5 sort/idle-filter fixes) ran inside the asyncio loop itself. Looking at the math:
+
+```python
+async def _event_loop_monitor():
+    while True:
+        t0 = monotonic()
+        await asyncio.sleep(0)        # ← blocks the wedge progresses past
+        lag = monotonic() - t0
+        if lag > 5:
+            dump_all_tasks()          # ← runs AFTER wedge resolves
+```
+
+The `await asyncio.sleep(0)` only returns when the loop unblocks. By the time the dump runs, **the blocker task has already advanced past its sync call site**. We see post-wedge state — every other task except the one we want.
+
+This explained the operator's last paste: 50+ tasks all classified ACTIVE, no obvious blocker frame, the suspect `anyio.connect_tcp.try_connect` task was a passive pending I/O (doesn't block the loop).
+
+### v19.30.6 fix — thread-based watchdog
+
+A daemon Python thread that watches a heartbeat counter the asyncio loop bumps every 0.5s. If the heartbeat goes stale for >5s, the thread captures `sys._current_frames()` from outside the loop — getting the main thread's REAL current execution state WHILE it's still stuck on the sync call.
+
+Mechanics:
+- New global `_loop_heartbeat = [0]` (mutable container for closures)
+- `_event_loop_monitor` bumps `_loop_heartbeat[0] += 1` each iteration (every 0.5s)
+- Daemon thread `wedge-watchdog` polls every 1s, checks if heartbeat moved
+- If not for ≥5s + cooldown elapsed, it walks `threading.enumerate()`, identifies the main thread (the loop thread), and prints `traceback.print_stack()` for every Python thread
+- Output labeled `=== WEDGE WATCHDOG TRIGGERED ===` with `← MAIN/LOOP THREAD` annotation on the loop thread
+- Existing `=== ASYNCIO TASK STACK DUMP ===` (v19.30.4) still fires after wedge — kept as complementary context
+
+### What shipped
+
+Single file (`backend/server.py`):
+- New `_wedge_watchdog_thread` daemon thread spawned at startup, idles silently waiting for heartbeat staleness
+- `_event_loop_monitor` now bumps `_loop_heartbeat[0]` each iteration and sleeps 0.5s instead of 2s (faster wedge detection)
+- The asyncio task dump is now classified by reading source lines via `linecache.getline` to detect `await asyncio.sleep(...)` patterns reliably (the v19.30.5 attempt by `f_code.co_name` was matching the calling coroutine, not the sleep — every task showed ACTIVE)
+- Both watchdog and asyncio dump have separate 30s cooldowns
+
+Test (`tests/test_autonomy_readiness_503_v19_30_4.py`):
+- Extended source-level pin: must contain `WEDGE WATCHDOG`, `_wedge_watchdog_thread`, `_current_frames`, `_loop_heartbeat`
+- 25/25 across the v19.30.x test suite
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh
+
+# Wait 5-10 min for wedges to recur. Then:
+grep -A 60 "WEDGE WATCHDOG TRIGGERED" /tmp/backend.log | head -200
+```
+
+Look for the line that says `← MAIN/LOOP THREAD` — its 20-deep stack trace shows the EXACT file:line of the synchronous call that's blocking the asyncio loop. That's the smoking gun for v19.30.7's surgical fix.
+
 ## 2026-05-02 (fifty-sixth commit, v19.30.4) — Auto stack-dump on wedge + autonomy/readiness 500→503
 
 **Operator-flagged 2026-05-02 evening, after v19.30.1/.2/.3 were live.**
