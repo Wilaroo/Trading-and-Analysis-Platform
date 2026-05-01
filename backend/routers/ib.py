@@ -3,7 +3,7 @@ Interactive Brokers API Router
 Endpoints for IB connection, account info, trading, and market data
 NO MOCK DATA - Only real verified data from IB Gateway or cached data with timestamps
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -137,6 +137,20 @@ _pushed_ib_data = {
 from collections import deque as _deque
 _push_timestamps: "_deque[float]" = _deque(maxlen=120)
 _push_count_total: int = 0
+
+# v19.30.1 (2026-05-02) — Push-data backpressure. The Windows pusher
+# hammers /api/ib/push-data every ~2s with 100+ quotes. Each push does
+# Mongo writes; under load the anyio thread pool (default 40) saturates
+# and the entire FastAPI loop wedges (HTTP requests time out with 0
+# bytes returned, including /api/health). We now serialise pushes to a
+# bounded concurrency: any push beyond the cap returns 503 Retry-After
+# instantly so the pusher backs off cleanly. _PUSH_DATA_MAX_CONCURRENT
+# is intentionally small because each push is HEAVY (Mongo upsert +
+# tick→bar processing + cache rotation). With one Windows pusher this
+# is effectively serialised.
+_PUSH_DATA_MAX_CONCURRENT: int = 4
+_push_in_flight: int = 0
+_push_dropped_503_total: int = 0
 
 
 def get_pushed_ib_data() -> dict:
@@ -303,8 +317,12 @@ def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
 # ===================== Connection Endpoints =====================
 
 @router.get("/status")
-def get_connection_status():
-    """Get IB connection status — runs as sync (def) to bypass event loop blocking."""
+async def get_connection_status():
+    """Get IB connection status. v19.30.1 (2026-05-02): converted to async
+    so it runs on the event loop directly, bypassing the anyio thread pool
+    that push-data hammers under load. Body is pure in-memory dict reads —
+    no DB, no IB calls — so async is safe and removes one more sync-def
+    handler from the saturable thread pool."""
     if not _ib_service:
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
@@ -421,14 +439,43 @@ async def disconnect_from_ib():
 # ===================== IB Data Pusher Endpoints =====================
 
 @router.post("/push-data")
-def receive_pushed_ib_data(request: IBPushDataRequest):
+async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response):
     """
     Receive data pushed from local IB Data Pusher.
-    Sync handler — runs in thread pool so it doesn't compete with the event loop.
-    Critical for live trading: this MUST respond fast to the Windows PC pusher.
+
+    v19.30.1 (2026-05-02) — Async + backpressure. Pre-fix this was a sync `def`
+    handler that did SYNC pymongo `update_one` on `ib_live_snapshot` and
+    invoked `tick_to_bar_persister.on_push` (which holds a lock + does
+    sync per-bar `update_one`s) inline on the FastAPI thread pool. With
+    the Windows pusher hammering this endpoint every ~2s with 100+
+    quotes, the anyio thread pool saturated and the entire backend
+    wedged — `/api/health` would TCP-accept but never return a byte.
+
+    The fix is two layers:
+      1. Backpressure: if `_PUSH_DATA_MAX_CONCURRENT` pushes are already
+         in flight, return 503 Retry-After:5 instantly so the pusher
+         backs off cleanly. The pusher is happier with a quick 503 than
+         a 120s timeout.
+      2. Offload: every sync mongo write + the tick→bar batch step go
+         through `asyncio.to_thread`, keeping the event loop responsive
+         to other endpoints (notably `/api/health`).
     """
-    global _pushed_ib_data, _push_count_total
-    
+    global _pushed_ib_data, _push_count_total, _push_in_flight, _push_dropped_503_total
+
+    # ── Backpressure gate (cheap, no awaits) ──────────────────────────
+    if _push_in_flight >= _PUSH_DATA_MAX_CONCURRENT:
+        _push_dropped_503_total += 1
+        response.status_code = 503
+        response.headers["Retry-After"] = "5"
+        return {
+            "success": False,
+            "error": "backpressure",
+            "in_flight": _push_in_flight,
+            "max": _PUSH_DATA_MAX_CONCURRENT,
+            "dropped_total": _push_dropped_503_total,
+        }
+
+    _push_in_flight += 1
     try:
         # Use server-side UTC timestamp for consistent staleness checks
         # (IB Pusher sends local time, but staleness checks compare with UTC)
@@ -440,19 +487,25 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
         import time as _t
         _push_timestamps.append(_t.time())
         _push_count_total += 1
-        
-        # Merge quotes
+
+        # Merge quotes (in-memory, fast).
         if request.quotes:
             _pushed_ib_data["quotes"].update(request.quotes)
             # 2026-04-28: feed live ticks into the bar persister so we
             # build 1m/5m/15m/1h OHLCV bars in real-time and upsert them
-            # into ib_historical_data on bar-close. Eliminates the chart's
-            # "PARTIAL coverage" badge for symbols the pusher is streaming.
+            # into ib_historical_data on bar-close. v19.30.1: now offloaded
+            # to a thread because on_push() does sync mongo upserts inside
+            # a global threading.Lock — without to_thread, this blocks the
+            # event loop for the duration of every bar finalisation pass.
             try:
                 from services.tick_to_bar_persister import (
                     get_tick_to_bar_persister,
                 )
-                _bars_finalized = get_tick_to_bar_persister().on_push(request.quotes)
+                _persister = get_tick_to_bar_persister()
+                _quotes_copy = dict(request.quotes)
+                _bars_finalized = await asyncio.to_thread(
+                    _persister.on_push, _quotes_copy
+                )
                 if _bars_finalized:
                     logger.debug(
                         f"tick_to_bar: {_bars_finalized} bars finalized & upserted"
@@ -460,58 +513,68 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
             except Exception as _tb_exc:
                 # Non-fatal: never break the push hot path.
                 logger.debug(f"tick_to_bar persister failed: {_tb_exc}")
-        
-        # Update account data
+
+        # Update account data (in-memory).
         if request.account:
             _pushed_ib_data["account"].update(request.account)
-        
-        # Update positions
+
+        # Update positions (in-memory).
         if request.positions:
             _pushed_ib_data["positions"] = request.positions
-        
+
         # Update Level 2 / DOM data
         if request.level2:
             _pushed_ib_data["level2"].update(request.level2)
-        
+
         # Update Fundamental data
         if request.fundamentals:
             _pushed_ib_data["fundamentals"].update(request.fundamentals)
-        
+
         # Update News data
         if request.news:
             _pushed_ib_data["news"].update(request.news)
-        
+
         # Update News providers
         if request.news_providers:
             _pushed_ib_data["news_providers"] = request.news_providers
-        
+
         quote_count = len(request.quotes) if request.quotes else 0
         pos_count = len(request.positions) if request.positions else 0
         l2_count = len(request.level2) if request.level2 else 0
         fund_count = len(request.fundamentals) if request.fundamentals else 0
         news_count = sum(len(items) for items in request.news.values()) if request.news else 0
-        
+
         # Persist snapshot to MongoDB so chat_server (port 8002) can read it
-        # without HTTP calls to the main backend (avoids thread pool exhaustion)
+        # without HTTP calls to the main backend (avoids thread pool exhaustion).
+        # v19.30.1: offloaded to a thread — pre-fix this was sync pymongo
+        # inline, the single biggest blocker on the loop under push storm.
+        # Also fixed a pre-existing import bug: `from database import get_db`
+        # never resolved (the symbol is `get_database`), so this snapshot
+        # write was silently failing the entire time. Now it works AND is
+        # safe.
         try:
-            from database import get_db
-            _db = get_db()
-            _db["ib_live_snapshot"].update_one(
-                {"_id": "current"},
-                {"$set": {
+            from database import get_database
+            _db = get_database()
+            if _db is not None:
+                _snapshot_payload = {
                     "last_update": _pushed_ib_data["last_update"],
                     "connected": True,
                     "quotes": _pushed_ib_data.get("quotes", {}),
                     "account": _pushed_ib_data.get("account", {}),
                     "positions": _pushed_ib_data.get("positions", []),
-                }},
-                upsert=True
-            )
+                }
+                await asyncio.to_thread(
+                    lambda: _db["ib_live_snapshot"].update_one(
+                        {"_id": "current"},
+                        {"$set": _snapshot_payload},
+                        upsert=True,
+                    )
+                )
         except Exception as snap_err:
             logger.debug(f"IB snapshot write skipped: {snap_err}")
 
         # Immediately update the streaming cache so WebSocket clients get fresh data
-        # without waiting for the next 10s cache refresh cycle
+        # without waiting for the next 10s cache refresh cycle. In-memory only — fast.
         try:
             import server as _srv
             cache = getattr(_srv, '_streaming_cache', None)
@@ -538,16 +601,22 @@ def receive_pushed_ib_data(request: IBPushDataRequest):
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
+
     except Exception as e:
         return {"success": False, "error": str(e)}
+    finally:
+        # Always release the in-flight slot — even on exception.
+        _push_in_flight -= 1
+        if _push_in_flight < 0:  # defensive: should never happen
+            _push_in_flight = 0
 
 
 @router.get("/pushed-data")
-def get_pushed_ib_data():
+async def get_pushed_ib_data():
     """
     Get the latest data pushed from local IB Data Pusher.
-    Async because it only reads in-memory dicts — immune to thread pool starvation.
+    v19.30.1 (2026-05-02): async because body is pure in-memory dict reads —
+    runs on event loop, immune to thread pool saturation.
     """
     global _pushed_ib_data
     
@@ -5806,15 +5875,18 @@ async def get_pusher_health():
 
         # If in-proc memory was reset (e.g., backend restart), fall back to
         # the persisted snapshot so we don't lie and say "disconnected".
+        # v19.30.1 (2026-05-02): use `get_database` (the actual symbol) —
+        # `get_db` was a typo that always raised ImportError silently.
         if not last_update_iso:
             try:
-                from database import get_db
-                _db = get_db()
-                snap = _db["ib_live_snapshot"].find_one(
-                    {"_id": "current"}, {"_id": 0, "last_update": 1, "connected": 1}
-                )
-                if snap and snap.get("last_update"):
-                    last_update_iso = snap["last_update"]
+                from database import get_database
+                _db = get_database()
+                if _db is not None:
+                    snap = _db["ib_live_snapshot"].find_one(
+                        {"_id": "current"}, {"_id": 0, "last_update": 1, "connected": 1}
+                    )
+                    if snap and snap.get("last_update"):
+                        last_update_iso = snap["last_update"]
             except Exception:
                 pass
 
@@ -5927,6 +5999,12 @@ async def get_pusher_health():
                 "pushes_per_min": pushes_per_min,
                 "push_count_total": _push_count_total,
                 "push_rate_health": push_rate_health,
+                # v19.30.1 (2026-05-02): expose push-data backpressure
+                # state so the operator can see if the Windows pusher is
+                # being throttled by the new 503-Retry-After path.
+                "push_in_flight": _push_in_flight,
+                "push_max_concurrent": _PUSH_DATA_MAX_CONCURRENT,
+                "push_dropped_503_total": _push_dropped_503_total,
                 **rpc_stats,
             },
             "collection_mode": {

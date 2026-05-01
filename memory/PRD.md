@@ -65,7 +65,18 @@ python -m backend.scripts.verify_v19_29 --watch
 - `GET /api/scanner/setup-coverage` — orphan/silent/active/time-filtered diagnostic
 - `GET /api/scanner/detector-stats` — per-detector evals + hits (cumulative + cycle)
 - `GET /api/ai-modules/validation/summary` — promotion-rate dashboard
-- `POST /api/ib/push-data` — receive pusher snapshot
+- `POST /api/ib/push-data` — receive pusher snapshot. **v19.30.1
+  (2026-05-02)**: now `async def` with `asyncio.to_thread` offload
+  for sync mongo snapshot upsert + `tick_to_bar_persister.on_push`,
+  plus 503-Retry-After:5 backpressure when ≥4 pushes are in flight
+  (cap = `_PUSH_DATA_MAX_CONCURRENT`). Pre-fix this sync handler did
+  inline sync pymongo + held-lock per-bar upserts on every push,
+  saturating anyio's 40-thread pool and wedging `/api/health` to
+  0-byte timeouts. New observability: `/api/ib/pusher-health.heartbeat`
+  exposes `push_in_flight`, `push_max_concurrent`, `push_dropped_503_total`.
+- `GET /api/health` — **v19.30.1 (2026-05-02)**: `def` → `async def`.
+  Must be async so it runs on the event loop directly, immune to
+  thread-pool starvation regardless of what's happening downstream.
 - `GET /api/ib/orders/pending` — pusher polls this
 - `POST /api/ib/orders/claim/{id}`, `POST /api/ib/orders/result` — claim/complete hooks pusher should use but may not
 - `POST /api/ai-modules/shadow/track-outcomes?drain=true&batch_size=50` — drain shadow-decision backlog (added 2026-04-29). Yields to event loop between batches.

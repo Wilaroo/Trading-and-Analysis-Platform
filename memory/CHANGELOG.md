@@ -2,6 +2,150 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-third commit, v19.30.1) — Event-loop wedge fix + push-data backpressure
+
+**Operator-flagged live failure 2026-05-01 night → 2026-05-02 morning**:
+
+```
+$ curl -v -m 10 localhost:8001/api/health
+* Connected to localhost (127.0.0.1) port 8001
+> GET /api/health HTTP/1.1
+... 10s pass ...
+* Operation timed out after 10000 milliseconds with 0 bytes received
+```
+
+Backend wedged AFTER `Application startup complete`. ALL endpoints —
+including `/api/health` which does literally `return {"status":
+"healthy"}` — TCP-accepted but never returned a byte. Tried `localhost`,
+`127.0.0.1`, and `192.168.50.2` — all same symptom. Repro'd reliably.
+
+### Root cause (deeper async-pymongo audit)
+
+Three stacked bugs combined to wedge the loop:
+
+1. **`/api/ib/push-data` was a sync `def` handler** doing sync pymongo
+   `update_one` to `ib_live_snapshot` inline. With the Windows pusher
+   pushing every ~2s and 100+ quote symbols, this saturated anyio's
+   default 40-thread pool.
+2. **`tick_to_bar_persister.on_push()` ran inline inside that same
+   sync handler**, holding a global `threading.Lock` and doing a
+   per-bar sync `update_one` upsert loop. On every minute boundary
+   that's ~100 sync mongo writes serialised under the lock.
+3. **`/api/health` was also sync `def`** so it shared the saturable
+   anyio thread pool. Once the pool filled, `/api/health` queued
+   forever and timed out 0-byte.
+
+A full audit of the codebase via `ast` walk identified 11 other sync
+`def` handlers in hot paths and 56 inline sync mongo calls in async
+handlers. v19.30.1 patches the wedge-causing minority; the others are
+in low-frequency endpoints that don't compound under push-storm load.
+
+Bonus pre-existing bug found: the snapshot write in `/api/ib/push-data`
+did `from database import get_db` — but the actual symbol is
+`get_database`. So that snapshot write had been silently failing the
+entire time. Fixed.
+
+### What shipped — 5 coordinated patches across 3 files
+
+#### A — `/api/health` async-ification (`routers/system_router.py`)
+- `def health_check()` → `async def health_check()`. Health now runs on
+  the event loop directly — immune to anyio thread pool saturation.
+
+#### B — `/api/ib/push-data` async + backpressure (`routers/ib.py`)
+- `def receive_pushed_ib_data(...)` → `async def receive_pushed_ib_data(..., response: Response)`
+- New module-level state:
+  - `_PUSH_DATA_MAX_CONCURRENT = 4` (operator-tunable cap)
+  - `_push_in_flight` counter
+  - `_push_dropped_503_total` for observability
+- New backpressure short-circuit: if `_push_in_flight >= cap`, return
+  `503 Retry-After: 5` instantly (no awaits, no DB calls). The pusher
+  sees a fast 503 instead of waiting on a wedged 120s timeout.
+- Sync mongo upsert to `ib_live_snapshot` now wrapped in
+  `asyncio.to_thread(lambda: db["ib_live_snapshot"].update_one(...))`.
+- `tick_to_bar_persister.on_push(quotes)` now wrapped in
+  `asyncio.to_thread(_persister.on_push, _quotes_copy)` — the
+  persister's global threading.Lock + per-bar sync upserts no longer
+  pin the event loop.
+- Always-release semantics: `_push_in_flight` decrement is in `finally`.
+
+#### C — `/api/ib/status` + `/api/ib/pushed-data` async-ification
+(`routers/ib.py`) — Two more sync def handlers polled by the dashboard.
+Both bodies are pure in-memory dict reads — converted to `async def`.
+
+#### D — `database.get_db` typo fix (`routers/ib.py`)
+- Two sites (`push-data` snapshot write + `pusher-health` snapshot
+  fallback) imported the non-existent `get_db`. Now imports the actual
+  `get_database` symbol. Snapshot write to `ib_live_snapshot` finally
+  works.
+
+#### E — `BriefMeAgent` injector update (`routers/agents.py`)
+- The `routers.ib` module has a name collision: helper
+  `def get_pushed_ib_data() -> dict` at line 157 vs route handler
+  `async def get_pushed_ib_data()` at line 611. Switched to importing
+  the underlying `_pushed_ib_data` dict directly to avoid the
+  async-route shadow.
+
+### New observability
+
+`/api/ib/pusher-health.heartbeat` now exposes:
+- `push_in_flight` — current count of pushes being processed (0..4)
+- `push_max_concurrent` — the cap (4)
+- `push_dropped_503_total` — session-wide tally of pushes rejected
+  for backpressure. Climbing fast = pusher too aggressive OR backend
+  Mongo too slow.
+
+### Verification (3 layers)
+
+#### 1. Unit pytest (7 new cases in `tests/test_event_loop_wedge_fix_v19_30_1.py`)
+- Source-level pins on all five patches.
+- Behavioural: 503 short-circuit completes in <50ms when cap is hit;
+  8 concurrent pushes complete with <100ms max event-loop block
+  (pre-fix: 2.5s+ block reproduced and pinned in negative-control test).
+
+#### 2. Local backend stress test
+30 parallel `POST /api/ib/push-data` + 5 parallel `GET /api/health`:
+- Pre-fix: all 35 requests time out 0-byte
+- Post-fix: 11 pushes 200, 19 pushes 503 (backpressure working as
+  designed), 5 health 200 — total elapsed 36ms, max health latency
+  21ms.
+
+#### 3. Test suite regression
+**120/120 combined** across v19.23 + v19.24 + v19.25 + v19.26 + v19.27
++ v19.28 + v19.29 + v19.30 + v19.30.1 suites. Ruff clean on new code.
+
+### Operator action (Spark deploy)
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+pkill -f "python server.py"
+cd backend && nohup python server.py > /tmp/backend.log 2>&1 &
+sleep 8
+
+curl -s -m 5 localhost:8001/api/health
+# Expected: {"status":"healthy","timestamp":"..."} — INSTANTLY
+
+# Watch the new backpressure observability while pusher runs:
+watch -n 2 'curl -s localhost:8001/api/ib/pusher-health | \
+  jq ".heartbeat | {pushes_per_min, push_in_flight, push_max_concurrent, push_dropped_503_total}"'
+```
+
+If `push_dropped_503_total` climbs fast, tune `_PUSH_DATA_MAX_CONCURRENT`
+in `routers/ib.py` upward (e.g. 6, 8) and restart. Full deploy runbook:
+`memory/V19_30_1_WEDGE_FIX.md`.
+
+### What this unblocks
+
+Now that the loop stays responsive, the rest of the v19.30 P0 stack
+becomes implementable:
+- 🔴 Diagnostics Data Quality Pack — fix `ai_passed`/`bot_fired`
+  consistency in Pipeline Funnel, Module Scorecard plumbing.
+- 🔴 Pre-open Order Purge — `POST /api/trading-bot/cancel-all-pending-orders`
+  to nuke GTC brackets before market open.
+- 🟡 Bot Thoughts content capture in Trail Explorer.
+- 🟡 Shadow-vs-Real gap drilldown.
+- 🟡 Drift detector (CRITICAL stream when bot tracks <80% of IB shares).
+
 ## 2026-05-01 (fifty-second commit, v19.29-validation-2) — Morning Play A reset script + runbook
 
 **Operator surfaced live state drift on Spark** during fork-tail debugging:

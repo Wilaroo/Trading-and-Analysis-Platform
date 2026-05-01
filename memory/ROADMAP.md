@@ -3,7 +3,93 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.29-validation-2 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.1 fork)
+
+### 🎯 Just shipped 2026-05-02 v19.30.1 — see CHANGELOG (fifty-third commit)
+**FastAPI event-loop wedge fix + push-data backpressure.**
+
+The backend was wedging AFTER startup — `/api/health` would TCP-accept
+but never return a byte. Three stacked bugs:
+
+1. `/api/ib/push-data` was a sync `def` doing inline sync mongo
+   `update_one` to `ib_live_snapshot`.
+2. `tick_to_bar_persister.on_push()` ran inline inside that sync
+   handler, holding a global lock + per-bar sync upserts.
+3. `/api/health` was also sync `def` so it shared the saturated anyio
+   thread pool — hence the 0-byte timeouts.
+
+What shipped:
+- ✅ `/api/health` `def` → `async def` (now event-loop-protected).
+- ✅ `/api/ib/push-data` `def` → `async def` + `asyncio.to_thread`
+  for snapshot upsert + tick_to_bar offload.
+- ✅ NEW: 503 Retry-After:5 backpressure when ≥4 pushes in flight.
+  Pusher backs off cleanly instead of timing out 120s.
+- ✅ `/api/ib/status` + `/api/ib/pushed-data` `def` → `async def`.
+- ✅ Bonus: fixed pre-existing `from database import get_db` typo
+  (real symbol is `get_database`) — `ib_live_snapshot` writes from
+  push-data finally work.
+- ✅ `BriefMeAgent` injector switched to use `_pushed_ib_data` dict
+  directly to avoid the now-async route handler shadow.
+- ✅ 7 new pytests in `test_event_loop_wedge_fix_v19_30_1.py`.
+  **120/120 combined across v19 stack.**
+- ✅ Live verified locally: 30 parallel pushes + 5 health checks
+  completed in 36ms total, all health 200, max latency 21ms.
+
+Operator action — Spark deploy:
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+pkill -f "python server.py"
+cd backend && nohup python server.py > /tmp/backend.log 2>&1 &
+sleep 8
+curl -s -m 5 localhost:8001/api/health  # MUST return instantly
+```
+
+### 🔴 P0 — Now unblocked by v19.30.1
+Now that the loop stays responsive, the rest of the v19.30 P0 stack is
+buildable:
+
+1. **Diagnostics Data Quality Pack** — fix Pipeline Funnel
+   `ai_passed`/`bot_fired` mutual consistency (currently shows 0% AI
+   pass while SentCom Intelligence shows 60%); fix Module Scorecard
+   plumbing so `shadow_module_performance` surfaces per-vote breakdown.
+2. **`POST /api/trading-bot/cancel-all-pending-orders`** — nuke all
+   pending GTC brackets at IB before market open to prevent naked
+   shorts if positions are manually flattened.
+3. **Bot Thoughts content capture** — Trail Explorer shows empty
+   `content` field for fired trades.
+
+### 🟡 P1
+- Shadow-vs-Real gap drilldown — endpoint + UI panel showing why
+  shadow win rate is 71% but real is 32% (which stop hit early?).
+- Drift detector — CRITICAL Unified Stream event when bot tracks
+  <80% of IB shares for any symbol.
+- Boot-time one-shot phantom sweep regardless of RTH (so phantoms
+  don't survive backend restarts).
+- IB Gateway reconnect-on-timeout with exponential backoff.
+- **(Deeper async-pymongo audit follow-up)** — the v19.30.1 audit
+  flagged 11 sync `def` handlers in hot paths and 56 inline sync
+  mongo calls in async handlers. The wedge-causing minority are
+  fixed. The remaining ones are in low-frequency endpoints
+  (`/api/ib/orders/*`, `/system-health`, `/training-status`,
+  `/regime-live`, etc.) — convert to async incrementally as they
+  surface as bottlenecks.
+
+### 🟢 P2 / P3 (unchanged)
+- v19.31 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.32 Chart WebSockets (live bar push, ~50ms vs 5s tail-poll)
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics (Hurst + OU half-life)
+- Liquidity-aware trail in `stop_manager.py`
+- Scanner card "Proven / Maturing / Cold-start" badge
+- Chart bubble click → `sentcom:focus-symbol`
+- SEC EDGAR 8-K integration
+- Safely retire Alpaca fallback
+- Break up monolithic `server.py`
+
+---
+
+## 🔴 Now / Near-term (previous fork pickup — 2026-05-01 v19.29-validation-2)
 
 ### 🎯 Just shipped 2026-05-01 v19.29-validation-2 — see CHANGELOG (fifty-second commit)
 **Morning Play A — clean slate reset for 2026-05-02 open.**

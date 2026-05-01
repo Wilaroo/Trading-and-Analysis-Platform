@@ -70,8 +70,11 @@ def init_system_router(
 
 
 @router.get("/api/health")
-def health_check():
-    """Async handler — runs on event loop, immune to thread pool saturation."""
+async def health_check():
+    """v19.30.1 (2026-05-02): MUST be async so it runs on the event loop and
+    bypasses the anyio thread pool. Otherwise a sync push-data hammer that
+    saturates the thread pool will starve `/api/health` even though this
+    handler does no DB work."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 

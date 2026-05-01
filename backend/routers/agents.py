@@ -184,7 +184,12 @@ def get_brief_me_agent():
     
     if _brief_me_agent is None:
         from agents.brief_me_agent import BriefMeAgent
-        from routers.ib import get_pushed_ib_data
+        # v19.30.1 (2026-05-02): use the raw `_pushed_ib_data` dict directly
+        # instead of `get_pushed_ib_data()`. The route handler with that name
+        # at routers/ib.py is now async, so calling it returns a coroutine.
+        # BriefMeAgent reads `_pushed_ib_data` directly elsewhere anyway, so
+        # passing the dict reference is the consistent path.
+        from routers.ib import _pushed_ib_data as ib_pushed_data_dict
         from services.news_service import get_news_service
         from database import get_database
         
@@ -204,7 +209,7 @@ def get_brief_me_agent():
             regime_performance_service=_services.get("regime_performance_service"),
             market_intel_service=_services.get("market_intel_service"),
             alpaca_service=_services.get("alpaca_service"),
-            ib_pushed_data=get_pushed_ib_data(),
+            ib_pushed_data=ib_pushed_data_dict,
             news_service=get_news_service()  # NEW: Inject news service for real news/catalysts
         )
         
