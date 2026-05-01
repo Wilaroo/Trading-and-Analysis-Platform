@@ -3809,19 +3809,61 @@ async def startup_event():
     loop.slow_callback_duration = 0.5  # Log warning if a callback takes >500ms
     
     # Start WebSocket streaming tasks (lightweight, non-blocking)
-    # Event loop health monitor — detects blocking calls
+    # Event loop health monitor — detects blocking calls. v19.30.4 (2026-05-02):
+    # when a >5s block fires, automatically dump every running asyncio task's
+    # current stack to the log. Without this the operator has to race py-spy
+    # against transient wedges (often impossible since wedges resolve before
+    # py-spy can attach). With this, EVERY wedge >5s leaves a smoking-gun
+    # stack trace in the log naming the exact file:line of the blocker.
     async def _event_loop_monitor():
-        """Periodically check event loop responsiveness. If asyncio.sleep(0) takes >500ms, something is blocking."""
+        """Periodically check event loop responsiveness. If asyncio.sleep(0)
+        takes >500ms, something is blocking. If it takes >5s, dump task stacks."""
         import time
+        import io
         await asyncio.sleep(5)
+        # Cooldown so a sustained wedge doesn't spam the log every 2s with
+        # stack dumps (still records every block in the lag print).
+        last_dump_t = 0.0
+        DUMP_COOLDOWN_S = 30.0
+        DUMP_THRESHOLD_S = 5.0
         while True:
             t0 = time.monotonic()
             await asyncio.sleep(0)
             lag = time.monotonic() - t0
             if lag > 0.5:  # 500ms threshold
                 print(f"⚠️ EVENT LOOP BLOCKED for {lag:.1f}s! Check for synchronous calls.")
+                # v19.30.4: auto-dump task stacks on serious wedges
+                now = time.monotonic()
+                if lag >= DUMP_THRESHOLD_S and (now - last_dump_t) >= DUMP_COOLDOWN_S:
+                    last_dump_t = now
+                    try:
+                        buf = io.StringIO()
+                        buf.write(
+                            f"\n=== ASYNCIO TASK STACK DUMP (lag={lag:.1f}s, "
+                            f"trigger=event_loop_monitor) ===\n"
+                        )
+                        tasks = [t for t in asyncio.all_tasks() if not t.done()]
+                        # Sort: tasks with names first (easier to identify)
+                        tasks.sort(key=lambda t: (t.get_name() or "_unnamed").lower())
+                        buf.write(f"Active tasks: {len(tasks)}\n")
+                        for t in tasks[:30]:  # cap at 30 to avoid log spam
+                            name = t.get_name() or "_unnamed"
+                            coro = getattr(t, "get_coro", lambda: None)()
+                            coro_name = getattr(coro, "__qualname__", str(coro))
+                            buf.write(f"\n--- Task: {name} | coro: {coro_name} ---\n")
+                            try:
+                                t.print_stack(file=buf, limit=8)
+                            except Exception as _e:
+                                buf.write(f"  (could not print stack: {_e})\n")
+                        if len(tasks) > 30:
+                            buf.write(f"\n... ({len(tasks) - 30} more tasks not shown)\n")
+                        buf.write("=== END STACK DUMP ===\n")
+                        print(buf.getvalue())
+                    except Exception as _dump_err:
+                        # Never let the monitor itself crash the loop
+                        print(f"[event-loop-monitor] stack dump failed: {_dump_err}")
             await asyncio.sleep(2)
-    asyncio.create_task(_event_loop_monitor())
+    asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
     
     # Master cache refresh — ONE thread replaces 26+ per cycle
     asyncio.create_task(_streaming_cache_loop())

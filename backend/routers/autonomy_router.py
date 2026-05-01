@@ -23,6 +23,7 @@ Endpoint:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -212,20 +213,66 @@ async def _check_risk_consistency(client) -> Dict[str, Any]:
 
 @router.get("/readiness")
 async def readiness() -> Dict[str, Any]:
-    """Aggregate go/no-go for autonomous trading."""
-    async with httpx.AsyncClient() as client:
-        # Run all 8 checks
-        account = await _check_account(client)
-        pusher = await _check_pusher_rpc(client)
-        live_bars = await _check_live_bars(client)
-        trophy = await _check_trophy_run(client)
-        kill_switch = await _check_kill_switch(client)
-        eod = await _check_eod(client)
-        risk = await _check_risk_consistency(client)
+    """Aggregate go/no-go for autonomous trading.
 
-        # Auto-execute is informational, not a check
-        ax = await _get_json(client, "/api/live-scanner/auto-execute/status")
-        auto_execute_enabled = bool(ax and ax.get("enabled"))
+    v19.30.4 (2026-05-02): two changes
+      1. The 7 sub-checks now run in parallel via `asyncio.gather`. Pre-fix
+         they ran sequentially with 5s timeout each — worst-case 35s, which
+         maps EXACTLY onto the operator's pusher 5s read-timeout failures
+         (the pusher polls /api/autonomy/readiness as part of its boot
+         dance). Parallel = 5s worst case.
+      2. Wrap the body in try/except so a `CancelledError` or `TimeoutError`
+         (e.g., during a transient event-loop block) returns a graceful 503
+         with `verdict=red, summary='readiness check cancelled (loop busy)'`
+         instead of bubbling out as a 500 Internal Server Error. Pre-fix,
+         every loop wedge produced a 500 here that the pusher's logs
+         flagged as a real bug.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            # Run all 7 checks concurrently (each is independent — no shared
+            # mutable state, no ordering requirement). gather returns
+            # results in the same order as the input coroutines.
+            (account, pusher, live_bars, trophy,
+             kill_switch, eod, risk) = await asyncio.gather(
+                _check_account(client),
+                _check_pusher_rpc(client),
+                _check_live_bars(client),
+                _check_trophy_run(client),
+                _check_kill_switch(client),
+                _check_eod(client),
+                _check_risk_consistency(client),
+                return_exceptions=False,
+            )
+
+            # Auto-execute is informational, not a check. Run after gather
+            # so it can't slow the verdict.
+            ax = await _get_json(client, "/api/live-scanner/auto-execute/status")
+            auto_execute_enabled = bool(ax and ax.get("enabled"))
+    except (asyncio.CancelledError, asyncio.TimeoutError) as cancel_err:
+        # Don't return 500 on a transient loop-wedge cancel. Operator's
+        # pusher polls this every few seconds; a 500 in their logs is
+        # noise. 503 is the correct status (Service Unavailable / try
+        # again in a moment).
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "success": False,
+                "verdict": "red",
+                "summary": "readiness check cancelled (event loop busy or timed out)",
+                "ready_for_autonomous": False,
+                "blockers": ["loop_busy"],
+                "warnings": [],
+                "next_steps": [
+                    "Wait 5s and retry. If persistent, see /tmp/backend.log "
+                    "for 'EVENT LOOP BLOCKED' lines and the asyncio task "
+                    "stack dump (v19.30.4)."
+                ],
+                "error_class": type(cancel_err).__name__,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     checks = {
         "account": account,

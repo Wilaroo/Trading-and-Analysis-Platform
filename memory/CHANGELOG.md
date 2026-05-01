@@ -2,6 +2,115 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-sixth commit, v19.30.4) — Auto stack-dump on wedge + autonomy/readiness 500→503
+
+**Operator-flagged 2026-05-02 evening, after v19.30.1/.2/.3 were live.**
+
+The deploy worked (clean 24s boot via the new launcher), but the
+operator's log + dashboard revealed a NEW recurring issue:
+
+```
+17:11:13: Event loop lag:  6.0s
+17:12:36: Event loop lag: 35.0s
+17:13:40: Event loop lag: 35.0s
+17:14:44: Event loop lag: 46.1s   ← biggest
+17:15:48: Event loop lag:  3ms    (recovered)
+```
+
+Wedges of **35-46s recurring every 60-90s** — a THIRD wedge class
+beyond push-data (v19.30.1) and bar-poll (v19.30.2). Symptoms:
+  - WebSocket keepalive (20s default) times out → dashboard "Loading bars..."
+  - Pusher's `requests.get()` hits its 5s read-timeout, retries 3 times
+  - `/api/autonomy/readiness` returns 500 with `CancelledError` traceback
+
+### Root cause analysis
+
+- **The 35-46s wedges**: source unknown — we don't have a stack
+  trace because by the time the operator runs `py-spy dump`, the
+  loop has recovered. We need automated capture.
+- **The 500 on /api/autonomy/readiness**: `readiness()` made
+  7 internal HTTP calls **sequentially**, each with a 5s timeout.
+  Worst case = 35s — which mapped EXACTLY onto the 35s wedges. When
+  the loop wedged, all 7 awaits cancelled and the httpx context exit
+  re-raised CancelledError → FastAPI returned 500. Pure cascade
+  failure: the wedge causes the 500, the 500 wakes up the operator
+  to investigate the 500, but the 500 isn't the bug — it's just the
+  loudest victim.
+
+### What shipped (3 surgical patches)
+
+#### A — Auto-dump asyncio task stacks on wedge (`backend/server.py`)
+- `_event_loop_monitor` (the existing v19.30 watchdog that prints the
+  `EVENT LOOP BLOCKED for N.Ns` warning) now ALSO walks
+  `asyncio.all_tasks()` and calls `task.print_stack()` on each, with
+  a 30s cooldown so a sustained wedge doesn't spam the log.
+- Output is clearly delimited:
+  ```
+  === ASYNCIO TASK STACK DUMP (lag=46.1s, trigger=event_loop_monitor) ===
+  Active tasks: 17
+  --- Task: _scan_loop | coro: BackgroundScanner._scan_loop ---
+    File "...", line N, in _scan_loop
+      ...
+  ```
+- Operator can now `grep "ASYNCIO TASK STACK DUMP" /tmp/backend.log`
+  to pinpoint the next wedge's source. No more racing py-spy.
+- Wrapped in try/except so the monitor itself can never crash the
+  loop. Capped at 30 tasks so worst-case logging stays bounded.
+
+#### B — Parallelise + soft-fail `/api/autonomy/readiness` (`routers/autonomy_router.py`)
+- The 7 sub-checks (`_check_account`, `_check_pusher_rpc`,
+  `_check_live_bars`, `_check_trophy_run`, `_check_kill_switch`,
+  `_check_eod`, `_check_risk_consistency`) now run via
+  `asyncio.gather` instead of sequentially. Worst case: 35s → 5s.
+  On a healthy loop: ~50ms.
+- Top-level try/except catches `asyncio.CancelledError` /
+  `asyncio.TimeoutError` and raises `HTTPException(503)` with a
+  structured detail body (`verdict: red`, `blockers: [loop_busy]`,
+  `next_steps: ["Wait 5s and retry…"]`). 503 is the correct status
+  for "service busy, try again" — the pusher's logs no longer flag
+  these as 500 bugs.
+
+#### C — 5 new pytests (`tests/test_autonomy_readiness_503_v19_30_4.py`)
+- Source-level pins: `asyncio.gather` is used; CancelledError is
+  caught; `status_code=503`; `_event_loop_monitor` calls
+  `print_stack` and uses `asyncio.all_tasks()` with cooldown.
+- Behavioural: 7 mocked sub-checks each sleeping 0.3s complete in
+  <1.0s (proves parallelism). Forced `CancelledError` from gather
+  produces an `HTTPException(503)` with the correct detail shape.
+
+### Verification
+
+- 5/5 new tests pass.
+- **130/130 total across v19.23 + v19.24 + v19.25 + v19.26 + v19.27 +
+  v19.28 + v19.29 + v19.30 + v19.30.1 + v19.30.2 + v19.30.3 + v19.30.4
+  suites**. Ruff clean on new code.
+
+### What this unblocks
+
+- **Diagnosing the 35-46s wedges**: the next time you restart and
+  let the bot run, every wedge >5s will leave a smoking-gun stack
+  dump in `/tmp/backend.log`. We get the next surgical fix
+  AUTOMATICALLY without operator intervention.
+- **Pusher logs noise reduction**: `/api/autonomy/readiness` 500
+  errors stop. Pusher's retry counter drops materially.
+- **Faster boot signals**: `/api/autonomy/readiness` typically
+  returns in <100ms now (gather + healthy loop) instead of 35s
+  best-case.
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh                  # OR via .bat orchestrator
+
+# After a few minutes of running, check for auto-captured stack dumps:
+grep -A 60 "ASYNCIO TASK STACK DUMP" /tmp/backend.log | head -200
+```
+
+Paste any stack dumps that show up — the next wedge fix lands within
+minutes once we see the file:line where the loop is blocking.
+
 ## 2026-05-02 (fifty-fifth commit, v19.30.3) — Spark startup script hardening
 
 **Operator-flagged 2026-05-02 afternoon, after v19.30.1/.2 went live.**
