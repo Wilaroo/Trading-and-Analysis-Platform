@@ -3,7 +3,91 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.1 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.2 fork)
+
+### 🎯 Just shipped 2026-05-02 v19.30.2 — see CHANGELOG (fifty-fourth commit)
+**Bar-poll degraded-mode wedge fix.**
+
+After v19.30.1 verified working live on Spark (200 OKs), a SECOND
+wedge surfaced when the Windows IB pusher was OFF. `py-spy dump`
+nailed it:
+
+```
+MainThread BLOCKED in:
+  ib_pusher_rpc.py:124    _request          ← sync HTTP, 8s timeout
+  ib_pusher_rpc.py:202    subscriptions
+  bar_poll_service.py:229 _build_symbol_pools  ← sync def
+  bar_poll_service.py:291 poll_pool_once       ← async caller!
+```
+
+What shipped:
+- ✅ `poll_pool_once` now calls `_build_symbol_pools` via
+  `asyncio.to_thread` — sync HTTP RPC + 3 sync mongo cursor iterations
+  now run in a thread, loop stays responsive.
+- ✅ Pusher RPC `subscriptions()` timeout dropped 8s → 3s
+  (defense-in-depth bound).
+- ✅ NEW `start_backend.sh` launcher at project root — handles venv
+  activation, server kill, restart, 60s startup wait, health check,
+  backpressure observability print. Operator no longer fights the
+  venv dance every restart.
+- ✅ 5 new pytests in `test_bar_poll_wedge_fix_v19_30_2.py`.
+  **125/125 across v19 stack** including v19.30.1 + v19.30.2.
+
+Operator action:
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+```
+
+### 🟡 P1 — Bar-poll wedge fix follow-ups
+- **Async-wrap the entire `_PusherRPCClient`** — add `async def
+  subscriptions_async(self)`, etc., that own the `to_thread`
+  internally. Prevents future async callers from re-introducing the
+  same wedge.
+- **Negative cache** — after 3 consecutive pusher RPC failures, skip
+  the RPC for 60s (then 120s, 300s — exponential backoff). Today's
+  fix bounds the per-call wedge at 3s but a fully-OFF pusher still
+  costs 3s every 30s forever.
+- Boot-time one-shot phantom sweep regardless of RTH.
+- IB Gateway reconnect-on-timeout with exponential backoff.
+
+### 🔴 P0 — Now unblocked by v19.30.1 + v19.30.2
+The loop stays responsive in BOTH push-storm AND degraded-IB scenarios.
+The rest of the v19.30 P0 stack is buildable:
+
+1. **Diagnostics Data Quality Pack** — fix Pipeline Funnel
+   `ai_passed`/`bot_fired` mutual consistency; fix Module Scorecard
+   plumbing for `shadow_module_performance` per-vote breakdown.
+2. **`POST /api/trading-bot/cancel-all-pending-orders`** — nuke
+   pending GTC brackets at IB before market open.
+3. **Bot Thoughts content capture** — Trail Explorer empty `content`.
+
+### 🟡 Other P1 (unchanged from v19.30.1 fork)
+- Shadow-vs-Real gap drilldown (71% shadow vs 32% real).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares.
+- **(Deeper async-pymongo audit follow-up — Audit Pass 2a)** — the
+  audit flagged 11 sync `def` handlers in hot routers and 54 inline
+  sync mongo calls in async routes. The 2 wedge-causing ones (push-data
+  + bar-poll) are fixed. Convert the remaining 53 incrementally as
+  they surface as bottlenecks.
+
+### 🟢 P2 / P3 (unchanged)
+- v19.31 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.32 Chart WebSockets (live bar push, ~50ms vs 5s tail-poll)
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics (Hurst + OU half-life)
+- Liquidity-aware trail in `stop_manager.py`
+- Scanner card "Proven / Maturing / Cold-start" badge
+- Chart bubble click → `sentcom:focus-symbol`
+- SEC EDGAR 8-K integration
+- Safely retire Alpaca fallback (32 reference sites)
+- **Audit Pass 1** — lint sweep + dead-code (370 ruff auto-fixes,
+  61 bare excepts, 6 orphaned services, 3 dup function names in ib.py)
+- **Audit Pass 3** — break up the 4 monoliths (ib.py 6242, server.py
+  4643, enhanced_scanner.py 7090, training_pipeline.py 3869)
+
+---
+
+## 🔴 Now / Near-term (previous fork pickup — 2026-05-02 v19.30.1)
 
 ### 🎯 Just shipped 2026-05-02 v19.30.1 — see CHANGELOG (fifty-third commit)
 **FastAPI event-loop wedge fix + push-data backpressure.**

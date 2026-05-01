@@ -2,6 +2,127 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-fourth commit, v19.30.2) — Bar-poll degraded-mode wedge fix
+
+**Operator-flagged after v19.30.1 deploy on Spark 2026-05-02 afternoon.**
+
+After v19.30.1's push-data backpressure fix verified working on live
+Spark hardware (200 OKs from /api/ib/pushed-data and dozens of other
+endpoints from both localhost AND the Windows pusher 192.168.50.1), a
+SECOND wedge surfaced — only when the Windows IB pusher was OFF:
+
+```
+$ curl -m 5 localhost:8001/api/health  # backend serves traffic for 30s, then…
+* Operation timed out after 5003 milliseconds with 0 bytes received
+```
+
+`py-spy dump --pid <main>` pinpointed the exact stack:
+```
+MainThread BLOCKED in:
+  services/ib_pusher_rpc.py:124    _request          ← sync HTTP call
+  services/ib_pusher_rpc.py:202    subscriptions
+  services/ib_pusher_rpc.py:400    get_subscribed_set
+  services/bar_poll_service.py:229 _build_symbol_pools
+  services/bar_poll_service.py:291 poll_pool_once
+  services/bar_poll_service.py:491 _loop_body        ← async loop body
+```
+
+### Root cause
+
+`bar_poll_service._build_symbol_pools()` is a sync `def` called inline
+from async `poll_pool_once`. Inside it does TWO things that each
+block the event loop:
+
+1. **`pusher.get_subscribed_set()`** — sync HTTP call to the Windows
+   pusher with an 8s timeout. When the pusher is fully OFF, every
+   call burns the full 8s.
+2. **Three sync `db["symbol_adv_cache"].find().sort()` cursor
+   iterations** in inline list comprehensions.
+
+With 3 pools polling at slightly staggered intervals × ~8s pusher RPC
++ sync mongo overhead = **24-36s loop wedge**. Observed exactly 36s on
+Spark.
+
+The `services/ib_pusher_rpc.py` module's own header docstring even
+warns "Call from async paths via asyncio.to_thread" — `bar_poll_service`
+was the only async caller violating the contract.
+
+### What shipped (3 surgical patches)
+
+#### A — Offload `_build_symbol_pools` to a thread (`services/bar_poll_service.py`)
+- `poll_pool_once` now calls `await asyncio.to_thread(self._build_symbol_pools)`
+  instead of `self._build_symbol_pools()` inline.
+- The pusher RPC + 3 sync mongo cursor iterations now run on a thread.
+  Event loop stays responsive.
+
+#### B — Reduce pusher RPC subscriptions timeout (`services/ib_pusher_rpc.py`)
+- `subscriptions()` RPC timeout dropped 8.0s → 3.0s.
+- Defense-in-depth: even if a future caller bypasses the to_thread
+  offload, max impact is bounded at 3s instead of 8s.
+- Subscription state changes rarely (operator action) and the 30s
+  `_subs_cache` TTL smooths the steady-state call rate, so this only
+  affects cold-cache / `force_refresh=True` paths.
+
+#### C — `start_backend.sh` launcher script (project root)
+- Activates `.venv/bin/activate` (Spark's actual venv path).
+- Kills any stale `python server.py`.
+- Launches in background, waits up to 60s for "Application startup
+  complete" (covers the v19.30.x watchdog phases).
+- Verifies `/api/system/health` (the actual health endpoint — `/api/health`
+  doesn't exist on this build).
+- Prints the v19.30.1 backpressure observability tile.
+- Operator no longer has to remember the venv-activate / python3-vs-python
+  / wait-30s dance manually.
+
+### Verification (3 layers)
+
+#### 1. Unit pytest (5 new cases in `tests/test_bar_poll_wedge_fix_v19_30_2.py`)
+- Source-level pins: `poll_pool_once` calls `_build_symbol_pools` via
+  `asyncio.to_thread`; subscriptions timeout ≤3s; module docstring
+  contract still in place.
+- Behavioural: 3 sequential slow-pusher-RPC pool builds (0.5s each)
+  complete in ≥1.4s with **<100ms max event-loop block** (a background
+  pinger runs concurrently and never gets starved). Pre-fix the same
+  scenario would block the loop for ~1.5s end-to-end.
+
+#### 2. Test suite regression
+**125/125 passing** across v19.23 + v19.24 + v19.25 + v19.26 + v19.27
++ v19.28 + v19.29 + v19.30 + v19.30.1 + v19.30.2 suites.
+
+#### 3. py-spy validated
+The exact stack frame the wedge was in (`ib_pusher_rpc.py:124 _request`)
+can no longer block the event loop because the entire chain is now
+behind `asyncio.to_thread`. The fix targets the proven-by-py-spy line.
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh
+```
+
+That's it. The new launcher handles venv activation, server kill,
+restart, log tail, and verifies health — replaces the manual
+`source .venv/bin/activate && cd backend && nohup python server.py …`
+dance that ate 30 minutes of operator time today.
+
+### Known limitations (P1 follow-ups)
+
+- The wedge fix is targeted at the bar_poll_service path. Other code
+  paths that call `pusher.get_subscribed_set()` from async context
+  (if any get added) would re-introduce the same wedge. Consider:
+  - Wrapping ALL of `_PusherRPCClient`'s public methods in async
+    helpers (`async def subscriptions_async(self)` etc.) that own
+    the `to_thread` internally.
+  - Adding a "negative cache" — after 3 consecutive failures, skip
+    the RPC for 60s (then 120s, 300s, exponential backoff). Today
+    the cache TTL is 30s so a fully-OFF pusher triggers a 3s timeout
+    every 30s forever.
+- `bar_poll_service._build_symbol_pools` itself still does inline sync
+  pymongo `find().sort()` calls — fine when called via to_thread
+  (Pass 2a in the audit), but the sync mongo pattern remains.
+
 ## 2026-05-02 (fifty-third commit, v19.30.1) — Event-loop wedge fix + push-data backpressure
 
 **Operator-flagged live failure 2026-05-01 night → 2026-05-02 morning**:

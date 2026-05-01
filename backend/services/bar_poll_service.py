@@ -288,7 +288,19 @@ class BarPollService:
         if pool is None:
             return {"error": f"unknown pool: {pool_name}"}
 
-        symbols = self._build_symbol_pools().get(pool_name, [])
+        # v19.30.2 (2026-05-02) — `_build_symbol_pools` is a sync def that
+        # does (1) a sync HTTP RPC to the Windows pusher
+        # (`pusher.get_subscribed_set` — 8s timeout) and (2) three sync
+        # pymongo `find().sort()` cursor iterations on `symbol_adv_cache`.
+        # When the pusher is OFF (operator-flagged 2026-05-02 morning),
+        # the RPC alone hangs the event loop for 8s × 3 pools = ~24-36s
+        # — py-spy traced the loop wedged at ib_pusher_rpc.py:124. Run it
+        # in a thread so the loop stays responsive. The
+        # `ib_pusher_rpc` module's own header docstring explicitly says
+        # "Call from async paths via asyncio.to_thread" — this finishes
+        # honoring that contract.
+        pools_map = await asyncio.to_thread(self._build_symbol_pools)
+        symbols = pools_map.get(pool_name, [])
         if not symbols:
             return {
                 "pool": pool_name,

@@ -192,14 +192,18 @@ class _PusherRPCClient:
         ):
             return self._subs_cache
 
-        # Bumped from 3.0s → 8.0s (2026-04-29 afternoon-13). Under load
-        # the pusher's RPC server can take >3s to answer when it's
-        # simultaneously qualifying contracts for unsubscribed symbols,
-        # which caused the gate to fall through and DGX to fire MORE
-        # latest-bars requests for unsubscribed symbols, compounding the
-        # problem. 8s gives the pusher headroom while staying well under
-        # the 18s latest-bars timeout.
-        resp = self._request("GET", "/rpc/subscriptions", timeout=8.0)
+        # v19.30.2 (2026-05-02): timeout dropped from 8.0s → 3.0s.
+        # The 8s budget was set 2026-04-29 to give the pusher headroom
+        # while it qualified contracts; in practice when the Windows
+        # pusher is FULLY OFF (operator power-cycle, IB Gateway down,
+        # etc.) every call burns the full 8s × N pools = 24-36s loop
+        # wedge. py-spy proved this on Spark 2026-05-02. Subscription
+        # state changes rarely (operator action), so a 3s budget is
+        # plenty when pusher is healthy and fails-fast when it's not.
+        # The 30s `_subs_cache` TTL still smooths the steady-state
+        # call rate, so this bound only matters on cold cache or
+        # `force_refresh=True`.
+        resp = self._request("GET", "/rpc/subscriptions", timeout=3.0)
         if not resp or not resp.get("success"):
             return None
         symbols = resp.get("symbols") or []
