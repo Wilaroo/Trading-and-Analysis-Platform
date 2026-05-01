@@ -46,6 +46,26 @@ else
     echo "All processes terminated cleanly."
 fi
 
+# v19.30.2 (2026-05-02): final defense-in-depth — kill anything still
+# bound to :8001 by port (catches processes whose cmdline didn't match
+# `pkill -f 'python.*server.py'` above — e.g., started via full path
+# or different python binary). Operator hit "address already in use"
+# 2026-05-02 morning because the prior wedged backend's cmdline didn't
+# match the pkill pattern.
+if command -v fuser >/dev/null 2>&1; then
+    if ss -tln 2>/dev/null | grep -q ':8001 '; then
+        echo "[CLEANUP] :8001 still bound — killing by port..."
+        fuser -k 8001/tcp 2>/dev/null || true
+        sleep 1
+    fi
+    if ss -tln 2>/dev/null | grep -q ':8001 '; then
+        echo "[WARN] :8001 STILL bound after fuser — manual intervention needed:"
+        echo "       sudo lsof -i :8001"
+    else
+        echo "Port 8001 free."
+    fi
+fi
+
 # Configure MongoDB cache (best-effort, no Docker dependency)
 echo ""
 echo "Configuring MongoDB cache..."

@@ -2,6 +2,114 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-fifth commit, v19.30.3) — Spark startup script hardening
+
+**Operator-flagged 2026-05-02 afternoon, after v19.30.1/.2 went live.**
+The wedge fixes were verified working, but the operator hit a
+20-minute deploy detour because `scripts/spark_start.sh` (called by
+the Windows orchestrator `TradeCommand_Spark_AITraining.bat` over
+SSH) failed to find the project's venv:
+
+### Root causes (3 stacked bugs in the Spark-side helpers)
+
+1. **`spark_start.sh` venv search missed `.venv/`** (the actual Spark
+   path). It only checked `~/venv/` and `$REPO_DIR/venv/` (no leading
+   dot). When neither matched it silently fell through to "Using
+   system Python" — and system Python on Spark has no fastapi
+   installed. `nohup python server.py` would then crash with
+   `ModuleNotFoundError: No module named 'fastapi'` while the .bat
+   orchestrator happily reported "Spark services started." Diagnosis
+   ate ~30 minutes of operator time.
+2. **No port-based stale-process kill** in `spark_stop.sh` /
+   `spark_start.sh`. The kill cycle is purely cmdline-pattern-based
+   (`pkill -f 'python.*server.py'`) — but processes whose cmdline
+   doesn't exactly match (e.g., started via full path, or `python3`
+   vs `python`, or via wrapper) survive. The new server's bind then
+   fails with `[Errno 98] address already in use`. Operator hit this
+   today when the prior wedged backend (v19.30.1 pre-fix) didn't
+   match the kill pattern.
+3. **No `import fastapi` sanity check** before launching. If venv
+   activation fails (case 1) or pip is out of sync, the symptom is
+   "backend never became healthy" with no useful log line.
+
+### What shipped (3 surgical patches in `scripts/`)
+
+#### A — `spark_start.sh` venv discovery + fail-fast (`scripts/spark_start.sh`)
+- Search order updated: `$REPO_DIR/.venv/` → `~/venv/` →
+  `$REPO_DIR/venv/`. `.venv/` (Spark's actual path) is now first.
+- After activation, runs `python -c "import fastapi"` as a smoke
+  test. Bails with a clear error pointing to `pip install -r
+  backend/requirements.txt` instead of letting the launch silently
+  fail.
+- Reports the active python binary + version so the operator can see
+  at a glance which env the backend is running in.
+
+#### B — Port-based stale-process kill (`scripts/spark_start.sh` + `spark_stop.sh`)
+- `spark_stop.sh`: after the cmdline-based pkill cycle, runs
+  `fuser -k 8001/tcp` to kill anything still bound to :8001.
+  Reports clearly if port still bound after fuser (manual
+  intervention needed).
+- `spark_start.sh`: defensive `fuser -k 8001/tcp` before launch + a
+  10-tick wait loop verifying the port is actually released
+  (TIME_WAIT can take a few seconds). Bails before launch with a
+  clear warning instead of letting uvicorn report `[Errno 98]
+  address already in use` deep in the log.
+
+#### C — Backpressure observability tile in launcher output (`scripts/spark_start.sh`)
+- After the health check passes, `spark_start.sh` now also curls
+  `/api/ib/pusher-health` and prints the v19.30.1 backpressure
+  metrics (`push_in_flight`, `push_max_concurrent`,
+  `push_dropped_503_total`, `pushes_per_min`). Operator sees the
+  wedge-protection state on every restart instead of having to
+  remember the curl one-liner.
+- Health check window also bumped 45s → 60s to give v19.30's phase
+  watchdogs (8s IB connect + 10s `_restore_state` + 8s
+  `simulation_engine` + 5s scanner) headroom on cold boot.
+
+### NOT changed (intentionally)
+
+- `TradeCommand_Spark_AITraining.bat` (Windows orchestrator) —
+  unchanged. It curls `/api/health` (which still exists and is now
+  `async def` per v19.30.1). Calling `bash scripts/spark_start.sh`
+  via SSH continues to work; the .bat doesn't need to know about
+  the venv discovery fix.
+- `backend/.env` — no new env vars. Every constant we introduced
+  (`_PUSH_DATA_MAX_CONCURRENT=4`, subscriptions `timeout=3.0`) works
+  fine at its default. Optional env-tuning was discussed but not
+  shipped (would add `IB_PUSH_MAX_CONCURRENT`,
+  `IB_PUSHER_RPC_SUBS_TIMEOUT_S`).
+- `start_backend.sh` (project root, manual operator path) — already
+  has `.venv` first in its search order. No change needed.
+
+### Verification
+
+- `bash -n` on both helpers confirms clean syntax.
+- 20/20 v19.30.x wedge-protection pytests still pass (no behavioural
+  regressions; this is a launcher-only change).
+- Pre-fix repro:
+  ```
+  $ bash -c 'unset PATH_TO_VENV; bash scripts/spark_start.sh'
+  → "Using system Python"
+  → ModuleNotFoundError: No module named 'fastapi'
+  ```
+  Post-fix:
+  ```
+  → "Activated $REPO_DIR/.venv"
+  → "Python ready: Python 3.12.3 — fastapi OK"
+  → backend launches cleanly
+  ```
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+# Either path works now:
+./start_backend.sh                          # manual: backend-only fast restart
+# OR via the Windows orchestrator (full stack restart):
+# (.bat already calls scripts/spark_start.sh — no .bat changes needed)
+```
+
 ## 2026-05-02 (fifty-fourth commit, v19.30.2) — Bar-poll degraded-mode wedge fix
 
 **Operator-flagged after v19.30.1 deploy on Spark 2026-05-02 afternoon.**

@@ -36,16 +36,39 @@ fi
 echo ""
 
 # Step 2: Activate venv
+# v19.30.2 (2026-05-02): added `.venv/` (Spark's actual path) as the
+# first check. Without this the script silently fell through to system
+# Python — which has no fastapi installed — and `python server.py`
+# would crash with `ModuleNotFoundError: No module named 'fastapi'`,
+# leaving the backend down despite the .bat orchestrator reporting
+# "Spark services started." Bit the operator 2026-05-02 morning.
 echo "[2/5] Activating Python environment..."
-if [ -f ~/venv/bin/activate ]; then
+if [ -f "$REPO_DIR/.venv/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$REPO_DIR/.venv/bin/activate"
+    echo "  Activated $REPO_DIR/.venv"
+elif [ -f ~/venv/bin/activate ]; then
+    # shellcheck disable=SC1091
     source ~/venv/bin/activate
     echo "  Activated ~/venv"
 elif [ -f "$REPO_DIR/venv/bin/activate" ]; then
+    # shellcheck disable=SC1091
     source "$REPO_DIR/venv/bin/activate"
     echo "  Activated $REPO_DIR/venv"
 else
-    echo "  Using system Python"
+    echo "  [ERROR] No venv found — backend will likely fail with 'No module named fastapi'"
+    echo "          Expected one of: $REPO_DIR/.venv, ~/venv, $REPO_DIR/venv"
 fi
+# Sanity-check: verify fastapi is reachable BEFORE we launch — fast-fail
+# is much better than a backend that launches, crashes, and leaves the
+# orchestrator believing it succeeded.
+if ! python -c "import fastapi" 2>/dev/null; then
+    echo "  [ERROR] 'import fastapi' failed in the active python — bailing."
+    echo "          Active python: $(which python)"
+    echo "          Run: pip install -r $REPO_DIR/backend/requirements.txt"
+    exit 1
+fi
+echo "  Python ready: $(python --version 2>&1) — fastapi OK"
 # Ensure uvloop is installed (2-4x faster event loop)
 pip install -q uvloop 2>/dev/null && echo "  uvloop: installed" || echo "  uvloop: skipped"
 echo ""
@@ -53,21 +76,62 @@ echo ""
 # Step 3: Start backend
 echo "[3/5] Starting backend server..."
 cd "$BACKEND_DIR"
+
+# v19.30.2 (2026-05-02): defensive port cleanup. spark_stop.sh kills by
+# cmdline match (pkill -f), which can miss processes whose cmdline
+# differs (full path, python3 vs python, etc.). Add a port-based kill
+# so a stale process bound to :8001 can't make the new launch fail
+# with "address already in use." Operator hit this 2026-05-02 morning.
+if command -v fuser >/dev/null 2>&1; then
+    fuser -k 8001/tcp 2>/dev/null && echo "  Killed stale process bound to :8001" || true
+    sleep 1
+fi
+# Wait until the port actually releases (TIME_WAIT can take a few seconds)
+for i in $(seq 1 10); do
+    if ! ss -tln 2>/dev/null | grep -q ':8001 '; then
+        break
+    fi
+    if [ "$i" -eq 10 ]; then
+        echo "  [WARN] :8001 still bound after 10s — backend launch may fail"
+    fi
+    sleep 1
+done
+
 nohup python server.py > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
 echo "  Backend PID: $BACKEND_PID"
 
 echo "  Waiting for health check..."
-for i in $(seq 1 45); do
+for i in $(seq 1 60); do
     if curl -sf http://localhost:8001/api/health > /dev/null 2>&1; then
         echo "  Backend healthy after ${i}s"
         break
     fi
-    if [ "$i" -eq 45 ]; then
-        echo "  [WARN] Backend not healthy after 45s — check: tail -f /tmp/backend.log"
+    if [ "$i" -eq 60 ]; then
+        echo "  [WARN] Backend not healthy after 60s — check: tail -f /tmp/backend.log"
     fi
     sleep 1
 done
+
+# v19.30.1/.2 (2026-05-02): print the new event-loop + backpressure
+# observability tile so the operator can see at a glance whether the
+# wedge fixes are healthy on this boot.
+if curl -sf http://localhost:8001/api/ib/pusher-health > /tmp/_pusher_health.json 2>/dev/null; then
+    echo ""
+    python -c "
+import json
+try:
+    h = json.load(open('/tmp/_pusher_health.json')).get('heartbeat', {})
+    print('  v19.30.1 backpressure:')
+    print(f'    push_in_flight        : {h.get(\"push_in_flight\")}')
+    print(f'    push_max_concurrent   : {h.get(\"push_max_concurrent\")}  (cap)')
+    print(f'    push_dropped_503_total: {h.get(\"push_dropped_503_total\")}')
+    print(f'    pushes_per_min        : {h.get(\"pushes_per_min\")}')
+except Exception as e:
+    print(f'  (could not parse pusher-health: {e})')
+"
+    rm -f /tmp/_pusher_health.json
+fi
 echo ""
 
 # Step 4: Start chat server (dedicated LLM process)
