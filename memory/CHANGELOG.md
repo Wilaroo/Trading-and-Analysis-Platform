@@ -2,6 +2,87 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-02 (fifty-ninth commit, v19.30.7) — Surgical fix from wedge-watchdog smoking gun
+
+**Operator-pasted stack capture from v19.30.6's wedge-watchdog this evening.**
+
+### The smoking gun
+
+```
+=== WEDGE WATCHDOG TRIGGERED (main thread stuck for 5.0s) ===
+--- Thread 'MainThread' ← MAIN/LOOP THREAD ---
+  ...
+  routers/sentcom_chart.py:862    get_chart_tail
+  routers/sentcom_chart.py:527    get_chart_bars
+  services/hybrid_data_service.py:678    fetch_latest_session_bars
+  → rpc.subscriptions(force_refresh=False)            ← SYNC HTTP CALL
+  services/ib_pusher_rpc.py:206   subscriptions
+  services/ib_pusher_rpc.py:124   _request
+  → with self._lock:                                   ← BLOCKED ON LOCK
+```
+
+The dashboard polls `/api/sentcom/chart` every few seconds. Each call
+went into `fetch_latest_session_bars`, which called `rpc.subscriptions()`
+**inline** (sync HTTP call to Windows pusher, holds a `threading.Lock`).
+Concurrent chart requests piled up on the lock — when the pusher RPC
+took >5s (because of slow Windows pusher response under load, transient
+network hiccup, or any delay), the lock contention pinned the event
+loop for the full timeout window.
+
+**Same wedge class as v19.30.2** (bar_poll_service `_build_symbol_pools`)
+but in a different async caller. The pusher_rpc module's docstring
+explicitly says "Call from async paths via asyncio.to_thread" — two
+async callers were violating it.
+
+### What shipped — 2 surgical patches + 1 codebase-wide guard
+
+#### A — `services/hybrid_data_service.py:678`
+- `subs = rpc.subscriptions(force_refresh=False)` → `subs = await asyncio.to_thread(rpc.subscriptions, False)`
+- Pattern already used 15 lines below for `rpc.latest_bars` (line 693) — restored consistency.
+
+#### B — `services/pusher_rotation_service.py:633`
+- `current = self.pusher.get_subscribed_set()` (in `_loop_body`) → `current = await asyncio.to_thread(self.pusher.get_subscribed_set)`
+- This loop body runs every `LOOP_TICK_SECONDS` so a single slow RPC could stall the loop on every tick. Now the loop stays responsive while the RPC runs on a thread.
+
+#### C — `tests/test_pusher_rpc_async_offload_v19_30_7.py`
+- **Codebase-wide AST audit test** — walks every `.py` file, finds all sync RPC method calls (`subscriptions`, `get_subscribed_set`, `subscribe_one`, etc.) inside any `async def`, fails if any are NOT wrapped in `asyncio.to_thread`. Now if anyone re-introduces this pattern in a future feature, the test fails at PR time with the exact file:line.
+- 4 new pytest cases. Currently reports 0 violations across the entire backend tree.
+
+### Verification
+
+- 4/4 new tests pass.
+- **134/134 across the v19.23 → v19.30.7 regression stack**. Ruff clean.
+- The codebase-wide audit explicitly confirms ZERO async-context unwrapped pusher RPC calls remain.
+
+### Operator action
+
+```bash
+cd ~/Trading-and-Analysis-Platform
+git pull
+./start_backend.sh
+# After 5-10 min of normal operation, you should see:
+#  - Dashboard chart loads stay responsive
+#  - WebSocket keepalive doesn't time out
+#  - Pusher's read-timeout retries drop to ~0
+#  - /api/autonomy/readiness no longer 500s
+# Wedge watchdog auto-dump should be silent (no >5s blocks).
+grep "WEDGE WATCHDOG TRIGGERED" /tmp/backend.log
+```
+
+If wedges still occur, the watchdog will once again capture the new call site — paste the stack and we ship v19.30.8. But based on the audit, this should be the last instance of this wedge class.
+
+### What this completes
+
+- **v19.30.1**: push-data wedge under high-pusher-load
+- **v19.30.2**: bar-poll wedge during degraded-IB boot
+- **v19.30.3**: Spark startup script venv discovery + port cleanup
+- **v19.30.4**: auto stack-dump on wedge (asyncio-internal)
+- **v19.30.5**: dump quality fixes (numeric task sort, idle filtering)
+- **v19.30.6**: thread-based wedge watchdog (captures main thread WHILE wedged)
+- **v19.30.7**: surgical fix from watchdog's smoking-gun stack + codebase-wide guard
+
+The asyncio loop should now be wedge-immune to the entire pusher-RPC class of bugs. The `_event_loop_monitor` + `wedge-watchdog` infrastructure remains as ongoing observability — any new wedge class will surface immediately with a smoking-gun stack.
+
 ## 2026-05-02 (fifty-eighth commit, v19.30.6) — Thread-based wedge watchdog
 
 **Operator-flagged 2026-05-02 evening, after v19.30.4/.5 stack dumps showed every task as "ACTIVE" but never the actual blocker.**

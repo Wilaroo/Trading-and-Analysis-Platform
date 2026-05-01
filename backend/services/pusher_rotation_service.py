@@ -630,7 +630,16 @@ class PusherRotationService:
                 # second-pass pin keeps stale-quote risk minimal).
                 else:
                     safety_pinned = _read_open_position_symbols(self.bot)
-                    current = self.pusher.get_subscribed_set() or set()
+                    # v19.30.7 (2026-05-02): wrap in asyncio.to_thread.
+                    # Same wedge class as the hybrid_data_service fix
+                    # in this version — get_subscribed_set transitively
+                    # holds the pusher RPC `threading.Lock` and blocks
+                    # the loop. This loop body fires every
+                    # LOOP_TICK_SECONDS so a single slow RPC could
+                    # stall the loop on EVERY tick.
+                    current = await asyncio.to_thread(
+                        self.pusher.get_subscribed_set
+                    ) or set()
                     missing = safety_pinned - current
                     if missing:
                         logger.info(

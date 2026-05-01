@@ -675,7 +675,17 @@ class HybridDataService:
         # collectors on Windows). Caller falls back gracefully when we
         # return `success=False, error="not_in_pusher_subscriptions"`.
         try:
-            subs = rpc.subscriptions(force_refresh=False) or set()
+            # v19.30.7 (2026-05-02 evening): wrap in asyncio.to_thread.
+            # Pre-fix this sync call held the pusher RPC's
+            # threading.Lock (`_request -> with self._lock:`) and
+            # blocked the event loop for 5+s under chart-polling
+            # storm. Captured by wedge-watchdog (v19.30.6) as the
+            # SMOKING-GUN frame of an active 5s+ wedge — same wedge
+            # class as v19.30.2 bar_poll fix, different call site.
+            # The pusher_rpc module's own header docstring mandates
+            # "Call from async paths via asyncio.to_thread"; this
+            # finishes honoring that contract for hybrid_data_service.
+            subs = await asyncio.to_thread(rpc.subscriptions, False) or set()
         except Exception:
             subs = set()
         if subs and symbol_u not in subs:
