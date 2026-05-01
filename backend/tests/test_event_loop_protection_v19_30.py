@@ -169,3 +169,46 @@ def test_v19_30_phase_budgets_documented():
     # bot can't drift behind real time on a string of timeouts.
     total = expected["scan"] + expected["pos"] + expected["eod"]
     assert total < 35, f"phase budget {total}s ≥ scan_interval — bot will drift"
+
+
+# ── 5. Boot-time watchdogs (server.py) ─────────────────────────────────
+def test_v19_30_startup_phases_have_watchdogs():
+    """Every async startup phase must have an asyncio.wait_for cap so
+    a hung Mongo/IB call can't wedge the entire boot for 30s+.
+    """
+    from pathlib import Path
+    src_path = Path(__file__).resolve().parents[1] / "server.py"
+    src = src_path.read_text()
+    # IB Gateway connect — 8s budget
+    assert "asyncio.wait_for(ib_svc.connect(), timeout=8.0)" in src, \
+        "IB connect must be wrapped in 8s wait_for (v19.30)"
+    # Trading bot restore — 10s budget
+    assert "asyncio.wait_for(trading_bot._restore_state(), timeout=10.0)" in src
+    # Trading bot start — 5s budget
+    assert "asyncio.wait_for(trading_bot.start(), timeout=5.0)" in src
+    # Simulation engine init — 8s budget
+    assert "asyncio.wait_for(simulation_engine.initialize(), timeout=8.0)" in src
+
+
+# ── 6. Simulation engine init no longer blocks event loop ──────────────
+def test_v19_30_simulation_engine_uses_to_thread():
+    """The simulation engine's startup-time Mongo calls (find_one,
+    create_index) were confirmed wedging the event loop in production.
+    They must now go through asyncio.to_thread.
+    """
+    from pathlib import Path
+    src_path = Path(__file__).resolve().parents[1] / "services" / "simulation_engine.py"
+    src = src_path.read_text()
+    # Both find_one calls inside _load_symbol_universes
+    assert src.count("await asyncio.to_thread(") >= 4, \
+        "simulation_engine.initialize must use to_thread for find_one/update_one/create_index"
+    # The dangerous patterns we removed should NOT exist anymore
+    assert "self._db[self.JOBS_COLLECTION].create_index(" not in src or \
+           "_ensure_indexes()" in src
+    # Inline find_one without to_thread is the bug we fixed
+    bad_patterns = [
+        'cached = self._db["symbol_universe"].find_one(',
+        'sp500 = self._db["symbol_universe"].find_one(',
+    ]
+    for pat in bad_patterns:
+        assert pat not in src, f"Inline sync mongo found again: {pat}"

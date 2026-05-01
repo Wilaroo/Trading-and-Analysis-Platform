@@ -208,10 +208,16 @@ class HistoricalSimulationEngine:
         await self._load_symbol_universes()
         
         # Ensure indexes
+        # v19.30 (2026-05-01): wrap sync create_index calls in to_thread
+        # so a slow Mongo cluster can't wedge the event loop during
+        # backend startup. These calls were detected wedging for 30s+
+        # in production via the EVENT LOOP BLOCKED warnings.
         if self._db is not None:
-            self._db[self.JOBS_COLLECTION].create_index("id", unique=True)
-            self._db[self.TRADES_COLLECTION].create_index([("job_id", 1), ("symbol", 1)])
-            self._db[self.DECISIONS_COLLECTION].create_index([("job_id", 1), ("date", 1)])
+            def _ensure_indexes():
+                self._db[self.JOBS_COLLECTION].create_index("id", unique=True)
+                self._db[self.TRADES_COLLECTION].create_index([("job_id", 1), ("symbol", 1)])
+                self._db[self.DECISIONS_COLLECTION].create_index([("job_id", 1), ("date", 1)])
+            await asyncio.to_thread(_ensure_indexes)
             
         logger.info(f"Engine initialized with {len(self._all_us_symbols)} US symbols")
         
@@ -219,8 +225,11 @@ class HistoricalSimulationEngine:
         """Load symbol lists from Alpaca or cache"""
         try:
             # Try to load from MongoDB cache first
+            # v19.30: wrap sync find_one in to_thread.
             if self._db is not None:
-                cached = self._db["symbol_universe"].find_one({"type": "us_stocks"})
+                cached = await asyncio.to_thread(
+                    self._db["symbol_universe"].find_one, {"type": "us_stocks"}
+                )
                 if cached:
                     self._all_us_symbols = cached.get("symbols", [])
                     logger.info(f"Loaded {len(self._all_us_symbols)} symbols from cache")
@@ -238,15 +247,21 @@ class HistoricalSimulationEngine:
                     
                     # Cache for future use
                     if self._db is not None and self._all_us_symbols:
-                        self._db["symbol_universe"].update_one(
+                        # v19.30: wrap sync update_one in to_thread.
+                        cache_doc = {"symbols": self._all_us_symbols, "updated": datetime.now(timezone.utc).isoformat()}
+                        await asyncio.to_thread(
+                            self._db["symbol_universe"].update_one,
                             {"type": "us_stocks"},
-                            {"$set": {"symbols": self._all_us_symbols, "updated": datetime.now(timezone.utc).isoformat()}},
-                            upsert=True
+                            {"$set": cache_doc},
+                            True,  # upsert=True
                         )
                         
             # Load S&P 500 if available
+            # v19.30: wrap sync find_one in to_thread.
             if self._db is not None:
-                sp500 = self._db["symbol_universe"].find_one({"type": "sp500"})
+                sp500 = await asyncio.to_thread(
+                    self._db["symbol_universe"].find_one, {"type": "sp500"}
+                )
                 if sp500:
                     self._sp500_symbols = sp500.get("symbols", [])
                     

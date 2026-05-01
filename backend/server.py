@@ -3949,13 +3949,22 @@ async def startup_event():
         await asyncio.sleep(0)  # Yield to event loop
 
         # 2. Attempt auto-connect to IB Gateway (everything depends on this)
+        # v19.30: hard wallclock budget. ib_insync's underlying connect
+        # has its own 15-20s timeout but historically has wedged for
+        # 36s+ when IB Gateway is in a half-broken state. Cap at 8s —
+        # if we can't connect cleanly in 8s, skip and run degraded
+        # (pusher path still works for live data).
         ib_connected = False
         try:
             ib_svc = get_ib_service()
             status = ib_svc.get_connection_status()
             if not status.get("connected", False):
                 print("Attempting auto-connect to IB Gateway...")
-                ib_connected = await ib_svc.connect()
+                try:
+                    ib_connected = await asyncio.wait_for(ib_svc.connect(), timeout=8.0)
+                except asyncio.TimeoutError:
+                    print("IB Gateway: AUTO-CONNECT EXCEEDED 8s BUDGET — skipping, running degraded")
+                    ib_connected = False
                 if ib_connected:
                     print("IB Gateway: CONNECTED")
                 else:
@@ -3968,8 +3977,13 @@ async def startup_event():
         await asyncio.sleep(0)  # Yield to event loop
 
         # 3. Start background scanner (needs IB for live scanning)
+        # v19.30: 5s budget — scanner.start() should be fast (just creates
+        # a task) but defensive cap against future bloat.
         try:
-            await background_scanner.start()
+            try:
+                await asyncio.wait_for(background_scanner.start(), timeout=5.0)
+            except asyncio.TimeoutError:
+                print("Background scanner: START EXCEEDED 5s BUDGET — continuing anyway")
             if ib_connected:
                 print("Background scanner: STARTED (live alerts active)")
             else:
@@ -3979,9 +3993,17 @@ async def startup_event():
         await asyncio.sleep(0)  # Yield to event loop
 
         # 4. Auto-start trading bot (needs IB for order execution)
+        # v19.30: cap restore (10s) and start (5s) separately so one
+        # slow phase doesn't wedge the other.
         try:
-            await trading_bot._restore_state()
-            await trading_bot.start()
+            try:
+                await asyncio.wait_for(trading_bot._restore_state(), timeout=10.0)
+            except asyncio.TimeoutError:
+                print("Trading bot: _restore_state EXCEEDED 10s BUDGET — continuing with empty state")
+            try:
+                await asyncio.wait_for(trading_bot.start(), timeout=5.0)
+            except asyncio.TimeoutError:
+                print("Trading bot: start() EXCEEDED 5s BUDGET — bot may not be fully running")
             mode = trading_bot.get_mode().value.upper()
             if ib_connected:
                 print(f"Trading bot: STARTED in {mode} mode (live execution ready)")
@@ -3991,10 +4013,16 @@ async def startup_event():
             print(f"Trading bot: FAILED ({e})")
 
         # 4.5 Initialize simulation engine (deferred from module load)
+        # v19.30: 8s budget. Found this doing sync mongo create_index +
+        # find_one calls inline in 2026-05-01 EVENT LOOP BLOCKED
+        # forensics — historically wedged the loop for 30s+.
         try:
             if simulation_engine is not None:
-                await simulation_engine.initialize()
-                print("Simulation engine: INITIALIZED")
+                try:
+                    await asyncio.wait_for(simulation_engine.initialize(), timeout=8.0)
+                    print("Simulation engine: INITIALIZED")
+                except asyncio.TimeoutError:
+                    print("Simulation engine: INIT EXCEEDED 8s BUDGET — running without it (degraded)")
         except Exception as e:
             print(f"Simulation engine: DEFERRED ({e})")
 
