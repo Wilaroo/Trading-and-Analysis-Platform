@@ -1997,18 +1997,40 @@ class TradingBotService:
                 # Alert intake — gated by collection/focus mode. Keeps the
                 # bot from creating NEW trades during data-fills, but
                 # everything below still runs so OPEN trades stay managed.
+                #
+                # v19.30 (2026-05-01) — wrap each phase in asyncio.wait_for
+                # to bound worst-case scan-cycle duration. Previously a
+                # slow ML eval / hung Mongo aggregation could block the
+                # event loop for 44-61s (see EVENT LOOP BLOCKED warnings
+                # in /tmp/backend.log on 2026-05-01 morning). Now each
+                # phase has a hard wall: opportunity scan = 20s, position
+                # update = 8s, EOD check = 5s. If we exceed any wall,
+                # log + skip THIS iteration and continue on the next
+                # tick. Total worst-case per scan: ~33s vs unbounded.
+                _SCAN_WALL_S = 20.0
+                _POS_WALL_S = 8.0
+                _EOD_WALL_S = 5.0
                 if not pause_intake:
-                    await self._scan_for_opportunities()
+                    try:
+                        await asyncio.wait_for(self._scan_for_opportunities(), timeout=_SCAN_WALL_S)
+                    except asyncio.TimeoutError:
+                        print(f"⚠️ [TradingBot] _scan_for_opportunities exceeded {_SCAN_WALL_S}s budget — skipping this cycle")
 
                 # Update open positions — runs unconditionally so stops,
                 # targets, and trailing logic always trigger even during
                 # data-fills. THIS IS THE SAFETY-CRITICAL CHANGE.
-                await self._update_open_positions()
+                try:
+                    await asyncio.wait_for(self._update_open_positions(), timeout=_POS_WALL_S)
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [TradingBot] _update_open_positions exceeded {_POS_WALL_S}s budget — skipping this cycle")
 
                 # Check for EOD close on scalp/intraday trades — also
                 # safety-critical during data-fills (an EOD scalp must
                 # close even if the data-fill is still running).
-                await self._check_eod_close()
+                try:
+                    await asyncio.wait_for(self._check_eod_close(), timeout=_EOD_WALL_S)
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [TradingBot] _check_eod_close exceeded {_EOD_WALL_S}s budget — skipping this cycle")
 
             except Exception as e:
                 print(f"❌ [TradingBot] Scan loop error: {e}")

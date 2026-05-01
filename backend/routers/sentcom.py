@@ -162,19 +162,33 @@ async def get_stream_history(
         if q:
             # Search across content + action_type. `re.escape` keeps
             # operator-typed slashes / parens harmless.
-            pat = re.escape(q)
+            # v19.30: action_type is indexable for exact match — try
+            # equality first; only fall back to regex on content. This
+            # collapses 1000ms+ regex full-scans into 50ms index hits
+            # for the common harness queries (direction_unstable,
+            # wrong_direction_phantom, etc).
+            q_lower = q.strip().lower()
             query["$or"] = [
-                {"content": {"$regex": pat, "$options": "i"}},
-                {"action_type": {"$regex": pat, "$options": "i"}},
+                {"action_type": q_lower},
+                {"content": {"$regex": re.escape(q), "$options": "i"}},
+                {"action_type": {"$regex": re.escape(q), "$options": "i"}},
             ]
 
-        cursor = (
-            db[THOUGHTS_COLLECTION]
-            .find(query, {"_id": 0})
-            .sort("created_at", -1)
-            .limit(limit)
-        )
-        rows = list(cursor)
+        # v19.30: Materialize the cursor in a worker thread so a slow
+        # Mongo query (regex scan, large limit, cold cache) cannot
+        # block the FastAPI event loop. Pre-v19.30, this `list(cursor)`
+        # call wedged the loop for 44-61s under load — see
+        # `EVENT LOOP BLOCKED` warnings in `/tmp/backend.log`.
+        import asyncio as _asyncio_lh
+        def _run_query():
+            cursor = (
+                db[THOUGHTS_COLLECTION]
+                .find(query, {"_id": 0})
+                .sort("created_at", -1)
+                .limit(limit)
+            )
+            return list(cursor)
+        rows = await _asyncio_lh.to_thread(_run_query)
 
         # Massage into the same shape `/api/sentcom/stream` returns so
         # the frontend can render via the same `<UnifiedStreamV5/>`.
