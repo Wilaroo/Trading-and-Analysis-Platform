@@ -99,10 +99,19 @@ def test_event_loop_monitor_dumps_task_stacks_on_wedge():
     src = (
         Path(__file__).resolve().parents[1] / "server.py"
     ).read_text()
-    # Find the _event_loop_monitor body
+    # Find the _event_loop_monitor body. v19.30.5 grew the monitor with
+    # idle-task filtering + numeric Task-N sort, so the body is now ~6kb.
+    # Use a generous window or search the whole file from the def onwards.
     idx = src.find("async def _event_loop_monitor")
     assert idx >= 0
-    body = src[idx:idx + 4000]
+    body = src[idx:]  # whole rest of file — function body lives here
+    # Everything below must appear inside the monitor function specifically.
+    # Cap the search at the next top-level `async def` or `def` outside the
+    # monitor, so we don't false-positive on unrelated code further down.
+    next_def = body.find("\n    asyncio.create_task(_event_loop_monitor")
+    assert next_def > 0, "could not locate monitor's create_task line"
+    body = body[:next_def + 200]
+
     assert "asyncio.all_tasks()" in body, (
         "monitor must enumerate all running tasks for the stack dump"
     )
@@ -114,6 +123,15 @@ def test_event_loop_monitor_dumps_task_stacks_on_wedge():
     assert "DUMP_COOLDOWN_S" in body or "cooldown" in body.lower(), (
         "monitor must rate-limit stack dumps (cooldown) so a sustained "
         "wedge doesn't spam the log"
+    )
+    # v19.30.5: idle-task filtering + numeric Task-N sort
+    assert "_is_idle" in body or "idle" in body.lower(), (
+        "v19.30.5 monitor must skip stacks of tasks idle in asyncio.sleep "
+        "so the actually-active tasks aren't truncated by the cap"
+    )
+    assert 'Task-(\\d+)' in body or '_task_sort_key' in body, (
+        "v19.30.5 monitor must sort by NUMERIC Task-N order — the "
+        "alphabetical sort dropped Task-2..Task-9 past the 30-task cap"
     )
 
 

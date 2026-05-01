@@ -3843,20 +3843,89 @@ async def startup_event():
                             f"trigger=event_loop_monitor) ===\n"
                         )
                         tasks = [t for t in asyncio.all_tasks() if not t.done()]
-                        # Sort: tasks with names first (easier to identify)
-                        tasks.sort(key=lambda t: (t.get_name() or "_unnamed").lower())
-                        buf.write(f"Active tasks: {len(tasks)}\n")
-                        for t in tasks[:30]:  # cap at 30 to avoid log spam
+
+                        # v19.30.5 (2026-05-02): two important fixes after
+                        # operator-flagged dump quality issues 2026-05-02 evening.
+                        #
+                        # 1) Filter out IDLE tasks (waiting on asyncio.sleep
+                        #    or asyncio.wait_for via Future). These are not
+                        #    the blocker. Removing them frees the budget for
+                        #    the actually-active tasks where the blocker is
+                        #    hiding.
+                        # 2) Sort by numeric Task ID, not alphabetically.
+                        #    Pre-fix: "Task-2" sorted AFTER "Task-19" so
+                        #    Task-2 through Task-9 (which often include the
+                        #    trading bot loop, scanner loop, etc.) got
+                        #    dropped past the 30-task cap. Now Task-1, 2, 3
+                        #    show first.
+                        import re
+                        def _is_idle(_t):
+                            """A task is idle if its top frame is a sleep/Future-wait."""
+                            try:
+                                stk = _t.get_stack(limit=1)
+                                if not stk:
+                                    return True
+                                top_func = stk[0].f_code.co_name
+                                return top_func in (
+                                    "sleep", "_step", "wait", "wait_for", "shield",
+                                    "as_completed",
+                                )
+                            except Exception:
+                                return False
+
+                        def _task_sort_key(_t):
+                            """Sort: real coros by qualname, then numeric Task-N
+                            order. Keeps the dump readable and prevents the
+                            alphabetical-cap bug."""
+                            name = _t.get_name() or ""
+                            m = re.fullmatch(r"Task-(\d+)", name)
+                            if m:
+                                return (1, int(m.group(1)), "")
+                            return (0, 0, name.lower())
+
+                        active = [t for t in tasks if not _is_idle(t)]
+                        idle = [t for t in tasks if _is_idle(t)]
+                        active.sort(key=_task_sort_key)
+                        idle.sort(key=_task_sort_key)
+                        buf.write(
+                            f"Active tasks total: {len(tasks)} "
+                            f"(non-idle: {len(active)}, idle/sleeping: {len(idle)})\n"
+                        )
+                        buf.write(
+                            "Showing non-idle first (the blocker is here); "
+                            "idle stream-loop tasks suppressed for clarity.\n"
+                        )
+
+                        # Bumped task cap 30 → 50, frame limit 8 → 16. The
+                        # active filter means we don't waste the budget on
+                        # idle sleepers anymore.
+                        TASK_CAP = 50
+                        FRAME_LIMIT = 16
+                        for t in active[:TASK_CAP]:
                             name = t.get_name() or "_unnamed"
                             coro = getattr(t, "get_coro", lambda: None)()
                             coro_name = getattr(coro, "__qualname__", str(coro))
-                            buf.write(f"\n--- Task: {name} | coro: {coro_name} ---\n")
+                            buf.write(f"\n--- ACTIVE: {name} | coro: {coro_name} ---\n")
                             try:
-                                t.print_stack(file=buf, limit=8)
+                                t.print_stack(file=buf, limit=FRAME_LIMIT)
                             except Exception as _e:
                                 buf.write(f"  (could not print stack: {_e})\n")
-                        if len(tasks) > 30:
-                            buf.write(f"\n... ({len(tasks) - 30} more tasks not shown)\n")
+                        if len(active) > TASK_CAP:
+                            buf.write(
+                                f"\n... ({len(active) - TASK_CAP} more active tasks not shown)\n"
+                            )
+                        # One-line summary of idle tasks (don't dump their
+                        # stacks — wastes log volume)
+                        if idle:
+                            buf.write(
+                                f"\n--- IDLE TASKS ({len(idle)}, stacks suppressed) ---\n"
+                            )
+                            for t in idle[:30]:
+                                coro = getattr(t, "get_coro", lambda: None)()
+                                coro_name = getattr(coro, "__qualname__", str(coro))
+                                buf.write(f"  · {t.get_name()}: {coro_name}\n")
+                            if len(idle) > 30:
+                                buf.write(f"  · ... ({len(idle) - 30} more idle)\n")
                         buf.write("=== END STACK DUMP ===\n")
                         print(buf.getvalue())
                     except Exception as _dump_err:
