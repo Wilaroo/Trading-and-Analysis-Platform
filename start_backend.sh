@@ -78,11 +78,29 @@ tail -15 /tmp/backend.log
 
 echo ""
 echo "=== Health check ==="
-HEALTH=$(curl -s -m 5 http://127.0.0.1:8001/api/system/health || true)
+# v19.30.4 hardening: retry up to 5 times. The single-shot 5s curl was
+# too brittle — during/right after deferred init the loop is briefly
+# busy with the deferred-init storm (IB connect, scanner start,
+# trading bot _restore_state, simulation engine init). One transient
+# 5s curl miss does not mean the backend is wedged.
+HEALTH=""
+for attempt in 1 2 3 4 5; do
+    HEALTH=$(curl -s -m 5 http://127.0.0.1:8001/api/system/health 2>/dev/null || true)
+    if [[ -n "$HEALTH" ]]; then
+        if [[ $attempt -gt 1 ]]; then
+            echo "  (recovered after $attempt attempts)"
+        fi
+        break
+    fi
+    [[ $attempt -lt 5 ]] && sleep 2
+done
+
 if [[ -n "$HEALTH" ]]; then
     echo "  ✓ /api/system/health: $HEALTH"
 else
-    echo "  ✗ /api/system/health TIMED OUT — see /tmp/backend.log for the wedge"
+    echo "  ✗ /api/system/health TIMED OUT after 5 retries — see /tmp/backend.log"
+    echo "    The backend may still be alive; check:"
+    echo "      ps -p $SERVER_PID  &&  tail -50 /tmp/backend.log"
     exit 1
 fi
 
