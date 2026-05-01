@@ -306,7 +306,7 @@ class HybridDataService:
     ) -> Dict[str, Any]:
         """Get bars from MongoDB ib_historical_data collection.
 
-        v19.30.9 (2026-05-02) — sync pymongo `find().sort()` cursor
+        v19.30.9 (2026-05-01) — sync pymongo `find().sort()` cursor
         materialisation is now wrapped in `asyncio.to_thread` so it
         never blocks the event loop. Pre-fix this was a wedge candidate
         per the v19.30 audit (53 sync-mongo-in-async sites identified)
@@ -487,7 +487,7 @@ class HybridDataService:
     async def _cache_bars(self, symbol: str, timeframe: str, bars: List[Dict]):
         """Store bars in MongoDB cache.
 
-        v19.30.9 (2026-05-02) — wraps the per-bar sync upsert loop in
+        v19.30.9 (2026-05-01) — wraps the per-bar sync upsert loop in
         `asyncio.to_thread` so the event loop isn't tied up doing N
         round-trips when an IB fetch returns a fresh batch.
         """

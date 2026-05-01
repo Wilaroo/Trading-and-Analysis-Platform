@@ -2,7 +2,7 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-05-02 (sixty-second commit, v19.30.10) — Drop the "degraded mode" theatre on /account/positions
+## 2026-05-01 (sixty-second commit, v19.30.10) — Drop the "degraded mode" theatre on /account/positions
 
 **Operator pushback on the v19.30.9 ship:** "why do we need degraded mode at all? didn't yesterday's chart change fix this?".
 
@@ -40,7 +40,7 @@ curl -s -m 5 localhost:8001/api/ib/account/positions | jq .
 
 ---
 
-## 2026-05-02 (sixty-first commit, v19.30.9) — Degraded-mode UI fixes + cancel-all-pending-orders
+## 2026-05-01 (sixty-first commit, v19.30.9) — Degraded-mode UI fixes + cancel-all-pending-orders
 
 **3 surface bugs filed by operator post-v19.30.8 deploy. All wedge-immune fixes (no new sync-in-async sites added).**
 

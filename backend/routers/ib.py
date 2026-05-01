@@ -1100,7 +1100,7 @@ def get_pushed_quote(symbol: str):
 async def get_positions():
     """Get all current positions.
 
-    v19.30.10 (2026-05-02) — simplified per operator feedback. The
+    v19.30.10 (2026-05-01) — simplified per operator feedback. The
     DGX backend never connects to IB Gateway directly (the Windows
     pusher does), so the previous "try direct IB → fall back to
     pusher" pattern was theatre. We always read from the pusher

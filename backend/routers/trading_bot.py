@@ -1178,7 +1178,7 @@ async def reconcile_orphan_positions(req: ReconcileRequest):
 
 
 
-# ==================== CANCEL ALL PENDING ORDERS (v19.30.9 — 2026-05-02) ===========
+# ==================== CANCEL ALL PENDING ORDERS (v19.30.9 — 2026-05-01) ===========
 
 class CancelAllPendingRequest(BaseModel):
     """Body for POST /api/trading-bot/cancel-all-pending-orders.

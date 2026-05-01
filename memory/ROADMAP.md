@@ -3,9 +3,12 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-02 v19.30.9 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.10 fork)
 
-### 🎯 Just shipped 2026-05-02 v19.30.9 — see CHANGELOG (sixty-first commit)
+### 🎯 Just shipped 2026-05-01 v19.30.10 — see CHANGELOG (sixty-second commit)
+**Drop the "degraded mode" theatre — pusher-only with Mongo fallback.**
+
+### 🎯 Just shipped 2026-05-01 v19.30.9 — see CHANGELOG (sixty-first commit)
 **Degraded-mode UI fixes + cancel-all-pending-orders.**
 
 3 surface bugs operator filed after the v19.30.8 wedge-immunity deploy:

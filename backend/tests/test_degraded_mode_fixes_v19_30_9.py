@@ -1,5 +1,5 @@
 """
-v19.30.9 + v19.30.10 (2026-05-02) — Pusher-source-of-truth simplification +
+v19.30.9 + v19.30.10 (2026-05-01) — Pusher-source-of-truth simplification +
 async-safety hardening + cancel-all-pending-orders.
 
 Operator pushback: "why do we need degraded mode at all? didn't yesterday's
@@ -48,7 +48,7 @@ def test_positions_endpoint_returns_in_memory_pusher_data():
     from routers import ib as ib_module
 
     fake_pushed = {
-        "last_update": "2026-05-02T18:00:00+00:00",
+        "last_update": "2026-05-01T18:00:00+00:00",
         "positions": [
             {"symbol": "SBUX", "qty": 100, "avg_cost": 95.50},
             {"symbol": "SOFI", "qty": 200, "avg_cost": 18.75},
@@ -60,7 +60,7 @@ def test_positions_endpoint_returns_in_memory_pusher_data():
 
     assert result["count"] == 2
     assert result["source"] == "memory"
-    assert result["last_update"] == "2026-05-02T18:00:00+00:00"
+    assert result["last_update"] == "2026-05-01T18:00:00+00:00"
     assert result["positions"][0]["symbol"] == "SBUX"
     # `degraded` flag intentionally removed (v19.30.10)
     assert "degraded" not in result
@@ -81,7 +81,7 @@ def test_positions_endpoint_falls_back_to_mongo_snapshot():
     fake_db = MagicMock()
     fake_db["ib_live_snapshot"].find_one.return_value = {
         "positions": [{"symbol": "SPY", "qty": 50, "avg_cost": 580.0}],
-        "last_update": "2026-05-02T17:55:00+00:00",
+        "last_update": "2026-05-01T17:55:00+00:00",
     }
 
     with patch.object(ib_module, "_pushed_ib_data", fake_pushed), \
@@ -90,7 +90,7 @@ def test_positions_endpoint_falls_back_to_mongo_snapshot():
 
     assert result["count"] == 1
     assert result["source"] == "mongo_snapshot"
-    assert result["last_update"] == "2026-05-02T17:55:00+00:00"
+    assert result["last_update"] == "2026-05-01T17:55:00+00:00"
     assert result["positions"][0]["symbol"] == "SPY"
 
 
