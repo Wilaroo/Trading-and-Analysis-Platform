@@ -95,11 +95,14 @@ def test_subscriptions_timeout_is_short_enough():
     # Find the subscriptions() body
     idx = text.find("def subscriptions(self,")
     assert idx >= 0, "subscriptions() method missing"
-    body = text[idx:idx + 1500]
-    # Look for the /rpc/subscriptions call timeout
+    body = text[idx:idx + 2500]
+    # Look for the /rpc/subscriptions call timeout. v19.30.11 changed
+    # the call from `_request(...)` to `_request_with_dedup(...)` so
+    # concurrent cold-cache races coalesce; the timeout MUST still be
+    # ≤3s either way (the pre-fix 8s burned the loop for 24-36s).
     import re
     m = re.search(
-        r'_request\(\s*"GET",\s*"/rpc/subscriptions",\s*timeout=(\d+(?:\.\d+)?)\s*\)',
+        r'_request(?:_with_dedup)?\(\s*"GET",\s*"/rpc/subscriptions",\s*timeout=(\d+(?:\.\d+)?)\s*\)',
         body,
     )
     assert m is not None, "could not find /rpc/subscriptions _request call"

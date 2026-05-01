@@ -9,6 +9,34 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
+# v19.30.11 (2026-05-01): skip-restart-if-healthy guard.
+# Pre-fix this script's first action was always `fuser -k 8001/tcp`,
+# which killed any healthy backend on every invocation. Operator hit
+# this 2026-05-01 afternoon: dashboard appeared empty (Windows pusher
+# was dead, NOT the backend), operator ran ./start_backend.sh,
+# accidentally killed a perfectly healthy backend AND ate a 60-90s
+# cold-boot wait on top of the existing pusher outage.
+#
+# New behaviour:
+#   - If /api/health returns 200, skip everything and exit 0
+#   - If you really want a forced restart, pass `--force` (or run
+#     scripts/spark_stop.sh first)
+FORCE_RESTART=false
+for arg in "$@"; do
+    if [[ "$arg" == "--force" ]]; then
+        FORCE_RESTART=true
+    fi
+done
+if [ "$FORCE_RESTART" = false ]; then
+    if curl -sf -m 5 http://127.0.0.1:8001/api/health >/dev/null 2>&1; then
+        echo "✓ Backend already healthy on :8001 — nothing to do."
+        echo ""
+        echo "  To force restart:  ./start_backend.sh --force"
+        echo "  To stop cleanly:   bash scripts/spark_stop.sh"
+        exit 0
+    fi
+fi
+
 # 1. Activate venv (Spark uses .venv at repo root)
 if [[ -f ".venv/bin/activate" ]]; then
     # shellcheck disable=SC1091
@@ -60,10 +88,15 @@ nohup python server.py > /tmp/backend.log 2>&1 &
 SERVER_PID=$!
 echo "backend started, PID=$SERVER_PID"
 
-# 4. Wait long enough for deferred init to finish (up to 60s on cold boot
-# with degraded IB; v19.30.x watchdogs cap each phase at 8-10s).
-echo "waiting up to 60s for 'Application startup complete'..."
-for i in {1..60}; do
+# 4. Wait long enough for deferred init to finish (up to 120s on cold boot
+# with degraded IB; v19.30.x watchdogs cap each phase at 8-10s and the
+# wedge watchdog catches genuine stalls separately).
+# v19.30.11 (2026-05-01): bumped 60s → 120s — the deferred-init storm
+# (IB connect retry + scanner state restore + bot _restore_state +
+# simulation engine + ML model loading) routinely takes 60-90s on a
+# busy Spark.
+echo "waiting up to 120s for 'Application startup complete'..."
+for i in {1..120}; do
     if grep -q "Application startup complete" /tmp/backend.log 2>/dev/null; then
         echo "  ✓ Application startup complete (after ${i}s)"
         break

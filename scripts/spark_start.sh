@@ -18,6 +18,35 @@ echo "========================================="
 echo "  SentCom — Starting DGX Spark Services"
 echo "========================================="
 
+# v19.30.11 (2026-05-01): skip-restart-if-healthy guard.
+# Pre-fix this script's first action was always `fuser -k 8001/tcp`,
+# which killed any healthy backend on every invocation. Operator hit
+# this 2026-05-01 afternoon: dashboard appeared empty (Windows pusher
+# was dead, not the backend), operator ran ./start_backend.sh,
+# accidentally killed a perfectly healthy backend and ate a 60-90s
+# cold-boot wait on top of the existing pusher outage.
+#
+# New behaviour:
+#   - If /api/health returns 200, skip everything — backend is already up
+#   - If you really want a forced restart, pass `--force` (or run
+#     spark_stop.sh first to kill the existing process cleanly)
+FORCE_RESTART=false
+for arg in "$@"; do
+    if [[ "$arg" == "--force" ]]; then
+        FORCE_RESTART=true
+    fi
+done
+if [ "$FORCE_RESTART" = false ]; then
+    if curl -sf -m 5 http://localhost:8001/api/health >/dev/null 2>&1; then
+        echo "  ✓ Backend already healthy on :8001 — nothing to do."
+        echo ""
+        echo "  To force restart:  bash scripts/spark_start.sh --force"
+        echo "  To stop cleanly:   bash scripts/spark_stop.sh"
+        exit 0
+    fi
+fi
+echo ""
+
 # Step 1: Check MongoDB is reachable (port-based, no Docker dependency)
 echo "[1/5] Checking MongoDB..."
 if timeout 3 bash -c "echo > /dev/tcp/localhost/27017" 2>/dev/null; then
@@ -100,15 +129,23 @@ done
 nohup python server.py > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
 echo "  Backend PID: $BACKEND_PID"
+# Note: the `>` redirect on the nohup line above already truncates
+# /tmp/backend.log on each launch, so the log only grows during a
+# single backend session (not across days of dev).
 
 echo "  Waiting for health check..."
-for i in $(seq 1 60); do
+# v19.30.11 (2026-05-01): cold-boot wait bumped 60s → 120s. The deferred
+# init storm (IB connect retry up to 30s + scanner state restore + bot
+# _restore_state + simulation engine init + ML model loading) routinely
+# takes 60-90s on a busy Spark. The watchdog catches genuine wedges
+# separately, so the boot health-check shouldn't false-alarm at 60s.
+for i in $(seq 1 120); do
     if curl -sf http://localhost:8001/api/health > /dev/null 2>&1; then
         echo "  Backend healthy after ${i}s"
         break
     fi
-    if [ "$i" -eq 60 ]; then
-        echo "  [WARN] Backend not healthy after 60s — check: tail -f /tmp/backend.log"
+    if [ "$i" -eq 120 ]; then
+        echo "  [WARN] Backend not healthy after 120s — check: tail -f /tmp/backend.log"
     fi
     sleep 1
 done

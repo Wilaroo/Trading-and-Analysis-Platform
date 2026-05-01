@@ -13,23 +13,48 @@ Config:
     ENABLE_LIVE_BAR_RPC - "true" / "false" (default "true"). Kill-switch
                           so the DGX can fall back to pure Mongo cache
                           without redeploying if the pusher RPC breaks.
+    IB_PUSHER_RPC_MAX_CONCURRENT - Max in-flight HTTP requests to the
+                          pusher (default 4). IB Gateway allows ≤6
+                          concurrent reqHistoricalData per client ID;
+                          the pusher uses client ID 15 alone during RTH,
+                          so 4 leaves 2 slots for the pusher's internal
+                          quote/account-snapshot ops without risking an
+                          IB pacing violation.
+    IB_PUSHER_RPC_CIRCUIT_THRESHOLD - Failure count within the rolling
+                          10s window that flips the circuit OPEN (default 5).
+    IB_PUSHER_RPC_CIRCUIT_OPEN_S - How long the circuit stays OPEN before
+                          it transitions to HALF_OPEN and tries one test
+                          request (default 30s).
 
 Design notes:
     * Purely sync. Call from async paths via asyncio.to_thread.
     * Short timeouts (6s default) — pusher RPC path is supposed to be
       a last-mile accelerator, not a liability.
     * Single shared requests.Session for keep-alive / connection reuse.
+    * Bounded concurrency via threading.Semaphore (default 4) so a flood
+      of concurrent chart panels can't overwhelm the pusher.
+    * Circuit breaker (closed → open → half_open). Once the pusher dies
+      or starts pacing-violating IB Gateway, we stop hammering it for
+      30s instead of spamming retries that prolong the outage.
+    * In-flight dedup on read paths (latest_bars / latest_bars_batch /
+      subscriptions) — multiple chart panels asking for the same symbol
+      simultaneously coalesce into a single HTTP request. Materially
+      reduces the request volume on busy mornings.
     * Every call returns either the parsed JSON dict or None on any
       failure. Never raises. Callers must treat None as "pusher unreachable,
-      fall back to cache."
+      fall back to cache." This is the FAIL-OPEN contract: the chart UI
+      keeps rendering off Mongo cache during a pusher outage.
 """
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
 import threading
-from typing import Any, Dict, List, Optional
+import time as _t
+from collections import deque
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -50,6 +75,34 @@ def _base_url() -> Optional[str]:
     return url or None
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# ─── Throttling / circuit breaker config ─────────────────────────────────────
+
+_REQUEST_SEMAPHORE_SIZE = _env_int("IB_PUSHER_RPC_MAX_CONCURRENT", 4)
+_CIRCUIT_FAILURE_THRESHOLD = _env_int("IB_PUSHER_RPC_CIRCUIT_THRESHOLD", 5)
+_CIRCUIT_FAILURE_WINDOW_S = _env_float("IB_PUSHER_RPC_CIRCUIT_WINDOW_S", 10.0)
+_CIRCUIT_OPEN_DURATION_S = _env_float("IB_PUSHER_RPC_CIRCUIT_OPEN_S", 30.0)
+_SEMAPHORE_ACQUIRE_TIMEOUT_S = _env_float("IB_PUSHER_RPC_ACQUIRE_TIMEOUT_S", 2.0)
+
+# Circuit states (string consts so they serialise cleanly in /pusher-health)
+_CIRCUIT_CLOSED = "closed"
+_CIRCUIT_OPEN = "open"
+_CIRCUIT_HALF_OPEN = "half_open"
+
+
 class _PusherRPCClient:
     # Subscription-set TTL. Pusher subscriptions change rarely (operator
     # adds a watchlist symbol, scanner promotes a Tier-2 stock, etc.), so
@@ -59,14 +112,18 @@ class _PusherRPCClient:
 
     def __init__(self) -> None:
         self._session = requests.Session()
-        self._lock = threading.Lock()
+        # Bounded-concurrency semaphore replaces the previous single
+        # threading.Lock. The lock serialised every call (effectively
+        # capacity 1); the semaphore allows up to N parallel calls
+        # (default 4) so chart-panel + scanner traffic doesn't queue
+        # behind a slow latest_bars fetch.
+        self._request_semaphore = threading.Semaphore(_REQUEST_SEMAPHORE_SIZE)
         # Track consecutive failures to auto-suppress noisy logs
         self._consecutive_failures = 0
         self._last_success_ts: Optional[float] = None
         # Rolling window of recent RPC latencies (last 50 successful calls)
         # used by /api/ib/pusher-health → PusherHeartbeatTile so the
         # operator can see RPC perf at a glance.
-        from collections import deque
         self._latency_ms_window: deque = deque(maxlen=50)
         self._call_count_total: int = 0
         self._success_count_total: int = 0
@@ -76,6 +133,24 @@ class _PusherRPCClient:
         # empty set = pusher reachable but tracking nothing.
         self._subs_cache: Optional[set] = None
         self._subs_cache_ts: float = 0.0
+
+        # ─── Circuit breaker state ──────────────────────────────────────
+        self._circuit_lock = threading.Lock()
+        self._circuit_state: str = _CIRCUIT_CLOSED
+        self._circuit_opened_at: float = 0.0
+        # Rolling timestamp window of recent failures. We open the circuit
+        # when len(failures within last _CIRCUIT_FAILURE_WINDOW_S) >= threshold.
+        self._failure_window: deque = deque(maxlen=_CIRCUIT_FAILURE_THRESHOLD * 2)
+        self._circuit_short_circuit_total: int = 0
+        self._semaphore_timeout_total: int = 0
+
+        # ─── In-flight dedup state ──────────────────────────────────────
+        # Coalesces concurrent identical idempotent calls (latest_bars(SPY)
+        # fired by 3 chart panels at the same moment → 1 HTTP request to
+        # the pusher). Keyed by (method, path, json_body_hash).
+        self._dedup_lock = threading.Lock()
+        self._in_flight_calls: Dict[Tuple[str, str, str], Tuple[threading.Event, List[Optional[Dict[str, Any]]]]] = {}
+        self._dedup_coalesced_total: int = 0
 
     # ---- public latency stats ----------------------------------------------
     def latency_stats(self) -> Dict[str, Any]:
@@ -90,6 +165,18 @@ class _PusherRPCClient:
             last = round(samples[-1], 1)
         else:
             avg = p95 = last = None
+        # Snapshot circuit state under the lock so the response is internally
+        # consistent (avoids a torn read where state="open" but opened_at=0).
+        with self._circuit_lock:
+            circuit_state = self._circuit_state
+            circuit_opened_at = self._circuit_opened_at
+            recent_failures = len(self._failure_window)
+        circuit_open_remaining_s: Optional[float] = None
+        if circuit_state == _CIRCUIT_OPEN:
+            circuit_open_remaining_s = max(
+                0.0,
+                round(_CIRCUIT_OPEN_DURATION_S - (_t.time() - circuit_opened_at), 1),
+            )
         return {
             "rpc_latency_ms_avg": avg,
             "rpc_latency_ms_p95": p95,
@@ -99,7 +186,149 @@ class _PusherRPCClient:
             "rpc_success_count_total": self._success_count_total,
             "rpc_consecutive_failures": self._consecutive_failures,
             "rpc_last_success_ts": self._last_success_ts,
+            # ─── v19.30.11 — throttle / circuit breaker / dedup metrics ──
+            "rpc_max_concurrent": _REQUEST_SEMAPHORE_SIZE,
+            "rpc_circuit_state": circuit_state,
+            "rpc_circuit_open_remaining_s": circuit_open_remaining_s,
+            "rpc_circuit_recent_failures": recent_failures,
+            "rpc_circuit_short_circuit_total": self._circuit_short_circuit_total,
+            "rpc_semaphore_timeout_total": self._semaphore_timeout_total,
+            "rpc_dedup_coalesced_total": self._dedup_coalesced_total,
         }
+
+    # ---- circuit breaker helpers -------------------------------------------
+
+    def _circuit_check(self) -> bool:
+        """Return True if a request may proceed, False if the circuit is
+        currently open. On expiry the circuit transitions to HALF_OPEN
+        and lets exactly one test request through.
+        """
+        now = _t.time()
+        with self._circuit_lock:
+            if self._circuit_state == _CIRCUIT_OPEN:
+                if now - self._circuit_opened_at >= _CIRCUIT_OPEN_DURATION_S:
+                    self._circuit_state = _CIRCUIT_HALF_OPEN
+                    logger.info(
+                        "pusher RPC circuit breaker: HALF_OPEN — testing recovery"
+                    )
+                    return True
+                return False
+            return True  # closed or half_open
+
+    def _circuit_record_success(self) -> None:
+        """Recovery confirmed (HALF_OPEN) or steady-state success (CLOSED)."""
+        with self._circuit_lock:
+            if self._circuit_state == _CIRCUIT_HALF_OPEN:
+                logger.info(
+                    "pusher RPC circuit breaker: CLOSED (recovered after %.1fs)",
+                    _t.time() - self._circuit_opened_at,
+                )
+            self._circuit_state = _CIRCUIT_CLOSED
+            self._circuit_opened_at = 0.0
+            self._failure_window.clear()
+
+    def _circuit_record_failure(self) -> None:
+        """Bump the rolling failure window. Open the circuit if the
+        window threshold is exceeded (CLOSED) or if the half-open test
+        request failed (HALF_OPEN).
+        """
+        now = _t.time()
+        with self._circuit_lock:
+            self._failure_window.append(now)
+            cutoff = now - _CIRCUIT_FAILURE_WINDOW_S
+            while self._failure_window and self._failure_window[0] < cutoff:
+                self._failure_window.popleft()
+
+            if self._circuit_state == _CIRCUIT_HALF_OPEN:
+                self._circuit_state = _CIRCUIT_OPEN
+                self._circuit_opened_at = now
+                logger.warning(
+                    "pusher RPC circuit breaker: OPEN (recovery test failed; "
+                    "blocking for %ds)",
+                    int(_CIRCUIT_OPEN_DURATION_S),
+                )
+            elif (
+                self._circuit_state == _CIRCUIT_CLOSED
+                and len(self._failure_window) >= _CIRCUIT_FAILURE_THRESHOLD
+            ):
+                self._circuit_state = _CIRCUIT_OPEN
+                self._circuit_opened_at = now
+                logger.warning(
+                    "pusher RPC circuit breaker: OPEN "
+                    "(%d failures in %.0fs; blocking for %ds — fail-open, "
+                    "callers fall back to Mongo cache)",
+                    len(self._failure_window),
+                    _CIRCUIT_FAILURE_WINDOW_S,
+                    int(_CIRCUIT_OPEN_DURATION_S),
+                )
+
+    # ---- dedup helper ------------------------------------------------------
+
+    def _dedup_key(
+        self,
+        method: str,
+        path: str,
+        json_body: Optional[Dict[str, Any]],
+    ) -> Tuple[str, str, str]:
+        """Stable key for in-flight dedup. JSON body sorted so the same
+        logical request hashes identically across callers."""
+        if json_body is None:
+            body_key = ""
+        else:
+            try:
+                body_key = _json.dumps(json_body, sort_keys=True, default=str)
+            except Exception:
+                # Fall back to a unique key per call — disables dedup for
+                # this one request but never breaks the call path.
+                body_key = f"_unhashable_{id(json_body)}"
+        return (method, path, body_key)
+
+    def _request_with_dedup(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Optional[Dict[str, Any]] = None,
+        timeout: float = _DEFAULT_TIMEOUT,
+    ) -> Optional[Dict[str, Any]]:
+        """Same as `_request`, but coalesces concurrent identical calls
+        into a single HTTP round-trip. Use this for IDEMPOTENT reads
+        only (latest_bars, latest_bars_batch, subscriptions, account_snapshot).
+        Subscribe / unsubscribe must use plain `_request` since each
+        call has independent semantics.
+        """
+        key = self._dedup_key(method, path, json_body)
+        leader: bool
+        with self._dedup_lock:
+            existing = self._in_flight_calls.get(key)
+            if existing is not None:
+                event, holder = existing
+                self._dedup_coalesced_total += 1
+                leader = False
+            else:
+                event = threading.Event()
+                holder = [None]
+                self._in_flight_calls[key] = (event, holder)
+                leader = True
+
+        if not leader:
+            # Follower — wait up to 1.5× the request timeout for the
+            # leader's response. If the leader takes longer than that,
+            # bail out fail-open (None). This bounds tail latency for
+            # followers when the leader is stuck on a slow IB call.
+            event.wait(timeout=timeout * 1.5)
+            return holder[0]
+
+        # We're the leader — make the actual HTTP request.
+        try:
+            holder[0] = self._request(
+                method, path, json_body=json_body, timeout=timeout
+            )
+        finally:
+            event.set()
+            with self._dedup_lock:
+                self._in_flight_calls.pop(key, None)
+        return holder[0]
 
     # ---- internal helpers -------------------------------------------------
 
@@ -116,18 +345,32 @@ class _PusherRPCClient:
         base = _base_url()
         if not base:
             return None
+
+        # ─── Circuit breaker gate ───────────────────────────────────────
+        # Fail-open: short-circuit returns None so callers fall back to
+        # Mongo cache instead of stalling on a doomed pusher round-trip.
+        if not self._circuit_check():
+            self._circuit_short_circuit_total += 1
+            return None
+
+        # ─── Concurrency cap ────────────────────────────────────────────
+        # Acquire a semaphore slot with a bounded wait — under heavy
+        # concurrent load (chart-mount storm + scanner tick + bar_poll),
+        # the slowest callers get a None instead of piling up indefinitely.
+        if not self._request_semaphore.acquire(timeout=_SEMAPHORE_ACQUIRE_TIMEOUT_S):
+            self._semaphore_timeout_total += 1
+            return None
+
         url = f"{base}{path}"
-        import time as _t
         _start = _t.time()
         self._call_count_total += 1
         try:
-            with self._lock:
-                resp = self._session.request(
-                    method=method,
-                    url=url,
-                    json=json_body,
-                    timeout=timeout,
-                )
+            resp = self._session.request(
+                method=method,
+                url=url,
+                json=json_body,
+                timeout=timeout,
+            )
             if resp.status_code >= 400:
                 # 404 probably means pusher RPC is deployed but this endpoint
                 # is older/missing — do not spam on every fetch.
@@ -137,10 +380,12 @@ class _PusherRPCClient:
                         method, path, resp.status_code, resp.text[:200],
                     )
                 self._consecutive_failures += 1
+                self._circuit_record_failure()
                 return None
             self._consecutive_failures = 0
             self._last_success_ts = _t.time()
             self._success_count_total += 1
+            self._circuit_record_success()
             # Record latency for the heartbeat tile.
             self._latency_ms_window.append((_t.time() - _start) * 1000.0)
             # Bust the subscription-set cache on any subscribe/unsubscribe
@@ -154,16 +399,20 @@ class _PusherRPCClient:
             if self._consecutive_failures < 3:
                 logger.info("pusher RPC %s %s unreachable: %s", method, path, exc)
             self._consecutive_failures += 1
+            self._circuit_record_failure()
             return None
         except Exception as exc:
             logger.warning("pusher RPC %s %s unexpected error: %s", method, path, exc)
             self._consecutive_failures += 1
+            self._circuit_record_failure()
             return None
+        finally:
+            self._request_semaphore.release()
 
     # ---- public API -------------------------------------------------------
 
     def health(self) -> Optional[Dict[str, Any]]:
-        return self._request("GET", "/rpc/health", timeout=3.0)
+        return self._request_with_dedup("GET", "/rpc/health", timeout=3.0)
 
     def account_snapshot(self) -> Optional[Dict[str, Any]]:
         """Fetch the pusher's latest account snapshot on demand.
@@ -171,8 +420,12 @@ class _PusherRPCClient:
         Returns a dict like {success, source, account, timestamp} or None
         if the RPC fails. Callers use this as a fallback for the V5
         equity pill when the push-loop's account_data is stale/empty.
+
+        v19.30.11 (2026-05-01) — dedup-wrapped: the V5 HUD account pill,
+        the SystemBanner, and the briefing endpoint can all call this
+        within the same tick; coalesce them into one HTTP round-trip.
         """
-        return self._request("GET", "/rpc/account-snapshot", timeout=5.0)
+        return self._request_with_dedup("GET", "/rpc/account-snapshot", timeout=5.0)
 
     def subscriptions(self, force_refresh: bool = False) -> Optional[set]:
         """
@@ -183,7 +436,6 @@ class _PusherRPCClient:
         None on RPC failure (callers should treat that as "unknown" and
         NOT gate, to preserve current behaviour when the pusher is down).
         """
-        import time as _t
         now = _t.time()
         if (
             not force_refresh
@@ -203,7 +455,9 @@ class _PusherRPCClient:
         # The 30s `_subs_cache` TTL still smooths the steady-state
         # call rate, so this bound only matters on cold cache or
         # `force_refresh=True`.
-        resp = self._request("GET", "/rpc/subscriptions", timeout=3.0)
+        # v19.30.11 (2026-05-01) — dedup-wrapped: cold-cache races
+        # (multiple services init in parallel) coalesce into one fetch.
+        resp = self._request_with_dedup("GET", "/rpc/subscriptions", timeout=3.0)
         if not resp or not resp.get("success"):
             return None
         symbols = resp.get("symbols") or []
@@ -265,7 +519,9 @@ class _PusherRPCClient:
             "use_rth": bool(use_rth),
             "what_to_show": what_to_show,
         }
-        resp = self._request(
+        # v19.30.11 — dedup-wrapped: chart panel + scanner + bar_poll
+        # firing for the same symbol within a few hundred ms coalesce.
+        resp = self._request_with_dedup(
             "POST", "/rpc/latest-bars",
             json_body=body,
             timeout=_DEFAULT_LATEST_BARS_TIMEOUT,
@@ -324,7 +580,9 @@ class _PusherRPCClient:
         }
         # Generous client-side timeout, scales with batch size.
         timeout = max(_DEFAULT_LATEST_BARS_TIMEOUT, 1.5 * len(cleaned))
-        resp = self._request(
+        # v19.30.11 — dedup-wrapped: dedup key includes the sorted symbol
+        # tuple so identical batch requests coalesce.
+        resp = self._request_with_dedup(
             "POST", "/rpc/latest-bars-batch",
             json_body=body,
             timeout=timeout,
@@ -339,7 +597,11 @@ class _PusherRPCClient:
 
     def quote_snapshot(self, symbol: str) -> Optional[Dict[str, Any]]:
         body = {"symbol": symbol.upper()}
-        resp = self._request("POST", "/rpc/quote-snapshot", json_body=body, timeout=5.0)
+        # v19.30.11 — dedup-wrapped: V5 watchlist + scanner cards can both
+        # ask for AAPL quote at the same tick; coalesce.
+        resp = self._request_with_dedup(
+            "POST", "/rpc/quote-snapshot", json_body=body, timeout=5.0
+        )
         if not resp or not resp.get("success"):
             return None
         return resp.get("quote")

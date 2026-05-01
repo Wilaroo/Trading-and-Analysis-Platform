@@ -2,6 +2,67 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-01 (sixty-third commit, v19.30.11) — Pusher overload protection + skip-restart-if-healthy + system banner
+
+**Operator hit a real problem 2026-05-01 afternoon:** dashboard appeared empty → assumed Spark backend was broken → ran `./start_backend.sh` → script killed a perfectly healthy backend AND ate 60-90s of cold boot. Diagnostic data proved the actual cause was the **Windows IB Pusher had died** (overload-induced — concurrent `/rpc/latest-bars` calls fanned out into IB Gateway's 6-concurrent-`reqHistoricalData` limit; IB closed the socket; pusher process couldn't recover). Three independent fixes shipped together to prevent recurrence:
+
+### 🔴 Fix 1 — Bounded concurrency + circuit breaker + dedup on Spark→pusher RPC
+
+**File:** `backend/services/ib_pusher_rpc.py` (~225 lines added/refactored)
+
+- **`threading.Lock` → `threading.Semaphore(N)`** (default N=4, env-configurable via `IB_PUSHER_RPC_MAX_CONCURRENT`). Caps concurrent in-flight Spark→pusher requests so a chart-mount storm + scanner tick + bar_poll can't combine into an IB pacing violation. Default 4 leaves 2 slots at the pusher for its internal account/quote ops within IB's 6-concurrent budget.
+- **Circuit breaker** with three states (`closed` / `open` / `half_open`):
+  - 5 failures within a rolling 10s window → flip to **OPEN**
+  - **OPEN** state short-circuits all calls (return None immediately) for 30s, instead of spamming retries that would prolong the outage
+  - After 30s → **HALF_OPEN** test request; success closes the circuit, failure re-opens for another 30s
+  - Tunable via `IB_PUSHER_RPC_CIRCUIT_THRESHOLD` / `_WINDOW_S` / `_OPEN_S`
+- **In-flight dedup** on idempotent reads (`latest_bars`, `latest_bars_batch`, `subscriptions`, `account_snapshot`, `health`, `quote_snapshot`). Multiple chart panels asking for the same payload simultaneously coalesce into a SINGLE HTTP round-trip via a shared `threading.Event`. Followers wait up to `1.5×timeout` for the leader's response.
+- **Fail-open contract preserved**: every failure path still returns `None`; callers (chart panel, scanner) fall back to Mongo cache. The chart UI keeps rendering during a pusher outage instead of blanking.
+- **Surface metrics** in `/api/ib/pusher-health`: `rpc_max_concurrent`, `rpc_circuit_state`, `rpc_circuit_open_remaining_s`, `rpc_circuit_recent_failures`, `rpc_circuit_short_circuit_total`, `rpc_semaphore_timeout_total`, `rpc_dedup_coalesced_total`.
+
+### 🟡 Fix 2 — Skip-restart-if-healthy guard
+
+**Files:** `start_backend.sh`, `scripts/spark_start.sh`
+
+Both scripts now short-circuit when the backend is already healthy. Pre-fix the first action was always `fuser -k 8001/tcp` — meaning every invocation guaranteed downtime + cold-boot wait. New behaviour:
+- If `curl -sf http://localhost:8001/api/health` returns 200 → exit 0 with friendly message
+- `--force` flag overrides for genuine restarts
+- Cold-boot wait bumped 60s → 120s (the deferred-init storm — IB connect retry + scanner state restore + bot `_restore_state` + simulation engine + ML models — legitimately takes 60-90s; the v19.30.6 wedge watchdog catches genuine wedges separately)
+- Removed an explicit log truncation that was redundant with `nohup ... > /tmp/backend.log`
+
+### 🟢 Fix 3 — `GET /api/system/banner` + V5 SystemBanner.jsx
+
+**Files:** `backend/routers/system_banner.py` (NEW, 175 lines), `frontend/src/components/sentcom/v5/SystemBanner.jsx` (NEW, 145 lines), wired into `SentComV5View.jsx` above `PusherDeadBanner`.
+
+Operator-facing alert strip that polls the new `/api/system/banner` endpoint every 10s. Fires a giant red strip across the top of the V5 HUD when:
+- Pusher_rpc has been red ≥30s → critical level with explicit action: "Check Windows side… Do NOT restart the Spark backend — it's healthy" (this exact copy is what would have prevented today's footgun)
+- MongoDB has been red ≥10s → critical level with `docker start mongodb` action
+- Overall health yellow → thinner amber strip
+
+Dismissable for 60s; reappears if the problem persists. Cleared automatically when the subsystem flips back to green. Internally consistent with `/api/system/health` (single source of truth — banner translates the diagnostic into operator-facing copy).
+
+### Tests
+20 new pytests in `tests/test_pusher_throttle_v19_30_11.py` covering circuit breaker state machine, semaphore concurrency cap, dedup correctness with concurrent threads, fail-open contract, source-level pins for `start_backend.sh` / `spark_start.sh` guards, and banner endpoint behaviour. **60/60 across the v19.30 stack** (40 prior + 20 new). Live-validated in container: `/api/system/banner` returns expected payload, `/api/ib/pusher-health` surfaces all new throttle metrics.
+
+### Operator action — Spark deploy
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull
+# The skip-if-healthy guard means subsequent runs of start_backend.sh
+# are now safe — if backend is up, nothing happens.
+./start_backend.sh
+
+# Verify the new metrics surface
+curl -s localhost:8001/api/ib/pusher-health | jq '.heartbeat | {rpc_max_concurrent, rpc_circuit_state, rpc_dedup_coalesced_total}'
+curl -s localhost:8001/api/system/banner | jq .
+```
+
+### Why this trio prevents recurrence
+- **Pusher overload mitigated** by Fix 1 — Spark can't swamp pusher into an IB pacing violation, AND when pusher does fail (different cause), the circuit breaker stops Spark from prolonging the outage with a retry storm
+- **Footgun closed** by Fix 2 — operator can't accidentally kill a healthy backend during troubleshooting
+- **Mistaken diagnosis prevented** by Fix 3 — when something IS broken, the dashboard tells the operator EXACTLY what's broken AND what NOT to do
+
+---
+
 ## 2026-05-01 (sixty-second commit, v19.30.10) — Drop the "degraded mode" theatre on /account/positions
 
 **Operator pushback on the v19.30.9 ship:** "why do we need degraded mode at all? didn't yesterday's chart change fix this?".

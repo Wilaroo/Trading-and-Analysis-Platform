@@ -65,6 +65,8 @@ from routers.startup_status import router as startup_status_router
 from routers.focus_mode_router import router as focus_mode_router
 from routers.watchlist import router as watchlist_router, init_watchlist_router, get_watchlist as _watchlist_get_watchlist
 from routers.system_router import router as system_router, init_system_router
+# v19.30.11 (2026-05-01) — operator-facing alert banner endpoint
+from routers.system_banner import router as system_banner_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from routers.ai_training import router as ai_training_router
 from routers.sentiment_refresh import (
@@ -1527,6 +1529,7 @@ app.include_router(startup_status_router)
 app.include_router(focus_mode_router)
 app.include_router(watchlist_router)
 app.include_router(system_router)
+app.include_router(system_banner_router)
 app.include_router(dashboard_router)
 app.include_router(sentiment_refresh_router)
 # Tier 2-4 routers registered during startup via _deferred_routers

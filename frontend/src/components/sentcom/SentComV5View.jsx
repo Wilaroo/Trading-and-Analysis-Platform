@@ -47,6 +47,12 @@ import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
+// v19.30.11 (2026-05-01) — high-priority system alerts (pusher dead 30s+,
+// mongo down, etc.) with explicit operator action guidance. Goes ABOVE
+// PusherDeadBanner because it's broader (covers all critical subsystems
+// not just pusher) and has the "DO NOT restart Spark backend" message
+// that prevented today's footgun.
+import SystemBanner from './v5/SystemBanner';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -239,6 +245,14 @@ export const SentComV5View = ({
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
+
+      {/* v19.30.11 (2026-05-01) — System Banner: catastrophic-subsystem
+          alert strip with explicit operator-action copy. Renders giant
+          red strip when pusher_rpc has been red ≥30s, mongo is down,
+          etc. Polls /api/system/banner every 10s. The action text
+          tells the operator EXACTLY what to do (and what NOT to do —
+          e.g., "Do NOT restart the Spark backend, it's healthy"). */}
+      <SystemBanner />
 
       {/* Pusher DEAD banner — loud failure mode when IB pusher stops feeding
           during market hours. Everything downstream (scanner, bot, chart)

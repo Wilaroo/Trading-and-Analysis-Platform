@@ -3,7 +3,16 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.10 fork)
+## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.11 fork)
+
+### 🎯 Just shipped 2026-05-01 v19.30.11 — see CHANGELOG (sixty-third commit)
+**Pusher overload protection + skip-restart-if-healthy + system banner.**
+
+Three coordinated fixes after operator hit a real outage:
+- ✅ **Pusher RPC throttle**: bounded `Semaphore(4)` + circuit breaker (5 failures/10s → open 30s → half-open test → close) + per-method dedup on idempotent reads. Caps Spark→pusher concurrency below IB's 6-concurrent reqHistoricalData limit. Surface metrics in `/api/ib/pusher-health`.
+- ✅ **Skip-restart-if-healthy guard** on both `start_backend.sh` and `scripts/spark_start.sh`. `--force` flag for genuine restarts. Cold-boot wait bumped 60s → 120s. Closes the "killed my own healthy backend" footgun.
+- ✅ **`GET /api/system/banner`** + V5 SystemBanner.jsx — giant red strip when pusher_rpc red ≥30s OR mongo red ≥10s. Includes explicit "Do NOT restart Spark backend" action copy. Dismissable for 60s; reappears if persistent.
+- ✅ 20 new pytests, **60/60 across v19.30 stack**. Live-validated in container.
 
 ### 🎯 Just shipped 2026-05-01 v19.30.10 — see CHANGELOG (sixty-second commit)
 **Drop the "degraded mode" theatre — pusher-only with Mongo fallback.**
