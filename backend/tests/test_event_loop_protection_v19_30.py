@@ -156,9 +156,12 @@ def test_v19_30_phase_budgets_documented():
 
     If someone tunes them, this test forces them to also update the doc.
     """
+    from pathlib import Path
     expected = {"scan": 20.0, "pos": 8.0, "eod": 5.0}
-    # Read the source file and assert the numbers are present.
-    src = open("/app/backend/services/trading_bot_service.py").read()
+    # Read the source file relative to this test (works on /app/ in
+    # Emergent container AND on Spark's ~/Trading-and-Analysis-Platform).
+    src_path = Path(__file__).resolve().parents[1] / "services" / "trading_bot_service.py"
+    src = src_path.read_text()
     assert "_SCAN_WALL_S = 20.0" in src
     assert "_POS_WALL_S = 8.0" in src
     assert "_EOD_WALL_S = 5.0" in src
