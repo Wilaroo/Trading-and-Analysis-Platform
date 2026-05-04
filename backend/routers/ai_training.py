@@ -418,12 +418,21 @@ async def stop_training():
 
 
 @router.get("/is-active")
-def is_training_active():
+async def is_training_active():
     """
     Lightweight endpoint for external processes (IB Pusher, Collectors) to check
     if training is currently running. Returns a simple boolean.
-    
+
     Used by Windows-side scripts to back off during Spark GPU training.
+
+    v19.30.13 (2026-05-04) — `def` → `async def` so this returns instantly
+    on the event loop instead of queuing behind other sync handlers in the
+    thread pool. Pre-fix, the Windows collector poll (5s timeout, every
+    cycle) would occasionally hit "Timeout on GET /api/ai-training/is-active"
+    when Spark was busy with scanner / push-data / smart-backfill — even
+    though THIS handler is just three in-memory dict reads and shouldn't
+    take more than microseconds. Moving to async eliminates the
+    thread-pool-queue tail latency.
     """
     active = False
     reason = "idle"

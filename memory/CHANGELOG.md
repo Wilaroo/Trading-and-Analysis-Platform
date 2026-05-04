@@ -2,6 +2,70 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (sixty-fifth commit, v19.30.13) — False-alarm cleanup pass: ADV schema clobber, ib_gateway yellow, ai-training timeouts
+
+**Three operator-flagged false alarms / bugs surfaced during the 2026-05-04 pre-market session.** All three made the dashboard say one thing while the underlying data said another, sending the operator on wild goose chases.
+
+### Fix 1 — ADV cache schema clobber (the actual smoking gun for "smart-backfill returns 0")
+
+Two endpoints write to `symbol_adv_cache` with **incompatible schemas**:
+- `/api/ib-collector/build-adv-cache` upserts: `avg_volume`, **`avg_dollar_volume`**, `atr_pct`, **`tier`**, `latest_close`
+- `/api/ai-modules/adv/recalculate` did `delete_many({})` + `insert_many` with ONLY `avg_volume`, **silently wiping `avg_dollar_volume` and `tier` fields**
+
+Operator ran them in this order: `build-adv-cache` (success: 9412 docs with `avg_dollar_volume` + `tier`) → `adv/recalculate` (DELETED ALL 9412, re-inserted 9270 without `avg_dollar_volume`) → `smart-backfill` (queried `{avg_dollar_volume: {$gte: 2_000_000}}` → matched 0 docs even though 9270 were in the cache) → falsely concluded "no symbols qualify".
+
+**Fix (`backend/routers/ai_modules.py::recalculate_adv_cache()`)**: redirected to the canonical `IBHistoricalCollector.rebuild_adv_from_ib_data()` builder. Both endpoints now converge on the same code path → no schema drift possible. Source-level pin asserts no future contributor can re-import the deprecated `scripts/recalculate_adv_cache.py` clobber path.
+
+### Fix 2 — `ib_gateway: yellow` false-alarm (the persistent "1 WARN")
+
+The DGX backend in this deployment never connects directly to IB Gateway — the Windows pusher is the only IB path. Pre-fix, `_check_ib_gateway()` returned yellow with detail `"ib_service not registered"` because it only checked for direct IB. This showed up as "1 WARN" in the V5 HUD header forever, sending operators on wild goose chases looking for a degraded IB Gateway that doesn't exist in this deployment.
+
+**Fix (`backend/services/system_health_service.py::_check_ib_gateway()`)**: pusher-only deployment is now a valid full configuration. New decision matrix:
+
+| ib_service registered? | Direct connected? | pusher_rpc reachable? | Result |
+|---|---|---|---|
+| Yes | Yes | n/a | GREEN ("connected") |
+| Yes | No | n/a | YELLOW ("disconnected", legitimately degraded) |
+| No | n/a | Yes | **GREEN ("pusher-only deployment — direct IB not used")** |
+| No | n/a | No | YELLOW ("no IB path: ib_service not registered and pusher unreachable") — genuine concern |
+
+`metrics.via_pusher: bool` added so the V5 HUD can render the actual deployment shape.
+
+### Fix 3 — Collector `is-active` timeout warnings
+
+Windows historical collectors poll `GET /api/ai-training/is-active` every cycle with a 5s timeout. Pre-fix the handler was `def is_training_active()` — a sync handler running in FastAPI's thread pool. When Spark was busy with scanner / push-data / smart-backfill, the call queued behind other sync handlers and the 5s timeout occasionally fired, even though the handler itself does only ~3 in-memory dict reads in microseconds.
+
+**Fix (`backend/routers/ai_training.py::is_training_active()`)**: `def → async def` runs it directly on the event loop. No thread-pool queuing → microsecond response time guaranteed regardless of other backend load. Source-level pin via `asyncio.iscoroutinefunction()` so a future contributor can't re-introduce the sync version.
+
+### Tests
+11 new pytests in `tests/test_false_alarm_cleanup_v19_30_13.py` covering all three fixes (source-level pins, functional checks, error path resilience). **80/80 passing across the v19.30 stack** (69 prior + 11 new).
+
+### Operator action — Spark deploy
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull
+./start_backend.sh   # safe — skip-if-healthy guard from v19.30.11
+
+# Verify the three fixes:
+curl -s localhost:8001/api/system/health | jq '.subsystems[] | select(.name=="ib_gateway")'
+# → status: "green", detail: "pusher-only deployment — direct IB not used"
+
+curl -X POST localhost:8001/api/ai-modules/adv/recalculate | jq '.tier_summary'
+# → returns intraday/swing/investment/skip counts (canonical builder)
+
+curl -X POST 'localhost:8001/api/ib-collector/smart-backfill?freshness_days=1' | jq '.tier_counts'
+# → returns NON-ZERO counts now that schema is preserved
+```
+
+### What this confirms about the v19.30 architecture
+The diagnostic chain (banner → health subsystem → endpoint metrics) is now self-consistent end-to-end:
+- v19.30.11 caught operator footguns + pusher overload
+- v19.30.12 distinguished push vs RPC channel
+- v19.30.13 cleans up the remaining "false positives" that send operators chasing non-issues
+
+The dashboard now ONLY fires alerts when something is genuinely wrong.
+
+---
+
 ## 2026-05-01 (afternoon recovery, post-deploy operations) — Network classification fix on Windows side
 
 **Closed the underlying network bug** that v19.30.11/.12 banner correctly diagnosed but couldn't fix from Spark.

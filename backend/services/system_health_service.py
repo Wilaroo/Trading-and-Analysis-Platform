@@ -238,11 +238,67 @@ def _check_pusher_rpc() -> SubsystemHealth:
 
 
 def _check_ib_gateway() -> SubsystemHealth:
+    """Health of the direct IB Gateway connection.
+
+    v19.30.13 (2026-05-04) — pusher-only deployment is now treated as a
+    valid full configuration (status: green) instead of a misleading
+    yellow warning. The DGX backend in this deployment never connects
+    directly to IB Gateway — the Windows pusher is the only IB path.
+    Pre-fix this check returned yellow forever and showed up as "1 WARN"
+    in the V5 HUD header, which sent operators on a wild goose chase.
+
+    Determination logic:
+      * `ib_service` registered AND connected → GREEN ("connected")
+      * `ib_service` registered AND disconnected → YELLOW (legitimately
+        degraded — the operator deployed direct IB intentionally and
+        it's down)
+      * `ib_service` NOT registered AND pusher_rpc reachable →
+        GREEN ("pusher-only deployment") — this is the SentCom standard
+        deployment shape, not an error
+      * `ib_service` NOT registered AND pusher_rpc unreachable →
+        YELLOW ("no IB path available") — genuine concern
+    """
     try:
         from services.service_registry import get_service_optional
         ib = get_service_optional("ib_service")
         if ib is None:
-            return SubsystemHealth(name="ib_gateway", status="yellow", detail="ib_service not registered")
+            # No direct IB. Check if pusher is the IB path (the SentCom
+            # standard deployment).
+            pusher_reachable = False
+            try:
+                from services.ib_pusher_rpc import get_pusher_rpc_client
+                client = get_pusher_rpc_client()
+                s = client.status()
+                # Pusher is reachable if it's enabled, has a URL, and
+                # has either succeeded recently OR has had < 5 consecutive
+                # failures (in which case it might just be a transient
+                # blip). The pusher_rpc subsystem check has its own
+                # nuanced logic; we just need a cheap "is it our IB path?"
+                # signal here.
+                pusher_reachable = (
+                    bool(s.get("enabled"))
+                    and bool(s.get("url"))
+                    and (s.get("last_success_ts") is not None
+                         or int(s.get("consecutive_failures") or 0) < 5)
+                )
+            except Exception:
+                pass
+
+            if pusher_reachable:
+                return SubsystemHealth(
+                    name="ib_gateway",
+                    status="green",
+                    detail="pusher-only deployment — direct IB not used",
+                    metrics={"connected": False, "via_pusher": True},
+                )
+            # No direct IB AND no pusher — that's a real concern.
+            return SubsystemHealth(
+                name="ib_gateway",
+                status="yellow",
+                detail="no IB path: ib_service not registered and pusher unreachable",
+                metrics={"connected": False, "via_pusher": False},
+            )
+
         connected = False
         try:
             if getattr(ib, "connected", False):
@@ -255,7 +311,7 @@ def _check_ib_gateway() -> SubsystemHealth:
             name="ib_gateway",
             status="green" if connected else "yellow",
             detail="connected" if connected else "disconnected (preview env OK)",
-            metrics={"connected": connected},
+            metrics={"connected": connected, "via_pusher": False},
         )
     except Exception as exc:
         return _error("ib_gateway", exc)

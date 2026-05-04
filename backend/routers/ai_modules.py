@@ -1972,29 +1972,46 @@ def get_adv_stats():
 @router.post("/adv/recalculate")
 async def recalculate_adv_cache():
     """
-    Recalculate the ADV cache from actual IB historical daily bar data.
-    This is a heavy operation that runs in a background thread.
+    Recalculate the ADV cache from IB historical daily bars.
+
+    v19.30.13 (2026-05-04) — redirects to the canonical builder
+    (`IBHistoricalCollector.rebuild_adv_from_ib_data`). Pre-v19.30.13
+    this endpoint called `scripts/recalculate_adv_cache.py` which
+    `delete_many({})` + `insert_many` ONLY the `avg_volume` field,
+    silently CLOBBERING the `avg_dollar_volume` + `tier` fields that
+    `/api/ib-collector/build-adv-cache` had previously written.
+    Smart-backfill then queried `{avg_dollar_volume: {$gte: ...}}` and
+    matched zero docs even though 9000+ symbols were in the cache.
+    Operator hit this 2026-05-04 pre-market.
+
+    Both endpoints now converge on the same code path → no schema drift.
     """
     try:
-        if not _timeseries_ai or _timeseries_ai._db is None:
-            raise HTTPException(status_code=503, detail="AI service not initialized")
-        
-        db = _timeseries_ai._db
-        
-        import sys
-        sys.path.insert(0, '/app/backend')
-        from scripts.recalculate_adv_cache import recalculate_adv_cache as do_recalc
-        
-        loop = asyncio.get_event_loop()
-        stats = await loop.run_in_executor(
-            None, lambda: do_recalc(db, lookback_days=20, min_bars=10, verbose=False)
-        )
-        
-        return {
-            "success": True,
-            "message": "ADV cache recalculated from IB daily bars",
-            "stats": stats,
-        }
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        if collector is None:
+            raise HTTPException(status_code=503, detail="IB collector not initialized")
+
+        result = await collector.rebuild_adv_from_ib_data()
+
+        # Re-shape the response so existing callers don't see a behavioural
+        # break. Old shape was `{success, message, stats: {total_symbols,
+        # thresholds: {...}, lookback_days, min_bars}}`. New canonical
+        # builder returns `{success, message, symbols_updated, tier_summary,
+        # skipped_by_atr, thresholds: {dollar_volume, atr_pct}}`.
+        # We pass through everything and add a friendly `stats` mirror.
+        if result.get("success"):
+            result.setdefault(
+                "stats",
+                {
+                    "total_symbols": result.get("symbols_updated", 0),
+                    "tier_summary": result.get("tier_summary", {}),
+                    "thresholds": result.get("thresholds", {}),
+                },
+            )
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error recalculating ADV cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
