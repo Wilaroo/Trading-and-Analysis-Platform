@@ -2010,6 +2010,25 @@ class SentComService:
                 logger.debug(f"v19.27 bot_shares aggregation failed: {e}")
         
         # First, get bot-managed trades (these have more detailed tracking)
+        # v19.34.1 (2026-05-04) — best-effort current pusher account
+        # so legacy bot_trades rows that pre-date the v19.31.13
+        # trade_type stamping (or reconciled-orphan rows that pre-date
+        # v19.34.1) get a chip on the UI without a DB rewrite. Read once
+        # per request to avoid hammering the pusher RPC on every row.
+        # Defined at outer scope so BOTH the bot-managed loop AND the
+        # IB-orphan / lazy-reconcile branch can fall back to it.
+        _legacy_trade_type = None
+        _legacy_account_id = None
+        try:
+            from services.account_guard import classify_account_id as _classify
+            from services.ib_pusher_rpc import get_account_snapshot as _gas
+            _snap = _gas()
+            _legacy_account_id = (_snap or {}).get("account_id") or None
+            if _legacy_account_id:
+                _legacy_trade_type = _classify(_legacy_account_id)
+        except Exception:
+            _legacy_trade_type = None
+
         if trading_bot:
             try:
                 open_trades = trading_bot.get_open_trades()
@@ -2166,8 +2185,22 @@ class SentComService:
                             # can render PAPER (amber) / LIVE (red) / SHADOW
                             # (sky) chips per row. Stamped at execution time
                             # by trade_execution.execute_trade.
-                            "trade_type": trade.get("trade_type") or "unknown",
-                            "account_id_at_fill": trade.get("account_id_at_fill"),
+                            # v19.34.1 — fall back to the current pusher
+                            # account when the row's stamp is missing or
+                            # "unknown" (legacy bot_trades / pre-stamping
+                            # reconciled orphans). The pusher's account is
+                            # the same account this position lives on, so
+                            # the chip is correct on the UI even though
+                            # we don't rewrite the DB.
+                            "trade_type": (
+                                trade.get("trade_type")
+                                if (trade.get("trade_type") and trade.get("trade_type") != "unknown")
+                                else (_legacy_trade_type or "unknown")
+                            ),
+                            "account_id_at_fill": (
+                                trade.get("account_id_at_fill")
+                                or _legacy_account_id
+                            ),
                         })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
@@ -2386,8 +2419,18 @@ class SentComService:
                         # reconciled rows. Pulls from the bot_trade lazy-
                         # match doc when present; orphans the bot never
                         # owned land here as `unknown`.
-                        "trade_type": (enrich_trade or {}).get("trade_type") or "unknown",
-                        "account_id_at_fill": (enrich_trade or {}).get("account_id_at_fill"),
+                        # v19.34.1 — fall back to current pusher account
+                        # so even un-reconciled IB orphans get a chip.
+                        "trade_type": (
+                            (enrich_trade or {}).get("trade_type")
+                            if ((enrich_trade or {}).get("trade_type")
+                                and (enrich_trade or {}).get("trade_type") != "unknown")
+                            else (_legacy_trade_type or "unknown")
+                        ),
+                        "account_id_at_fill": (
+                            (enrich_trade or {}).get("account_id_at_fill")
+                            or _legacy_account_id
+                        ),
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")

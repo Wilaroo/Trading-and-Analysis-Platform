@@ -798,6 +798,27 @@ class PositionReconciler:
                     trade.entry_time = datetime.now(timezone.utc)
                     trade.executed_at = datetime.now(timezone.utc).isoformat()
                     trade.created_at = datetime.now(timezone.utc).isoformat()
+                    # v19.34.1 (2026-05-04) — stamp trade_type from the
+                    # current pusher account so reconciled-orphan rows
+                    # also chip PAPER/LIVE/UNKNOWN in the V5 UI. Orphans
+                    # are silent on which account they came from at fill
+                    # time, but the operator's *current* connected account
+                    # is the same one the orphan must belong to (otherwise
+                    # the pusher snapshot wouldn't show it).
+                    try:
+                        from services.account_guard import classify_account_id
+                        from services.ib_pusher_rpc import get_account_snapshot
+                        snap = get_account_snapshot()
+                        cur_account_id = (snap or {}).get("account_id") or ""
+                        trade.trade_type = classify_account_id(cur_account_id)
+                        trade.account_id_at_fill = cur_account_id or None
+                    except Exception as _acct_exc:
+                        # Safe default: leave as "unknown" / None so the
+                        # chip simply doesn't render rather than mislabel.
+                        logger.debug(
+                            f"reconcile {sym}: trade_type stamp skipped: {_acct_exc}"
+                        )
+                        trade.trade_type = "unknown"
                     trade.notes = (
                         f"Reconciled from IB orphan — stop at {default_stop_pct:.1f}% "
                         f"from avg_cost, R:R {default_rr:.1f}"

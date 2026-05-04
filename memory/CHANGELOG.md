@@ -2,6 +2,49 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (eighty-second commit, v19.34.1) — Layout-stretch fix + reconciled-row PAPER/LIVE chip backfill
+
+**Operator-reported regressions during live RTH window:**
+
+> "the charts stretching vertically with the additional unified stream messages. also i dont see any live, paper, shadow tags in open trades"
+
+### Bug 1 — Chart container stretched vertically as Unified Stream grew
+
+**Root cause chain:**
+- V5 root had `overflow-y-auto` (page itself could scroll).
+- Main-row had `flex-shrink-0 min-h-[1120px]` (only LOWER bound, refused to shrink).
+- Chart+sidebar grid had `flex-shrink-0 min-h-[800px]` (only LOWER bound).
+- As Unified Stream messages accumulated, the stream's natural height grew, the section grew, the grid cell grew (default `align-self: stretch`), the grid grew (no upper bound), the main-row grew, the page scrolled, and ChartPanel's ResizeObserver re-sized the chart vertically with each new message.
+
+**Fix (3 surgical changes in `SentComV5View.jsx`):**
+- V5 root: `overflow-y-auto` → `overflow-hidden`. Page is clamped to viewport via the existing `fixed top-0…bottom-0` bounds.
+- Main-row: `flex-shrink-0 min-h-[1120px]` → `flex-1 min-h-0`. Row claims remaining viewport height after the strips above and never exceeds it.
+- Chart+sidebar grid: `flex-shrink-0 min-h-[800px]` → `flex-1 min-h-0`. Grid claims all column flex-col space; cells distribute via `align-self: stretch`. Chart 60% / Stream 40% split is now against a deterministic parent height, so the stream's `flex-1 overflow-y-auto` finally scrolls internally instead of dragging the chart taller.
+
+### Bug 2 — Reconciled-from-IB-orphan rows had no PAPER/LIVE chip
+
+**Root cause:** Position reconciler created `bot_trades` from IB orphan positions but didn't stamp `trade_type` (orphans don't carry account context per-fill). And legacy bot_trades pre-dating v19.31.13 also had no stamp. The chip rendered with `hideUnknown` so missing stamps → no chip → operator can't tell paper vs live.
+
+**Fix (3 surgical changes):**
+1. **`services/position_reconciler.py:reconcile_orphan_positions`** — when materializing a new `BotTrade` from an IB orphan, call `account_guard.classify_account_id(pusher_account_id)` and stamp `trade.trade_type` + `trade.account_id_at_fill`. The orphan's position is on the *current* connected account by construction, so the classification is correct.
+2. **`services/sentcom_service.py:get_our_positions`** — once-per-request lookup of the current pusher account ID + classification, used as a fallback for any row whose `trade_type` is missing or `"unknown"`. Both the bot-managed loop and the IB-orphan / lazy-reconcile branch use the same fallback. Presentational only — no DB rewrite.
+3. **`routers/sentcom.py:get_positions:closed_today`** — same legacy fallback for closed_today drilldown rows so the close-today CSV / table also chips correctly.
+4. **`OpenPositionsV5.jsx`** — drop `hideUnknown` from the row chip. Every row now gets a tag. With the pusher-account fallback, the chip is paper/live in practice; only when the pusher RPC is unreachable does it stay `?`.
+
+### Tests (7 new in `test_v19_34_1_layout_fix_and_chip_backfill.py`)
+
+Layout fix structural assertions + reconciler imports + sentcom_service legacy-fallback wiring + frontend chip render-on-unknown verification.
+
+**215/215 v19.31.x + v19.23.x + v19.32 + v19.33 + v19.34 + v19.34.1 pytests passing.**
+
+### Files touched
+
+Backend: `services/position_reconciler.py`, `services/sentcom_service.py`, `routers/sentcom.py`.
+
+Frontend: `components/sentcom/SentComV5View.jsx` (3 layout edits), `components/sentcom/v5/OpenPositionsV5.jsx` (drop `hideUnknown`).
+
+---
+
 ## 2026-05-04 (eighty-first commit, v19.34) — L1 Tick Bus + Mid-Bar Stop Eval
 
 **Operator request: ship the predictive-tick-fed manage-loop during this RTH window. Three phases, all feature-flagged with hard guards, manage-loop consumer defaulted OFF for explicit operator opt-in.**

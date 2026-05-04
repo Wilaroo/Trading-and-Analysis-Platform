@@ -217,17 +217,17 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
             </span>
           )}
           {/* v19.31.13 — trade origin chip (PAPER amber, LIVE red, SHADOW sky).
-              Hidden when type is unknown to keep the row compact for legacy/
-              orphan rows that pre-date the v19.31.13 trade_type stamping. */}
+              v19.34.1 — render even when type is "unknown" so the operator
+              never has a row without a mode tag. The pusher-account
+              fallback in sentcom_service should normally fill this in. */}
           <TradeTypeChip
             type={position.trade_type}
-            hideUnknown
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
             title={
               position.account_id_at_fill
                 ? `Filled on ${position.account_id_at_fill}`
-                : undefined
+                : 'No account context — see /api/system/account-mode'
             }
           />
         </div>

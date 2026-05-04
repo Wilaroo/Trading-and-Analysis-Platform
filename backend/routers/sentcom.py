@@ -470,9 +470,26 @@ async def get_positions():
         # close-specific extras. Skip `_id` is already excluded above.
         closed_today = []
         total_realized_pnl = 0.0
+        # v19.34.1 (2026-05-04) — pusher account fallback so legacy
+        # closed_today rows that pre-date v19.31.13 trade_type stamping
+        # still chip PAPER/LIVE on the UI.
+        _legacy_trade_type = None
+        _legacy_account_id = None
+        try:
+            from services.account_guard import classify_account_id as _classify
+            from services.ib_pusher_rpc import get_account_snapshot as _gas
+            _snap = _gas()
+            _legacy_account_id = (_snap or {}).get("account_id") or None
+            if _legacy_account_id:
+                _legacy_trade_type = _classify(_legacy_account_id)
+        except Exception:
+            pass
         for t in closed_today_raw:
             realized = float(t.get("realized_pnl") or t.get("net_pnl") or t.get("pnl") or 0)
             total_realized_pnl += realized
+            row_trade_type = t.get("trade_type")
+            if not row_trade_type or row_trade_type == "unknown":
+                row_trade_type = _legacy_trade_type or "unknown"
             closed_today.append({
                 "symbol": t.get("symbol"),
                 "direction": t.get("direction"),
@@ -488,7 +505,9 @@ async def get_positions():
                 "trade_id": t.get("id"),
                 # v19.31.13 — surface trade_type for the CLOSE TODAY
                 # drilldown table chip.
-                "trade_type": t.get("trade_type") or "unknown",
+                # v19.34.1 — fall back to current pusher account when
+                # the row's stamp is missing or "unknown".
+                "trade_type": row_trade_type,
             })
 
         total_unrealized_pnl = sum(p.get("pnl", 0) for p in positions)

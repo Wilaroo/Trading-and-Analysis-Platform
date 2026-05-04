@@ -314,7 +314,17 @@ export const SentComV5View = ({
   return (
     <div
       data-testid="sentcom-v5-root"
-      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-y-auto v5-root v5-scroll"
+      // v19.34.1 (2026-05-04) — was `overflow-y-auto`, which let the
+      // whole page scroll when inner panels grew (Unified Stream
+      // accumulating messages, Open Positions accumulating reconciled
+      // orphans, etc.). That outer scroll dragged the chart container
+      // taller — the chart's ResizeObserver then re-sized the chart
+      // vertically with each new stream message, which is the bug
+      // operator reported. Clamp the root to the viewport (`overflow-
+      // hidden` + `h-full` via the existing `top-0…bottom-0` fixed
+      // bounds). Inner panels already have their own `overflow-y-auto`
+      // so they scroll internally instead of pushing siblings around.
+      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
@@ -452,7 +462,15 @@ export const SentComV5View = ({
           that was only as tall as the grid, wasting vertical space. */}
       <div
         data-testid="sentcom-v5-main-row"
-        className="flex flex-shrink-0 min-h-[1120px] gap-px bg-zinc-900"
+        // v19.34.1 (2026-05-04) — was `flex-shrink-0 min-h-[1120px]`,
+        // which set only the LOWER bound and refused to shrink. As
+        // inner panels grew with content, this row grew with them and
+        // (via the formerly-overflow-y-auto root) dragged the chart
+        // taller. Switched to `flex-1 min-h-0` so the row claims all
+        // remaining viewport height after the strips above and never
+        // exceeds it. Inner panels (Scanner, Stream, Open Positions)
+        // each scroll internally via their own `overflow-y-auto`.
+        className="flex flex-1 min-h-0 gap-px bg-zinc-900"
       >
         {/* LEFT — Scanner · Live (full height) */}
         <section
@@ -515,10 +533,21 @@ export const SentComV5View = ({
         <div className="flex-1 min-w-0 flex flex-col gap-px bg-zinc-900">
           {/* Top grid: Chart center + Right sidebar (aligned to the
               chart's left edge). 55fr/25fr = the old 55%/25% split
-              repurposed for the right column. */}
+              repurposed for the right column.
+              v19.34.1 (2026-05-04) — was `flex-shrink-0 min-h-[800px]`,
+              which set only the LOWER bound. As Unified Stream messages
+              accumulated, the inner stream's natural height grew
+              unboundedly, dragging the grid (and chart container) taller
+              with it. Switched to `flex-1 min-h-0`: the grid claims ALL
+              remaining vertical space in the column flex-col, no more,
+              no less. Inside each grid cell, the existing `flex: 60/40`
+              children + `overflow-hidden` chain on the stream now have
+              a deterministic parent height to flex-distribute against,
+              so the stream's `flex-1 overflow-y-auto` finally scrolls
+              internally instead of pushing the chart taller. */}
           <div
             data-testid="sentcom-v5-grid"
-            className="grid gap-px bg-zinc-900 flex-shrink-0 min-h-[800px]"
+            className="grid gap-px bg-zinc-900 flex-1 min-h-0"
             style={{ gridTemplateColumns: '55fr 25fr' }}
           >
 
