@@ -2,6 +2,70 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (eighty-fifth commit, v19.34.4) — IB Fill-Tape Auditor + Spark Mongo cross-check + Operator findings report
+
+**Operator pasted the day's full IB execution tape (328 fills across 21 symbols) for audit against the bot's `bot_trades` collection.** Built a self-contained parser + audit pipeline so this becomes a one-command operation going forward.
+
+### Backend tooling
+
+- **`backend/scripts/audit_ib_fill_tape.py`** — parses TWS Trades-pane paste format (symbol → summary → action row → time → price → amount → fees) into structured `Fill` records. Aggregates per-symbol with FIFO leg matching. Generates a markdown audit report + JSON sidecar.
+   - **Verdicts**: `CARRYOVER_FLATTENED` (sold > bought today — prior-day inventory was flushed), `OPEN_POSITION_LONG` (bought > sold — still holding), `MULTI_LEG_MIXED` (LONG and SHORT legs same day), `INVERSION_SHORT_COVER`, `MULTI_LEG_LONG`, `MULTI_LEG_SHORT`, `CLEAN_ROUND_TRIP`.
+   - **Operator findings block** (top of report): carryover flush list (with `POST /api/trading-bot/reconcile` recommendation), heavy-fragmentation symbols, top losers/winners, short-direction trades to cross-check.
+   - **Fragmentation flags**: ≥30 fills or ≥6 venues per symbol → warning chip.
+   - **EOD-flatten detection**: any fill ≥ 3:55 PM ET marked.
+- **`backend/scripts/export_bot_trades_for_audit.py`** — operator runs on Spark to dump today's `bot_trades` rows (matched on `executed_at`/`closed_at`/`created_at` within ET trading-day window) into a JSON sidecar consumed by the auditor's `--bot-trades-json` flag. Emits `{symbol → {row_count, total_qty, total_realized_pnl, rows}}` with full provenance fields (`entered_by`, `synthetic_source`, `prior_verdict_conflict`, `trade_type`, `account_id_at_fill`).
+
+### 2026-05-04 audit summary
+
+- **328 fills across 21 symbols on PAPER account `DUN615665`.**
+- **Total realized: -$14,249.67 gross / -$14,560.37 net of fees.** Losing day.
+- **Only one residual: STX -17sh.** Flagged as `CARRYOVER_FLATTENED` — bot started the day already long 17 STX (prior-session carryover) and the EOD flatten cluster sold them along with today's 274 bought. **Action item:** verify on Spark whether `bot_trades` covered the 17-share carryover via `python -m scripts.export_bot_trades_for_audit --date 2026-05-04 --out /tmp/bt.json && python -m scripts.audit_ib_fill_tape --input ... --bot-trades-json /tmp/bt.json`.
+- **VALE: -$1,528** — confirms operator's prior bug investigation. The bot adopted VALE long this morning with synthetic R:R 2.0 even though it had been rejecting `gap_fade LONG` at R:R 1.11–1.19 all yesterday afternoon. v19.34.3's `prior_verdict_conflict` flag should now flag the next reconciler-adoption of this kind in real time.
+- **BKNG: 87 fills across 9 venues for a 740-share long.** Block size ~10 sh — typical for highly-liquid mega-cap retail order routing. Bot's `bot_trades` row should aggregate these into a single fill record via the executor's parent-order match; if Mongo shows separate rows per venue fragment, the executor is broken.
+- **V: 46 fills, MULTI_LEG_MIXED, -$975** — heavy intraday churn (4 separate round-trips opening at 9:33-9:37 AM with multiple direction flips). Pattern consistent with `fashionably_late` or scalp setup overactivity.
+- **Top losers (gross)**: BKNG -$2,059 · APH -$1,553 · VALE -$1,528 · NXPI -$1,339 · MO -$1,179 · SBUX -$1,074.
+- **Winners (gross)**: WDC +$281 · BP +$79 · ELV +$27.
+- **Short-direction trades**: LHX, GM, FDX, CRCL — confirm matching `bot_trades.direction='short'` rows. v19.29's 30s direction-stability gate should prevent any shadow-LONG-then-real-SHORT mismatches.
+
+### Tests
+
+`tests/test_audit_ib_fill_tape_v19_34_4.py` — 15 tests:
+- Parser: single-fill record shape, thousand-separator quantity, `Bot` action word, multi-record stream.
+- FIFO matching: clean LONG round-trip, short-then-cover (inversion), multi-leg mixed (LONG + SHORT same day), partial-fill fragmentation aggregation.
+- Verdict logic: `CARRYOVER_FLATTENED` when sold > bought, `OPEN_POSITION_LONG` when bought > sold.
+- Fragmentation warning at ≥30 fills.
+- EOD-flatten detection threshold (3:55 PM).
+- Real fixture round-trip: 328 fills / 21 symbols / STX -17 residual / total realized between -$10K and -$20K.
+
+**256/256 cumulative pytests passing** across all v19.x suites.
+
+### Files touched
+
+Backend:
+- new `scripts/audit_ib_fill_tape.py` (parser + FIFO + verdict + markdown render)
+- new `scripts/export_bot_trades_for_audit.py` (Spark Mongo export)
+
+Memory:
+- new `memory/audit/2026-05-04_ib_fill_tape.txt` (raw operator paste)
+- new `memory/audit/2026-05-04_ib_fill_tape_audit.md` (rendered report)
+- new `memory/audit/2026-05-04_ib_fill_tape_audit.json` (sidecar for diff)
+- new `memory/runbooks/audit_ib_fill_tape.md` (operator runbook)
+
+### Operator action — Spark cross-check (next session)
+
+```bash
+cd ~/Trading-and-Analysis-Platform/backend
+python -m scripts.export_bot_trades_for_audit --date 2026-05-04 --out /tmp/bt_2026_05_04.json
+python -m scripts.audit_ib_fill_tape \
+    --input ../memory/audit/2026-05-04_ib_fill_tape.txt \
+    --bot-trades-json /tmp/bt_2026_05_04.json \
+    --out /tmp/audit_2026_05_04.md
+# Read /tmp/audit_2026_05_04.md — Cross-check section flags any symbols where
+# IB qty != bot_trades qty, or symbols in bot_trades but missing from IB tape.
+```
+
+---
+
 ## 2026-05-04 (eighty-fourth commit, v19.34.3) — Reconcile-conflict provenance + Smart synthetic SL/PT + Forensic Orphan Origin (VALE bug fix)
 
 **Operator-discovered live bug — VALE position adopted with synthetic R:R 2.0 even though the bot's logic had been rejecting that setup all afternoon for R:R 1.11–1.19.**

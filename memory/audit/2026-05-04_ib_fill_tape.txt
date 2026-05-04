@@ -1,0 +1,2625 @@
+Trades 	Account	Action	 Quantity	Status 	 Price	 Amount		
+STX
+Sold 38 @ 737.73 on NASDAQ
+DUN615665	Sold	38	
+Filled
+3:57 PM
+737.73	
+28033.74
+Fees: 1.59
+STX
+Sold 17 @ 737.73 on NASDAQ
+DUN615665	Sold	17	
+Filled
+3:57 PM
+737.73	
+12541.41
+Fees: 0.26
+STX
+Sold 55 @ 737.62 on NASDAQ
+DUN615665	Sold	55	
+Filled
+3:56 PM
+737.62	
+40569.1
+Fees: 1.85
+STX
+Sold 41 @ 736.16 on ARCA
+DUN615665	Sold	41	
+Filled
+3:56 PM
+736.16	
+30182.56
+Fees: 1.63
+STX
+Sold 14 @ 736.16 on IBKRATS
+DUN615665	Sold	14	
+Filled
+3:56 PM
+736.16	
+10306.24
+Fees: 0.22
+TER
+Sold 40 @ 337.96 on BYX
+DUN615665	Sold	40	
+Filled
+3:55 PM
+337.96	
+13518.4
+Fees: 0.29
+TER
+Sold 32 @ 337.96 on DRCTEDGE
+DUN615665	Sold	32	
+Filled
+3:55 PM
+337.96	
+10814.72
+Fees: 0.23
+TER
+Sold 27 @ 337.96 on IBKRATS
+DUN615665	Sold	27	
+Filled
+3:55 PM
+337.96	
+9124.92
+Fees: 0.19
+TER
+Sold 58 @ 337.96 on NASDAQ
+DUN615665	Sold	58	
+Filled
+3:55 PM
+337.96	
+19601.68
+Fees: 0.42
+TER
+Sold 40 @ 337.96 on BYX
+DUN615665	Sold	40	
+Filled
+3:55 PM
+337.96	
+13518.4
+Fees: 1.29
+NXPI
+Sold 92 @ 289.78 on NASDAQ
+DUN615665	Sold	92	
+Filled
+3:55 PM
+289.78	
+26659.76
+Fees: 0.57
+NXPI
+Sold 100 @ 289.78 on IBKRATS
+DUN615665	Sold	100	
+Filled
+3:55 PM
+289.78	
+28978
+Fees: 1.62
+SOXS
+Sold 1600 @ 13.27 on BYX
+DUN615665	Sold	1,600	
+Filled
+3:55 PM
+13.27	
+21232
+Fees: 8.75
+SOXS
+Sold 3566 @ 13.27 on BYX
+DUN615665	Sold	3,566	
+Filled
+3:55 PM
+13.27	
+47320.82
+Fees: 19.51
+VALE
+Sold 1343 @ 15.82 on BYX
+DUN615665	Sold	1,343	
+Filled
+3:55 PM
+15.82	
+21246.26
+Fees: 7.42
+VALE
+Sold 3836 @ 15.82 on BYX
+DUN615665	Sold	3,836	
+Filled
+3:55 PM
+15.82	
+60685.52
+Fees: 21.19
+NCLH
+Sold 1429 @ 17.26 on NASDAQ
+DUN615665	Sold	1,429	
+Filled
+3:55 PM
+17.26	
+24664.54
+Fees: 7.44
+NCLH
+Sold 893 @ 17.26 on ARCA
+DUN615665	Sold	893	
+Filled
+3:55 PM
+17.26	
+15413.18
+Fees: 4.96
+NCLH
+Sold 100 @ 17.26 on NYSENAT
+DUN615665	Sold	100	
+Filled
+3:55 PM
+17.26	
+1726
+Fees: 1.06
+ELV
+Sold 33 @ 372.18 on NASDAQ
+DUN615665	Sold	33	
+Filled
+3:55 PM
+372.18	
+12281.94
+Fees: 0.26
+ELV
+Sold 80 @ 372.18 on NASDAQ
+DUN615665	Sold	80	
+Filled
+3:55 PM
+372.18	
+29774.4
+Fees: 1.63
+STX
+Sold 25 @ 735.09 on NASDAQ
+DUN615665	Sold	25	
+Filled
+3:51 PM
+735.09	
+18377.25
+Fees: 0.38
+STX
+Sold 44 @ 735.09 on ARCA
+DUN615665	Sold	44	
+Filled
+3:51 PM
+735.09	
+32343.96
+Fees: 0.67
+STX
+Sold 57 @ 735.09 on NASDAQ
+DUN615665	Sold	57	
+Filled
+3:51 PM
+735.09	
+41900.13
+Fees: 1.87
+BP
+Sold 55 @ 46.92 on DRCTEDGE
+DUN615665	Sold	55	
+Filled
+3:51 PM
+46.92	
+2580.6
+Fees: 0.34
+BP
+Sold 445 @ 46.92 on NASDAQ
+DUN615665	Sold	445	
+Filled
+3:51 PM
+46.92	
+20879.4
+Fees: 2.74
+SBUX
+Sold 100 @ 104.84 on EDGEA
+DUN615665	Sold	100	
+Filled
+3:51 PM
+104.84	
+10484
+Fees: 1.24
+BP
+Sold 300 @ 46.92 on ARCA
+DUN615665	Sold	300	
+Filled
+3:51 PM
+46.92	
+14076
+Fees: 1.85
+SBUX
+Sold 261 @ 104.81 on NASDAQ
+DUN615665	Sold	261	
+Filled
+3:51 PM
+104.81	
+27355.41
+Fees: 1.42
+BP
+Sold 400 @ 46.92 on IEX
+DUN615665	Sold	400	
+Filled
+3:51 PM
+46.92	
+18768
+Fees: 2.47
+GM
+Bot 193 @ 75.71 on DRCTEDGE
+DUN615665	Bought	193	
+Filled
+3:51 PM
+75.71	
+14612.03
+Fees: 0.97
+V
+Sold 49 @ 326.65 on IBKRATS
+DUN615665	Sold	49	
+Filled
+3:51 PM
+326.65	
+16005.85
+Fees: 0.34
+GM
+Bot 104 @ 75.71 on NASDAQ
+DUN615665	Bought	104	
+Filled
+3:51 PM
+75.71	
+7873.84
+Fees: 1.0
+PYPL
+Sold 133 @ 50.38 on BATS
+DUN615665	Sold	133	
+Filled
+3:51 PM
+50.38	
+6700.54
+Fees: 1.16
+GM
+Bot 100 @ 75.71 on NYSE
+DUN615665	Bought	100	
+Filled
+3:51 PM
+75.71	
+7571
+Fees: 0.02
+PYPL
+Sold 134 @ 50.38 on ARCA
+DUN615665	Sold	134	
+Filled
+3:51 PM
+50.38	
+6750.92
+Fees: 0.84
+PYPL
+Sold 549 @ 50.38 on NASDAQ
+DUN615665	Sold	549	
+Filled
+3:51 PM
+50.38	
+27658.62
+Fees: 3.09
+V
+Sold 40 @ 326.69 on NASDAQ
+DUN615665	Sold	40	
+Filled
+3:51 PM
+326.69	
+13067.6
+Fees: 1.28
+V
+Sold 40 @ 326.69 on NASDAQ
+DUN615665	Sold	40	
+Filled
+3:51 PM
+326.69	
+13067.6
+Fees: 0.28
+V
+Sold 40 @ 326.69 on NYSE
+DUN615665	Sold	40	
+Filled
+3:51 PM
+326.69	
+13067.6
+Fees: 0.28
+SBUX
+Bot 88 @ 105.27 on IEX
+DUN615665	Bought	88	
+Filled
+2:12 PM
+105.27	
+9263.76
+Fees: 1.0
+BP
+Bot 342 @ 46.80 on NASDAQ
+DUN615665	Bought	342	
+Filled
+2:00 PM
+46.80	
+16005.6
+Fees: 1.39
+BP
+Bot 36 @ 46.80 on NASDAQ
+DUN615665	Bought	36	
+Filled
+2:00 PM
+46.80	
+1684.8
+Fees: 0.0
+BP
+Bot 100 @ 46.80 on ARCA
+DUN615665	Bought	100	
+Filled
+2:00 PM
+46.80	
+4680
+Fees: 1.0
+LITE
+Bot 62 @ 994.11 on NASDAQ
+DUN615665	Bought	62	
+Filled
+2:00 PM
+994.11	
+61634.82
+Fees: 1.0
+LITE
+Sold 62 @ 991.87 on NASDAQ
+DUN615665	Sold	62	
+Filled
+1:30 PM
+991.87	
+61495.94
+Fees: 2.28
+NXPI
+Bot 92 @ 292.65 on BATS
+DUN615665	Bought	92	
+Filled
+1:29 PM
+292.65	
+26923.8
+Fees: 0.0
+NXPI
+Bot 100 @ 292.65 on IEX
+DUN615665	Bought	100	
+Filled
+1:29 PM
+292.65	
+29265
+Fees: 1.0
+TER
+Bot 100 @ 341.98 on NASDAQ
+DUN615665	Bought	100	
+Filled
+1:29 PM
+341.98	
+34198
+Fees: 1.0
+TER
+Bot 97 @ 341.98 on NASDAQ
+DUN615665	Bought	97	
+Filled
+1:29 PM
+341.98	
+33172.06
+Fees: 0.0
+BP
+Bot 17 @ 46.89 on ARCA
+DUN615665	Bought	17	
+Filled
+1:00 PM
+46.89	
+797.13
+Fees: 0.09
+BP
+Bot 225 @ 46.89 on NASDAQ
+DUN615665	Bought	225	
+Filled
+1:00 PM
+46.89	
+10550.25
+Fees: 1.13
+BP
+Bot 100 @ 46.89 on ARCA
+DUN615665	Bought	100	
+Filled
+1:00 PM
+46.89	
+4689
+Fees: 0.13
+BP
+Bot 125 @ 46.89 on NASDAQ
+DUN615665	Bought	125	
+Filled
+1:00 PM
+46.89	
+5861.25
+Fees: 1.0
+BP
+Bot 255 @ 46.89 on NYSE
+DUN615665	Bought	255	
+Filled
+1:00 PM
+46.89	
+11956.95
+Fees: 1.28
+GM
+Sold 100 @ 75.44 on ARCA
+DUN615665	Sold	100	
+Filled
+12:56 PM
+75.44	
+7544
+Fees: 0.18
+GM
+Sold 100 @ 75.44 on NASDAQ
+DUN615665	Sold	100	
+Filled
+12:56 PM
+75.44	
+7544
+Fees: 1.18
+GM
+Sold 100 @ 75.44 on IEX
+DUN615665	Sold	100	
+Filled
+12:56 PM
+75.44	
+7544
+Fees: 0.68
+GM
+Sold 97 @ 75.44 on NYSE
+DUN615665	Sold	97	
+Filled
+12:56 PM
+75.44	
+7317.68
+Fees: 0.65
+SBUX
+Sold 100 @ 104.75 on NASDAQ
+DUN615665	Sold	100	
+Filled
+12:55 PM
+104.75	
+10475
+Fees: 0.74
+SBUX
+Sold 23 @ 104.75 on NASDAQ
+DUN615665	Sold	23	
+Filled
+12:55 PM
+104.75	
+2409.25
+Fees: 0.17
+MO
+Sold 221 @ 73.07 on DRCTEDGE
+DUN615665	Sold	221	
+Filled
+12:55 PM
+73.07	
+16148.47
+Fees: 1.48
+MO
+Sold 455 @ 73.07 on DRCTEDGE
+DUN615665	Sold	455	
+Filled
+12:55 PM
+73.07	
+33246.85
+Fees: 3.05
+MO
+Sold 242 @ 73.07 on DRCTEDGE
+DUN615665	Sold	242	
+Filled
+12:55 PM
+73.07	
+17682.94
+Fees: 1.62
+MO
+Sold 100 @ 73.07 on NASDAQ
+DUN615665	Sold	100	
+Filled
+12:55 PM
+73.07	
+7307
+Fees: 1.17
+MO
+Sold 100 @ 73.07 on DRCTEDGE
+DUN615665	Sold	100	
+Filled
+12:55 PM
+73.07	
+7307
+Fees: 0.67
+MO
+Sold 100 @ 73.07 on NYSE
+DUN615665	Sold	100	
+Filled
+12:55 PM
+73.07	
+7307
+Fees: 0.17
+MO
+Sold 271 @ 73.07 on DRCTEDGE
+DUN615665	Sold	271	
+Filled
+12:55 PM
+73.07	
+19801.97
+Fees: 1.82
+MO
+Sold 100 @ 73.07 on IEX
+DUN615665	Sold	100	
+Filled
+12:55 PM
+73.07	
+7307
+Fees: 0.67
+MO
+Sold 112 @ 73.07 on DRCTEDGE
+DUN615665	Sold	112	
+Filled
+12:55 PM
+73.07	
+8183.84
+Fees: 0.75
+SBUX
+Sold 100 @ 104.75 on BEX
+DUN615665	Sold	100	
+Filled
+12:55 PM
+104.75	
+10475
+Fees: 0.59
+SBUX
+Sold 25 @ 104.75 on NASDAQ
+DUN615665	Sold	25	
+Filled
+12:55 PM
+104.75	
+2618.75
+Fees: 0.18
+SBUX
+Sold 77 @ 104.75 on NASDAQ
+DUN615665	Sold	77	
+Filled
+12:55 PM
+104.75	
+8065.75
+Fees: 0.18
+SBUX
+Sold 6 @ 104.75 on NASDAQ
+DUN615665	Sold	6	
+Filled
+12:55 PM
+104.75	
+628.5
+Fees: 0.04
+SBUX
+Sold 94 @ 104.75 on NASDAQ
+DUN615665	Sold	94	
+Filled
+12:55 PM
+104.75	
+9846.5
+Fees: 1.22
+SBUX
+Sold 125 @ 104.76 on NASDAQ
+DUN615665	Sold	125	
+Filled
+12:55 PM
+104.76	
+13095
+Fees: 0.92
+SBUX
+Sold 100 @ 104.78 on NASDAQ
+DUN615665	Sold	100	
+Filled
+12:55 PM
+104.78	
+10478
+Fees: 0.43
+SBUX
+Sold 138 @ 104.78 on NASDAQ
+DUN615665	Sold	138	
+Filled
+12:55 PM
+104.78	
+14459.64
+Fees: 1.33
+SOXS
+Bot 66 @ 13.40 on NASDAQ
+DUN615665	Bought	66	
+Filled
+12:52 PM
+13.40	
+884.4
+Fees: 0.33
+SOXS
+Bot 2900 @ 13.40 on IEX
+DUN615665	Bought	2,900	
+Filled
+12:52 PM
+13.40	
+38860
+Fees: 14.51
+SOXS
+Bot 2200 @ 13.40 on ARCA
+DUN615665	Bought	2,200	
+Filled
+12:52 PM
+13.40	
+29480
+Fees: 11.01
+SBUX
+Sold 96 @ 104.86 on NASDAQ
+DUN615665	Sold	96	
+Filled
+12:51 PM
+104.86	
+10066.56
+Fees: 1.23
+BKNG
+Sold 2 @ 166.13 on MEMX
+DUN615665	Sold	2	
+Filled
+11:48 AM
+166.13	
+332.26
+Fees: 0.02
+BKNG
+Sold 30 @ 166.10 on NASDAQ
+DUN615665	Sold	30	
+Filled
+11:48 AM
+166.10	
+4983
+Fees: 0.26
+BKNG
+Sold 10 @ 166.15 on NYSE
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.07
+BKNG
+Sold 10 @ 166.15 on NYSE
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 11 @ 166.10 on BATS
+DUN615665	Sold	11	
+Filled
+11:48 AM
+166.10	
+1827.1
+Fees: 0.04
+BKNG
+Sold 3 @ 166.10 on BATS
+DUN615665	Sold	3	
+Filled
+11:48 AM
+166.10	
+498.3
+Fees: 0.03
+BKNG
+Sold 10 @ 166.10 on BATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.10	
+1661
+Fees: 0.09
+BKNG
+Sold 10 @ 166.15 on BATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.09
+BKNG
+Sold 10 @ 166.15 on ARCA
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.12 on IEX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.12	
+1661.2
+Fees: 0.04
+BKNG
+Sold 10 @ 166.12 on NASDAQ
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.12	
+1661.2
+Fees: 0.05
+BKNG
+Sold 10 @ 166.12 on NASDAQ
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.12	
+1661.2
+Fees: 0.04
+BKNG
+Sold 10 @ 166.12 on NASDAQ
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.12	
+1661.2
+Fees: 0.04
+BKNG
+Sold 20 @ 166.15 on ARCA
+DUN615665	Sold	20	
+Filled
+11:48 AM
+166.15	
+3323
+Fees: 0.07
+BKNG
+Sold 10 @ 166.15 on BATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.09
+BKNG
+Sold 20 @ 166.12 on NASDAQ
+DUN615665	Sold	20	
+Filled
+11:48 AM
+166.12	
+3322.4
+Fees: 0.17
+BKNG
+Sold 20 @ 166.15 on ARCA
+DUN615665	Sold	20	
+Filled
+11:48 AM
+166.15	
+3323
+Fees: 0.07
+BKNG
+Sold 30 @ 166.12 on NASDAQ
+DUN615665	Sold	30	
+Filled
+11:48 AM
+166.12	
+4983.6
+Fees: 0.11
+BKNG
+Sold 10 @ 166.15 on IEX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.15 on PEARL
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.15 on ARCA
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.15 on NYSE
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.15 on BATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.15	
+1661.5
+Fees: 0.04
+BKNG
+Sold 10 @ 166.14 on MEMX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.14	
+1661.4
+Fees: 0.04
+BKNG
+Sold 7 @ 166.14 on BATS
+DUN615665	Sold	7	
+Filled
+11:48 AM
+166.14	
+1162.98
+Fees: 0.03
+BKNG
+Sold 10 @ 166.14 on ARCA
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.14	
+1661.4
+Fees: 0.09
+BKNG
+Sold 13 @ 166.14 on BATS
+DUN615665	Sold	13	
+Filled
+11:48 AM
+166.14	
+2159.82
+Fees: 0.11
+BKNG
+Sold 30 @ 166.10 on NASDAQ
+DUN615665	Sold	30	
+Filled
+11:48 AM
+166.10	
+4983
+Fees: 0.11
+BKNG
+Sold 10 @ 166.10 on IEX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.10	
+1661
+Fees: 0.04
+BKNG
+Sold 12 @ 166.14 on NASDAQ
+DUN615665	Sold	12	
+Filled
+11:48 AM
+166.14	
+1993.68
+Fees: 0.1
+BKNG
+Sold 12 @ 166.14 on NASDAQ
+DUN615665	Sold	12	
+Filled
+11:48 AM
+166.14	
+1993.68
+Fees: 0.1
+BKNG
+Sold 10 @ 166.14 on MEMX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.14	
+1661.4
+Fees: 0.04
+BKNG
+Sold 35 @ 166.09 on IEX
+DUN615665	Sold	35	
+Filled
+11:48 AM
+166.09	
+5813.15
+Fees: 0.13
+BKNG
+Sold 15 @ 166.13 on BATS
+DUN615665	Sold	15	
+Filled
+11:48 AM
+166.13	
+2491.95
+Fees: 0.05
+BKNG
+Sold 25 @ 166.09 on NASDAQ
+DUN615665	Sold	25	
+Filled
+11:48 AM
+166.09	
+4152.25
+Fees: 0.09
+BKNG
+Sold 15 @ 166.06 on NASDAQ
+DUN615665	Sold	15	
+Filled
+11:48 AM
+166.06	
+2490.9
+Fees: 0.05
+BKNG
+Sold 10 @ 166.10 on NASDAQ
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.10	
+1661
+Fees: 0.04
+BKNG
+Sold 10 @ 166.09 on IEX
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.09	
+1660.9
+Fees: 0.04
+BKNG
+Sold 10 @ 166.10 on NASDAQ
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.10	
+1661
+Fees: 0.04
+BKNG
+Sold 15 @ 166.09 on NASDAQ
+DUN615665	Sold	15	
+Filled
+11:48 AM
+166.09	
+2491.35
+Fees: 0.05
+BKNG
+Sold 10 @ 166.09 on IBKRATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.09	
+1660.9
+Fees: 0.04
+BKNG
+Sold 14 @ 166.13 on NASDAQ
+DUN615665	Sold	14	
+Filled
+11:48 AM
+166.13	
+2325.82
+Fees: 0.05
+BKNG
+Sold 25 @ 166.06 on NASDAQ
+DUN615665	Sold	25	
+Filled
+11:48 AM
+166.06	
+4151.5
+Fees: 1.09
+BKNG
+Sold 100 @ 166.06 on NASDAQ
+DUN615665	Sold	100	
+Filled
+11:48 AM
+166.06	
+16606
+Fees: 0.36
+BKNG
+Sold 10 @ 166.10 on BATS
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.10	
+1661
+Fees: 0.04
+BKNG
+Sold 10 @ 166.12 on ARCA
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.12	
+1661.2
+Fees: 0.04
+BKNG
+Sold 11 @ 166.06 on NASDAQ
+DUN615665	Sold	11	
+Filled
+11:48 AM
+166.06	
+1826.66
+Fees: 1.04
+BKNG
+Sold 10 @ 166.11 on DRCTEDGE
+DUN615665	Sold	10	
+Filled
+11:48 AM
+166.11	
+1661.1
+Fees: 1.04
+BKNG
+Sold 15 @ 166.09 on NASDAQ
+DUN615665	Sold	15	
+Filled
+11:48 AM
+166.09	
+2491.35
+Fees: 0.05
+APH
+Sold 88 @ 140.39 on NASDAQ
+DUN615665	Sold	88	
+Filled
+11:21 AM
+140.39	
+12354.32
+Fees: 0.71
+APH
+Sold 100 @ 140.40 on IBKRATS
+DUN615665	Sold	100	
+Filled
+11:21 AM
+140.40	
+14040
+Fees: 0.81
+APH
+Sold 100 @ 140.39 on NASDAQ
+DUN615665	Sold	100	
+Filled
+11:21 AM
+140.39	
+14039
+Fees: 0.81
+APH
+Sold 100 @ 140.39 on NYSE
+DUN615665	Sold	100	
+Filled
+11:21 AM
+140.39	
+14039
+Fees: 0.81
+APH
+Sold 100 @ 140.44 on NASDAQ
+DUN615665	Sold	100	
+Filled
+11:21 AM
+140.44	
+14044
+Fees: 0.31
+NXPI
+Sold 100 @ 291.19 on NASDAQ
+DUN615665	Sold	100	
+Filled
+11:21 AM
+291.19	
+29119
+Fees: 1.62
+APH
+Sold 100 @ 140.44 on NASDAQ
+DUN615665	Sold	100	
+Filled
+11:21 AM
+140.44	
+14044
+Fees: 1.31
+NXPI
+Sold 41 @ 291.19 on NASDAQ
+DUN615665	Sold	41	
+Filled
+11:21 AM
+291.19	
+11938.79
+Fees: 0.25
+LHX
+Sold 40 @ 311.82 on NYSE
+DUN615665	Sold	40	
+Filled
+11:18 AM
+311.82	
+12472.8
+Fees: 1.26
+LHX
+Bot 40 @ 311.81 on NYSE
+DUN615665	Bought	40	
+Filled
+11:18 AM
+311.81	
+12472.4
+Fees: 1.0
+V
+Bot 9 @ 328.13 on ARCA
+DUN615665	Bought	9	
+Filled
+10:50 AM
+328.13	
+2953.17
+Fees: 0.0
+V
+Bot 120 @ 328.13 on IEX
+DUN615665	Bought	120	
+Filled
+10:50 AM
+328.13	
+39375.6
+Fees: 1.0
+V
+Bot 40 @ 328.13 on NYSE
+DUN615665	Bought	40	
+Filled
+10:50 AM
+328.13	
+13125.2
+Fees: 0.0
+CRCL
+Bot 100 @ 114.95 on NASDAQ
+DUN615665	Bought	100	
+Filled
+10:44 AM
+114.95	
+11495
+Fees: 1.0
+CRCL
+Bot 90 @ 114.95 on ARCA
+DUN615665	Bought	90	
+Filled
+10:44 AM
+114.95	
+10345.5
+Fees: 0.0
+SBUX
+Bot 91 @ 105.97 on NASDAQ
+DUN615665	Bought	91	
+Filled
+10:35 AM
+105.97	
+9643.27
+Fees: 1.0
+SBUX
+Bot 91 @ 105.98 on IEX
+DUN615665	Bought	91	
+Filled
+10:34 AM
+105.98	
+9644.18
+Fees: 1.0
+SBUX
+Bot 91 @ 105.98 on NASDAQ
+DUN615665	Bought	91	
+Filled
+10:34 AM
+105.98	
+9644.18
+Fees: 1.0
+SBUX
+Bot 4 @ 106.03 on NASDAQ
+DUN615665	Bought	4	
+Filled
+10:33 AM
+106.03	
+424.12
+Fees: 1.0
+SBUX
+Bot 92 @ 106.03 on NASDAQ
+DUN615665	Bought	92	
+Filled
+10:33 AM
+106.03	
+9754.76
+Fees: 0.0
+STM
+Sold 17 @ 55.21 on BATS
+DUN615665	Sold	17	
+Filled
+10:29 AM
+55.21	
+938.57
+Fees: 0.11
+STM
+Sold 133 @ 55.21 on NASDAQ
+DUN615665	Sold	133	
+Filled
+10:29 AM
+55.21	
+7342.93
+Fees: 0.84
+STM
+Sold 403 @ 55.21 on NASDAQ
+DUN615665	Sold	403	
+Filled
+10:29 AM
+55.21	
+22249.63
+Fees: 2.55
+STM
+Sold 120 @ 55.21 on ARCA
+DUN615665	Sold	120	
+Filled
+10:29 AM
+55.21	
+6625.2
+Fees: 0.76
+STM
+Sold 74 @ 55.21 on NASDAQ
+DUN615665	Sold	74	
+Filled
+10:29 AM
+55.21	
+4085.54
+Fees: 0.47
+WDC
+Bot 20 @ 434.24 on NASDAQ
+DUN615665	Bought	20	
+Filled
+10:29 AM
+434.24	
+8684.8
+Fees: 1.0
+WDC
+Bot 20 @ 435.47 on NASDAQ
+DUN615665	Bought	20	
+Filled
+10:23 AM
+435.47	
+8709.4
+Fees: 1.0
+WDC
+Sold 20 @ 449.65 on NASDAQ
+DUN615665	Sold	20	
+Filled
+10:00 AM
+449.65	
+8993
+Fees: 1.19
+WDC
+Sold 20 @ 449.22 on NASDAQ
+DUN615665	Sold	20	
+Filled
+9:51 AM
+449.22	
+8984.4
+Fees: 1.19
+VALE
+Bot 2076 @ 16.09 on NYSE
+DUN615665	Bought	2,076	
+Filled
+9:49 AM
+16.09	
+33402.84
+Fees: 10.39
+VALE
+Bot 510 @ 16.09 on BATS
+DUN615665	Bought	510	
+Filled
+9:49 AM
+16.09	
+8205.9
+Fees: 2.55
+STX
+Bot 13 @ 741.69 on NASDAQ
+DUN615665	Bought	13	
+Filled
+9:47 AM
+741.69	
+9641.97
+Fees: 0.0
+STX
+Bot 40 @ 741.69 on NASDAQ
+DUN615665	Bought	40	
+Filled
+9:47 AM
+741.69	
+29667.6
+Fees: 1.0
+WDC
+Bot 20 @ 452.79 on NASDAQ
+DUN615665	Bought	20	
+Filled
+9:47 AM
+452.79	
+9055.8
+Fees: 1.0
+WDC
+Bot 20 @ 452.79 on IBKRATS
+DUN615665	Bought	20	
+Filled
+9:47 AM
+452.79	
+9055.8
+Fees: 1.0
+WDC
+Bot 20 @ 452.79 on NASDAQ
+DUN615665	Bought	20	
+Filled
+9:47 AM
+452.79	
+9055.8
+Fees: 1.0
+WDC
+Bot 20 @ 452.79 on IBKRATS
+DUN615665	Bought	20	
+Filled
+9:47 AM
+452.79	
+9055.8
+Fees: 1.0
+WDC
+Sold 20 @ 450.91 on IBKRATS
+DUN615665	Sold	20	
+Filled
+9:47 AM
+450.91	
+9018.2
+Fees: 1.19
+FDX
+Sold 100 @ 365.86 on IBKRATS
+DUN615665	Sold	100	
+Filled
+9:46 AM
+365.86	
+36586
+Fees: 1.77
+FDX
+Sold 10 @ 365.86 on NASDAQ
+DUN615665	Sold	10	
+Filled
+9:46 AM
+365.86	
+3658.6
+Fees: 0.08
+FDX
+Bot 110 @ 367.08 on IBKRATS
+DUN615665	Bought	110	
+Filled
+9:46 AM
+367.08	
+40378.8
+Fees: 1.0
+WDC
+Sold 20 @ 450.00 on IBKRATS
+DUN615665	Sold	20	
+Filled
+9:46 AM
+450.00	
+9000
+Fees: 1.19
+PYPL
+Bot 100 @ 50.82 on NASDAQ
+DUN615665	Bought	100	
+Filled
+9:46 AM
+50.82	
+5082
+Fees: 0.5
+PYPL
+Bot 200 @ 50.83 on NASDAQ
+DUN615665	Bought	200	
+Filled
+9:46 AM
+50.83	
+10166
+Fees: 1.0
+PYPL
+Bot 514 @ 50.83 on IEX
+DUN615665	Bought	514	
+Filled
+9:46 AM
+50.83	
+26126.62
+Fees: 1.58
+PYPL
+Bot 2 @ 50.83 on NASDAQ
+DUN615665	Bought	2	
+Filled
+9:46 AM
+50.83	
+101.66
+Fees: 1.0
+MO
+Bot 175 @ 73.77 on NASDAQ
+DUN615665	Bought	175	
+Filled
+9:45 AM
+73.77	
+12909.75
+Fees: 0.88
+MO
+Bot 125 @ 73.77 on IEX
+DUN615665	Bought	125	
+Filled
+9:45 AM
+73.77	
+9221.25
+Fees: 0.63
+MO
+Bot 63 @ 73.77 on BATS
+DUN615665	Bought	63	
+Filled
+9:45 AM
+73.77	
+4647.51
+Fees: 0.0
+MO
+Bot 100 @ 73.77 on ARCA
+DUN615665	Bought	100	
+Filled
+9:45 AM
+73.77	
+7377
+Fees: 1.0
+MO
+Bot 100 @ 73.77 on IBKRATS
+DUN615665	Bought	100	
+Filled
+9:45 AM
+73.77	
+7377
+Fees: 0.32
+WDC
+Sold 20 @ 447.57 on NASDAQ
+DUN615665	Sold	20	
+Filled
+9:44 AM
+447.57	
+8951.4
+Fees: 1.19
+VALE
+Bot 2293 @ 16.14 on NYSE
+DUN615665	Bought	2,293	
+Filled
+9:44 AM
+16.14	
+37009.02
+Fees: 11.47
+VALE
+Bot 300 @ 16.14 on NYSE
+DUN615665	Bought	300	
+Filled
+9:44 AM
+16.14	
+4842
+Fees: 1.5
+WDC
+Sold 20 @ 447.57 on NASDAQ
+DUN615665	Sold	20	
+Filled
+9:43 AM
+447.57	
+8951.4
+Fees: 1.19
+NCLH
+Bot 100 @ 17.29 on NASDAQ
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 119 @ 17.29 on NASDAQ
+DUN615665	Bought	119	
+Filled
+9:43 AM
+17.29	
+2057.51
+Fees: 0.6
+NCLH
+Bot 44 @ 17.29 on NYSE
+DUN615665	Bought	44	
+Filled
+9:43 AM
+17.29	
+760.76
+Fees: 0.22
+NCLH
+Bot 100 @ 17.29 on NASDAQ
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 100 @ 17.29 on DRCTEDGE
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 300 @ 17.29 on NYSE
+DUN615665	Bought	300	
+Filled
+9:43 AM
+17.29	
+5187
+Fees: 1.5
+NCLH
+Bot 100 @ 17.29 on ARCA
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 100 @ 17.29 on NYSE
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 100 @ 17.29 on IEX
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 139 @ 17.29 on BATS
+DUN615665	Bought	139	
+Filled
+9:43 AM
+17.29	
+2403.31
+Fees: 0.7
+NCLH
+Bot 100 @ 17.29 on NASDAQ
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 100 @ 17.29 on NYSE
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+NCLH
+Bot 401 @ 17.29 on NYSE
+DUN615665	Bought	401	
+Filled
+9:43 AM
+17.29	
+6933.29
+Fees: 2.01
+NCLH
+Bot 300 @ 17.29 on NASDAQ
+DUN615665	Bought	300	
+Filled
+9:43 AM
+17.29	
+5187
+Fees: 1.5
+NCLH
+Bot 219 @ 17.29 on NASDAQ
+DUN615665	Bought	219	
+Filled
+9:43 AM
+17.29	
+3786.51
+Fees: 1.1
+NCLH
+Bot 100 @ 17.29 on BATS
+DUN615665	Bought	100	
+Filled
+9:43 AM
+17.29	
+1729
+Fees: 0.5
+SBUX
+Bot 53 @ 105.29 on BATS
+DUN615665	Bought	53	
+Filled
+9:42 AM
+105.29	
+5580.37
+Fees: 0.27
+SBUX
+Bot 100 @ 105.38 on IBKRATS
+DUN615665	Bought	100	
+Filled
+9:42 AM
+105.38	
+10538
+Fees: 0.5
+SBUX
+Bot 130 @ 105.38 on NASDAQ
+DUN615665	Bought	130	
+Filled
+9:42 AM
+105.38	
+13699.4
+Fees: 1.0
+SBUX
+Bot 111 @ 105.38 on BATS
+DUN615665	Bought	111	
+Filled
+9:42 AM
+105.38	
+11697.18
+Fees: 0.21
+STX
+Bot 53 @ 742.37 on NASDAQ
+DUN615665	Bought	53	
+Filled
+9:42 AM
+742.37	
+39345.61
+Fees: 1.0
+STX
+Bot 55 @ 742.37 on NASDAQ
+DUN615665	Bought	55	
+Filled
+9:42 AM
+742.37	
+40830.35
+Fees: 1.0
+FDX
+Sold 30 @ 367.98 on BATS
+DUN615665	Sold	30	
+Filled
+9:41 AM
+367.98	
+11039.4
+Fees: 0.23
+FDX
+Sold 40 @ 367.98 on BATS
+DUN615665	Sold	40	
+Filled
+9:41 AM
+367.98	
+14719.2
+Fees: 0.31
+FDX
+Sold 40 @ 367.98 on BATS
+DUN615665	Sold	40	
+Filled
+9:41 AM
+367.98	
+14719.2
+Fees: 1.31
+FDX
+Bot 110 @ 368.89 on NYSE
+DUN615665	Bought	110	
+Filled
+9:41 AM
+368.89	
+40577.9
+Fees: 1.0
+MO
+Bot 100 @ 73.77 on NYSE
+DUN615665	Bought	100	
+Filled
+9:41 AM
+73.77	
+7377
+Fees: 0.5
+MO
+Bot 12 @ 73.77 on NYSE
+DUN615665	Bought	12	
+Filled
+9:41 AM
+73.77	
+885.24
+Fees: 0.06
+MO
+Bot 100 @ 73.77 on NYSE
+DUN615665	Bought	100	
+Filled
+9:41 AM
+73.77	
+7377
+Fees: 0.5
+MO
+Bot 100 @ 73.77 on NYSE
+DUN615665	Bought	100	
+Filled
+9:41 AM
+73.77	
+7377
+Fees: 0.5
+MO
+Bot 255 @ 73.77 on NYSE
+DUN615665	Bought	255	
+Filled
+9:41 AM
+73.77	
+18811.35
+Fees: 1.28
+CRCL
+Sold 109 @ 110.36 on NYSE
+DUN615665	Sold	109	
+Filled
+9:38 AM
+110.36	
+12029.24
+Fees: 1.27
+CRCL
+Sold 81 @ 110.36 on NYSE
+DUN615665	Sold	81	
+Filled
+9:38 AM
+110.36	
+8939.16
+Fees: 0.2
+SBUX
+Bot 82 @ 105.69 on BATS
+DUN615665	Bought	82	
+Filled
+9:37 AM
+105.69	
+8666.58
+Fees: 0.41
+SBUX
+Bot 93 @ 105.69 on MEMX
+DUN615665	Bought	93	
+Filled
+9:37 AM
+105.69	
+9829.17
+Fees: 0.47
+SBUX
+Bot 100 @ 105.69 on BATS
+DUN615665	Bought	100	
+Filled
+9:37 AM
+105.69	
+10569
+Fees: 0.0
+SBUX
+Bot 26 @ 105.69 on MEMX
+DUN615665	Bought	26	
+Filled
+9:37 AM
+105.69	
+2747.94
+Fees: 0.1
+SBUX
+Bot 93 @ 105.69 on MEMX
+DUN615665	Bought	93	
+Filled
+9:37 AM
+105.69	
+9829.17
+Fees: 1.0
+V
+Sold 84 @ 326.62 on NASDAQ
+DUN615665	Sold	84	
+Filled
+9:37 AM
+326.62	
+27436.08
+Fees: 0.58
+V
+Sold 40 @ 326.62 on IBKRATS
+DUN615665	Sold	40	
+Filled
+9:37 AM
+326.62	
+13064.8
+Fees: 0.28
+V
+Sold 74 @ 326.62 on NASDAQ
+DUN615665	Sold	74	
+Filled
+9:37 AM
+326.62	
+24169.88
+Fees: 0.78
+V
+Sold 56 @ 326.62 on NASDAQ
+DUN615665	Sold	56	
+Filled
+9:37 AM
+326.62	
+18290.72
+Fees: 1.39
+V
+Bot 40 @ 326.69 on IBKRATS
+DUN615665	Bought	40	
+Filled
+9:37 AM
+326.69	
+13067.6
+Fees: 1.0
+V
+Bot 214 @ 326.69 on BYX
+DUN615665	Bought	214	
+Filled
+9:37 AM
+326.69	
+69911.66
+Fees: 0.27
+BKNG
+Bot 17 @ 168.43 on NASDAQ
+DUN615665	Bought	17	
+Filled
+9:37 AM
+168.43	
+2863.31
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 17 @ 168.43 on NASDAQ
+DUN615665	Bought	17	
+Filled
+9:37 AM
+168.43	
+2863.31
+Fees: 0.0
+BKNG
+Bot 86 @ 168.43 on NASDAQ
+DUN615665	Bought	86	
+Filled
+9:37 AM
+168.43	
+14484.98
+Fees: 0.23
+BKNG
+Bot 19 @ 168.43 on NASDAQ
+DUN615665	Bought	19	
+Filled
+9:37 AM
+168.43	
+3200.17
+Fees: 0.0
+BKNG
+Bot 10 @ 168.39 on IBKRATS
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.39	
+1683.9
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+BKNG
+Bot 10 @ 168.40 on IBKRATS
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.40	
+1684
+Fees: 1.0
+BKNG
+Bot 17 @ 168.40 on NASDAQ
+DUN615665	Bought	17	
+Filled
+9:37 AM
+168.40	
+2862.8
+Fees: 0.0
+BKNG
+Bot 10 @ 168.43 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:37 AM
+168.43	
+1684.3
+Fees: 0.0
+V
+Sold 29 @ 326.96 on IBKRATS
+DUN615665	Sold	29	
+Filled
+9:36 AM
+326.96	
+9481.84
+Fees: 0.35
+V
+Sold 43 @ 326.96 on BATS
+DUN615665	Sold	43	
+Filled
+9:36 AM
+326.96	
+14059.28
+Fees: 0.3
+V
+Sold 40 @ 326.96 on IEX
+DUN615665	Sold	40	
+Filled
+9:36 AM
+326.96	
+13078.4
+Fees: 0.28
+V
+Sold 53 @ 326.96 on MEMX
+DUN615665	Sold	53	
+Filled
+9:36 AM
+326.96	
+17328.88
+Fees: 0.5
+V
+Sold 51 @ 326.96 on DRCTEDGE
+DUN615665	Sold	51	
+Filled
+9:36 AM
+326.96	
+16674.96
+Fees: 0.35
+V
+Sold 40 @ 326.96 on IBKRATS
+DUN615665	Sold	40	
+Filled
+9:36 AM
+326.96	
+13078.4
+Fees: 1.28
+ELV
+Bot 33 @ 371.94 on NYSE
+DUN615665	Bought	33	
+Filled
+9:36 AM
+371.94	
+12274.02
+Fees: 0.0
+V
+Bot 26 @ 327.32 on NYSE
+DUN615665	Bought	26	
+Filled
+9:36 AM
+327.32	
+8510.32
+Fees: 0.13
+V
+Bot 65 @ 327.12 on IBKRATS
+DUN615665	Bought	65	
+Filled
+9:36 AM
+327.12	
+21262.8
+Fees: 0.0
+V
+Bot 45 @ 327.12 on ARCA
+DUN615665	Bought	45	
+Filled
+9:36 AM
+327.12	
+14720.4
+Fees: 0.15
+V
+Bot 120 @ 327.12 on NYSE
+DUN615665	Bought	120	
+Filled
+9:36 AM
+327.12	
+39254.4
+Fees: 1.0
+BKNG
+Bot 12 @ 169.02 on NASDAQ
+DUN615665	Bought	12	
+Filled
+9:36 AM
+169.02	
+2028.24
+Fees: 0.06
+BKNG
+Bot 63 @ 169.02 on NASDAQ
+DUN615665	Bought	63	
+Filled
+9:36 AM
+169.02	
+10648.26
+Fees: 0.17
+BKNG
+Bot 10 @ 169.03 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:36 AM
+169.03	
+1690.3
+Fees: 0.0
+BKNG
+Bot 30 @ 169.03 on NASDAQ
+DUN615665	Bought	30	
+Filled
+9:36 AM
+169.03	
+5070.9
+Fees: 0.0
+BKNG
+Bot 10 @ 169.03 on IBKRATS
+DUN615665	Bought	10	
+Filled
+9:36 AM
+169.03	
+1690.3
+Fees: 0.0
+BKNG
+Bot 10 @ 169.03 on ARCA
+DUN615665	Bought	10	
+Filled
+9:36 AM
+169.03	
+1690.3
+Fees: 0.0
+BKNG
+Bot 25 @ 169.03 on NASDAQ
+DUN615665	Bought	25	
+Filled
+9:36 AM
+169.03	
+4225.75
+Fees: 0.0
+BKNG
+Bot 15 @ 169.03 on NASDAQ
+DUN615665	Bought	15	
+Filled
+9:36 AM
+169.03	
+2535.45
+Fees: 0.0
+BKNG
+Bot 20 @ 168.90 on NASDAQ
+DUN615665	Bought	20	
+Filled
+9:36 AM
+168.90	
+3378
+Fees: 0.0
+BKNG
+Bot 10 @ 168.90 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:36 AM
+168.90	
+1689
+Fees: 0.0
+BKNG
+Bot 11 @ 169.03 on NASDAQ
+DUN615665	Bought	11	
+Filled
+9:36 AM
+169.03	
+1859.33
+Fees: 0.0
+BKNG
+Bot 10 @ 168.89 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:36 AM
+168.89	
+1688.9
+Fees: 0.0
+BKNG
+Bot 20 @ 168.89 on NASDAQ
+DUN615665	Bought	20	
+Filled
+9:36 AM
+168.89	
+3377.8
+Fees: 1.0
+STM
+Bot 207 @ 56.14 on NASDAQ
+DUN615665	Bought	207	
+Filled
+9:35 AM
+56.14	
+11620.98
+Fees: 1.04
+STM
+Bot 540 @ 56.14 on NASDAQ
+DUN615665	Bought	540	
+Filled
+9:35 AM
+56.14	
+30315.6
+Fees: 2.7
+V
+Sold 256 @ 326.79 on IBKRATS
+DUN615665	Sold	256	
+Filled
+9:35 AM
+326.79	
+83658.24
+Fees: 3.05
+ELV
+Bot 40 @ 371.94 on NYSE
+DUN615665	Bought	40	
+Filled
+9:35 AM
+371.94	
+14877.6
+Fees: 0.0
+V
+Bot 40 @ 327.15 on IBKRATS
+DUN615665	Bought	40	
+Filled
+9:35 AM
+327.15	
+13086
+Fees: 1.0
+V
+Bot 80 @ 327.15 on NYSE
+DUN615665	Bought	80	
+Filled
+9:35 AM
+327.15	
+26172
+Fees: 0.28
+V
+Bot 136 @ 327.15 on IEX
+DUN615665	Bought	136	
+Filled
+9:35 AM
+327.15	
+44492.4
+Fees: 0.0
+BKNG
+Bot 30 @ 169.38 on ARCA
+DUN615665	Bought	30	
+Filled
+9:35 AM
+169.38	
+5081.4
+Fees: 0.15
+BKNG
+Bot 9 @ 169.32 on NASDAQ
+DUN615665	Bought	9	
+Filled
+9:35 AM
+169.32	
+1523.88
+Fees: 0.05
+BKNG
+Bot 20 @ 169.32 on ARCA
+DUN615665	Bought	20	
+Filled
+9:35 AM
+169.32	
+3386.4
+Fees: 0.05
+BKNG
+Bot 30 @ 169.22 on BATS
+DUN615665	Bought	30	
+Filled
+9:35 AM
+169.22	
+5076.6
+Fees: 0.0
+BKNG
+Bot 38 @ 169.22 on BATS
+DUN615665	Bought	38	
+Filled
+9:35 AM
+169.22	
+6430.36
+Fees: 0.0
+BKNG
+Bot 10 @ 169.21 on IBKRATS
+DUN615665	Bought	10	
+Filled
+9:35 AM
+169.21	
+1692.1
+Fees: 0.0
+BKNG
+Bot 30 @ 169.21 on BATS
+DUN615665	Bought	30	
+Filled
+9:35 AM
+169.21	
+5076.3
+Fees: 0.0
+BKNG
+Bot 31 @ 169.22 on BATS
+DUN615665	Bought	31	
+Filled
+9:35 AM
+169.22	
+5245.82
+Fees: 0.0
+BKNG
+Bot 10 @ 169.21 on NASDAQ
+DUN615665	Bought	10	
+Filled
+9:35 AM
+169.21	
+1692.1
+Fees: 0.0
+BKNG
+Bot 30 @ 169.22 on BATS
+DUN615665	Bought	30	
+Filled
+9:35 AM
+169.22	
+5076.6
+Fees: 1.0
+BKNG
+Bot 10 @ 169.22 on IBKRATS
+DUN615665	Bought	10	
+Filled
+9:35 AM
+169.22	
+1692.2
+Fees: 0.0
+V
+Sold 61 @ 326.66 on DRCTEDGE
+DUN615665	Sold	61	
+Filled
+9:35 AM
+326.66	
+19926.26
+Fees: 0.7
+V
+Sold 50 @ 326.46 on NYSE
+DUN615665	Sold	50	
+Filled
+9:35 AM
+326.46	
+16323
+Fees: 0.35
+V
+Sold 30 @ 326.46 on NYSE
+DUN615665	Sold	30	
+Filled
+9:35 AM
+326.46	
+9793.8
+Fees: 0.36
+V
+Sold 40 @ 326.46 on IBKRATS
+DUN615665	Sold	40	
+Filled
+9:35 AM
+326.46	
+13058.4
+Fees: 0.28
+V
+Sold 96 @ 326.46 on ARCA
+DUN615665	Sold	96	
+Filled
+9:35 AM
+326.46	
+31340.16
+Fees: 0.79
+V
+Sold 40 @ 326.46 on ARCA
+DUN615665	Sold	40	
+Filled
+9:35 AM
+326.46	
+13058.4
+Fees: 0.28
+V
+Sold 30 @ 326.46 on IEX
+DUN615665	Sold	30	
+Filled
+9:35 AM
+326.46	
+9793.8
+Fees: 0.21
+V
+Sold 50 @ 326.46 on IBKRATS
+DUN615665	Sold	50	
+Filled
+9:35 AM
+326.46	
+16323
+Fees: 1.35
+V
+Sold 105 @ 326.46 on ARCA
+DUN615665	Sold	105	
+Filled
+9:35 AM
+326.46	
+34278.3
+Fees: 1.73
+V
+Sold 10 @ 326.46 on IEX
+DUN615665	Sold	10	
+Filled
+9:35 AM
+326.46	
+3264.6
+Fees: 0.07
+MO
+Bot 100 @ 73.75 on NYSE
+DUN615665	Bought	100	
+Filled
+9:35 AM
+73.75	
+7375
+Fees: 0.5
+MO
+Bot 171 @ 73.75 on NASDAQ
+DUN615665	Bought	171	
+Filled
+9:35 AM
+73.75	
+12611.25
+Fees: 0.86
+MO
+Bot 300 @ 73.75 on IBKRATS
+DUN615665	Bought	300	
+Filled
+9:35 AM
+73.75	
+22125
+Fees: 1.5
+LHX
+Sold 100 @ 310.96 on IBKRATS
+DUN615665	Sold	100	
+Filled
+9:34 AM
+310.96	
+31096
+Fees: 0.76
+LHX
+Sold 49 @ 310.82 on NASDAQ
+DUN615665	Sold	49	
+Filled
+9:34 AM
+310.82	
+15230.18
+Fees: 0.57
+LHX
+Sold 80 @ 310.96 on NYSE
+DUN615665	Sold	80	
+Filled
+9:34 AM
+310.96	
+24876.8
+Fees: 0.53
+LHX
+Sold 40 @ 310.96 on NYSE
+DUN615665	Sold	40	
+Filled
+9:34 AM
+310.96	
+12438.4
+Fees: 1.26
+LHX
+Bot 50 @ 311.81 on NYSE
+DUN615665	Bought	50	
+Filled
+9:34 AM
+311.81	
+15590.5
+Fees: 1.0
+LHX
+Bot 64 @ 311.81 on NYSE
+DUN615665	Bought	64	
+Filled
+9:34 AM
+311.81	
+19955.84
+Fees: 0.0
+NXPI
+Bot 41 @ 296.78 on NASDAQ
+DUN615665	Bought	41	
+Filled
+9:34 AM
+296.78	
+12167.98
+Fees: 0.0
+LHX
+Bot 1 @ 311.81 on NYSE
+DUN615665	Bought	1	
+Filled
+9:34 AM
+311.81	
+311.81
+Fees: 0.01
+LHX
+Bot 154 @ 311.81 on NYSE
+DUN615665	Bought	154	
+Filled
+9:34 AM
+311.81	
+48018.74
+Fees: 0.34
+ELV
+Bot 40 @ 371.94 on NYSE
+DUN615665	Bought	40	
+Filled
+9:34 AM
+371.94	
+14877.6
+Fees: 1.0
+NXPI
+Bot 100 @ 296.78 on IBKRATS
+DUN615665	Bought	100	
+Filled
+9:34 AM
+296.78	
+29678
+Fees: 1.0
+V
+Bot 65 @ 327.71 on IBKRATS
+DUN615665	Bought	65	
+Filled
+9:34 AM
+327.71	
+21301.15
+Fees: 0.0
+V
+Bot 9 @ 327.71 on NYSE
+DUN615665	Bought	9	
+Filled
+9:34 AM
+327.71	
+2949.39
+Fees: 0.05
+V
+Bot 62 @ 327.71 on ARCA
+DUN615665	Bought	62	
+Filled
+9:34 AM
+327.71	
+20318.02
+Fees: 0.24
+V
+Bot 80 @ 327.71 on MEMX
+DUN615665	Bought	80	
+Filled
+9:34 AM
+327.71	
+26216.8
+Fees: 0.0
+V
+Bot 40 @ 327.71 on BATS
+DUN615665	Bought	40	
+Filled
+9:34 AM
+327.71	
+13108.4
+Fees: 1.0
+V
+Bot 69 @ 327.50 on BATS
+DUN615665	Bought	69	
+Filled
+9:33 AM
+327.50	
+22597.5
+Fees: 0.15
+V
+Bot 100 @ 327.50 on BATS
+DUN615665	Bought	100	
+Filled
+9:33 AM
+327.50	
+32750
+Fees: 1.0
+V
+Bot 27 @ 327.50 on BATS
+DUN615665	Bought	27	
+Filled
+9:33 AM
+327.50	
+8842.5
+Fees: 0.14
+V
+Bot 60 @ 327.50 on MEMX
+DUN615665	Bought	60	
+Filled
+9:33 AM
+327.50	
+19650
+Fees: 0.0
+STX
+Bot 100 @ 735.29 on IBKRATS
+DUN615665	Bought	100	
+Filled
+9:32 AM
+735.29	
+73529
+Fees: 1.0
+STX
+Bot 13 @ 735.29 on NASDAQ
+DUN615665	Bought	13	
+Filled
+9:32 AM
+735.29	
+9558.77
+Fees: 0.0
+APH
+Bot 77 @ 143.05 on NYSE
+DUN615665	Bought	77	
+Filled
+9:32 AM
+143.05	
+11014.85
+Fees: 0.39
+APH
+Bot 100 @ 143.05 on NYSE
+DUN615665	Bought	100	
+Filled
+9:32 AM
+143.05	
+14305
+Fees: 0.5
+APH
+Bot 311 @ 143.05 on NYSE
+DUN615665	Bought	311	
+Filled
+9:32 AM
+143.05	
+44488.55
+Fees: 1.56
+APH
+Bot 100 @ 143.05 on NYSE
+DUN615665	Bought	100	
+Filled
+9:32 AM
+143.05	
+14305
+Fees: 0.5
+LITE
+Bot 62 @ 990.00 on IBKRATS
+DUN615665	Bought	62	
+Filled
+9:31 AM
+990.00	
+61380
+Fees: 1.0
+LITE
+Sold 55 @ 991.87 on NASDAQ
+DUN615665	Sold	55	
+Filled
+9:31 AM
+991.87	
+54552.85
+Fees: 2.13
+LITE
+Sold 7 @ 991.87 on NASDAQ
+DUN615665	Sold	7	
+Filled
+9:31 AM
+991.87	
+6943.09
+Fees: 0.14

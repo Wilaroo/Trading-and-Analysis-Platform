@@ -4,6 +4,78 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.34.4)
+
+### 🎯 Just shipped 2026-05-04 v19.34.4 — see CHANGELOG (eighty-fifth commit)
+**IB fill-tape auditor + Spark Mongo cross-check + 2026-05-04 audit run.**
+
+- ✅ `backend/scripts/audit_ib_fill_tape.py` — TWS-paste parser + FIFO PnL + verdict classifier (`CARRYOVER_FLATTENED` / `OPEN_POSITION_LONG` / `MULTI_LEG_*` / `INVERSION_SHORT_COVER` / `CLEAN_ROUND_TRIP`).
+- ✅ `backend/scripts/export_bot_trades_for_audit.py` — Spark Mongo export (today's `bot_trades` rows with full v19.34.3 provenance fields).
+- ✅ `memory/runbooks/audit_ib_fill_tape.md` — 5-phase operator runbook.
+- ✅ 2026-05-04 audit complete: **328 fills / 21 symbols / -$14,560 net** PAPER day. Single residual `STX -17sh` flagged as carryover.
+- ✅ **15/15 new pytests passing**, **256/256 cumulative across all v19.x suites**.
+
+### 🔴 P0 — Top of next session (operator-driven, requires Spark access)
+
+**Step 1 — Spark cross-check the 2026-05-04 audit:**
+```bash
+cd ~/Trading-and-Analysis-Platform/backend
+python -m scripts.export_bot_trades_for_audit --date 2026-05-04 --out /tmp/bt_2026_05_04.json
+python -m scripts.audit_ib_fill_tape \
+    --input ../memory/audit/2026-05-04_ib_fill_tape.txt \
+    --bot-trades-json /tmp/bt_2026_05_04.json \
+    --out /tmp/audit_2026_05_04_with_xcheck.md
+```
+- **Investigate the STX -17sh carryover** — confirm via `/api/diagnostics/orphan-origin/STX?days=7` whether the bot ever owned those 17 shares or they were a manual click / prior session that the morning reset didn't close.
+- **VALE confirmation** — the audit flags VALE as `MULTI_LEG_LONG` with -$1,528 realized; verify v19.34.3's `prior_verdict_conflict` flag on the matching `bot_trades` row (operator's previous bug).
+- **Spot-check fragmentation** on BKNG (87 fills) and V (46 fills) — confirm bot has 1 row per parent order, not 1 row per venue child fill.
+
+### 🔴 P0 — MID_BAR_TICK_EVAL activation (carry-over from v19.34)
+Per `/app/memory/runbooks/midbar_tick_eval_activation.md`:
+1. `curl ${BACKEND_URL}/api/ib/quote-tick-bus/health` — confirm `enabled=true`, `publish_total > 0`, `drop_total ≈ 0` for 30 min during RTH.
+2. Flip `MID_BAR_TICK_EVAL_ENABLED=true` in `.env` and restart.
+3. Verify `[v19.34 MID-BAR TICK]` subscriber-spawn logs and `mid_bar_v19_34` close-reason stamping in Day Tape on next stop hit.
+
+### 🔴 P0 — Carry-over verifications (still pending operator confirmation)
+
+- (v19.31.13) AccountModeBadge correctness on paper vs live accounts.
+- (v19.31.13) Realized PnL auto-syncs within 30s without operator clicks.
+- (v19.31.13) Diagnostics → Shadow Decisions tab loads cleanly.
+- (v19.31.13) PAPER/LIVE chips render on Open Positions / Day Tape / Forensics.
+- (v19.31.14) Pre-Market banner appears 7:00-9:30 ET in scanner panel.
+- (v19.31.14) `/api/ib-collector/throttle-policy` returns `max_concurrent_workers=1` during RTH.
+- (v19.31.14) BootReconcilePill appears in HUD after backend restart, fades after 10 min.
+- (v19.31.14) Module Vote Breakdown panel renders below Module Scorecard.
+- (v19.31.14) Funnel `⚠ Shadow drift` chip appears when shadow ≠ trades.
+- (v19.32) Chart click on a recently-visible scanner symbol lands in <50ms (was ~400ms cold).
+- (v19.33) Chart header shows cyan **"live"** pip when on a focused intraday chart during RTH.
+- (v19.34.3) RECONCILED + ⚠ CONFLICT chips render on V5 Open Positions row when applicable.
+
+### 🟡 P1 (operator-facing improvements, carried forward)
+- Frontend L1 tick rendering with RAF-coalescing on `/ws/quote-ticks` (deferred from v19.33).
+- `.bat` health screen probes pusher actually (carry-over).
+- Pusher auto-restart on Windows (carry-over).
+- Shadow-vs-Real gap drilldown (carry-over).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
+- Pusher honors `max_concurrent_workers` from `/api/ib-collector/throttle-policy`.
+
+### 🟢 P2 / P3 (future evolution paths now unlocked by v19.34)
+- **Stop-distance journal → ML training data** (operator-suggested 2026-05-04) — pipe `tick_evaluated` annotations into `sentcom_thoughts` on every mid-bar eval. After a week, microsecond-resolution journal of every stop's distance-to-fire — perfect training data for a "predict stop-run probability before the wick fires" ML module.
+- **Sub-bar trailing stops** — once mid-bar is proven safe.
+- **Mid-bar entry eval** — selectively front-run entries on high-conviction signals.
+- **L1 → L2 escalation** — request L2 depth via the tick bus for actively-evaluated symbols.
+- **Audit Pass 1**: lint sweep + dead-code (370 ruff fixes).
+- **Audit Pass 3**: break up 4 monoliths.
+- v19.32 evolution — predictive warmer that pre-fetches the chart for the symbol an alert is about to fire on.
+- v19.33 evolution — WS pushes per-tick L1 quote updates.
+- Setup-landscape EOD self-grading tracker.
+- Mean-reversion metrics service (per-symbol Hurst exponent + Ornstein-Uhlenbeck half-life).
+- Liquidity-aware trail in `stop_manager.py`.
+- IB Gateway auto-login resilience.
+- Safely retire Alpaca fallback.
+
+---
+
 ## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.34)
 
 ### 🎯 Just shipped 2026-05-04 v19.34 — see CHANGELOG (eighty-first commit)

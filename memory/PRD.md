@@ -175,6 +175,19 @@ is the operator's source of truth for which Trade fits which Setup;
 - Backend restart: `pkill -f "python server.py" && cd backend && nohup python server.py > /tmp/backend.log 2>&1 &` (Spark uses `.venv`, not supervisor)
 
 
+## Audit tooling (v19.34.4 — 2026-05-04)
+
+When operator wants to confirm bot accounting matches IB reality
+(phantom shares, partial-fill drift, orphan adoptions):
+
+1. Paste IB TWS Trades-pane → `memory/audit/<YYYY-MM-DD>_ib_fill_tape.txt`.
+2. `python -m scripts.audit_ib_fill_tape --input ... --out report.md` — standalone parser + FIFO PnL + verdict classifier.
+3. `python -m scripts.export_bot_trades_for_audit --date YYYY-MM-DD --out bt.json` — Spark Mongo export of today's `bot_trades` rows.
+4. Re-run auditor with `--bot-trades-json bt.json` for cross-check section flagging IB-but-not-bot, bot-but-not-IB, and qty mismatches.
+
+Full runbook: `memory/runbooks/audit_ib_fill_tape.md`.
+
+
 ## Scanner runtime architecture (v19.15 + v19.16 — 2026-04-30)
 
 ### Per-cycle context cache (v19.15)

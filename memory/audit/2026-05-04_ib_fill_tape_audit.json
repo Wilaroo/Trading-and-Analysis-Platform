@@ -1,0 +1,3174 @@
+{
+  "generated_at": "2026-05-04T20:24:51",
+  "fill_count": 328,
+  "symbols": {
+    "STX": {
+      "symbol": "STX",
+      "fill_count": 14,
+      "bought_qty": 274,
+      "sold_qty": 291,
+      "bought_dollars": 202573.3,
+      "sold_dollars": 214254.39,
+      "fees_total": 12.47,
+      "venues": [
+        "ARCA",
+        "IBKRATS",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:32 AM",
+      "latest_time": "3:57 PM",
+      "eod_flatten": true,
+      "net_position": -17,
+      "open_residual_qty": -17,
+      "realized_pnl": -860.32,
+      "realized_pnl_after_fees": -872.79,
+      "has_inversion": false,
+      "verdict": "CARRYOVER_FLATTENED",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 25,
+          "open_price": 735.29,
+          "close_price": 735.09,
+          "open_time": "9:32 AM",
+          "close_time": "3:51 PM",
+          "pnl": -5.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 44,
+          "open_price": 735.29,
+          "close_price": 735.09,
+          "open_time": "9:32 AM",
+          "close_time": "3:51 PM",
+          "pnl": -8.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 31,
+          "open_price": 735.29,
+          "close_price": 735.09,
+          "open_time": "9:32 AM",
+          "close_time": "3:51 PM",
+          "pnl": -6.2
+        },
+        {
+          "direction": "LONG",
+          "qty": 13,
+          "open_price": 735.29,
+          "close_price": 735.09,
+          "open_time": "9:32 AM",
+          "close_time": "3:51 PM",
+          "pnl": -2.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 13,
+          "open_price": 742.37,
+          "close_price": 735.09,
+          "open_time": "9:42 AM",
+          "close_time": "3:51 PM",
+          "pnl": -94.64
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 742.37,
+          "close_price": 737.62,
+          "open_time": "9:42 AM",
+          "close_time": "3:56 PM",
+          "pnl": -190.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 15,
+          "open_price": 742.37,
+          "close_price": 737.62,
+          "open_time": "9:42 AM",
+          "close_time": "3:56 PM",
+          "pnl": -71.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 742.37,
+          "close_price": 736.16,
+          "open_time": "9:42 AM",
+          "close_time": "3:56 PM",
+          "pnl": -248.4
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 741.69,
+          "close_price": 736.16,
+          "open_time": "9:47 AM",
+          "close_time": "3:56 PM",
+          "pnl": -5.53
+        },
+        {
+          "direction": "LONG",
+          "qty": 12,
+          "open_price": 741.69,
+          "close_price": 736.16,
+          "open_time": "9:47 AM",
+          "close_time": "3:56 PM",
+          "pnl": -66.36
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 741.69,
+          "close_price": 736.16,
+          "open_time": "9:47 AM",
+          "close_time": "3:56 PM",
+          "pnl": -11.06
+        },
+        {
+          "direction": "LONG",
+          "qty": 38,
+          "open_price": 741.69,
+          "close_price": 737.73,
+          "open_time": "9:47 AM",
+          "close_time": "3:57 PM",
+          "pnl": -150.48
+        }
+      ]
+    },
+    "TER": {
+      "symbol": "TER",
+      "fill_count": 7,
+      "bought_qty": 197,
+      "sold_qty": 197,
+      "bought_dollars": 67370.06,
+      "sold_dollars": 66578.12,
+      "fees_total": 3.42,
+      "venues": [
+        "BYX",
+        "DRCTEDGE",
+        "IBKRATS",
+        "NASDAQ"
+      ],
+      "earliest_time": "1:29 PM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -791.94,
+      "realized_pnl_after_fees": -795.36,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -160.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 32,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -128.64
+        },
+        {
+          "direction": "LONG",
+          "qty": 27,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -108.54
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -4.02
+        },
+        {
+          "direction": "LONG",
+          "qty": 57,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -229.14
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 341.98,
+          "close_price": 337.96,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -160.8
+        }
+      ]
+    },
+    "NXPI": {
+      "symbol": "NXPI",
+      "fill_count": 8,
+      "bought_qty": 333,
+      "sold_qty": 333,
+      "bought_dollars": 98034.78,
+      "sold_dollars": 96695.55,
+      "fees_total": 6.06,
+      "venues": [
+        "BATS",
+        "IBKRATS",
+        "IEX",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:34 AM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -1339.23,
+      "realized_pnl_after_fees": -1345.29,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 41,
+          "open_price": 296.78,
+          "close_price": 291.19,
+          "open_time": "9:34 AM",
+          "close_time": "11:21 AM",
+          "pnl": -229.19
+        },
+        {
+          "direction": "LONG",
+          "qty": 59,
+          "open_price": 296.78,
+          "close_price": 291.19,
+          "open_time": "9:34 AM",
+          "close_time": "11:21 AM",
+          "pnl": -329.81
+        },
+        {
+          "direction": "LONG",
+          "qty": 41,
+          "open_price": 296.78,
+          "close_price": 291.19,
+          "open_time": "9:34 AM",
+          "close_time": "11:21 AM",
+          "pnl": -229.19
+        },
+        {
+          "direction": "LONG",
+          "qty": 92,
+          "open_price": 292.65,
+          "close_price": 289.78,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -264.04
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 292.65,
+          "close_price": 289.78,
+          "open_time": "1:29 PM",
+          "close_time": "3:55 PM",
+          "pnl": -287.0
+        }
+      ]
+    },
+    "SOXS": {
+      "symbol": "SOXS",
+      "fill_count": 5,
+      "bought_qty": 5166,
+      "sold_qty": 5166,
+      "bought_dollars": 69224.4,
+      "sold_dollars": 68552.82,
+      "fees_total": 54.11,
+      "venues": [
+        "ARCA",
+        "BYX",
+        "IEX",
+        "NASDAQ"
+      ],
+      "earliest_time": "12:52 PM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -671.58,
+      "realized_pnl_after_fees": -725.69,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 66,
+          "open_price": 13.4,
+          "close_price": 13.27,
+          "open_time": "12:52 PM",
+          "close_time": "3:55 PM",
+          "pnl": -8.58
+        },
+        {
+          "direction": "LONG",
+          "qty": 1534,
+          "open_price": 13.4,
+          "close_price": 13.27,
+          "open_time": "12:52 PM",
+          "close_time": "3:55 PM",
+          "pnl": -199.42
+        },
+        {
+          "direction": "LONG",
+          "qty": 1366,
+          "open_price": 13.4,
+          "close_price": 13.27,
+          "open_time": "12:52 PM",
+          "close_time": "3:55 PM",
+          "pnl": -177.58
+        },
+        {
+          "direction": "LONG",
+          "qty": 2200,
+          "open_price": 13.4,
+          "close_price": 13.27,
+          "open_time": "12:52 PM",
+          "close_time": "3:55 PM",
+          "pnl": -286.0
+        }
+      ]
+    },
+    "VALE": {
+      "symbol": "VALE",
+      "fill_count": 6,
+      "bought_qty": 5179,
+      "sold_qty": 5179,
+      "bought_dollars": 83459.76,
+      "sold_dollars": 81931.78,
+      "fees_total": 54.52,
+      "venues": [
+        "BATS",
+        "BYX",
+        "NYSE"
+      ],
+      "earliest_time": "9:44 AM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -1527.98,
+      "realized_pnl_after_fees": -1582.5,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 1343,
+          "open_price": 16.14,
+          "close_price": 15.82,
+          "open_time": "9:44 AM",
+          "close_time": "3:55 PM",
+          "pnl": -429.76
+        },
+        {
+          "direction": "LONG",
+          "qty": 950,
+          "open_price": 16.14,
+          "close_price": 15.82,
+          "open_time": "9:44 AM",
+          "close_time": "3:55 PM",
+          "pnl": -304.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 300,
+          "open_price": 16.14,
+          "close_price": 15.82,
+          "open_time": "9:44 AM",
+          "close_time": "3:55 PM",
+          "pnl": -96.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 2076,
+          "open_price": 16.09,
+          "close_price": 15.82,
+          "open_time": "9:49 AM",
+          "close_time": "3:55 PM",
+          "pnl": -560.52
+        },
+        {
+          "direction": "LONG",
+          "qty": 510,
+          "open_price": 16.09,
+          "close_price": 15.82,
+          "open_time": "9:49 AM",
+          "close_time": "3:55 PM",
+          "pnl": -137.7
+        }
+      ]
+    },
+    "NCLH": {
+      "symbol": "NCLH",
+      "fill_count": 19,
+      "bought_qty": 2422,
+      "sold_qty": 2422,
+      "bought_dollars": 41876.38,
+      "sold_dollars": 41803.72,
+      "fees_total": 25.59,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "DRCTEDGE",
+        "IEX",
+        "NASDAQ",
+        "NYSE",
+        "NYSENAT"
+      ],
+      "earliest_time": "9:43 AM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -72.66,
+      "realized_pnl_after_fees": -98.25,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": "venue_spread_7_venues",
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 119,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.57
+        },
+        {
+          "direction": "LONG",
+          "qty": 44,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -1.32
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 300,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -9.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 139,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -4.17
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 27,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -0.81
+        },
+        {
+          "direction": "LONG",
+          "qty": 374,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -11.22
+        },
+        {
+          "direction": "LONG",
+          "qty": 300,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -9.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 219,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -6.57
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 17.29,
+          "close_price": 17.26,
+          "open_time": "9:43 AM",
+          "close_time": "3:55 PM",
+          "pnl": -3.0
+        }
+      ]
+    },
+    "ELV": {
+      "symbol": "ELV",
+      "fill_count": 5,
+      "bought_qty": 113,
+      "sold_qty": 113,
+      "bought_dollars": 42029.22,
+      "sold_dollars": 42056.34,
+      "fees_total": 2.89,
+      "venues": [
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:34 AM",
+      "latest_time": "3:55 PM",
+      "eod_flatten": true,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": 27.12,
+      "realized_pnl_after_fees": 24.23,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 33,
+          "open_price": 371.94,
+          "close_price": 372.18,
+          "open_time": "9:34 AM",
+          "close_time": "3:55 PM",
+          "pnl": 7.92
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 371.94,
+          "close_price": 372.18,
+          "open_time": "9:34 AM",
+          "close_time": "3:55 PM",
+          "pnl": 1.68
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 371.94,
+          "close_price": 372.18,
+          "open_time": "9:35 AM",
+          "close_time": "3:55 PM",
+          "pnl": 9.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 33,
+          "open_price": 371.94,
+          "close_price": 372.18,
+          "open_time": "9:36 AM",
+          "close_time": "3:55 PM",
+          "pnl": 7.92
+        }
+      ]
+    },
+    "BP": {
+      "symbol": "BP",
+      "fill_count": 12,
+      "bought_qty": 1200,
+      "sold_qty": 1200,
+      "bought_dollars": 56224.98,
+      "sold_dollars": 56304.0,
+      "fees_total": 13.42,
+      "venues": [
+        "ARCA",
+        "DRCTEDGE",
+        "IEX",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "1:00 PM",
+      "latest_time": "3:51 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": 79.02,
+      "realized_pnl_after_fees": 65.6,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 17,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 0.51
+        },
+        {
+          "direction": "LONG",
+          "qty": 38,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 1.14
+        },
+        {
+          "direction": "LONG",
+          "qty": 187,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 5.61
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 3.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 125,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 3.75
+        },
+        {
+          "direction": "LONG",
+          "qty": 33,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 0.99
+        },
+        {
+          "direction": "LONG",
+          "qty": 222,
+          "open_price": 46.89,
+          "close_price": 46.92,
+          "open_time": "1:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 6.66
+        },
+        {
+          "direction": "LONG",
+          "qty": 78,
+          "open_price": 46.8,
+          "close_price": 46.92,
+          "open_time": "2:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 9.36
+        },
+        {
+          "direction": "LONG",
+          "qty": 264,
+          "open_price": 46.8,
+          "close_price": 46.92,
+          "open_time": "2:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 31.68
+        },
+        {
+          "direction": "LONG",
+          "qty": 36,
+          "open_price": 46.8,
+          "close_price": 46.92,
+          "open_time": "2:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 4.32
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 46.8,
+          "close_price": 46.92,
+          "open_time": "2:00 PM",
+          "close_time": "3:51 PM",
+          "pnl": 12.0
+        }
+      ]
+    },
+    "SBUX": {
+      "symbol": "SBUX",
+      "fill_count": 28,
+      "bought_qty": 1245,
+      "sold_qty": 1245,
+      "bought_dollars": 131531.08,
+      "sold_dollars": 130457.36,
+      "fees_total": 18.65,
+      "venues": [
+        "BATS",
+        "BEX",
+        "EDGEA",
+        "IBKRATS",
+        "IEX",
+        "MEMX",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:37 AM",
+      "latest_time": "3:51 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -1073.72,
+      "realized_pnl_after_fees": -1092.37,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": "venue_spread_7_venues",
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 82,
+          "open_price": 105.69,
+          "close_price": 104.86,
+          "open_time": "9:37 AM",
+          "close_time": "12:51 PM",
+          "pnl": -68.06
+        },
+        {
+          "direction": "LONG",
+          "qty": 14,
+          "open_price": 105.69,
+          "close_price": 104.86,
+          "open_time": "9:37 AM",
+          "close_time": "12:51 PM",
+          "pnl": -11.62
+        },
+        {
+          "direction": "LONG",
+          "qty": 79,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -74.26
+        },
+        {
+          "direction": "LONG",
+          "qty": 21,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -19.74
+        },
+        {
+          "direction": "LONG",
+          "qty": 23,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -21.62
+        },
+        {
+          "direction": "LONG",
+          "qty": 56,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -52.64
+        },
+        {
+          "direction": "LONG",
+          "qty": 26,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -24.44
+        },
+        {
+          "direction": "LONG",
+          "qty": 18,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -16.92
+        },
+        {
+          "direction": "LONG",
+          "qty": 25,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -23.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 50,
+          "open_price": 105.69,
+          "close_price": 104.75,
+          "open_time": "9:37 AM",
+          "close_time": "12:55 PM",
+          "pnl": -47.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 27,
+          "open_price": 105.29,
+          "close_price": 104.75,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -14.58
+        },
+        {
+          "direction": "LONG",
+          "qty": 6,
+          "open_price": 105.29,
+          "close_price": 104.75,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -3.24
+        },
+        {
+          "direction": "LONG",
+          "qty": 20,
+          "open_price": 105.29,
+          "close_price": 104.75,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -10.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 74,
+          "open_price": 105.38,
+          "close_price": 104.75,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -46.62
+        },
+        {
+          "direction": "LONG",
+          "qty": 26,
+          "open_price": 105.38,
+          "close_price": 104.76,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -16.12
+        },
+        {
+          "direction": "LONG",
+          "qty": 99,
+          "open_price": 105.38,
+          "close_price": 104.76,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -61.38
+        },
+        {
+          "direction": "LONG",
+          "qty": 31,
+          "open_price": 105.38,
+          "close_price": 104.78,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -18.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 69,
+          "open_price": 105.38,
+          "close_price": 104.78,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -41.4
+        },
+        {
+          "direction": "LONG",
+          "qty": 42,
+          "open_price": 105.38,
+          "close_price": 104.78,
+          "open_time": "9:42 AM",
+          "close_time": "12:55 PM",
+          "pnl": -25.2
+        },
+        {
+          "direction": "LONG",
+          "qty": 4,
+          "open_price": 106.03,
+          "close_price": 104.78,
+          "open_time": "10:33 AM",
+          "close_time": "12:55 PM",
+          "pnl": -5.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 92,
+          "open_price": 106.03,
+          "close_price": 104.78,
+          "open_time": "10:33 AM",
+          "close_time": "12:55 PM",
+          "pnl": -115.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 91,
+          "open_price": 105.98,
+          "close_price": 104.84,
+          "open_time": "10:34 AM",
+          "close_time": "3:51 PM",
+          "pnl": -103.74
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 105.98,
+          "close_price": 104.84,
+          "open_time": "10:34 AM",
+          "close_time": "3:51 PM",
+          "pnl": -10.26
+        },
+        {
+          "direction": "LONG",
+          "qty": 82,
+          "open_price": 105.98,
+          "close_price": 104.81,
+          "open_time": "10:34 AM",
+          "close_time": "3:51 PM",
+          "pnl": -95.94
+        },
+        {
+          "direction": "LONG",
+          "qty": 91,
+          "open_price": 105.97,
+          "close_price": 104.81,
+          "open_time": "10:35 AM",
+          "close_time": "3:51 PM",
+          "pnl": -105.56
+        },
+        {
+          "direction": "LONG",
+          "qty": 88,
+          "open_price": 105.27,
+          "close_price": 104.81,
+          "open_time": "2:12 PM",
+          "close_time": "3:51 PM",
+          "pnl": -40.48
+        }
+      ]
+    },
+    "GM": {
+      "symbol": "GM",
+      "fill_count": 7,
+      "bought_qty": 397,
+      "sold_qty": 397,
+      "bought_dollars": 30056.87,
+      "sold_dollars": 29949.68,
+      "fees_total": 4.68,
+      "venues": [
+        "ARCA",
+        "DRCTEDGE",
+        "IEX",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "12:56 PM",
+      "latest_time": "3:51 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -107.19,
+      "realized_pnl_after_fees": -111.87,
+      "has_inversion": true,
+      "verdict": "MULTI_LEG_SHORT",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "SHORT",
+          "qty": 100,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -27.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 93,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -25.11
+        },
+        {
+          "direction": "SHORT",
+          "qty": 7,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -1.89
+        },
+        {
+          "direction": "SHORT",
+          "qty": 97,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -26.19
+        },
+        {
+          "direction": "SHORT",
+          "qty": 3,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -0.81
+        },
+        {
+          "direction": "SHORT",
+          "qty": 97,
+          "open_price": 75.44,
+          "close_price": 75.71,
+          "open_time": "12:56 PM",
+          "close_time": "3:51 PM",
+          "pnl": -26.19
+        }
+      ]
+    },
+    "V": {
+      "symbol": "V",
+      "fill_count": 46,
+      "bought_qty": 1447,
+      "sold_qty": 1447,
+      "bought_dollars": 473665.31,
+      "sold_dollars": 472689.85,
+      "fees_total": 24.85,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "BYX",
+        "DRCTEDGE",
+        "IBKRATS",
+        "IEX",
+        "MEMX",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:33 AM",
+      "latest_time": "3:51 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -975.46,
+      "realized_pnl_after_fees": -1000.31,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_MIXED",
+      "fragmentation_warning": "high_fragmentation_46_fills",
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 69,
+          "open_price": 327.5,
+          "close_price": 326.79,
+          "open_time": "9:33 AM",
+          "close_time": "9:35 AM",
+          "pnl": -48.99
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 327.5,
+          "close_price": 326.79,
+          "open_time": "9:33 AM",
+          "close_time": "9:35 AM",
+          "pnl": -71.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 27,
+          "open_price": 327.5,
+          "close_price": 326.79,
+          "open_time": "9:33 AM",
+          "close_time": "9:35 AM",
+          "pnl": -19.17
+        },
+        {
+          "direction": "LONG",
+          "qty": 60,
+          "open_price": 327.5,
+          "close_price": 326.79,
+          "open_time": "9:33 AM",
+          "close_time": "9:35 AM",
+          "pnl": -42.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 61,
+          "open_price": 327.71,
+          "close_price": 326.66,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -64.05
+        },
+        {
+          "direction": "LONG",
+          "qty": 4,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -5.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -11.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 37,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -46.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 25,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -31.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 5,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -6.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -50.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 35,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -43.75
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 327.71,
+          "close_price": 326.46,
+          "open_time": "9:34 AM",
+          "close_time": "9:35 AM",
+          "pnl": -50.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 21,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -14.49
+        },
+        {
+          "direction": "LONG",
+          "qty": 19,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -13.11
+        },
+        {
+          "direction": "LONG",
+          "qty": 21,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -14.49
+        },
+        {
+          "direction": "LONG",
+          "qty": 30,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -20.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 29,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -20.01
+        },
+        {
+          "direction": "LONG",
+          "qty": 21,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -14.49
+        },
+        {
+          "direction": "LONG",
+          "qty": 105,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -72.45
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 327.15,
+          "close_price": 326.46,
+          "open_time": "9:35 AM",
+          "close_time": "9:35 AM",
+          "pnl": -6.9
+        },
+        {
+          "direction": "SHORT",
+          "qty": 26,
+          "open_price": 326.96,
+          "close_price": 327.32,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -9.36
+        },
+        {
+          "direction": "SHORT",
+          "qty": 3,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -0.48
+        },
+        {
+          "direction": "SHORT",
+          "qty": 43,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -6.88
+        },
+        {
+          "direction": "SHORT",
+          "qty": 19,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -3.04
+        },
+        {
+          "direction": "SHORT",
+          "qty": 21,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -3.36
+        },
+        {
+          "direction": "SHORT",
+          "qty": 24,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -3.84
+        },
+        {
+          "direction": "SHORT",
+          "qty": 29,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -4.64
+        },
+        {
+          "direction": "SHORT",
+          "qty": 51,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -8.16
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 326.96,
+          "close_price": 327.12,
+          "open_time": "9:36 AM",
+          "close_time": "9:36 AM",
+          "pnl": -6.4
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 326.62,
+          "close_price": 326.69,
+          "open_time": "9:37 AM",
+          "close_time": "9:37 AM",
+          "pnl": -2.8
+        },
+        {
+          "direction": "SHORT",
+          "qty": 44,
+          "open_price": 326.62,
+          "close_price": 326.69,
+          "open_time": "9:37 AM",
+          "close_time": "9:37 AM",
+          "pnl": -3.08
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 326.62,
+          "close_price": 326.69,
+          "open_time": "9:37 AM",
+          "close_time": "9:37 AM",
+          "pnl": -2.8
+        },
+        {
+          "direction": "SHORT",
+          "qty": 74,
+          "open_price": 326.62,
+          "close_price": 326.69,
+          "open_time": "9:37 AM",
+          "close_time": "9:37 AM",
+          "pnl": -5.18
+        },
+        {
+          "direction": "SHORT",
+          "qty": 56,
+          "open_price": 326.62,
+          "close_price": 326.69,
+          "open_time": "9:37 AM",
+          "close_time": "9:37 AM",
+          "pnl": -3.92
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 328.13,
+          "close_price": 326.65,
+          "open_time": "10:50 AM",
+          "close_time": "3:51 PM",
+          "pnl": -13.32
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 328.13,
+          "close_price": 326.65,
+          "open_time": "10:50 AM",
+          "close_time": "3:51 PM",
+          "pnl": -59.2
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 328.13,
+          "close_price": 326.69,
+          "open_time": "10:50 AM",
+          "close_time": "3:51 PM",
+          "pnl": -57.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 328.13,
+          "close_price": 326.69,
+          "open_time": "10:50 AM",
+          "close_time": "3:51 PM",
+          "pnl": -57.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 328.13,
+          "close_price": 326.69,
+          "open_time": "10:50 AM",
+          "close_time": "3:51 PM",
+          "pnl": -57.6
+        }
+      ]
+    },
+    "PYPL": {
+      "symbol": "PYPL",
+      "fill_count": 7,
+      "bought_qty": 816,
+      "sold_qty": 816,
+      "bought_dollars": 41476.28,
+      "sold_dollars": 41110.08,
+      "fees_total": 9.17,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "IEX",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:46 AM",
+      "latest_time": "3:51 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -366.2,
+      "realized_pnl_after_fees": -375.37,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 50.82,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -44.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 33,
+          "open_price": 50.83,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -14.85
+        },
+        {
+          "direction": "LONG",
+          "qty": 134,
+          "open_price": 50.83,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -60.3
+        },
+        {
+          "direction": "LONG",
+          "qty": 33,
+          "open_price": 50.83,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -14.85
+        },
+        {
+          "direction": "LONG",
+          "qty": 514,
+          "open_price": 50.83,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -231.3
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 50.83,
+          "close_price": 50.38,
+          "open_time": "9:46 AM",
+          "close_time": "3:51 PM",
+          "pnl": -0.9
+        }
+      ]
+    },
+    "LITE": {
+      "symbol": "LITE",
+      "fill_count": 5,
+      "bought_qty": 124,
+      "sold_qty": 124,
+      "bought_dollars": 123014.82,
+      "sold_dollars": 122991.88,
+      "fees_total": 6.55,
+      "venues": [
+        "IBKRATS",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:31 AM",
+      "latest_time": "2:00 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -22.94,
+      "realized_pnl_after_fees": -29.49,
+      "has_inversion": true,
+      "verdict": "MULTI_LEG_MIXED",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 55,
+          "open_price": 990.0,
+          "close_price": 991.87,
+          "open_time": "9:31 AM",
+          "close_time": "9:31 AM",
+          "pnl": 102.85
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 990.0,
+          "close_price": 991.87,
+          "open_time": "9:31 AM",
+          "close_time": "9:31 AM",
+          "pnl": 13.09
+        },
+        {
+          "direction": "SHORT",
+          "qty": 62,
+          "open_price": 991.87,
+          "close_price": 994.11,
+          "open_time": "1:30 PM",
+          "close_time": "2:00 PM",
+          "pnl": -138.88
+        }
+      ]
+    },
+    "MO": {
+      "symbol": "MO",
+      "fill_count": 22,
+      "bought_qty": 1701,
+      "sold_qty": 1701,
+      "bought_dollars": 125471.35,
+      "sold_dollars": 124292.07,
+      "fees_total": 19.93,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "DRCTEDGE",
+        "IBKRATS",
+        "IEX",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:35 AM",
+      "latest_time": "12:55 PM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -1179.28,
+      "realized_pnl_after_fees": -1199.21,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": "venue_spread_7_venues",
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.75,
+          "close_price": 73.07,
+          "open_time": "9:35 AM",
+          "close_time": "12:55 PM",
+          "pnl": -68.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 121,
+          "open_price": 73.75,
+          "close_price": 73.07,
+          "open_time": "9:35 AM",
+          "close_time": "12:55 PM",
+          "pnl": -82.28
+        },
+        {
+          "direction": "LONG",
+          "qty": 50,
+          "open_price": 73.75,
+          "close_price": 73.07,
+          "open_time": "9:35 AM",
+          "close_time": "12:55 PM",
+          "pnl": -34.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 300,
+          "open_price": 73.75,
+          "close_price": 73.07,
+          "open_time": "9:35 AM",
+          "close_time": "12:55 PM",
+          "pnl": -204.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 5,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -3.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -4.9
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 35,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -24.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 20,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:41 AM",
+          "close_time": "12:55 PM",
+          "pnl": -14.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 80,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -56.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 95,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -66.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 125,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -87.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 51,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -35.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 12,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -8.4
+        },
+        {
+          "direction": "LONG",
+          "qty": 88,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -61.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 12,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -8.4
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 73.77,
+          "close_price": 73.07,
+          "open_time": "9:45 AM",
+          "close_time": "12:55 PM",
+          "pnl": -70.0
+        }
+      ]
+    },
+    "BKNG": {
+      "symbol": "BKNG",
+      "fill_count": 87,
+      "bought_qty": 740,
+      "sold_qty": 740,
+      "bought_dollars": 124978.86,
+      "sold_dollars": 122919.85,
+      "fees_total": 10.17,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "DRCTEDGE",
+        "IBKRATS",
+        "IEX",
+        "MEMX",
+        "NASDAQ",
+        "NYSE",
+        "PEARL"
+      ],
+      "earliest_time": "9:35 AM",
+      "latest_time": "11:48 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -2059.01,
+      "realized_pnl_after_fees": -2069.18,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": "high_fragmentation_87_fills",
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 169.38,
+          "close_price": 166.13,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -6.5
+        },
+        {
+          "direction": "LONG",
+          "qty": 28,
+          "open_price": 169.38,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -91.84
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 169.32,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -6.44
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.32,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -22.19
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 169.32,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -9.51
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.32,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -31.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.32,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -22.54
+        },
+        {
+          "direction": "LONG",
+          "qty": 4,
+          "open_price": 169.22,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -12.48
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 169.22,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -9.36
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.22,
+          "close_price": 166.1,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -31.2
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -30.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -9.21
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -21.49
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -31.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -31.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -31.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -3.1
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 169.21,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -27.81
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 169.21,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -3.06
+        },
+        {
+          "direction": "LONG",
+          "qty": 19,
+          "open_price": 169.21,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -58.14
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.21,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -30.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 169.21,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -3.09
+        },
+        {
+          "direction": "LONG",
+          "qty": 19,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -58.9
+        },
+        {
+          "direction": "LONG",
+          "qty": 12,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -36.84
+        },
+        {
+          "direction": "LONG",
+          "qty": 8,
+          "open_price": 169.21,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -24.48
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 169.21,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -6.18
+        },
+        {
+          "direction": "LONG",
+          "qty": 28,
+          "open_price": 169.22,
+          "close_price": 166.12,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -86.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -6.14
+        },
+        {
+          "direction": "LONG",
+          "qty": 8,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -24.56
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 169.22,
+          "close_price": 166.15,
+          "open_time": "9:35 AM",
+          "close_time": "11:48 AM",
+          "pnl": -6.14
+        },
+        {
+          "direction": "LONG",
+          "qty": 8,
+          "open_price": 169.02,
+          "close_price": 166.15,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -22.96
+        },
+        {
+          "direction": "LONG",
+          "qty": 4,
+          "open_price": 169.02,
+          "close_price": 166.15,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -11.48
+        },
+        {
+          "direction": "LONG",
+          "qty": 6,
+          "open_price": 169.02,
+          "close_price": 166.15,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -17.22
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.02,
+          "close_price": 166.15,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.02,
+          "close_price": 166.15,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.02,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.02,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.16
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.02,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.02,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -8.67
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.03,
+          "close_price": 166.1,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.51
+        },
+        {
+          "direction": "LONG",
+          "qty": 23,
+          "open_price": 169.03,
+          "close_price": 166.1,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -67.39
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.03,
+          "close_price": 166.1,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.51
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 169.03,
+          "close_price": 166.1,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -8.79
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.23
+        },
+        {
+          "direction": "LONG",
+          "qty": 5,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -14.45
+        },
+        {
+          "direction": "LONG",
+          "qty": 5,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -14.45
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.23
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 169.03,
+          "close_price": 166.14,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.9
+        },
+        {
+          "direction": "LONG",
+          "qty": 8,
+          "open_price": 169.03,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.52
+        },
+        {
+          "direction": "LONG",
+          "qty": 15,
+          "open_price": 169.03,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -44.1
+        },
+        {
+          "direction": "LONG",
+          "qty": 12,
+          "open_price": 168.9,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -33.72
+        },
+        {
+          "direction": "LONG",
+          "qty": 8,
+          "open_price": 168.9,
+          "close_price": 166.13,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -22.16
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 168.9,
+          "close_price": 166.13,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -19.39
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 168.9,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -8.43
+        },
+        {
+          "direction": "LONG",
+          "qty": 11,
+          "open_price": 169.03,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -32.34
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.89,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -28.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.89,
+          "close_price": 166.09,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 15,
+          "open_price": 168.89,
+          "close_price": 166.06,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -42.45
+        },
+        {
+          "direction": "LONG",
+          "qty": 4,
+          "open_price": 168.89,
+          "close_price": 166.1,
+          "open_time": "9:36 AM",
+          "close_time": "11:48 AM",
+          "pnl": -11.16
+        },
+        {
+          "direction": "LONG",
+          "qty": 6,
+          "open_price": 168.43,
+          "close_price": 166.1,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -13.98
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.4
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.43,
+          "close_price": 166.1,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.33
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 168.43,
+          "close_price": 166.1,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.97
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.34
+        },
+        {
+          "direction": "LONG",
+          "qty": 14,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -32.76
+        },
+        {
+          "direction": "LONG",
+          "qty": 3,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -7.02
+        },
+        {
+          "direction": "LONG",
+          "qty": 7,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -16.38
+        },
+        {
+          "direction": "LONG",
+          "qty": 14,
+          "open_price": 168.43,
+          "close_price": 166.13,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -32.2
+        },
+        {
+          "direction": "LONG",
+          "qty": 25,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -59.25
+        },
+        {
+          "direction": "LONG",
+          "qty": 40,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -94.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 19,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -45.03
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.39,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.3
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.7
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.43,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.37
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 168.43,
+          "close_price": 166.1,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.97
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.43,
+          "close_price": 166.1,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.33
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 168.43,
+          "close_price": 166.12,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -20.79
+        },
+        {
+          "direction": "LONG",
+          "qty": 1,
+          "open_price": 168.4,
+          "close_price": 166.12,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -2.28
+        },
+        {
+          "direction": "LONG",
+          "qty": 9,
+          "open_price": 168.4,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -21.06
+        },
+        {
+          "direction": "LONG",
+          "qty": 2,
+          "open_price": 168.4,
+          "close_price": 166.06,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -4.68
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.4,
+          "close_price": 166.11,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -22.9
+        },
+        {
+          "direction": "LONG",
+          "qty": 5,
+          "open_price": 168.4,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -11.55
+        },
+        {
+          "direction": "LONG",
+          "qty": 10,
+          "open_price": 168.43,
+          "close_price": 166.09,
+          "open_time": "9:37 AM",
+          "close_time": "11:48 AM",
+          "pnl": -23.4
+        }
+      ]
+    },
+    "APH": {
+      "symbol": "APH",
+      "fill_count": 10,
+      "bought_qty": 588,
+      "sold_qty": 588,
+      "bought_dollars": 84113.4,
+      "sold_dollars": 82560.32,
+      "fees_total": 7.71,
+      "venues": [
+        "IBKRATS",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:32 AM",
+      "latest_time": "11:21 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -1553.08,
+      "realized_pnl_after_fees": -1560.79,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 77,
+          "open_price": 143.05,
+          "close_price": 140.39,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -204.82
+        },
+        {
+          "direction": "LONG",
+          "qty": 11,
+          "open_price": 143.05,
+          "close_price": 140.39,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -29.26
+        },
+        {
+          "direction": "LONG",
+          "qty": 89,
+          "open_price": 143.05,
+          "close_price": 140.4,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -235.85
+        },
+        {
+          "direction": "LONG",
+          "qty": 11,
+          "open_price": 143.05,
+          "close_price": 140.4,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -29.15
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 143.05,
+          "close_price": 140.39,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -266.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 143.05,
+          "close_price": 140.39,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -266.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 143.05,
+          "close_price": 140.44,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -261.0
+        },
+        {
+          "direction": "LONG",
+          "qty": 100,
+          "open_price": 143.05,
+          "close_price": 140.44,
+          "open_time": "9:32 AM",
+          "close_time": "11:21 AM",
+          "pnl": -261.0
+        }
+      ]
+    },
+    "LHX": {
+      "symbol": "LHX",
+      "fill_count": 10,
+      "bought_qty": 309,
+      "sold_qty": 309,
+      "bought_dollars": 96349.29,
+      "sold_dollars": 96114.18,
+      "fees_total": 6.73,
+      "venues": [
+        "IBKRATS",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:34 AM",
+      "latest_time": "11:18 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -235.11,
+      "realized_pnl_after_fees": -241.84,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_SHORT",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "SHORT",
+          "qty": 50,
+          "open_price": 310.96,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -42.5
+        },
+        {
+          "direction": "SHORT",
+          "qty": 50,
+          "open_price": 310.96,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -42.5
+        },
+        {
+          "direction": "SHORT",
+          "qty": 14,
+          "open_price": 310.82,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -13.86
+        },
+        {
+          "direction": "SHORT",
+          "qty": 1,
+          "open_price": 310.82,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -0.99
+        },
+        {
+          "direction": "SHORT",
+          "qty": 34,
+          "open_price": 310.82,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -33.66
+        },
+        {
+          "direction": "SHORT",
+          "qty": 80,
+          "open_price": 310.96,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -68.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 310.96,
+          "close_price": 311.81,
+          "open_time": "9:34 AM",
+          "close_time": "9:34 AM",
+          "pnl": -34.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 311.82,
+          "close_price": 311.81,
+          "open_time": "11:18 AM",
+          "close_time": "11:18 AM",
+          "pnl": 0.4
+        }
+      ]
+    },
+    "CRCL": {
+      "symbol": "CRCL",
+      "fill_count": 4,
+      "bought_qty": 190,
+      "sold_qty": 190,
+      "bought_dollars": 21840.5,
+      "sold_dollars": 20968.4,
+      "fees_total": 2.47,
+      "venues": [
+        "ARCA",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:38 AM",
+      "latest_time": "10:44 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -872.1,
+      "realized_pnl_after_fees": -874.57,
+      "has_inversion": true,
+      "verdict": "MULTI_LEG_SHORT",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "SHORT",
+          "qty": 100,
+          "open_price": 110.36,
+          "close_price": 114.95,
+          "open_time": "9:38 AM",
+          "close_time": "10:44 AM",
+          "pnl": -459.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 9,
+          "open_price": 110.36,
+          "close_price": 114.95,
+          "open_time": "9:38 AM",
+          "close_time": "10:44 AM",
+          "pnl": -41.31
+        },
+        {
+          "direction": "SHORT",
+          "qty": 81,
+          "open_price": 110.36,
+          "close_price": 114.95,
+          "open_time": "9:38 AM",
+          "close_time": "10:44 AM",
+          "pnl": -371.79
+        }
+      ]
+    },
+    "STM": {
+      "symbol": "STM",
+      "fill_count": 7,
+      "bought_qty": 747,
+      "sold_qty": 747,
+      "bought_dollars": 41936.58,
+      "sold_dollars": 41241.87,
+      "fees_total": 8.47,
+      "venues": [
+        "ARCA",
+        "BATS",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:35 AM",
+      "latest_time": "10:29 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -694.71,
+      "realized_pnl_after_fees": -703.18,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_LONG",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "LONG",
+          "qty": 17,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -15.81
+        },
+        {
+          "direction": "LONG",
+          "qty": 133,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -123.69
+        },
+        {
+          "direction": "LONG",
+          "qty": 57,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -53.01
+        },
+        {
+          "direction": "LONG",
+          "qty": 346,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -321.78
+        },
+        {
+          "direction": "LONG",
+          "qty": 120,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -111.6
+        },
+        {
+          "direction": "LONG",
+          "qty": 74,
+          "open_price": 56.14,
+          "close_price": 55.21,
+          "open_time": "9:35 AM",
+          "close_time": "10:29 AM",
+          "pnl": -68.82
+        }
+      ]
+    },
+    "WDC": {
+      "symbol": "WDC",
+      "fill_count": 12,
+      "bought_qty": 120,
+      "sold_qty": 120,
+      "bought_dollars": 53617.4,
+      "sold_dollars": 53898.4,
+      "fees_total": 13.14,
+      "venues": [
+        "IBKRATS",
+        "NASDAQ"
+      ],
+      "earliest_time": "9:43 AM",
+      "latest_time": "10:29 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": 281.0,
+      "realized_pnl_after_fees": 267.86,
+      "has_inversion": true,
+      "verdict": "MULTI_LEG_MIXED",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "SHORT",
+          "qty": 20,
+          "open_price": 447.57,
+          "close_price": 452.79,
+          "open_time": "9:43 AM",
+          "close_time": "9:47 AM",
+          "pnl": -104.4
+        },
+        {
+          "direction": "SHORT",
+          "qty": 20,
+          "open_price": 447.57,
+          "close_price": 452.79,
+          "open_time": "9:44 AM",
+          "close_time": "9:47 AM",
+          "pnl": -104.4
+        },
+        {
+          "direction": "SHORT",
+          "qty": 20,
+          "open_price": 450.0,
+          "close_price": 452.79,
+          "open_time": "9:46 AM",
+          "close_time": "9:47 AM",
+          "pnl": -55.8
+        },
+        {
+          "direction": "LONG",
+          "qty": 20,
+          "open_price": 452.79,
+          "close_price": 450.91,
+          "open_time": "9:47 AM",
+          "close_time": "9:47 AM",
+          "pnl": -37.6
+        },
+        {
+          "direction": "SHORT",
+          "qty": 20,
+          "open_price": 449.22,
+          "close_price": 435.47,
+          "open_time": "9:51 AM",
+          "close_time": "10:23 AM",
+          "pnl": 275.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 20,
+          "open_price": 449.65,
+          "close_price": 434.24,
+          "open_time": "10:00 AM",
+          "close_time": "10:29 AM",
+          "pnl": 308.2
+        }
+      ]
+    },
+    "FDX": {
+      "symbol": "FDX",
+      "fill_count": 7,
+      "bought_qty": 220,
+      "sold_qty": 220,
+      "bought_dollars": 80956.7,
+      "sold_dollars": 80722.4,
+      "fees_total": 5.7,
+      "venues": [
+        "BATS",
+        "IBKRATS",
+        "NASDAQ",
+        "NYSE"
+      ],
+      "earliest_time": "9:41 AM",
+      "latest_time": "9:46 AM",
+      "eod_flatten": false,
+      "net_position": 0,
+      "open_residual_qty": 0,
+      "realized_pnl": -234.3,
+      "realized_pnl_after_fees": -240.0,
+      "has_inversion": false,
+      "verdict": "MULTI_LEG_SHORT",
+      "fragmentation_warning": null,
+      "closed_legs": [
+        {
+          "direction": "SHORT",
+          "qty": 30,
+          "open_price": 367.98,
+          "close_price": 368.89,
+          "open_time": "9:41 AM",
+          "close_time": "9:41 AM",
+          "pnl": -27.3
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 367.98,
+          "close_price": 368.89,
+          "open_time": "9:41 AM",
+          "close_time": "9:41 AM",
+          "pnl": -36.4
+        },
+        {
+          "direction": "SHORT",
+          "qty": 40,
+          "open_price": 367.98,
+          "close_price": 368.89,
+          "open_time": "9:41 AM",
+          "close_time": "9:41 AM",
+          "pnl": -36.4
+        },
+        {
+          "direction": "SHORT",
+          "qty": 100,
+          "open_price": 365.86,
+          "close_price": 367.08,
+          "open_time": "9:46 AM",
+          "close_time": "9:46 AM",
+          "pnl": -122.0
+        },
+        {
+          "direction": "SHORT",
+          "qty": 10,
+          "open_price": 365.86,
+          "close_price": 367.08,
+          "open_time": "9:46 AM",
+          "close_time": "9:46 AM",
+          "pnl": -12.2
+        }
+      ]
+    }
+  }
+}
