@@ -697,7 +697,20 @@ class BotTrade:
     mae_price: float = 0.0    # Worst adverse price since fill
     mae_pct: float = 0.0      # MAE as % from entry (always negative)
     mae_r: float = 0.0        # MAE in R-multiples (always negative)
-    
+
+    # v19.31.13 — Trade origin classification.
+    # "paper" — bot fired against IB paper account (DUN…/paperesw…)
+    # "live"  — bot fired against IB live account (esw…/U… without DU prefix)
+    # "shadow"— never set on bot_trades (shadow lives in shadow_decisions
+    #           with `was_executed=False`); reserved here for forward-compat
+    #           if we ever materialize a paper-only test fill row.
+    # "unknown"— pusher offline at fill time / account guard unconfigured.
+    # Stamped at execution time from `account_guard.classify_account_id`
+    # so historical truth is preserved even when the operator flips
+    # IB_ACCOUNT_ACTIVE between paper and live.
+    trade_type: str = "unknown"
+    account_id_at_fill: Optional[str] = None
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         d = asdict(self)
@@ -720,6 +733,9 @@ class BotTrade:
         d['mae_r'] = self.mae_r
         d['total_commissions'] = self.total_commissions
         d['net_pnl'] = self.net_pnl
+        # v19.31.13 — trade-type taxonomy fields
+        d['trade_type'] = self.trade_type
+        d['account_id_at_fill'] = self.account_id_at_fill
         return d
 
 

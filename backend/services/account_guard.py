@@ -181,3 +181,75 @@ def summarize_for_ui(
         "reason": reason,
         "ib_connected": ib_connected,
     }
+
+
+
+# ── v19.31.13 — public helpers for trade_type stamping ──────────────
+
+
+def classify_account_id(account_id: Optional[str]) -> str:
+    """Map an IB account id string to its mode label.
+
+    Detection rules (in priority order):
+      1. Exact-match against IB_ACCOUNT_PAPER aliases → "paper".
+      2. Exact-match against IB_ACCOUNT_LIVE aliases  → "live".
+      3. Falls back to ID-prefix heuristics:
+         - `DU*` (paper account ID prefix per IB convention) → "paper".
+         - `paper*` (login alias) → "paper".
+         - Anything else with at least 4 chars → "live" (conservative
+           default: IB live account IDs typically start with `U`).
+      4. Empty / None → "unknown".
+
+    Used at order-execution time to stamp `trade_type` onto bot_trades
+    so historical rows preserve their original mode even after the
+    operator switches IB_ACCOUNT_ACTIVE.
+    """
+    if not account_id:
+        return "unknown"
+    norm = account_id.strip().lower()
+    if not norm:
+        return "unknown"
+
+    exp = load_account_expectation()
+    if norm in exp.paper_aliases:
+        return "paper"
+    if norm in exp.live_aliases:
+        return "live"
+
+    # Heuristic fallback for unconfigured installs.
+    if norm.startswith("du") or norm.startswith("paper"):
+        return "paper"
+    if len(norm) >= 4:
+        return "live"
+    return "unknown"
+
+
+def get_account_mode_snapshot(
+    current_account_id: Optional[str],
+    ib_connected: Optional[bool] = None,
+) -> dict:
+    """Compact summary for `/api/system/account-mode`. Distinct from
+    `summarize_for_ui` (which is geared at the existing safety chip) —
+    this one focuses on "what trade_type should I stamp right now?"
+    plus the operator-friendly badge fields.
+    """
+    classified = classify_account_id(current_account_id)
+    exp = load_account_expectation()
+    ok, reason = check_account_match(current_account_id, exp, ib_connected=ib_connected)
+    # The trade_type the bot SHOULD stamp on a fresh fill right now.
+    # Prefer the IB-pusher-detected mode when present (it's the truth);
+    # fall back to env-configured active_mode when pusher is offline.
+    effective_mode = (
+        classified if classified in ("paper", "live")
+        else exp.active_mode
+    )
+    return {
+        "active_mode": exp.active_mode,        # what env says we should be
+        "detected_mode": classified,            # what IB actually reports
+        "effective_mode": effective_mode,       # what we'll stamp on fills
+        "current_account_id": current_account_id,
+        "expected_aliases": list(exp.expected_aliases),
+        "match": ok,
+        "reason": reason,
+        "ib_connected": ib_connected,
+    }

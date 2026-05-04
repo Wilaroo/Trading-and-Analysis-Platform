@@ -388,6 +388,43 @@ class TradeExecution:
 
                 print(f"   💰 Entry commission: ${entry_commission:.2f} ({trade.shares} shares @ ${trade.commission_per_share}/share)")
 
+                # v19.31.13 — stamp trade_type from the IB account that
+                # actually filled this order. We grab the current account
+                # ID from the pusher snapshot at fill time and classify
+                # via account_guard. Stamping AT FILL preserves historical
+                # truth: if the operator flips IB_ACCOUNT_ACTIVE between
+                # paper and live tomorrow, today's rows still know they
+                # were paper.
+                try:
+                    from routers.ib import _pushed_ib_data, is_pusher_connected
+                    from services.account_guard import classify_account_id
+                    current_acct = None
+                    if is_pusher_connected():
+                        # Account id is per-position in the snapshot;
+                        # any non-empty value tells us who filled.
+                        for _ip in (_pushed_ib_data.get("positions") or []):
+                            _a = (_ip.get("account") or "").strip()
+                            if _a:
+                                current_acct = _a
+                                break
+                        # Fallback: top-level account_summary if pusher
+                        # publishes it.
+                        if not current_acct:
+                            current_acct = (
+                                (_pushed_ib_data.get("account_summary") or {}).get("account")
+                                or _pushed_ib_data.get("account")
+                            )
+                    if current_acct:
+                        trade.account_id_at_fill = current_acct
+                        trade.trade_type = classify_account_id(current_acct)
+                    else:
+                        # Pusher offline at fill → fall back to env.
+                        from services.account_guard import load_account_expectation
+                        trade.trade_type = load_account_expectation().active_mode
+                except Exception as e:
+                    logger.debug(f"trade_type classification failed (non-fatal): {e}")
+                    trade.trade_type = "unknown"
+
                 # Record actual entry (Phase 1 Learning)
                 if hasattr(bot, '_learning_loop') and bot._learning_loop:
                     try:

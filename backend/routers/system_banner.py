@@ -333,3 +333,58 @@ async def get_system_banner() -> Dict[str, Any]:
         "subsystem": None,
         "as_of": snapshot.get("as_of"),
     }
+
+
+
+# ── v19.31.13 — Account mode endpoint ────────────────────────────────
+
+
+@router.get("/account-mode")
+async def get_account_mode() -> Dict[str, Any]:
+    """v19.31.13 — Compact account-mode summary for the V5 HUD top-strip
+    badge ("PAPER · DUN615665" / "LIVE · U7654321").
+
+    The badge tells the operator at a glance which IB account they're
+    pointing at, in big enough type to never confuse paper for live
+    when switching between accounts.
+
+    Pulls live data:
+      - `current_account_id`: from the IB pusher snapshot (truth source).
+      - `effective_mode`: what trade_type freshly-filled bot_trades will
+        get stamped with right now.
+      - `match` / `reason`: account-guard verdict (does the live account
+        ID match the env-configured aliases?).
+    """
+    try:
+        from services.account_guard import get_account_mode_snapshot
+        from routers.ib import _pushed_ib_data, is_pusher_connected
+    except Exception as e:
+        logger.debug(f"account-mode: import failed: {e}")
+        return {
+            "active_mode": "unknown",
+            "detected_mode": "unknown",
+            "effective_mode": "unknown",
+            "current_account_id": None,
+            "ib_connected": False,
+            "match": False,
+            "reason": "imports_failed",
+        }
+
+    # Find current account ID from the pusher snapshot.
+    acct = None
+    try:
+        if is_pusher_connected():
+            for _ip in (_pushed_ib_data.get("positions") or []):
+                _a = (_ip.get("account") or "").strip()
+                if _a:
+                    acct = _a
+                    break
+            if not acct:
+                acct = (
+                    (_pushed_ib_data.get("account_summary") or {}).get("account")
+                    or _pushed_ib_data.get("account")
+                )
+    except Exception as e:
+        logger.debug(f"account-mode: pusher read failed: {e}")
+
+    return get_account_mode_snapshot(acct, ib_connected=is_pusher_connected())

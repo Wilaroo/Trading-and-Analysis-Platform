@@ -602,38 +602,24 @@ async def get_trade_forensics(days: int = Query(1, ge=1, le=7)):
     }
 
 
-@router.post("/recalc-realized-pnl/{symbol}")
-async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
-    """v19.31.12 — Retroactive backfill: claim IB realizedPNL for `symbol`
-    onto the bot's closed_today rows when `bot.realized_pnl == 0`.
-
-    Drives the "↻ Recalc realized_pnl" remediation button on the Trade
-    Forensics row. Splits the IB realized total proportionally across
-    closed bot_trades (by share count) so multiple stacked legacy trades
-    for the same symbol all get a fair share. Only touches rows where
-    `realized_pnl` is currently 0 — never overwrites existing values.
-
-    Returns:
-      {
-        success, symbol, ib_realized_pnl, claimed,
-        rows_updated: [{trade_id, claimed_pnl}],
-        rows_skipped: [{trade_id, reason}]
-      }
+async def _recalc_realized_pnl_for_symbol(
+    db, symbol: str, days: int = 7,
+) -> Dict[str, Any]:
+    """v19.31.13 — Internal helper extracted from /recalc-realized-pnl
+    so the new auto-recalc background task can reuse the exact same
+    apportion-by-shares logic.
     """
-    if _db is None:
-        raise HTTPException(status_code=503, detail="db not initialised")
-
     symbol_u = (symbol or "").upper()
     if not symbol_u:
-        raise HTTPException(status_code=400, detail="symbol required")
+        return {"success": False, "error": "symbol required"}
 
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     cutoff_iso = (_dt.now(_tz.utc) - _td(days=days)).isoformat()
 
-    # 1. Pull IB realizedPNL for the symbol from the latest snapshot.
+    # 1. Pull IB realizedPNL.
     ib_realized = 0.0
     try:
-        snap = _db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0})
+        snap = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0})
         if snap:
             for p in snap.get("positions", []) or []:
                 if (p.get("symbol") or "").upper() == symbol_u:
@@ -642,25 +628,20 @@ async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
                     )
                     break
     except Exception as e:
-        logger.warning(f"recalc: ib snapshot read failed: {e}")
+        logger.warning(f"recalc helper: ib snapshot read failed: {e}")
 
     if abs(ib_realized) < 0.005:
         return {
-            "success": True,
-            "symbol": symbol_u,
-            "ib_realized_pnl": 0.0,
-            "claimed": 0.0,
-            "rows_updated": [],
-            "rows_skipped": [],
+            "success": True, "symbol": symbol_u,
+            "ib_realized_pnl": 0.0, "claimed": 0.0,
+            "rows_updated": [], "rows_skipped": [],
             "note": "IB shows no realized PnL for this symbol — nothing to claim.",
         }
 
-    # 2. Pull closed bot_trades in window with realized_pnl == 0.
     try:
-        rows = list(_db["bot_trades"].find(
+        rows = list(db["bot_trades"].find(
             {
-                "symbol": symbol_u,
-                "status": "closed",
+                "symbol": symbol_u, "status": "closed",
                 "$or": [
                     {"closed_at": {"$gte": cutoff_iso}},
                     {"closed_at": None, "executed_at": {"$gte": cutoff_iso}},
@@ -669,30 +650,24 @@ async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
             {"_id": 0},
         ))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"bot_trades read failed: {e}")
+        return {"success": False, "error": f"bot_trades read failed: {e}"}
 
     candidates = [r for r in rows if not (r.get("realized_pnl") or 0)]
-
     if not candidates:
         return {
-            "success": True,
-            "symbol": symbol_u,
-            "ib_realized_pnl": round(ib_realized, 2),
-            "claimed": 0.0,
-            "rows_updated": [],
-            "rows_skipped": [
+            "success": True, "symbol": symbol_u,
+            "ib_realized_pnl": round(ib_realized, 2), "claimed": 0.0,
+            "rows_updated": [], "rows_skipped": [
                 {"trade_id": str(r.get("id") or r.get("trade_id")),
                  "reason": "already has realized_pnl"} for r in rows
             ],
             "note": "All closed rows already have realized_pnl populated.",
         }
 
-    # 3. Apportion ib_realized across candidates by share count.
     total_shares = sum(int(r.get("shares") or 0) for r in candidates) or 1
     rows_updated: List[Dict[str, Any]] = []
     rows_skipped: List[Dict[str, Any]] = []
     total_claimed = 0.0
-
     for r in candidates:
         tid = str(r.get("id") or r.get("trade_id") or "")
         if not tid:
@@ -704,9 +679,10 @@ async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
             rows_skipped.append({"trade_id": tid, "reason": "apportioned to zero"})
             continue
         try:
-            res = _db["bot_trades"].update_one(
+            res = db["bot_trades"].update_one(
                 {"id": tid, "status": "closed", "$or": [
-                    {"realized_pnl": 0}, {"realized_pnl": None}, {"realized_pnl": {"$exists": False}},
+                    {"realized_pnl": 0}, {"realized_pnl": None},
+                    {"realized_pnl": {"$exists": False}},
                 ]},
                 {"$set": {
                     "realized_pnl": claimed_pnl,
@@ -718,15 +694,25 @@ async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
                 rows_updated.append({"trade_id": tid, "claimed_pnl": claimed_pnl})
                 total_claimed += claimed_pnl
             else:
-                rows_skipped.append({"trade_id": tid, "reason": "row no longer matched (race / already updated)"})
+                rows_skipped.append({"trade_id": tid, "reason": "row no longer matched"})
         except Exception as e:
             rows_skipped.append({"trade_id": tid, "reason": f"write failed: {e}"})
 
     return {
-        "success": True,
-        "symbol": symbol_u,
+        "success": True, "symbol": symbol_u,
         "ib_realized_pnl": round(ib_realized, 2),
         "claimed": round(total_claimed, 2),
-        "rows_updated": rows_updated,
-        "rows_skipped": rows_skipped,
+        "rows_updated": rows_updated, "rows_skipped": rows_skipped,
     }
+
+
+@router.post("/recalc-realized-pnl/{symbol}")
+async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
+    """v19.31.12 — Retroactive backfill (now a thin wrapper around
+    `_recalc_realized_pnl_for_symbol` so the auto-recalc background
+    task in TradingBotService.start() can reuse the same logic)."""
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    if not (symbol or "").strip():
+        raise HTTPException(status_code=400, detail="symbol required")
+    return await _recalc_realized_pnl_for_symbol(_db, symbol, days=days)
