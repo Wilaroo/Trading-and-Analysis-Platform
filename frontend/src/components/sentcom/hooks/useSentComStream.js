@@ -17,7 +17,11 @@ export const useSentComStream = (pollInterval = 120000) => {  // HTTP backup onl
 
   const fetchStream = useCallback(async () => {
     try {
-      const data = await safeGet('/api/sentcom/stream?limit=20');
+      // 2026-05-04 — bumped from limit=20 → 200 so operator can scroll
+      // back through scanner events / EVAL gates / fills during RTH.
+      // The 20-cap was a relic of the early build when the stream was
+      // chat-only; now it's the operator's primary forensics surface.
+      const data = await safeGet('/api/sentcom/stream?limit=200');
       if (!data) return;
       
       if (data?.success && data.messages) {
@@ -34,11 +38,21 @@ export const useSentComStream = (pollInterval = 120000) => {  // HTTP backup onl
         const hasNewChat = chatIds !== lastFetchRef.current.ids || 
                           chatMessages.length !== lastFetchRef.current.chatCount;
         
-        if (hasNewChat || messages.length === 0) {
-          lastFetchRef.current = { ids: chatIds, chatCount: chatMessages.length };
-          // Keep status messages stable - only take the 2 most recent
-          const stableStatus = statusMessages.slice(0, 2);
-          const newMessages = [...stableStatus, ...chatMessages];
+        // 2026-05-04 — also re-render when status volume changes so new
+        // scanner / eval / fill events flow in without waiting for a
+        // chat message to refresh.
+        const statusCountChanged = statusMessages.length !== (lastFetchRef.current.statusCount ?? 0);
+        if (hasNewChat || statusCountChanged || messages.length === 0) {
+          lastFetchRef.current = {
+            ids: chatIds,
+            chatCount: chatMessages.length,
+            statusCount: statusMessages.length,
+          };
+          // 2026-05-04 — was `.slice(0, 2)` which artificially capped the
+          // Unified Stream to 2 status events even when the backend
+          // returned hundreds. Remove the cap so the operator can scroll
+          // back through the full RTH event log.
+          const newMessages = [...statusMessages, ...chatMessages];
           setMessages(newMessages);
           setCached('sentcomStream', newMessages, 30000); // 30 second TTL
         }
@@ -73,7 +87,11 @@ export const useSentComStream = (pollInterval = 120000) => {  // HTTP backup onl
     if (streamMessages.length > 0) {
       setMessages(prev => {
         const chatMsgs = prev.filter(p => p.type === 'chat' || p.action_type === 'chat_response' || p.action_type === 'user_message');
-        const merged = [...streamMessages.slice(0, 2), ...chatMsgs];
+        // 2026-05-04 — was `.slice(0, 2)` which clipped every WS update
+        // to 2 most-recent stream events, masking the live SCAN/EVAL/
+        // FILL flow during RTH. Use the full WS payload (already capped
+        // by backend broadcaster).
+        const merged = [...streamMessages, ...chatMsgs];
         return merged;
       });
       setLoading(false);

@@ -257,7 +257,13 @@ async def get_system_banner() -> Dict[str, Any]:
     # (this is the EXPECTED state for a DGX backend that talks to IB
     # only via the pusher, so we don't want to alarm on it).
     ib = subsystems.get("ib_gateway", {})
-    if ib.get("status") == "yellow" and pusher_red:
+    # 2026-05-04 — `pusher_red` was removed from this scope during the
+    # v19.30.12 refactor that introduced the 4-quadrant push×RPC matrix
+    # but the IB-yellow branch was left referencing it, causing every
+    # /banner call to 500 with NameError. Re-derive from the same fields
+    # the early section already computed.
+    pusher_red_now = pusher_status == "red"
+    if ib.get("status") == "yellow" and pusher_red_now:
         # Pusher is also red — pusher_rpc handler above has already
         # fired, no need to fire again here.
         pass

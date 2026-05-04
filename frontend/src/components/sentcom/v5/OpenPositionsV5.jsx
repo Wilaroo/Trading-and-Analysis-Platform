@@ -144,7 +144,7 @@ const Sparkline = ({ points, color }) => {
 };
 
 
-const PositionRow = ({ position, onClick, expanded, onToggle }) => {
+const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, memberCount }) => {
   const dir = (position.direction || position.side || '').toLowerCase();
   const isShort = dir === 'short';
   const pnlUsd = position.unrealized_pnl ?? position.pnl ?? 0;
@@ -194,6 +194,27 @@ const PositionRow = ({ position, onClick, expanded, onToggle }) => {
             {position.symbol}
           </span>
           <span className={`v5-chip ${chipClass}`}>{tier}</span>
+          {/* 2026-05-04 — ORPHAN/PARTIAL/STALE badge moved inline to the
+              left cluster so it stops overlapping the right-aligned PnL.
+              Multi-trade count rendered next to it. */}
+          {memberCount > 1 && (
+            <span
+              data-testid={`group-multi-badge-${position.symbol}`}
+              className="px-1 py-0 text-[9px] uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700 rounded"
+              title={`${memberCount} bot trades aggregated`}
+            >
+              {memberCount}×
+            </span>
+          )}
+          {sourceBadge && (
+            <span
+              data-testid={`group-source-badge-${position.symbol}`}
+              className={`px-1 py-0 text-[9px] uppercase tracking-wider border rounded ${sourceBadge.color}`}
+              title={sourceBadge.title}
+            >
+              {sourceBadge.label}
+            </span>
+          )}
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
           {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
@@ -608,50 +629,36 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
         )}
         {groups.map(g => {
           const isExpanded = expandedKey === g._group_key;
-          const sourceBadge = SOURCE_BADGE[g.source];
+          const sourceBadgeRaw = SOURCE_BADGE[g.source];
           const memberCount = g._members.length;
+          // 2026-05-04 — sourceBadge now inlined into PositionRow's left
+          // cluster (was an absolute overlay on the right that obscured
+          // live PnL). Build the title/tooltip here so PositionRow stays
+          // dumb about source semantics.
+          const sourceBadge = sourceBadgeRaw
+            ? {
+                ...sourceBadgeRaw,
+                title:
+                  g.source === 'partial'
+                    ? `Bot tracks ${(g._members.find(m => m.source === 'bot')?.shares) ?? 0}sh, IB has more — ${g._unclaimed_shares}sh untracked`
+                    : g.source === 'stale_bot'
+                    ? 'Bot tracks shares IB does not show — phantom shares, will auto-sweep'
+                    : 'IB position with no bot tracking — click Reconcile to claim',
+              }
+            : null;
           return (
             <div
               key={g._group_key}
               data-testid={`v5-open-group-${g.symbol}-${g.direction}`}
             >
-              <div className="relative">
-                <PositionRow
-                  position={g}
-                  expanded={isExpanded}
-                  onToggle={() => handleToggle(g._group_key)}
-                  onClick={() => onSelectPosition?.(g)}
-                />
-                {/* Multi-trade indicator + source badge overlay */}
-                {(memberCount > 1 || sourceBadge) && (
-                  <div className="absolute right-3 top-2 flex items-center gap-1 pointer-events-none">
-                    {memberCount > 1 && (
-                      <span
-                        data-testid={`group-multi-badge-${g.symbol}`}
-                        className="px-1 py-0 text-[9px] uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700 rounded"
-                        title={`${memberCount} bot trades aggregated`}
-                      >
-                        {memberCount}×
-                      </span>
-                    )}
-                    {sourceBadge && (
-                      <span
-                        data-testid={`group-source-badge-${g.symbol}`}
-                        className={`px-1 py-0 text-[9px] uppercase tracking-wider border rounded ${sourceBadge.color}`}
-                        title={
-                          g.source === 'partial'
-                            ? `Bot tracks ${(g._members.find(m => m.source === 'bot')?.shares) ?? 0}sh, IB has more — ${g._unclaimed_shares}sh untracked`
-                            : g.source === 'stale_bot'
-                            ? 'Bot tracks shares IB does not show — phantom shares, will auto-sweep'
-                            : 'IB position with no bot tracking — click Reconcile to claim'
-                        }
-                      >
-                        {sourceBadge.label}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
+              <PositionRow
+                position={g}
+                expanded={isExpanded}
+                onToggle={() => handleToggle(g._group_key)}
+                onClick={() => onSelectPosition?.(g)}
+                sourceBadge={sourceBadge}
+                memberCount={memberCount}
+              />
               {isExpanded && memberCount > 1 && (
                 <div
                   data-testid={`group-members-${g.symbol}`}

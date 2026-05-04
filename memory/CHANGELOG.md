@@ -2,6 +2,37 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (sixty-sixth commit, v19.31.0) — Live-RTH HUD paper-cuts: stream cap + ORPHAN badge overlap + banner NameError
+
+**Three operator-flagged issues from the +5 min into RTH on 2026-05-04 dashboard screenshot.** All UI-side; backend was healthy.
+
+### Fix 1 — Unified Stream artificially capped to 2 status events
+
+`useSentComStream.js` had `.slice(0, 2)` on BOTH the HTTP fetch path (line 40) and the WebSocket update path (line 76). The cap was a relic from when the stream was chat-only — once SCAN/EVAL/ORDER/FILL events were added, the cap silently hid 99% of them. Operator saw 2 events at +5 min into RTH while the backend was generating dozens.
+
+**Fix**: Removed `.slice(0, 2)` on both paths. Bumped `/api/sentcom/stream?limit=` from 20 → 200 so backend serves enough scrollback for the morning. Also re-render on `statusCount` change (was only re-rendering on chat-id change), so live SCAN/EVAL flow appears without waiting for a chat message.
+
+### Fix 2 — ORPHAN/PARTIAL/STALE badge overlapping live PnL
+
+`OpenPositionsV5.jsx` rendered the source badge as `absolute right-3 top-2` overlay on top of the position row. The PnL number (`+$X · +YR`) was already right-aligned in the same row — badge sat directly on top of the PnL, obscuring it. Operator hit it the moment 8 of 9 positions came up as ORPHAN (post morning-reset).
+
+**Fix**: Moved the badge inline into the LEFT cluster, right after the tier chip (e.g. `[chev] LITE [DAY 2 short] [ORPHAN] ······· +$155 · +1.2R`). Multi-trade `2×` count moved alongside it. Removed the absolute overlay div entirely. PnL is now always visible.
+
+### Fix 3 — `/api/system/banner` 500 with `NameError: pusher_red`
+
+The v19.30.12 refactor that introduced the 4-quadrant push×RPC severity matrix removed the local `pusher_red` variable but left a dangling reference in the IB-yellow branch (line 260). Every `/banner` call returned 500 — meaning the giant red SystemBanner the operator built specifically so pusher outages can't be missed never rendered.
+
+**Fix**: Re-derive `pusher_red_now = (pusher_status == "red")` in scope before the IB-yellow branch. 3 new pytests in `test_system_banner_pusher_red_fix_v19_31.py` (1 source-level pin via AST walk + 2 live-call tests covering ib-yellow and ib-yellow+pusher-red scenarios). All 3 passing.
+
+### Operator note: about the 8 ORPHAN tags
+
+Operator asked "why do we need to reconcile 8 of these — they were all opened by the bot?". Diagnosis: the morning reset script (`memory/MORNING_2026-05-02_PLAY_A.md`) wipes `bot_trades` + `_open_trades` to clear yesterday's phantoms, but doesn't touch IB. Legitimate swing / Day-2 carryover positions become "orphans" from the bot's perspective until reconciled. The classifier is doing the right thing — it's not lying, it's saying "I don't have a contract for these shares".
+
+**Future work** (P1 candidate, not in this commit):
+- Make `_open_trades` + `bot_trades` durable across the morning reset (skip wiping rows where IB still shows matching shares), OR
+- Auto-reconcile at boot when IB has shares and Mongo has zero matching open `bot_trades` for the symbol+direction.
+
+
 ## 2026-05-04 (sixty-fifth commit, v19.30.13) — False-alarm cleanup pass: ADV schema clobber, ib_gateway yellow, ai-training timeouts
 
 **Three operator-flagged false alarms / bugs surfaced during the 2026-05-04 pre-market session.** All three made the dashboard say one thing while the underlying data said another, sending the operator on wild goose chases.

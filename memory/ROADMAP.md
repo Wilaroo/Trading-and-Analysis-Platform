@@ -3,6 +3,41 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.0)
+
+### 🎯 Just shipped 2026-05-04 v19.31.0 — see CHANGELOG (sixty-sixth commit)
+**Live-RTH HUD paper-cuts: 3 fixes after operator screenshot at +5 min into RTH.**
+
+- ✅ Unified Stream: removed `.slice(0, 2)` cap on both HTTP fetch + WS update paths in `useSentComStream.js`. Bumped fetch limit 20 → 200. Stream is now scrollable through the full morning.
+- ✅ ORPHAN/PARTIAL/STALE badge moved from absolute right-edge overlay to inline left cluster in `OpenPositionsV5.jsx` — no longer obscures live PnL.
+- ✅ `/api/system/banner` `NameError: pusher_red` fixed (re-derived from `pusher_status` in IB-yellow branch). 3 new regression pytests passing.
+
+### 🔴 P0 — Top of next session (carry-forward + new finds)
+- **Diagnose `MANAGE +0.0R` HUD aggregator bug** — operator's LITE was clearly +12R open profit but the HUD MANAGE counter showed +0.0R across 9 positions. Likely lives in pipeline_hud / OperationsHUDV5 where it sums R from `_open_trades` only and drops the orphans (or zeros instead of skipping).
+- **Verify scanner / unified-stream live during RTH** with the v19.31 cap removal — operator should now see SCAN/EVAL/SKIP events flowing in real time. If still empty post-deploy, the WS broadcaster (chat_server stream-publish path) is the next suspect.
+- **Diagnostics Data Quality Pack** — fix Pipeline Funnel `ai_passed`/`bot_fired` consistency + Module Scorecard `shadow_module_performance` per-vote breakdown (carry-over from v19.30.13 ROADMAP).
+- **Bot Thoughts content capture** — Trail Explorer empty `content` field for fired trades (carry-over).
+
+### 🟡 P1 (operator-facing improvements + new finds)
+- **Reset-survival for `bot_trades`** — make `MORNING_PLAY_A_RESET` skip wiping rows where IB still holds matching shares, OR add an auto-reconcile-at-boot path so legitimate swing carryovers don't show as ORPHAN every morning.
+- `.bat` health screen probes pusher actually (carry-over).
+- Pusher auto-restart on Windows (carry-over).
+- Shadow-vs-Real gap drilldown (71% shadow vs 32% real) (carry-over).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
+- Async-pymongo audit follow-up — 51 remaining sync-mongo-in-async sites (carry-over).
+
+### 🟢 P2 / P3
+- v19.32 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.33 Chart WebSockets (Tier 3 — kill remaining 5s polling latency)
+- IB Gateway auto-login resilience
+- Setup-landscape EOD self-grading tracker
+- Audit Pass 1: lint sweep + dead-code (370 ruff fixes)
+- Break up 4 monoliths (ib.py 6349, server.py 4643, enhanced_scanner.py 7090, training_pipeline.py 3869)
+- Safely retire Alpaca fallback (32 reference sites)
+
+---
+
 ## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.12 + Windows network fix)
 
 ### 🟢 Today fully resolved — all data channels healthy
