@@ -4,7 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.1)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.2)
+
+### 🎯 Just shipped 2026-05-04 v19.31.2 — see CHANGELOG (sixty-eighth commit)
+**Auto-reconcile-at-boot toggle — kills the morning RECONCILE-N click ritual.**
+
+- ✅ `AUTO_RECONCILE_AT_BOOT=true` env flag wired into `TradingBotService.start()`. Runs 20s after start (after emergency stops), claims every IB-only carryover via `reconcile_orphan_positions(all_orphans=True)`. Default OFF for safety.
+- ✅ Stream event `auto_reconcile_at_boot` emitted on success with first 8 symbols + overflow tag.
+- ✅ Wrapped in try/except so reconcile failure never crashes `start()`.
+- ✅ **17/17 pytests** including 6 truthy variants + 7 falsy variants + exception-safe test.
+- ✅ Combined with v19.31.1 reset-survival guard, operator literally never sees "RECONCILE 13" in the morning anymore.
 
 ### 🎯 Just shipped 2026-05-04 v19.31.1 — see CHANGELOG (sixty-seventh commit)
 **Three live-RTH bugs from operator screenshot at 9:36 AM ET RTH.**

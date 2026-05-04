@@ -2,6 +2,48 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (sixty-eighth commit, v19.31.2) — Auto-reconcile-at-boot toggle
+
+**Operator's "potential improvement" feedback from v19.31.1: kill the morning RECONCILE-N click ritual entirely.**
+
+When `AUTO_RECONCILE_AT_BOOT=true` is set in `backend/.env`, the bot fires a `reconcile_orphan_positions(all_orphans=True)` 20s after `start()` so the bot self-claims every IB-only carryover the moment the pusher publishes its position snapshot. After this + the v19.31.1 reset-survival guard ship together, the operator literally never sees "RECONCILE 13" in the morning anymore.
+
+### Implementation
+
+- New env-var-gated branch in `TradingBotService.start()` immediately after the existing `_startup_orphan_guard` (which places emergency stops at 15s). Auto-reconcile runs at 20s — so emergency stops land *first* (safety net), THEN the proper bot_trades + _open_trades materialization runs (manage-loop hookup).
+- Truthy values accepted: `1`, `true`, `yes`, `on` (case-insensitive, whitespace-tolerant). Anything else (including unset) → feature OFF.
+- Logs `[v19.31 AUTO-RECONCILE]` on every run with reconciled/skipped/error counts.
+- Emits a `kind: "info"` `auto_reconcile_at_boot` Unified Stream event when ≥1 position was claimed, listing the first 8 symbols + a `(+N more)` overflow tag.
+- Wrapped in a top-level `try/except` so a reconcile failure can never crash `start()` (fire-and-forget).
+
+### Why default OFF
+
+Operators who manually trade on certain days (e.g. earnings plays they want to manage by hand) don't want the bot stealing tracking on every position they open. Opt-in keeps the system honest.
+
+### Tests
+
+`test_auto_reconcile_at_boot_v19_31_2.py` — 17 tests:
+- Source-level pin (env var ref + `all_orphans=True` + truthy variants present).
+- OFF-by-default when env unset.
+- ON when env truthy.
+- 6 truthy variants (`1`, `true`, `TRUE`, `yes`, `on`, `  True  `) all enable.
+- 7 falsy variants (`""`, `0`, `false`, `FALSE`, `no`, `off`, `garbage`) all skip.
+- Exception inside reconcile logs warning and never crashes `start()`.
+
+**39/39 v19.31 pytests passing across 5 suites** (banner, phantom-sweep, reset-guard, pnl_r aggregator, auto-reconcile).
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull
+echo 'AUTO_RECONCILE_AT_BOOT=true' >> backend/.env
+./start_backend.sh
+# Watch backend.err.log for "[v19.31 AUTO-RECONCILE]" line within ~25s
+# Watch Unified Stream for "auto_reconcile_at_boot" info event
+```
+
+
+
 ## 2026-05-04 (sixty-seventh commit, v19.31.1) — External-close phantom sweep + reset survival guard + MANAGE +0.0R fix
 
 **Three live-RTH bugs surfaced from the operator's 2026-05-04 9:36 AM ET screenshot.** All three were exposed when LITE was in the dashboard as 62sh short with rich detail while the actual IB position was 0sh (OCA target hit, IB closed externally), and 13 carryover positions showed up as ORPHAN despite the operator believing they had no overnight book.

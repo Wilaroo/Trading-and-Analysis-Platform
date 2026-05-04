@@ -1912,6 +1912,86 @@ class TradingBotService:
                     logger.warning(f"Startup orphan-guard failed (non-fatal): {e}")
             asyncio.create_task(_startup_orphan_guard())
 
+            # 2026-05-04 v19.31.1 — Auto-reconcile-at-boot.
+            # Operator-facing toggle: when AUTO_RECONCILE_AT_BOOT=true is
+            # set in backend/.env, every legitimate IB-only carryover
+            # gets a `bot_trades` row + `_open_trades` entry materialized
+            # the moment the pusher streams the position snapshot. Means
+            # the operator literally never sees "RECONCILE 13" in the
+            # morning anymore — the bot self-claims its own positions
+            # the moment they're visible.
+            #
+            # Runs AFTER orphan-guard (20s vs 15s) on purpose:
+            #   1. Orphan-guard places emergency stops first (fast, safe
+            #      net for any positions IB has but bot doesn't track).
+            #   2. Auto-reconcile then materializes the proper bot_trades
+            #      rows so manage loop can trail/scale-out/EOD-close.
+            #
+            # Default OFF for safety. The operator who DOESN'T want this
+            # (e.g. days they manually trade and don't want the bot
+            # stealing tracking) just leaves the env var unset.
+            import os as _os
+            if _os.environ.get("AUTO_RECONCILE_AT_BOOT", "").strip().lower() in (
+                "1", "true", "yes", "on"
+            ):
+                async def _startup_auto_reconcile():
+                    try:
+                        # 20s — runs after orphan-guard's 15s emergency
+                        # stops are placed, and gives the pusher snapshot
+                        # extra time to arrive.
+                        await asyncio.sleep(20)
+                        result = await self.reconcile_orphan_positions(
+                            all_orphans=True,
+                        )
+                        n_recon = len(result.get("reconciled", []))
+                        n_skip = len(result.get("skipped", []))
+                        n_err = len(result.get("errors", []))
+                        if n_recon:
+                            logger.warning(
+                                f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile claimed "
+                                f"{n_recon} orphan position(s); skipped={n_skip} "
+                                f"errors={n_err}"
+                            )
+                            # Surface in the operator stream so it shows
+                            # up in Unified Stream alongside other boot
+                            # events.
+                            try:
+                                from services.sentcom_service import emit_stream_event
+                                claimed_syms = [
+                                    r.get("symbol") for r in result.get("reconciled", [])
+                                    if r.get("symbol")
+                                ]
+                                await emit_stream_event({
+                                    "kind": "info",
+                                    "event": "auto_reconcile_at_boot",
+                                    "text": (
+                                        f"🔁 Auto-reconcile claimed {n_recon} orphan "
+                                        f"position(s) at boot: "
+                                        f"{', '.join(claimed_syms[:8])}"
+                                        + (f" (+{len(claimed_syms)-8} more)"
+                                           if len(claimed_syms) > 8 else "")
+                                    ),
+                                    "metadata": {
+                                        "reconciled_count": n_recon,
+                                        "skipped_count": n_skip,
+                                        "errors_count": n_err,
+                                        "symbols": claimed_syms,
+                                    },
+                                })
+                            except Exception:
+                                pass
+                        else:
+                            logger.info(
+                                "🔁 [v19.31 AUTO-RECONCILE] Boot reconcile found "
+                                f"nothing to claim (skipped={n_skip} errors={n_err})"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile failed "
+                            f"(non-fatal): {e}"
+                        )
+                asyncio.create_task(_startup_auto_reconcile())
+
         # Persist state
         await self._save_state()
     
