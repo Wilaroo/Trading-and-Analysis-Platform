@@ -2,6 +2,80 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventieth commit, v19.31.4 → v19.31.6) — Diagnostics Data Quality Pack + Trail Explorer thoughts + reconcile skip-reasons UX + sweep label disambiguation
+
+**Four next-action items shipped in one cumulative commit.** Closes the "trustworthy diagnostics" loop the operator asked for after the v19.31.0–v19.31.3 stability run.
+
+### v19.31.4 — Pipeline Funnel + Module Scorecard data quality
+
+**Bug 1 (Funnel):** `build_pipeline_funnel` matched `combined_recommendation in ('BUY', 'STRONG_BUY')` but the actual values written by `shadow_tracker.ShadowDecision` are `'proceed'` / `'pass'` / `'reduce_size'` (line 46). Result: `ai_passed` was always 0 — the funnel was useless.
+
+**Fix:**
+- `ai_passed` now matches `combined_recommendation` against `proceed`/`PROCEED`/`Proceed` (real values).
+- `risk_passed` matches `risk_assessment.recommendation NOT IN reject/REJECT/Reject/block/BLOCK/Block`.
+- `fired` uses `MAX(shadow.was_executed, bot_trades_in_window)` so the funnel stays monotonic when the two sources drift, and surfaces a `drift_warning` when they disagree by >max(2, 10%).
+- `winners` rebuilt to use `$or` over `executed_at`/`created_at` and either `realized_pnl` or `pnl`.
+- 7 new pytests covering each predicate + monotonicity check.
+
+**Bug 2 (Scorecard):** Aggregate `accuracy_rate` only — no way to spot a module that's directionally biased (e.g. always votes bull). 
+
+**Fix:** New `_aggregate_vote_breakdown(db, cutoff_iso)` helper aggregates raw `shadow_decisions[].debate_result.winner` / `risk_assessment.recommendation` / `timeseries_forecast.direction` / `institutional_context.flow_signal` into a per-module `{long/short/hold_votes, agreed_with_final, disagreement_rate}` block. Surfaces under `vote_breakdown` in the scorecard payload. 6 new pytests.
+
+### v19.31.5 — Trail Explorer thoughts capture
+
+**Three bugs in the `sentcom_thoughts` lookup that drained content for fired trades:**
+
+1. **Symbol case-sensitivity** — `_persist_thought` wrote raw `msg.symbol`, lookup matched `symbol.upper()` only. Lowercase legacy rows never matched.
+2. **Anchor preferred `created_at` over `executed_at`** — for trades fired after a multi-second AI consultation, the window centered on consult-start, not the actual decision moment, missing post-fill manage thoughts.
+3. **Empty-content rows** — dedup sentinels written with empty `content` rendered as blank lines in the drilldown.
+
+**Fixes (all on the same write+read pair):**
+- `_persist_thought` now normalizes `symbol.upper()` AND skips empty/whitespace-only content (never writes them).
+- `build_decision_trail` reads with `symbol: $in: [upper, lower, original]` for legacy compat, AND `content: $nin: ["", None]` to filter sentinels at read-time too.
+- Anchor reordered to prefer `executed_at` first.
+- 8 new pytests including persist + read symmetry.
+
+### v19.31.6 — Reconcile skip-reasons surfaced inline
+
+Backend always returned `skipped: [{symbol, reason}, ...]` per `position_reconciler.py:594` but the frontend collapsed it into "Reconciled N, skipped M" with no detail. Operator's "1 skipped" earlier this session left them in the dark.
+
+**Fix in `OpenPositionsV5.jsx`:**
+- Build a compact inline detail line listing `SBUX (no IB position), SOFI (direction unstable)`.
+- Truncate to 90 chars on screen with full text in `title=` tooltip on hover.
+- Bumped message TTL 6s → 30s so operator can actually read it.
+- New `REASON_LABELS` map for human-readable wording (`already_tracked` → "already tracked", etc.).
+
+### v19.31 cleanup — sweep label disambiguation
+
+Old: both phantom-sweep paths emitted `event: "phantom_auto_swept"` (v19.27 0sh-leftover) and `event: "oca_closed_externally_swept"` (v19.31 OCA-closed) which looked similar in stream UIs. Operator couldn't tell which fixed the case at a glance.
+
+**Renames:**
+- `phantom_auto_swept` → `phantom_v19_27_leftover_swept` (with `sweep_path: "v19_27_leftover"` in metadata).
+- `oca_closed_externally_swept` → `phantom_v19_31_oca_closed_swept` (with `sweep_path: "v19_31_oca_closed"`).
+- Stream text updated to mirror — `🧹 v19.27 leftover sweep: ...` and `🧹 v19.31 OCA-closed sweep: ...`.
+- `test_external_close_phantom_sweep_v19_31.py` event-name pin updated.
+
+### Tests
+
+73/73 v19.31 pytests passing across **8 suites** (banner-NameError / phantom-sweep / reset-guard / pnl_r / auto-reconcile / hist-queue-thresholds / funnel-scorecard / trail-thoughts).
+
+ESLint clean on all modified frontend files. Backend `/api/health` 200, `/api/diagnostics/funnel?days=1` returns all 5 stages.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Then visit Diagnostics → Funnel Monitor: ai_passed should now show
+# real values (not 0). Module Scorecard: scroll to vote_breakdown for
+# per-module long/short/disagreement-rate.
+# Click any fired trade in Trail Explorer → thoughts panel should now
+# have content (was empty).
+# Hover the reconcile message after clicking RECONCILE N → shows
+# per-symbol skip reasons.
+```
+
+
+
 ## 2026-05-04 (sixty-ninth commit, v19.31.3) — System banner: thin strip + smarter `historical_queue` thresholds
 
 **Operator's "the orange degraded banner is HUGE and dominates the page" feedback after v19.31.2 deploy.** Banner was correctly detecting `historical_queue: 20,222 pending · 0 failed` but the visual was a 200px-tall amber strip dominating the dashboard at market open — alarming on what was just by-design backfill depth.

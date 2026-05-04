@@ -226,20 +226,21 @@ class PositionManager:
                                     from services.sentcom_service import emit_stream_event
                                     await emit_stream_event({
                                         "kind": "warning",
-                                        "event": "oca_closed_externally_swept",
+                                        "event": "phantom_v19_31_oca_closed_swept",
                                         "symbol": _trade.symbol,
                                         "text": (
-                                            f"🧹 Externally-closed phantom swept: "
+                                            f"🧹 v19.31 OCA-closed sweep: "
                                             f"{_trade.symbol} {_dir.upper()} bot tracked "
                                             f"{int(_rem_external)}sh but IB has 0 in both "
-                                            f"directions. OCA bracket likely closed it; "
-                                            f"bot record closed — v19.31 fix."
+                                            f"directions. OCA bracket closed it externally; "
+                                            f"bot record closed."
                                         ),
                                         "metadata": {
                                             "trade_id": _trade.id,
                                             "bot_direction": _dir,
                                             "bot_remaining_shares": int(_rem_external),
-                                            "reason": "oca_closed_externally",
+                                            "reason": "oca_closed_externally_v19_31",
+                                            "sweep_path": "v19_31_oca_closed",
                                         },
                                     })
                                 except Exception:
@@ -299,16 +300,17 @@ class PositionManager:
                             from services.sentcom_service import emit_stream_event
                             await emit_stream_event({
                                 "kind": "info",
-                                "event": "phantom_auto_swept",
+                                "event": "phantom_v19_27_leftover_swept",
                                 "symbol": _trade.symbol,
                                 "text": (
-                                    f"🧹 Auto-swept phantom {_trade.symbol} "
-                                    f"{_dir.upper()} (0sh leftover) — IB "
-                                    f"shows no shares, marking closed."
+                                    f"🧹 v19.27 leftover sweep: {_trade.symbol} "
+                                    f"{_dir.upper()} (0sh leftover after scale-out) "
+                                    f"— IB shows no shares, marking closed."
                                 ),
                                 "metadata": {
                                     "trade_id": _trade.id,
                                     "reason": "phantom_auto_swept_v19_27",
+                                    "sweep_path": "v19_27_leftover",
                                 },
                             })
                         except Exception:

@@ -235,12 +235,25 @@ def build_decision_trail(db, identifier: str) -> Optional[Dict[str, Any]]:
         }
 
     # ── Sentcom thoughts in the decision's time window ──────────────
+    # 2026-05-04 v19.31.5 — three small fixes the operator's
+    # "empty content for fired trades" report exposed:
+    #   1. Case-insensitive symbol match. `_persist_thought` now
+    #      normalizes the persisted symbol to upper-case (see
+    #      sentcom_service.py); for legacy rows that slipped in with
+    #      lowercase, fall back to a $regex match.
+    #   2. Anchor prefers `executed_at` (when the trade fired) over
+    #      `created_at` (when the row was first inserted, often
+    #      during AI consultation seconds before the fill). Better
+    #      centers the window on the actual decision.
+    #   3. Skip rows with empty/None content — these are dedup
+    #      sentinels or metadata-only events that render as blank
+    #      lines in Trail Explorer.
     thoughts: List[Dict[str, Any]] = []
     try:
         symbol = (trade or shadow or {}).get("symbol")
         anchor_iso = (
-            (trade or {}).get("created_at")
-            or (trade or {}).get("executed_at")
+            (trade or {}).get("executed_at")
+            or (trade or {}).get("created_at")
             or (shadow or {}).get("trigger_time")
             or (shadow or {}).get("created_at")
         )
@@ -252,12 +265,20 @@ def build_decision_trail(db, identifier: str) -> Optional[Dict[str, Any]]:
                 anchor = anchor.replace(tzinfo=timezone.utc)
             window_start = (anchor - timedelta(minutes=30)).isoformat()
             window_end = (anchor + timedelta(minutes=120)).isoformat()
+            sym_upper = symbol.upper()
+            sym_lower = symbol.lower()
             thoughts = list(
                 db["sentcom_thoughts"]
                 .find(
                     {
-                        "symbol": symbol.upper(),
+                        "symbol": {"$in": [sym_upper, sym_lower, symbol]},
                         "timestamp": {"$gte": window_start, "$lte": window_end},
+                        # Filter out empty / None content. Thoughts that
+                        # exist only to drive a metadata-only stream
+                        # event (e.g. dedup sentinels) carry empty
+                        # `content` and shouldn't render as blank lines
+                        # in the Trail Explorer.
+                        "content": {"$nin": ["", None]},
                     },
                     {"_id": 0},
                     sort=[("timestamp", 1)],
@@ -442,6 +463,140 @@ def list_recent_decisions(
 
 
 # ── Module scorecard aggregation ─────────────────────────────────────────
+def _aggregate_vote_breakdown(db, cutoff_iso: str) -> Dict[str, Dict[str, Any]]:
+    """v19.31.4 — per-module vote tally from raw shadow_decisions.
+
+    Aggregates the four module sub-dicts (debate_result, risk_assessment,
+    institutional_context, timeseries_forecast) into a per-module
+    {long_votes, short_votes, hold_votes, total_votes, agreed_with_final,
+    disagreement_rate} block. Lets the operator see "this module is
+    bullish 80% of the time even though final consensus is bearish 70%
+    of the time" — useful for spotting modules that anchor too hard on
+    one direction.
+
+    Returns:
+      {
+        "debate_agents":     { long_votes, short_votes, hold_votes,
+                              agreed_with_final, total_votes,
+                              disagreement_rate },
+        "risk_manager":      { proceed_votes, reject_votes, reduce_votes,
+                              total_votes, agreed_with_final,
+                              disagreement_rate },
+        "institutional":     { positive_votes, negative_votes, neutral_votes,
+                              total_votes },
+        "timeseries":        { up_votes, down_votes, neutral_votes,
+                              total_votes, agreed_with_final,
+                              disagreement_rate },
+      }
+
+    `agreed_with_final` only counts decisions where the module's vote
+    direction matches the final `combined_recommendation` ('proceed'
+    means positive direction agreement, 'pass' negative, 'reduce_size'
+    is treated as positive-but-cautious). When a module is silent on a
+    given decision (no sub-dict populated), it doesn't count toward
+    that module's totals.
+    """
+    out: Dict[str, Dict[str, Any]] = {
+        "debate_agents":   {"long_votes": 0, "short_votes": 0, "hold_votes": 0,
+                            "total_votes": 0, "agreed_with_final": 0},
+        "risk_manager":    {"proceed_votes": 0, "reject_votes": 0,
+                            "reduce_votes": 0, "total_votes": 0,
+                            "agreed_with_final": 0},
+        "institutional":   {"positive_votes": 0, "negative_votes": 0,
+                            "neutral_votes": 0, "total_votes": 0},
+        "timeseries":      {"up_votes": 0, "down_votes": 0, "neutral_votes": 0,
+                            "total_votes": 0, "agreed_with_final": 0},
+    }
+    try:
+        cursor = db["shadow_decisions"].find(
+            {"trigger_time": {"$gte": cutoff_iso}},
+            {"_id": 0, "combined_recommendation": 1, "debate_result": 1,
+             "risk_assessment": 1, "institutional_context": 1,
+             "timeseries_forecast": 1},
+        )
+        for d in cursor:
+            final_rec = (d.get("combined_recommendation") or "").lower()
+            final_positive = final_rec in ("proceed", "reduce_size")
+
+            # Debate agents
+            debate = d.get("debate_result") or {}
+            winner = (debate.get("winner") or "").lower()
+            if winner:
+                out["debate_agents"]["total_votes"] += 1
+                if winner == "bull":
+                    out["debate_agents"]["long_votes"] += 1
+                    if final_positive:
+                        out["debate_agents"]["agreed_with_final"] += 1
+                elif winner == "bear":
+                    out["debate_agents"]["short_votes"] += 1
+                    if not final_positive:
+                        out["debate_agents"]["agreed_with_final"] += 1
+                else:  # tie / hold
+                    out["debate_agents"]["hold_votes"] += 1
+                    # hold doesn't agree-or-disagree with proceed/pass
+                    # — counts as neutral
+
+            # Risk manager
+            risk = d.get("risk_assessment") or {}
+            risk_rec = (risk.get("recommendation") or "").lower()
+            if risk_rec:
+                out["risk_manager"]["total_votes"] += 1
+                if risk_rec in ("proceed", "approve", "ok"):
+                    out["risk_manager"]["proceed_votes"] += 1
+                    if final_positive:
+                        out["risk_manager"]["agreed_with_final"] += 1
+                elif risk_rec in ("reject", "block", "no"):
+                    out["risk_manager"]["reject_votes"] += 1
+                    if not final_positive:
+                        out["risk_manager"]["agreed_with_final"] += 1
+                elif risk_rec in ("reduce", "reduce_size", "caution"):
+                    out["risk_manager"]["reduce_votes"] += 1
+                    if final_positive:
+                        out["risk_manager"]["agreed_with_final"] += 1
+
+            # Institutional flow — purely informational, no agree counter
+            inst = d.get("institutional_context") or {}
+            flow = (inst.get("flow_signal") or "").lower()
+            if flow:
+                out["institutional"]["total_votes"] += 1
+                if flow in ("bullish", "buying", "accumulating", "positive"):
+                    out["institutional"]["positive_votes"] += 1
+                elif flow in ("bearish", "selling", "distributing", "negative"):
+                    out["institutional"]["negative_votes"] += 1
+                else:
+                    out["institutional"]["neutral_votes"] += 1
+
+            # Timeseries forecast
+            ts = d.get("timeseries_forecast") or {}
+            direction = (ts.get("direction") or "").lower()
+            if direction:
+                out["timeseries"]["total_votes"] += 1
+                if direction in ("up", "bullish", "long"):
+                    out["timeseries"]["up_votes"] += 1
+                    if final_positive:
+                        out["timeseries"]["agreed_with_final"] += 1
+                elif direction in ("down", "bearish", "short"):
+                    out["timeseries"]["down_votes"] += 1
+                    if not final_positive:
+                        out["timeseries"]["agreed_with_final"] += 1
+                else:
+                    out["timeseries"]["neutral_votes"] += 1
+
+        # Compute disagreement_rate per module (where it makes sense).
+        for mod_key in ("debate_agents", "risk_manager", "timeseries"):
+            total = out[mod_key]["total_votes"]
+            agreed = out[mod_key]["agreed_with_final"]
+            out[mod_key]["disagreement_rate"] = (
+                round(100.0 * (1 - agreed / total), 1) if total > 0 else None
+            )
+        # Institutional doesn't have agree/disagree (it's a context
+        # signal, not a vote on direction), so no disagreement_rate.
+    except Exception as e:
+        logger.warning(f"_aggregate_vote_breakdown failed: {e}")
+        out["error"] = str(e)
+    return out
+
+
 def build_module_scorecard(db, days: int = 7) -> Dict[str, Any]:
     """Aggregate per-AI-module performance over the last `days`.
 
@@ -462,11 +617,19 @@ def build_module_scorecard(db, days: int = 7) -> Dict[str, Any]:
         "days": days,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "modules": [],
+        "vote_breakdown": {},  # v19.31.4 — per-module raw vote tally
     }
     if db is None:
         return out
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_iso = cutoff.isoformat()
+        # v19.31.4 — fresh per-module vote breakdown from raw shadow_decisions.
+        # The pre-aggregated `shadow_module_performance` collection only
+        # tracks accuracy_rate; this surfaces the directional bias
+        # operators can't get otherwise.
+        out["vote_breakdown"] = _aggregate_vote_breakdown(db, cutoff_iso)
+
         # The shadow_tracker already maintains per-module accuracy
         # rolling stats. Pull the freshest doc per module.
         agg = list(
@@ -531,12 +694,21 @@ def build_pipeline_funnel(db, days: int = 1) -> Dict[str, Any]:
 
     Pulled from existing collections — no new instrumentation needed:
       - emit count: shadow_decisions count (every alert logs a shadow)
-      - AI-passed: shadow.combined_recommendation in ('BUY', 'STRONG_BUY')
+      - AI-passed: shadow.combined_recommendation = 'proceed'
       - Risk-passed: shadow.risk_assessment.recommendation != 'REJECT'
-      - Fired: bot_trades created in window
+      - Fired: shadow.was_executed == True  (canonical "AI green-lit
+        AND bot actually placed an order"); we cross-check against
+        bot_trades to surface drift.
       - Winners: bot_trades with realized_pnl > 0
 
     Returns the counts + drop-reason breakdown per stage.
+
+    2026-05-04 v19.31.4 — fixed the smoking-gun bug where the funnel
+    matched on `combined_recommendation in ('BUY', 'STRONG_BUY')` but
+    the actual values are `'proceed'`/`'pass'`/`'reduce_size'` per
+    `shadow_tracker.ShadowDecision.combined_recommendation` (line 46).
+    Result: `ai_passed` was always 0, making the entire funnel useless.
+    Now match against the real values + `was_executed` for fired.
     """
     out: Dict[str, Any] = {
         "days": days,
@@ -554,28 +726,57 @@ def build_pipeline_funnel(db, days: int = 1) -> Dict[str, Any]:
         emitted = db["shadow_decisions"].count_documents({
             "trigger_time": {"$gte": cutoff_iso},
         })
-        # Stage 2 — AI passed (combined_recommendation = BUY/STRONG_BUY).
+        # Stage 2 — AI passed = the AI council combined to "proceed".
+        # `combined_recommendation` is always lowercase per shadow_tracker
+        # but defend against legacy uppercase rows just in case.
+        ai_pass_match = {"$in": ["proceed", "PROCEED", "Proceed"]}
         ai_passed = db["shadow_decisions"].count_documents({
             "trigger_time": {"$gte": cutoff_iso},
-            "combined_recommendation": {"$in": ["BUY", "STRONG_BUY", "buy", "strong_buy"]},
+            "combined_recommendation": ai_pass_match,
         })
-        # Stage 3 — risk-council passed.
+        # Stage 3 — risk-council didn't veto.
         risk_passed = db["shadow_decisions"].count_documents({
             "trigger_time": {"$gte": cutoff_iso},
-            "combined_recommendation": {"$in": ["BUY", "STRONG_BUY", "buy", "strong_buy"]},
-            "risk_assessment.recommendation": {"$nin": ["REJECT", "reject", "BLOCK"]},
+            "combined_recommendation": ai_pass_match,
+            "risk_assessment.recommendation": {
+                "$nin": ["REJECT", "reject", "Reject", "BLOCK", "block", "Block"],
+            },
         })
-        # Stage 4 — fired.
-        fired = db["bot_trades"].count_documents({
-            "created_at": {"$gte": cutoff_iso},
+        # Stage 4 — fired. Two ways to count this:
+        #   (a) shadow rows with was_executed=True  ← AI green-lit AND
+        #       bot actually placed an order
+        #   (b) bot_trades rows created in window  ← canonical fill
+        # In a healthy pipeline these match. When they diverge, it's
+        # almost always: bot_trades > shadow.was_executed → the bot
+        # bypassed the shadow logger (auto-execute on a high-priority
+        # alert that skipped consultation). Surface BOTH so the
+        # operator can spot drift.
+        fired_via_shadow = db["shadow_decisions"].count_documents({
+            "trigger_time": {"$gte": cutoff_iso},
+            "was_executed": True,
         })
+        fired_via_trades = db["bot_trades"].count_documents({
+            "$or": [
+                {"executed_at": {"$gte": cutoff_iso}},
+                {"created_at": {"$gte": cutoff_iso}},
+            ],
+        })
+        # Use the larger of the two as the "fired" count so the funnel
+        # is monotonic (fired >= risk_passed never fails) and the drift
+        # is exposed via metadata.
+        fired = max(fired_via_shadow, fired_via_trades)
         # Stage 5 — winners (closed positive).
         winners = db["bot_trades"].count_documents({
-            "created_at": {"$gte": cutoff_iso},
-            "status": "closed",
             "$or": [
-                {"realized_pnl": {"$gt": 0}},
-                {"pnl": {"$gt": 0}},
+                {"executed_at": {"$gte": cutoff_iso}},
+                {"created_at": {"$gte": cutoff_iso}},
+            ],
+            "status": "closed",
+            "$and": [
+                {"$or": [
+                    {"realized_pnl": {"$gt": 0}},
+                    {"pnl": {"$gt": 0}},
+                ]},
             ],
         })
 
@@ -583,7 +784,19 @@ def build_pipeline_funnel(db, days: int = 1) -> Dict[str, Any]:
             {"stage": "emitted",     "count": emitted,     "label": "Scanner alerts"},
             {"stage": "ai_passed",   "count": ai_passed,   "label": "AI passed"},
             {"stage": "risk_passed", "count": risk_passed, "label": "Risk passed"},
-            {"stage": "fired",       "count": fired,       "label": "Bot fired"},
+            {
+                "stage": "fired", "count": fired, "label": "Bot fired",
+                "fired_via_shadow": fired_via_shadow,
+                "fired_via_trades": fired_via_trades,
+                "drift_warning": (
+                    "shadow.was_executed and bot_trades disagree — bot may "
+                    "be firing without consulting the AI council"
+                    if abs(fired_via_shadow - fired_via_trades) > max(
+                        2, int(0.1 * max(fired_via_shadow, fired_via_trades))
+                    )
+                    else None
+                ),
+            },
             {"stage": "winners",     "count": winners,     "label": "Winners"},
         ]
         # Compute conversion percentage between consecutive stages so

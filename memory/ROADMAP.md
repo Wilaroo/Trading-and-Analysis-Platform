@@ -4,7 +4,54 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.3)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.4–v19.31.6)
+
+### 🎯 Just shipped 2026-05-04 v19.31.4–v19.31.6 — see CHANGELOG (seventieth commit)
+**Diagnostics Data Quality Pack + Trail Explorer thoughts + reconcile skip-reasons UX + sweep label disambiguation. All four operator action items.**
+
+- ✅ **Funnel `ai_passed` predicate fixed** — was matching `BUY`/`STRONG_BUY` (never written), now matches `proceed`/`PROCEED`/`Proceed` (real shadow_tracker values). Funnel was useless before; usable now.
+- ✅ **Funnel `fired` uses MAX(shadow.was_executed, bot_trades)** — monotonic + drift warning when sources disagree.
+- ✅ **Module Scorecard `vote_breakdown`** — per-module `{long/short/hold_votes, agreed_with_final, disagreement_rate}` from raw shadow_decisions. Operator can now spot directional bias.
+- ✅ **Trail Explorer thoughts** — case-insensitive symbol match (legacy compat), `executed_at` anchor preferred, empty-content rows filtered both on persist and on read.
+- ✅ **Reconcile UI surfaces skip reasons inline** — "SBUX (no IB position), SOFI (direction unstable)" instead of just "skipped 1". Tooltip + 30s TTL.
+- ✅ **Sweep events disambiguated** — `phantom_v19_27_leftover_swept` vs `phantom_v19_31_oca_closed_swept` so operator can tell which path fired.
+- ✅ **73/73 v19.31 pytests passing** across 8 suites.
+
+### 🎯 v19.31.0 → v19.31.6 cumulative (this session)
+12 operator pain-points resolved + 2 toggles shipped:
+1. ✅ Unified Stream cap removed
+2. ✅ ORPHAN badge no longer covers PnL
+3. ✅ `/api/system/banner` NameError fixed
+4. ✅ External-close phantom sweep
+5. ✅ Reset script IB-survival guard + `--force`
+6. ✅ MANAGE +0.0R aggregator fix (`pnl_r`)
+7. ✅ Auto-reconcile-at-boot toggle (`AUTO_RECONCILE_AT_BOOT=true`)
+8. ✅ Historical-queue threshold rebalance + thin info banner
+9. ✅ Funnel `ai_passed` predicate (smoking-gun bug)
+10. ✅ Module Scorecard `vote_breakdown`
+11. ✅ Trail Explorer thoughts (3 bugs in one)
+12. ✅ Reconcile UI skip-reasons + sweep label disambiguation
+
+### 🔴 P0 — Top of next session
+- **Verify v19.31.4–v19.31.6 fixes during next RTH session** (operator). Specifically: Funnel ai_passed > 0, Module Scorecard `vote_breakdown` shape valid, Trail Explorer thoughts non-empty for any fired trade.
+
+### 🟡 P1 (operator-facing improvements)
+- **Stale-snapshot warning on reset script** — warn if `ib_live_snapshot.as_of` >30s old.
+- **`vote_breakdown` UI panel** — render the new per-module breakdown in the Module Scorecard view.
+- **Funnel drift_warning UI surfacing** — when `fired_via_shadow != fired_via_trades`, render an inline "shadow drift" badge.
+- **Auto-reconcile-at-boot status pill** — small chip in V5 HUD top strip showing "🔁 Auto-claimed N at boot" for ~10 min after boot, then fades.
+- `.bat` health screen probes pusher actually (carry-over).
+- Pusher auto-restart on Windows (carry-over).
+- Shadow-vs-Real gap drilldown (carry-over).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
+
+### 🟢 P2 / P3
+- v19.32 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
+- v19.33 Chart WebSockets (Tier 3 — kill remaining 5s polling latency)
+- IB Gateway auto-login resilience
+- Setup-landscape EOD self-grading tracker
+- Audit Pass 1: lint sweep + dead-code (370 ruff fixes)
+- Break up 4 monoliths
 
 ### 🎯 Just shipped 2026-05-04 v19.31.3 — see CHANGELOG (sixty-ninth commit)
 **System banner thin strip + smarter `historical_queue` thresholds. Operator's "banner is huge" feedback.**

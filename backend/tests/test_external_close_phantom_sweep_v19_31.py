@@ -211,7 +211,7 @@ async def test_externally_closed_phantom_swept_when_ib_has_zero_both_directions(
     assert trade in fake_bot.persisted, "Trade should be persisted"
     # Stream event emitted
     assert any(
-        e.get("event") == "oca_closed_externally_swept" and e.get("symbol") == "LITE"
+        e.get("event") == "phantom_v19_31_oca_closed_swept" and e.get("symbol") == "LITE"
         for e in patch_emit_stream
     )
 

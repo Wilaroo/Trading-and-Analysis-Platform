@@ -2756,17 +2756,29 @@ def _ensure_thoughts_indexes():
 
 
 async def _persist_thought(msg: "SentComMessage") -> None:
-    """Append a thought to `sentcom_thoughts`. Best-effort, never raises."""
+    """Append a thought to `sentcom_thoughts`. Best-effort, never raises.
+
+    2026-05-04 v19.31.5 — normalize symbol to upper-case on write so
+    Trail Explorer's case-sensitive lookup hits. Also skip persisting
+    rows with empty content (these were causing blank lines in the
+    Trail Explorer drilldown).
+    """
+    # Skip writes for empty/None content — these are dedup sentinels
+    # or metadata-only events that have no operator-readable text.
+    if not msg.content or not str(msg.content).strip():
+        return
     try:
         _ensure_thoughts_indexes()
         db = _get_db()
+
+        sym_norm = (msg.symbol or "").upper() or None
 
         def _insert():
             db[THOUGHTS_COLLECTION].insert_one({
                 "id": msg.id,
                 "kind": msg.type,
                 "content": msg.content,
-                "symbol": msg.symbol,
+                "symbol": sym_norm,
                 "action_type": msg.action_type,
                 "confidence": msg.confidence,
                 "metadata": msg.metadata or {},

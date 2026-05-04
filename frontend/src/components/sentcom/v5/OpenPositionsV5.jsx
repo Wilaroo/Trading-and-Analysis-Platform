@@ -568,17 +568,42 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
         });
       } else {
         const nRec = (data.reconciled || []).length;
-        const nSkip = (data.skipped || []).length;
+        const skipped = data.skipped || [];
+        const nSkip = skipped.length;
+        // 2026-05-04 v19.31.6 — surface per-symbol skip reasons. The
+        // backend always returns `skipped: [{symbol, reason}, ...]`
+        // (see services/position_reconciler.py:594). Pre-fix we threw
+        // it away; operator could only see "skipped 1" with no clue
+        // why. Now: build a compact inline list + a full tooltip.
+        const REASON_LABELS = {
+          already_tracked: 'already tracked',
+          no_ib_position: 'no IB position',
+          invalid_avg_cost: 'invalid avg cost',
+          direction_unstable: 'direction unstable',
+          stop_already_breached: 'stop already breached',
+          closed_outside_bot: 'closed outside bot',
+          direction_changed: 'direction changed',
+        };
+        const formatSkip = (s) => {
+          const reason = REASON_LABELS[s.reason] || s.reason || 'unknown';
+          return `${s.symbol} (${reason})`;
+        };
+        const skipDetail = nSkip > 0
+          ? `Reconciled ${nRec}, skipped ${nSkip}: ${skipped.map(formatSkip).join(', ')}`
+          : `Reconciled ${nRec}`;
         setReconcileMsg({
           kind: 'ok',
-          text: `Reconciled ${nRec}${nSkip > 0 ? `, skipped ${nSkip}` : ''}`,
+          text: skipDetail.length > 90 ? `${skipDetail.slice(0, 87)}…` : skipDetail,
+          tooltip: skipDetail,
         });
       }
     } catch (err) {
       setReconcileMsg({ kind: 'error', text: String(err?.message || err) });
     } finally {
       setReconcileBusy(false);
-      setTimeout(() => setReconcileMsg(null), 6000);
+      // 2026-05-04 v19.31.6 — bumped 6s → 30s so operator can actually
+      // read the skip-reason breakdown (was disappearing too fast).
+      setTimeout(() => setReconcileMsg(null), 30000);
     }
   };
 
@@ -609,7 +634,8 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
           {reconcileMsg && (
             <span
               data-testid="open-positions-reconcile-msg"
-              className={`text-[11px] ${reconcileMsg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
+              className={`text-[11px] cursor-help ${reconcileMsg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
+              title={reconcileMsg.tooltip || reconcileMsg.text}
             >
               {reconcileMsg.text}
             </span>
