@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.trading_bot_service import TradingBotService
@@ -798,6 +798,167 @@ class PositionReconciler:
                     trade.entry_time = datetime.now(timezone.utc)
                     trade.executed_at = datetime.now(timezone.utc).isoformat()
                     trade.created_at = datetime.now(timezone.utc).isoformat()
+
+                    # ── v19.34.3 (2026-05-04) — Provenance + Smart Stop ──
+                    # Operator-discovered (VALE bug): the reconciler was
+                    # silently materializing IB orphans with default 2%
+                    # SL / 2.0 R:R — which didn't reflect the bot's real
+                    # rejection verdicts on those same setups. The bot
+                    # had been rejecting VALE all afternoon for R:R 1.19,
+                    # yet the reconciled row showed R:R 2.0 (synthetic).
+                    # Now:
+                    #   1. Stamp `entered_by="reconciled_external"` so the
+                    #      UI can chip "RECONCILED · Bot did not open".
+                    #   2. Query the last 5 rejection events from
+                    #      sentcom_thoughts to learn the bot's prior
+                    #      verdict on this symbol/setup.
+                    #   3. If a recent verdict has real entry/stop/target
+                    #      numbers, prefer THOSE over synthetic defaults
+                    #      (smart stop). Stamp `synthetic_source` so the
+                    #      UI shows which logic was used.
+                    #   4. If ≥2 of the last 3 verdicts were rejections,
+                    #      flag this row as `prior_verdict_conflict=True`
+                    #      so the UI can show a HIGH-priority warning.
+                    trade.entered_by = "reconciled_external"
+                    prior_verdicts: list = []
+                    last_rej_meta: Dict[str, Any] = {}
+                    rejection_count_last_3 = 0
+                    try:
+                        cursor = self.db["sentcom_thoughts"].find(
+                            {
+                                "symbol": sym,
+                                "kind": "rejection",
+                            },
+                            {"_id": 0},
+                            sort=[("timestamp", -1)],
+                            limit=5,
+                        )
+                        for thought in cursor:
+                            md = thought.get("metadata") or {}
+                            verdict = {
+                                "timestamp": thought.get("timestamp"),
+                                "setup_type": md.get("setup_type"),
+                                "direction": md.get("direction"),
+                                "reason_code": md.get("reason_code"),
+                                "rr_ratio": md.get("rr_ratio"),
+                                "min_required": md.get("min_required"),
+                                "entry_price": md.get("entry_price"),
+                                "stop_price": md.get("stop_price"),
+                                "primary_target": md.get("primary_target"),
+                                "text": thought.get("text"),
+                            }
+                            prior_verdicts.append(verdict)
+                            if len(prior_verdicts) <= 3:
+                                rejection_count_last_3 += 1
+                            # Latch the most recent verdict that has
+                            # real numbers we can use for smart stop.
+                            if not last_rej_meta and md.get("entry_price"):
+                                last_rej_meta = md
+                    except Exception as e:
+                        logger.debug(f"reconcile {sym}: prior-verdict lookup failed: {e}")
+
+                    # Smart synthetic SL/PT: use the bot's real numbers
+                    # when available, but only when they're directionally
+                    # consistent with the IB position (LONG bot stop must
+                    # be below avg_cost; SHORT bot stop must be above).
+                    use_smart_stop = False
+                    if last_rej_meta:
+                        _e = last_rej_meta.get("entry_price")
+                        _s = last_rej_meta.get("stop_price")
+                        _t = last_rej_meta.get("primary_target")
+                        if _e and _s and _t:
+                            try:
+                                _e, _s, _t = float(_e), float(_s), float(_t)
+                                if direction == TradeDirection.LONG:
+                                    if _s < avg_cost < _t:
+                                        stop_price = _s
+                                        target_1 = _t
+                                        use_smart_stop = True
+                                else:  # SHORT
+                                    if _t < avg_cost < _s:
+                                        stop_price = _s
+                                        target_1 = _t
+                                        use_smart_stop = True
+                                # Recompute risk-reward from the smart numbers.
+                                if use_smart_stop:
+                                    risk_per_share = abs(avg_cost - stop_price)
+                                    reward_per_share = abs(target_1 - avg_cost)
+                                    if risk_per_share > 0:
+                                        smart_rr = reward_per_share / risk_per_share
+                                    else:
+                                        smart_rr = default_rr
+                                else:
+                                    smart_rr = default_rr
+                            except Exception:
+                                smart_rr = default_rr
+                        else:
+                            smart_rr = default_rr
+                    else:
+                        smart_rr = default_rr
+
+                    trade.target_prices = [target_1]
+                    trade.stop_price = stop_price
+                    trade.risk_amount = abs(avg_cost - stop_price) * abs_qty
+                    trade.risk_reward_ratio = round(smart_rr, 2)
+
+                    trade.synthetic_source = (
+                        "last_verdict" if use_smart_stop else "default_pct"
+                    )
+                    trade.prior_verdicts = prior_verdicts
+                    trade.prior_verdict_conflict = (
+                        rejection_count_last_3 >= 2
+                    )
+                    # If ≥2 of the last 3 verdicts were rejections,
+                    # emit a HIGH-priority warning event so the operator
+                    # never silently inherits a setup the bot dismissed.
+                    if trade.prior_verdict_conflict:
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            recent_rr = next(
+                                (v.get("rr_ratio") for v in prior_verdicts
+                                 if v.get("rr_ratio") is not None),
+                                None,
+                            )
+                            recent_setup = next(
+                                (v.get("setup_type") for v in prior_verdicts
+                                 if v.get("setup_type")),
+                                None,
+                            )
+                            warn_text = (
+                                f"⚠ Reconciling {sym} {direction.value.upper()} "
+                                f"{abs_qty}sh @ ${avg_cost:.2f} — but my "
+                                f"last {rejection_count_last_3} of 3 verdicts on "
+                                f"{recent_setup or 'this setup'} were REJECT"
+                                + (f" (R:R {recent_rr})" if recent_rr is not None else "")
+                                + ". I did NOT open this position. Smart stop "
+                                + (f"@ ${stop_price:.2f} pulled from last verdict's "
+                                   f"computed numbers." if use_smart_stop
+                                   else f"@ ${stop_price:.2f} is synthetic ("
+                                        f"{default_stop_pct:.1f}% from avg). "
+                                        "Consider closing manually or overriding SL/PT.")
+                            )
+                            asyncio.create_task(emit_stream_event({
+                                "kind": "warning",
+                                "event": "reconcile_prior_verdict_conflict_v19_34_3",
+                                "symbol": sym,
+                                "text": warn_text,
+                                "severity": "high",
+                                "metadata": {
+                                    "trade_id": trade.id,
+                                    "rejection_count_last_3": rejection_count_last_3,
+                                    "synthetic_source": trade.synthetic_source,
+                                    "stop_price": stop_price,
+                                    "target_1": target_1,
+                                    "recent_rr": recent_rr,
+                                    "recent_setup": recent_setup,
+                                },
+                            }))
+                        except Exception as _emit_exc:
+                            logger.debug(
+                                f"reconcile {sym}: conflict-warning emit failed: {_emit_exc}"
+                            )
+                    # ── end v19.34.3 ──────────────────────────────────────
+
                     # v19.34.1 (2026-05-04) — stamp trade_type from the
                     # current pusher account so reconciled-orphan rows
                     # also chip PAPER/LIVE/UNKNOWN in the V5 UI. Orphans

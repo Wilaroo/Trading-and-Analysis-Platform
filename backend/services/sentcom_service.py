@@ -2259,6 +2259,17 @@ class SentComService:
                                 quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_state")
                                 or "unknown"
                             ),
+                            # v19.34.3 — provenance + reconcile-conflict
+                            # metadata so the UI can chip RECONCILED
+                            # rows distinctly and surface "prior verdict:
+                            # REJECT" inline when the bot's own logic
+                            # was actively rejecting this setup.
+                            "entered_by": trade.get("entered_by") or "bot_fired",
+                            "prior_verdict_conflict": bool(
+                                trade.get("prior_verdict_conflict")
+                            ),
+                            "prior_verdicts": trade.get("prior_verdicts") or [],
+                            "synthetic_source": trade.get("synthetic_source"),
                         })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
@@ -2498,6 +2509,23 @@ class SentComService:
                             quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_state")
                             or "unknown"
                         ),
+                        # v19.34.3 — provenance + conflict metadata for
+                        # IB-orphan / lazy-reconciled rows. When the
+                        # operator just sees "Reconciled from IB orphan"
+                        # in notes, they can't tell whether the bot
+                        # actively *agreed* with the setup or had been
+                        # rejecting it. These fields surface the truth.
+                        "entered_by": (
+                            (enrich_trade or {}).get("entered_by")
+                            or "reconciled_external"
+                        ),
+                        "prior_verdict_conflict": bool(
+                            (enrich_trade or {}).get("prior_verdict_conflict")
+                        ),
+                        "prior_verdicts": (
+                            (enrich_trade or {}).get("prior_verdicts") or []
+                        ),
+                        "synthetic_source": (enrich_trade or {}).get("synthetic_source"),
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")

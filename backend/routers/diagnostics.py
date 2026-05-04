@@ -925,3 +925,232 @@ async def get_shadow_decisions_csv(
     for r in rows:
         lines.append(",".join(_q(r.get(h)) for h in headers))
     return "\n".join(lines) + "\n"
+
+
+
+# ─── v19.34.3 (2026-05-04) — Forensic Orphan Origin ──────────────────
+
+
+@router.get("/orphan-origin/{symbol}")
+async def get_orphan_origin(
+    symbol: str,
+    days: int = Query(7, ge=1, le=90),
+):
+    """v19.34.3 — Forensic backfill report for a reconciled IB orphan.
+
+    Operator's "where did this position come from?" question. Walks
+    every available history source for a single symbol over the last
+    N days and assembles a single-page report:
+
+    * `bot_trades` — every row this symbol has had (open, closed, swept,
+      reconciled). Lets the operator spot a prior session's leftover.
+    * `bot_trades_reset_log` — morning resets that touched this symbol.
+    * `sentcom_thoughts` — last 50 events: rejections, evaluations,
+      reconcile events, sweep events, manual fills.
+    * `ib_live_snapshot.history` — when the position first appeared on
+      the IB pusher snapshot (when persisted; falls back to "current
+      only" when history isn't being saved).
+    * `shadow_decisions` — AI council verdicts on this symbol so the
+      operator can see what the bot WOULD HAVE DONE if asked.
+
+    Output is shaped for the V5 Diagnostics → Orphan Origin tab and
+    designed to answer "should I close this position manually?".
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+
+    sym_u = (symbol or "").strip().upper()
+    if not sym_u:
+        raise HTTPException(status_code=400, detail="symbol required")
+
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    now_utc = _dt.now(_tz.utc)
+    cutoff = (now_utc - _td(days=days)).isoformat()
+
+    out: Dict[str, Any] = {
+        "success": True,
+        "symbol": sym_u,
+        "days": days,
+        "from_iso": cutoff,
+        "to_iso": now_utc.isoformat(),
+    }
+
+    # 1) bot_trades history
+    try:
+        bt_rows = list(_db["bot_trades"].find(
+            {"symbol": sym_u, "executed_at": {"$gte": cutoff}},
+            {"_id": 0},
+            sort=[("executed_at", -1)],
+            limit=50,
+        ))
+    except Exception as e:
+        bt_rows = []
+        logger.debug(f"orphan-origin bot_trades lookup failed: {e}")
+    out["bot_trades"] = [
+        {
+            "id": r.get("id"),
+            "executed_at": r.get("executed_at"),
+            "closed_at": r.get("closed_at"),
+            "status": r.get("status"),
+            "direction": r.get("direction"),
+            "shares": r.get("shares"),
+            "remaining_shares": r.get("remaining_shares"),
+            "fill_price": r.get("fill_price") or r.get("entry_price"),
+            "stop_price": r.get("stop_price"),
+            "target_prices": r.get("target_prices") or [],
+            "realized_pnl": r.get("realized_pnl"),
+            "close_reason": r.get("close_reason"),
+            "setup_type": r.get("setup_type"),
+            "trade_type": r.get("trade_type"),
+            "entered_by": r.get("entered_by"),
+            "synthetic_source": r.get("synthetic_source"),
+            "prior_verdict_conflict": r.get("prior_verdict_conflict"),
+            "notes": r.get("notes"),
+        }
+        for r in bt_rows
+    ]
+    out["bot_trades_count"] = len(bt_rows)
+
+    # 2) bot_trades_reset_log — what reset events touched this symbol
+    try:
+        reset_rows = list(_db["bot_trades_reset_log"].find(
+            {"as_of": {"$gte": cutoff}},
+            {"_id": 0},
+            sort=[("as_of", -1)],
+            limit=10,
+        ))
+        # Filter to events that mention this symbol.
+        reset_touched = []
+        for r in reset_rows:
+            affected = r.get("affected") or []
+            survivors = r.get("survivors") or []
+            for source, items in (("affected", affected), ("survivors", survivors)):
+                for item in items:
+                    if isinstance(item, dict) and (item.get("symbol") or "").upper() == sym_u:
+                        reset_touched.append({
+                            "as_of": r.get("as_of"),
+                            "source": source,
+                            "trade_id": item.get("trade_id"),
+                            "direction": item.get("direction"),
+                            "shares": item.get("shares"),
+                            "force": r.get("force"),
+                            "ib_snapshot_age_s": r.get("ib_snapshot_age_s"),
+                        })
+                    elif isinstance(item, str) and item.upper() == sym_u:
+                        reset_touched.append({
+                            "as_of": r.get("as_of"),
+                            "source": source,
+                            "force": r.get("force"),
+                        })
+    except Exception as e:
+        reset_touched = []
+        logger.debug(f"orphan-origin reset-log lookup failed: {e}")
+    out["reset_log_touched"] = reset_touched
+
+    # 3) sentcom_thoughts — full event timeline (rejections, fires,
+    # reconciles, sweeps, evals, warnings)
+    try:
+        thoughts = list(_db["sentcom_thoughts"].find(
+            {"symbol": sym_u, "timestamp": {"$gte": cutoff}},
+            {"_id": 0},
+            sort=[("timestamp", -1)],
+            limit=80,
+        ))
+    except Exception as e:
+        thoughts = []
+        logger.debug(f"orphan-origin thoughts lookup failed: {e}")
+    out["thoughts"] = [
+        {
+            "timestamp": t.get("timestamp"),
+            "kind": t.get("kind"),
+            "event": t.get("event"),
+            "text": t.get("text"),
+            "severity": t.get("severity"),
+            "metadata": {
+                k: v for k, v in (t.get("metadata") or {}).items()
+                if k in (
+                    "setup_type", "direction", "reason_code",
+                    "rr_ratio", "min_required",
+                    "entry_price", "stop_price", "primary_target",
+                    "trade_id", "trade_type",
+                )
+            },
+        }
+        for t in thoughts
+    ]
+
+    # 4) shadow_decisions — what the AI council thought
+    try:
+        shadow_rows = list(_db["shadow_decisions"].find(
+            {"symbol": sym_u, "trigger_time": {"$gte": cutoff}},
+            {"_id": 0},
+            sort=[("trigger_time", -1)],
+            limit=20,
+        ))
+    except Exception as e:
+        shadow_rows = []
+        logger.debug(f"orphan-origin shadow lookup failed: {e}")
+    out["shadow_decisions"] = [
+        {
+            "trigger_time": s.get("trigger_time"),
+            "trigger_type": s.get("trigger_type"),
+            "combined_recommendation": s.get("combined_recommendation"),
+            "confidence_score": s.get("confidence_score"),
+            "was_executed": s.get("was_executed"),
+            "would_have_pnl": s.get("would_have_pnl"),
+            "would_have_r": s.get("would_have_r"),
+            "actual_outcome": s.get("actual_outcome"),
+        }
+        for s in shadow_rows
+    ]
+
+    # 5) Current IB position snapshot for context.
+    try:
+        from routers.ib import _pushed_ib_data
+        for p in (_pushed_ib_data.get("positions") or []):
+            if (p.get("symbol") or "").upper() == sym_u:
+                out["ib_current_position"] = {
+                    "symbol": sym_u,
+                    "qty": float(p.get("position", p.get("qty", 0)) or 0),
+                    "avg_cost": float(p.get("avgCost", p.get("avg_cost", 0)) or 0),
+                    "market_price": float(p.get("marketPrice", p.get("market_price", 0)) or 0),
+                }
+                break
+    except Exception:
+        pass
+
+    # 6) Verdict summary — count rejections vs evaluations vs fires
+    # over the window. Helps the operator answer "was the bot agreeing
+    # with this position?" at a glance.
+    rej_count = sum(
+        1 for t in thoughts if (t.get("kind") or "") == "rejection"
+    )
+    fire_count = sum(
+        1 for t in thoughts
+        if (t.get("event") or "").startswith("trade_executed")
+    )
+    eval_count = sum(
+        1 for t in thoughts
+        if (t.get("event") or "") == "evaluating_setup"
+    )
+    reconcile_count = sum(
+        1 for t in thoughts
+        if "reconcile" in (t.get("event") or "")
+    )
+    out["verdict_summary"] = {
+        "rejections": rej_count,
+        "evaluations": eval_count,
+        "fires": fire_count,
+        "reconciles": reconcile_count,
+        # Heuristic verdict:
+        #   "bot_disagreed"  — evaluations > 0 AND ≥80% were rejections
+        #   "bot_agreed"     — fires > 0
+        #   "no_signal"      — no evals, no fires (manual or carryover)
+        "verdict": (
+            "bot_disagreed" if eval_count > 0 and (rej_count / max(1, eval_count)) >= 0.8 and fire_count == 0
+            else "bot_agreed" if fire_count > 0
+            else "no_signal"
+        ),
+    }
+
+    return out

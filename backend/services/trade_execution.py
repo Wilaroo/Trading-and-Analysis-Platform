@@ -425,6 +425,13 @@ class TradeExecution:
                     logger.debug(f"trade_type classification failed (non-fatal): {e}")
                     trade.trade_type = "unknown"
 
+                # v19.34.3 (2026-05-04) — provenance stamp. The bot's
+                # own evaluation + execution path opened this trade
+                # via real setup math + R:R check. Distinct from
+                # `reconciled_external` which the position_reconciler
+                # uses when adopting an IB orphan.
+                trade.entered_by = "bot_fired"
+
                 # Record actual entry (Phase 1 Learning)
                 if hasattr(bot, '_learning_loop') and bot._learning_loop:
                     try:

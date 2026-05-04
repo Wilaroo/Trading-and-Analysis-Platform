@@ -711,6 +711,31 @@ class BotTrade:
     trade_type: str = "unknown"
     account_id_at_fill: Optional[str] = None
 
+    # v19.34.3 (2026-05-04) — Provenance + reconcile-conflict metadata.
+    # `entered_by`:
+    #   "bot_fired"         — bot's own evaluation + execution path opened it.
+    #   "reconciled_external"— position_reconciler adopted an IB orphan
+    #                         the bot didn't open. Operator MUST treat
+    #                         this as "manage carefully" — synthetic
+    #                         SL/PT may not match the bot's real verdict.
+    #   "manual"            — created via manual API call.
+    # Stamped at materialization time. Historical truth.
+    entered_by: str = "bot_fired"
+    # When `entered_by == "reconciled_external"`, this holds the bot's
+    # last 5 verdicts on this symbol pulled from `sentcom_thoughts` at
+    # reconcile time. Lets the UI show "prior verdict: REJECT (R:R 1.19)"
+    # so the operator never silently inherits a setup the bot rejected.
+    prior_verdicts: List[Dict[str, Any]] = field(default_factory=list)
+    # True when ≥2 of the last 3 verdicts were rejections — signals a
+    # high-confidence "this position contradicts my recent verdicts"
+    # situation. Triggers a HIGH-priority warning event at reconcile.
+    prior_verdict_conflict: bool = False
+    # Where the synthetic SL/PT came from:
+    #   "last_verdict" — pulled from a recent rejection's computed numbers.
+    #   "default_pct"  — fell back to RiskParameters.reconciled_default_*.
+    # Lets the UI show which logic was used.
+    synthetic_source: Optional[str] = None
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         d = asdict(self)
@@ -736,6 +761,11 @@ class BotTrade:
         # v19.31.13 — trade-type taxonomy fields
         d['trade_type'] = self.trade_type
         d['account_id_at_fill'] = self.account_id_at_fill
+        # v19.34.3 — provenance + reconcile-conflict metadata
+        d['entered_by'] = self.entered_by
+        d['prior_verdicts'] = self.prior_verdicts
+        d['prior_verdict_conflict'] = self.prior_verdict_conflict
+        d['synthetic_source'] = self.synthetic_source
         return d
 
 
@@ -1198,16 +1228,39 @@ class TradingBotService:
                 loop = None
             if loop is not None:
                 from services.sentcom_service import emit_stream_event
+                # v19.34.3 (2026-05-04) — surface the full eval context
+                # in the persisted metadata so the position_reconciler
+                # can later use the bot's actual computed entry/stop/
+                # target/RR (the "real" math) when adopting an IB
+                # orphan, instead of synthetic 2% defaults that don't
+                # reflect bar conditions. Operator-discovered: VALE was
+                # being rejected for R:R 1.19 yet reconciled with
+                # synthetic R:R 2.0 — the reconciled SL/PT didn't match
+                # the bot's actual setup math.
+                _meta = {
+                    "setup_type": setup_type,
+                    "direction": direction,
+                    "reason_code": reason_code,
+                }
+                # Whitelist the numeric/structural keys the reconciler
+                # might want — full ctx forwarding could leak large
+                # debug blobs into Mongo.
+                _ctx_keys = (
+                    "rr_ratio", "min_required", "global_min",
+                    "entry_price", "stop_price", "primary_target",
+                    "target_prices", "shares", "stop_distance_pct",
+                    "atr", "confidence_score",
+                )
+                for _k in _ctx_keys:
+                    _v = ctx.get(_k) if isinstance(ctx, dict) else None
+                    if _v is not None:
+                        _meta[_k] = _v
                 loop.create_task(emit_stream_event({
                     "kind": "rejection",
                     "event": f"rejection_{reason_code}",
                     "symbol": symbol,
                     "text": narrative,
-                    "metadata": {
-                        "setup_type": setup_type,
-                        "direction": direction,
-                        "reason_code": reason_code,
-                    },
+                    "metadata": _meta,
                 }))
         except Exception as exc:
             logger.debug(f"record_rejection: stream emit failed: {exc}")

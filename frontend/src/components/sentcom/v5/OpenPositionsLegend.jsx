@@ -13,6 +13,12 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 
+const _PROVENANCE_ROWS = [
+  { name: 'BOT',         cls: 'bg-zinc-900 text-zinc-400 border-zinc-700',         desc: 'Default. The bot\'s own evaluation + execution path opened this trade. Setup math, R:R check, all green.' },
+  { name: 'RECONCILED',  cls: 'bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800', desc: 'Bot ADOPTED an IB orphan it did not open. Could be carry-over from prior session, manual TWS click, or stale bracket. SL/PT may be synthetic defaults. Manage carefully.' },
+  { name: '⚠ CONFLICT',  cls: 'bg-amber-950/70 text-amber-300 border-amber-700',   desc: 'Reconciled position whose recent setup verdicts were REJECT (e.g. R:R below min). The bot inherited a position it would have rejected. Strongly consider closing or overriding SL/PT.' },
+];
+
 const _ROWS = [
   {
     name: 'PAPER',
@@ -101,6 +107,20 @@ export default function OpenPositionsLegend() {
             >×</button>
           </div>
           <div className="px-3 py-2.5 text-[11px] leading-relaxed text-zinc-300 space-y-3">
+            <section>
+              <div className="text-zinc-500 uppercase tracking-wider text-[10px] mb-1">Provenance chip (RECONCILED / CONFLICT)</div>
+              <ul className="space-y-1.5">
+                {_PROVENANCE_ROWS.map((r) => (
+                  <li key={r.name} className="flex items-start gap-2">
+                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-bold ${r.cls}`}>
+                      {r.name}
+                    </span>
+                    <span className="text-zinc-300">{r.desc}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
             <section>
               <div className="text-zinc-500 uppercase tracking-wider text-[10px] mb-1">Trade origin (mode chip)</div>
               <ul className="space-y-1.5">

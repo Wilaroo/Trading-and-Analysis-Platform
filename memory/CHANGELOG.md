@@ -2,6 +2,116 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (eighty-fourth commit, v19.34.3) — Reconcile-conflict provenance + Smart synthetic SL/PT + Forensic Orphan Origin (VALE bug fix)
+
+**Operator-discovered live bug — VALE position adopted with synthetic R:R 2.0 even though the bot's logic had been rejecting that setup all afternoon for R:R 1.11–1.19.**
+
+Forensic timeline from the operator's stream:
+- 1:20 PM – 2:46 PM ET: 16+ evaluations of `VALE gap_fade LONG` → all REJECTED with `rr_below_min` (R:R 1.11–1.19, below 1.5 minimum).
+- "Dedup cooldown" message claimed "I just fired this exact long setup" — but the bot **never fired**. Every single evaluation was REJECTED.
+- 10:00:01 AM next morning: bot re-evaluated → reconciler materialized a `bot_trade` row with synthetic 2% SL / 4% PT / R:R 2.0 (nothing to do with the bar/ATR conditions the bot's setup math had been computing).
+
+**Root cause:** `position_reconciler.reconcile_orphan_positions` adopted any IB position the bot didn't have a `bot_trades` row for, using `RiskParameters.reconciled_default_*` synthetic values. It never consulted the bot's recent decision history. The bot inherited a setup it would have rejected, with SL/PT that didn't match the bot's actual computed levels.
+
+### Phase A — Provenance metadata (`entered_by` field)
+
+`BotTrade` schema now carries:
+- `entered_by: str` — `"bot_fired"` (default — bot's own eval+exec opened it) | `"reconciled_external"` (reconciler adopted an IB orphan) | `"manual"`.
+- `prior_verdicts: List[Dict]` — last 5 rejection events from `sentcom_thoughts` for this symbol, persisted on the trade row at reconcile time.
+- `prior_verdict_conflict: bool` — True when ≥2 of last 3 verdicts were rejections.
+- `synthetic_source: Optional[str]` — `"last_verdict"` (smart-stop pulled from bot's real numbers) | `"default_pct"` (fell back to synthetic).
+
+`trade_execution.execute_trade` stamps `entered_by="bot_fired"` on every fresh fill. `position_reconciler.reconcile_orphan_positions` stamps `entered_by="reconciled_external"` plus full prior-verdict context.
+
+### Phase B — Smart synthetic SL/PT
+
+Reconciler now:
+1. Queries the last 5 `sentcom_thoughts` rejections for the symbol.
+2. If a recent rejection has `entry_price` + `stop_price` + `primary_target` AND those numbers are **directionally consistent** with the IB position (LONG: `stop < avg_cost < target`; SHORT: `target < avg_cost < stop`), uses **those exact numbers** instead of synthetic defaults.
+3. Recomputes R:R from the smart numbers.
+4. Stamps `synthetic_source="last_verdict"` (vs `"default_pct"` fallback).
+
+`opportunity_evaluator.record_rejection` now persists `entry_price`, `stop_price`, `primary_target`, `rr_ratio`, `min_required` in the stream event metadata so the reconciler has those numbers to pull from.
+
+### Phase C — Conflict warning event
+
+When `prior_verdict_conflict=True`, reconciler emits:
+```
+[WARNING · severity=high] reconcile_prior_verdict_conflict_v19_34_3
+⚠ Reconciling VALE LONG 5179sh @ $16.12 — but my last 3 of 3 verdicts
+on gap_fade were REJECT (R:R 1.19). I did NOT open this position.
+Smart stop @ $15.80 pulled from last verdict's computed numbers.
+```
+
+Routed to the V5 Unified Stream's prominent-warning lane so the operator can never silently inherit a setup the bot was actively rejecting.
+
+### Phase D — Forensic Orphan Origin endpoint
+
+New `GET /api/diagnostics/orphan-origin/{symbol}?days=N` returns a single-page report:
+- `bot_trades` history for the symbol (last 50 rows).
+- `bot_trades_reset_log` — morning reset events that touched this symbol.
+- `sentcom_thoughts` — last 80 events (rejections, evaluations, fires, reconciles, sweeps, warnings).
+- `shadow_decisions` — AI council's verdicts.
+- `ib_current_position` — what's actually on IB right now.
+- `verdict_summary` — counts + heuristic verdict:
+   - `"bot_disagreed"` — evals > 0 AND ≥80% rejections AND fires=0.
+   - `"bot_agreed"` — fires > 0.
+   - `"no_signal"` — no evals, no fires (manual or carryover).
+
+Designed to answer "where did this position come from?" in one curl call.
+
+### Frontend
+
+- **`RECONCILED` chip** (fuchsia) on rows where `entered_by=reconciled_external`. Tooltip shows whether smart-stop or default-pct was used.
+- **`⚠ CONFLICT` chip** (amber, animate-pulse) on rows where `prior_verdict_conflict=True`. The operator's eyes get drawn to the row immediately.
+- **Reconcile callout in expanded view** — renders the bot's last 3 verdicts (timestamp · REJECT · reason · R:R · setup_type) so the operator can see exactly what the bot was thinking before adopting the position.
+- **Legend popover** updated with the new BOT / RECONCILED / ⚠ CONFLICT row explaining each chip.
+
+### Tests
+
+`tests/test_v19_34_3_provenance_and_orphan_origin.py` — 15 tests:
+- BotTrade schema + `to_dict()` carry the 4 new provenance fields.
+- `trade_execution` stamps `entered_by="bot_fired"`.
+- Reconciler imports + uses smart-stop logic + persists prior_verdicts + emits high-severity conflict warning.
+- Reconciler smart-stop directionality check (LONG: stop < avg < target; SHORT: target < avg < stop).
+- `trading_bot_service` rejection emit forwards `entry_price`/`stop_price`/`primary_target`/`rr_ratio`/`min_required` to metadata.
+- `/api/diagnostics/orphan-origin/{symbol}` returns full timeline + verdict summary.
+- Verdict summary heuristic: `bot_disagreed` (evals=5, rejections=5, fires=0), `bot_agreed` (fires=1), `no_signal` (zeros).
+- 400 on empty symbol.
+- Frontend chip + legend wiring assertions.
+- `sentcom_service` threads provenance fields into both branches.
+
+**241/241 cumulative pytests passing** across all v19.x suites.
+
+### Files touched
+
+Backend:
+- `services/trading_bot_service.py` — `BotTrade` schema (4 new fields) + `to_dict()` extension; `record_rejection` whitelist of full ctx into stream metadata.
+- `services/trade_execution.py` — stamp `entered_by="bot_fired"` on fresh fills.
+- `services/position_reconciler.py` — query prior verdicts, smart-stop logic, persist `prior_verdicts`, emit conflict warning.
+- `services/sentcom_service.py` — thread provenance fields into both bot-managed and IB-orphan position payload branches.
+- `routers/diagnostics.py` — new `GET /orphan-origin/{symbol}` endpoint.
+
+Frontend:
+- `components/sentcom/v5/OpenPositionsV5.jsx` — RECONCILED + ⚠ CONFLICT chips on row header; reconcile callout with last-3-verdicts in expanded view.
+- `components/sentcom/v5/OpenPositionsLegend.jsx` — new "Provenance chip" section explaining BOT / RECONCILED / CONFLICT.
+
+### Operator answer to the original question
+
+> "According to this it seems that the VALE trade should have never been taken?!"
+
+**Confirmed.** The bot did not take VALE today. An IB position was already on the account (carryover, manual click, or prior session — the new `/orphan-origin/VALE` endpoint will tell you which when run on real data). The reconciler silently adopted it with synthetic SL/PT. As of v19.34.3, the same scenario would surface:
+- A `RECONCILED` chip plus a `⚠ CONFLICT` chip (because R:R 1.19 < 1.5 was the bot's last 3 verdicts).
+- A HIGH-priority stream warning at the moment of reconcile.
+- The smart-stop logic would set SL=$15.80 / PT=$16.76 from the bot's actual verdict (matching what you saw in the trade card), R:R=1.19 displayed truthfully — not the synthetic 2.0.
+
+The operator can now investigate VALE's origin on the live system:
+```
+curl ${BACKEND_URL}/api/diagnostics/orphan-origin/VALE?days=7 | jq '.verdict_summary, .bot_trades[0:2], .reset_log_touched'
+```
+
+---
+
 ## 2026-05-04 (eighty-third commit, v19.34.2) — Operator clarity bundle: legend popover + quote-freshness chips + stale-quote auto-resub + near-stop diagnostic
 
 **Operator question during live RTH:**

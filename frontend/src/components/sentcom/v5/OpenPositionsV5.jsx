@@ -243,6 +243,36 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
+          {/* v19.34.3 — provenance chip. Distinguishes RECONCILED
+              (orphan adoption — bot did not open this) from BOT
+              (bot's own evaluation + execution). Operator-discovered
+              VALE bug: synthetic SL/PT didn't reflect bot's prior
+              REJECT verdicts. */}
+          {position.entered_by === 'reconciled_external' && (
+            <span
+              data-testid={`provenance-chip-${position.symbol}`}
+              className="px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800 font-bold"
+              title={
+                position.synthetic_source === 'last_verdict'
+                  ? 'RECONCILED — Bot did not open this. SL/PT pulled from bot\'s last verdict numbers.'
+                  : 'RECONCILED — Bot did not open this. SL/PT are synthetic defaults (e.g. 2% from avg cost).'
+              }
+            >
+              RECONCILED
+            </span>
+          )}
+          {/* v19.34.3 — prior-verdict-conflict warning chip. Triggered
+              when ≥2 of the bot's last 3 verdicts on this symbol/setup
+              were REJECT, yet the position was reconciled anyway. */}
+          {position.prior_verdict_conflict && (
+            <span
+              data-testid={`prior-verdict-conflict-chip-${position.symbol}`}
+              className="px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border bg-amber-950/70 text-amber-300 border-amber-700 font-bold animate-pulse"
+              title="Bot's recent verdicts on this setup were REJECT — this position contradicts the bot's own logic. Consider closing manually or overriding SL/PT."
+            >
+              ⚠ CONFLICT
+            </span>
+          )}
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
           {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
@@ -268,6 +298,59 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
           className="mt-2 pt-2 border-t border-zinc-800/60 space-y-2 text-[12px] text-zinc-400"
           data-testid={`open-position-details-${position.symbol}`}
         >
+          {/* v19.34.3 — Reconcile-conflict callout. Renders ONLY when
+              entered_by=reconciled_external AND prior verdicts exist.
+              Shows the bot's last verdict (REJECT / R:R / setup_type)
+              so the operator never silently inherits a bad setup. */}
+          {position.entered_by === 'reconciled_external' && (
+            <div
+              data-testid={`reconcile-callout-${position.symbol}`}
+              className={`px-2 py-1.5 rounded border text-[11px] leading-snug ${
+                position.prior_verdict_conflict
+                  ? 'bg-amber-950/40 border-amber-800/60 text-amber-200'
+                  : 'bg-fuchsia-950/30 border-fuchsia-800/40 text-fuchsia-200'
+              }`}
+            >
+              <div className="font-bold uppercase tracking-wider text-[10px] mb-0.5">
+                {position.prior_verdict_conflict
+                  ? '⚠ Reconcile conflict — bot disagreed with this setup'
+                  : 'Reconciled from IB orphan'}
+              </div>
+              <div className="text-zinc-300">
+                Bot did not open this. SL/PT pulled from{' '}
+                <span className="font-mono text-zinc-100">
+                  {position.synthetic_source === 'last_verdict'
+                    ? "bot's last computed verdict"
+                    : 'synthetic defaults (e.g. 2% from avg cost)'}
+                </span>
+                .
+              </div>
+              {Array.isArray(position.prior_verdicts) && position.prior_verdicts.length > 0 && (
+                <div
+                  data-testid={`prior-verdicts-${position.symbol}`}
+                  className="mt-1 pt-1 border-t border-zinc-700/40 space-y-0.5"
+                >
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                    Last {Math.min(3, position.prior_verdicts.length)} verdict(s)
+                  </div>
+                  {position.prior_verdicts.slice(0, 3).map((v, i) => (
+                    <div key={i} className="font-mono text-[10px] text-zinc-400">
+                      {v.timestamp ? new Date(v.timestamp).toLocaleTimeString('en-US', {hour12: false}) + ' · ' : ''}
+                      <span className="uppercase font-bold text-rose-300">REJECT</span>
+                      {v.reason_code && <> · {v.reason_code}</>}
+                      {v.rr_ratio != null && (
+                        <> · R:R <span className="text-zinc-200">{Number(v.rr_ratio).toFixed(2)}</span>
+                          {v.min_required != null && <> &lt; min <span className="text-zinc-200">{Number(v.min_required).toFixed(2)}</span></>}
+                        </>
+                      )}
+                      {v.setup_type && <> · {v.setup_type}</>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Price grid: Entry / Current / SL / PT */}
           <div className="grid grid-cols-4 gap-1 v5-mono text-[12px]">
             <div>
