@@ -1970,8 +1970,16 @@ class SentComService:
         # match IB or are part of a larger / smaller IB net. This drives
         # the smart `source` field below.
         ib_pos_by_symbol: dict = {}
+        # v19.34.2 (2026-05-04) — also collect per-quote `pushed_at` /
+        # `as_of` timestamps so we can stamp each row with `quote_age_s`
+        # + `quote_state` (fresh / amber / stale). Lets the V5 UI show
+        # a Quote-Freshness chip per row instead of just "STALE" when
+        # we cross the 30s line.
+        quote_meta_by_symbol: dict = {}
         try:
             from routers.ib import _pushed_ib_data
+            from datetime import datetime as _dt2, timezone as _tz2
+            _now_utc = _dt2.now(_tz2.utc)
             for _ip in (_pushed_ib_data.get("positions") or []):
                 _sym = (_ip.get("symbol") or "").upper()
                 if not _sym:
@@ -1985,6 +1993,47 @@ class SentComService:
                     "abs_qty": int(abs(_qty)),
                     "avg_cost": float(_ip.get("avgCost", _ip.get("avg_cost", 0)) or 0),
                     "market_price": float(_ip.get("marketPrice", _ip.get("market_price", 0)) or 0),
+                }
+            # v19.34.2 — quote-age computation per symbol, mirrors the
+            # logic in position_manager.update_open_positions.
+            _quotes_dict = _pushed_ib_data.get("quotes") or {}
+            for _sym_q, _q in _quotes_dict.items():
+                if not isinstance(_q, dict):
+                    continue
+                _q_ts_raw = (
+                    _q.get("pushed_at")
+                    or _q.get("as_of")
+                    or _q.get("timestamp")
+                    or _q.get("ts")
+                )
+                _age_s: Optional[float] = None
+                if _q_ts_raw is not None:
+                    try:
+                        if isinstance(_q_ts_raw, (int, float)):
+                            # Heuristic: > 1e12 → ms epoch; > 1e9 → s epoch.
+                            _ts_f = float(_q_ts_raw)
+                            if _ts_f > 1e12:
+                                _ts_f = _ts_f / 1000.0
+                            _age_s = _now_utc.timestamp() - _ts_f
+                        else:
+                            _norm = str(_q_ts_raw)
+                            if _norm.endswith("Z"):
+                                _norm = _norm[:-1] + "+00:00"
+                            _dt_q = _dt2.fromisoformat(_norm)
+                            if _dt_q.tzinfo is None:
+                                _dt_q = _dt_q.replace(tzinfo=_tz2.utc)
+                            _age_s = (_now_utc - _dt_q).total_seconds()
+                    except Exception:
+                        _age_s = None
+                _state = (
+                    "fresh" if _age_s is not None and _age_s < 5.0 else
+                    "amber" if _age_s is not None and _age_s < 30.0 else
+                    "stale" if _age_s is not None else
+                    "unknown"
+                )
+                quote_meta_by_symbol[(_sym_q or "").upper()] = {
+                    "quote_age_s": (round(_age_s, 1) if _age_s is not None else None),
+                    "quote_state": _state,
                 }
         except Exception:
             pass
@@ -2200,6 +2249,15 @@ class SentComService:
                             "account_id_at_fill": (
                                 trade.get("account_id_at_fill")
                                 or _legacy_account_id
+                            ),
+                            # v19.34.2 — per-row quote freshness so the V5
+                            # UI can render a fresh / amber / stale chip.
+                            "quote_age_s": (
+                                quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_age_s")
+                            ),
+                            "quote_state": (
+                                quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_state")
+                                or "unknown"
                             ),
                         })
             except Exception as e:
@@ -2430,6 +2488,15 @@ class SentComService:
                         "account_id_at_fill": (
                             (enrich_trade or {}).get("account_id_at_fill")
                             or _legacy_account_id
+                        ),
+                        # v19.34.2 — quote-freshness chip support for
+                        # IB-orphan / lazy-reconciled rows.
+                        "quote_age_s": (
+                            quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_age_s")
+                        ),
+                        "quote_state": (
+                            quote_meta_by_symbol.get(symbol.upper(), {}).get("quote_state")
+                            or "unknown"
                         ),
                     })
         except Exception as e:

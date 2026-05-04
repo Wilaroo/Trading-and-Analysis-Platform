@@ -467,15 +467,24 @@ class PositionManager:
                 # v19.13 — staleness guard. Skip stop checks when quote
                 # is stale; the IB-side bracket is still active server-
                 # side and will fire on REAL-TIME prices.
+                # v19.34.2 (2026-05-04) — also schedule a pusher re-
+                # subscribe for the symbol so the bot recovers from the
+                # blind spot on its own. Without this, a position whose
+                # quote subscription rotates out can sit STALE forever
+                # while the manage-loop logs the same warning every 60s.
                 if quote_age_s is not None and quote_age_s > STALE_QUOTE_S:
                     if not getattr(trade, "_stale_quote_warned_at", None) \
                        or (time.time() - float(getattr(trade, "_stale_quote_warned_at", 0))) > 60:
                         logger.warning(
                             f"manage: SKIP stop-check for {trade.symbol} — quote "
                             f"is {quote_age_s:.1f}s old (cap {STALE_QUOTE_S}s). "
-                            f"Server-side IB bracket still active."
+                            f"Server-side IB bracket still active. "
+                            f"Requesting pusher re-subscribe to recover."
                         )
                         trade._stale_quote_warned_at = time.time()
+                    if not hasattr(self, "_stale_resub_set"):
+                        self._stale_resub_set = set()
+                    self._stale_resub_set.add(trade.symbol.upper())
                     continue
 
                 trade.current_price = quote.get('price', trade.current_price)
@@ -609,6 +618,35 @@ class PositionManager:
                     await self.close_trade(trade_id, bot, reason=reason)
                     continue
 
+                # v19.34.2 (2026-05-04) — Near-stop diagnostic. When a
+                # position sits within 5c (or 0.25%) of its stop and
+                # we're NOT firing the close, log a one-shot warning so
+                # the operator can spot stuck-near-stop trades (the
+                # VALE-at-1R class of issue) without scrolling the UI.
+                # Throttled to once per 60s per trade so we don't spam.
+                try:
+                    distance_abs = abs(trigger_price - effective_stop)
+                    distance_pct = (
+                        (distance_abs / max(0.01, abs(trigger_price))) * 100.0
+                    )
+                    near_stop = distance_abs <= 0.05 or distance_pct <= 0.25
+                    if near_stop:
+                        last_warn = float(getattr(trade, "_near_stop_warned_at", 0) or 0)
+                        if (time.time() - last_warn) >= 60.0:
+                            trade._near_stop_warned_at = time.time()
+                            side = "bid" if trade.direction == TradeDirection.LONG else "ask"
+                            cmp_op = "<=" if trade.direction == TradeDirection.LONG else ">="
+                            logger.warning(
+                                f"[v19.34.2 NEAR-STOP] {trade.symbol} "
+                                f"{trade.direction.value} {side}=${trigger_price:.4f} "
+                                f"is {distance_abs:.4f} ({distance_pct:.3f}%) from stop "
+                                f"${effective_stop:.4f}. Trigger condition "
+                                f"`{side} {cmp_op} stop` not yet met — if this row "
+                                f"stays open while distance stays ≤5c, investigate."
+                            )
+                except Exception:
+                    pass
+
                 # Automatic target profit-taking with scale-out
                 if trade.target_prices and trade.scale_out_config.get('enabled', True):
                     await self.check_and_execute_scale_out(trade, bot)
@@ -640,6 +678,41 @@ class PositionManager:
 
             except Exception as e:
                 logger.exception(f"Error updating position {trade_id}: {type(e).__name__}: {e}")
+
+        # v19.34.2 (2026-05-04) — End-of-loop: if any open trades had
+        # stale quotes, ask the pusher to (re-)subscribe to those
+        # symbols so the next manage cycle has fresh data. Throttled
+        # to one RPC per 60s to avoid hammering the pusher when many
+        # symbols go stale in lockstep (e.g. pusher reconnect storm).
+        try:
+            stale_set = getattr(self, "_stale_resub_set", None)
+            if stale_set:
+                last_resub = float(getattr(self, "_last_stale_resub_at", 0) or 0)
+                if (time.time() - last_resub) >= 60.0:
+                    self._last_stale_resub_at = time.time()
+                    self._stale_resub_set = set()  # consume
+                    try:
+                        from services.ib_pusher_rpc import get_pusher_rpc_client
+                        rpc = get_pusher_rpc_client()
+                        if rpc.is_configured():
+                            res = rpc.subscribe_symbols(stale_set)
+                            logger.info(
+                                f"[v19.34.2 STALE-RESUB] requested re-subscribe for "
+                                f"{len(stale_set)} symbol(s): "
+                                f"{sorted(stale_set)[:8]}"
+                                f"{'…' if len(stale_set) > 8 else ''} "
+                                f"→ added={(res or {}).get('added')!r}"
+                            )
+                        else:
+                            logger.debug("[v19.34.2 STALE-RESUB] pusher RPC not configured")
+                    except Exception as e:
+                        logger.warning(f"[v19.34.2 STALE-RESUB] dispatch failed: {e}")
+                else:
+                    # Throttled — keep accumulating; next eligible cycle
+                    # will resub the union.
+                    pass
+        except Exception as _e:
+            logger.debug(f"[v19.34.2 STALE-RESUB] post-loop handler swallowed: {_e}")
 
 
     # ─── v19.34 (2026-05-04) — Mid-bar tick stop-eval ─────────────────

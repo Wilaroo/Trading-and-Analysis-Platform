@@ -20,6 +20,9 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LiveDataChip } from './LiveDataChip';
 import TradeTypeChip from './TradeTypeChip';
+// v19.34.2 (2026-05-04) — quote-freshness chip + legend popover.
+import QuoteFreshnessChip from './QuoteFreshnessChip';
+import OpenPositionsLegend from './OpenPositionsLegend';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -229,6 +232,16 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
                 ? `Filled on ${position.account_id_at_fill}`
                 : 'No account context — see /api/system/account-mode'
             }
+          />
+          {/* v19.34.2 — quote freshness chip. Shows whether the bot
+              can currently fire stops on this position (FRESH / AMBER /
+              STALE) so the operator never has to guess if a row is
+              actively protected. */}
+          <QuoteFreshnessChip
+            state={position.quote_state}
+            ageSeconds={position.quote_age_s}
+            size="xs"
+            testIdSuffix={`open-pos-${position.symbol}`}
           />
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
@@ -627,6 +640,11 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <div className="v5-panel-title">Open ({groups.length})</div>
+          {/* v19.34.2 — `?` legend popover explaining REAL/SHADOW/MIXED
+              + quote freshness chip semantics. Anchored next to the
+              panel title so the operator's "what is what?" answer is
+              one click away. */}
+          <OpenPositionsLegend />
           <LiveDataChip compact />
           {reconcileCount > 0 && (
             <button

@@ -2,6 +2,81 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (eighty-third commit, v19.34.2) — Operator clarity bundle: legend popover + quote-freshness chips + stale-quote auto-resub + near-stop diagnostic
+
+**Operator question during live RTH:**
+> "im still confused as to what are real positions, what are not real/closed, and what are shadow trades. is this PnL correct? are our trades actually stopping out when they need to?"
+
+Four coordinated changes — clarity in the UI + hardening behind the scenes.
+
+### 1. Open Positions legend popover (`?` icon next to "Open (N)")
+
+`<OpenPositionsLegend>` — single-click popover documenting:
+- **Mode chip semantics** — PAPER (amber, paper IB account, real fills sim money), LIVE (red, live IB account, real money), SHADOW (sky, AI council "would have fired", NEVER touched IB), MIXED (slate, paper+live legs on same symbol), `?` (slate, no account context).
+- **Quote freshness chip semantics** — FRESH (cyan, <5s), AMBER (5–30s), STALE (>30s, bot SKIPS stop checks).
+- **"Shadow rows live ONLY in Diagnostics → Shadow Decisions"** explicit reminder so the operator never wonders if a row in Open Positions is shadow.
+
+Click-outside or Escape closes; pure presentational, zero API calls.
+
+### 2. Quote Freshness chip per row
+
+`<QuoteFreshnessChip>` — visual chip showing per-position quote age:
+- 🔵 **FRESH** (`<5s`) with pulse animation when `<2s`.
+- 🟡 **AMBER** (5–30s).
+- 🔴 **STALE** (≥30s) — bot is currently blind on this row.
+- ⚫ **?** — no quote known.
+
+Renders next to the trade-type chip in OpenPositionsV5 row header. Operator can spot unprotected positions at a glance instead of waiting for the row's "STALE" badge to appear after 30s.
+
+### 3. Backend payload enrichment
+
+`services/sentcom_service.get_our_positions` now builds `quote_meta_by_symbol` from `_pushed_ib_data["quotes"]` (mirrors the manage-loop's age computation) and stamps each row with `quote_age_s` + `quote_state`. Both bot-managed and IB-orphan branches honor the same fields so the chip renders correctly on every row.
+
+### 4. Stale-quote auto-resub via pusher RPC
+
+`position_manager.update_open_positions` now collects symbols whose quotes go stale into a per-cycle set and dispatches **one** `pusher_rpc.subscribe_symbols(set)` call after the loop finishes. Throttled to ≤1 RPC per 60s to avoid hammering the pusher during a reconnect storm. Self-healing: a position whose live-data subscription rotates out is re-requested automatically; without this, STALE positions could sit unprotected indefinitely while the bot logged the same warning every minute.
+
+### 5. Near-stop diagnostic warning (one-shot per 60s per trade)
+
+When a position sits within **5¢ or 0.25%** of its stop and we're NOT firing the close, position_manager now logs:
+
+```
+[v19.34.2 NEAR-STOP] VALE long bid=$15.8100 is 0.0100 (0.063%) from
+stop $15.8000. Trigger condition `bid <= stop` not yet met — if this
+row stays open while distance stays ≤5c, investigate.
+```
+
+Surfaces the "VALE-at-1.0R-but-still-open" class of operator question in the logs without scrolling the UI. Common cause: the row's R-multiple uses `last` (mark price) but the stop trigger uses `bid` (LONG) / `ask` (SHORT) — on a LONG, bid < last, so a row can show -1.0R while the bid is still 1¢ above the stop. This warning explains it.
+
+### Tests
+
+`tests/test_v19_34_2_legend_freshness_resub.py` — 11 tests: legend + freshness chip components exist + wired in OpenPositionsV5; backend payload exposes `quote_age_s` + `quote_state` on both branches with matching 5s/30s thresholds; manage-loop collects + dispatches stale-resub with 60s throttle + try/except; near-stop diagnostic with 5¢ + 0.25% threshold + 60s per-trade throttle.
+
+**226/226 cumulative pytests passing** across v19.23.x + v19.31.x + v19.32 + v19.33 + v19.34 + v19.34.1 + v19.34.2.
+
+### Files touched
+
+Backend:
+- `services/sentcom_service.py` — `quote_meta_by_symbol` + per-row `quote_age_s` / `quote_state` on both branches.
+- `services/position_manager.py` — `_stale_resub_set` accumulation in stale guard, post-loop dispatcher with 60s throttle, near-stop diagnostic warning.
+
+Frontend:
+- new `components/sentcom/v5/QuoteFreshnessChip.jsx`.
+- new `components/sentcom/v5/OpenPositionsLegend.jsx`.
+- `components/sentcom/v5/OpenPositionsV5.jsx` — legend in header, freshness chip per row.
+
+### Operator FAQ — quick reference
+
+| Question | Answer |
+|---|---|
+| What's a REAL trade? | Anything in Open Positions or Closed Today. Has a `bot_trades` row. |
+| What's a SHADOW trade? | AI council's would-have-fired record. Lives in `shadow_decisions`. NEVER appears in Open Positions. View via `Diagnostics → Shadow Decisions`. |
+| Is `-$11,061.04` my P&L? | No, that's the BUYING POWER number (label says so). For P&L: Open Positions header = unrealized; Closed Today panel = realized; HUD `MANAGE -$X.XX` = aggregate R-multiple. |
+| Is VALE at -1.0R supposed to be open? | Probably yes — row R uses `last`, stop trigger uses `bid` (LONG) which is 1-3¢ below `last`. Watch the log for `[v19.34.2 NEAR-STOP]` to see exact distance. |
+| Why isn't STALE protected? | Bot SKIPS stop checks on stale quotes (>30s). v19.34.2 now auto-requests a pusher resubscribe so the row recovers within a minute. |
+
+---
+
 ## 2026-05-04 (eighty-second commit, v19.34.1) — Layout-stretch fix + reconciled-row PAPER/LIVE chip backfill
 
 **Operator-reported regressions during live RTH window:**
