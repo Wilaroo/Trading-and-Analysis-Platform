@@ -529,6 +529,125 @@ const ModuleScorecard = () => {
       <div className="mt-3 text-[10px] text-zinc-600">
         🔴 = Kill candidate — accuracy &lt; 50% AND followed-P&L worse than ignored-P&L. Consider retiring or downweighting.
       </div>
+
+      {/* v19.31.14 — Vote Breakdown panel. Renders the per-module raw
+          vote tally already computed by `_aggregate_vote_breakdown()`
+          on the backend. Lets the operator spot modules that anchor
+          too hard on one direction (e.g. debate_agents 90% bull while
+          final consensus is 50/50). */}
+      {data?.vote_breakdown && Object.keys(data.vote_breakdown).length > 0 && (
+        <ModuleVoteBreakdownPanel breakdown={data.vote_breakdown} />
+      )}
+    </div>
+  );
+};
+
+const VOTE_LABELS = {
+  debate_agents:  ['long_votes', 'short_votes', 'hold_votes'],
+  risk_manager:   ['proceed_votes', 'reduce_votes', 'reject_votes'],
+  institutional:  ['positive_votes', 'neutral_votes', 'negative_votes'],
+  timeseries:     ['up_votes', 'neutral_votes', 'down_votes'],
+};
+
+const VOTE_COLOR = {
+  long_votes:     'bg-emerald-900/40 text-emerald-300',
+  short_votes:    'bg-rose-900/40 text-rose-300',
+  hold_votes:     'bg-zinc-800 text-zinc-400',
+  proceed_votes:  'bg-emerald-900/40 text-emerald-300',
+  reduce_votes:   'bg-amber-900/40 text-amber-300',
+  reject_votes:   'bg-rose-900/40 text-rose-300',
+  positive_votes: 'bg-emerald-900/40 text-emerald-300',
+  neutral_votes:  'bg-zinc-800 text-zinc-400',
+  negative_votes: 'bg-rose-900/40 text-rose-300',
+  up_votes:       'bg-emerald-900/40 text-emerald-300',
+  down_votes:     'bg-rose-900/40 text-rose-300',
+};
+
+const _humanizeVoteKey = (k) => k.replace(/_votes$/, '').replace(/_/g, ' ');
+
+const ModuleVoteBreakdownPanel = ({ breakdown }) => {
+  return (
+    <div data-testid="vote-breakdown-panel" className="mt-5 border border-zinc-800 rounded overflow-hidden">
+      <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-zinc-300 font-bold">Module Vote Breakdown</span>
+        <span className="text-[10px] text-zinc-500">how each AI module is voting before consensus</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0">
+        {Object.entries(breakdown).map(([moduleKey, m]) => {
+          const total = Number(m.total_votes) || 0;
+          const labels = VOTE_LABELS[moduleKey] || Object.keys(m).filter(k => k.endsWith('_votes'));
+          const disagreementPct = m.disagreement_rate != null
+            ? Math.round(Number(m.disagreement_rate) * 100)
+            : null;
+          return (
+            <div
+              key={moduleKey}
+              data-testid={`vote-breakdown-${moduleKey}`}
+              className="p-3 border-r last:border-r-0 sm:border-b lg:border-b-0 border-zinc-900"
+            >
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="text-xs font-mono text-zinc-200">{moduleKey}</span>
+                <span className="text-[10px] text-zinc-500">{total.toLocaleString()} votes</span>
+              </div>
+              {total === 0 ? (
+                <div className="text-[10px] text-zinc-600 italic">no decisions in window</div>
+              ) : (
+                <>
+                  {/* Stacked bar — width = pct of total, color = direction */}
+                  <div className="flex h-3 rounded overflow-hidden border border-zinc-800 mb-1.5">
+                    {labels.map(k => {
+                      const v = Number(m[k]) || 0;
+                      const pct = total > 0 ? (v / total * 100) : 0;
+                      if (pct === 0) return null;
+                      return (
+                        <div
+                          key={k}
+                          data-testid={`vote-bar-${moduleKey}-${k}`}
+                          className={VOTE_COLOR[k] || 'bg-zinc-700'}
+                          style={{ width: `${pct}%` }}
+                          title={`${_humanizeVoteKey(k)}: ${v} (${pct.toFixed(1)}%)`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {labels.map(k => {
+                      const v = Number(m[k]) || 0;
+                      if (v === 0) return null;
+                      const pct = total > 0 ? (v / total * 100).toFixed(0) : '0';
+                      return (
+                        <span
+                          key={k}
+                          data-testid={`vote-chip-${moduleKey}-${k}`}
+                          className={`px-1.5 py-0 rounded text-[10px] font-mono ${VOTE_COLOR[k] || 'bg-zinc-800 text-zinc-400'}`}
+                          title={`${v} votes`}
+                        >
+                          {_humanizeVoteKey(k)} {pct}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {disagreementPct != null && (
+                    <div
+                      data-testid={`vote-disagreement-${moduleKey}`}
+                      className={`mt-1.5 text-[10px] v5-mono ${
+                        disagreementPct > 40 ? 'text-amber-400' :
+                        disagreementPct > 20 ? 'text-zinc-400' : 'text-zinc-500'
+                      }`}
+                      title="% of decisions where this module's direction disagreed with the final consensus"
+                    >
+                      Disagreement {disagreementPct}%
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+        Disagreement % = how often this module's vote went against the final consensus. High disagreement (≥40%) on a kill-candidate is a strong retire signal.
+      </div>
     </div>
   );
 };
@@ -600,24 +719,50 @@ const PipelineFunnel = () => {
             const conv = s.conversion_pct;
             const lowConv = conv != null && conv < 30 && i > 0;
             return (
-              <div key={s.stage} data-testid={`funnel-stage-${s.stage}`} className="flex items-center gap-3">
-                <div className="w-32 text-xs text-zinc-400 text-right">{s.label}</div>
-                <div className="flex-1 relative h-7 bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
-                  <div
-                    className={`absolute inset-y-0 left-0 ${
-                      lowConv ? 'bg-rose-900/40' : 'bg-cyan-900/40'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                  <div className="absolute inset-0 flex items-center px-2 font-mono text-xs text-zinc-200">
-                    {Number(s.count).toLocaleString()}
+              <div key={s.stage} data-testid={`funnel-stage-${s.stage}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-32 text-xs text-zinc-400 text-right">{s.label}</div>
+                  <div className="flex-1 relative h-7 bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
+                    <div
+                      className={`absolute inset-y-0 left-0 ${
+                        lowConv ? 'bg-rose-900/40' : 'bg-cyan-900/40'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                    <div className="absolute inset-0 flex items-center px-2 font-mono text-xs text-zinc-200">
+                      {Number(s.count).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className={`w-20 text-right font-mono text-xs ${
+                    lowConv ? 'text-rose-400' : 'text-zinc-500'
+                  }`}>
+                    {conv != null ? `${conv}%` : '—'}
                   </div>
                 </div>
-                <div className={`w-20 text-right font-mono text-xs ${
-                  lowConv ? 'text-rose-400' : 'text-zinc-500'
-                }`}>
-                  {conv != null ? `${conv}%` : '—'}
-                </div>
+                {/* v19.31.14 — Surface shadow-vs-trade drift on the
+                    `fired` stage so the operator can spot a bot that's
+                    firing without the AI council's verdict. Both raw
+                    counts shown next to the warning. */}
+                {s.stage === 'fired' && (s.fired_via_shadow != null || s.fired_via_trades != null) && (
+                  <div className="ml-32 pl-3 mt-1 flex items-center gap-2 flex-wrap">
+                    <span data-testid="funnel-fired-shadow" className="text-[10px] v5-mono text-zinc-500">
+                      via shadow.was_executed: <span className="text-zinc-300">{Number(s.fired_via_shadow ?? 0).toLocaleString()}</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-700">·</span>
+                    <span data-testid="funnel-fired-trades" className="text-[10px] v5-mono text-zinc-500">
+                      via bot_trades: <span className="text-zinc-300">{Number(s.fired_via_trades ?? 0).toLocaleString()}</span>
+                    </span>
+                    {s.drift_warning && (
+                      <span
+                        data-testid="funnel-drift-warning"
+                        className="px-1.5 py-0 rounded border bg-rose-950/50 text-rose-300 border-rose-800 text-[10px] uppercase tracking-wider font-bold"
+                        title={s.drift_warning}
+                      >
+                        ⚠ Shadow drift
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

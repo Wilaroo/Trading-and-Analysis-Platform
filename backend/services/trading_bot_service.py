@@ -1968,6 +1968,33 @@ class TradingBotService:
                                 f"{n_recon} orphan position(s); skipped={n_skip} "
                                 f"errors={n_err}"
                             )
+                            # v19.31.14 — persist the last-boot-reconcile
+                            # result so the V5 HUD can render a "🔁 Auto-
+                            # claimed N at boot" status pill that fades
+                            # ~10 minutes after the boot event. Stored
+                            # both in `bot_state` (survives restart) and
+                            # exposed via `/api/trading-bot/boot-reconcile-
+                            # status` for the operator.
+                            try:
+                                from database import get_database as _gdb
+                                _db_br = _gdb()
+                                if _db_br is not None:
+                                    _db_br["bot_state"].update_one(
+                                        {"_id": "last_auto_reconcile_at_boot"},
+                                        {"$set": {
+                                            "ran_at": datetime.now(timezone.utc).isoformat(),
+                                            "reconciled_count": n_recon,
+                                            "skipped_count": n_skip,
+                                            "errors_count": n_err,
+                                            "symbols": [
+                                                r.get("symbol") for r in result.get("reconciled", [])
+                                                if r.get("symbol")
+                                            ][:32],
+                                        }},
+                                        upsert=True,
+                                    )
+                            except Exception:
+                                pass
                             # Surface in the operator stream so it shows
                             # up in Unified Stream alongside other boot
                             # events.
@@ -2001,6 +2028,26 @@ class TradingBotService:
                                 "🔁 [v19.31 AUTO-RECONCILE] Boot reconcile found "
                                 f"nothing to claim (skipped={n_skip} errors={n_err})"
                             )
+                            # v19.31.14 — also persist the no-op result so
+                            # the HUD pill can show "🔁 Boot OK · nothing
+                            # to claim".
+                            try:
+                                from database import get_database as _gdb
+                                _db_br = _gdb()
+                                if _db_br is not None:
+                                    _db_br["bot_state"].update_one(
+                                        {"_id": "last_auto_reconcile_at_boot"},
+                                        {"$set": {
+                                            "ran_at": datetime.now(timezone.utc).isoformat(),
+                                            "reconciled_count": 0,
+                                            "skipped_count": n_skip,
+                                            "errors_count": n_err,
+                                            "symbols": [],
+                                        }},
+                                        upsert=True,
+                                    )
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.warning(
                             f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile failed "

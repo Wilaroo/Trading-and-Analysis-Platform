@@ -4,33 +4,34 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.13)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.14)
 
-### 🎯 Just shipped 2026-05-04 v19.31.13 — see CHANGELOG (seventy-seventh commit)
-**Realized-PnL auto-sync (every 30s, no operator click) + Trade-type differentiation (PAPER/LIVE/SHADOW chips & badge) + new Diagnostics → Shadow Decisions tab.**
+### 🎯 Just shipped 2026-05-04 v19.31.14 — see CHANGELOG (seventy-eighth commit)
+**P1 bundle: 6 operator-feedback items + recovered 7 broken regression tests. All low-risk, high-visibility wins; no behavioral changes to live trading paths.**
 
-- ✅ **30s auto-recalc background loop** in `TradingBotService.start()` — scans bot_trades for `closed AND realized_pnl in (0, null, missing) AND closed_at within 24h`, dedupes by symbol, calls the same helper as the manual `↻ Recalc` button. Idempotent + silent when healthy. Cancelled cleanly in `bot.stop()`.
-- ✅ **`<AccountModeBadge>` in V5 HUD top strip** — polls `/api/system/account-mode` every 30s, shows `PAPER · DUN61…5665` (amber) / `LIVE · U7654321` (red) / `SHADOW · standby` (sky) / `UNKNOWN` (slate). Hover tooltip with detected vs effective vs env mode + match status.
-- ✅ **`<TradeTypeChip>` shared component** wired into OpenPositionsV5, ClosedTodayDrilldown, ManageStage drilldown, Day Tape, Trade Forensics. Hidden by default for `unknown` rows so the UI stays compact.
-- ✅ **`/api/diagnostics/shadow-decisions`** + CSV mirror + new `Diagnostics → Shadow Decisions` tab (sortable table, range toggle, summary chips with `divergence_signal`).
-- ✅ **trade_type surfaced** in `/api/sentcom/positions` (open + lazy-reconciled IB-orphan branches), closed_today, day-tape, forensics. CSV header pinned with `trade_type` + `account_id_at_fill`.
-- ✅ **21/21 new v19.31.13 pytests passing** (in addition to all 71/71 prior v19.31.x suites). Lint clean, frontend webpack compiled with only pre-existing warnings.
+- ✅ **Pre-Market Mode banner** in `ScannerCardsV5` (7:00-9:30 ET) — explains scanner silence is intentional (building watchlists). Self-hides outside the window.
+- ✅ **Backfill Readiness diagnostic copy fix** — distinguishes 3 real failure modes ("cache empty" vs "cache below ADV threshold" vs "cache full but unqualifiable") instead of the misleading one-liner.
+- ✅ **Reset script stale-snapshot warning** — surfaces `as_of` age, warns when >30s old, adds `⚠ STALE` chip to summary.
+- ✅ **RTH-aware collector throttle** — `_rth_throttle_decision()` returns 1 worker during RTH (9:30-15:55 ET), 4 otherwise. New `GET /api/ib-collector/throttle-policy`. Server-side enforcement on `/api/ib/historical-data/pending` so older pushers also benefit.
+- ✅ **Funnel drift_warning UI** — surfaces `fired_via_shadow` / `fired_via_trades` raw counts inline + `⚠ Shadow drift` chip when they diverge.
+- ✅ **Module Vote Breakdown panel** — stacked direction bar + per-module vote chips + disagreement % below the Module Scorecard table.
+- ✅ **Auto-reconcile-at-boot status pill** — `<BootReconcilePill>` in HUD top strip, fades after 10 min.
+- ✅ **Test path bug fix** — `test_reset_ib_survival_guard_v19_31.py` had `from backend.scripts...` → fixed to `from scripts...`. 7 broken regression tests recovered.
+- ✅ **165/165 v19.31 + v19.23 pytests passing.**
 
 ### 🔴 P0 — Top of next session
-- **Verify v19.31.13 fixes during next RTH session** (operator):
-  1. `<AccountModeBadge>` in HUD top strip should show `PAPER · DUN61…5665` (amber) when pusher's account is DU*-prefixed.
-  2. After any closed trade with `realized_pnl=0`, wait ≤30s and confirm the row gets backfilled without clicking `↻ Recalc`. A `realized_pnl_autosync_v19_31_13` event should appear in the Unified Stream.
-  3. `Diagnostics → Shadow Decisions` tab loads, ranges toggle, CSV downloads.
-  4. Open Positions / Day Tape / Forensics rows show PAPER/LIVE chip on rows filled after this commit.
+- **Verify v19.31.13 + v19.31.14 fixes during next RTH session** (operator):
+  1. (v19.31.13) `<AccountModeBadge>` shows `PAPER · DUN61…5665` (amber) when pusher is paper.
+  2. (v19.31.13) After any closed trade with `realized_pnl=0`, ≤30s later it gets backfilled — no manual click needed.
+  3. (v19.31.13) `Diagnostics → Shadow Decisions` tab loads.
+  4. (v19.31.13) Open Positions / Day Tape / Forensics rows show PAPER/LIVE chips.
+  5. (v19.31.14) **Pre-Market banner** appears 7:00-9:30 ET in scanner panel.
+  6. (v19.31.14) **`/api/ib-collector/throttle-policy`** returns `max_concurrent_workers=1` during RTH; older pushers get fewer jobs returned per poll.
+  7. (v19.31.14) **`<BootReconcilePill>`** appears in HUD strip after each backend restart that triggered the boot reconcile, fades after 10 min.
+  8. (v19.31.14) **Module Vote Breakdown panel** shows direction bars below Module Scorecard table.
+  9. (v19.31.14) **Funnel `⚠ Shadow drift`** chip appears in `Diagnostics → Pipeline Funnel` when shadow & trades disagree.
 
 ### 🟡 P1 (operator-facing improvements, carried forward)
-- **Pre-Market Mode banner in `ScannerCardsV5`** during 7:00–9:30 ET so silent scanner is explained as "building watchlists" rather than "broken".
-- **RTH-aware collector throttle** — drop Windows historical collectors from 4 → 1 active during RTH (9:30–15:55 ET) to save IB Gateway pacing budget.
-- **Backfill Readiness diagnostic copy fix** — `BackfillReadinessCard.jsx` + `symbol_universe.py` / `ib_collector_router.py` say "symbol_adv_cache empty?" even when cache is full (staleness check failure).
-- **Stale-snapshot warning on reset script** — warn if `ib_live_snapshot.as_of` >30s old.
-- **`vote_breakdown` UI panel** — render per-module breakdown in Module Scorecard view.
-- **Funnel drift_warning UI surfacing** — inline "shadow drift" badge when `fired_via_shadow != fired_via_trades`.
-- **Auto-reconcile-at-boot status pill** — small chip in V5 HUD top strip "🔁 Auto-claimed N at boot" for ~10 min after boot.
 - `.bat` health screen probes pusher actually (carry-over).
 - Pusher auto-restart on Windows (carry-over).
 - Shadow-vs-Real gap drilldown (carry-over).

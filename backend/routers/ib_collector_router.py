@@ -3424,3 +3424,94 @@ def purge_stale_gap_requests(
     except Exception as e:
         logger.error(f"Error in purge-stale-gap-requests: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ─── v19.31.14 (2026-05-04) — RTH-aware collector throttle ──────────
+
+
+def _rth_throttle_decision(now=None) -> Dict:
+    """Compute the recommended concurrent-collector cap based on the
+    current ET time. During RTH (9:30-15:55 ET, weekdays), drop active
+    historical collectors from 4 → 1 to preserve IB Gateway pacing
+    budget for live L1 / L2 subscriptions and order traffic. Outside
+    RTH, return to full parallelism.
+
+    Pure function — single source of truth that both the throttle-policy
+    endpoint and the pending-request limiter consume.
+    """
+    from datetime import datetime as _dt
+
+    n = now or _dt.now(timezone.utc)
+    # ET conversion via a tz-aware Intl-like approach. We keep stdlib-
+    # only here so we don't pull in pytz: convert from UTC by reading
+    # the Eastern offset manually. Standard Time UTC-5; DST UTC-4. We
+    # use zoneinfo (Python 3.9+, available in this stack).
+    try:
+        from zoneinfo import ZoneInfo
+        et = n.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        # Fallback: assume EST/EDT split; rough offset.
+        et = n  # best effort; throttle defaults to "off" if unsure
+
+    weekday = et.weekday()  # 0=Mon .. 6=Sun
+    minute_of_day = et.hour * 60 + et.minute
+
+    # RTH window: 9:30-15:55 ET, Mon-Fri. The 5min cushion before close
+    # is intentional — it keeps the throttle on through the EOD-close
+    # phase when manage-loops compete for the pusher.
+    rth_open_min = 9 * 60 + 30
+    rth_throttle_until_min = 15 * 60 + 55
+    is_rth = (
+        weekday < 5
+        and minute_of_day >= rth_open_min
+        and minute_of_day < rth_throttle_until_min
+    )
+
+    if is_rth:
+        return {
+            "max_concurrent_workers": 1,
+            "rth_active": True,
+            "weekday": weekday,
+            "et_minute_of_day": minute_of_day,
+            "et_iso": et.isoformat() if hasattr(et, "isoformat") else None,
+            "reason": (
+                "RTH active 9:30-15:55 ET — historical collectors throttled "
+                "to 1 active worker to preserve IB pacing budget for live "
+                "subscriptions and order traffic."
+            ),
+            "recommended_pending_request_limit": 1,
+        }
+    return {
+        "max_concurrent_workers": 4,
+        "rth_active": False,
+        "weekday": weekday,
+        "et_minute_of_day": minute_of_day,
+        "et_iso": et.isoformat() if hasattr(et, "isoformat") else None,
+        "reason": (
+            "Outside RTH — historical collectors run at full parallelism "
+            "(4 active workers)."
+        ),
+        "recommended_pending_request_limit": 10,
+    }
+
+
+@router.get("/throttle-policy")
+async def get_collector_throttle_policy():
+    """v19.31.14 — RTH-aware collector throttle recommendation.
+
+    The Windows IB Data Pusher should poll this endpoint every ~30s and
+    cap its active worker pool to `max_concurrent_workers`. During RTH
+    (9:30-15:55 ET, weekdays), only 1 historical collector is recommended
+    so that the remaining IB Gateway pacing budget is reserved for live
+    L1/L2 subscriptions and order traffic.
+
+    The same logic is also enforced server-side via the
+    `recommended_pending_request_limit` field — even older pushers that
+    don't honor `max_concurrent_workers` directly will see fewer jobs
+    returned per poll during RTH and naturally drain the queue more
+    slowly.
+
+    Pure read endpoint, no DB — safe to call frequently.
+    """
+    return _rth_throttle_decision()

@@ -1769,6 +1769,25 @@ def get_pending_historical_data_requests(
     
     # Cap at 50 to prevent overload
     limit = min(max(limit, 1), 50)
+
+    # v19.31.14 (2026-05-04) — RTH-aware throttle. During RTH (9:30-15:55
+    # ET weekdays), cap the returned-jobs count at the policy's
+    # `recommended_pending_request_limit` (currently 1) so that the 4
+    # Windows collectors share a single in-flight job at a time. Frees
+    # ~75% of the IB Gateway pacing budget for live L1/L2 subscriptions
+    # and order traffic. Pre-existing operator-passed `limit` is the
+    # ceiling; the throttle can only lower it.
+    rth_active = False
+    rth_limit_cap: Optional[int] = None
+    try:
+        from routers.ib_collector_router import _rth_throttle_decision
+        policy = _rth_throttle_decision()
+        rth_active = bool(policy.get("rth_active"))
+        rth_limit_cap = int(policy.get("recommended_pending_request_limit") or limit)
+    except Exception as e:
+        logger.debug(f"throttle-policy lookup failed: {e}")
+    if rth_active and rth_limit_cap is not None:
+        limit = min(limit, rth_limit_cap)
     
     # Parse bar_sizes filter
     bar_sizes_list = None
@@ -1786,7 +1805,12 @@ def get_pending_historical_data_requests(
             bar_sizes=bar_sizes_list,
             symbol_partition=symbol_partition
         )
-        return {"success": True, "requests": requests}
+        return {
+            "success": True,
+            "requests": requests,
+            "throttle_limit": limit,
+            "rth_active": rth_active,
+        }
     except Exception as e:
         logger.error(f"Error getting pending historical data requests: {e}")
         return {"success": False, "requests": [], "error": str(e)}

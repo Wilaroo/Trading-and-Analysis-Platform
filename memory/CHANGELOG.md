@@ -2,6 +2,94 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-eighth commit, v19.31.14) — P1 bundle: Pre-Market banner + Backfill copy fix + Stale-snapshot warning + RTH-aware throttle + Funnel drift_warning + Vote-breakdown panel + Boot-reconcile pill
+
+**Six P1 operator-feedback items shipped together. All low-risk, high-visibility wins; no behavioral changes to live trading paths.**
+
+### 1. Pre-Market Mode banner (operator panic-prevention)
+
+`<PreMarketModeBanner>` — appears 7:00–9:30 ET, shows live countdown to open, explains "scanner is intentionally building watchlists". Self-hides outside the window (zero footprint during RTH). Wired into both the empty-state and the populated-list branches of `ScannerCardsV5`.
+
+### 2. Backfill Readiness diagnostic copy fix
+
+`backfill_readiness_service._check_overall_freshness` no longer says "symbol_adv_cache empty?" when the cache is full but failing for other reasons. Now diagnoses three real failure modes:
+
+- **Cache truly empty** → "symbol_adv_cache is empty — POST /api/ib-collector/rebuild-adv-from-ib"
+- **Cache full but below threshold** → "...has N rows but none meet intraday ADV threshold ($X) — cache may be stale"
+- **Cache full but all unqualifiable** → "...has N rows but all are marked unqualifiable=True — investigate the fundamentals filter"
+- **Fallthrough (transient)** → "...rows look healthy but get_universe returned 0 — likely a concurrent rebuild, re-check in 30s"
+
+Returns `adv_cache_total`, `adv_cache_qualified`, `adv_cache_above_intraday_thr` for the operator to verify diagnosis.
+
+### 3. Reset script stale-snapshot warning
+
+`scripts/reset_bot_open_trades.py` now reads `ib_live_snapshot.as_of` and warns when the snapshot is older than 30s. Pusher pushes every ~5s, so anything past 6 cycles silent likely means the pusher is dead. Survival guard still works on the cached positions (no behavior change), but the operator gets a `WARN:` line + `result['ib_snapshot_stale']=True` + a `⚠ STALE` chip in `render_summary()`. Helps the operator catch the "I ran reset against stale data" failure mode.
+
+### 4. RTH-aware collector throttle
+
+New `_rth_throttle_decision()` pure function in `ib_collector_router.py` that returns `max_concurrent_workers=1` during RTH (9:30-15:55 ET, weekdays) and `4` otherwise. Surfaced two ways:
+
+- **`GET /api/ib-collector/throttle-policy`** — read endpoint the Windows pusher should poll every ~30s and cap its worker pool.
+- **Server-side enforcement in `/api/ib/historical-data/pending`** — the operator-passed `limit` param is capped at the policy's `recommended_pending_request_limit` (currently 1) when RTH is active. Even older pushers that don't honor `max_concurrent_workers` directly will see fewer jobs returned per poll during RTH, naturally serializing the queue. Returned payload now includes `throttle_limit` + `rth_active` so the pusher can log/honor.
+
+5min cushion before close (15:55) keeps throttle on through the EOD-close phase when manage-loops compete for pusher RPC.
+
+### 5. Funnel drift_warning UI surfacing
+
+The `fired` stage in `Diagnostics → Pipeline Funnel` now renders the existing backend `fired_via_shadow` / `fired_via_trades` raw counts inline plus a `⚠ Shadow drift` chip when they disagree by >max(2, 10%). Lets the operator instantly spot a bot that's firing without consulting the AI council.
+
+### 6. Module Vote Breakdown panel
+
+`ModuleVoteBreakdownPanel` — renders the existing backend `_aggregate_vote_breakdown()` per-module raw vote tally (debate_agents / risk_manager / institutional / timeseries) below the Module Scorecard table.
+
+- Stacked horizontal bar (color-coded by direction) + percentage chips.
+- "Disagreement N%" chip below each module — % of decisions where this module's direction went against the final consensus. ≥40% on a kill-candidate is a strong retire signal.
+
+### 7. Auto-reconcile-at-boot status pill
+
+`<BootReconcilePill>` in V5 HUD top strip (next to AccountModeBadge):
+- Polls `GET /api/trading-bot/boot-reconcile-status` every 60s.
+- Shows `🔁 Auto-claimed N · Xm Ys ago` (cyan) when the boot-time reconcile claimed orphans.
+- Shows `🔁 Boot OK · 0 claims · Xm ago` (slate) when boot-time reconcile ran but found nothing.
+- Auto-hides after `pill_visible_seconds=600` (10 min) so it doesn't permanently clutter the strip.
+- Backend persists `last_auto_reconcile_at_boot` to `bot_state` collection on every boot run, so the pill survives backend restarts.
+
+### Plus: pre-existing test path bug fixed
+
+`test_reset_ib_survival_guard_v19_31.py` had `from backend.scripts...` imports that fail in the standard `cd backend && pytest` workflow. Fixed to `from scripts...`. 7 previously-broken tests now pass — bringing the v19.31.x + v19.23.x suite to 165/165 green.
+
+### Tests (27 new in 2 files)
+
+- `tests/test_v19_31_14_premarket_throttle_stale_warn.py` (15 tests) — 3 backfill-copy modes, 4 stale-warn scenarios, 6 RTH-throttle time windows, 1 throttle-policy endpoint test, 1 PreMarket banner JSX existence assertion.
+- `tests/test_v19_31_14_boot_pill_drift_votes.py` (11 tests) — boot-reconcile-status endpoint contract (5 scenarios), funnel drift_warning structural assertions (2 tests), vote-breakdown wiring (2 tests), BootReconcilePill component existence + integration (2 tests).
+
+### Files touched
+
+Backend:
+- `services/backfill_readiness_service.py` (3-mode diagnostic copy)
+- `scripts/reset_bot_open_trades.py` (stale-snapshot warning + age in render_summary)
+- `routers/ib_collector_router.py` (new `_rth_throttle_decision` + `/throttle-policy`)
+- `routers/ib.py` (live `/historical-data/pending` honors throttle)
+- `routers/ib_modules/historical_data.py` (clean revert; route is dead-code, not mounted)
+- `routers/trading_bot.py` (new `/boot-reconcile-status`)
+- `services/trading_bot_service.py` (persist `last_auto_reconcile_at_boot` to `bot_state`)
+- `tests/test_reset_ib_survival_guard_v19_31.py` (import path fix, 7 tests recovered)
+
+Frontend:
+- new `components/sentcom/v5/PreMarketModeBanner.jsx`
+- new `components/sentcom/v5/BootReconcilePill.jsx`
+- `components/sentcom/v5/ScannerCardsV5.jsx` (banner mounted in 2 branches)
+- `components/sentcom/SentComV5View.jsx` (BootReconcilePill in HUD strip)
+- `pages/DiagnosticsPage.jsx` (drift_warning chip + ModuleVoteBreakdownPanel)
+
+### Operator-facing defaults
+
+- Throttle thresholds: 9:30 ET open ⇄ 15:55 ET cushion (Mon-Fri).
+- BootReconcilePill: visible 10 min after boot.
+- Reset stale threshold: 30s.
+
+---
+
 ## 2026-05-04 (seventy-seventh commit, v19.31.13) — Realized-PnL auto-sync + Trade-type differentiation (PAPER/LIVE/SHADOW)
 
 **Operator feedback after v19.31.12 shipped the manual `↻ Recalc` button:**

@@ -108,7 +108,7 @@ def _make_trade(trade_id, symbol, direction, shares=100, remaining=None):
 def test_skips_row_when_ib_still_holds_matching_position():
     """The exact morning-reset bug: bot_trades has APH long open, IB
     snapshot still holds APH 588 long → row must be SKIPPED."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [
@@ -134,7 +134,7 @@ def test_skips_row_when_ib_still_holds_matching_position():
 
 def test_closes_row_when_ib_does_not_hold():
     """Bot has stale row for symbol IB no longer holds → close it."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [
@@ -154,7 +154,7 @@ def test_closes_row_when_ib_does_not_hold():
 
 def test_force_flag_bypasses_survival_guard():
     """--force skips the IB check and closes everything."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [
@@ -175,7 +175,7 @@ def test_force_flag_bypasses_survival_guard():
 def test_aborts_when_snapshot_missing_and_not_forced():
     """Fail-closed when ib_live_snapshot.current is missing — operator
     must consciously pass --force to nuke without IB visibility."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [_make_trade("1", "ABC", "long")]
@@ -191,7 +191,7 @@ def test_aborts_when_snapshot_missing_and_not_forced():
 
 def test_dry_run_with_snapshot_still_reports_skipped():
     """Dry-run should report what WOULD be skipped without writing."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [
@@ -217,7 +217,7 @@ def test_dry_run_with_snapshot_still_reports_skipped():
 def test_partial_partition_when_some_held_some_not():
     """Mix: 3 trades — APH (held), STALE (gone), V (gone). Only the 2
     truly-orphaned bot rows close; APH preserved."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [
@@ -250,7 +250,7 @@ def test_partial_partition_when_some_held_some_not():
 def test_direction_aware_survival_guard():
     """If bot has SOFI long but IB has SOFI short, row should NOT be
     saved by the guard (different direction = different position)."""
-    from backend.scripts.reset_bot_open_trades import reset_open_trades
+    from scripts.reset_bot_open_trades import reset_open_trades
 
     db = _FakeDB()
     db.bot_trades.docs = [

@@ -14,6 +14,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveSubscriptions } from '../../../hooks/useLiveSubscription';
+import PreMarketModeBanner from './PreMarketModeBanner';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
 const STAGE_CLASS = {
@@ -612,8 +613,11 @@ export const ScannerCardsV5 = ({
 
   if (cards.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-[13px] text-zinc-500">
-        <div className="v5-mono">Scanner idle.</div>
+      <div className="px-3 py-6 text-center text-[13px] text-zinc-500" data-testid="v5-scanner-empty">
+        {/* v19.31.14 — Pre-Market banner explains scanner silence
+            during 7:00–9:30 ET so new operators don't think it's broken. */}
+        <PreMarketModeBanner />
+        <div className="v5-mono mt-3">Scanner idle.</div>
         <div className="mt-1 v5-why-dim">No setups, alerts, or open positions yet.</div>
       </div>
     );
@@ -621,6 +625,10 @@ export const ScannerCardsV5 = ({
 
   return (
     <div ref={wrapperRef} data-testid="v5-scanner-cards-list" data-help-id="scanner-panel" className="flex flex-col">
+      {/* v19.31.14 — Pre-Market banner above the controls strip.
+          Self-hides outside 7:00–9:30 ET so it has zero footprint
+          during RTH. */}
+      <PreMarketModeBanner />
       {/* Wave 3 (#1) — grouping toggle. Tiny chip in the panel header
           row so the operator can flip between FLAT (legacy) and
           GROUPED-BY-SETUP views without leaving the panel. */}

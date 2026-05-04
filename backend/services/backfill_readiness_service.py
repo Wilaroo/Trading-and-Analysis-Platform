@@ -290,12 +290,64 @@ def _check_overall_freshness(db) -> Dict[str, Any]:
     intraday_symbols = get_universe(db, "intraday")
     total_symbols = len(intraday_symbols)
     if not total_symbols:
+        # v19.31.14 (2026-05-04) — operator feedback: original copy
+        # said "symbol_adv_cache empty?" even when the cache was full.
+        # Differentiate the three real failure modes:
+        #   (a) cache truly empty → run rebuild-adv
+        #   (b) cache has rows but all qualified rows below ADV threshold
+        #       (likely stale ADV calc on a low-vol day) → recalc
+        #   (c) cache has rows but all `unqualifiable=True` → check the
+        #       fundamentals filter
+        try:
+            cache_total = db["symbol_adv_cache"].count_documents({})
+            cache_qualified = db["symbol_adv_cache"].count_documents(
+                {"unqualifiable": {"$ne": True}}
+            )
+            from services.symbol_universe import DOLLAR_VOL_THRESHOLDS
+            intraday_thr = DOLLAR_VOL_THRESHOLDS.get("intraday", 0)
+            cache_above_intraday_thr = db["symbol_adv_cache"].count_documents(
+                {"avg_dollar_volume": {"$gte": intraday_thr}}
+            )
+        except Exception as e:
+            cache_total = cache_qualified = cache_above_intraday_thr = -1
+            intraday_thr = 0
+            logger.debug(f"backfill_readiness adv-cache probe failed: {e}")
+
+        if cache_total == 0:
+            detail = (
+                "symbol_adv_cache is empty — POST /api/ib-collector/"
+                "rebuild-adv-from-ib to populate it from IB daily bars."
+            )
+        elif cache_above_intraday_thr == 0:
+            detail = (
+                f"symbol_adv_cache has {cache_total:,} rows but none meet "
+                f"intraday ADV threshold (${intraday_thr:,.0f}). Cache may "
+                "be stale — POST /api/ib-collector/rebuild-adv-from-ib."
+            )
+        elif cache_qualified == 0:
+            detail = (
+                f"symbol_adv_cache has {cache_total:,} rows but all are "
+                "marked unqualifiable=True. Investigate the fundamentals "
+                "filter that flagged them."
+            )
+        else:
+            # Cache looks healthy but get_universe still returned 0 — odd
+            # transient (e.g. concurrent rebuild swapping the collection).
+            detail = (
+                f"symbol_adv_cache has {cache_total:,} rows "
+                f"({cache_above_intraday_thr:,} above intraday threshold, "
+                f"{cache_qualified:,} qualified) but get_universe('intraday') "
+                "returned 0. Likely a transient rebuild — re-check in 30s."
+            )
         return {
             "status": "yellow",
-            "detail": "No intraday universe resolved (symbol_adv_cache empty?)",
+            "detail": detail,
             "fresh_pct": 0.0,
             "universe_size": 0,
             "market_state": market_state,
+            "adv_cache_total": cache_total,
+            "adv_cache_qualified": cache_qualified,
+            "adv_cache_above_intraday_thr": cache_above_intraday_thr,
         }
 
     total_fresh = total_pairs = 0

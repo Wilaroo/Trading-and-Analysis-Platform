@@ -3212,3 +3212,83 @@ def get_all_strategy_stats():
         }
 
 
+
+
+# ─── v19.31.14 (2026-05-04) — Auto-reconcile-at-boot status pill ───
+
+
+@router.get("/boot-reconcile-status")
+async def get_boot_reconcile_status(pill_visible_seconds: int = 600):
+    """v19.31.14 — Read the last `auto_reconcile_at_boot` event so the
+    V5 HUD top strip can render a "🔁 Auto-claimed N at boot" pill that
+    fades after `pill_visible_seconds` (default 10 min).
+
+    Returns:
+        {
+          "ran": bool,                  # has the boot reconcile run at all
+          "ran_at": iso str | null,     # when it last ran
+          "age_seconds": float | null,  # seconds since ran_at
+          "reconciled_count": int,
+          "skipped_count": int,
+          "errors_count": int,
+          "symbols": [str],             # up to 32 symbols claimed
+          "show_pill": bool,            # age < pill_visible_seconds
+          "pill_visible_seconds": int,
+        }
+    """
+    from database import get_database
+    from datetime import datetime as _dt, timezone as _tz
+    db = get_database()
+    if db is None:
+        return {
+            "ran": False, "ran_at": None, "age_seconds": None,
+            "reconciled_count": 0, "skipped_count": 0, "errors_count": 0,
+            "symbols": [], "show_pill": False,
+            "pill_visible_seconds": pill_visible_seconds,
+        }
+
+    try:
+        doc = db["bot_state"].find_one(
+            {"_id": "last_auto_reconcile_at_boot"}, {"_id": 0},
+        )
+    except Exception:
+        doc = None
+
+    if not doc:
+        return {
+            "ran": False, "ran_at": None, "age_seconds": None,
+            "reconciled_count": 0, "skipped_count": 0, "errors_count": 0,
+            "symbols": [], "show_pill": False,
+            "pill_visible_seconds": pill_visible_seconds,
+        }
+
+    ran_at = doc.get("ran_at")
+    age_s: Optional[float] = None
+    if ran_at:
+        try:
+            norm = ran_at.replace("Z", "+00:00") if ran_at.endswith("Z") else ran_at
+            dt = _dt.fromisoformat(norm)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_tz.utc)
+            age_s = (_dt.now(_tz.utc) - dt).total_seconds()
+        except Exception:
+            age_s = None
+
+    show_pill = (
+        age_s is not None
+        and age_s >= 0
+        and age_s < pill_visible_seconds
+    )
+
+    return {
+        "ran": True,
+        "ran_at": ran_at,
+        "age_seconds": round(age_s, 1) if age_s is not None else None,
+        "reconciled_count": int(doc.get("reconciled_count") or 0),
+        "skipped_count": int(doc.get("skipped_count") or 0),
+        "errors_count": int(doc.get("errors_count") or 0),
+        "symbols": list(doc.get("symbols") or [])[:32],
+        "show_pill": bool(show_pill),
+        "pill_visible_seconds": pill_visible_seconds,
+    }
+

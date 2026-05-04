@@ -80,15 +80,48 @@ def _fetch_ib_held_keys(db) -> Optional[set]:
     The snapshot is updated on every pusher push (~5s cadence) so it's
     fresh enough for a manual pre-open reset.
     """
+    held, _age_s = _fetch_ib_held_keys_with_age(db)
+    return held
+
+
+def _fetch_ib_held_keys_with_age(db) -> tuple:
+    """v19.31.14 (2026-05-04) — same as `_fetch_ib_held_keys` but also
+    returns the snapshot's age in seconds. Lets callers warn the operator
+    when the snapshot is staler than ~30s — typical signal that the
+    Windows pusher has stopped pushing (firewall, IB Gateway disconnect,
+    or process crashed) and the survival guard is reading stale data.
+
+    Returns `(held_keys_or_None, age_seconds_or_None)`.
+    """
     try:
         snap = db["ib_live_snapshot"].find_one(
-            {"_id": "current"}, {"_id": 0, "positions": 1}
+            {"_id": "current"}, {"_id": 0, "positions": 1, "as_of": 1}
         )
     except Exception as e:
         print(f"WARN: cannot read ib_live_snapshot.current: {e}")
-        return None
+        return None, None
     if not snap or not isinstance(snap, dict):
-        return None
+        return None, None
+
+    age_s: Optional[float] = None
+    as_of = snap.get("as_of")
+    if as_of:
+        try:
+            if isinstance(as_of, str):
+                # Tolerate trailing Z and missing tz.
+                norm = as_of.replace("Z", "+00:00") if as_of.endswith("Z") else as_of
+                dt = datetime.fromisoformat(norm)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = as_of
+                if getattr(dt, "tzinfo", None) is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            age_s = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception as e:
+            print(f"WARN: ib_live_snapshot.as_of unparseable ({as_of!r}): {e}")
+            age_s = None
+
     positions = snap.get("positions") or []
     held: set = set()
     for p in positions:
@@ -100,7 +133,7 @@ def _fetch_ib_held_keys(db) -> Optional[set]:
             held.add((sym, "long" if qty > 0 else "short"))
         except Exception:
             continue
-    return held
+    return held, age_s
 
 
 def _build_query(symbols: Optional[List[str]]) -> dict:
@@ -195,8 +228,42 @@ def reset_open_trades(
     # before any DB writes. If `force=True`, skip the partition (legacy
     # behavior). If snapshot can't be read, fail-closed by default —
     # operator must pass --force to override.
-    held_keys: Optional[set] = None if force else _fetch_ib_held_keys(db)
+    # v19.31.14 (2026-05-04) — also expose snapshot age so the operator
+    # gets a clear "snapshot is X seconds old" warning when the pusher
+    # has stopped pushing (firewall blip, crashed pusher, etc.). 30s is
+    # the threshold — pusher pushes every ~5s so anything past ~6 cycles
+    # silent likely means it's gone.
+    if force:
+        held_keys, snap_age_s = None, None
+    else:
+        held_keys, snap_age_s = _fetch_ib_held_keys_with_age(db)
     result["ib_snapshot_available"] = held_keys is not None
+    result["ib_snapshot_age_s"] = (
+        round(snap_age_s, 1) if isinstance(snap_age_s, (int, float)) else None
+    )
+
+    # Stale-snapshot warning (does NOT abort — survival guard still
+    # works on the cached positions, but the operator deserves to know
+    # that the data they're trusting is older than ~30s).
+    STALE_THRESHOLD_S = 30.0
+    if (
+        held_keys is not None
+        and isinstance(snap_age_s, (int, float))
+        and snap_age_s > STALE_THRESHOLD_S
+    ):
+        result["ib_snapshot_stale"] = True
+        result["ib_snapshot_stale_threshold_s"] = STALE_THRESHOLD_S
+        warn = (
+            f"WARN: ib_live_snapshot.current is {snap_age_s:.0f}s old "
+            f"(threshold: {STALE_THRESHOLD_S:.0f}s). Pusher may be down. "
+            "Survival guard will still work but the data may not reflect "
+            "IB's current state. Confirm pusher is alive on Windows before "
+            "running with --commit."
+        )
+        print(warn)
+        result.setdefault("warnings", []).append(warn)
+    else:
+        result["ib_snapshot_stale"] = False
 
     if held_keys is None and not force and not dry_run:
         print(
@@ -264,7 +331,19 @@ def render_summary(result: dict) -> str:
         "available" if result.get("ib_snapshot_available")
         else ("BYPASSED (--force)" if result.get("force") else "MISSING")
     )
+    age_s = result.get("ib_snapshot_age_s")
+    if age_s is not None:
+        snap_status += f" · {age_s:.0f}s old"
+    if result.get("ib_snapshot_stale"):
+        snap_status += " ⚠ STALE"
     lines.append(f"  ib snapshot: {snap_status}")
+
+    if result.get("ib_snapshot_stale"):
+        thr = result.get("ib_snapshot_stale_threshold_s", 30.0)
+        lines.append(
+            f"  ⚠ snapshot is older than {thr:.0f}s — pusher may be down. "
+            "Confirm pusher is alive on Windows before --commit."
+        )
 
     skipped = result.get("skipped_ib_held") or []
     if skipped:
