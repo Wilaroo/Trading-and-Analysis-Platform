@@ -186,6 +186,7 @@ export const PipelineHUDV5 = ({
               open={openStage === 'scan'} onClose={close} anchorRef={scanStageRef}
               title={scanCfg.title} versionTag={scanCfg.versionTag}
               headerExtras={scanCfg.headerExtras} columns={scanCfg.columns}
+              filters={scanCfg.filters}
               rows={scanRows || []} defaultSortKey={scanCfg.defaultSortKey}
               emptyText={scanCfg.emptyText} onRowClick={onJumpToTrade}
               testIdPrefix="scan-drilldown"
@@ -202,6 +203,7 @@ export const PipelineHUDV5 = ({
               open={openStage === 'eval'} onClose={close} anchorRef={evalStageRef}
               title={evalCfg.title} versionTag={evalCfg.versionTag}
               headerExtras={evalCfg.headerExtras} columns={evalCfg.columns}
+              filters={evalCfg.filters}
               rows={evalRows || []} defaultSortKey={evalCfg.defaultSortKey}
               emptyText={evalCfg.emptyText} onRowClick={onJumpToTrade}
               testIdPrefix="eval-drilldown"
@@ -218,6 +220,7 @@ export const PipelineHUDV5 = ({
               open={openStage === 'order'} onClose={close} anchorRef={orderStageRef}
               title={orderCfg.title} versionTag={orderCfg.versionTag}
               headerExtras={orderCfg.headerExtras} columns={orderCfg.columns}
+              filters={orderCfg.filters}
               rows={orderRows || []} defaultSortKey={orderCfg.defaultSortKey}
               emptyText={orderCfg.emptyText} onRowClick={onJumpToTrade}
               testIdPrefix="order-drilldown"
@@ -234,6 +237,7 @@ export const PipelineHUDV5 = ({
               open={openStage === 'manage'} onClose={close} anchorRef={manageStageRef}
               title={manageCfg.title} versionTag={manageCfg.versionTag}
               headerExtras={manageCfg.headerExtras} columns={manageCfg.columns}
+              filters={manageCfg.filters}
               rows={managePositions || []} defaultSortKey={manageCfg.defaultSortKey}
               emptyText={manageCfg.emptyText} onRowClick={onJumpToTrade}
               testIdPrefix="manage-drilldown"

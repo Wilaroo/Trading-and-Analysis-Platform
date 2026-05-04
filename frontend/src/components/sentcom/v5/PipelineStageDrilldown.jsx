@@ -47,10 +47,22 @@ export const PipelineStageDrilldown = ({
   widthClass = 'w-[640px]',
   testIdPrefix = 'pipeline-drilldown',
   footerHint,
+  // v19.31.10 — per-column filter chip groups. Each entry: {
+  //   key: data column to filter on (e.g. 'direction')
+  //   label: human label rendered before the chips
+  //   values: 'auto' (extract distinct from rows) | string[]
+  //   format: optional fn(v) => label rendered on chip
+  //   sort: optional fn(values) => values (pre-sort the chip order)
+  //   maxValues: optional cap on chip count (extra → '+N more' chip)
+  // }
+  filters = [],
 }) => {
   const panelRef = useRef(null);
   const [sortKey, setSortKey] = useState(defaultSortKey || (columns[0]?.sortKey ?? columns[0]?.key));
   const [sortDir, setSortDir] = useState(defaultSortDir);
+  // Active filters — { [filterKey]: Set(values) }. Empty / missing
+  // Set means "no filter applied for this column".
+  const [activeFilters, setActiveFilters] = useState({});
 
   useEffect(() => {
     if (!open) return;
@@ -72,9 +84,52 @@ export const PipelineStageDrilldown = ({
     };
   }, [open, onClose, anchorRef]);
 
+  // v19.31.10 — auto-extract distinct values for each filter group.
+  // Memoized off `rows` so toggling a chip doesn't re-flatten the list.
+  const filterGroups = useMemo(() => {
+    return (filters || []).map(f => {
+      let values;
+      if (f.values === 'auto' || !Array.isArray(f.values)) {
+        const seen = new Set();
+        for (const r of rows) {
+          const v = r?.[f.key];
+          if (v == null || v === '') continue;
+          seen.add(v);
+        }
+        values = Array.from(seen);
+      } else {
+        values = [...f.values];
+      }
+      // Stable sort: alpha for strings, numeric for numbers
+      values.sort((a, b) => {
+        if (typeof a === 'number' && typeof b === 'number') return a - b;
+        return String(a).localeCompare(String(b));
+      });
+      if (typeof f.sort === 'function') {
+        values = f.sort(values);
+      }
+      const cap = f.maxValues ?? 8;
+      const overflow = values.length > cap ? values.length - cap : 0;
+      return {
+        key: f.key,
+        label: f.label || f.key,
+        values: values.slice(0, cap),
+        overflow,
+        format: f.format || ((v) => String(v)),
+      };
+    });
+  }, [rows, filters]);
+
+  // Apply active filters (AND across columns, OR within a column).
+  const filteredRows = useMemo(() => {
+    const keys = Object.keys(activeFilters).filter(k => activeFilters[k] && activeFilters[k].size > 0);
+    if (keys.length === 0) return rows;
+    return rows.filter(r => keys.every(k => activeFilters[k].has(r?.[k])));
+  }, [rows, activeFilters]);
+
   const sortedRows = useMemo(() => {
-    if (!sortKey) return rows;
-    const arr = [...rows];
+    if (!sortKey) return filteredRows;
+    const arr = [...filteredRows];
     arr.sort((a, b) => {
       const av = a?.[sortKey];
       const bv = b?.[sortKey];
@@ -88,7 +143,21 @@ export const PipelineStageDrilldown = ({
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [rows, sortKey, sortDir]);
+  }, [filteredRows, sortKey, sortDir]);
+
+  const toggleFilter = (groupKey, value) => {
+    setActiveFilters(prev => {
+      const cur = prev[groupKey] ? new Set(prev[groupKey]) : new Set();
+      if (cur.has(value)) cur.delete(value);
+      else cur.add(value);
+      return { ...prev, [groupKey]: cur };
+    });
+  };
+
+  const clearAllFilters = () => setActiveFilters({});
+
+  const totalActive = Object.values(activeFilters)
+    .reduce((s, v) => s + (v?.size || 0), 0);
 
   const handleSort = (col) => {
     const key = col.sortKey ?? col.key;
@@ -115,7 +184,10 @@ export const PipelineStageDrilldown = ({
             {title}
           </span>
           <span data-testid={`${testIdPrefix}-count`} className="v5-mono text-sm text-zinc-100">
-            {rows.length}
+            {/* v19.31.10 — show filtered/total when a filter is active */}
+            {totalActive > 0 && filteredRows.length !== rows.length
+              ? `${filteredRows.length}/${rows.length}`
+              : rows.length}
           </span>
           {headerExtras}
         </div>
@@ -130,9 +202,68 @@ export const PipelineStageDrilldown = ({
         </button>
       </div>
 
+      {/* v19.31.10 — Filter chips. One row per group; click to toggle.
+          Hidden entirely if no filters configured OR no values to show
+          (e.g. an empty rows list). */}
+      {filterGroups.length > 0 && filterGroups.some(g => g.values.length > 0) && (
+        <div
+          data-testid={`${testIdPrefix}-filters`}
+          className="px-3 py-1.5 border-b border-zinc-800 bg-zinc-950/50"
+        >
+          {filterGroups.map(g => {
+            if (g.values.length === 0) return null;
+            const active = activeFilters[g.key] || new Set();
+            return (
+              <div
+                key={g.key}
+                data-testid={`${testIdPrefix}-filter-row-${g.key}`}
+                className="flex items-center gap-1 flex-wrap py-0.5"
+              >
+                <span className="text-[10px] uppercase tracking-wider text-zinc-600 mr-1 shrink-0">
+                  {g.label}
+                </span>
+                {g.values.map(v => {
+                  const on = active.has(v);
+                  return (
+                    <button
+                      key={String(v)}
+                      type="button"
+                      data-testid={`${testIdPrefix}-filter-${g.key}-${v}`}
+                      onClick={() => toggleFilter(g.key, v)}
+                      className={`px-1.5 py-0.5 text-[10px] rounded border transition-colors ${
+                        on
+                          ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+                          : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                      }`}
+                    >
+                      {g.format(v)}
+                    </button>
+                  );
+                })}
+                {g.overflow > 0 && (
+                  <span className="text-[10px] text-zinc-600 ml-1">+{g.overflow}</span>
+                )}
+              </div>
+            );
+          })}
+          {totalActive > 0 && (
+            <div className="flex items-center justify-end pt-0.5">
+              <button
+                type="button"
+                data-testid={`${testIdPrefix}-filters-clear`}
+                onClick={clearAllFilters}
+                className="text-[10px] text-zinc-500 hover:text-zinc-200 underline-offset-2 hover:underline"
+              >
+                clear filters ({totalActive})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {sortedRows.length === 0 ? (
         <div data-testid={`${testIdPrefix}-empty`} className="px-3 py-6 text-center text-[12px] text-zinc-500">
-          {emptyText}
+          {totalActive > 0 ? 'No matches for the selected filters.' : emptyText}
         </div>
       ) : (
         <div className="max-h-[320px] overflow-y-auto v5-scroll">

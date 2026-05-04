@@ -34,6 +34,7 @@ export const ClosedTodayDrilldown = ({
       versionTag={cfg.versionTag}
       headerExtras={cfg.headerExtras}
       columns={cfg.columns}
+      filters={cfg.filters}
       rows={closedToday}
       defaultSortKey={cfg.defaultSortKey}
       onRowClick={onJumpToTrade}

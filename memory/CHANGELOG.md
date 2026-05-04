@@ -2,6 +2,52 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-fourth commit, v19.31.10) — Filter chips on every Pipeline drill-down
+
+**Operator's "potential improvement" feedback after v19.31.9 landed all-stages-clickable + Day Tape.**
+
+### Behavior
+
+Every drill-down panel (SCAN, EVAL, ORDER, MANAGE, CLOSE) now has a row of toggleable filter chips above the table. Click a chip to narrow rows; chips combine AND across columns + OR within a column (e.g. "long" + "short" both selected = either). A "clear filters (N)" link appears when any chip is active. Header count flips from `47` to `12/47` while filtered. Empty state changes to "No matches for the selected filters." when nothing matches.
+
+### Per-stage filter sets
+
+- **SCAN**: Tier · Setup · Phase
+- **EVAL**: Tier · Setup · AI verdict (proceed/pass/reduce_size)
+- **ORDER**: Direction · Status · Order type
+- **MANAGE**: Direction · Setup · Source (bot/ib/partial/stale_bot) · Risk level
+- **CLOSE TODAY**: Direction · Setup · Close reason
+
+Chip values auto-extracted from the actual rows (no hardcoding) — only chips with at least one matching row render. `tier` and `status` use deterministic sort orders; everything else alpha. Default cap is 8 chips per group with `+N` overflow indicator (configurable per filter via `maxValues`).
+
+### Implementation
+
+- `PipelineStageDrilldown` accepts a new `filters: [{key, label, values: 'auto'|string[], format?, sort?, maxValues?}]` prop. Memoizes distinct value extraction so toggling a chip doesn't re-flatten.
+- `pipelineStageColumns.jsx` adds `filters` arrays to all 5 stage configs + helpers: `humanizeSetup`, `humanizeDir`, `sortTier`, `sortStatus`.
+- Filter pipeline: rows → filtered (AND across columns, OR within a column) → sorted. All in `useMemo` so re-renders stay cheap.
+- Empty-state message contextual ("No matches for the selected filters." vs the original "No data yet.").
+- Footer count flips to `filtered/total` when filters active.
+- All testids included: `${prefix}-filters`, `${prefix}-filter-row-${key}`, `${prefix}-filter-${key}-${value}`, `${prefix}-filters-clear` for testing/automation.
+
+### Tests
+
+All existing 88 v19.31 pytests still passing (backend untouched). ESLint clean on all modified frontend files. Frontend boot smoke screenshot clean. Filter logic is pure-frontend, validated through the existing component shell tests + visual inspection.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Click any Pipeline HUD tile → drill-down opens
+# Click filter chips above the table to narrow:
+#   SCAN/EVAL: filter by Tier or Setup or Phase/AI verdict
+#   ORDER:     filter by Status (pending vs filled vs rejected)
+#   MANAGE:    filter by Source (bot vs ib vs partial vs stale_bot)
+#   CLOSE:     filter by Close reason (target vs stop vs OCA-ext)
+# "clear filters (N)" link in the chip area resets all
+```
+
+
+
 ## 2026-05-04 (seventy-third commit, v19.31.9) — All Pipeline stages clickable + Day Tape diagnostics tab
 
 **Two coupled deliverables.** Operator wanted (a) every Pipeline HUD stage to be a drill-down (not just CLOSE TODAY), and (b) a multi-day "Day Tape" view with CSV export for end-of-week journaling.

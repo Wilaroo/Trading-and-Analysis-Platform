@@ -90,6 +90,39 @@ const rCell = (v) => {
   );
 };
 
+// ───── Filter helpers ──────────────────────────────────────────────
+
+const humanizeSetup = (s) => (s ? String(s).replace(/_/g, ' ').slice(0, 20) : '?');
+const humanizeDir = (d) => {
+  const s = String(d || '').toLowerCase();
+  if (s === 'long') return 'long';
+  if (s === 'short') return 'short';
+  return s || '?';
+};
+
+const TIER_ORDER = ['SMB-A', 'SMB-B', 'tier1', 'tier2', 'tier3', 'A', 'B', 'C'];
+const sortTier = (values) => {
+  const ranked = [];
+  const rest = [];
+  for (const v of values) {
+    if (TIER_ORDER.includes(v)) ranked.push(v);
+    else rest.push(v);
+  }
+  ranked.sort((a, b) => TIER_ORDER.indexOf(a) - TIER_ORDER.indexOf(b));
+  return [...ranked, ...rest];
+};
+
+const STATUS_ORDER = ['filled', 'partial', 'pending', 'submitted', 'rejected', 'cancelled', 'canceled'];
+const sortStatus = (values) =>
+  [...values].sort((a, b) => {
+    const ai = STATUS_ORDER.indexOf(String(a).toLowerCase());
+    const bi = STATUS_ORDER.indexOf(String(b).toLowerCase());
+    if (ai === -1 && bi === -1) return String(a).localeCompare(String(b));
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+
 // ───── CLOSE TODAY ──────────────────────────────────────────────────
 
 export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sortedRows }) => {
@@ -99,9 +132,15 @@ export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sorted
   const sumR = (sortedRows || []).reduce((s, r) => s + (Number(r.r_multiple) || 0), 0);
   return {
     title: 'Closed Today',
-    versionTag: 'v19.31.9',
+    versionTag: 'v19.31.10',
     defaultSortKey: 'closed_at',
     emptyText: 'No trades closed today yet.',
+    filters: [
+      { key: 'direction',    label: 'Dir',    values: 'auto', format: humanizeDir },
+      { key: 'setup_type',   label: 'Setup',  values: 'auto', format: humanizeSetup, maxValues: 6 },
+      { key: 'close_reason', label: 'Reason', values: 'auto',
+        format: (v) => REASON_HUMAN[v] || v || '?', maxValues: 6 },
+    ],
     headerExtras: (
       <>
         {winRate != null && (
@@ -150,9 +189,15 @@ export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sorted
 
 export const manageStageConfig = ({ totalUnrealized, sumR }) => ({
   title: 'Open Positions',
-  versionTag: 'v19.31.9',
+  versionTag: 'v19.31.10',
   defaultSortKey: 'pnl',
   emptyText: 'No open positions.',
+  filters: [
+    { key: 'direction',  label: 'Dir',    values: 'auto', format: humanizeDir },
+    { key: 'setup_type', label: 'Setup',  values: 'auto', format: humanizeSetup, maxValues: 6 },
+    { key: 'source',     label: 'Source', values: 'auto', format: (v) => v || '?' },
+    { key: 'risk_level', label: 'Risk',   values: 'auto', format: (v) => v || '?' },
+  ],
   headerExtras: (
     <>
       <span
@@ -205,9 +250,14 @@ const ORDER_STATUS_COLOR = {
 
 export const orderStageConfig = ({ filledCount, pendingCount }) => ({
   title: 'Orders Today',
-  versionTag: 'v19.31.9',
+  versionTag: 'v19.31.10',
   defaultSortKey: 'placed_at',
   emptyText: 'No orders placed today.',
+  filters: [
+    { key: 'direction',  label: 'Dir',    values: 'auto', format: humanizeDir },
+    { key: 'status',     label: 'Status', values: 'auto', sort: sortStatus },
+    { key: 'order_type', label: 'Type',   values: 'auto', format: (v) => v || '?' },
+  ],
   headerExtras: (
     <>
       <span className="v5-mono text-[11px] text-emerald-400">{filledCount} filled</span>
@@ -237,9 +287,15 @@ export const orderStageConfig = ({ filledCount, pendingCount }) => ({
 
 export const evalStageConfig = ({ avgGate, gatePassPct }) => ({
   title: 'Evaluations Today',
-  versionTag: 'v19.31.9',
+  versionTag: 'v19.31.10',
   defaultSortKey: 'gate_score',
   emptyText: 'No evaluations yet.',
+  filters: [
+    { key: 'tier',                    label: 'Tier',   values: 'auto', sort: sortTier },
+    { key: 'setup_type',              label: 'Setup',  values: 'auto', format: humanizeSetup, maxValues: 6 },
+    { key: 'combined_recommendation', label: 'AI',     values: 'auto',
+      format: (v) => String(v || '?').toLowerCase() },
+  ],
   headerExtras: (
     <>
       {avgGate != null && (
@@ -276,9 +332,14 @@ export const evalStageConfig = ({ avgGate, gatePassPct }) => ({
 
 export const scanStageConfig = ({ scanCount }) => ({
   title: 'Scanner Alerts Today',
-  versionTag: 'v19.31.9',
+  versionTag: 'v19.31.10',
   defaultSortKey: 'timestamp',
   emptyText: 'No scanner alerts yet.',
+  filters: [
+    { key: 'tier',       label: 'Tier',  values: 'auto', sort: sortTier },
+    { key: 'setup_type', label: 'Setup', values: 'auto', format: humanizeSetup, maxValues: 6 },
+    { key: 'phase',      label: 'Phase', values: 'auto', format: (v) => v || '?' },
+  ],
   headerExtras: (
     <span className="v5-mono text-[11px] text-zinc-500">{scanCount} hits</span>
   ),
