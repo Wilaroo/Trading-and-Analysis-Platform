@@ -316,6 +316,19 @@ export const SentComV5View = ({
         totalUnrealizedPnl={totalUnrealizedPnl}
         totalRealizedPnl={totalRealizedPnl}
         totalPnlToday={totalPnlToday}
+        closedToday={closedToday}
+        winsToday={winsToday}
+        lossesToday={lossesToday}
+        onJumpToTrade={(row) => {
+          // Reuse the existing focus-symbol bus other panels listen to.
+          if (row?.symbol) {
+            try {
+              window.dispatchEvent(new CustomEvent('sentcom:focus-symbol', {
+                detail: { symbol: row.symbol, source: 'closed-today-drilldown' },
+              }));
+            } catch (_) { /* no-op */ }
+          }
+        }}
         equity={equity}
         buyingPower={buyingPower}
         phase={phase}

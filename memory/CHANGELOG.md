@@ -2,6 +2,56 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-second commit, v19.31.8) — CLOSE TODAY drill-down panel
+
+**One-click access to the day's tape.** Operator's "potential improvement" feedback after v19.31.7 landed CLOSE TODAY counts and realized PnL on the dashboard.
+
+### Behavior
+
+Click the CLOSE TODAY tile in the V5 Pipeline HUD → a 640px-wide dropdown panel slides down anchored under the tile, showing a sortable table of every trade closed today. Click outside, click X, or press Esc to close.
+
+### Component
+
+New `frontend/src/components/sentcom/v5/ClosedTodayDrilldown.jsx` — pure presentational + local state for sort + open. Reads `closed_today` array from `/api/sentcom/positions` (already in payload from v19.31.7).
+
+**Header**: count, win-rate (W/L), total realized $, total R-multiple sum. All color-coded.
+
+**Table** (compact 11px monospace, ~320px max-h with scroll):
+- Sym (sortable)
+- Dir (L/S color-coded)
+- Sh
+- Entry / Exit (price)
+- $ (realized)
+- R (r-multiple)
+- Reason (humanized: "target", "stop", "trail", "OCA ext", "phantom", etc.)
+- Time (closed_at)
+
+Click any column header to sort (toggle asc/desc, 3rd click ignored). Click any row to fire `sentcom:focus-symbol` on the existing window event bus — focuses the symbol on the chart + scanner cards.
+
+Empty state: "No trades closed today yet." with no scary error text.
+
+### Wiring
+
+- `Stage` component in `PipelineHUDV5` now accepts `onClick` + `dataTestId` props. Becomes `role="button"` with keyboard support (Enter/Space) when clickable.
+- CLOSE TODAY tile wrapped in a `relative` container with the drill-down anchored `absolute right-0 top-full` underneath.
+- `SentComV5View` passes `closedToday` / `winsToday` / `lossesToday` + an `onJumpToTrade` handler that dispatches `window.dispatchEvent('sentcom:focus-symbol')`.
+
+### Tests
+
+ESLint clean on `ClosedTodayDrilldown.jsx`, `PipelineHUDV5.jsx`, `SentComV5View.jsx`. **79/79 v19.31 pytests** continue to pass (backend untouched). Frontend boot smoke screenshot clean — no errors, modal renders.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Click the CLOSE TODAY tile in the top HUD → drill-down panel opens
+# Sort by clicking any column header
+# Click a row to focus that symbol on the chart
+# Esc / click outside / X to close
+```
+
+
+
 ## 2026-05-04 (seventy-first commit, v19.31.7) — CLOSE TODAY tile + Realized PnL on the HUD
 
 **Two operator-flagged bugs after the v19.31.4–v19.31.6 deploy.** Both surfaced when the operator asked "did the bot actually take and close any trades today?" — answer was yes (LITE realizedPNL +$112.66, V realizedPNL −$751.78 visible in IB account snapshot) but the dashboard's CLOSE TODAY tile read 0 and the top-bar P&L showed only unrealized PnL.

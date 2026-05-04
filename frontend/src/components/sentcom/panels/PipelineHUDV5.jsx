@@ -15,6 +15,7 @@
  * without breaking any existing panels or styles.
  */
 import React from 'react';
+import { ClosedTodayDrilldown } from '../v5/ClosedTodayDrilldown';
 
 const stageColor = {
   scan:    { border: 'border-violet-900/60', bg: 'bg-violet-950/20', text: 'text-violet-400' },
@@ -24,12 +25,22 @@ const stageColor = {
   close:   { border: 'border-slate-700',     bg: 'bg-slate-900/20',  text: 'text-slate-400' },
 };
 
-const Stage = ({ stage, label, count, sub, accent }) => {
+const Stage = ({ stage, label, count, sub, accent, onClick, dataTestId }) => {
   const c = stageColor[stage];
+  const interactive = typeof onClick === 'function';
   return (
     <div
-      data-testid={`v5-pipeline-stage-${stage}`}
-      className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block`}
+      data-testid={dataTestId || `v5-pipeline-stage-${stage}`}
+      onClick={onClick}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick(e);
+        }
+      } : undefined}
+      className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block ${interactive ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-center justify-between gap-1.5">
         <span className={`text-[11px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
@@ -83,11 +94,18 @@ export const PipelineHUDV5 = ({
   totalUnrealizedPnl,
   totalRealizedPnl,
   totalPnlToday,
+  // v19.31.8 — drill-down props
+  closedToday,
+  winsToday,
+  lossesToday,
+  onJumpToTrade,
   equity,
   buyingPower,
   phase = '—',
   rightExtra = null,
 }) => {
+  const [closeDrilldownOpen, setCloseDrilldownOpen] = React.useState(false);
+  const closeStageRef = React.useRef(null);
   // 2026-05-04 v19.31.7 — operator asked for realized PnL alongside
   // unrealized. The single "P&L" tile now shows the day total
   // (realized + unrealized) with realized/unrealized split underneath.
@@ -136,7 +154,29 @@ export const PipelineHUDV5 = ({
           <span className="text-zinc-700 font-mono shrink-0">→</span>
           <Stage stage="manage" label="Manage"      count={manageCount} sub={manageSub} accent={manageAccent} />
           <span className="text-zinc-700 font-mono shrink-0">→</span>
-          <Stage stage="close"  label="Close today" count={closeCount}  sub={closeSub}  accent={closeAccent} />
+          {/* v19.31.8 — clickable CLOSE TODAY tile that drops a sortable
+              drilldown of every trade closed today. */}
+          <div ref={closeStageRef} className="flex-1 min-w-0 relative">
+            <Stage
+              stage="close"
+              label="Close today"
+              count={closeCount}
+              sub={closeSub}
+              accent={closeAccent}
+              dataTestId="v5-pipeline-stage-close"
+              onClick={() => setCloseDrilldownOpen(o => !o)}
+            />
+            <ClosedTodayDrilldown
+              open={closeDrilldownOpen}
+              onClose={() => setCloseDrilldownOpen(false)}
+              closedToday={closedToday}
+              totalRealized={totalRealizedPnl ?? 0}
+              winsToday={winsToday ?? 0}
+              lossesToday={lossesToday ?? 0}
+              anchorRef={closeStageRef}
+              onJumpToTrade={onJumpToTrade}
+            />
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-3 pl-3 border-l border-zinc-800 basis-2/5 min-w-0 shrink-0">
