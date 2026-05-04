@@ -2,6 +2,69 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-sixth commit, v19.31.12) — Recalc realized_pnl + sweep-time PnL claim + display sign-fix
+
+**Operator's Trade Forensics view exposed a real backend bug + a frontend display bug.** Both shipped together.
+
+### The bugs Trade Forensics surfaced
+
+1. **🔴 Bot's `realized_pnl` always $0 for OCA-closed trades.** Operator saw 11 closed trades all reporting `+$0.00` realized while IB had real realized PnL ($1560.78 on APH, $2069 on BKNG, $874 on CRCL, $112.66 on LITE, etc.). Root cause: both phantom-sweep paths (`v19.27` 0-share leftover + `v19.31` OCA-closed externally) marked trades CLOSED but never stamped `realized_pnl` from the IB snapshot.
+
+2. **🔴 Frontend display stripped negative signs.** APH IB realized was `−$1560.78` but rendered as `$1560.78` (looks like a winner!) because `Math.abs()` was used in the display formatter for both bot and IB realized chips.
+
+### Fix 1 — Going-forward: phantom sweeps now claim IB realized
+
+Both sweep paths in `position_manager.py` now:
+
+- Build a parallel `ib_pos_map_realized: dict[(symbol, dir)] -> realizedPNL` from the same pusher snapshot.
+- At sweep time, claim the IB realizedPNL onto `trade.realized_pnl` proportionally by share count (when multiple stacked trades exist for the same symbol+direction).
+- Only claim when bot's existing `realized_pnl` is 0 (don't double-count if scale-outs already accumulated).
+
+### Fix 2 — Retroactive: `POST /api/diagnostics/recalc-realized-pnl/{symbol}`
+
+Lets the operator backfill closed rows with `realized_pnl == 0`:
+
+- Pulls IB realizedPNL for the symbol from `ib_live_snapshot.current`.
+- Apportions across closed bot_trades in window by share count.
+- Writes back with `realized_pnl_recalc_source: "ib_snapshot_v19_31_12"` audit field.
+- **Idempotent**: running twice doesn't double-claim (only matches rows where `realized_pnl in [0, null, missing]`).
+- **Non-destructive**: never overwrites existing populated values.
+- Returns full `{rows_updated, rows_skipped, claimed, note}` audit trail.
+
+### Fix 3 — Frontend display sign
+
+Trade Forensics row's bot/IB/drift chips now use a `signed(n)` helper that returns `+$X.XX` or `−$X.XX` (with explicit minus glyph). No more `Math.abs()` swallowing negative signs. APH now correctly shows `IB: 0sh · realized −$1560.78`.
+
+### Fix 4 — `↻ Recalc` button per-row
+
+For every `unexplained_drift` row, an inline `↻ Recalc` button posts to the new endpoint, refreshes Trade Forensics, and shows a 8-second confirmation message inline (`"Claimed +$1560.78 across 1 row"` or `"All closed rows already have realized_pnl populated"`).
+
+### Tests
+
+`test_recalc_realized_pnl_v19_31_12.py` — 8 tests:
+- Claims IB realized → bot row when bot is zero (LITE-style).
+- Apportions correctly across multiple rows by share count.
+- Skips already-populated rows.
+- Idempotent across two runs (no double-claim).
+- "No IB activity" returns note instead of erroring.
+- Negative IB realized propagates correctly (loser trades).
+- Only touches `status=closed` rows (never opens).
+- Rejects empty symbol with 400.
+
+**111/111 v19.31 pytests passing across 12 suites.** ESLint clean. Endpoint smoke-tested live.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Diagnostics → Trade Forensics → today's "unexplained_drift" rows
+# Click "↻ Recalc" on each → bot's realized_pnl backfills from IB
+# Going forward, phantom sweeps stamp realized_pnl automatically
+# Display now shows real ± signs on bot/IB/drift PnL
+```
+
+
+
 ## 2026-05-04 (seventy-fifth commit, v19.31.11) — Trade Forensics: real vs phantom verdict per symbol
 
 **Operator's "what was real and what was phantom today + why the display discrepancies?" forensic ask.** New endpoint + Diagnostics sub-tab that joins all four sources of truth into a single per-symbol verdict.

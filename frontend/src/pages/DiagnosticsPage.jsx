@@ -1022,6 +1022,9 @@ const TradeForensicsView = () => {
   const [error, setError] = useState(null);
   const [verdictFilter, setVerdictFilter] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  // v19.31.12 — recalc button per row
+  const [recalcBusy, setRecalcBusy] = useState(null);
+  const [recalcMsg, setRecalcMsg] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1038,6 +1041,36 @@ const TradeForensicsView = () => {
   }, [days]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleRecalc = async (e, symbol) => {
+    e.stopPropagation();
+    setRecalcBusy(symbol);
+    setRecalcMsg(m => ({ ...m, [symbol]: null }));
+    try {
+      const r = await fetch(
+        `${BACKEND_URL}/api/diagnostics/recalc-realized-pnl/${encodeURIComponent(symbol)}?days=${days}`,
+        { method: 'POST' },
+      );
+      const j = await r.json();
+      if (!j.success) throw new Error('recalc failed');
+      const updatedCount = (j.rows_updated || []).length;
+      const claimed = j.claimed ?? 0;
+      const note = j.note;
+      setRecalcMsg(m => ({
+        ...m,
+        [symbol]: note
+          ? { ok: true, text: note }
+          : { ok: true, text: `Claimed ${claimed >= 0 ? '+' : ''}$${Math.abs(claimed).toFixed(2)} across ${updatedCount} row${updatedCount === 1 ? '' : 's'}` },
+      }));
+      // Refresh forensics to reflect new state
+      load();
+    } catch (err) {
+      setRecalcMsg(m => ({ ...m, [symbol]: { ok: false, text: String(err?.message || err) } }));
+    } finally {
+      setRecalcBusy(null);
+      setTimeout(() => setRecalcMsg(m => ({ ...m, [symbol]: null })), 8000);
+    }
+  };
 
   const symbols = data?.symbols || [];
   const summary = data?.summary || {};
@@ -1137,7 +1170,6 @@ const TradeForensicsView = () => {
             {sorted.map((row) => {
               const m = VERDICT_META[row.verdict] || VERDICT_META.clean;
               const isExpanded = expanded === row.symbol;
-              const driftClass = Math.abs(row.drift_usd || 0) > 5 ? 'text-rose-400' : 'text-zinc-500';
               return (
                 <div
                   key={row.symbol}
@@ -1157,34 +1189,61 @@ const TradeForensicsView = () => {
                     </span>
                     {/* Symbol */}
                     <span className="v5-mono font-bold text-sm text-zinc-100 w-16 shrink-0">{row.symbol}</span>
-                    {/* Bot ledger */}
-                    <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
-                      Bot: <span className="text-zinc-300">{row.bot.trade_count}t</span>
-                      {' '}({row.bot.open_count}o · {row.bot.closed_count}c){' '}
-                      <span className={(row.bot.total_realized_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                        {(row.bot.total_realized_pnl ?? 0) >= 0 ? '+' : ''}${Math.abs(row.bot.total_realized_pnl ?? 0).toFixed(2)}
-                      </span>
-                    </span>
-                    {/* IB ledger */}
-                    <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
-                      IB: <span className="text-zinc-300">{row.ib.current_position}sh</span>
-                      {' · realized '}
-                      <span className={(row.ib.realized_pnl_today ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                        {(row.ib.realized_pnl_today ?? 0) >= 0 ? '+' : ''}${Math.abs(row.ib.realized_pnl_today ?? 0).toFixed(2)}
-                      </span>
-                    </span>
-                    {/* Drift */}
-                    <span className={`text-[11px] v5-mono ${driftClass} w-24 shrink-0`}>
-                      Δ {(row.drift_usd ?? 0) >= 0 ? '+' : ''}${Math.abs(row.drift_usd ?? 0).toFixed(2)}
-                    </span>
+                    {/* Bot ledger — v19.31.12 fix: use signed sign() helper, not Math.abs() */}
+                    {(() => {
+                      const botPnl = Number(row.bot.total_realized_pnl) || 0;
+                      const ibPnl = Number(row.ib.realized_pnl_today) || 0;
+                      const drift = Number(row.drift_usd) || 0;
+                      const signed = (n) => `${n >= 0 ? '+' : '−'}$${Math.abs(n).toFixed(2)}`;
+                      const pnlColor = (n) => n >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                      const driftClass2 = Math.abs(drift) > 5 ? 'text-rose-400' : 'text-zinc-500';
+                      return (
+                        <>
+                          <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                            Bot: <span className="text-zinc-300">{row.bot.trade_count}t</span>
+                            {' '}({row.bot.open_count}o · {row.bot.closed_count}c){' '}
+                            <span className={pnlColor(botPnl)}>{signed(botPnl)}</span>
+                          </span>
+                          <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                            IB: <span className="text-zinc-300">{row.ib.current_position}sh</span>
+                            {' · realized '}
+                            <span className={pnlColor(ibPnl)}>{signed(ibPnl)}</span>
+                          </span>
+                          <span className={`text-[11px] v5-mono ${driftClass2} w-24 shrink-0`}>
+                            Δ {signed(drift)}
+                          </span>
+                        </>
+                      );
+                    })()}
                     {/* Explanation */}
                     <span className="text-[11px] text-zinc-400 flex-1 truncate" title={row.explanation}>
                       {row.explanation}
                     </span>
+                    {/* Recalc button — only shown for unexplained_drift rows */}
+                    {row.verdict === 'unexplained_drift' && (
+                      <button
+                        type="button"
+                        data-testid={`forensics-recalc-${row.symbol}`}
+                        onClick={(e) => handleRecalc(e, row.symbol)}
+                        disabled={recalcBusy === row.symbol}
+                        className="px-2 py-0.5 text-[10px] text-emerald-300 border border-emerald-900/60 rounded hover:bg-emerald-950/40 disabled:opacity-50 shrink-0"
+                        title="Recalc bot's realized_pnl from IB realizedPNL (apportions across closed rows by share count)"
+                      >
+                        {recalcBusy === row.symbol ? '…' : '↻ Recalc'}
+                      </button>
+                    )}
                     <span className="text-[10px] text-zinc-600 shrink-0">
                       {isExpanded ? '▼' : '▶'} timeline
                     </span>
                   </div>
+                  {recalcMsg[row.symbol] && (
+                    <div
+                      data-testid={`forensics-recalc-msg-${row.symbol}`}
+                      className={`px-4 pb-2 text-[10px] ${recalcMsg[row.symbol].ok ? 'text-emerald-300' : 'text-rose-300'}`}
+                    >
+                      {recalcMsg[row.symbol].text}
+                    </div>
+                  )}
 
                   {isExpanded && (
                     <div

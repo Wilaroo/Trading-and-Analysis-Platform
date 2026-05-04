@@ -55,13 +55,29 @@ class PositionManager:
         # layer remove it from `_open_trades` on the next cycle.
         try:
             ib_pos_map: dict = {}
+            # v19.31.12 — also collect IB realizedPNL per (symbol, direction)
+            # so the sweep paths can stamp realized_pnl onto the bot's
+            # closed rows. Without this every OCA-closed trade ended up
+            # at $0 realized → Trade Forensics flagged it as drift.
+            ib_pos_map_realized: dict = {}
             try:
                 from routers.ib import _pushed_ib_data, is_pusher_connected
                 if is_pusher_connected():
                     for _ip in (_pushed_ib_data.get("positions") or []):
                         _sym = (_ip.get("symbol") or "").upper()
                         _qty = float(_ip.get("position", 0) or 0)
-                        if not _sym or abs(_qty) < 0.001:
+                        if not _sym:
+                            continue
+                        # Capture realizedPNL even when position == 0
+                        # (those are exactly the OCA-closed cases we
+                        # want to credit back to the bot's closed row).
+                        _real = float(_ip.get("realizedPNL") or _ip.get("realized_pnl") or 0)
+                        if _real:
+                            # Index by both directions — at sweep time
+                            # we look up by the bot's tracked direction.
+                            ib_pos_map_realized[(_sym, "long")] = _real
+                            ib_pos_map_realized[(_sym, "short")] = _real
+                        if abs(_qty) < 0.001:
                             continue
                         _key = (_sym, "long" if _qty > 0 else "short")
                         ib_pos_map[_key] = abs(_qty)
@@ -201,8 +217,48 @@ class PositionManager:
                                 except Exception:
                                     age_ok_e = True
                             if age_ok_e:
+                                # v19.31.12 — claim IB realizedPNL onto
+                                # the bot's record before marking closed.
+                                # Pre-fix: trade.realized_pnl stayed at $0
+                                # so Trade Forensics flagged every OCA-
+                                # closed trade as "unexplained_drift". Now
+                                # we apportion the symbol's IB realizedPNL
+                                # across all open bot_trades for that
+                                # (symbol, direction) by share count.
+                                try:
+                                    ib_realized_for_sym = float(
+                                        ib_pos_map_realized.get(
+                                            ((_trade.symbol or "").upper(), _dir),
+                                            0,
+                                        ) or 0
+                                    )
+                                except Exception:
+                                    ib_realized_for_sym = 0.0
+                                # Apportion: this trade's share of the
+                                # symbol's open bot shares × IB realized.
+                                # Keeps the math correct even when the
+                                # bot has multiple stacked scaled-down
+                                # trades for the same symbol.
+                                bot_open_shares_same_dir = sum(
+                                    int(getattr(t2, "remaining_shares", 0) or 0)
+                                    for t2 in bot._open_trades.values()
+                                    if (t2.symbol or "").upper() == (_trade.symbol or "").upper()
+                                    and (t2.direction.value if hasattr(t2.direction, "value") else str(t2.direction)).lower() == _dir
+                                )
+                                share_fraction = (
+                                    int(_rem_external) / bot_open_shares_same_dir
+                                    if bot_open_shares_same_dir > 0 else 1.0
+                                )
+                                claimed_pnl = round(ib_realized_for_sym * share_fraction, 2)
+
                                 _trade.status = _TS.CLOSED
                                 _trade.close_reason = "oca_closed_externally_v19_31"
+                                # v19.31.12 — only claim if non-zero AND
+                                # bot's existing realized_pnl is zero
+                                # (don't double-count if scale-outs already
+                                # recorded gains).
+                                if claimed_pnl != 0 and not getattr(_trade, "realized_pnl", 0):
+                                    _trade.realized_pnl = claimed_pnl
                                 from datetime import datetime as _dt_e3, timezone as _tz_e3
                                 if not getattr(_trade, "closed_at", None):
                                     _trade.closed_at = _dt_e3.now(_tz_e3.utc).isoformat()
@@ -279,6 +335,28 @@ class PositionManager:
                                 pass
                         if ib_pos_map.get((_sym_u, _dir), 0) > 0:
                             continue  # IB still has shares
+                        # v19.31.12 — same fix as the v19.31 branch above:
+                        # claim the IB realizedPNL onto the bot's row
+                        # before marking closed. The 0sh-leftover case
+                        # also frequently has bot.realized_pnl == $0
+                        # because the scale-out path didn't accumulate
+                        # for some legacy trades, and IB's realized is
+                        # the only ground truth we have.
+                        try:
+                            ib_realized_for_sym_v27 = float(
+                                ib_pos_map_realized.get((_sym_u, _dir), 0) or 0
+                            )
+                        except Exception:
+                            ib_realized_for_sym_v27 = 0.0
+                        # 0sh-leftover means no apportion needed —
+                        # this trade is the only one being closed by
+                        # this branch. Just claim whatever's there
+                        # (only if bot's realized_pnl is still 0).
+                        if (
+                            ib_realized_for_sym_v27 != 0
+                            and not getattr(_trade, "realized_pnl", 0)
+                        ):
+                            _trade.realized_pnl = round(ib_realized_for_sym_v27, 2)
                         _trade.status = _TS.CLOSED
                         _trade.close_reason = (
                             getattr(_trade, "close_reason", None)
