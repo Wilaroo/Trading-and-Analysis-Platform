@@ -78,6 +78,12 @@ def main() -> int:
         "--db-name",
         default=os.environ.get("DB_NAME", "tradecommand_db"),
     )
+    ap.add_argument(
+        "--status",
+        default="closed,open",
+        help="Comma-separated statuses to include (default: closed,open). "
+        "Use 'all' to include rejected/vetoed/pending evaluation rows.",
+    )
     args = ap.parse_args()
 
     start_utc, end_utc = parse_et_date(args.date)
@@ -94,7 +100,7 @@ def main() -> int:
     start_iso = start_utc.isoformat()
     end_iso = end_utc.isoformat()
 
-    query = {
+    time_window = {
         "$or": [
             {"executed_at": {"$gte": start_iso, "$lt": end_iso}},
             {"closed_at": {"$gte": start_iso, "$lt": end_iso}},
@@ -105,6 +111,14 @@ def main() -> int:
         ]
     }
 
+    if args.status.strip().lower() == "all":
+        query = time_window
+        print("Status filter: ALL (includes rejected/vetoed/pending)", file=sys.stderr)
+    else:
+        statuses = [s.strip() for s in args.status.split(",") if s.strip()]
+        query = {"$and": [time_window, {"status": {"$in": statuses}}]}
+        print(f"Status filter: {statuses}", file=sys.stderr)
+
     proj = {
         "_id": 0,
         "trade_id": 1,
@@ -113,6 +127,7 @@ def main() -> int:
         "shares": 1,
         "entry_price": 1,
         "exit_price": 1,
+        "fill_price": 1,
         "stop_price": 1,
         "target_prices": 1,
         "executed_at": 1,
