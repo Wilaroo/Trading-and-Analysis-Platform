@@ -86,9 +86,19 @@ def main() -> int:
     client = MongoClient(args.mongo_url)
     db = client[args.db_name]
 
-    # Bot rows where any of executed_at, closed_at, or created_at falls in window.
+    # bot_trades stores executed_at/closed_at/created_at as ISO 8601 strings,
+    # not Mongo ISODate. ISO 8601 strings sort lexicographically when normalized
+    # to the same offset, so we issue both a string-range query (matches the
+    # current production schema) AND a datetime-range query (in case a future
+    # schema migration moves to native ISODate). The union is the correct set.
+    start_iso = start_utc.isoformat()
+    end_iso = end_utc.isoformat()
+
     query = {
         "$or": [
+            {"executed_at": {"$gte": start_iso, "$lt": end_iso}},
+            {"closed_at": {"$gte": start_iso, "$lt": end_iso}},
+            {"created_at": {"$gte": start_iso, "$lt": end_iso}},
             {"executed_at": {"$gte": start_utc, "$lt": end_utc}},
             {"closed_at": {"$gte": start_utc, "$lt": end_utc}},
             {"created_at": {"$gte": start_utc, "$lt": end_utc}},
