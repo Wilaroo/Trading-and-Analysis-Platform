@@ -1176,3 +1176,286 @@ async def retrain_model_from_scorecard(request: ScorecardRetrainRequest) -> Dict
         "bar_size": bar_size,
         "message": f"Retrain queued for {target}. Poll /api/jobs/{job['job_id']} for progress.",
     }
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v19.32 (2026-05-04) — Chart Cache Warmer
+# ═══════════════════════════════════════════════════════════════════
+#
+# Operator's "cold chart load is 400ms even though the cache is fast"
+# pain-point. The fix isn't faster cold compute — `/chart` does correct
+# work — it's making sure the operator's NEXT click finds a warm cache.
+#
+# Strategy: when the scanner produces a top-N watchlist, the frontend
+# fires this endpoint with `{symbols, timeframes}`. Backend computes
+# each (symbol, tf) chart payload concurrently using the same code
+# path as `GET /chart`, populates `chart_response_cache`, and returns
+# a thin summary `{warmed, skipped, failed, ms}`. Operator's click on
+# any of those symbols is then a <50ms cache hit.
+#
+# Concurrency is bounded (default 4 workers) so we don't hammer Mongo
+# / pusher RPC under load. Per-cell timeout protects the whole batch
+# from a single slow symbol.
+
+from fastapi import Body
+from pydantic import field_validator
+import asyncio as _asyncio_warm
+
+
+class ChartWarmRequest(BaseModel):
+    """Request shape for `POST /chart/warm`. All fields except `symbols`
+    are optional and have sensible defaults that match the V5 frontend's
+    typical chart load."""
+    symbols: List[str] = Field(..., min_length=1, max_length=32)
+    timeframes: List[str] = Field(default=["5min"], max_length=4)
+    days: int = Field(default=5, ge=1, le=365)
+    session: str = Field(default="rth_plus_premarket")
+    max_concurrent: int = Field(default=4, ge=1, le=8)
+    per_cell_timeout_s: float = Field(default=8.0, ge=1.0, le=30.0)
+
+    @field_validator("symbols")
+    @classmethod
+    def _upper_dedupe_symbols(cls, v):
+        seen = []
+        for s in v:
+            u = (s or "").strip().upper()
+            if u and u not in seen:
+                seen.append(u)
+        if not seen:
+            raise ValueError("symbols must contain at least one non-empty value")
+        return seen
+
+    @field_validator("timeframes")
+    @classmethod
+    def _normalize_timeframes(cls, v):
+        out = []
+        for t in v:
+            tl = (t or "").strip().lower()
+            if tl in _SUPPORTED_TFS and tl not in out:
+                out.append(tl)
+        if not out:
+            raise ValueError(f"timeframes must include at least one of {sorted(_SUPPORTED_TFS)}")
+        return out
+
+
+@router.post("/chart/warm")
+async def warm_chart_cache(req: ChartWarmRequest = Body(...)) -> Dict[str, Any]:
+    """v19.32 — Pre-compute `chart_response_cache` entries for the given
+    symbol × timeframe matrix. Returns once all cells settle (success or
+    timeout), so the caller can fire-and-forget without leaking.
+
+    Idempotent: cells that already have a fresh cache entry are skipped
+    (counted as `skipped`). Cells that miss are computed and cached, so
+    the operator's NEXT chart click for any of these symbols is <50ms.
+    """
+    started_ms = datetime.now(timezone.utc)
+
+    if _hybrid_data_service is None:
+        raise HTTPException(status_code=503, detail="hybrid_data_service not initialised")
+
+    from services.chart_response_cache import (
+        get_chart_response_cache, make_cache_key,
+    )
+    cache = get_chart_response_cache(db=_db)
+
+    cells: List[Dict[str, Any]] = [
+        {"symbol": s, "timeframe": tf}
+        for s in req.symbols
+        for tf in req.timeframes
+    ]
+
+    sem = _asyncio_warm.Semaphore(req.max_concurrent)
+
+    async def _warm_cell(cell: Dict[str, Any]) -> Dict[str, Any]:
+        sym = cell["symbol"]
+        tf = cell["timeframe"]
+        async with sem:
+            try:
+                # Cache HIT short-circuit so we don't re-run the chain.
+                key = make_cache_key(sym, tf, req.session, req.days)
+                if (await cache.get(key)) is not None:
+                    return {"symbol": sym, "timeframe": tf, "status": "skipped",
+                            "reason": "already_warm"}
+                # Reuse the public endpoint logic so the warmed payload
+                # is byte-identical to a future `GET /chart` response.
+                # We call it with a fresh task to honor the per-cell timeout.
+                async def _run():
+                    return await get_chart_bars(
+                        symbol=sym, timeframe=tf, days=req.days,
+                        session=req.session, rth_only=None,
+                    )
+                payload = await _asyncio_warm.wait_for(
+                    _run(), timeout=req.per_cell_timeout_s,
+                )
+                if not payload or not payload.get("success"):
+                    return {"symbol": sym, "timeframe": tf, "status": "failed",
+                            "reason": (payload or {}).get("error", "compute_failed")}
+                return {
+                    "symbol": sym, "timeframe": tf, "status": "warmed",
+                    "bar_count": int(payload.get("bar_count") or 0),
+                }
+            except _asyncio_warm.TimeoutError:
+                return {"symbol": sym, "timeframe": tf, "status": "failed",
+                        "reason": f"timeout_{req.per_cell_timeout_s:.0f}s"}
+            except Exception as e:
+                logger.debug(f"warm cell {sym}/{tf} failed: {e}")
+                return {"symbol": sym, "timeframe": tf, "status": "failed",
+                        "reason": str(e)[:120]}
+
+    results = await _asyncio_warm.gather(*[_warm_cell(c) for c in cells])
+
+    summary = {
+        "warmed": sum(1 for r in results if r["status"] == "warmed"),
+        "skipped": sum(1 for r in results if r["status"] == "skipped"),
+        "failed": sum(1 for r in results if r["status"] == "failed"),
+        "total": len(results),
+    }
+    elapsed_ms = (datetime.now(timezone.utc) - started_ms).total_seconds() * 1000.0
+
+    return {
+        "success": True,
+        "summary": summary,
+        "elapsed_ms": round(elapsed_ms, 1),
+        "results": results,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v19.33 (2026-05-04) — Chart Tail WebSocket
+# ═══════════════════════════════════════════════════════════════════
+#
+# Replaces the 5s polling loop on the focused chart with a server-pushed
+# tail stream. Latency drops from ~5s avg → ~2s ceiling (the server tick
+# interval), and the client doesn't pay round-trip overhead for empty
+# "no new bars" responses. Falls back transparently to polling when the
+# WS connection drops or the feature is disabled by env-var.
+#
+# Wire format
+# -----------
+# Client connects to `/api/sentcom/ws/chart-tail?symbol=AAPL&timeframe=5min&since=0`.
+# Server sends JSON frames in two shapes:
+#
+#   1. Initial / on-tick "tail" frames — same payload as the REST
+#      `/chart-tail` endpoint, so the frontend merge code is identical.
+#      Only emitted when there's actually new data (server filters out
+#      empty ticks to save bandwidth).
+#
+#   2. "ping" frames every 15s when there are no new bars. Lets the
+#      frontend confirm the connection is alive without re-firing
+#      lightweight-charts updates.
+#
+# Server tick interval defaults to 2s during RTH, 30s otherwise.
+# REALIZED_PNL_AUTOSYNC_INTERVAL_S-style toggle: env var
+# `CHART_WS_TICK_S` overrides the RTH interval.
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+
+@router.websocket("/ws/chart-tail")
+async def chart_tail_ws(websocket: WebSocket):
+    """v19.33 — WebSocket-pushed chart tail. Drop-in for the 5s polling
+    loop on `/chart-tail`. The frontend should attempt the WS first and
+    fall back to polling if the connection fails.
+
+    Query params (parsed from URL):
+      symbol     (str, required)  — e.g. "AAPL"
+      timeframe  (str, required)  — one of _SUPPORTED_TFS
+      since      (int, default 0) — unix-seconds of last bar client has
+      session    (str, default rth_plus_premarket)
+
+    Frame shape: identical to the REST `/chart-tail` response, but only
+    sent when `bar_count > 0`. Heartbeats `{type:'ping', t:...}` go out
+    every 15s during silent windows.
+    """
+    import os as _os3
+    import json as _json3
+
+    # Feature-flag escape hatch. If a future regression surfaces, the
+    # operator can flip this off without a redeploy. Default is ON.
+    if _os3.environ.get("CHART_WS_ENABLED", "true").strip().lower() in ("0", "false", "no", "off"):
+        await websocket.close(code=1008, reason="chart_ws_disabled")
+        return
+
+    qp = websocket.query_params
+    symbol = (qp.get("symbol") or "").strip().upper()
+    timeframe = (qp.get("timeframe") or "5min").strip().lower()
+    try:
+        since = int(qp.get("since") or 0)
+    except Exception:
+        since = 0
+    session = (qp.get("session") or "rth_plus_premarket").strip().lower()
+
+    if not symbol or timeframe not in _SUPPORTED_TFS:
+        await websocket.close(code=1008, reason="bad_args")
+        return
+
+    await websocket.accept()
+    logger.info(f"[v19.33 CHART-WS] open sym={symbol} tf={timeframe} since={since}")
+
+    last_sent_time = since
+    last_heartbeat = datetime.now(timezone.utc)
+
+    # RTH-aware tick interval.
+    def _tick_seconds():
+        try:
+            return float(_os3.environ.get("CHART_WS_TICK_S") or 0) or _default_tick_s()
+        except Exception:
+            return _default_tick_s()
+
+    def _default_tick_s():
+        from routers.ib_collector_router import _rth_throttle_decision
+        try:
+            policy = _rth_throttle_decision()
+            return 2.0 if policy.get("rth_active") else 30.0
+        except Exception:
+            return 5.0
+
+    try:
+        while True:
+            tick_s = _tick_seconds()
+
+            # Pull a tail payload by reusing the REST handler's logic —
+            # cache hits are virtually free, and on miss the upstream
+            # `/chart` endpoint handles the heavy lift.
+            try:
+                tail = await get_chart_tail(
+                    symbol=symbol, timeframe=timeframe, since=last_sent_time,
+                    session=session, rth_only=None, cap=50,
+                )
+            except Exception as e:
+                # Don't kill the WS for a transient compute error — log
+                # and retry on the next tick.
+                logger.debug(f"[v19.33 CHART-WS] tail fetch failed sym={symbol}: {e}")
+                tail = None
+
+            now = datetime.now(timezone.utc)
+            if tail and tail.get("success") and int(tail.get("bar_count") or 0) > 0:
+                # Stamp the WS-source flag so the frontend can show a
+                # "live" pip in the chart header without a separate API.
+                tail = dict(tail)
+                tail["from_ws"] = True
+                tail["server_t"] = now.isoformat()
+                await websocket.send_json(tail)
+                last_sent_time = int(tail.get("latest_time") or last_sent_time)
+                last_heartbeat = now
+            else:
+                # Heartbeat every 15s of silence.
+                if (now - last_heartbeat).total_seconds() >= 15.0:
+                    await websocket.send_json({
+                        "type": "ping",
+                        "t": now.isoformat(),
+                        "symbol": symbol,
+                    })
+                    last_heartbeat = now
+
+            await _asyncio_warm.sleep(tick_s)
+
+    except WebSocketDisconnect:
+        logger.info(f"[v19.33 CHART-WS] disconnect sym={symbol} tf={timeframe}")
+    except Exception as e:
+        logger.warning(f"[v19.33 CHART-WS] error sym={symbol}: {e}")
+        try:
+            await websocket.close(code=1011, reason="server_error")
+        except Exception:
+            pass

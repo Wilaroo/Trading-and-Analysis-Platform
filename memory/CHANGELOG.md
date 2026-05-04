@@ -2,6 +2,80 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-ninth + eightieth commits, v19.32 + v19.33) — Cold-chart pre-warm + Chart Tail WebSocket
+
+**Operator request: "lets do both of these now. its RTH" — shipped during the live RTH window with feature flags so neither breaks the running pipeline if a regression surfaces.**
+
+### v19.32 — Chart Cache Warmer
+
+The cold-chart load profile is dominated by 4 stages: Mongo bars query → pusher RPC live-merge → indicator math (vwap, ema 20/50/200, BB) → session filter / dedup / sort. The existing `chart_response_cache` makes the SECOND request <50ms but the FIRST is still ~400ms. Fix: pre-warm the cache for the symbols the operator is most likely to click next.
+
+- New **`POST /api/sentcom/chart/warm`** endpoint:
+  - Body: `{symbols: [str], timeframes: [str]=["5min"], days: int=5, session: str="rth_plus_premarket", max_concurrent: int=4, per_cell_timeout_s: float=8.0}`.
+  - Symbols normalized to uppercase + de-duped; invalid timeframes filtered against `_SUPPORTED_TFS`.
+  - Returns once all cells settle: `{success, summary: {warmed, skipped, failed, total}, elapsed_ms, results: [{symbol, timeframe, status, reason?, bar_count?}]}`.
+  - Cells with an existing cache entry are `skipped/already_warm` (no recompute).
+  - Concurrency is bounded by `max_concurrent` semaphore; per-cell timeout protects the batch from a single slow symbol.
+- Frontend integration in `ScannerCardsV5.jsx`:
+  - Whenever `cards.slice(0, 12)` symbol set changes (1500ms debounce), fire-and-forget POST.
+  - `lastWarmedRef` short-circuits identical sets.
+- Operator's NEXT chart click on any of those symbols is now a `<50ms` cache hit.
+
+### v19.33 — Chart Tail WebSocket (Tier 3)
+
+The 5s polling on `/chart-tail` adds latency floor of ~5s and round-trip overhead even when no new bars exist. Replaced with a WebSocket that pushes only when there's actually new data.
+
+- New **`WS /api/sentcom/ws/chart-tail?symbol=X&timeframe=Y&since=Z&session=...`** endpoint:
+  - Reuses the existing `get_chart_tail` REST handler internally so the wire payload is byte-identical to the polling path (frontend merge code unchanged).
+  - Server tick interval defaults to **2s during RTH**, **30s outside** (driven by `_rth_throttle_decision()` from v19.31.14).
+  - Heartbeat `{type:'ping', t:..., symbol:...}` every 15s of silence to keep aggressive proxies happy.
+  - Stamps `from_ws: true` + `server_t` so the frontend can render a "live" pip without a separate API.
+  - Feature-flagged: `CHART_WS_ENABLED=false` returns close-code 1008 immediately.
+  - `CHART_WS_TICK_S` env var overrides the default tick interval.
+- New **`useChartTailWs` hook** in `frontend/src/hooks/useChartTailWs.js`:
+  - Auto-reconnect with exponential backoff (1s → 2s → 4s).
+  - **3-failure auto-fallback**: after 3 consecutive failures, sets `status='fallback'` and stops retrying so the polling loop takes over without a tight reconnect spiral.
+  - Resume marker (`sinceRef`) survives reconnects so the server doesn't re-ship bars the client already merged.
+  - Silent on render-loop callback changes (refs prevent connection thrash).
+- `ChartPanel.jsx` integration:
+  - Polling loop pauses while `wsStatus ∈ {connecting, connected}`.
+  - New **chart-ws-status pip** in chart header: cyan "live" (WS-pushed), amber "…" (connecting), slate "poll" / "poll-fb" (polling fallback).
+  - Hover tooltip explains current mode.
+
+### Verified (live, fork environment)
+
+- `POST /api/sentcom/chart/warm` returns the right summary shape with diagnostic per-cell `failed/no_bars` reasons (no bars in this fork — would `warmed` on real DGX).
+- `GET → 101 Switching Protocols` on the WS endpoint via `curl --include`. Heartbeat pings confirmed firing at 15s cadence.
+- Frontend webpack compiled with only pre-existing warnings.
+
+### Tests (18 new in `test_v19_32_v19_33_chart_warmer_ws.py`)
+
+- Warmer request validation: uppercase + dedupe, empty rejection, timeframe filter, all-invalid rejection.
+- Warmer behavior: skip on cache hit (no recompute), warmed accounting on miss, per-cell timeout, 503 when service unset, bounded concurrency (peak ≤ max_concurrent).
+- WS structural: route registered, env-flag disable path, RTH-aware tick interval, timeframe validation, 15s heartbeat.
+- Frontend assertions: hook exists with auto-fallback + exponential backoff, ChartPanel uses hook + pauses polling when connected, ScannerCardsV5 fires warmer on card list change.
+
+**183/183 v19.31.x + v19.23.x + v19.32 + v19.33 pytests passing.**
+
+### Files touched
+
+Backend:
+- `routers/sentcom_chart.py` (new `ChartWarmRequest` model + `POST /chart/warm` + `WS /ws/chart-tail`)
+
+Frontend:
+- new `hooks/useChartTailWs.js`
+- `components/sentcom/panels/ChartPanel.jsx` (hook integration + pip + polling-pause)
+- `components/sentcom/v5/ScannerCardsV5.jsx` (1500ms debounced fire-and-forget warmer call on top-12 changes)
+
+### Operator-facing defaults
+
+- `CHART_WS_ENABLED=true` (set to `false` to instantly disable WS path; clients fall back to polling).
+- `CHART_WS_TICK_S=` (unset → 2s RTH / 30s off-hours).
+- Warmer concurrency: `max_concurrent=4`, `per_cell_timeout_s=8s`.
+- Top-12 visible scanner symbols pre-warmed on every list change (1.5s debounce).
+
+---
+
 ## 2026-05-04 (seventy-eighth commit, v19.31.14) — P1 bundle: Pre-Market banner + Backfill copy fix + Stale-snapshot warning + RTH-aware throttle + Funnel drift_warning + Vote-breakdown panel + Boot-reconcile pill
 
 **Six P1 operator-feedback items shipped together. All low-risk, high-visibility wins; no behavioral changes to live trading paths.**

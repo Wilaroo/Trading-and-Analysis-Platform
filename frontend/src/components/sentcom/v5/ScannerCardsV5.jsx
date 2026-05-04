@@ -446,6 +446,34 @@ export const ScannerCardsV5 = ({
     [setups, alerts, positions, messages]
   );
 
+  // v19.32 (2026-05-04) — Chart cache warmer.
+  // Fire-and-forget POST to /api/sentcom/chart/warm with the top-12
+  // visible scanner symbols whenever the card list changes (debounced
+  // 1500ms so a flurry of mid-scan updates doesn't hammer the endpoint).
+  // The operator's NEXT click on any of these symbols then finds a warm
+  // chart_response_cache entry and lands in <50ms instead of 400ms.
+  const lastWarmedRef = useRef('');
+  useEffect(() => {
+    const symbols = cards.slice(0, 12).map(c => c.symbol).filter(Boolean);
+    if (symbols.length === 0) return undefined;
+    const key = symbols.sort().join(',');
+    // Skip duplicate warmups for the same set.
+    if (lastWarmedRef.current === key) return undefined;
+    const timer = setTimeout(() => {
+      lastWarmedRef.current = key;
+      const url = `${process.env.REACT_APP_BACKEND_URL || ''}/api/sentcom/chart/warm`;
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbols, timeframes: ['5min'], days: 5,
+          max_concurrent: 4, per_cell_timeout_s: 8,
+        }),
+      }).catch(() => { /* silent: warmer is opportunistic */ });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [cards]);
+
   // Wave 3 (#1) — operator-toggleable grouping by Market Setup.
   // Persisted to localStorage so the operator's choice survives reload.
   // Defaults OFF so existing layout is preserved on first encounter

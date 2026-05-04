@@ -20,6 +20,9 @@ import {
 import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
 import { VolumeProfileOverlay } from './VolumeProfileOverlay';
 import { ChartThoughtBubblesOverlay } from './ChartThoughtBubblesOverlay';
+// v19.33 (2026-05-04) — WebSocket-pushed chart tail. Replaces the 5s
+// polling loop while connected; auto-falls-back to polling on failure.
+import { useChartTailWs } from '../../../hooks/useChartTailWs';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
 const TIMEFRAMES = [
@@ -377,6 +380,10 @@ export const ChartPanel = ({
   // full series. Drops the auto-refresh cost from ~5,000 bars / 30s to
   // ~1-3 bars / 5s. Auto-pauses when the tab is hidden or outside RTH so
   // it doesn't burn cycles when the operator isn't watching. ──────────
+  // v19.33 (2026-05-04): the same merge logic is now also called from
+  // the `useChartTailWs` hook, so server-pushed updates get processed
+  // through one code path. The polling loop below stays as a fallback
+  // for browsers / proxies that can't hold the WS open.
   const isRthEt = useCallback(() => {
     try {
       // ET local hours/minutes via toLocaleString trick (DST-safe).
@@ -390,6 +397,52 @@ export const ChartPanel = ({
     } catch (_) {
       return false;
     }
+  }, []);
+
+  /** v19.33 — Shared payload merger. Called from both the polling loop
+   *  and the WebSocket onmessage handler. Returns the new latest_time
+   *  (server-stamped or computed from the bars list) for marker
+   *  bookkeeping by the caller. */
+  const applyTailPayload = useCallback((resp) => {
+    if (!resp || resp.success === false) return null;
+    const newBars = Array.isArray(resp.bars) ? resp.bars : [];
+    if (newBars.length === 0) {
+      setLastUpdated(Date.now());
+      return null;
+    }
+    setBars(prev => {
+      const merged = [...prev];
+      for (const nb of newBars) {
+        const t = Number(nb.time);
+        if (merged.length > 0 && Number(merged[merged.length - 1].time) === t) {
+          merged[merged.length - 1] = nb;
+        } else {
+          merged.push(nb);
+        }
+      }
+      return merged;
+    });
+    if (resp.indicators && typeof resp.indicators === 'object') {
+      setIndicators(prev => {
+        const next = { ...prev };
+        for (const [key, points] of Object.entries(resp.indicators)) {
+          if (!Array.isArray(points) || points.length === 0) continue;
+          const existing = Array.isArray(next[key]) ? next[key] : [];
+          const tailTimes = new Set(points.map(p => Number(p.time)));
+          const cleaned = existing.filter(p => !tailTimes.has(Number(p.time)));
+          next[key] = [...cleaned, ...points];
+        }
+        return next;
+      });
+    }
+    if (Array.isArray(resp.markers) && resp.markers.length > 0) {
+      setMarkers(prev => {
+        const newTimes = new Set(resp.markers.map(m => Number(m.time)));
+        return [...prev.filter(m => !newTimes.has(Number(m.time))), ...resp.markers];
+      });
+    }
+    setLastUpdated(Date.now());
+    return resp.latest_time != null ? Number(resp.latest_time) : null;
   }, []);
 
   const fetchTail = useCallback(async () => {
@@ -410,64 +463,40 @@ export const ChartPanel = ({
         `/api/sentcom/chart-tail?symbol=${encodeURIComponent(symbol)}` +
         `&timeframe=${encodeURIComponent(active.value)}&since=${latestTime}`
       );
-      if (!resp || resp.success === false) return;
-      const newBars = Array.isArray(resp.bars) ? resp.bars : [];
-      if (newBars.length === 0) {
-        setLastUpdated(Date.now());
-        return;
-      }
-      // Merge new bars onto state. lightweight-charts handles update()
-      // via the dedicated effect below; we just keep React state in sync.
-      setBars(prev => {
-        // De-dupe in case the tail's first bar overlaps the last bar
-        // we already have (matching `time`). Last wins (freshest).
-        const merged = [...prev];
-        for (const nb of newBars) {
-          const t = Number(nb.time);
-          if (merged.length > 0 && Number(merged[merged.length - 1].time) === t) {
-            merged[merged.length - 1] = nb;
-          } else {
-            merged.push(nb);
-          }
-        }
-        return merged;
-      });
-      // Splice tail-indicator points onto each indicator series.
-      if (resp.indicators && typeof resp.indicators === 'object') {
-        setIndicators(prev => {
-          const next = { ...prev };
-          for (const [key, points] of Object.entries(resp.indicators)) {
-            if (!Array.isArray(points) || points.length === 0) continue;
-            const existing = Array.isArray(next[key]) ? next[key] : [];
-            // Drop overlapping last bar to prevent duplicate-time warnings.
-            const tailTimes = new Set(points.map(p => Number(p.time)));
-            const cleaned = existing.filter(p => !tailTimes.has(Number(p.time)));
-            next[key] = [...cleaned, ...points];
-          }
-          return next;
-        });
-      }
-      // Append new markers if any.
-      if (Array.isArray(resp.markers) && resp.markers.length > 0) {
-        setMarkers(prev => {
-          const newTimes = new Set(resp.markers.map(m => Number(m.time)));
-          return [...prev.filter(m => !newTimes.has(Number(m.time))), ...resp.markers];
-        });
-      }
-      setLastUpdated(Date.now());
+      applyTailPayload(resp);
     } catch (err) {
       // Silent — the next full fetchBars on next remount/symbol-switch
       // will recover. Don't surface tail-poll errors to the user.
     }
-  }, [symbol, active, bars]);
+  }, [symbol, active, bars, applyTailPayload]);
+
+  // v19.33 — WebSocket-pushed tail. Server filters silent ticks so
+  // bandwidth is minimal. Hook returns `status` ∈ {idle, connecting,
+  // connected, disconnected, fallback}. Polling loop below skips
+  // ticks while `wsStatus === 'connected'` to avoid double-merging.
+  const latestBarTime = bars.length > 0
+    ? Number(bars[bars.length - 1]?.time || 0)
+    : 0;
+  const wsEnabled = !!symbol && active.value !== '1day';
+  const { status: wsStatus } = useChartTailWs({
+    symbol,
+    timeframe: active.value,
+    since: latestBarTime,
+    enabled: wsEnabled,
+    onTail: applyTailPayload,
+  });
 
   // Smart-polling loop: 5s tail-poll during RTH while the tab is visible
   // AND we already have cold-load bars for this symbol. Outside RTH it
   // backs off to a single 30s poll so end-of-day extended-hours ticks
   // still trickle in. autoRefreshMs=0 disables polling entirely.
+  // v19.33 — When `wsStatus === 'connected'`, the polling loop is paused
+  // because the WS is already pushing updates. If WS fails (status flips
+  // to `disconnected` or `fallback`), this loop kicks back in.
   useEffect(() => {
     if (!autoRefreshMs) return undefined;
     if (active.value === '1day') return undefined;
+    if (wsStatus === 'connected' || wsStatus === 'connecting') return undefined;
 
     let cancelled = false;
     let timerId = null;
@@ -487,7 +516,7 @@ export const ChartPanel = ({
       cancelled = true;
       if (timerId) clearTimeout(timerId);
     };
-  }, [autoRefreshMs, fetchTail, isRthEt, active.value]);
+  }, [autoRefreshMs, fetchTail, isRthEt, active.value, wsStatus]);
 
   // Push data into the series whenever bars change
   useEffect(() => {
@@ -932,6 +961,43 @@ export const ChartPanel = ({
           {lastUpdated && !loading && (
             <span className="text-[12px] text-zinc-600 truncate">
               · updated {fmtET12Sec(lastUpdated)} ET
+            </span>
+          )}
+          {/* v19.33 — Connection mode pip. `connected` (cyan) = WS-pushed
+              live bars; `disconnected` / `fallback` (slate) = REST polling. */}
+          {wsEnabled && (
+            <span
+              data-testid="chart-ws-status"
+              data-status={wsStatus}
+              title={
+                wsStatus === 'connected'
+                  ? 'Live bars via WebSocket (~2s tick)'
+                  : wsStatus === 'connecting'
+                  ? 'Connecting to WebSocket…'
+                  : wsStatus === 'fallback'
+                  ? 'WebSocket failed 3x — using REST polling'
+                  : 'REST polling (5s during RTH)'
+              }
+              className={`inline-flex items-center gap-1 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-mono ${
+                wsStatus === 'connected'
+                  ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800'
+                  : wsStatus === 'connecting'
+                  ? 'bg-amber-950/40 text-amber-300/80 border-amber-900/60'
+                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`inline-block w-1.5 h-1.5 rounded-full ${
+                  wsStatus === 'connected' ? 'bg-cyan-400 animate-pulse' :
+                  wsStatus === 'connecting' ? 'bg-amber-400' :
+                  'bg-zinc-600'
+                }`}
+              />
+              {wsStatus === 'connected' ? 'live' :
+               wsStatus === 'connecting' ? '…' :
+               wsStatus === 'fallback' ? 'poll-fb' :
+               'poll'}
             </span>
           )}
         </div>
