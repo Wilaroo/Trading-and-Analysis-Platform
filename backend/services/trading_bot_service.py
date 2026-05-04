@@ -2178,6 +2178,137 @@ class TradingBotService:
                 f"[v19.31.13 PNL-AUTOSYNC] failed to schedule (non-fatal): {e}"
             )
 
+        # ─── v19.34 (2026-05-04) — Mid-bar tick stop-eval lifecycle ──
+        # Bot's `_open_trades` dict is the source of truth. Every N
+        # seconds we walk it and:
+        #   • spawn a tick-bus subscriber task for every newly-opened
+        #     trade (one task per (trade_id, symbol)) that runs the
+        #     mid-bar stop check on each fresh quote.
+        #   • cancel + clean up tasks whose trade_id is no longer in
+        #     _open_trades (the trade was closed/swept).
+        #
+        # Wire-up is decoupled from individual insertion sites — there
+        # are 8+ places that put into `_open_trades` (alert exec, recon-
+        # ciler, lazy-reconcile, persistence load, bot_persistence load,
+        # etc.) and instrumenting all of them would be brittle. Reaping
+        # by diff every 2s is cheap and self-healing.
+        #
+        # Feature-flag: MID_BAR_TICK_EVAL_ENABLED=false (default OFF).
+        # Even with the flag ON the manage-loop's bar-close stop check
+        # still runs as the safety net; mid-bar is purely additive.
+        self._midbar_tick_subs: Dict[str, asyncio.Task] = {}
+
+        async def _midbar_tick_lifecycle_loop():
+            import os as _os3
+            disabled = (
+                _os3.environ.get("MID_BAR_TICK_EVAL_ENABLED", "false")
+                .strip().lower() in ("0", "false", "no", "off")
+            )
+            if disabled:
+                logger.info(
+                    "[v19.34 MID-BAR TICK] disabled by env "
+                    "(MID_BAR_TICK_EVAL_ENABLED!=true)"
+                )
+                return
+            try:
+                from services.quote_tick_bus import get_quote_tick_bus
+            except Exception as e:
+                logger.warning(f"[v19.34 MID-BAR TICK] bus import failed: {e}")
+                return
+            bus = get_quote_tick_bus()
+            poll_s = float(_os3.environ.get("MID_BAR_TICK_RECONCILE_S", "2.0") or 2.0)
+            await asyncio.sleep(5)  # let the bot finish its initial state restore
+
+            async def _subscriber(trade_id: str, symbol: str):
+                """One task per open trade. Pulls ticks, runs mid-bar
+                stop eval, exits when the trade is no longer open."""
+                from services.position_manager import PositionManager
+                pm: PositionManager = self._position_manager
+                q, sym_u = bus.subscribe(symbol, queue_size=8)
+                try:
+                    while self._running:
+                        try:
+                            tick = await asyncio.wait_for(q.get(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            # Heartbeat — check the trade is still open
+                            # so we exit promptly when it closes between
+                            # ticks (e.g. EOD close, manual close).
+                            if trade_id not in self._open_trades:
+                                break
+                            continue
+                        trade = self._open_trades.get(trade_id)
+                        if trade is None:
+                            break
+                        if getattr(trade, "status", None) and \
+                                trade.status.value != "open":
+                            break
+                        # Run the per-trade stop eval. Its own try/except
+                        # swallows errors so this loop never dies.
+                        await pm.evaluate_single_trade_against_quote(
+                            trade, self, tick,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning(
+                        f"[v19.34 MID-BAR TICK] subscriber {trade_id} "
+                        f"sym={symbol} crashed: {e}"
+                    )
+                finally:
+                    bus.unsubscribe(sym_u, q)
+
+            while self._running:
+                try:
+                    open_ids = set(self._open_trades.keys())
+                    sub_ids = set(self._midbar_tick_subs.keys())
+                    # Spawn subscribers for newly-opened trades.
+                    for tid in open_ids - sub_ids:
+                        try:
+                            trade = self._open_trades[tid]
+                            symbol = trade.symbol
+                            t = asyncio.create_task(_subscriber(tid, symbol))
+                            self._midbar_tick_subs[tid] = t
+                            logger.info(
+                                f"[v19.34 MID-BAR TICK] +sub trade_id={tid} "
+                                f"sym={symbol}"
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                f"[v19.34 MID-BAR TICK] failed to spawn sub "
+                                f"for {tid}: {e}"
+                            )
+                    # Cancel subscribers for trades no longer open.
+                    for tid in sub_ids - open_ids:
+                        t = self._midbar_tick_subs.pop(tid, None)
+                        if t is not None and not t.done():
+                            t.cancel()
+                            try:
+                                await t
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception:
+                                pass
+                            logger.info(
+                                f"[v19.34 MID-BAR TICK] -sub trade_id={tid}"
+                            )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"[v19.34 MID-BAR TICK] reconcile failed: {e}")
+                try:
+                    await asyncio.sleep(poll_s)
+                except asyncio.CancelledError:
+                    raise
+
+        try:
+            self._midbar_tick_lifecycle_task = asyncio.create_task(
+                _midbar_tick_lifecycle_loop()
+            )
+        except Exception as e:
+            logger.warning(
+                f"[v19.34 MID-BAR TICK] failed to schedule (non-fatal): {e}"
+            )
+
         # Persist state
         await self._save_state()
     
@@ -2200,6 +2331,29 @@ class TradingBotService:
                 pass
             except Exception:
                 pass
+        # v19.34 — cancel the mid-bar tick lifecycle loop + all per-trade
+        # subscriber tasks so they don't leak across hot-reloads.
+        lt = getattr(self, "_midbar_tick_lifecycle_task", None)
+        if lt is not None:
+            lt.cancel()
+            try:
+                await lt
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        midbar_subs = getattr(self, "_midbar_tick_subs", {}) or {}
+        for tid, t in list(midbar_subs.items()):
+            if t is not None and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+        if isinstance(midbar_subs, dict):
+            midbar_subs.clear()
         logger.info("Trading bot stopped")
         
         # Persist state

@@ -4,42 +4,65 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.32 + v19.33)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.34)
 
-### 🎯 Just shipped 2026-05-04 v19.32 + v19.33 — see CHANGELOG (seventy-ninth + eightieth commits)
-**Cold-chart pre-warm + Chart Tail WebSocket. Both feature-flagged for safety; rolled out during live RTH.**
+### 🎯 Just shipped 2026-05-04 v19.34 — see CHANGELOG (eighty-first commit)
+**L1 tick bus + mid-bar stop eval. Three phases. Bus + bridge always on; manage-loop consumer defaulted OFF for explicit operator opt-in.**
 
-- ✅ **v19.32 — Chart Cache Warmer** — `POST /api/sentcom/chart/warm` pre-computes `chart_response_cache` for top-12 visible scanner symbols (1.5s debounce). Operator's NEXT chart click is <50ms.
-- ✅ **v19.33 — Chart Tail WebSocket** — `WS /api/sentcom/ws/chart-tail` pushes bar updates at 2s RTH-tick / 30s off-hours. Auto-reconnect + 3-failure auto-fallback to polling. Feature-flagged via `CHART_WS_ENABLED`.
-- ✅ **chart-ws-status pip** in chart header: cyan "live" / amber "…" / slate "poll" / "poll-fb".
-- ✅ Verified live: `HTTP 101 Switching Protocols` on the WS endpoint, heartbeat pings firing at 15s cadence.
-- ✅ **183/183 v19.31.x + v19.23.x + v19.32 + v19.33 pytests passing.**
+- ✅ **Phase 1 — `services/quote_tick_bus.py`** — in-memory pub/sub with latest-N drop, per-subscriber `asyncio.Queue(8)`, drop counters, `bus.stream()` async-generator helper.
+- ✅ **Phase 2 — Pusher → bus bridge** — `routers/ib.py:receive_pushed_ib_data` publishes every quote update. New `GET /api/ib/quote-tick-bus/health` for monitoring.
+- ✅ **Phase 3 — Mid-bar stop eval** — `PositionManager.evaluate_single_trade_against_quote` mirrors bid/ask-aware stop-trigger logic but per-trade per-tick (~50ms cadence). Lifecycle reaper in `TradingBotService.start()` walks `_open_trades` every 2s and reconciles subscribers. Close reason stamped `stop_loss_mid_bar_v19_34`. Defaulted OFF via `MID_BAR_TICK_EVAL_ENABLED`.
+- ✅ **Operator playbook** — `memory/runbooks/midbar_tick_eval_activation.md` with pre-flight checklist (30min bus health on RTH), activation steps, verification, rollback (single env-var flip), and red-flag monitoring.
+- ✅ **208/208 v19.31.x + v19.23.x + v19.32 + v19.33 + v19.34 pytests passing.**
 
-### 🔴 P0 — Top of next session
-- **Verify v19.31.13, v19.31.14, v19.32, v19.33 during next RTH** (operator):
-  1. (v19.31.13) AccountModeBadge correctness on paper vs live accounts.
-  2. (v19.31.13) Realized PnL auto-syncs within 30s without operator clicks.
-  3. (v19.31.13) Diagnostics → Shadow Decisions tab loads cleanly.
-  4. (v19.31.13) PAPER/LIVE chips render on Open Positions / Day Tape / Forensics.
-  5. (v19.31.14) Pre-Market banner appears 7:00-9:30 ET in scanner panel.
-  6. (v19.31.14) `/api/ib-collector/throttle-policy` returns `max_concurrent_workers=1` during RTH.
-  7. (v19.31.14) BootReconcilePill appears in HUD after backend restart, fades after 10 min.
-  8. (v19.31.14) Module Vote Breakdown panel renders below Module Scorecard.
-  9. (v19.31.14) Funnel `⚠ Shadow drift` chip appears when shadow ≠ trades.
-  10. (v19.32) Chart click on a recently-visible scanner symbol lands in <50ms (was ~400ms cold). `chart_response_cache` shows pre-warmed entries.
-  11. (v19.33) Chart header shows cyan **"live"** pip when on a focused intraday chart during RTH. New bars appear within 2s of close (was 5s polling).
-  12. (v19.33) **Test the auto-fallback**: temporarily set `CHART_WS_ENABLED=false` and confirm chart switches to "poll" pip + still updates via REST.
+### 🔴 P0 — Top of next session (operator-driven activation path)
+
+**Step 1 (today, RTH window) — Validate bus health:**
+1. `curl ${BACKEND_URL}/api/ib/quote-tick-bus/health` — confirm `enabled=true`, `publish_total > 0` and growing, `drop_total ≈ 0`, `active_symbols=0` (no consumers yet).
+2. Re-check after 30min of RTH. Drop rate should still be 0.
+
+**Step 2 (after Step 1 passes) — Flip Phase 3 ON:**
+1. `echo "MID_BAR_TICK_EVAL_ENABLED=true" >> /app/backend/.env && sudo supervisorctl restart backend`.
+2. Within 5s of an open trade, look for `[v19.34 MID-BAR TICK] +sub trade_id=...` in logs.
+3. Health endpoint should now show `active_symbols ≥ #(open trades)`.
+4. On any stop-hit during the session, look for `[v19.34 MID-BAR STOP]` warning + a `mid_bar_v19_34` close reason in Day Tape / Forensics.
+
+**Step 3 — Verification of saved latency:**
+- Compare Day Tape `mid_bar_v19_34` rows vs equivalent bar-close stops on prior days. Mid-bar fires should land within ~0-2s of the trigger crossing; bar-close fires were typically 5-30s.
+
+**ROLLBACK if anything goes wrong:**
+- `sed -i 's/MID_BAR_TICK_EVAL_ENABLED=true/MID_BAR_TICK_EVAL_ENABLED=false/' /app/backend/.env && sudo supervisorctl restart backend`. Bot reverts to v19.33 behavior immediately.
+
+**ALSO verify existing v19.31.13 + v19.31.14 + v19.32 + v19.33 features** (12-point checklist preserved below).
+
+### 🔴 P0 — Verification carry-over from prior sessions
+
+- (v19.31.13) AccountModeBadge correctness on paper vs live accounts.
+- (v19.31.13) Realized PnL auto-syncs within 30s without operator clicks.
+- (v19.31.13) Diagnostics → Shadow Decisions tab loads cleanly.
+- (v19.31.13) PAPER/LIVE chips render on Open Positions / Day Tape / Forensics.
+- (v19.31.14) Pre-Market banner appears 7:00-9:30 ET in scanner panel.
+- (v19.31.14) `/api/ib-collector/throttle-policy` returns `max_concurrent_workers=1` during RTH.
+- (v19.31.14) BootReconcilePill appears in HUD after backend restart, fades after 10 min.
+- (v19.31.14) Module Vote Breakdown panel renders below Module Scorecard.
+- (v19.31.14) Funnel `⚠ Shadow drift` chip appears when shadow ≠ trades.
+- (v19.32) Chart click on a recently-visible scanner symbol lands in <50ms (was ~400ms cold).
+- (v19.33) Chart header shows cyan **"live"** pip when on a focused intraday chart during RTH.
+- (v19.33) Auto-fallback test: temporarily set `CHART_WS_ENABLED=false` → confirm chart switches to "poll" pip + still updates via REST.
 
 ### 🟡 P1 (operator-facing improvements, carried forward)
 - `.bat` health screen probes pusher actually (carry-over).
 - Pusher auto-restart on Windows (carry-over).
 - Shadow-vs-Real gap drilldown (carry-over).
 - Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
-- **Pusher honors `max_concurrent_workers`** — current Windows pusher reads `/api/ib-collector/throttle-policy` and parks N-1 of its 4 workers. Server-side `limit` cap helps but doesn't actually *idle the workers* — they still poll IB Gateway.
+- **Pusher honors `max_concurrent_workers`** — current Windows pusher reads `/api/ib-collector/throttle-policy` and parks N-1 of its 4 workers.
 
-### 🟢 P2 / P3
-- **v19.32 evolution**: predictive warmer that pre-fetches the chart for the symbol an alert is about to fire on (using AI council confidence as the trigger).
-- **v19.33 evolution**: WS pushes per-tick L1 quote updates, not just per-bar updates. Latency would drop another order of magnitude (~50ms ceiling) but needs server-side dedup tuning to prevent firehose effects.
+### 🟢 P2 / P3 (future evolution paths now unlocked by v19.34)
+- **Sub-bar trailing stops** — once mid-bar stop eval is proven safe, extend to per-tick trailing recalc. Needs careful smoothing to avoid noise-driven exits.
+- **Mid-bar entry eval** — currently entries wait for bar-close to avoid wicks. Could selectively front-run entries on high-conviction signals using the same tick bus.
+- **L1 → L2 escalation** — for actively-evaluated symbols, request L2 depth via the tick bus to spot stop-runs before they fire.
+- v19.32 evolution — predictive warmer that pre-fetches the chart for the symbol an alert is about to fire on.
+- v19.33 evolution — WS pushes per-tick L1 quote updates, not just per-bar updates. Latency floor would drop to ~50ms but needs server-side dedup tuning.
 - Setup-landscape EOD self-grading tracker.
 - Mean-reversion metrics service (per-symbol Hurst exponent + Ornstein-Uhlenbeck half-life).
 - Liquidity-aware trail in `stop_manager.py`.

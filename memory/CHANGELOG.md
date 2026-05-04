@@ -2,6 +2,79 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (eighty-first commit, v19.34) — L1 Tick Bus + Mid-Bar Stop Eval
+
+**Operator request: ship the predictive-tick-fed manage-loop during this RTH window. Three phases, all feature-flagged with hard guards, manage-loop consumer defaulted OFF for explicit operator opt-in.**
+
+### Phase 1 — `services/quote_tick_bus.py` (in-memory L1 pub/sub)
+
+- New `QuoteTickBus` singleton: `defaultdict[symbol, set[asyncio.Queue]]` keyed by uppercase symbol.
+- **Latest-N drop policy** — bounded `asyncio.Queue(maxsize=8)` per subscriber. When full, oldest tick is popped and freshest replaces it. Tick streams are stateless so dropping older queued ticks is correct: only the freshest quote matters for stop eval.
+- Per-symbol drop counters; process-global publish/drop totals.
+- `subscribe(symbol, queue_size=8)` returns `(queue, normalized_symbol)`.
+- `unsubscribe(symbol, queue)` returns True/False; auto-cleans the symbol slot when last subscriber leaves.
+- Async-generator helper `bus.stream(symbol)` for `async for tick in bus.stream("AAPL")` ergonomics.
+- Feature-flag `QUOTE_TICK_BUS_ENABLED=true` (default ON; `false` makes publish/subscribe no-ops).
+
+### Phase 2 — Pusher → bus bridge
+
+- Hook into `routers/ib.py:receive_pushed_ib_data`: after the existing in-memory `_pushed_ib_data["quotes"].update(request.quotes)` line, also `bus.publish_quotes(request.quotes)`.
+- Wrapped in try/except so a bus blip can NEVER break the push hot path.
+- Always safe because the bus is a no-op when nobody's subscribed.
+- New `GET /api/ib/quote-tick-bus/health` — returns `{enabled, publish_total, drop_total, drop_rate_pct, active_symbols, total_subscribers, per_symbol: [{symbol, subscribers, publishes, drops, last_publish_age_s}]}`. Operator monitors this for ~30 minutes during RTH before flipping Phase 3 ON.
+
+### Phase 3 — Mid-bar stop eval (manage-loop consumer)
+
+- New `PositionManager.evaluate_single_trade_against_quote(trade, bot, quote)` — single-trade stop trigger check on a single tick. Mirrors the bid/ask-aware logic in `update_open_positions` but operates on ONE trade with ONE quote. Returns close reason on fire, None on no-action.
+- **Defensive contract:** any exception (malformed tick, executor down, etc.) is caught and logged. Subscriber loop never dies; bar-close eval still runs as the safety net.
+- New lifecycle reaper in `TradingBotService.start()`: every 2s walks `_open_trades`, spawns a per-trade subscriber task for newly-opened trades, cancels tasks for closed trades. Self-healing — reconciles automatically across the 8+ insertion sites for `_open_trades` (alert exec, position_reconciler, lazy-reconcile, persistence load, etc.).
+- `bot.stop()` cancels the lifecycle task + all live subscriber tasks so they don't leak across hot-reloads.
+- `close_reason` is stamped `stop_loss_mid_bar_v19_34` (or `stop_loss_<mode>_mid_bar_v19_34` for trailing stops) so Day Tape / Forensics can filter mid-bar fires from bar-close fires for journaling and AI training.
+
+### Operator-facing defaults
+
+- `QUOTE_TICK_BUS_ENABLED=true` — bus on by default (no I/O cost when nobody subscribes).
+- `MID_BAR_TICK_EVAL_ENABLED=false` — **manage-loop consumer defaulted OFF.** Phase 3 is dormant until operator opts in.
+- `MID_BAR_TICK_RECONCILE_S=2.0` — lifecycle reaper cadence (smaller = newer trades get subscribers faster).
+
+### Operator playbook
+
+`/app/memory/runbooks/midbar_tick_eval_activation.md` — pre-flight checklist (bus health for 30min during RTH), activation steps, verification (subscriber spawn logs + `mid_bar_v19_34` close-reason stamping), rollback (single env-var flip), and monitoring red flags.
+
+### Architecture notes
+
+- Out-of-scope intentionally: frontend tick rendering (would need RAF-throttling), mid-bar entry eval (entries still wait for bar-close to avoid wicks), per-tick trailing-stop recompute (too noisy; keep at bar-close cadence).
+- The chart WebSocket (v19.33) and the manage-loop now read from the SAME upstream tick source but are independent consumers — neither competes for frame queue, neither slows the other.
+
+### Tests
+
+`tests/test_v19_34_quote_tick_bus_midbar_stop.py` — 25 tests:
+- Bus pub/sub semantics, uppercase normalization, subscriber isolation, multi-subscriber fanout.
+- Latest-N drop policy + drop counter accounting.
+- Feature-flag (`QUOTE_TICK_BUS_ENABLED=false` → no-op).
+- `publish_quotes()` batch helper.
+- Health snapshot shape contract.
+- Async-generator `stream()` helper.
+- Pusher → bus bridge structural assertion.
+- Health endpoint registered.
+- Mid-bar stop eval: LONG bid below stop fires close, LONG bid above no-op, SHORT ask above stop fires close, SHORT ask below no-op, last-fallback when bid/ask absent, no stop_price no-op, status-not-open no-op, close failure returns None (not raise), exception swallowed (subscriber survives), trailing-stop precedence over original stop.
+- Lifecycle reaper structural: wired in start, cancelled in stop, defaulted OFF.
+
+**208/208 v19.31.x + v19.23.x + v19.32 + v19.33 + v19.34 pytests passing.**
+
+### Files touched
+
+Backend:
+- new `services/quote_tick_bus.py`
+- `routers/ib.py` (publish hook in pusher intake + new `/quote-tick-bus/health` endpoint)
+- `services/position_manager.py` (new `evaluate_single_trade_against_quote` method)
+- `services/trading_bot_service.py` (lifecycle reaper task in `start()`, cleanup in `stop()`)
+
+Docs:
+- new `memory/runbooks/midbar_tick_eval_activation.md`
+
+---
+
 ## 2026-05-04 (seventy-ninth + eightieth commits, v19.32 + v19.33) — Cold-chart pre-warm + Chart Tail WebSocket
 
 **Operator request: "lets do both of these now. its RTH" — shipped during the live RTH window with feature flags so neither breaks the running pipeline if a regression surfaces.**

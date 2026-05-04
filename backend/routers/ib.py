@@ -491,6 +491,22 @@ async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response)
         # Merge quotes (in-memory, fast).
         if request.quotes:
             _pushed_ib_data["quotes"].update(request.quotes)
+
+            # v19.34 (2026-05-04) — Publish to the in-memory L1 quote
+            # tick bus so the manage-loop's mid-bar stop-eval (Phase 3)
+            # can react within ~50ms instead of waiting for the next
+            # `update_open_positions` cycle. Phase 1+2 of v19.34 ship
+            # the bus + monitoring; Phase 3 (subscribers) is gated by
+            # `MID_BAR_TICK_EVAL_ENABLED` so flipping the consumer ON
+            # is a single-env-var operation. Publishing here is always
+            # safe because the bus is a no-op when nobody's subscribed.
+            try:
+                from services.quote_tick_bus import get_quote_tick_bus
+                get_quote_tick_bus().publish_quotes(request.quotes)
+            except Exception as _bus_exc:
+                # Never break the push hot path on bus errors.
+                logger.debug(f"quote_tick_bus publish skipped: {_bus_exc}")
+
             # 2026-04-28: feed live ticks into the bar persister so we
             # build 1m/5m/15m/1h OHLCV bars in real-time and upsert them
             # into ib_historical_data on bar-close. v19.30.1: now offloaded
@@ -6308,3 +6324,38 @@ async def get_mode_status():
         },
         "queue": queue_stats
     }
+
+
+
+# ─── v19.34 (2026-05-04) — Quote Tick Bus monitoring ──────────────
+
+
+@router.get("/quote-tick-bus/health")
+async def get_quote_tick_bus_health():
+    """v19.34 — In-memory L1 quote tick bus monitoring snapshot.
+
+    Returns subscriber counts + publish/drop counters per symbol so
+    the operator can confirm the bus is healthy before flipping
+    `MID_BAR_TICK_EVAL_ENABLED=true` to wire it into the manage-loop.
+
+    Healthy looks like:
+      enabled: true
+      publish_total: 50000+ during RTH (one per pusher push × ~40 symbols)
+      drop_total: 0  (or <1% of publish_total)
+      active_symbols: 0 if nobody's subscribed (Phase 3 OFF), else
+                      = #open trades when Phase 3 is ON
+
+    Unhealthy looks like:
+      drop_rate_pct: > 5%   → consumer can't keep up; investigate
+                              `update_single_position_against_quote`
+                              latency in `position_manager.py`
+      publish_total: 0      → pusher isn't pushing OR the publish hook
+                              is failing silently
+    """
+    try:
+        from services.quote_tick_bus import get_quote_tick_bus
+        bus = get_quote_tick_bus()
+        return {"success": True, **bus.health()}
+    except Exception as e:
+        logger.warning(f"quote-tick-bus health failed: {e}")
+        return {"success": False, "error": str(e)}

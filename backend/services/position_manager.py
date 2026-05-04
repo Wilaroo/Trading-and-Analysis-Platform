@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Dict, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.trading_bot_service import BotTrade, TradingBotService
@@ -640,6 +640,92 @@ class PositionManager:
 
             except Exception as e:
                 logger.exception(f"Error updating position {trade_id}: {type(e).__name__}: {e}")
+
+
+    # ─── v19.34 (2026-05-04) — Mid-bar tick stop-eval ─────────────────
+    async def evaluate_single_trade_against_quote(
+        self, trade: 'BotTrade', bot: 'TradingBotService',
+        quote: Dict,
+    ) -> Optional[str]:
+        """v19.34 — Re-evaluate a single trade's stop trigger against a
+        fresh L1 tick. Called by the per-trade quote_tick_bus subscriber
+        (see `_subscribe_trade_to_tick_bus` below). Mirrors the stop
+        logic in `update_open_positions` but operates on ONE trade with
+        a SINGLE quote so it can run per-tick (50ms cadence) instead
+        of per manage-loop cycle (~5-15s cadence).
+
+        Returns the close reason if the close was actually executed,
+        `None` if no action was needed. Defensive: any exception is
+        logged and swallowed so a malformed tick can't kill the
+        subscriber task.
+
+        IMPORTANT: this method intentionally does NOT trail stops or
+        scale out. Both decisions need broader context (recent bars,
+        ATR) and should stay on the per-cycle path. We ONLY check the
+        existing stop level against the new quote — that's the cheapest
+        and highest-value mid-bar action.
+        """
+        from services.trading_bot_service import TradeDirection, TradeStatus
+        try:
+            if trade is None or trade.status != TradeStatus.OPEN:
+                return None
+            if not getattr(trade, "stop_price", None) or trade.stop_price <= 0:
+                # No local stop level → server-side bracket is the only
+                # protection; nothing to do mid-bar.
+                return None
+
+            effective_stop = (
+                getattr(trade, "trailing_stop_config", {}).get("current_stop")
+                or trade.stop_price
+            )
+
+            # Mirror the bid/ask-aware trigger logic in update_open_positions.
+            _bid = quote.get("bid")
+            _ask = quote.get("ask")
+            _last = quote.get("last") or quote.get("price")
+
+            stop_hit = False
+            trigger_price: Optional[float] = None
+            if trade.direction == TradeDirection.LONG:
+                if _bid and float(_bid) > 0:
+                    trigger_price = float(_bid)
+                elif _last and float(_last) > 0:
+                    trigger_price = float(_last)
+                if trigger_price is not None and trigger_price <= effective_stop:
+                    stop_hit = True
+            else:  # SHORT
+                if _ask and float(_ask) > 0:
+                    trigger_price = float(_ask)
+                elif _last and float(_last) > 0:
+                    trigger_price = float(_last)
+                if trigger_price is not None and trigger_price >= effective_stop:
+                    stop_hit = True
+
+            if not stop_hit:
+                return None
+
+            mode = getattr(trade, "trailing_stop_config", {}).get("mode", "original")
+            reason = (
+                f"stop_loss_{mode}_mid_bar_v19_34"
+                if mode != "original"
+                else "stop_loss_mid_bar_v19_34"
+            )
+
+            logger.warning(
+                f"[v19.34 MID-BAR STOP] {trade.symbol} {trade.direction.value} "
+                f"trigger=${trigger_price:.4f} <= stop=${effective_stop:.4f} "
+                f"(mode={mode}); firing close NOW (saved ~next-cycle latency)"
+            )
+            ok = await self.close_trade(trade.id, bot, reason=reason)
+            return reason if ok else None
+        except Exception as e:
+            # Log but never propagate — the subscriber task must keep
+            # running so subsequent ticks still get evaluated.
+            logger.warning(
+                f"[v19.34 MID-BAR STOP] eval failed for "
+                f"{getattr(trade, 'symbol', '?')}: {e}"
+            )
+            return None
 
     async def check_eod_close(self, bot: 'TradingBotService'):
         """
