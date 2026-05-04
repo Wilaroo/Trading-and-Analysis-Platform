@@ -143,6 +143,43 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages, clo
     close_r: closedCount ? closedR : null,
     wins,
     losses,
+    // v19.31.9 — drill-down rows + per-stage meta
+    drilldown: {
+      scan: alerts || [],
+      eval: (alerts || []).filter(a => a?.gate_score != null || a?.combined_recommendation),
+      // ORDER drill-down rebuilds from open positions + closed-today
+      // entries — these carry the bot's actual fill records. Pending
+      // orders aren't currently in /api/sentcom/positions, so we
+      // surface filled fills only (the operator's "Order" tile counts
+      // both pending+filled but the row list shows what we have).
+      order: [
+        ...openPositions.map(p => ({
+          ...p,
+          status: 'filled',
+          fill_price: p.entry_price,
+          placed_at: p.entry_time || p.executed_at,
+          order_type: 'bracket',
+        })),
+        ...(closedFromBackend || []).map(c => ({
+          ...c,
+          status: 'filled',
+          fill_price: c.entry_price,
+          placed_at: c.executed_at,
+          order_type: 'bracket',
+        })),
+      ],
+      manage: openPositions,
+      // close already handled by ClosedTodayDrilldown via closedToday prop
+    },
+    drilldownMeta: {
+      scan: { scanCount: (alerts?.length ?? 0) },
+      eval: { avgGate, gatePassPct },
+      order: {
+        filledCount: pipeline.filled ?? pipeline.filled_today ?? openPositions.length,
+        pendingCount: pipeline.pending ?? 0,
+      },
+      manage: { totalUnrealized: openPositions.reduce((s, p) => s + (Number(p.pnl) || 0), 0), sumR: totalR },
+    },
   };
 };
 
@@ -319,12 +356,21 @@ export const SentComV5View = ({
         closedToday={closedToday}
         winsToday={winsToday}
         lossesToday={lossesToday}
+        // v19.31.9 — per-stage drill-down rows + meta
+        scanRows={counts.drilldown?.scan}
+        evalRows={counts.drilldown?.eval}
+        orderRows={counts.drilldown?.order}
+        managePositions={counts.drilldown?.manage}
+        scanMeta={counts.drilldownMeta?.scan}
+        evalMeta={counts.drilldownMeta?.eval}
+        orderMeta={counts.drilldownMeta?.order}
+        manageMeta={counts.drilldownMeta?.manage}
         onJumpToTrade={(row) => {
           // Reuse the existing focus-symbol bus other panels listen to.
           if (row?.symbol) {
             try {
               window.dispatchEvent(new CustomEvent('sentcom:focus-symbol', {
-                detail: { symbol: row.symbol, source: 'closed-today-drilldown' },
+                detail: { symbol: row.symbol, source: 'pipeline-drilldown' },
               }));
             } catch (_) { /* no-op */ }
           }

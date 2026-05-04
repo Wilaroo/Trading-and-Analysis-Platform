@@ -18,6 +18,7 @@ const SUB_TABS = [
   { id: 'trail', label: 'Trail Explorer' },
   { id: 'scorecard', label: 'Module Scorecard' },
   { id: 'funnel', label: 'Pipeline Funnel' },
+  { id: 'day_tape', label: 'Day Tape' },
   { id: 'export', label: 'Export Report' },
 ];
 
@@ -630,6 +631,260 @@ const PipelineFunnel = () => {
 // Sub-tab 4: Export Report
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+// Sub-tab: Day Tape (v19.31.9)
+// 5/30-day toggle + sortable table + CSV export. Powered by
+// /api/diagnostics/day-tape and /day-tape.csv.
+// ─────────────────────────────────────────────────────────────────
+
+const DAY_TAPE_RANGES = [
+  { id: 1,  label: 'Today' },
+  { id: 5,  label: '5d' },
+  { id: 30, label: '30d' },
+];
+
+const fmtTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', {
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  } catch { return '—'; }
+};
+
+const DayTapeView = () => {
+  const [days, setDays] = useState(1);
+  const [direction, setDirection] = useState(null);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [sortKey, setSortKey] = useState('closed_at');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ days });
+      if (direction) params.append('direction', direction);
+      const r = await fetch(`${BACKEND_URL}/api/diagnostics/day-tape?${params}`);
+      const j = await r.json();
+      if (!j.success) throw new Error('day-tape failed');
+      setData(j);
+    } catch (e) {
+      setError(e?.message || 'failed to load day tape');
+    } finally {
+      setLoading(false);
+    }
+  }, [days, direction]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = useMemo(() => {
+    const rows = data?.rows || [];
+    return [...rows].sort((a, b) => {
+      const av = a?.[sortKey];
+      const bv = b?.[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const isNum = typeof av === 'number' || typeof bv === 'number';
+      const cmp = isNum ? Number(av) - Number(bv) : String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const sortBy = (k) => {
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir('desc'); }
+  };
+
+  const handleCsv = () => {
+    const params = new URLSearchParams({ days });
+    if (direction) params.append('direction', direction);
+    window.open(`${BACKEND_URL}/api/diagnostics/day-tape.csv?${params}`, '_blank');
+  };
+
+  const summary = data?.summary || {};
+
+  return (
+    <div data-testid="day-tape-view" className="h-full flex flex-col bg-zinc-950 text-zinc-200">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-zinc-300">Day Tape</span>
+          <div className="flex items-center gap-1 ml-2">
+            {DAY_TAPE_RANGES.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                data-testid={`day-tape-range-${r.id}`}
+                onClick={() => setDays(r.id)}
+                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                  days === r.id
+                    ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >{r.label}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 ml-2">
+            {[null, 'long', 'short'].map(d => (
+              <button
+                key={String(d)}
+                type="button"
+                data-testid={`day-tape-direction-${d || 'all'}`}
+                onClick={() => setDirection(d)}
+                className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+                  direction === d
+                    ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+                    : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >{d || 'all'}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="day-tape-refresh"
+            onClick={load}
+            className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+          <button
+            type="button"
+            data-testid="day-tape-csv"
+            onClick={handleCsv}
+            className="px-2 py-1 text-[11px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
+          >
+            Download CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Summary chips */}
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[11px] v5-mono">
+        <span data-testid="day-tape-summary-count" className="text-zinc-500">
+          <span className="text-zinc-200 font-semibold">{summary.count ?? 0}</span> trades
+        </span>
+        <span data-testid="day-tape-summary-wr" className="text-zinc-500">
+          WR <span className="text-zinc-200 font-semibold">{summary.win_rate != null ? `${summary.win_rate}%` : '—'}</span>
+          {' · '}<span className="text-emerald-400">{summary.wins ?? 0}W</span>
+          {' / '}<span className="text-rose-400">{summary.losses ?? 0}L</span>
+          {summary.scratches > 0 && <> {' / '}<span className="text-zinc-400">{summary.scratches} scratch</span></>}
+        </span>
+        <span data-testid="day-tape-summary-pnl" className={(summary.gross_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+          Gross {formatPnl(summary.gross_pnl ?? 0)}
+        </span>
+        <span data-testid="day-tape-summary-avg-r" className="text-zinc-500">
+          avg R <span className={(summary.avg_r ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+            {summary.avg_r != null ? Number(summary.avg_r).toFixed(2) : '—'}
+          </span>
+        </span>
+        {summary.biggest_winner && (
+          <span data-testid="day-tape-summary-biggest-win" className="text-emerald-400">
+            Best: {summary.biggest_winner.symbol} {formatPnl(summary.biggest_winner.realized_pnl)}
+          </span>
+        )}
+        {summary.biggest_loser && (
+          <span data-testid="day-tape-summary-biggest-loss" className="text-rose-400">
+            Worst: {summary.biggest_loser.symbol} {formatPnl(summary.biggest_loser.realized_pnl)}
+          </span>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-y-auto">
+        {error && <div className="px-4 py-3 text-rose-400">{error}</div>}
+        {!error && sorted.length === 0 && !loading && (
+          <div data-testid="day-tape-empty" className="px-4 py-12 text-center text-zinc-500 text-sm">
+            No closed trades in this window.
+          </div>
+        )}
+        {sorted.length > 0 && (
+          <table className="w-full text-[11px] v5-mono">
+            <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800">
+              <tr>
+                {[
+                  ['closed_at',    'Closed',   'right'],
+                  ['symbol',       'Sym',      'left'],
+                  ['direction',    'Dir',      'left'],
+                  ['shares',       'Sh',       'right'],
+                  ['entry_price',  'Entry',    'right'],
+                  ['exit_price',   'Exit',     'right'],
+                  ['realized_pnl', '$',        'right'],
+                  ['r_multiple',   'R',        'right'],
+                  ['close_reason', 'Reason',   'left'],
+                  ['setup_type',   'Setup',    'left'],
+                ].map(([k, l, a]) => (
+                  <th
+                    key={k}
+                    onClick={() => sortBy(k)}
+                    data-testid={`day-tape-col-${k}`}
+                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[10px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
+                  >
+                    {l}{sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => {
+                const dollars = Number(r.realized_pnl) || 0;
+                const rMul = Number(r.r_multiple) || 0;
+                const isShort = (r.direction || '').toLowerCase() === 'short';
+                return (
+                  <tr key={r.trade_id || `${r.symbol}-${r.closed_at}`}
+                      data-testid={`day-tape-row-${r.symbol}`}
+                      className="border-b border-zinc-900 hover:bg-white/5">
+                    <td className="px-2 py-1 text-right text-zinc-500">{fmtTime(r.closed_at || r.executed_at)}</td>
+                    <td className="px-2 py-1 font-bold text-zinc-100">{r.symbol}</td>
+                    <td className={`px-2 py-1 ${isShort ? 'text-rose-400' : 'text-emerald-400'}`}>{isShort ? 'S' : 'L'}</td>
+                    <td className="px-2 py-1 text-right text-zinc-300">{r.shares ?? '—'}</td>
+                    <td className="px-2 py-1 text-right text-zinc-400">{r.entry_price != null ? Number(r.entry_price).toFixed(2) : '—'}</td>
+                    <td className="px-2 py-1 text-right text-zinc-400">{r.exit_price != null ? Number(r.exit_price).toFixed(2) : '—'}</td>
+                    <td className={`px-2 py-1 text-right font-semibold ${dollars >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatPnl(dollars)}</td>
+                    <td className={`px-2 py-1 text-right font-semibold ${rMul >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {r.r_multiple != null ? `${rMul >= 0 ? '+' : ''}${rMul.toFixed(2)}R` : '—'}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-500 truncate" title={r.close_reason || ''}>{r.close_reason || '—'}</td>
+                    <td className="px-2 py-1 text-zinc-500 truncate" title={r.setup_type || ''}>{r.setup_type || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Setup breakdown footer */}
+      {summary.by_setup && Object.keys(summary.by_setup).length > 0 && (
+        <div data-testid="day-tape-by-setup" className="px-4 py-2 border-t border-zinc-800 text-[10px] flex flex-wrap gap-3">
+          <span className="text-zinc-500 uppercase tracking-wider">By setup:</span>
+          {Object.entries(summary.by_setup)
+            .sort(([, a], [, b]) => (b.gross_pnl ?? 0) - (a.gross_pnl ?? 0))
+            .slice(0, 8)
+            .map(([s, b]) => (
+              <span key={s} className="text-zinc-400">
+                {s} <span className="text-zinc-500">{b.count}</span>{' '}
+                <span className={(b.gross_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                  {formatPnl(b.gross_pnl)}
+                </span>
+                {b.win_rate != null && (
+                  <span className="text-zinc-600"> ({b.win_rate}%)</span>
+                )}
+              </span>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+
 const ExportReport = () => {
   const [days, setDays] = useState(1);
   const [report, setReport] = useState('');
@@ -749,6 +1004,7 @@ export default function DiagnosticsPage() {
         {tab === 'trail' && <TrailExplorer />}
         {tab === 'scorecard' && <ModuleScorecard />}
         {tab === 'funnel' && <PipelineFunnel />}
+        {tab === 'day_tape' && <DayTapeView />}
         {tab === 'export' && <ExportReport />}
       </main>
     </div>

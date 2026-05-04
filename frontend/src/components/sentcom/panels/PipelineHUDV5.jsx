@@ -16,6 +16,13 @@
  */
 import React from 'react';
 import { ClosedTodayDrilldown } from '../v5/ClosedTodayDrilldown';
+import { PipelineStageDrilldown } from '../v5/PipelineStageDrilldown';
+import {
+  scanStageConfig,
+  evalStageConfig,
+  orderStageConfig,
+  manageStageConfig,
+} from '../v5/pipelineStageColumns';
 
 const stageColor = {
   scan:    { border: 'border-violet-900/60', bg: 'bg-violet-950/20', text: 'text-violet-400' },
@@ -98,14 +105,36 @@ export const PipelineHUDV5 = ({
   closedToday,
   winsToday,
   lossesToday,
+  // v19.31.9 — additional stages
+  scanRows,
+  evalRows,
+  orderRows,
+  managePositions,
+  scanMeta,
+  evalMeta,
+  orderMeta,
+  manageMeta,
   onJumpToTrade,
   equity,
   buyingPower,
   phase = '—',
   rightExtra = null,
 }) => {
-  const [closeDrilldownOpen, setCloseDrilldownOpen] = React.useState(false);
+  // v19.31.9 — single source of truth for which stage panel is open.
+  // Only one open at a time so they don't visually stack.
+  const [openStage, setOpenStage] = React.useState(null);
+  const scanStageRef = React.useRef(null);
+  const evalStageRef = React.useRef(null);
+  const orderStageRef = React.useRef(null);
+  const manageStageRef = React.useRef(null);
   const closeStageRef = React.useRef(null);
+  const toggle = (stage) => setOpenStage(prev => (prev === stage ? null : stage));
+  const close = () => setOpenStage(null);
+
+  const scanCfg = scanStageConfig({ scanCount: scanCount });
+  const evalCfg = evalStageConfig(evalMeta || {});
+  const orderCfg = orderStageConfig(orderMeta || {});
+  const manageCfg = manageStageConfig(manageMeta || {});
   // 2026-05-04 v19.31.7 — operator asked for realized PnL alongside
   // unrealized. The single "P&L" tile now shows the day total
   // (realized + unrealized) with realized/unrealized split underneath.
@@ -146,35 +175,82 @@ export const PipelineHUDV5 = ({
             displays. Operator flagged the cluster overlapping HealthChip
             / ConnectivityCheck / FlattenAll on the V5 mockup review. */}
         <div className="flex items-center gap-1 basis-3/5 min-w-0 shrink">
-          <Stage stage="scan"   label="Scan"        count={scanCount}   sub={scanSub} />
+          {/* v19.31.9 — every stage is a clickable drill-down anchor. */}
+          <div ref={scanStageRef} className="flex-1 min-w-0 relative">
+            <Stage
+              stage="scan" label="Scan" count={scanCount} sub={scanSub}
+              dataTestId="v5-pipeline-stage-scan"
+              onClick={() => toggle('scan')}
+            />
+            <PipelineStageDrilldown
+              open={openStage === 'scan'} onClose={close} anchorRef={scanStageRef}
+              title={scanCfg.title} versionTag={scanCfg.versionTag}
+              headerExtras={scanCfg.headerExtras} columns={scanCfg.columns}
+              rows={scanRows || []} defaultSortKey={scanCfg.defaultSortKey}
+              emptyText={scanCfg.emptyText} onRowClick={onJumpToTrade}
+              testIdPrefix="scan-drilldown"
+            />
+          </div>
           <span className="text-zinc-700 font-mono shrink-0">→</span>
-          <Stage stage="eval"   label="Evaluate"    count={evalCount}   sub={evalSub} />
+          <div ref={evalStageRef} className="flex-1 min-w-0 relative">
+            <Stage
+              stage="eval" label="Evaluate" count={evalCount} sub={evalSub}
+              dataTestId="v5-pipeline-stage-eval"
+              onClick={() => toggle('eval')}
+            />
+            <PipelineStageDrilldown
+              open={openStage === 'eval'} onClose={close} anchorRef={evalStageRef}
+              title={evalCfg.title} versionTag={evalCfg.versionTag}
+              headerExtras={evalCfg.headerExtras} columns={evalCfg.columns}
+              rows={evalRows || []} defaultSortKey={evalCfg.defaultSortKey}
+              emptyText={evalCfg.emptyText} onRowClick={onJumpToTrade}
+              testIdPrefix="eval-drilldown"
+            />
+          </div>
           <span className="text-zinc-700 font-mono shrink-0">→</span>
-          <Stage stage="order"  label="Order"       count={orderCount}  sub={orderSub} />
+          <div ref={orderStageRef} className="flex-1 min-w-0 relative">
+            <Stage
+              stage="order" label="Order" count={orderCount} sub={orderSub}
+              dataTestId="v5-pipeline-stage-order"
+              onClick={() => toggle('order')}
+            />
+            <PipelineStageDrilldown
+              open={openStage === 'order'} onClose={close} anchorRef={orderStageRef}
+              title={orderCfg.title} versionTag={orderCfg.versionTag}
+              headerExtras={orderCfg.headerExtras} columns={orderCfg.columns}
+              rows={orderRows || []} defaultSortKey={orderCfg.defaultSortKey}
+              emptyText={orderCfg.emptyText} onRowClick={onJumpToTrade}
+              testIdPrefix="order-drilldown"
+            />
+          </div>
           <span className="text-zinc-700 font-mono shrink-0">→</span>
-          <Stage stage="manage" label="Manage"      count={manageCount} sub={manageSub} accent={manageAccent} />
+          <div ref={manageStageRef} className="flex-1 min-w-0 relative">
+            <Stage
+              stage="manage" label="Manage" count={manageCount} sub={manageSub} accent={manageAccent}
+              dataTestId="v5-pipeline-stage-manage"
+              onClick={() => toggle('manage')}
+            />
+            <PipelineStageDrilldown
+              open={openStage === 'manage'} onClose={close} anchorRef={manageStageRef}
+              title={manageCfg.title} versionTag={manageCfg.versionTag}
+              headerExtras={manageCfg.headerExtras} columns={manageCfg.columns}
+              rows={managePositions || []} defaultSortKey={manageCfg.defaultSortKey}
+              emptyText={manageCfg.emptyText} onRowClick={onJumpToTrade}
+              testIdPrefix="manage-drilldown"
+            />
+          </div>
           <span className="text-zinc-700 font-mono shrink-0">→</span>
-          {/* v19.31.8 — clickable CLOSE TODAY tile that drops a sortable
-              drilldown of every trade closed today. */}
           <div ref={closeStageRef} className="flex-1 min-w-0 relative">
             <Stage
-              stage="close"
-              label="Close today"
-              count={closeCount}
-              sub={closeSub}
-              accent={closeAccent}
+              stage="close" label="Close today" count={closeCount} sub={closeSub} accent={closeAccent}
               dataTestId="v5-pipeline-stage-close"
-              onClick={() => setCloseDrilldownOpen(o => !o)}
+              onClick={() => toggle('close')}
             />
             <ClosedTodayDrilldown
-              open={closeDrilldownOpen}
-              onClose={() => setCloseDrilldownOpen(false)}
-              closedToday={closedToday}
-              totalRealized={totalRealizedPnl ?? 0}
-              winsToday={winsToday ?? 0}
-              lossesToday={lossesToday ?? 0}
-              anchorRef={closeStageRef}
-              onJumpToTrade={onJumpToTrade}
+              open={openStage === 'close'} onClose={close}
+              closedToday={closedToday} totalRealized={totalRealizedPnl ?? 0}
+              winsToday={winsToday ?? 0} lossesToday={lossesToday ?? 0}
+              anchorRef={closeStageRef} onJumpToTrade={onJumpToTrade}
             />
           </div>
         </div>

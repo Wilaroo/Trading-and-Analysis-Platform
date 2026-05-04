@@ -2,6 +2,75 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-third commit, v19.31.9) — All Pipeline stages clickable + Day Tape diagnostics tab
+
+**Two coupled deliverables.** Operator wanted (a) every Pipeline HUD stage to be a drill-down (not just CLOSE TODAY), and (b) a multi-day "Day Tape" view with CSV export for end-of-week journaling.
+
+### 1. Generic stage drill-down shell
+
+Refactored `ClosedTodayDrilldown.jsx` into a generic shell + per-stage adapters:
+
+- New `frontend/src/components/sentcom/v5/PipelineStageDrilldown.jsx` — pure presentational shell handling open/close/Esc/click-outside/sort/columns. Takes `columns` config + `rows` array + optional `headerExtras` + `onRowClick`. Null-safe sort. Empty state.
+- New `frontend/src/components/sentcom/v5/pipelineStageColumns.jsx` — column configs + format helpers + colored cell renderers for each stage (`closeStageConfig`, `manageStageConfig`, `orderStageConfig`, `evalStageConfig`, `scanStageConfig`).
+- `ClosedTodayDrilldown.jsx` rewritten as a thin adapter on top of the shell; preserves all v19.31.8 testids for back-compat.
+
+### 2. All 5 Pipeline HUD stages clickable
+
+Every stage tile now opens its own drill-down panel anchored under the tile, single-open-at-a-time. Click a row to fire `sentcom:focus-symbol` on the global event bus.
+
+- **SCAN** — `Scanner Alerts Today`: symbol, tier, setup, gate score (color-coded), price, % change, phase, time. Sortable by any column.
+- **EVAL** — `Evaluations Today`: symbol, gate score (≥60 green / <60 red), tier, setup, AI council recommendation, reasoning preview, time.
+- **ORDER** — `Orders Today`: symbol, dir, shares, type, limit, fill, status (filled/pending/rejected color-coded), placed_at. Built from the bot's actual fill records (open positions + closed-today entries).
+- **MANAGE** — `Open Positions`: symbol, dir, shares, entry, last, $ pnl, R, stop, setup, source. Same data the OpenPositions panel uses but compactly tabled.
+- **CLOSE** — `Closed Today`: same as v19.31.8 but now using the shared shell.
+
+`Stage` component in `PipelineHUDV5` now accepts `onClick` and becomes a proper `role="button"` with Enter/Space keyboard support when interactive.
+
+### 3. Day Tape diagnostics tab
+
+New `Diagnostics → Day Tape` sub-tab with:
+
+- **Range toggle**: Today / 5d / 30d.
+- **Direction filter**: All / Long / Short.
+- **Sortable table**: closed_at / symbol / dir / shares / entry / exit / $ / R / reason / setup. 10 columns total.
+- **Summary chips**: count, win-rate, gross PnL, avg R, biggest winner / loser.
+- **By-setup breakdown footer**: top 8 setups sorted by gross PnL with count + win-rate inline.
+- **CSV export**: one-click `Download CSV` button opens `/api/diagnostics/day-tape.csv?days=N&direction=…` in a new tab.
+
+### Backend
+
+New endpoints in `routers/diagnostics.py`:
+
+- `GET /api/diagnostics/day-tape?days=N&direction=long|short&setup=name` — returns rows + summary (count/wins/losses/scratches, win_rate, gross_pnl, avg_r, biggest_winner, biggest_loser, by_setup, by_direction).
+- `GET /api/diagnostics/day-tape.csv` — same query, returns CSV with pinned column order: `closed_at,symbol,direction,shares,entry_price,exit_price,realized_pnl,r_multiple,close_reason,setup_type,setup_variant,trade_style,executed_at,trade_id`.
+- Falls back to `executed_at` for legacy rows missing `closed_at`.
+- Limit 2000 rows per response.
+
+### Tests
+
+`test_day_tape_v19_31_9.py` — 9 tests:
+- Basic 1-day window, multi-day windows, direction filter.
+- Biggest winner/loser detection across mixed sizes.
+- By-setup aggregation with win_rate calculation.
+- CSV header order pinned (operator scripts depend on it).
+- CSV quotes embedded commas correctly.
+- Legacy row with null `closed_at` falls back to `executed_at`.
+- avg_r mean calculation.
+
+**88/88 v19.31 pytests passing across 10 suites.** ESLint clean on all 6 modified frontend files. `/api/diagnostics/day-tape` and `/day-tape.csv` both serving 200.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# 1. Click any Pipeline HUD tile (SCAN/EVAL/ORDER/MANAGE/CLOSE) →
+#    drill-down opens. Sort columns. Click row → focuses symbol.
+# 2. Diagnostics → Day Tape sub-tab. Toggle Today / 5d / 30d.
+# 3. Filter by direction. Click "Download CSV" for end-of-week journal.
+```
+
+
+
 ## 2026-05-04 (seventy-second commit, v19.31.8) — CLOSE TODAY drill-down panel
 
 **One-click access to the day's tape.** Operator's "potential improvement" feedback after v19.31.7 landed CLOSE TODAY counts and realized PnL on the dashboard.
