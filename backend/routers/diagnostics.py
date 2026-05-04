@@ -288,3 +288,315 @@ async def get_day_tape_csv(
     for r in rows:
         lines.append(",".join(_q(r.get(h)) for h in headers))
     return "\n".join(lines) + "\n"
+
+
+# ─── v19.31.11 — Trade Forensics ─────────────────────────────────────
+
+
+def _classify_symbol_verdict(*, bot_rows, ib_pos, ib_realized, sweep_events,
+                             reconcile_events, reset_touched):
+    """v19.31.11 — Verdict classifier for the trade-forensics endpoint.
+
+    Returns (verdict, explanation). Order is intentional — first match
+    wins, so the most specific verdict surfaces first.
+
+    Inputs
+    ------
+    bot_rows         list of bot_trades docs for this symbol in window
+    ib_pos           float — current IB position (0 if flat)
+    ib_realized      float — IB realizedPNL today (0 if no closes)
+    sweep_events     list of sentcom_thought dicts where event matches
+                     phantom_v19_27_leftover_swept or
+                     phantom_v19_31_oca_closed_swept
+    reconcile_events list of sentcom_thought dicts where event matches
+                     auto_reconcile_at_boot (metadata.symbols includes
+                     this symbol) or manual reconcile event
+    reset_touched    bool — `bot_trades_reset_log.affected_ids`
+                     references this symbol's trade_ids
+    """
+    # 1. Phantom-v31 OCA-closed-externally — most specific.
+    if any(e.get("event") == "phantom_v19_31_oca_closed_swept" for e in sweep_events):
+        return ("phantom_v31",
+                "OCA bracket closed the position on IB; bot still tracked it "
+                "until v19.31 sweep marked it closed.")
+
+    # 2. Phantom-v27 0sh leftover.
+    if any(e.get("event") == "phantom_v19_27_leftover_swept" for e in sweep_events):
+        return ("phantom_v27",
+                "Bot scaled to 0sh leftover, IB held nothing, v19.27 sweep "
+                "cleaned the in-memory ghost.")
+
+    # 3. Reset-orphaned — reset wiped a row but IB still held shares.
+    #    (Pre-v19.31 survival guard could do this.)
+    if reset_touched and abs(ib_pos) > 0.01:
+        return ("reset_orphaned",
+                "Morning reset script wiped this trade's row, but IB still "
+                "held the position. Survival guard (v19.31.1) prevents this.")
+
+    # 4. Auto-reconciled / operator-reconciled.
+    if reconcile_events:
+        return ("auto_reconciled",
+                "Bot had no record of this position at boot; auto-reconcile "
+                "(or operator's RECONCILE click) claimed it from IB.")
+
+    # 5. Manual-or-external — IB has it but no bot row anywhere.
+    if not bot_rows and abs(ib_pos) > 0.01:
+        return ("manual_or_external",
+                "IB position with no bot record and no reconcile event — "
+                "external trade (TWS / upstream) the bot never owned.")
+
+    # 6. Unexplained drift — both ledgers exist but PnL differs > $5.
+    bot_total_realized = sum(
+        float(r.get("realized_pnl") or r.get("net_pnl") or r.get("pnl") or 0)
+        for r in bot_rows
+        if (r.get("status") or "").lower() == "closed"
+    )
+    if bot_rows and abs(bot_total_realized - ib_realized) > 5.0:
+        return ("unexplained_drift",
+                f"Bot realized ${bot_total_realized:+.2f}, IB realized "
+                f"${ib_realized:+.2f} (Δ ${bot_total_realized - ib_realized:+.2f}). "
+                f"Investigate fill prices / commissions / partial closes.")
+
+    # 7. Clean.
+    if bot_rows:
+        return ("clean",
+                "Bot opened + closed; ledgers match within tolerance.")
+
+    # 8. Fallback — no bot rows and no IB activity → ignore.
+    return ("inactive",
+            "No bot record and no IB activity for this symbol in window.")
+
+
+@router.get("/trade-forensics")
+async def get_trade_forensics(days: int = Query(1, ge=1, le=7)):
+    """v19.31.11 — Joins bot_trades + ib_live_snapshot.current + recent
+    sentcom_thoughts (sweep + reconcile events) + bot_trades_reset_log
+    to produce a per-symbol forensic verdict for "what was real vs
+    phantom" today.
+
+    Verdicts:
+      - clean: bot opened + closed; ledgers match.
+      - phantom_v27: 0sh-leftover swept by v19.27 path.
+      - phantom_v31: OCA-closed-externally swept by v19.31 path.
+      - reset_orphaned: morning reset wiped row but IB still held.
+      - auto_reconciled: bot had nothing, claimed via reconcile.
+      - manual_or_external: IB has it, no bot trace at all.
+      - unexplained_drift: both ledgers, PnL gap > $5.
+      - inactive: no activity (filtered out of `symbols` list by default).
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    now_utc = _dt.now(_tz.utc)
+    cutoff_iso = (now_utc - _td(days=days)).isoformat()
+
+    # ── 1. bot_trades rows in window ────────────────────────────────
+    try:
+        bot_rows = list(_db["bot_trades"].find(
+            {
+                "$or": [
+                    {"executed_at": {"$gte": cutoff_iso}},
+                    {"created_at": {"$gte": cutoff_iso}},
+                    {"closed_at": {"$gte": cutoff_iso}},
+                ],
+            },
+            {"_id": 0},
+        ))
+    except Exception as e:
+        logger.warning(f"forensics: bot_trades read failed: {e}")
+        bot_rows = []
+
+    # ── 2. ib_live_snapshot.current ─────────────────────────────────
+    ib_by_symbol: Dict[str, Dict[str, Any]] = {}
+    try:
+        snap = _db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0})
+        if snap:
+            for p in snap.get("positions", []) or []:
+                sym = (p.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                qty = float(p.get("position", p.get("qty", 0)) or 0)
+                ib_by_symbol[sym] = {
+                    "position": qty,
+                    "realized_pnl": float(p.get("realizedPNL") or p.get("realized_pnl") or 0),
+                    "unrealized_pnl": float(p.get("unrealizedPNL") or p.get("unrealized_pnl") or 0),
+                    "avg_cost": float(p.get("avgCost") or p.get("avg_cost") or 0),
+                    "market_price": float(p.get("marketPrice") or p.get("market_price") or 0),
+                    "market_value": float(p.get("marketValue") or p.get("market_value") or 0),
+                }
+    except Exception as e:
+        logger.warning(f"forensics: ib snapshot read failed: {e}")
+
+    # ── 3. sentcom_thoughts — sweep + reconcile events in window ────
+    sweep_events_by_symbol: Dict[str, list] = {}
+    reconcile_events_by_symbol: Dict[str, list] = {}
+    try:
+        cur = _db["sentcom_thoughts"].find(
+            {
+                "timestamp": {"$gte": cutoff_iso},
+                "$or": [
+                    {"metadata.reason": {"$regex": "phantom|reconcile|oca_closed", "$options": "i"}},
+                    {"metadata.event": {"$regex": "phantom|reconcile", "$options": "i"}},
+                ],
+            },
+            {"_id": 0},
+            sort=[("timestamp", 1)],
+            limit=2000,
+        )
+        for e in cur:
+            md = e.get("metadata") or {}
+            evt = md.get("event") or e.get("kind") or ""
+            sym = (e.get("symbol") or md.get("symbol") or "").upper()
+            if not sym and "auto_reconcile" in evt.lower():
+                # Boot-time auto-reconcile carries an array of symbols.
+                for s in (md.get("symbols") or []):
+                    s_up = (s or "").upper()
+                    if s_up:
+                        reconcile_events_by_symbol.setdefault(s_up, []).append({
+                            "event": evt, "timestamp": e.get("timestamp"),
+                            "metadata": md,
+                        })
+                continue
+            if not sym:
+                continue
+            payload = {"event": evt, "timestamp": e.get("timestamp"),
+                       "metadata": md, "content": e.get("content")}
+            if "phantom" in evt.lower() or "phantom" in str(md.get("reason", "")).lower():
+                sweep_events_by_symbol.setdefault(sym, []).append(payload)
+            if "reconcile" in evt.lower() or "reconcile" in str(md.get("reason", "")).lower():
+                reconcile_events_by_symbol.setdefault(sym, []).append(payload)
+    except Exception as e:
+        logger.warning(f"forensics: sweep/reconcile lookup failed: {e}")
+
+    # ── 4. bot_trades_reset_log — which trade_ids were closed? ──────
+    reset_trade_ids: set = set()
+    try:
+        cur = _db["bot_trades_reset_log"].find(
+            {"timestamp": {"$gte": cutoff_iso}},
+            {"_id": 0, "affected_ids": 1, "symbols": 1},
+        )
+        for r in cur:
+            for tid in r.get("affected_ids") or []:
+                reset_trade_ids.add(str(tid))
+    except Exception as e:
+        logger.debug(f"forensics: reset log read skipped: {e}")
+
+    # ── 5. Merge per symbol ─────────────────────────────────────────
+    symbols_seen = set()
+    bot_by_symbol: Dict[str, list] = {}
+    for r in bot_rows:
+        sym = (r.get("symbol") or "").upper()
+        if not sym:
+            continue
+        bot_by_symbol.setdefault(sym, []).append(r)
+        symbols_seen.add(sym)
+    for sym in ib_by_symbol:
+        symbols_seen.add(sym)
+    for sym in sweep_events_by_symbol:
+        symbols_seen.add(sym)
+    for sym in reconcile_events_by_symbol:
+        symbols_seen.add(sym)
+
+    out_symbols: List[Dict[str, Any]] = []
+    by_verdict: Dict[str, int] = {}
+    for sym in sorted(symbols_seen):
+        rows = bot_by_symbol.get(sym) or []
+        ib = ib_by_symbol.get(sym) or {"position": 0, "realized_pnl": 0,
+                                        "unrealized_pnl": 0, "avg_cost": 0,
+                                        "market_price": 0, "market_value": 0}
+        sweeps = sweep_events_by_symbol.get(sym) or []
+        recons = reconcile_events_by_symbol.get(sym) or []
+        reset_touched = any(str(r.get("id") or r.get("trade_id")) in reset_trade_ids for r in rows)
+
+        verdict, explanation = _classify_symbol_verdict(
+            bot_rows=rows, ib_pos=ib["position"], ib_realized=ib["realized_pnl"],
+            sweep_events=sweeps, reconcile_events=recons, reset_touched=reset_touched,
+        )
+
+        # Build event timeline merging bot_trades + sweeps + reconciles.
+        timeline = []
+        for r in rows:
+            if r.get("executed_at"):
+                timeline.append({
+                    "time": r["executed_at"], "kind": "bot_executed",
+                    "detail": f"{r.get('direction', '?')} {r.get('shares', '?')}sh @ {r.get('fill_price', r.get('entry_price', '?'))}",
+                    "trade_id": r.get("id"),
+                })
+            if r.get("closed_at") and (r.get("status") or "").lower() == "closed":
+                timeline.append({
+                    "time": r["closed_at"], "kind": "bot_closed",
+                    "detail": f"realized ${float(r.get('realized_pnl') or r.get('pnl') or 0):+.2f} reason={r.get('close_reason') or '?'}",
+                    "trade_id": r.get("id"),
+                })
+        for e in sweeps:
+            timeline.append({
+                "time": e.get("timestamp"), "kind": e.get("event"),
+                "detail": e.get("content") or e.get("metadata", {}).get("reason") or "?",
+            })
+        for e in recons:
+            timeline.append({
+                "time": e.get("timestamp"), "kind": e.get("event") or "reconcile",
+                "detail": e.get("content") or e.get("metadata", {}).get("reason") or "?",
+            })
+        timeline.sort(key=lambda x: x.get("time") or "")
+
+        bot_total_realized = sum(
+            float(r.get("realized_pnl") or r.get("net_pnl") or r.get("pnl") or 0)
+            for r in rows if (r.get("status") or "").lower() == "closed"
+        )
+        bot_open = [r for r in rows if (r.get("status") or "").lower() == "open"]
+        bot_closed = [r for r in rows if (r.get("status") or "").lower() == "closed"]
+
+        by_verdict[verdict] = by_verdict.get(verdict, 0) + 1
+
+        # Skip 'inactive' rows from the response by default — operator's
+        # forensic UI doesn't need empty rows for symbols just appearing
+        # in a yesterday-ish IB snapshot with no activity today.
+        if verdict == "inactive":
+            continue
+
+        out_symbols.append({
+            "symbol": sym,
+            "verdict": verdict,
+            "explanation": explanation,
+            "bot": {
+                "trade_count": len(rows),
+                "open_count": len(bot_open),
+                "closed_count": len(bot_closed),
+                "total_realized_pnl": round(bot_total_realized, 2),
+                "first_executed_at": min(
+                    [r.get("executed_at") for r in rows if r.get("executed_at")],
+                    default=None,
+                ),
+                "last_closed_at": max(
+                    [r.get("closed_at") for r in rows if r.get("closed_at")],
+                    default=None,
+                ),
+            },
+            "ib": {
+                "current_position": ib["position"],
+                "realized_pnl_today": round(ib["realized_pnl"], 2),
+                "unrealized_pnl": round(ib["unrealized_pnl"], 2),
+                "avg_cost": round(ib["avg_cost"], 2),
+                "market_value": round(ib["market_value"], 2),
+            },
+            "drift_usd": round(bot_total_realized - ib["realized_pnl"], 2),
+            "sweep_count": len(sweeps),
+            "reconcile_count": len(recons),
+            "reset_touched": reset_touched,
+            "timeline": timeline,
+        })
+
+    return {
+        "success": True,
+        "days": days,
+        "from_iso": cutoff_iso,
+        "to_iso": now_utc.isoformat(),
+        "symbols": out_symbols,
+        "summary": {
+            "total_symbols": len(out_symbols),
+            "by_verdict": by_verdict,
+        },
+    }

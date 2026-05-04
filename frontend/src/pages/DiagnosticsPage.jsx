@@ -19,6 +19,7 @@ const SUB_TABS = [
   { id: 'scorecard', label: 'Module Scorecard' },
   { id: 'funnel', label: 'Pipeline Funnel' },
   { id: 'day_tape', label: 'Day Tape' },
+  { id: 'forensics', label: 'Trade Forensics' },
   { id: 'export', label: 'Export Report' },
 ];
 
@@ -971,6 +972,278 @@ const ExportReport = () => {
 // Top-level page
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+// Sub-tab: Trade Forensics (v19.31.11)
+// Per-symbol verdict join across bot_trades + IB snapshot +
+// sweep events + reconcile events. Powers the operator's
+// "what was real vs phantom today" forensic question.
+// ─────────────────────────────────────────────────────────────────
+
+const FORENSICS_RANGES = [
+  { id: 1, label: 'Today' },
+  { id: 3, label: '3d' },
+  { id: 7, label: '7d' },
+];
+
+const VERDICT_META = {
+  clean:              { color: 'text-emerald-400', bg: 'bg-emerald-950/40',  border: 'border-emerald-900/60', icon: '✓', label: 'Clean' },
+  phantom_v27:        { color: 'text-amber-300',   bg: 'bg-amber-950/40',    border: 'border-amber-900/60',   icon: '◇', label: 'Phantom v27' },
+  phantom_v31:        { color: 'text-amber-300',   bg: 'bg-amber-950/40',    border: 'border-amber-900/60',   icon: '◇', label: 'Phantom v31' },
+  reset_orphaned:     { color: 'text-orange-300',  bg: 'bg-orange-950/40',   border: 'border-orange-900/60',  icon: '!', label: 'Reset orphaned' },
+  auto_reconciled:    { color: 'text-sky-300',     bg: 'bg-sky-950/40',      border: 'border-sky-900/60',     icon: '↻', label: 'Auto-reconciled' },
+  manual_or_external: { color: 'text-slate-300',   bg: 'bg-slate-900/60',    border: 'border-slate-700',      icon: '?', label: 'Manual / external' },
+  unexplained_drift:  { color: 'text-rose-300',    bg: 'bg-rose-950/40',     border: 'border-rose-900/60',    icon: '✕', label: 'Unexplained drift' },
+};
+
+const VERDICT_PRIORITY = {
+  unexplained_drift: 0,
+  reset_orphaned:    1,
+  manual_or_external: 2,
+  phantom_v31:       3,
+  phantom_v27:       4,
+  auto_reconciled:   5,
+  clean:             6,
+};
+
+const fmtForensicsTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+  } catch { return '—'; }
+};
+
+const TradeForensicsView = () => {
+  const [days, setDays] = useState(1);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [verdictFilter, setVerdictFilter] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/diagnostics/trade-forensics?days=${days}`);
+      const j = await r.json();
+      if (!j.success) throw new Error('forensics failed');
+      setData(j);
+    } catch (e) {
+      setError(e?.message || 'failed to load forensics');
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const symbols = data?.symbols || [];
+  const summary = data?.summary || {};
+  const byVerdict = summary.by_verdict || {};
+
+  const sorted = useMemo(() => {
+    const filtered = verdictFilter
+      ? symbols.filter(s => s.verdict === verdictFilter)
+      : symbols;
+    return [...filtered].sort((a, b) => {
+      const ap = VERDICT_PRIORITY[a.verdict] ?? 99;
+      const bp = VERDICT_PRIORITY[b.verdict] ?? 99;
+      if (ap !== bp) return ap - bp;
+      return String(a.symbol).localeCompare(String(b.symbol));
+    });
+  }, [symbols, verdictFilter]);
+
+  return (
+    <div data-testid="trade-forensics-view" className="h-full flex flex-col bg-zinc-950 text-zinc-200">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-zinc-300">Trade Forensics</span>
+          <span className="text-[11px] text-zinc-500 ml-1">real vs phantom · ledger drift</span>
+          <div className="flex items-center gap-1 ml-3">
+            {FORENSICS_RANGES.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                data-testid={`forensics-range-${r.id}`}
+                onClick={() => setDays(r.id)}
+                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                  days === r.id
+                    ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >{r.label}</button>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          data-testid="forensics-refresh"
+          onClick={load}
+          className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+        >
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {/* Verdict filter chips — show counts */}
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-1 flex-wrap text-[11px]">
+        <button
+          type="button"
+          data-testid="forensics-filter-all"
+          onClick={() => setVerdictFilter(null)}
+          className={`px-2 py-0.5 rounded border ${
+            verdictFilter === null
+              ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+              : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+          }`}
+        >
+          All <span className="opacity-70">{symbols.length}</span>
+        </button>
+        {Object.entries(byVerdict).map(([v, count]) => {
+          const m = VERDICT_META[v] || { color: 'text-zinc-300', bg: 'bg-zinc-900', border: 'border-zinc-800', label: v };
+          const active = verdictFilter === v;
+          return (
+            <button
+              key={v}
+              type="button"
+              data-testid={`forensics-filter-${v}`}
+              onClick={() => setVerdictFilter(active ? null : v)}
+              className={`px-2 py-0.5 rounded border ${
+                active
+                  ? `${m.bg} ${m.color} ${m.border} font-semibold`
+                  : `bg-zinc-900 ${m.color} border-zinc-800 hover:border-zinc-600`
+              }`}
+            >
+              {m.icon} {m.label} <span className="opacity-70">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-y-auto">
+        {error && <div className="px-4 py-3 text-rose-400 text-sm">{error}</div>}
+        {!error && sorted.length === 0 && !loading && (
+          <div data-testid="forensics-empty" className="px-4 py-12 text-center text-zinc-500 text-sm">
+            {verdictFilter
+              ? 'No symbols match this verdict.'
+              : 'No trade activity in this window.'}
+          </div>
+        )}
+        {sorted.length > 0 && (
+          <div className="divide-y divide-zinc-900">
+            {sorted.map((row) => {
+              const m = VERDICT_META[row.verdict] || VERDICT_META.clean;
+              const isExpanded = expanded === row.symbol;
+              const driftClass = Math.abs(row.drift_usd || 0) > 5 ? 'text-rose-400' : 'text-zinc-500';
+              return (
+                <div
+                  key={row.symbol}
+                  data-testid={`forensics-row-${row.symbol}`}
+                  className={`${m.bg} hover:bg-white/5 transition-colors`}
+                >
+                  <div
+                    className="px-4 py-2 flex items-center gap-4 cursor-pointer"
+                    onClick={() => setExpanded(isExpanded ? null : row.symbol)}
+                  >
+                    {/* Verdict badge */}
+                    <span
+                      data-testid={`forensics-row-${row.symbol}-verdict`}
+                      className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${m.color} ${m.border} ${m.bg} font-bold`}
+                    >
+                      {m.icon} {m.label}
+                    </span>
+                    {/* Symbol */}
+                    <span className="v5-mono font-bold text-sm text-zinc-100 w-16 shrink-0">{row.symbol}</span>
+                    {/* Bot ledger */}
+                    <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                      Bot: <span className="text-zinc-300">{row.bot.trade_count}t</span>
+                      {' '}({row.bot.open_count}o · {row.bot.closed_count}c){' '}
+                      <span className={(row.bot.total_realized_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        {(row.bot.total_realized_pnl ?? 0) >= 0 ? '+' : ''}${Math.abs(row.bot.total_realized_pnl ?? 0).toFixed(2)}
+                      </span>
+                    </span>
+                    {/* IB ledger */}
+                    <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                      IB: <span className="text-zinc-300">{row.ib.current_position}sh</span>
+                      {' · realized '}
+                      <span className={(row.ib.realized_pnl_today ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        {(row.ib.realized_pnl_today ?? 0) >= 0 ? '+' : ''}${Math.abs(row.ib.realized_pnl_today ?? 0).toFixed(2)}
+                      </span>
+                    </span>
+                    {/* Drift */}
+                    <span className={`text-[11px] v5-mono ${driftClass} w-24 shrink-0`}>
+                      Δ {(row.drift_usd ?? 0) >= 0 ? '+' : ''}${Math.abs(row.drift_usd ?? 0).toFixed(2)}
+                    </span>
+                    {/* Explanation */}
+                    <span className="text-[11px] text-zinc-400 flex-1 truncate" title={row.explanation}>
+                      {row.explanation}
+                    </span>
+                    <span className="text-[10px] text-zinc-600 shrink-0">
+                      {isExpanded ? '▼' : '▶'} timeline
+                    </span>
+                  </div>
+
+                  {isExpanded && (
+                    <div
+                      data-testid={`forensics-timeline-${row.symbol}`}
+                      className="bg-zinc-950/50 px-4 py-2 border-t border-zinc-900"
+                    >
+                      {row.timeline?.length ? (
+                        <table className="w-full text-[11px] v5-mono">
+                          <thead>
+                            <tr className="text-zinc-600 uppercase text-[10px] tracking-wider">
+                              <th className="text-left pb-1 w-20">Time</th>
+                              <th className="text-left pb-1 w-48">Event</th>
+                              <th className="text-left pb-1">Detail</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {row.timeline.map((e, i) => {
+                              const isPhantom = String(e.kind || '').toLowerCase().includes('phantom');
+                              const isReconcile = String(e.kind || '').toLowerCase().includes('reconcile');
+                              const kindClass = isPhantom
+                                ? 'text-amber-300'
+                                : isReconcile
+                                ? 'text-sky-300'
+                                : 'text-zinc-400';
+                              return (
+                                <tr key={i} className="border-t border-zinc-900">
+                                  <td className="py-1 text-zinc-500">{fmtForensicsTime(e.time)}</td>
+                                  <td className={`py-1 ${kindClass}`}>{e.kind}</td>
+                                  <td className="py-1 text-zinc-400 truncate" title={e.detail}>{e.detail}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="text-zinc-600 text-[11px]">No timeline events.</div>
+                      )}
+                      {row.reset_touched && (
+                        <div className="mt-1.5 text-[10px] text-orange-400">
+                          ⚠ This row was touched by the morning reset script.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+        Sorted by verdict severity (drift / orphaned / phantom / clean). Click any row to expand timeline. v19.31.11
+      </div>
+    </div>
+  );
+};
+
+
 export default function DiagnosticsPage() {
   const [tab, setTab] = useState('trail');
 
@@ -1005,6 +1278,7 @@ export default function DiagnosticsPage() {
         {tab === 'scorecard' && <ModuleScorecard />}
         {tab === 'funnel' && <PipelineFunnel />}
         {tab === 'day_tape' && <DayTapeView />}
+        {tab === 'forensics' && <TradeForensicsView />}
         {tab === 'export' && <ExportReport />}
       </main>
     </div>

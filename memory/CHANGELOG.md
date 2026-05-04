@@ -2,6 +2,66 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-fifth commit, v19.31.11) — Trade Forensics: real vs phantom verdict per symbol
+
+**Operator's "what was real and what was phantom today + why the display discrepancies?" forensic ask.** New endpoint + Diagnostics sub-tab that joins all four sources of truth into a single per-symbol verdict.
+
+### Backend — `GET /api/diagnostics/trade-forensics?days=N`
+
+Joins:
+- `bot_trades` (in-window rows the bot owns)
+- `ib_live_snapshot.current` (IB position + realizedPNL by symbol)
+- `sentcom_thoughts` (sweep + reconcile events from v19.27 / v19.31 / auto-reconcile-at-boot)
+- `bot_trades_reset_log.affected_ids` (whether the morning reset touched the row)
+
+For each symbol that touched the system in the window:
+
+**Verdict classifier** (first-match wins, most specific first):
+| Verdict | Trigger |
+|---|---|
+| `phantom_v31` | `phantom_v19_31_oca_closed_swept` event present |
+| `phantom_v27` | `phantom_v19_27_leftover_swept` event present |
+| `reset_orphaned` | reset_log touched row AND IB still holds shares |
+| `auto_reconciled` | any reconcile event for this symbol |
+| `manual_or_external` | IB has shares, no bot row, no reconcile event |
+| `unexplained_drift` | both ledgers have data, `\|bot_realized − ib_realized\| > $5` |
+| `clean` | bot opened + closed, ledgers within tolerance |
+| `inactive` | filtered out of response |
+
+Each row carries `bot.{trade_count, open_count, closed_count, total_realized_pnl, first_executed_at, last_closed_at}` + `ib.{current_position, realized_pnl_today, unrealized_pnl, avg_cost, market_value}` + `drift_usd` + `sweep_count` + `reconcile_count` + `reset_touched` + a sorted **timeline** merging bot_executed / bot_closed / sweep / reconcile events.
+
+Summary: `total_symbols` + `by_verdict: { clean: N, phantom_v31: N, ... }` for instant operator triage.
+
+### Frontend — `Diagnostics → Trade Forensics`
+
+- Range toggle: Today / 3d / 7d.
+- **Verdict filter chip row**: All / Clean / Phantom v27 / Phantom v31 / Reset orphaned / Auto-reconciled / Manual or external / Unexplained drift — each with live count.
+- **Severity-sorted table**: rows ordered by verdict priority (`unexplained_drift` first, `clean` last) so problems surface at the top.
+- Each row: verdict badge (color-coded with icon ✓/◇/!/↻/?/✕) + symbol + bot ledger summary + IB ledger summary + drift Δ + 1-line explanation + click-to-expand timeline.
+- **Expandable per-row timeline**: chronological merge of bot_executed → bot_closed → sweep → reconcile events. Phantom events highlighted amber, reconcile events sky-blue.
+- Empty state contextual ("No symbols match this verdict." vs "No trade activity in this window.").
+
+### Tests
+
+`test_trade_forensics_v19_31_11.py` — 15 tests:
+- 10 classifier unit tests (one per verdict + drift-within-tolerance + phantom-precedence-over-drift + inactive fallback).
+- 5 endpoint integration tests including the exact LITE phantom_v31 scenario, summary by_verdict aggregation, auto-reconcile multi-symbol metadata array, and zombie-position exclusion.
+
+**103/103 v19.31 pytests passing across 11 suites.** ESLint clean. `/api/diagnostics/trade-forensics` returns 200 with `success: true`.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Diagnostics → Trade Forensics tab
+# Today → see today's per-symbol verdict
+# Click any row → timeline expands chronologically
+# Filter chips at top to drill into "all phantom_v31" or "all unexplained_drift" etc.
+# Look for unexplained_drift first (top of list by severity-sort)
+```
+
+
+
 ## 2026-05-04 (seventy-fourth commit, v19.31.10) — Filter chips on every Pipeline drill-down
 
 **Operator's "potential improvement" feedback after v19.31.9 landed all-stages-clickable + Day Tape.**
