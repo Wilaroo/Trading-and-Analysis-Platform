@@ -2064,6 +2064,21 @@ class SentComService:
                         elif pnl_pct < -7:
                             risk_level = "warning"
                         
+                        # 2026-05-04 v19.31 — realized R-multiple for the
+                        # MANAGE HUD aggregator. Operator caught the HUD
+                        # reading +0.0R while LITE alone was +12R because
+                        # this field was never populated. Compute it from
+                        # pnl / risk_amount (the dollar risk locked in at
+                        # entry: shares × |entry − stop|). risk_amount
+                        # may be 0 for half-broken legacy trades; in that
+                        # case fall back to recomputing from stop_price.
+                        risk_amt_for_r = float(trade.get("risk_amount") or 0)
+                        if risk_amt_for_r <= 0:
+                            stop_for_r = trade.get("stop_price") or 0
+                            if entry and stop_for_r and shares:
+                                risk_amt_for_r = abs(float(entry) - float(stop_for_r)) * abs(float(shares))
+                        pnl_r_value = (pnl / risk_amt_for_r) if risk_amt_for_r > 0 else None
+
                         positions.append({
                             "symbol": symbol,
                             "shares": shares,
@@ -2072,6 +2087,9 @@ class SentComService:
                             "current_price": current,
                             "pnl": round(pnl, 2),
                             "pnl_percent": round(pnl_pct, 2),
+                            # v19.31 — realized R for the manage HUD.
+                            "pnl_r": round(pnl_r_value, 3) if pnl_r_value is not None else None,
+                            "unrealized_r": round(pnl_r_value, 3) if pnl_r_value is not None else None,
                             "market_value": round(market_value, 2),
                             "cost_basis": round(cost_basis, 2),
                             "today_change": round(today_change * shares, 2) if today_change else 0,
@@ -2296,6 +2314,18 @@ class SentComService:
                     except Exception as _e:
                         logger.debug(f"Lazy-reconcile failed for {symbol}: {_e}")
 
+                    # 2026-05-04 v19.31 — same realized R-multiple logic
+                    # for IB-orphan / lazy-reconciled positions. Uses the
+                    # enriched stop_price from `bot_trades` if present.
+                    risk_amt_for_r_orphan = float((enrich_trade or {}).get("risk_amount") or 0)
+                    if risk_amt_for_r_orphan <= 0 and enrich_stop and avg_cost and abs_shares:
+                        risk_amt_for_r_orphan = abs(float(avg_cost) - float(enrich_stop)) * abs(float(abs_shares))
+                    pnl_r_orphan = (
+                        unrealized_pnl / risk_amt_for_r_orphan
+                        if risk_amt_for_r_orphan > 0
+                        else None
+                    )
+
                     positions.append({
                         "symbol": symbol,
                         "shares": abs_shares,
@@ -2304,6 +2334,9 @@ class SentComService:
                         "current_price": current,
                         "pnl": round(unrealized_pnl, 2),
                         "pnl_percent": round(pnl_pct, 2),
+                        # v19.31 — realized R for the manage HUD.
+                        "pnl_r": round(pnl_r_orphan, 3) if pnl_r_orphan is not None else None,
+                        "unrealized_r": round(pnl_r_orphan, 3) if pnl_r_orphan is not None else None,
                         "market_value": round(market_value, 2),
                         "cost_basis": round(cost_basis_val, 2),
                         "realized_pnl": round(realized_pnl, 2),

@@ -71,6 +71,38 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fetch_ib_held_keys(db) -> Optional[set]:
+    """v19.31 — IB-survival guard. Read the latest pusher snapshot from
+    `ib_live_snapshot.current` and return the set of `(symbol_upper,
+    direction)` tuples IB currently holds. Returns None if the snapshot
+    is missing or unparseable so callers can decide whether to bail.
+
+    The snapshot is updated on every pusher push (~5s cadence) so it's
+    fresh enough for a manual pre-open reset.
+    """
+    try:
+        snap = db["ib_live_snapshot"].find_one(
+            {"_id": "current"}, {"_id": 0, "positions": 1}
+        )
+    except Exception as e:
+        print(f"WARN: cannot read ib_live_snapshot.current: {e}")
+        return None
+    if not snap or not isinstance(snap, dict):
+        return None
+    positions = snap.get("positions") or []
+    held: set = set()
+    for p in positions:
+        try:
+            sym = (p.get("symbol") or "").upper()
+            qty = float(p.get("position", p.get("qty", 0)) or 0)
+            if not sym or abs(qty) < 0.001:
+                continue
+            held.add((sym, "long" if qty > 0 else "short"))
+        except Exception:
+            continue
+    return held
+
+
 def _build_query(symbols: Optional[List[str]]) -> dict:
     q: dict = {"status": "open"}
     if symbols:
@@ -126,8 +158,22 @@ def reset_open_trades(
     db,
     symbols: Optional[List[str]] = None,
     dry_run: bool = True,
+    force: bool = False,
 ) -> dict:
-    """Core reset op. Returns a summary dict — never raises on data."""
+    """Core reset op. Returns a summary dict — never raises on data.
+
+    v19.31 (2026-05-04) — IB-survival guard. Before this, the script
+    blindly closed every `bot_trades` row with status=open even when
+    IB still actually held the position. Operator hit this 2026-05-04
+    when 13 carryover positions ended up reading as "ORPHAN" because
+    the morning reset wiped the bot's tracking record while IB still
+    owned the shares.
+
+    New behavior: rows whose `(symbol, direction)` tuple is still in
+    IB's pushed-snapshot positions get SKIPPED with `skipped_ib_held`
+    in the summary. Pass `force=True` to override (returns to the old
+    "close everything" behavior).
+    """
     query = _build_query(symbols)
     coll = db["bot_trades"]
     affected = _summarise_open_trades(coll, query)
@@ -135,15 +181,61 @@ def reset_open_trades(
 
     result = {
         "dry_run": dry_run,
+        "force": force,
         "query": query,
         "matched_count": len(affected),
         "affected": affected,
         "modified_count": 0,
         "log_written": False,
+        "skipped_ib_held": [],
+        "ib_snapshot_available": False,
     }
 
-    if dry_run or not affected:
+    # v19.31 — partition `affected` into "IB still holds" vs "safe to close"
+    # before any DB writes. If `force=True`, skip the partition (legacy
+    # behavior). If snapshot can't be read, fail-closed by default —
+    # operator must pass --force to override.
+    held_keys: Optional[set] = None if force else _fetch_ib_held_keys(db)
+    result["ib_snapshot_available"] = held_keys is not None
+
+    if held_keys is None and not force and not dry_run:
+        print(
+            "ABORT: ib_live_snapshot.current is missing or unreadable. "
+            "Cannot verify which positions IB still holds. Pass --force "
+            "to override (this will close ALL matching rows regardless "
+            "of IB state)."
+        )
+        result["aborted"] = "no_ib_snapshot"
         return result
+
+    safe_to_close: List[dict] = []
+    for t in affected:
+        sym = (t.get("symbol") or "").upper()
+        direction = str(t.get("direction") or "long").lower()
+        if held_keys is not None and (sym, direction) in held_keys:
+            result["skipped_ib_held"].append({
+                "symbol": sym,
+                "direction": direction,
+                "trade_id": str(t.get("trade_id") or ""),
+                "shares": t.get("shares"),
+                "remaining_shares": t.get("remaining_shares"),
+            })
+        else:
+            safe_to_close.append(t)
+
+    safe_ids = [str(t.get("trade_id") or "") for t in safe_to_close if t.get("trade_id")]
+    result["safe_to_close_count"] = len(safe_to_close)
+    result["affected"] = safe_to_close  # surface only the rows we'll actually touch
+    result["affected_ids"] = safe_ids
+
+    if dry_run or not safe_to_close:
+        return result
+
+    # Build a tighter query so update_many ONLY hits the safe rows.
+    update_query = dict(query)
+    if safe_ids:
+        # trade_id is the canonical key on bot_trades.
+        update_query["trade_id"] = {"$in": safe_ids}
 
     update = {
         "$set": {
@@ -153,28 +245,58 @@ def reset_open_trades(
             "remaining_shares": 0,
         }
     }
-    upd = coll.update_many(query, update)
+    upd = coll.update_many(update_query, update)
     result["modified_count"] = upd.modified_count
 
-    _write_reset_log(db, affected_ids, symbols)
+    _write_reset_log(db, safe_ids, symbols)
     result["log_written"] = True
+    # keep affected_ids for downstream callers / tests that expect it
     return result
 
 
 def render_summary(result: dict) -> str:
     lines = []
     mode = "DRY-RUN" if result["dry_run"] else "COMMITTED"
-    lines.append(f"\n[{mode}] reset_bot_open_trades — {_now_iso()}")
-    lines.append(f"  matched: {result['matched_count']} open bot_trades")
+    forced = " [FORCED]" if result.get("force") else ""
+    lines.append(f"\n[{mode}{forced}] reset_bot_open_trades — {_now_iso()}")
+    lines.append(f"  matched (raw): {result['matched_count']} open bot_trades")
+    snap_status = (
+        "available" if result.get("ib_snapshot_available")
+        else ("BYPASSED (--force)" if result.get("force") else "MISSING")
+    )
+    lines.append(f"  ib snapshot: {snap_status}")
+
+    skipped = result.get("skipped_ib_held") or []
+    if skipped:
+        lines.append(
+            f"  skipped {len(skipped)} row(s) — IB still holds the position "
+            f"(v19.31 survival guard):"
+        )
+        for s in skipped:
+            lines.append(
+                f"    ⚠ {s.get('symbol'):<6} {s.get('direction'):<6} "
+                f"shares={s.get('shares')} remaining={s.get('remaining_shares')} "
+                f"trade_id={s.get('trade_id')}"
+            )
+        lines.append(
+            "  (closing these rows would orphan real IB positions — "
+            "use --force to override at your own risk.)"
+        )
+
     if result["affected"]:
-        lines.append("  rows:")
+        lines.append(f"  rows that would be closed: {result.get('safe_to_close_count', len(result['affected']))}")
         for t in result["affected"]:
             lines.append(
                 f"    - {t.get('symbol'):<6} {str(t.get('direction') or '?'):<6} "
                 f"shares={t.get('shares')} remaining={t.get('remaining_shares')} "
                 f"trade_id={t.get('trade_id')}"
             )
-    if not result["dry_run"]:
+    elif not skipped:
+        lines.append("  rows that would be closed: 0")
+
+    if result.get("aborted"):
+        lines.append(f"  ABORTED: {result['aborted']}")
+    elif not result["dry_run"]:
         lines.append(f"  modified: {result['modified_count']}")
         lines.append(f"  audit log written to bot_trades_reset_log: {result['log_written']}")
     else:
@@ -190,6 +312,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Preview without modifying")
     parser.add_argument("--confirm", default=None, help="Pass 'RESET' to actually commit")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of summary")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "v19.31 — bypass the IB-survival guard. Without this flag, "
+            "rows whose (symbol, direction) is still in IB's pushed "
+            "snapshot are skipped to avoid orphaning real positions. "
+            "Pass --force to close everything regardless of IB state."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.dry_run and args.confirm != "RESET":
@@ -206,7 +338,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 3
     db = client[args.db]
 
-    result = reset_open_trades(db=db, symbols=args.symbols, dry_run=args.dry_run)
+    result = reset_open_trades(
+        db=db, symbols=args.symbols, dry_run=args.dry_run, force=args.force,
+    )
 
     if args.json:
         import json

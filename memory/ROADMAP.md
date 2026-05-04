@@ -4,28 +4,39 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.0)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.1)
+
+### 🎯 Just shipped 2026-05-04 v19.31.1 — see CHANGELOG (sixty-seventh commit)
+**Three live-RTH bugs from operator screenshot at 9:36 AM ET RTH.**
+
+- ✅ **External-close phantom sweep** in `position_manager.py` — catches the LITE-style case where IB's OCA bracket closed the position but bot's `_open_trades` still tracks it. Marks CLOSED with `oca_closed_externally_v19_31` reason. 6 new pytests.
+- ✅ **Reset script IB-survival guard** in `reset_bot_open_trades.py` — refuses to close `bot_trades` rows where IB still holds matching `(symbol, direction)`. New `--force` to bypass; fail-closed when snapshot missing. 7 new pytests.
+- ✅ **MANAGE +0.0R aggregator fix** — `sentcom_service.get_our_positions` now emits `pnl_r` + `unrealized_r` for both bot-tracked and orphan/lazy-reconciled paths (was silently 0 because the fields were never populated). 6 new pytests including LITE +12.5R math validation.
+- ✅ **22/22 v19.31 pytests passing** across 4 suites. Backend syntax + ESLint clean.
 
 ### 🎯 Just shipped 2026-05-04 v19.31.0 — see CHANGELOG (sixty-sixth commit)
-**Live-RTH HUD paper-cuts: 3 fixes after operator screenshot at +5 min into RTH.**
+**Live-RTH HUD paper-cuts: stream cap + ORPHAN badge overlap + banner NameError.**
 
-- ✅ Unified Stream: removed `.slice(0, 2)` cap on both HTTP fetch + WS update paths in `useSentComStream.js`. Bumped fetch limit 20 → 200. Stream is now scrollable through the full morning.
-- ✅ ORPHAN/PARTIAL/STALE badge moved from absolute right-edge overlay to inline left cluster in `OpenPositionsV5.jsx` — no longer obscures live PnL.
-- ✅ `/api/system/banner` `NameError: pusher_red` fixed (re-derived from `pusher_status` in IB-yellow branch). 3 new regression pytests passing.
+- ✅ Unified Stream `.slice(0, 2)` cap removed (HTTP + WS); fetch limit 20 → 200.
+- ✅ ORPHAN/PARTIAL/STALE badge moved inline next to tier chip — no longer obscures live PnL.
+- ✅ `/api/system/banner` `NameError: pusher_red` fixed. 3 regression pytests.
 
-### 🔴 P0 — Top of next session (carry-forward + new finds)
-- **Diagnose `MANAGE +0.0R` HUD aggregator bug** — operator's LITE was clearly +12R open profit but the HUD MANAGE counter showed +0.0R across 9 positions. Likely lives in pipeline_hud / OperationsHUDV5 where it sums R from `_open_trades` only and drops the orphans (or zeros instead of skipping).
-- **Verify scanner / unified-stream live during RTH** with the v19.31 cap removal — operator should now see SCAN/EVAL/SKIP events flowing in real time. If still empty post-deploy, the WS broadcaster (chat_server stream-publish path) is the next suspect.
-- **Diagnostics Data Quality Pack** — fix Pipeline Funnel `ai_passed`/`bot_fired` consistency + Module Scorecard `shadow_module_performance` per-vote breakdown (carry-over from v19.30.13 ROADMAP).
+### 🔴 P0 — Top of next session
+- **Verify v19.31.1 fixes live during next RTH session**:
+  1. After pull + restart, confirm the LITE-style phantom sweeps within 30-60s of OCA closure.
+  2. Check `MANAGE +XR` HUD aggregator now reflects realized R per open position.
+  3. Try a dry-run reset script with the new `--dry-run` to see the IB-survival report.
+- **Diagnostics Data Quality Pack** — fix Pipeline Funnel `ai_passed`/`bot_fired` consistency + Module Scorecard `shadow_module_performance` per-vote breakdown (carry-over).
 - **Bot Thoughts content capture** — Trail Explorer empty `content` field for fired trades (carry-over).
 
-### 🟡 P1 (operator-facing improvements + new finds)
-- **Reset-survival for `bot_trades`** — make `MORNING_PLAY_A_RESET` skip wiping rows where IB still holds matching shares, OR add an auto-reconcile-at-boot path so legitimate swing carryovers don't show as ORPHAN every morning.
+### 🟡 P1 (operator-facing improvements)
+- **Auto-reconcile-at-boot** — if `_restore_open_trades` finds 0 rows but IB still has positions, auto-fire a `POST /api/trading-bot/reconcile {all: true}` so the operator doesn't have to click RECONCILE every morning. Likely best gated behind an env flag (`AUTO_RECONCILE_AT_BOOT=true`).
+- **Stale-snapshot warning on reset** — if `ib_live_snapshot.current.as_of` is more than ~30s old when the reset script runs, print a warning before partitioning. Defends against a freshly-restarted backend with no pusher data yet.
 - `.bat` health screen probes pusher actually (carry-over).
 - Pusher auto-restart on Windows (carry-over).
-- Shadow-vs-Real gap drilldown (71% shadow vs 32% real) (carry-over).
+- Shadow-vs-Real gap drilldown (carry-over).
 - Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
-- Async-pymongo audit follow-up — 51 remaining sync-mongo-in-async sites (carry-over).
+- Async-pymongo audit follow-up — 51 remaining sync-mongo-in-async sites.
 
 ### 🟢 P2 / P3
 - v19.32 Pre-Aggregated Bar Pipeline (cold chart 400ms→30ms)
@@ -33,10 +44,10 @@ Open priorities, deferred ideas, and backlog. Move items to
 - IB Gateway auto-login resilience
 - Setup-landscape EOD self-grading tracker
 - Audit Pass 1: lint sweep + dead-code (370 ruff fixes)
-- Break up 4 monoliths (ib.py 6349, server.py 4643, enhanced_scanner.py 7090, training_pipeline.py 3869)
-- Safely retire Alpaca fallback (32 reference sites)
+- Break up 4 monoliths
 
 ---
+
 
 ## 🔴 Now / Near-term (next session pickup — 2026-05-01 v19.30.12 + Windows network fix)
 

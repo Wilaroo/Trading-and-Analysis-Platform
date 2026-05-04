@@ -2,6 +2,47 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (sixty-seventh commit, v19.31.1) — External-close phantom sweep + reset survival guard + MANAGE +0.0R fix
+
+**Three live-RTH bugs surfaced from the operator's 2026-05-04 9:36 AM ET screenshot.** All three were exposed when LITE was in the dashboard as 62sh short with rich detail while the actual IB position was 0sh (OCA target hit, IB closed externally), and 13 carryover positions showed up as ORPHAN despite the operator believing they had no overnight book.
+
+### Fix 1 — Externally-closed phantom sweep (`position_manager.py`)
+
+The v19.27 0-share-leftover sweep + v19.29 wrong-direction sweep both miss the case where the **OCA bracket on IB closed the position out from under the bot**. LITE's bracket hit the target, IB closed it (realizedPNL +$112.66, position 0), but `_open_trades` still had `remaining_shares = 62`. The 0sh-leftover branch didn't fire (rem≠0). The wrong-direction branch didn't fire (IB has zero in BOTH directions, not just opposite).
+
+**Fix**: New third sweep branch detects `remaining_shares > 0` AND `ib_qty_my_dir == 0` AND `ib_qty_opp_dir == 0` AND trade is older than 30s → mark CLOSED with `oca_closed_externally_v19_31` reason. Emits a warning-level Unified Stream event with the share count + bot's tracked direction. 6 new pytests.
+
+### Fix 2 — Reset script IB-survival guard (`reset_bot_open_trades.py`)
+
+The morning reset script blindly closed every status=open row in `bot_trades` even when IB still actually held the position. Operator hit this 2026-05-04 when 13 yesterday-carryover positions ended up reading as ORPHAN because the reset wiped the bot's tracking record but didn't touch IB.
+
+**Fix**: New `_fetch_ib_held_keys(db)` helper reads `ib_live_snapshot.current.positions` and partitions matched rows into "IB still holds" (skipped) vs "safe to close" (closed normally). Fail-closed if the snapshot is missing — operator must pass `--force` to override. New `--force` CLI flag for the legacy "close everything" behavior. The summary now lists every skipped row with its symbol/direction/shares so operator can tell why nothing happened. 7 new pytests.
+
+### Fix 3 — `MANAGE +0.0R` HUD aggregator (`sentcom_service.py`)
+
+`derivePipelineCounts` summed `unrealized_r ?? pnl_r` across positions, but `get_our_positions` never populated either field — only `pnl` (raw $) and `pnl_percent`. Result: every position contributed 0 to totalR, so the HUD showed +0.0R even with LITE alone at +12.5R.
+
+**Fix**: Compute realized R-multiple = `pnl / risk_amount` in both bot-tracked and orphan/lazy-reconciled branches of `get_our_positions`. Send as both `pnl_r` and `unrealized_r` (the frontend reads either). Returns None (NOT 0) when risk_amount is unavailable, so the aggregator skips the position cleanly instead of dragging totalR toward 0. 6 new pytests including LITE-scenario math validation.
+
+### Operator note: the 13 ORPHAN diagnosis
+
+Operator clicked RECONCILE 13 → 12 reconciled, 1 skipped. The skipped one is almost certainly LITE (IB position = 0; reconcile correctly refuses to materialize a trade for a position that doesn't exist). After Fix 1 ships and the manage loop runs, LITE will auto-close from `_open_trades` and the dashboard will stop drawing it.
+
+### Tests
+
+22/22 v19.31 pytests passing. ESLint clean on `useSentComStream.js` + `OpenPositionsV5.jsx` from v19.31.0. Python ast parses cleanly on the three modified backend files.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Watch /api/sentcom/positions response — pnl_r should now be populated
+# Watch /var/log/supervisor/backend.err.log for "v19.31 EXTERNAL-CLOSE-SWEEP"
+# when LITE's stale entry gets swept
+```
+
+
+
 ## 2026-05-04 (sixty-sixth commit, v19.31.0) — Live-RTH HUD paper-cuts: stream cap + ORPHAN badge overlap + banner NameError
 
 **Three operator-flagged issues from the +5 min into RTH on 2026-05-04 dashboard screenshot.** All UI-side; backend was healthy.

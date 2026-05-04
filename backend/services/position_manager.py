@@ -155,6 +155,104 @@ class PositionManager:
                             )
                             continue  # done with this trade
 
+                        # ── v19.31 (2026-05-04) Externally-closed phantom sweep ──
+                        # Operator hit this with LITE on 2026-05-04: OCA
+                        # target hit on IB ($961.26), IB closed the position
+                        # via the bracket, but `_open_trades` still tracked
+                        # 62 sh short. The 0sh-leftover branch below didn't
+                        # fire because remaining_shares was 62, not 0. The
+                        # wrong-direction branch above didn't fire because
+                        # IB has zero shares in BOTH directions. Result: bot
+                        # kept "managing" a position that no longer existed
+                        # and the dashboard kept drawing it.
+                        #
+                        # Rule: if bot tracks shares > 0 AND IB has zero
+                        # shares in BOTH directions for the symbol AND the
+                        # trade is older than 30s (so we don't sweep a
+                        # brand-new fill IB hasn't reported yet), the
+                        # position was closed externally (OCA target hit,
+                        # OCA stop hit, or manual TWS close). Mark CLOSED
+                        # with `oca_closed_externally` reason and let the
+                        # P&L/journal pipeline catch up on the next tick.
+                        _rem_external = getattr(_trade, "remaining_shares", None)
+                        if (
+                            _rem_external is not None
+                            and _rem_external > 0
+                            and ib_qty_my_dir == 0
+                            and ib_qty_opp_dir == 0
+                        ):
+                            _executed_at_e = getattr(_trade, "executed_at", None)
+                            age_ok_e = True
+                            if _executed_at_e:
+                                try:
+                                    if isinstance(_executed_at_e, str):
+                                        from datetime import datetime as _dt_e
+                                        _ea_e = _dt_e.fromisoformat(
+                                            _executed_at_e.replace("Z", "+00:00")
+                                        )
+                                    else:
+                                        _ea_e = _executed_at_e
+                                    if _ea_e.tzinfo is None:
+                                        from datetime import timezone as _tz_e
+                                        _ea_e = _ea_e.replace(tzinfo=_tz_e.utc)
+                                    from datetime import datetime as _dt_e2, timezone as _tz_e2
+                                    age_s_e = (_dt_e2.now(_tz_e2.utc) - _ea_e).total_seconds()
+                                    age_ok_e = age_s_e >= 30
+                                except Exception:
+                                    age_ok_e = True
+                            if age_ok_e:
+                                _trade.status = _TS.CLOSED
+                                _trade.close_reason = "oca_closed_externally_v19_31"
+                                from datetime import datetime as _dt_e3, timezone as _tz_e3
+                                if not getattr(_trade, "closed_at", None):
+                                    _trade.closed_at = _dt_e3.now(_tz_e3.utc).isoformat()
+                                # Set remaining_shares to 0 so any downstream
+                                # consumer reading the trade dict stops
+                                # treating it as live.
+                                try:
+                                    _trade.remaining_shares = 0
+                                except Exception:
+                                    pass
+                                try:
+                                    await asyncio.to_thread(bot._persist_trade, _trade)
+                                except Exception:
+                                    pass
+                                bot._open_trades.pop(_tid, None)
+                                try:
+                                    bot._closed_trades.append(_trade)
+                                except Exception:
+                                    pass
+                                try:
+                                    from services.sentcom_service import emit_stream_event
+                                    await emit_stream_event({
+                                        "kind": "warning",
+                                        "event": "oca_closed_externally_swept",
+                                        "symbol": _trade.symbol,
+                                        "text": (
+                                            f"🧹 Externally-closed phantom swept: "
+                                            f"{_trade.symbol} {_dir.upper()} bot tracked "
+                                            f"{int(_rem_external)}sh but IB has 0 in both "
+                                            f"directions. OCA bracket likely closed it; "
+                                            f"bot record closed — v19.31 fix."
+                                        ),
+                                        "metadata": {
+                                            "trade_id": _trade.id,
+                                            "bot_direction": _dir,
+                                            "bot_remaining_shares": int(_rem_external),
+                                            "reason": "oca_closed_externally",
+                                        },
+                                    })
+                                except Exception:
+                                    pass
+                                logger.warning(
+                                    "[v19.31 EXTERNAL-CLOSE-SWEEP] %s %s tracked %dsh but "
+                                    "IB has 0 in both directions — OCA likely closed it. "
+                                    "Marking trade CLOSED, trade_id=%s",
+                                    _trade.symbol, _dir.upper(),
+                                    int(_rem_external), _trade.id,
+                                )
+                                continue  # done with this trade
+
                         # Original v19.27 phantom sweep: 0sh leftover
                         _rem = getattr(_trade, "remaining_shares", None)
                         if _rem is None or _rem != 0:
