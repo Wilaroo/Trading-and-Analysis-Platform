@@ -80,12 +80,29 @@ export const PipelineHUDV5 = ({
   closeSub,
   closeAccent,
   totalPnl = 0,
+  totalUnrealizedPnl,
+  totalRealizedPnl,
+  totalPnlToday,
   equity,
   buyingPower,
   phase = '—',
   rightExtra = null,
 }) => {
-  const pnlColor = (Number(totalPnl) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  // 2026-05-04 v19.31.7 — operator asked for realized PnL alongside
+  // unrealized. The single "P&L" tile now shows the day total
+  // (realized + unrealized) with realized/unrealized split underneath.
+  // Falls back to legacy totalPnl when v19.31.7 fields are absent
+  // (e.g., still on an old backend).
+  const dayTotal = (totalPnlToday ?? null) != null
+    ? Number(totalPnlToday)
+    : Number(totalPnl) || 0;
+  const realizedNum = totalRealizedPnl != null ? Number(totalRealizedPnl) : null;
+  const unrealizedNum = totalUnrealizedPnl != null
+    ? Number(totalUnrealizedPnl)
+    : Number(totalPnl) || 0;
+  const pnlColor = dayTotal >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const realizedColor = realizedNum != null && realizedNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const unrealizedColor = unrealizedNum >= 0 ? 'text-emerald-400' : 'text-rose-400';
   const phaseColor =
     phase?.toUpperCase?.() === 'LIVE' ? 'text-emerald-400' :
     phase?.toUpperCase?.() === 'PAPER' ? 'text-amber-400' :
@@ -124,7 +141,38 @@ export const PipelineHUDV5 = ({
 
         <div className="flex items-center justify-end gap-3 pl-3 border-l border-zinc-800 basis-2/5 min-w-0 shrink-0">
           {rightExtra}
-          <Metric label="P&L"     value={formatMoney(totalPnl)}      color={pnlColor} />
+          {/* v19.31.7 — Day P&L tile = realized + unrealized, with the
+              split rendered underneath. When realized data is unavailable
+              (legacy backend), falls back to single-line legacy display. */}
+          {realizedNum != null ? (
+            <div
+              data-testid="pipeline-pnl-block"
+              data-help-id="pipeline-pnl"
+              className="flex flex-col items-end leading-tight"
+              title={
+                `Day P&L: ${formatMoney(dayTotal)}\n` +
+                `  Realized:   ${formatMoney(realizedNum)}\n` +
+                `  Unrealized: ${formatMoney(unrealizedNum)}`
+              }
+            >
+              <div className="flex items-baseline gap-1">
+                <span className="text-[9px] uppercase tracking-wider text-zinc-500">P&L</span>
+                <span data-testid="pipeline-pnl-day" className={`v5-mono text-[13px] font-semibold ${pnlColor}`}>
+                  {formatMoney(dayTotal)}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 text-[10px] v5-mono">
+                <span data-testid="pipeline-pnl-realized" className={realizedColor}>
+                  R {formatMoney(realizedNum)}
+                </span>
+                <span data-testid="pipeline-pnl-unrealized" className={unrealizedColor}>
+                  U {formatMoney(unrealizedNum)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <Metric label="P&L" value={formatMoney(totalPnl)} color={pnlColor} />
+          )}
           <Metric label="Equity"  value={formatEquity(equity)} />
           <Metric label="Buying Pwr"
             value={formatEquity(buyingPower)}

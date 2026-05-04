@@ -64,10 +64,18 @@ import {
 } from '../../hooks/useMondayMorningAutoLoad';
 
 
-const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) => {
+const derivePipelineCounts = ({ status, setups, positions, alerts, messages, closedToday, winsToday, lossesToday }) => {
   const pipeline = status?.order_pipeline || {};
   const openPositions = (positions || []).filter(p => p && p.status !== 'closed');
-  const closedToday = (positions || []).filter(p => p?.status === 'closed');
+  // 2026-05-04 v19.31.7 — operator's CLOSE TODAY tile read 0 even when
+  // the bot demonstrably closed positions today. Root cause: the
+  // backend's /api/sentcom/positions endpoint returned only OPEN
+  // positions (so filtering for `status === 'closed'` against that
+  // array could never match anything). Now the backend returns a
+  // dedicated `closed_today: [...]` array surfaced as the
+  // `closedToday` prop. Stream-message fallback is kept for cases
+  // where the backend list is briefly stale post-close.
+  const closedFromBackend = Array.isArray(closedToday) ? closedToday : [];
   const streamCloses = (messages || []).filter(m => {
     const kind = (m?.event || m?.kind || '').toLowerCase();
     return kind.includes('close') || kind.includes('win') || kind.includes('loss');
@@ -88,15 +96,21 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) =
   const stopsBreached = openPositions.filter(p => p.stop_breached || p.stop_hit).length;
   const openSymbols = openPositions.map(p => p.symbol).filter(Boolean).slice(0, 3).join(' · ');
 
-  // Aggregate close
-  const closedCount = closedToday.length || streamCloses.length;
-  const winsCount = closedToday.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
-  const lossesCount = closedToday.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
-  const closedR = closedToday.reduce((s, p) => s + (Number(p.r_multiple) || 0), 0);
-  const worstR = closedToday.length
-    ? Math.min(...closedToday.map(p => Number(p.r_multiple) || 0))
+  // Aggregate close — v19.31.7 prefers the backend list, falls back
+  // to filtering the positions array (legacy), and finally to the
+  // stream-event scan.
+  const positionsClosedFallback = (positions || []).filter(p => p?.status === 'closed');
+  const closedSource = closedFromBackend.length > 0
+    ? closedFromBackend
+    : positionsClosedFallback;
+  const closedCount = closedSource.length || streamCloses.length;
+  const wins = winsToday ?? closedSource.filter(p => (p.realized_pnl ?? p.pnl ?? 0) > 0).length;
+  const losses = lossesToday ?? closedSource.filter(p => (p.realized_pnl ?? p.pnl ?? 0) < 0).length;
+  const closedR = closedSource.reduce((s, p) => s + (Number(p.r_multiple) || 0), 0);
+  const worstR = closedSource.length
+    ? Math.min(...closedSource.map(p => Number(p.r_multiple) || 0))
     : null;
-  const winRate = closedCount ? Math.round((winsCount / closedCount) * 100) : null;
+  const winRate = closedCount ? Math.round((wins / closedCount) * 100) : null;
 
   return {
     // 2026-04-30 v15 — operator flagged "SCAN 0 / EVAL 5" mismatch.
@@ -127,8 +141,8 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages }) =
       ? `WR ${winRate}%${closedR ? ` · $${closedR >= 0 ? '+' : '−'}${Math.abs(Math.round(closedR * 100))}` : ''}${worstR != null ? ` · worst ${worstR.toFixed(1)}R` : ''}`
       : 'no closes today',
     close_r: closedCount ? closedR : null,
-    wins: winsCount,
-    losses: lossesCount,
+    wins,
+    losses,
   };
 };
 
@@ -138,6 +152,12 @@ export const SentComV5View = ({
   context,
   positions,
   totalPnl,
+  totalUnrealizedPnl,
+  totalRealizedPnl,
+  totalPnlToday,
+  closedToday,
+  winsToday,
+  lossesToday,
   positionsLoading,
   setupsLoading,
   contextLoading,
@@ -188,7 +208,16 @@ export const SentComV5View = ({
     );
   }, [focusedSymbol, selectedPosition, positions]);
 
-  const counts = derivePipelineCounts({ status, setups, positions, alerts, messages });
+  const counts = derivePipelineCounts({
+    status,
+    setups,
+    positions,
+    alerts,
+    messages,
+    closedToday,
+    winsToday,
+    lossesToday,
+  });
 
   // Bottom-drawer split state — operator-resizable via DrawerSplitHandle.
   // Persisted to localStorage so the chosen split survives refresh.
@@ -284,6 +313,9 @@ export const SentComV5View = ({
           text: `${counts.close_r >= 0 ? '+' : ''}${counts.close_r.toFixed(1)}R`,
         } : undefined}
         totalPnl={totalPnl}
+        totalUnrealizedPnl={totalUnrealizedPnl}
+        totalRealizedPnl={totalRealizedPnl}
+        totalPnlToday={totalPnlToday}
         equity={equity}
         buyingPower={buyingPower}
         phase={phase}

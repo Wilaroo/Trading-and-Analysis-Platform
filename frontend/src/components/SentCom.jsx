@@ -101,7 +101,17 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const showBriefingDeepDive = briefingKey !== null;
   const { status, loading: statusLoading } = useSentComStatus();
   const { messages, loading: streamLoading, refresh: refreshStream } = useSentComStream();
-  const { positions, totalPnl, loading: positionsLoading } = useSentComPositions();
+  const {
+    positions,
+    totalPnl,
+    totalUnrealizedPnl,
+    totalRealizedPnl,
+    totalPnlToday,
+    closedToday,
+    winsToday,
+    lossesToday,
+    loading: positionsLoading,
+  } = useSentComPositions();
   const { setups, loading: setupsLoading } = useSentComSetups();
   const { context, loading: contextLoading } = useSentComContext();
   const { alerts, loading: alertsLoading } = useSentComAlerts();
@@ -388,6 +398,12 @@ const SentCom = ({ compact = false, embedded = false }) => {
           context={context}
           positions={positions}
           totalPnl={totalPnl}
+          totalUnrealizedPnl={totalUnrealizedPnl}
+          totalRealizedPnl={totalRealizedPnl}
+          totalPnlToday={totalPnlToday}
+          closedToday={closedToday}
+          winsToday={winsToday}
+          lossesToday={lossesToday}
           positionsLoading={positionsLoading}
           setupsLoading={setupsLoading}
           contextLoading={contextLoading}

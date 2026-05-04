@@ -2,6 +2,64 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-first commit, v19.31.7) — CLOSE TODAY tile + Realized PnL on the HUD
+
+**Two operator-flagged bugs after the v19.31.4–v19.31.6 deploy.** Both surfaced when the operator asked "did the bot actually take and close any trades today?" — answer was yes (LITE realizedPNL +$112.66, V realizedPNL −$751.78 visible in IB account snapshot) but the dashboard's CLOSE TODAY tile read 0 and the top-bar P&L showed only unrealized PnL.
+
+### Bug 1 — CLOSE TODAY = 0 even after closes
+
+`/api/sentcom/positions` only returned OPEN positions. The HUD's `derivePipelineCounts` filtered `positions.filter(p => p.status === 'closed')` against THAT array, so it could never find anything. Stream-message fallback caught a few close events for ~30s but they scrolled off and the count went back to 0.
+
+**Fix in `routers/sentcom.py:get_positions`**: now also returns `closed_today: [...]` populated from `bot_trades` where `status='closed'` AND `closed_at >= today_start_ET (≈ 04:00 UTC)`. Includes `closed_today_count`, `wins_today`, `losses_today`. Also falls back to `executed_at` for legacy rows missing `closed_at`. Wraps the whole closed-today lookup in try/except so a Mongo failure can never break live PnL display.
+
+**Fix in `derivePipelineCounts`**: now reads `closedToday` from props (backend-sourced), falls back to filtering `positions` (legacy), then to stream events. CLOSE TODAY tile finally shows real counts.
+
+### Bug 2 — HUD P&L was unrealized-only
+
+`total_pnl = sum(p.get("pnl", 0) for p in positions)` summed only OPEN-position unrealized PnL. A trade that closed for $200 profit was completely invisible on the dashboard's day-PnL number.
+
+**Fix in `routers/sentcom.py`**: explicit `total_realized_pnl`, `total_unrealized_pnl`, and `total_pnl_today = realized + unrealized`. Legacy `total_pnl` field preserved as alias of unrealized for back-compat (existing consumers don't break).
+
+**Fix in `PipelineHUDV5.jsx`**: P&L tile now renders three lines:
+- **P&L $X.XX** — day total (realized + unrealized) in 13px semibold.
+- **R $X.XX** — realized only (small).
+- **U $X.XX** — unrealized only (small).
+- Tooltip on hover shows the full split.
+- Falls back to single-line legacy display if backend hasn't been updated yet.
+
+### Tests
+
+`test_closed_today_realized_pnl_v19_31_7.py` — 6 tests:
+- `closed_today` array surfaces with correct symbols, excludes yesterday's rows.
+- `total_pnl_today == realized + unrealized` math.
+- Legacy `total_pnl` stays unrealized-only (back-compat).
+- `executed_at` fallback when `closed_at` missing.
+- Required field shape pin (symbol/direction/realized_pnl/r_multiple/...).
+- Mongo failure during closed-today lookup must NOT break open-PnL display.
+
+**79/79 v19.31 pytests passing across 9 suites.** ESLint clean on `useSentComPositions.js`, `SentComV5View.jsx`, `PipelineHUDV5.jsx`. Backend `/api/sentcom/positions` returns all new fields with correct shape.
+
+### Operator runbook for "did the bot trade today?"
+
+New `/app/memory/runbooks/diagnose_today_trades.md` walks operator through:
+1. `daily_stats` (in-memory counter).
+2. `/api/trading-bot/trades` (Mongo state).
+3. `/api/sentcom/positions` (what dashboard sees).
+4. Common gaps (OCA-closed-without-bot-noticing, missing `closed_at`, reset-script wipe).
+5. Mongo cleanup commands for legacy rows.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Top-bar P&L tile now shows R/U split.
+# CLOSE TODAY tile populates with real counts.
+# Hover the P&L tile for the full breakdown tooltip.
+# Run /app/memory/runbooks/diagnose_today_trades.md if anything looks off.
+```
+
+
+
 ## 2026-05-04 (seventieth commit, v19.31.4 → v19.31.6) — Diagnostics Data Quality Pack + Trail Explorer thoughts + reconcile skip-reasons UX + sweep label disambiguation
 
 **Four next-action items shipped in one cumulative commit.** Closes the "trustworthy diagnostics" loop the operator asked for after the v19.31.0–v19.31.3 stability run.

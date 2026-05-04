@@ -408,30 +408,118 @@ async def get_positions():
     - today_change, today_change_pct
     - stop_price, target_prices
     - status, entry_time
+
+    2026-05-04 v19.31.7 — operator reported HUD's CLOSE TODAY tile
+    always reading 0 even after the bot demonstrably closed positions.
+    Root cause: this endpoint returned only OPEN positions, but the
+    HUD filtered `status === 'closed'` against THAT array, so it could
+    never find anything. Now we also return:
+
+      - `closed_today`: bot_trades closed since 00:00 ET today, with
+        symbol/direction/realized_pnl/closed_at — feeds the HUD's
+        CLOSE TODAY tile directly.
+      - `total_realized_pnl`: sum of realized PnL across closed_today.
+      - `total_unrealized_pnl`: sum of pnl across open positions
+        (alias of `total_pnl` — kept for clarity in the new payload).
+      - `total_pnl_today`: realized + unrealized (the operator's
+        actual day-PnL number).
     """
     try:
         service = _get_service()
         positions = await service.get_our_positions()
-        
-        total_pnl = sum(p.get("pnl", 0) for p in positions)
+
+        # ── Closed trades today (v19.31.7) ────────────────────────
+        # Anchor the day on US/Eastern open (close enough for the
+        # operator's intent: "trades the bot closed during today's
+        # RTH session"). Worker time is UTC; subtract 4-5h depending
+        # on DST. Use a permissive 16h-ago window so a Sunday-evening
+        # check still catches Friday's last close in case the operator
+        # is reviewing.
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        from server import db as _db
+        now_utc = _dt.now(_tz.utc)
+        # 09:30 ET == 13:30 UTC (during DST) / 14:30 UTC (winter).
+        # Pick the lower bound at "midnight ET ≈ 04:00 UTC" so we
+        # cover the whole trading day plus pre-market.
+        today_start_et = now_utc.replace(hour=0, minute=0, second=0,
+                                         microsecond=0) - _td(hours=4)
+        cutoff_iso = today_start_et.isoformat()
+
+        closed_today_raw = []
+        try:
+            cursor = _db["bot_trades"].find(
+                {
+                    "status": "closed",
+                    "$or": [
+                        {"closed_at": {"$gte": cutoff_iso}},
+                        # `executed_at` fallback for trades with no
+                        # closed_at field (legacy, or where the close
+                        # path skipped stamping it).
+                        {"closed_at": None, "executed_at": {"$gte": cutoff_iso}},
+                    ],
+                },
+                {"_id": 0},
+                sort=[("closed_at", -1)],
+                limit=200,
+            )
+            closed_today_raw = list(cursor)
+        except Exception as e:
+            logger.warning(f"closed_today lookup failed (non-fatal): {e}")
+
+        # Slim shape for the HUD — same fields as positions but with
+        # close-specific extras. Skip `_id` is already excluded above.
+        closed_today = []
+        total_realized_pnl = 0.0
+        for t in closed_today_raw:
+            realized = float(t.get("realized_pnl") or t.get("net_pnl") or t.get("pnl") or 0)
+            total_realized_pnl += realized
+            closed_today.append({
+                "symbol": t.get("symbol"),
+                "direction": t.get("direction"),
+                "shares": t.get("shares"),
+                "entry_price": t.get("fill_price") or t.get("entry_price"),
+                "exit_price": t.get("exit_price") or t.get("close_price"),
+                "realized_pnl": round(realized, 2),
+                "r_multiple": t.get("r_multiple"),
+                "executed_at": t.get("executed_at"),
+                "closed_at": t.get("closed_at"),
+                "close_reason": t.get("close_reason") or t.get("exit_reason"),
+                "setup_type": t.get("setup_type"),
+                "trade_id": t.get("id"),
+            })
+
+        total_unrealized_pnl = sum(p.get("pnl", 0) for p in positions)
         total_market_value = sum(p.get("market_value", 0) for p in positions)
         total_cost_basis = sum(p.get("cost_basis", 0) for p in positions)
         total_today_change = sum(p.get("today_change", 0) for p in positions)
         bot_count = sum(1 for p in positions if p.get("source") == "bot")
         ib_count = sum(1 for p in positions if p.get("source") == "ib")
         positions_at_risk = sum(1 for p in positions if p.get("risk_level") in ("danger", "critical"))
-        
+
+        wins_today = sum(1 for c in closed_today if (c.get("realized_pnl") or 0) > 0)
+        losses_today = sum(1 for c in closed_today if (c.get("realized_pnl") or 0) < 0)
+
         return {
             "success": True,
             "positions": positions,
             "count": len(positions),
-            "total_pnl": round(total_pnl, 2),
+            # Legacy field — keeps existing HUDs working unchanged.
+            "total_pnl": round(total_unrealized_pnl, 2),
+            # v19.31.7 explicit naming + new realized/total-today fields.
+            "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+            "total_realized_pnl": round(total_realized_pnl, 2),
+            "total_pnl_today": round(total_unrealized_pnl + total_realized_pnl, 2),
             "total_market_value": round(total_market_value, 2),
             "total_cost_basis": round(total_cost_basis, 2),
             "total_today_change": round(total_today_change, 2),
             "bot_positions": bot_count,
             "ib_positions": ib_count,
             "positions_at_risk": positions_at_risk,
+            # v19.31.7 — closed trades for today (drives HUD CLOSE TODAY tile).
+            "closed_today": closed_today,
+            "closed_today_count": len(closed_today),
+            "wins_today": wins_today,
+            "losses_today": losses_today,
         }
     except Exception as e:
         logger.error(f"Error getting positions: {e}")
@@ -440,7 +528,14 @@ async def get_positions():
             "error": str(e),
             "positions": [],
             "count": 0,
-            "total_pnl": 0
+            "total_pnl": 0,
+            "total_unrealized_pnl": 0,
+            "total_realized_pnl": 0,
+            "total_pnl_today": 0,
+            "closed_today": [],
+            "closed_today_count": 0,
+            "wins_today": 0,
+            "losses_today": 0,
         }
 
 
