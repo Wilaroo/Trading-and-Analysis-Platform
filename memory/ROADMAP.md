@@ -58,6 +58,11 @@ Open priorities, deferred ideas, and backlog. Move items to
 - **Pusher honors `max_concurrent_workers`** — current Windows pusher reads `/api/ib-collector/throttle-policy` and parks N-1 of its 4 workers.
 
 ### 🟢 P2 / P3 (future evolution paths now unlocked by v19.34)
+- **Stop-distance journal → ML training data** *(operator-suggested 2026-05-04, captured from v19.34 finish summary)* — pipe a tiny `tick_evaluated` annotation into `sentcom_thoughts` on every mid-bar eval, e.g. `"AAPL: bid 148.42 vs stop 148.50 (-8c safety margin) at 09:33:14"`. After a week, you'd have a microsecond-resolution journal of every stop's distance-to-fire across every open trade — perfect training data for an AI module that learns to predict stop-run probability **before** the wick actually fires. Implementation notes:
+  - Throttle the writer (1 sample/sec/trade max) so we don't drown `sentcom_thoughts` — the existing TTL=7d is fine.
+  - Add a new `kind: "stop_distance_sample"` so it's filterable from the operator-facing thought stream.
+  - Stamp `bid/ask/last/effective_stop/distance_pct/seconds_until_fire` so the trainer has both the live state and (computed at fire-time, in a later batch job) the eventual outcome label.
+  - Train a small classifier (XGBoost or a 2-layer MLP) on `(distance, recent volatility, time-of-day, regime)` → `P(stop hit within next N seconds)`. Wire prediction back into the AI council's "should we tighten the stop?" decision.
 - **Sub-bar trailing stops** — once mid-bar stop eval is proven safe, extend to per-tick trailing recalc. Needs careful smoothing to avoid noise-driven exits.
 - **Mid-bar entry eval** — currently entries wait for bar-close to avoid wicks. Could selectively front-run entries on high-conviction signals using the same tick bus.
 - **L1 → L2 escalation** — for actively-evaluated symbols, request L2 depth via the tick bus to spot stop-runs before they fire.
