@@ -301,6 +301,28 @@ async def get_system_banner() -> Dict[str, Any]:
             "as_of": snapshot.get("as_of"),
         }
 
+    # All clear (or near-clear) — but check for the "deep historical
+    # queue, no failures" info hint before returning fully empty so the
+    # V5 banner can render a thin blue strip instead of nothing.
+    # 2026-05-04 v19.31.3 — see _check_historical_queue for the rationale.
+    hist = subsystems.get("historical_queue", {})
+    hist_metrics = hist.get("metrics") or {}
+    if hist_metrics.get("deep_queue_no_failures"):
+        return {
+            "level": "info",
+            "message": f"Backfill queue deep — {hist_metrics.get('pending', 0):,} pending",
+            "detail": (
+                f"{hist_metrics.get('pending', 0):,} requests pending · "
+                f"{hist_metrics.get('failed', 0)} failed. Workers are "
+                f"draining at IB's pacing limit — this is normal during "
+                f"a full backfill, no action needed."
+            ),
+            "action": None,
+            "since_seconds": None,
+            "subsystem": "historical_queue",
+            "as_of": snapshot.get("as_of"),
+        }
+
     # All clear.
     return {
         "level": None,

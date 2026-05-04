@@ -40,8 +40,11 @@ logger = logging.getLogger(__name__)
 # Yellow / red thresholds — tuned to DGX + Windows pusher operational norms.
 MONGO_PING_YELLOW_MS = 50
 MONGO_PING_RED_MS = 500
-HIST_QUEUE_YELLOW = 5_000
-HIST_QUEUE_RED = 25_000        # over 25k = IB pacing will be underwater
+HIST_QUEUE_INFO = 5_000        # deep queue but normal — blue info pill, NOT warning
+HIST_QUEUE_YELLOW = 50_000     # 50k+ pending = IB pacing genuinely underwater
+HIST_QUEUE_RED = 100_000       # 100k+ pending = pipeline can't drain in a session
+HIST_QUEUE_FAIL_YELLOW = 25    # 25+ failures = real backfill errors, surface them
+HIST_QUEUE_FAIL_RED = 100      # 100+ failures = backfill workers actively broken
 TASK_HEARTBEAT_STALE_S = 900    # 15 min without activity → yellow
 TASK_HEARTBEAT_DEAD_S = 3_600   # 1 hour → red
 
@@ -324,16 +327,44 @@ def _check_historical_queue(db) -> SubsystemHealth:
         col = db["historical_data_requests"]
         pending = col.count_documents({"status": {"$in": ["pending", "in_progress"]}})
         failed = col.count_documents({"status": "failed"})
+        # 2026-05-04 v19.31.3 — Failures are the real signal of a broken
+        # backfill pipeline. A deep pending queue is by-design — the
+        # operator runs a 60k-symbol full backfill and the workers
+        # patiently churn through it at IB's pacing limit. Old thresholds
+        # (yellow at 5k pending) lit up an orange "subsystems degraded"
+        # banner the moment the operator started a backfill, even though
+        # nothing was wrong.
+        #
+        # New rule:
+        #   - failures escalate FIRST — they're cheap to compare and
+        #     genuinely indicate broken workers / IB pacing breaches.
+        #   - pending only escalates if the queue is genuinely underwater
+        #     (>50k = IB pacing budget can't drain in a session).
+        #   - 5k-50k pending with 0 failures → green + an `info`-level
+        #     hint surfaced via metrics so the V5 banner can render a
+        #     thin info strip instead of a warning.
         status = "green"
-        if pending >= HIST_QUEUE_RED:
+        if failed >= HIST_QUEUE_FAIL_RED or pending >= HIST_QUEUE_RED:
             status = "red"
-        elif pending >= HIST_QUEUE_YELLOW:
+        elif failed >= HIST_QUEUE_FAIL_YELLOW or pending >= HIST_QUEUE_YELLOW:
             status = "yellow"
+
+        # Surface the "deep queue but otherwise green" condition so the
+        # banner layer can show a quiet info pill rather than alarming.
+        deep_queue_no_failures = (
+            status == "green"
+            and pending >= HIST_QUEUE_INFO
+            and failed == 0
+        )
         return SubsystemHealth(
             name="historical_queue",
             status=status,
             detail=f"{pending:,} pending · {failed:,} failed",
-            metrics={"pending": pending, "failed": failed},
+            metrics={
+                "pending": pending,
+                "failed": failed,
+                "deep_queue_no_failures": deep_queue_no_failures,
+            },
         )
     except Exception as exc:
         return _error("historical_queue", exc)

@@ -2,6 +2,52 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (sixty-ninth commit, v19.31.3) — System banner: thin strip + smarter `historical_queue` thresholds
+
+**Operator's "the orange degraded banner is HUGE and dominates the page" feedback after v19.31.2 deploy.** Banner was correctly detecting `historical_queue: 20,222 pending · 0 failed` but the visual was a 200px-tall amber strip dominating the dashboard at market open — alarming on what was just by-design backfill depth.
+
+### Three coordinated changes
+
+**1. `system_health_service._check_historical_queue` thresholds rebalanced.**
+Old: yellow at 5,000 pending, red at 25,000. Triggered the moment the operator started a real backfill.
+New (v19.31.3):
+- `HIST_QUEUE_INFO = 5_000` — deep queue but green (info hint, not warning)
+- `HIST_QUEUE_YELLOW = 50_000` — IB pacing genuinely underwater
+- `HIST_QUEUE_RED = 100_000` — pipeline can't drain in a session
+- `HIST_QUEUE_FAIL_YELLOW = 25` — failures escalate FIRST (real workers broken)
+- `HIST_QUEUE_FAIL_RED = 100` — backfill workers actively dead
+
+The check now returns `metrics.deep_queue_no_failures = True` when pending ≥ 5K AND failed = 0 AND status still green, giving the banner layer a clean signal to render an info pill instead of a warning.
+
+**2. `system_banner.get_system_banner` emits `level: "info"` for deep-queue-no-failures.**
+Only fires after every higher-priority check (pusher_rpc, mongo, ib_gateway, generic yellow). Message: `"Backfill queue deep — 20,222 pending"` with non-alarming detail explaining workers are draining at IB's pacing limit. No `action` field — purely informational.
+
+**3. `SystemBanner.jsx` collapsed to a single ~28px strip.**
+- 3-color scheme: red (critical), amber (warning), slate (info).
+- Single-row layout: icon · message · detail · since · action — all inline with bullet separators.
+- Detail truncates at 140 chars; full detail in `title=` tooltip on hover.
+- Action only inline at lg breakpoint and only for critical.
+- Padding `py-3 → py-1`, font `text-base → text-xs`, dropped shadow.
+- Net: ~200px → ~28px. Operator gets back the screen real estate without losing visibility.
+
+### Tests
+
+`test_historical_queue_thresholds_v19_31_3.py` — 12 tests: threshold constants pinned, full state-machine across the 5 thresholds (zero / 4k / 20k / 50k / 100k pending), failures-only escalation, deep-queue-with-failures NOT info, banner integration tests for info / null / warning-precedence-over-info.
+
+**51/51 v19.31 pytests passing across 6 suites.** ESLint clean on `SystemBanner.jsx`. Backend `/api/system/banner` returns a clean warning payload with valid JSON.
+
+### Operator action — Spark deploy
+
+```bash
+cd ~/Trading-and-Analysis-Platform && git pull && ./start_backend.sh
+# Banner should now be ~28px tall instead of 200px during a backfill.
+# A 20k-pending queue with 0 failures will render as a slate-blue
+# info strip ("ℹ Backfill queue deep — 20,222 pending") instead of
+# a giant amber alarm.
+```
+
+
+
 ## 2026-05-04 (sixty-eighth commit, v19.31.2) — Auto-reconcile-at-boot toggle
 
 **Operator's "potential improvement" feedback from v19.31.1: kill the morning RECONCILE-N click ritual entirely.**

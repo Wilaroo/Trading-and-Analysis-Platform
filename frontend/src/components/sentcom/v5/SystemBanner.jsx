@@ -71,9 +71,19 @@ const SystemBanner = () => {
     }
 
     const isCritical = banner.level === 'critical';
-    const stripClasses = isCritical
-        ? 'bg-red-700 border-red-500 text-white'
-        : 'bg-amber-700 border-amber-500 text-white';
+    const isInfo = banner.level === 'info';
+    // 2026-05-04 v19.31.3 — three levels, three thin colours.
+    //   critical → red    (must-not-miss outages)
+    //   warning  → amber  (something genuinely degraded)
+    //   info     → slate  (purely informational, e.g. deep backfill queue)
+    let stripClasses;
+    if (isCritical) {
+        stripClasses = 'bg-red-700 border-red-500 text-white';
+    } else if (isInfo) {
+        stripClasses = 'bg-slate-800 border-slate-600 text-slate-200';
+    } else {
+        stripClasses = 'bg-amber-700 border-amber-500 text-white';
+    }
 
     const sinceLabel = banner.since_seconds != null
         ? `${Math.floor(banner.since_seconds / 60)}m ${banner.since_seconds % 60}s`
@@ -84,65 +94,75 @@ const SystemBanner = () => {
         setDismissedAt(Date.now());
     };
 
+    // 2026-05-04 v19.31.3 — collapsed to a single 28px-tall row so the
+    // banner stops eating ~200px of dashboard real estate during a deep
+    // backfill. Detail + action are rendered inline with bullet
+    // separators; if the strip is hovered, a tiny tooltip surfaces the
+    // full detail. Critical banners can still surface action prominently
+    // by wrapping into a second row at lg breakpoints.
+    const compactDetail = banner.detail
+        ? banner.detail.length > 140
+            ? `${banner.detail.slice(0, 137)}…`
+            : banner.detail
+        : null;
+    const tooltip = [banner.detail, banner.action].filter(Boolean).join(' — ');
+
     return (
         <div
             data-testid="system-banner"
             data-level={banner.level}
             data-subsystem={banner.subsystem || 'unknown'}
-            className={`w-full border-b-2 ${stripClasses} px-4 py-3 shadow-lg`}
-            style={{ position: 'sticky', top: 0, zIndex: 9999 }}
+            className={`w-full border-b ${stripClasses} px-3 py-1`}
+            style={{ position: 'sticky', top: 0, zIndex: 9999, lineHeight: '1.2' }}
+            title={tooltip || undefined}
         >
-            <div className="max-w-screen-2xl mx-auto flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="max-w-screen-2xl mx-auto flex items-center justify-between gap-3 text-xs sm:text-[13px]">
+                <div className="flex items-center gap-2 flex-1 min-w-0 truncate">
                     <span
-                        className="text-xl font-bold flex-shrink-0"
+                        className="text-sm font-bold flex-shrink-0"
                         aria-hidden="true"
                     >
-                        {isCritical ? '⚠' : '!'}
+                        {isCritical ? '⚠' : isInfo ? 'ℹ' : '!'}
                     </span>
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-3 flex-wrap">
-                            <span
-                                data-testid="system-banner-message"
-                                className="font-bold text-base sm:text-lg"
-                            >
-                                {banner.message}
-                            </span>
-                            {sinceLabel && (
-                                <span
-                                    data-testid="system-banner-since"
-                                    className="text-xs opacity-80 font-mono"
-                                >
-                                    for {sinceLabel}
-                                </span>
-                            )}
-                        </div>
-                        {banner.detail && (
-                            <div
-                                data-testid="system-banner-detail"
-                                className="text-sm opacity-95 mt-0.5"
-                            >
-                                {banner.detail}
-                            </div>
-                        )}
-                        {banner.action && (
-                            <div
-                                data-testid="system-banner-action"
-                                className="text-sm font-medium mt-1 opacity-100"
-                            >
-                                <span className="opacity-80">→</span> {banner.action}
-                            </div>
-                        )}
-                    </div>
+                    <span
+                        data-testid="system-banner-message"
+                        className="font-semibold whitespace-nowrap"
+                    >
+                        {banner.message}
+                    </span>
+                    {compactDetail && (
+                        <span
+                            data-testid="system-banner-detail"
+                            className="opacity-80 truncate hidden sm:inline"
+                        >
+                            · {compactDetail}
+                        </span>
+                    )}
+                    {sinceLabel && (
+                        <span
+                            data-testid="system-banner-since"
+                            className="opacity-70 font-mono whitespace-nowrap hidden md:inline"
+                        >
+                            · {sinceLabel}
+                        </span>
+                    )}
+                    {banner.action && isCritical && (
+                        <span
+                            data-testid="system-banner-action"
+                            className="opacity-95 font-medium truncate hidden lg:inline"
+                        >
+                            → {banner.action}
+                        </span>
+                    )}
                 </div>
                 <button
                     type="button"
                     data-testid="system-banner-dismiss"
                     onClick={handleDismiss}
-                    className="flex-shrink-0 text-xs px-3 py-1 rounded border border-white/40 hover:bg-white/10 transition-colors font-medium"
+                    className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-white/30 hover:bg-white/10 transition-colors"
                     title="Dismiss for 60s — banner reappears if problem persists"
                 >
-                    Dismiss 60s
+                    Dismiss
                 </button>
             </div>
         </div>

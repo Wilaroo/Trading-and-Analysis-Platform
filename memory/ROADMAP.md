@@ -4,7 +4,26 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.2)
+## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.31.3)
+
+### 🎯 Just shipped 2026-05-04 v19.31.3 — see CHANGELOG (sixty-ninth commit)
+**System banner thin strip + smarter `historical_queue` thresholds. Operator's "banner is huge" feedback.**
+
+- ✅ `HIST_QUEUE_*` thresholds rebalanced: yellow 5K→50K pending, failures-first escalation (≥25 failed → yellow). Deep queue with 0 failures now stays green.
+- ✅ New `level: "info"` banner state (slate-blue) for deep-queue-no-failures, with `metrics.deep_queue_no_failures` flag from the health service.
+- ✅ `SystemBanner.jsx` collapsed from ~200px to ~28px single-strip layout. 3-color scheme (red/amber/slate). Inline detail+since+action. Full detail in title tooltip.
+- ✅ **12/12 new pytests** + **51/51 v19.31 total** across 6 suites.
+
+### 🎯 v19.31.0–v19.31.3 cumulative — operator pain-points resolved this session
+
+1. ✅ Unified Stream `.slice(0,2)` cap removed; fetch limit 20→200.
+2. ✅ ORPHAN/PARTIAL/STALE badge no longer obscures live PnL.
+3. ✅ `/api/system/banner` `NameError: pusher_red` fixed.
+4. ✅ External-close phantom sweep (`oca_closed_externally_v19_31`) catches LITE-style cases.
+5. ✅ Reset script `--force` flag + IB-survival guard prevents orphaning real positions.
+6. ✅ MANAGE +0.0R aggregator fixed via `pnl_r` field on every position.
+7. ✅ Auto-reconcile-at-boot (`AUTO_RECONCILE_AT_BOOT=true`) — no more morning click ritual.
+8. ✅ Historical-queue threshold rebalance + info-level banner + thin strip — backfill no longer alarms.
 
 ### 🎯 Just shipped 2026-05-04 v19.31.2 — see CHANGELOG (sixty-eighth commit)
 **Auto-reconcile-at-boot toggle — kills the morning RECONCILE-N click ritual.**
