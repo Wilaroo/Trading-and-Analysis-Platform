@@ -227,6 +227,11 @@ async def get_day_tape(
             "setup_type": t.get("setup_type"),
             "setup_variant": t.get("setup_variant"),
             "trade_style": t.get("trade_style"),
+            # v19.31.13 — surface trade_type so the Day Tape rows can
+            # render PAPER / LIVE / SHADOW / UNKNOWN chips and the
+            # operator can never confuse modes when journaling.
+            "trade_type": t.get("trade_type") or "unknown",
+            "account_id_at_fill": t.get("account_id_at_fill"),
         })
 
     # finalize win-rates
@@ -273,7 +278,8 @@ async def get_day_tape_csv(
     headers = [
         "closed_at", "symbol", "direction", "shares", "entry_price",
         "exit_price", "realized_pnl", "r_multiple", "close_reason",
-        "setup_type", "setup_variant", "trade_style", "executed_at", "trade_id",
+        "setup_type", "setup_variant", "trade_style", "trade_type",
+        "account_id_at_fill", "executed_at", "trade_id",
     ]
 
     def _q(v):
@@ -549,6 +555,23 @@ async def get_trade_forensics(days: int = Query(1, ge=1, le=7)):
         bot_open = [r for r in rows if (r.get("status") or "").lower() == "open"]
         bot_closed = [r for r in rows if (r.get("status") or "").lower() == "closed"]
 
+        # v19.31.13 — surface dominant trade_type per symbol so the
+        # forensics row can show a PAPER/LIVE/SHADOW/UNKNOWN chip.
+        # When a symbol has rows of mixed types (paper-then-live across
+        # an account flip), report "mixed" so the operator notices.
+        type_set = {(r.get("trade_type") or "unknown") for r in rows}
+        if not type_set:
+            dominant_type = "unknown"
+        elif len(type_set) == 1:
+            dominant_type = next(iter(type_set))
+        else:
+            # Filter out unknown when other concrete types exist.
+            non_unknown = type_set - {"unknown"}
+            dominant_type = (
+                "mixed" if len(non_unknown) > 1
+                else (next(iter(non_unknown)) if non_unknown else "unknown")
+            )
+
         by_verdict[verdict] = by_verdict.get(verdict, 0) + 1
 
         # Skip 'inactive' rows from the response by default — operator's
@@ -586,6 +609,7 @@ async def get_trade_forensics(days: int = Query(1, ge=1, le=7)):
             "sweep_count": len(sweeps),
             "reconcile_count": len(recons),
             "reset_touched": reset_touched,
+            "trade_type": dominant_type,
             "timeline": timeline,
         })
 
@@ -716,3 +740,188 @@ async def recalc_realized_pnl(symbol: str, days: int = Query(7, ge=1, le=30)):
     if not (symbol or "").strip():
         raise HTTPException(status_code=400, detail="symbol required")
     return await _recalc_realized_pnl_for_symbol(_db, symbol, days=days)
+
+
+
+# ─── v19.31.13 — Shadow Decisions tab ────────────────────────────────
+
+
+@router.get("/shadow-decisions")
+async def get_shadow_decisions(
+    days: int = Query(1, ge=1, le=30),
+    symbol: Optional[str] = Query(None, max_length=10),
+    only_executed: bool = Query(False),
+    only_passed: bool = Query(False),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """v19.31.13 — Lists rows from the `shadow_decisions` Mongo
+    collection with light per-row aggregation so the V5 Diagnostics →
+    Shadow Decisions sub-tab can render a sortable table.
+
+    A "shadow decision" is the AI council's verdict on an alert,
+    logged regardless of whether the bot fired. When the bot DID fire,
+    `was_executed=True` and `trade_id` references the corresponding
+    `bot_trades` row. When it didn't, the shadow row is the only
+    record of the decision — useful for the operator to see "what
+    would have happened" and grade the AI council's calibration.
+
+    Returns rows + a small summary (counts by combined_recommendation,
+    win-rate among executed, would-have-pnl among non-executed).
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    now_utc = _dt.now(_tz.utc)
+    cutoff_iso = (now_utc - _td(days=days)).isoformat()
+
+    query: Dict[str, Any] = {"trigger_time": {"$gte": cutoff_iso}}
+    if symbol and isinstance(symbol, str):
+        query["symbol"] = symbol.upper()
+    if only_executed is True:
+        query["was_executed"] = True
+    if only_passed is True:
+        query["combined_recommendation"] = {"$in": ["proceed", "PROCEED", "Proceed"]}
+
+    try:
+        cursor = _db["shadow_decisions"].find(
+            query,
+            {"_id": 0},
+            sort=[("trigger_time", -1)],
+            limit=limit,
+        )
+        raw = list(cursor)
+    except Exception as e:
+        logger.warning(f"shadow-decisions read failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    out: List[Dict[str, Any]] = []
+    by_rec: Dict[str, int] = {}
+    executed_count = 0
+    executed_wins = 0
+    executed_pnl_sum = 0.0
+    not_executed_count = 0
+    would_pnl_sum = 0.0
+    for d in raw:
+        rec = (d.get("combined_recommendation") or "").lower() or "unknown"
+        by_rec[rec] = by_rec.get(rec, 0) + 1
+
+        debate = d.get("debate_result") or {}
+        risk = d.get("risk_assessment") or {}
+        ts = d.get("timeseries_forecast") or {}
+
+        was_exec = bool(d.get("was_executed"))
+        actual_outcome = d.get("actual_outcome") or ""
+        would_pnl = float(d.get("would_have_pnl") or 0)
+        would_r = float(d.get("would_have_r") or 0)
+
+        if was_exec:
+            executed_count += 1
+            # Use real outcome when present; otherwise use would_have_pnl
+            # which the executed branch also stamps post-fill.
+            pnl_for_summary = would_pnl
+            if pnl_for_summary > 0:
+                executed_wins += 1
+            executed_pnl_sum += pnl_for_summary
+        else:
+            not_executed_count += 1
+            would_pnl_sum += would_pnl
+
+        out.append({
+            "id": d.get("id"),
+            "symbol": d.get("symbol"),
+            "trigger_type": d.get("trigger_type"),
+            "trigger_time": d.get("trigger_time"),
+            "price_at_decision": d.get("price_at_decision"),
+            "market_regime": d.get("market_regime"),
+            "combined_recommendation": d.get("combined_recommendation"),
+            "confidence_score": d.get("confidence_score"),
+            "reasoning": d.get("reasoning") or "",
+            "was_executed": was_exec,
+            "execution_reason": d.get("execution_reason"),
+            "trade_id": d.get("trade_id"),
+            "would_have_pnl": round(would_pnl, 2),
+            "would_have_r": round(would_r, 3) if would_r else None,
+            "actual_outcome": actual_outcome,
+            "outcome_tracked": bool(d.get("outcome_tracked")),
+            "modules_used": d.get("modules_used") or [],
+            # Per-module compact summary so the operator can spot bias
+            # without expanding the full debate_result / risk row.
+            "debate_winner": debate.get("winner"),
+            "debate_bull_score": debate.get("bull_score"),
+            "debate_bear_score": debate.get("bear_score"),
+            "risk_recommendation": risk.get("recommendation"),
+            "risk_score": risk.get("risk_score"),
+            "ts_direction": ts.get("direction"),
+            "ts_probability": ts.get("probability"),
+        })
+
+    summary = {
+        "total": len(out),
+        "by_recommendation": by_rec,
+        "executed_count": executed_count,
+        "executed_wins": executed_wins,
+        "executed_win_rate": (
+            round(100.0 * executed_wins / executed_count, 1)
+            if executed_count else None
+        ),
+        "executed_pnl_sum": round(executed_pnl_sum, 2),
+        "not_executed_count": not_executed_count,
+        "not_executed_would_pnl_sum": round(would_pnl_sum, 2),
+        # Divergence sign — positive means "the trades you didn't take
+        # would have been profitable in aggregate, you may be too
+        # conservative". Negative means "the AI's pass calls were
+        # correct in aggregate".
+        "divergence_signal": (
+            "ai_too_conservative" if would_pnl_sum > 250
+            else "ai_too_aggressive" if would_pnl_sum < -250
+            else "balanced"
+        ),
+    }
+
+    return {
+        "success": True,
+        "days": days,
+        "from_iso": cutoff_iso,
+        "to_iso": now_utc.isoformat(),
+        "rows": out,
+        "summary": summary,
+    }
+
+
+@router.get("/shadow-decisions.csv", response_class=PlainTextResponse)
+async def get_shadow_decisions_csv(
+    days: int = Query(1, ge=1, le=30),
+    symbol: Optional[str] = Query(None, max_length=10),
+    only_executed: bool = Query(False),
+    only_passed: bool = Query(False),
+) -> str:
+    """v19.31.13 — CSV mirror of /shadow-decisions for journaling."""
+    payload = await get_shadow_decisions(
+        days=days, symbol=symbol,
+        only_executed=only_executed, only_passed=only_passed,
+        limit=2000,
+    )
+    rows = payload.get("rows", [])
+    headers = [
+        "trigger_time", "symbol", "combined_recommendation",
+        "confidence_score", "was_executed", "trade_id",
+        "would_have_pnl", "would_have_r", "actual_outcome",
+        "debate_winner", "risk_recommendation", "ts_direction",
+        "price_at_decision", "market_regime", "execution_reason",
+        "id",
+    ]
+
+    def _q(v):
+        if v is None:
+            return ""
+        s = str(v).replace('"', '""')
+        if "," in s or '"' in s or "\n" in s:
+            return f'"{s}"'
+        return s
+
+    lines = [",".join(headers)]
+    for r in rows:
+        lines.append(",".join(_q(r.get(h)) for h in headers))
+    return "\n".join(lines) + "\n"

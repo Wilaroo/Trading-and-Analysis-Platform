@@ -11,6 +11,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Microscope, TrendingUp, TrendingDown, Copy, RefreshCw, Filter } from 'lucide-react';
+import TradeTypeChip from '../components/sentcom/v5/TradeTypeChip';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -20,6 +21,7 @@ const SUB_TABS = [
   { id: 'funnel', label: 'Pipeline Funnel' },
   { id: 'day_tape', label: 'Day Tape' },
   { id: 'forensics', label: 'Trade Forensics' },
+  { id: 'shadow', label: 'Shadow Decisions' },
   { id: 'export', label: 'Export Report' },
 ];
 
@@ -819,6 +821,7 @@ const DayTapeView = () => {
                   ['r_multiple',   'R',        'right'],
                   ['close_reason', 'Reason',   'left'],
                   ['setup_type',   'Setup',    'left'],
+                  ['trade_type',   'Mode',     'left'],
                 ].map(([k, l, a]) => (
                   <th
                     key={k}
@@ -852,6 +855,14 @@ const DayTapeView = () => {
                     </td>
                     <td className="px-2 py-1 text-zinc-500 truncate" title={r.close_reason || ''}>{r.close_reason || '—'}</td>
                     <td className="px-2 py-1 text-zinc-500 truncate" title={r.setup_type || ''}>{r.setup_type || '—'}</td>
+                    <td className="px-2 py-1">
+                      <TradeTypeChip
+                        type={r.trade_type}
+                        size="xs"
+                        testIdSuffix={`day-tape-${r.symbol}`}
+                        title={r.account_id_at_fill ? `Filled on ${r.account_id_at_fill}` : undefined}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -1189,6 +1200,13 @@ const TradeForensicsView = () => {
                     </span>
                     {/* Symbol */}
                     <span className="v5-mono font-bold text-sm text-zinc-100 w-16 shrink-0">{row.symbol}</span>
+                    {/* v19.31.13 — trade origin chip per row (PAPER/LIVE/SHADOW/MIXED) */}
+                    <TradeTypeChip
+                      type={row.trade_type}
+                      hideUnknown
+                      size="xs"
+                      testIdSuffix={`forensics-${row.symbol}`}
+                    />
                     {/* Bot ledger — v19.31.12 fix: use signed sign() helper, not Math.abs() */}
                     {(() => {
                       const botPnl = Number(row.bot.total_realized_pnl) || 0;
@@ -1303,6 +1321,307 @@ const TradeForensicsView = () => {
 };
 
 
+// ─────────────────────────────────────────────────────────────────
+// Sub-tab: Shadow Decisions (v19.31.13)
+// Lists rows from the `shadow_decisions` Mongo collection — every
+// AI council verdict on an alert, regardless of whether the bot
+// fired. Operator uses this to grade the AI's calibration:
+// "what would have happened if I'd taken the trades I passed on?"
+// ─────────────────────────────────────────────────────────────────
+
+const SHADOW_RANGES = [
+  { id: 1,  label: 'Today' },
+  { id: 5,  label: '5d' },
+  { id: 30, label: '30d' },
+];
+
+const recBadge = (rec) => {
+  const r = (rec || '').toLowerCase();
+  if (r === 'proceed')     return { cls: 'bg-emerald-950/60 text-emerald-300 border-emerald-800', label: 'PROCEED' };
+  if (r === 'reduce_size') return { cls: 'bg-amber-950/60 text-amber-300 border-amber-800', label: 'REDUCE' };
+  if (r === 'pass')        return { cls: 'bg-slate-900 text-slate-400 border-slate-700', label: 'PASS' };
+  return { cls: 'bg-zinc-900 text-zinc-500 border-zinc-800', label: (r || '?').toUpperCase() };
+};
+
+const fmtShadowTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', {
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  } catch { return '—'; }
+};
+
+const ShadowDecisionsView = () => {
+  const [days, setDays] = useState(1);
+  const [filterSymbol, setFilterSymbol] = useState('');
+  const [onlyExecuted, setOnlyExecuted] = useState(false);
+  const [onlyPassed, setOnlyPassed] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [sortKey, setSortKey] = useState('trigger_time');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ days });
+      if (filterSymbol) params.append('symbol', filterSymbol.toUpperCase());
+      if (onlyExecuted) params.append('only_executed', 'true');
+      if (onlyPassed)   params.append('only_passed', 'true');
+      const r = await fetch(`${BACKEND_URL}/api/diagnostics/shadow-decisions?${params}`);
+      const j = await r.json();
+      if (!j.success) throw new Error('shadow-decisions failed');
+      setData(j);
+    } catch (e) {
+      setError(e?.message || 'failed to load shadow decisions');
+    } finally {
+      setLoading(false);
+    }
+  }, [days, filterSymbol, onlyExecuted, onlyPassed]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = useMemo(() => {
+    const rows = data?.rows || [];
+    return [...rows].sort((a, b) => {
+      const av = a?.[sortKey];
+      const bv = b?.[sortKey];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const isNum = typeof av === 'number' || typeof bv === 'number';
+      const cmp = isNum ? Number(av) - Number(bv) : String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const sortBy = (k) => {
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir('desc'); }
+  };
+
+  const handleCsv = () => {
+    const params = new URLSearchParams({ days });
+    if (filterSymbol) params.append('symbol', filterSymbol.toUpperCase());
+    if (onlyExecuted) params.append('only_executed', 'true');
+    if (onlyPassed)   params.append('only_passed', 'true');
+    window.open(`${BACKEND_URL}/api/diagnostics/shadow-decisions.csv?${params}`, '_blank');
+  };
+
+  const summary = data?.summary || {};
+  const byRec = summary.by_recommendation || {};
+
+  return (
+    <div data-testid="shadow-decisions-view" className="h-full flex flex-col bg-zinc-950 text-zinc-200">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-bold text-zinc-300">Shadow Decisions</span>
+          <span className="text-[11px] text-zinc-500 ml-1">AI council verdicts (executed + passed)</span>
+          <div className="flex items-center gap-1 ml-3">
+            {SHADOW_RANGES.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                data-testid={`shadow-range-${r.id}`}
+                onClick={() => setDays(r.id)}
+                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                  days === r.id
+                    ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                }`}
+              >{r.label}</button>
+            ))}
+          </div>
+          <input
+            data-testid="shadow-filter-symbol"
+            value={filterSymbol}
+            onChange={e => setFilterSymbol(e.target.value)}
+            placeholder="Symbol"
+            className="ml-2 bg-zinc-950 border border-zinc-800 rounded px-2 py-0.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-600 w-20"
+          />
+          <button
+            type="button"
+            data-testid="shadow-toggle-executed"
+            onClick={() => setOnlyExecuted(v => !v)}
+            className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+              onlyExecuted
+                ? 'bg-emerald-900/40 text-emerald-300 border-emerald-800/60'
+                : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
+            }`}
+          >executed only</button>
+          <button
+            type="button"
+            data-testid="shadow-toggle-passed"
+            onClick={() => setOnlyPassed(v => !v)}
+            className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+              onlyPassed
+                ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/60'
+                : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
+            }`}
+          >ai-passed only</button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="shadow-refresh"
+            onClick={load}
+            className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+          <button
+            type="button"
+            data-testid="shadow-csv"
+            onClick={handleCsv}
+            className="px-2 py-1 text-[11px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
+          >
+            Download CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Summary chips */}
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[11px] v5-mono">
+        <span data-testid="shadow-summary-total" className="text-zinc-500">
+          <span className="text-zinc-200 font-semibold">{summary.total ?? 0}</span> decisions
+        </span>
+        <span data-testid="shadow-summary-executed" className="text-zinc-500">
+          Executed <span className="text-zinc-200 font-semibold">{summary.executed_count ?? 0}</span>
+          {summary.executed_win_rate != null && (
+            <> · WR <span className="text-emerald-400">{summary.executed_win_rate}%</span></>
+          )}
+        </span>
+        <span data-testid="shadow-summary-passed" className="text-zinc-500">
+          Passed <span className="text-zinc-200 font-semibold">{summary.not_executed_count ?? 0}</span>
+          {summary.not_executed_would_pnl_sum != null && (
+            <> · would-have <span className={(summary.not_executed_would_pnl_sum ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+              {formatPnl(summary.not_executed_would_pnl_sum)}
+            </span></>
+          )}
+        </span>
+        {Object.entries(byRec).map(([rec, count]) => {
+          const m = recBadge(rec);
+          return (
+            <span key={rec} data-testid={`shadow-summary-rec-${rec}`} className={`px-1.5 py-0 rounded border ${m.cls}`}>
+              {m.label} <span className="opacity-70">{count}</span>
+            </span>
+          );
+        })}
+        {summary.divergence_signal && (
+          <span
+            data-testid="shadow-summary-divergence"
+            className={`px-1.5 py-0 rounded border ${
+              summary.divergence_signal === 'ai_too_conservative'
+                ? 'bg-amber-950/40 text-amber-300 border-amber-800'
+                : summary.divergence_signal === 'ai_too_aggressive'
+                ? 'bg-rose-950/40 text-rose-300 border-rose-800'
+                : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+            }`}
+            title="ai_too_conservative = passed trades would have made >$250 in aggregate · ai_too_aggressive = passed trades dodged a >-$250 drawdown"
+          >
+            {summary.divergence_signal.replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-y-auto">
+        {error && <div className="px-4 py-3 text-rose-400 text-sm">{error}</div>}
+        {!error && sorted.length === 0 && !loading && (
+          <div data-testid="shadow-empty" className="px-4 py-12 text-center text-zinc-500 text-sm">
+            No shadow decisions in this window.
+          </div>
+        )}
+        {sorted.length > 0 && (
+          <table className="w-full text-[11px] v5-mono">
+            <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800">
+              <tr>
+                {[
+                  ['trigger_time',           'Time',         'right'],
+                  ['symbol',                  'Sym',          'left'],
+                  ['combined_recommendation', 'Verdict',      'left'],
+                  ['confidence_score',        'Conf',         'right'],
+                  ['was_executed',            'Exec',         'left'],
+                  ['debate_winner',           'Debate',       'left'],
+                  ['risk_recommendation',     'Risk',         'left'],
+                  ['ts_direction',            'TS dir',       'left'],
+                  ['would_have_pnl',          'Would-$',      'right'],
+                  ['would_have_r',            'Would-R',      'right'],
+                  ['actual_outcome',          'Outcome',      'left'],
+                ].map(([k, l, a]) => (
+                  <th
+                    key={k}
+                    onClick={() => sortBy(k)}
+                    data-testid={`shadow-col-${k}`}
+                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[10px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
+                  >
+                    {l}{sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => {
+                const verdict = recBadge(r.combined_recommendation);
+                const wouldPnl = Number(r.would_have_pnl) || 0;
+                const wouldR = r.would_have_r != null ? Number(r.would_have_r) : null;
+                return (
+                  <tr key={r.id || `${r.symbol}-${r.trigger_time}`}
+                      data-testid={`shadow-row-${r.id || r.symbol}`}
+                      className="border-b border-zinc-900 hover:bg-white/5">
+                    <td className="px-2 py-1 text-right text-zinc-500">{fmtShadowTime(r.trigger_time)}</td>
+                    <td className="px-2 py-1 font-bold text-zinc-100">{r.symbol || '—'}</td>
+                    <td className="px-2 py-1">
+                      <span className={`px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border font-bold ${verdict.cls}`}>
+                        {verdict.label}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 text-right text-zinc-300">
+                      {r.confidence_score != null ? `${Number(r.confidence_score).toFixed(0)}%` : '—'}
+                    </td>
+                    <td className="px-2 py-1">
+                      {r.was_executed ? (
+                        <span className="text-emerald-300" title={r.trade_id ? `trade_id: ${r.trade_id}` : ''}>FIRED</span>
+                      ) : (
+                        <span className="text-zinc-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-400 truncate" title={r.debate_winner || ''}>
+                      {r.debate_winner || '—'}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-400 truncate" title={r.risk_recommendation || ''}>
+                      {r.risk_recommendation || '—'}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-400 truncate">{r.ts_direction || '—'}</td>
+                    <td className={`px-2 py-1 text-right font-semibold ${wouldPnl >= 0 ? 'text-emerald-400' : wouldPnl < 0 ? 'text-rose-400' : 'text-zinc-500'}`}>
+                      {wouldPnl ? formatPnl(wouldPnl) : '—'}
+                    </td>
+                    <td className={`px-2 py-1 text-right font-semibold ${wouldR == null ? 'text-zinc-500' : wouldR >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {wouldR != null ? `${wouldR >= 0 ? '+' : ''}${wouldR.toFixed(2)}R` : '—'}
+                    </td>
+                    <td className="px-2 py-1 text-zinc-500 truncate" title={r.actual_outcome || ''}>
+                      {r.actual_outcome || '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+        Sorted by {sortKey} ({sortDir}). Click any column header to sort. v19.31.13
+      </div>
+    </div>
+  );
+};
+
+
 export default function DiagnosticsPage() {
   const [tab, setTab] = useState('trail');
 
@@ -1312,7 +1631,7 @@ export default function DiagnosticsPage() {
         <div className="flex items-center gap-2">
           <Microscope size={16} className="text-cyan-400" />
           <span className="text-sm uppercase tracking-wider">Diagnostics</span>
-          <span className="text-[10px] text-zinc-600 uppercase">v19.28</span>
+          <span className="text-[10px] text-zinc-600 uppercase">v19.31.13</span>
         </div>
         <nav className="flex items-center gap-1">
           {SUB_TABS.map(t => (
@@ -1338,6 +1657,7 @@ export default function DiagnosticsPage() {
         {tab === 'funnel' && <PipelineFunnel />}
         {tab === 'day_tape' && <DayTapeView />}
         {tab === 'forensics' && <TradeForensicsView />}
+        {tab === 'shadow' && <ShadowDecisionsView />}
         {tab === 'export' && <ExportReport />}
       </main>
     </div>

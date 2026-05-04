@@ -53,6 +53,10 @@ import { PusherDeadBanner } from './v5/PusherDeadBanner';
 // not just pusher) and has the "DO NOT restart Spark backend" message
 // that prevented today's footgun.
 import SystemBanner from './v5/SystemBanner';
+// v19.31.13 (2026-05-04) — Account-mode badge in HUD top strip.
+// Reads /api/system/account-mode every 30s. Big enough to never
+// confuse PAPER (amber) for LIVE (red) when switching IB accounts.
+import AccountModeBadge from './v5/AccountModeBadge';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -396,6 +400,7 @@ export const SentComV5View = ({
             <PusherHealthChip />
             <DeadLetterBadge />
             <FlattenAllButtonV5 safety={safety} inline />
+            <AccountModeBadge />
             <AccountGuardChipV5 safety={safety} />
             <SafetyHudChip safety={safety} />
           </div>

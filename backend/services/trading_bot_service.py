@@ -2008,6 +2008,129 @@ class TradingBotService:
                         )
                 asyncio.create_task(_startup_auto_reconcile())
 
+        # 2026-05-04 v19.31.13 — Realized-PnL auto-sync background task.
+        # Operator's "I shouldn't have to click ↻ Recalc per row" feedback
+        # after the v19.31.12 retroactive endpoint shipped. Every 30s we
+        # scan `bot_trades` for `status=closed AND realized_pnl in (0, null,
+        # missing) AND closed_at within last 24h`, dedupe by symbol, and
+        # call the same helper as the operator's manual button. Skips
+        # silently when no rows need attention so the loop is cheap when
+        # the system is healthy.
+        #
+        # Wrapped in a top-level try/except so a Mongo blip can't crash
+        # bot.start(). Honours `REALIZED_PNL_AUTOSYNC_ENABLED=false` env
+        # for the rare operator who wants to disable.
+        async def _realized_pnl_autosync_loop():
+            import os as _os2
+            interval_s = int(_os2.environ.get("REALIZED_PNL_AUTOSYNC_INTERVAL_S", "30") or 30)
+            if interval_s < 5:
+                interval_s = 5  # safety floor
+            disabled = (
+                _os2.environ.get("REALIZED_PNL_AUTOSYNC_ENABLED", "true").strip().lower()
+                in ("0", "false", "no", "off")
+            )
+            if disabled:
+                logger.info("[v19.31.13 PNL-AUTOSYNC] disabled by env")
+                return
+
+            # Lazy bind — avoid circular import at module load.
+            try:
+                from routers.diagnostics import _recalc_realized_pnl_for_symbol
+                from database import get_database
+            except Exception as e:
+                logger.warning(f"[v19.31.13 PNL-AUTOSYNC] import failed: {e}")
+                return
+
+            # Initial 45s grace period: pusher snapshot + auto-reconcile
+                # should both have completed.
+            await asyncio.sleep(45)
+            while self._running:
+                try:
+                    db = get_database()
+                    if db is not None:
+                        cutoff_iso = (
+                            datetime.now(timezone.utc) - timedelta(hours=24)
+                        ).isoformat()
+                        # Find symbols with closed-but-unstamped rows.
+                        cursor = db["bot_trades"].find(
+                            {
+                                "status": "closed",
+                                "$or": [
+                                    {"closed_at": {"$gte": cutoff_iso}},
+                                    {"closed_at": None,
+                                     "executed_at": {"$gte": cutoff_iso}},
+                                ],
+                                "$and": [{"$or": [
+                                    {"realized_pnl": 0},
+                                    {"realized_pnl": None},
+                                    {"realized_pnl": {"$exists": False}},
+                                ]}],
+                            },
+                            {"_id": 0, "symbol": 1},
+                        )
+                        symbols_to_recalc = sorted({
+                            (r.get("symbol") or "").upper()
+                            for r in cursor if r.get("symbol")
+                        })
+                        if symbols_to_recalc:
+                            total_claimed = 0.0
+                            total_rows_updated = 0
+                            for sym in symbols_to_recalc:
+                                try:
+                                    res = await _recalc_realized_pnl_for_symbol(
+                                        db, sym, days=2,
+                                    )
+                                    if res.get("success"):
+                                        total_claimed += float(res.get("claimed") or 0)
+                                        total_rows_updated += len(
+                                            res.get("rows_updated") or []
+                                        )
+                                except Exception as ex:
+                                    logger.debug(
+                                        f"[v19.31.13 PNL-AUTOSYNC] {sym} skipped: {ex}"
+                                    )
+                            if total_rows_updated:
+                                logger.info(
+                                    f"[v19.31.13 PNL-AUTOSYNC] backfilled "
+                                    f"{total_rows_updated} row(s) across "
+                                    f"{len(symbols_to_recalc)} symbol(s); "
+                                    f"net claimed ${total_claimed:+.2f}"
+                                )
+                                # Soft Unified Stream notice.
+                                try:
+                                    from services.sentcom_service import emit_stream_event
+                                    await emit_stream_event({
+                                        "kind": "info",
+                                        "event": "realized_pnl_autosync_v19_31_13",
+                                        "text": (
+                                            f"📒 Realized PnL auto-sync claimed "
+                                            f"{total_rows_updated} row(s) across "
+                                            f"{len(symbols_to_recalc)} symbol(s)"
+                                        ),
+                                        "metadata": {
+                                            "symbols": symbols_to_recalc[:32],
+                                            "rows_updated": total_rows_updated,
+                                            "net_claimed": round(total_claimed, 2),
+                                        },
+                                    })
+                                except Exception:
+                                    pass
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"[v19.31.13 PNL-AUTOSYNC] loop tick failed: {e}")
+                try:
+                    await asyncio.sleep(interval_s)
+                except asyncio.CancelledError:
+                    raise
+
+        try:
+            self._pnl_autosync_task = asyncio.create_task(_realized_pnl_autosync_loop())
+        except Exception as e:
+            logger.warning(
+                f"[v19.31.13 PNL-AUTOSYNC] failed to schedule (non-fatal): {e}"
+            )
+
         # Persist state
         await self._save_state()
     
@@ -2019,6 +2142,16 @@ class TradingBotService:
             try:
                 await self._scan_task
             except asyncio.CancelledError:
+                pass
+        # v19.31.13 — also cancel the realized-PnL auto-sync background task.
+        task = getattr(self, "_pnl_autosync_task", None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
                 pass
         logger.info("Trading bot stopped")
         

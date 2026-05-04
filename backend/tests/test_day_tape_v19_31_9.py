@@ -183,7 +183,14 @@ async def test_day_tape_by_setup_aggregation(patch_db):
 
 @pytest.mark.asyncio
 async def test_day_tape_csv_pinned_header_order(patch_db):
-    """Operator scripts depend on column order. Pin it explicitly."""
+    """Operator scripts depend on column order. Pin it explicitly.
+
+    v19.31.13 (2026-05-04): added trade_type + account_id_at_fill so
+    the operator can spot paper vs live rows in their journaling tools.
+    They appear after trade_style and before the audit columns
+    (executed_at, trade_id) so existing column slicers that look at
+    "first N columns up to setup data" stay stable.
+    """
     from routers.diagnostics import get_day_tape_csv
     patch_db.docs = [_trade("t1", "AAPL", realized_pnl=100)]
     csv_text = await get_day_tape_csv(days=1, direction=None, setup=None)
@@ -191,7 +198,7 @@ async def test_day_tape_csv_pinned_header_order(patch_db):
     expected_cols = (
         "closed_at,symbol,direction,shares,entry_price,exit_price,"
         "realized_pnl,r_multiple,close_reason,setup_type,setup_variant,"
-        "trade_style,executed_at,trade_id"
+        "trade_style,trade_type,account_id_at_fill,executed_at,trade_id"
     )
     assert first_line == expected_cols
 

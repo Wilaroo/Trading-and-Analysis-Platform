@@ -486,6 +486,9 @@ async def get_positions():
                 "close_reason": t.get("close_reason") or t.get("exit_reason"),
                 "setup_type": t.get("setup_type"),
                 "trade_id": t.get("id"),
+                # v19.31.13 — surface trade_type for the CLOSE TODAY
+                # drilldown table chip.
+                "trade_type": t.get("trade_type") or "unknown",
             })
 
         total_unrealized_pnl = sum(p.get("pnl", 0) for p in positions)

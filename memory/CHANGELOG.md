@@ -2,6 +2,84 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 (seventy-seventh commit, v19.31.13) — Realized-PnL auto-sync + Trade-type differentiation (PAPER/LIVE/SHADOW)
+
+**Operator feedback after v19.31.12 shipped the manual `↻ Recalc` button:**
+> "I shouldn't have to click Recalc per row. Auto-sync with IB. And I need a clear way to see whether a trade was paper, live, or shadow — because I switch accounts and never want to confuse them."
+
+### Backend
+
+1. **30-second auto-recalc background loop** in `TradingBotService.start()`.
+   - Scans `bot_trades` every 30s for `status=closed AND closed_at within last 24h AND realized_pnl in (0, null, missing)`.
+   - Dedupes by symbol; calls the same `_recalc_realized_pnl_for_symbol` helper that the manual `POST /api/diagnostics/recalc-realized-pnl/{symbol}` route uses.
+   - **Idempotent** (won't double-claim) and **silent when healthy** (no logs when there's nothing to sync).
+   - Emits a soft Unified-Stream `realized_pnl_autosync_v19_31_13` event when ≥1 row gets backfilled, so the operator sees that the system caught up without them clicking.
+   - 45s startup grace period; respects `REALIZED_PNL_AUTOSYNC_ENABLED=false` env override.
+   - Cancelled cleanly by `bot.stop()` so it doesn't leak across hot-reloads.
+
+2. **`trade_type` surfaced everywhere** so the V5 UI can chip every row.
+   - `BotTrade.trade_type` already stamped at execution time in `trade_execution.py` from the live IB account ID via `account_guard.classify_account_id` (DU* → paper, anything else → live, empty → unknown).
+   - Now exposed in `/api/sentcom/positions` (open & lazy-reconciled IB-orphan branches), `/api/sentcom/positions.closed_today`, `/api/diagnostics/day-tape`, `/api/diagnostics/day-tape.csv`, and `/api/diagnostics/forensics`.
+   - Forensics rolls up per-symbol `trade_type` to `dominant_type` (unanimous → that type; mixed concrete types → `mixed`; unknown is filtered out when concrete types exist).
+   - CSV export header gained `trade_type` and `account_id_at_fill` (after `trade_style`, before audit columns).
+
+3. **New `GET /api/diagnostics/shadow-decisions`** + `.csv` mirror.
+   - Reads from the existing `shadow_decisions` Mongo collection (the AI council's verdict on every alert, regardless of whether the bot fired).
+   - Filters: `days` (1/5/30), `symbol`, `only_executed`, `only_passed`.
+   - Returns rows + summary: total, by_recommendation, executed_count, executed_win_rate, executed_pnl_sum, not_executed_count, not_executed_would_pnl_sum.
+   - Computes `divergence_signal`: `ai_too_conservative` (>$250 of "would have made it" on passed trades), `ai_too_aggressive` (<-$250), or `balanced`.
+
+### Frontend
+
+4. **`<AccountModeBadge>`** in V5 HUD top strip (next to AccountGuardChipV5).
+   - Polls `/api/system/account-mode` every 30s.
+   - `PAPER · DUN615665` → amber; `LIVE · U7654321` → red; `SHADOW · standby` → sky-blue; `UNKNOWN` → slate.
+   - Hover tooltip: detected mode, effective mode (next-fill stamp), env active mode, pusher connection state, account match status.
+   - Account-id displayed truncated when >12 chars (e.g., `DUN61…5665`).
+   - `data-testid="account-mode-badge"` with `data-mode`, `data-detected`, `data-account` attributes for testing/scripting.
+
+5. **`<TradeTypeChip>`** shared component used in:
+   - `OpenPositionsV5` row header (next to source-badge).
+   - `ClosedTodayDrilldown` table (new `Mode` column).
+   - `ManageStage` drill-down (new `Mode` column + `Mode` filter chip).
+   - Day Tape diagnostics table (new `Mode` column).
+   - Trade Forensics row header.
+   - Hidden by default for `unknown` (legacy/orphan rows pre-dating v19.31.13) so the UI stays compact.
+   - Full pre-v19.31.13 trades show `unknown` only on the diagnostics tables; user-facing main app shows nothing for them.
+
+6. **New `Diagnostics → Shadow Decisions` tab** — sortable table:
+   - Columns: time, symbol, verdict (PROCEED/REDUCE/PASS pill), confidence, exec-status, debate-winner, risk-rec, ts-direction, would-have-$, would-have-R, actual-outcome.
+   - Range toggles: `Today / 5d / 30d`.
+   - Filter chips: `executed only` (emerald), `ai-passed only` (cyan).
+   - Summary strip: count chips per recommendation + divergence signal (`ai_too_conservative` amber, `ai_too_aggressive` rose, `balanced` slate).
+   - CSV download mirrors all filter state.
+
+### Tests (21 new)
+
+All in `backend/tests/test_pnl_autosync_and_shadow_decisions_v19_31_13.py`:
+
+- Auto-sync wiring: helper extracted, scheduled in start(), cancelled in stop(), env-var toggle respected.
+- Shadow-decisions endpoint: window filter, symbol filter, only_executed filter, only_passed filter, divergence signal classification.
+- Shadow-decisions CSV: pinned header order.
+- Day-tape: trade_type surfaces, falls back to `unknown` on legacy rows, CSV columns include trade_type + account_id_at_fill.
+- Forensics: dominant_type unanimous, mixed, filters-out-unknown.
+- BotTrade.to_dict carries trade_type + account_id_at_fill.
+- account_guard.classify_account_id paper/live/unknown rules.
+- account_guard.get_account_mode_snapshot shape contract.
+
+### Files touched
+
+Backend: `routers/diagnostics.py`, `services/trading_bot_service.py`, `services/sentcom_service.py`, `routers/sentcom.py`, `tests/test_day_tape_v19_31_9.py` (CSV header pin update).
+
+Frontend: new `components/sentcom/v5/AccountModeBadge.jsx`, new `components/sentcom/v5/TradeTypeChip.jsx`, edited `components/sentcom/SentComV5View.jsx` (HUD strip), `components/sentcom/v5/OpenPositionsV5.jsx` (chip on row header), `components/sentcom/v5/pipelineStageColumns.jsx` (Mode column + filter on close & manage stages), `pages/DiagnosticsPage.jsx` (chips on day-tape + forensics + new Shadow Decisions tab).
+
+### Operator-facing defaults
+
+- `REALIZED_PNL_AUTOSYNC_INTERVAL_S=30` (floor: 5s).
+- `REALIZED_PNL_AUTOSYNC_ENABLED=true` (set to false/0/no/off to disable).
+
+---
+
 ## 2026-05-04 (seventy-sixth commit, v19.31.12) — Recalc realized_pnl + sweep-time PnL claim + display sign-fix
 
 **Operator's Trade Forensics view exposed a real backend bug + a frontend display bug.** Both shipped together.

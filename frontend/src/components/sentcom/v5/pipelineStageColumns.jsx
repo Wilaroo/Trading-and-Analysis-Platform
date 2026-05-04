@@ -9,6 +9,7 @@
  * defaultSortKey } for one stage.
  */
 import React from 'react';
+import TradeTypeChip from './TradeTypeChip';
 
 export const formatMoney = (v) => {
   if (v == null || Number.isNaN(Number(v))) return '—';
@@ -140,6 +141,8 @@ export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sorted
       { key: 'setup_type',   label: 'Setup',  values: 'auto', format: humanizeSetup, maxValues: 6 },
       { key: 'close_reason', label: 'Reason', values: 'auto',
         format: (v) => REASON_HUMAN[v] || v || '?', maxValues: 6 },
+      { key: 'trade_type',   label: 'Mode',   values: 'auto',
+        format: (v) => (v || '?').toUpperCase() },
     ],
     headerExtras: (
       <>
@@ -179,6 +182,9 @@ export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sorted
       { key: 'close_reason', label: 'Reason', align: 'left',  width: 'w-20',
         render: (v) => REASON_HUMAN[v] || v || '—',
         cellClass: () => 'text-zinc-500' },
+      { key: 'trade_type',   label: 'Mode',   align: 'left',  width: 'w-16',
+        render: (v) => <TradeTypeChip type={v} hideUnknown size="xs" />,
+        cellClass: () => '' },
       { key: 'closed_at',    label: 'Time',   align: 'right', width: 'w-14',
         render: formatTime, cellClass: () => 'text-zinc-500' },
     ],
@@ -197,6 +203,8 @@ export const manageStageConfig = ({ totalUnrealized, sumR }) => ({
     { key: 'setup_type', label: 'Setup',  values: 'auto', format: humanizeSetup, maxValues: 6 },
     { key: 'source',     label: 'Source', values: 'auto', format: (v) => v || '?' },
     { key: 'risk_level', label: 'Risk',   values: 'auto', format: (v) => v || '?' },
+    { key: 'trade_type', label: 'Mode',   values: 'auto',
+      format: (v) => (v || '?').toUpperCase() },
   ],
   headerExtras: (
     <>
@@ -233,6 +241,9 @@ export const manageStageConfig = ({ totalUnrealized, sumR }) => ({
       cellClass: () => 'text-zinc-500 truncate' },
     { key: 'source',         label: 'Src',      align: 'left',  width: 'w-12',
       cellClass: () => 'text-zinc-500' },
+    { key: 'trade_type',     label: 'Mode',     align: 'left',  width: 'w-16',
+      render: (v) => <TradeTypeChip type={v} hideUnknown size="xs" />,
+      cellClass: () => '' },
   ],
 });
 

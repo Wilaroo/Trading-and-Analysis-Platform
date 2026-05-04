@@ -2162,6 +2162,12 @@ class SentComService:
                             "remaining_shares": trade.get("remaining_shares", shares),
                             "original_shares": trade.get("original_shares", shares),
                             "regime_score": trade.get("regime_score", 0),
+                            # v19.31.13 — trade origin classification so V5 UI
+                            # can render PAPER (amber) / LIVE (red) / SHADOW
+                            # (sky) chips per row. Stamped at execution time
+                            # by trade_execution.execute_trade.
+                            "trade_type": trade.get("trade_type") or "unknown",
+                            "account_id_at_fill": trade.get("account_id_at_fill"),
                         })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
@@ -2376,6 +2382,12 @@ class SentComService:
                         "exit_rule": ((enrich_trade or {}).get("entry_context") or {}).get("exit_rule", ""),
                         "trading_approach": ((enrich_trade or {}).get("entry_context") or {}).get("trading_approach", ""),
                         "notes": (enrich_trade or {}).get("notes", ""),
+                        # v19.31.13 — trade-type chip for IB-orphans / lazy
+                        # reconciled rows. Pulls from the bot_trade lazy-
+                        # match doc when present; orphans the bot never
+                        # owned land here as `unknown`.
+                        "trade_type": (enrich_trade or {}).get("trade_type") or "unknown",
+                        "account_id_at_fill": (enrich_trade or {}).get("account_id_at_fill"),
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")

@@ -19,6 +19,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LiveDataChip } from './LiveDataChip';
+import TradeTypeChip from './TradeTypeChip';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -215,6 +216,20 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
               {sourceBadge.label}
             </span>
           )}
+          {/* v19.31.13 — trade origin chip (PAPER amber, LIVE red, SHADOW sky).
+              Hidden when type is unknown to keep the row compact for legacy/
+              orphan rows that pre-date the v19.31.13 trade_type stamping. */}
+          <TradeTypeChip
+            type={position.trade_type}
+            hideUnknown
+            size="xs"
+            testIdSuffix={`open-pos-${position.symbol}`}
+            title={
+              position.account_id_at_fill
+                ? `Filled on ${position.account_id_at_fill}`
+                : undefined
+            }
+          />
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
           {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
