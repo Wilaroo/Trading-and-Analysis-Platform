@@ -72,6 +72,175 @@ class StrategyConfigUpdate(BaseModel):
     timeframe: Optional[str] = None
 
 
+@router.get("/diag/symbol-state")
+async def diag_symbol_state(
+    symbol: str = Query(..., description="Symbol to diagnose (case-insensitive)"),
+    history_days: int = Query(7, ge=1, le=30),
+):
+    """v19.34.15 (2026-05-06) — symbol-level forensic diagnostic.
+
+    Operator caught UPS showing 5,304 shares at IB but only 425 in-app.
+    This endpoint returns every angle on a symbol so you can see what
+    happened end-to-end:
+
+      • `ib_position` — live IB qty/avg_cost/market_value from the
+        pusher snapshot.
+      • `open_trades_in_memory` — `_trading_bot._open_trades[symbol]`
+        array; this is the source of the V5 "Open Positions" panel.
+      • `bot_trades_history` — every `bot_trades` Mongo row for this
+        symbol over the last `history_days` (open + closed),
+        newest-first, with key fields only (no _id).
+      • `bracket_lifecycle` — every `bracket_lifecycle_events` row for
+        this symbol (so you see scale-outs, re-issues, etc.)
+      • `drift` — computed `IB_qty - sum(in_memory.remaining_shares)`.
+        +ve = IB has more than tracked (UPS case); -ve = bot thinks
+        more than IB has.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(400, "symbol required")
+
+    db = getattr(_trading_bot, "_db", None)
+
+    # 1) Live IB position from pusher snapshot.
+    ib_position: Optional[Dict[str, Any]] = None
+    try:
+        from routers.ib import _pushed_ib_data
+        positions = (_pushed_ib_data or {}).get("positions") or []
+        # `positions` may be a list of dicts or a dict keyed by symbol.
+        if isinstance(positions, dict):
+            ib_position = positions.get(sym)
+        elif isinstance(positions, list):
+            for p in positions:
+                psym = str((p or {}).get("symbol") or "").upper()
+                if psym == sym:
+                    ib_position = p
+                    break
+        live_quote = ((_pushed_ib_data or {}).get("quotes") or {}).get(sym) or {}
+    except Exception as e:
+        ib_position = {"error": str(e)}
+        live_quote = {}
+
+    # 2) In-memory open trades.
+    open_trades_mem: List[Dict[str, Any]] = []
+    try:
+        ot = getattr(_trading_bot, "_open_trades", {}) or {}
+        rows = ot.get(sym) or []
+        for t in (rows if isinstance(rows, list) else [rows]):
+            d = {
+                "id": getattr(t, "id", None),
+                "symbol": getattr(t, "symbol", None),
+                "direction": getattr(t, "direction", None),
+                "status": str(getattr(t, "status", "")),
+                "entry_price": getattr(t, "entry_price", None),
+                "remaining_shares": getattr(t, "remaining_shares", None),
+                "original_shares": getattr(t, "original_shares", None),
+                "stop_price": getattr(t, "stop_price", None),
+                "target_prices": getattr(t, "target_prices", None),
+                "scale_outs_executed": getattr(t, "scale_outs_executed", None),
+                "setup_type": getattr(t, "setup_type", None),
+                "created_at": str(getattr(t, "created_at", "")) or None,
+                "ai_context": (getattr(t, "ai_context", "") or "")[:200] or None,
+            }
+            # Coerce direction enum to value.
+            d["direction"] = getattr(d["direction"], "value", d["direction"])
+            open_trades_mem.append(d)
+    except Exception as e:
+        open_trades_mem = [{"error": str(e)}]
+
+    # 3) bot_trades history (Mongo).
+    history: List[Dict[str, Any]] = []
+    if db is not None:
+        try:
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(days=int(history_days))
+            cur = db["bot_trades"].find(
+                {
+                    "symbol": sym,
+                    "$or": [
+                        {"created_at": {"$gte": cutoff}},
+                        {"created_at": {"$gte": cutoff.isoformat()}},
+                    ],
+                },
+                {"_id": 0, "ai_context": 0, "entry_context": 0},
+            ).sort("created_at", -1).limit(200)
+
+            def _read():
+                return list(cur)
+            history = await asyncio.to_thread(_read)
+        except Exception as e:
+            history = [{"error": str(e)}]
+
+    # 4) Bracket lifecycle (added v19.34.11).
+    lifecycle: List[Dict[str, Any]] = []
+    if db is not None:
+        try:
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(days=int(history_days))
+            cur2 = db["bracket_lifecycle_events"].find(
+                {"symbol": sym, "created_at": {"$gte": cutoff}},
+                {"_id": 0},
+            ).sort("created_at", -1).limit(50)
+
+            def _read2():
+                return list(cur2)
+            lifecycle = await asyncio.to_thread(_read2)
+        except Exception:
+            pass
+
+    # 5) Drift computation.
+    ib_qty_signed: Optional[float] = None
+    if isinstance(ib_position, dict):
+        ib_qty_signed = (
+            ib_position.get("qty")
+            or ib_position.get("quantity")
+            or ib_position.get("position")
+        )
+        try:
+            ib_qty_signed = float(ib_qty_signed) if ib_qty_signed is not None else None
+        except (TypeError, ValueError):
+            ib_qty_signed = None
+
+    in_mem_qty_signed: float = 0.0
+    for t in open_trades_mem:
+        rs = t.get("remaining_shares")
+        if rs is None:
+            continue
+        try:
+            rs = float(rs)
+        except (TypeError, ValueError):
+            continue
+        d = (t.get("direction") or "").lower()
+        in_mem_qty_signed += rs if d != "short" else -rs
+
+    drift_shares: Optional[float] = None
+    if ib_qty_signed is not None:
+        drift_shares = round(ib_qty_signed - in_mem_qty_signed, 4)
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "ib_position": ib_position,
+        "live_quote": live_quote,
+        "open_trades_in_memory": open_trades_mem,
+        "in_memory_qty_signed": in_mem_qty_signed,
+        "bot_trades_history": history,
+        "bot_trades_history_count": len(history),
+        "bracket_lifecycle": lifecycle,
+        "drift_shares": drift_shares,
+        "drift_interpretation": (
+            None if drift_shares is None
+            else "ib_has_more_than_tracked" if drift_shares > 1
+            else "bot_thinks_more_than_ib_has" if drift_shares < -1
+            else "in_sync"
+        ),
+        "history_days": history_days,
+    }
+
+
 def init_trading_bot_router(trading_bot, trade_executor):
     """Initialize router with service dependencies"""
     global _trading_bot, _trade_executor
