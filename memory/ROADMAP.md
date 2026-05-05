@@ -40,11 +40,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 3. **Wired into `TradingBotService.start()` + `stop()`** — survives backend restart, 30s grace period, cancelled cleanly on shutdown.
 4. **Default ON**: `STATE_INTEGRITY_CHECK_ENABLED=true`, interval 60s, auto-resolve true. Operator can flip to detect-only via env.
 
+### ✅ v19.34.11 + v19.34.12 shipped (Bracket History panel + Rejection Heatmap sub-tab — 2026-05-06)
+
+1. **v19.34.11 — Bracket History**: `services/bracket_reissue_service._persist_lifecycle_event` writes every reissue path to Mongo `bracket_lifecycle_events` (TTL 7d). `GET /api/trading-bot/bracket-history?trade_id|symbol&days&limit` returns events + summary aggregations. V5 `<BracketHistoryPanel />` is a lazy-loaded expandable inner panel inside `OpenPositionsV5.jsx` expanded row with reason chips (color-coded by reason: scale_out=emerald, scale_in=cyan, tif_promotion=violet, manual=zinc) + phase chips + per-event detail. 9 new tests.
+2. **v19.34.12 — Rejection Heatmap**: `services/rejection_cooldown_service._persist_rejection_event` writes every structural rejection to Mongo `rejection_events` (TTL 7d) with TTL + compound (symbol, setup_type, created_at) indexes. `GET /api/trading-bot/rejection-events?symbol&setup_type&days&limit` returns events + heatmap aggregation (rows by Symbol × Setup, by_reason maps, top reasons, max_rejections). V5 `<RejectionHeatmap />` is a new Diagnostics sub-tab at id `rejections` rendering the (Symbol × Setup) grid with 4-tier heat colors + hover tooltips per cell + raw-events table toggle + days selector + auto-refresh 30s. 13 new tests.
+
 ### 🟡 Remaining v19.34.10 / next pickup
 
-1. **V5 Frontend — Bracket History tab** (v19.34.7 backlog item). Per operator sign-off 2026-05-06, lives as expandable inner panel inside each row of `OpenPositionsV5.jsx`. Backend: add `bracket_lifecycle_events` Mongo writer in `bracket_reissue_service.py` + new `GET /api/trading-bot/bracket-history?trade_id=X`. Frontend: new `<BracketHistoryTab />` component rendering full lifecycle (original bracket → scale-out trim → re-issue → exit) with `reason` chips per event.
-2. **V5 Frontend — Rejection Heatmap** (v19.34.8 backlog item). Per operator sign-off 2026-05-06, lives as a new sub-tab in `PipelineHUDV5.jsx`. Backend: persist `rejection_cooldown_service` events to a new `rejection_events` Mongo collection (TTL 7d) + new `GET /api/trading-bot/rejection-events?days=N`. Frontend: (Symbol × Setup) grid colored by rejection_count, tooltips break down by reason.
-3. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred from v19.34.8/9; forensic-only.
+1. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred from v19.34.8/9; forensic-only. Needs operator's diagnostic script output for the 13:35:36 trade.
+2. **Extend `audit_ib_fill_tape.py`** to flag unmatched `Sell Short` / `Buy to Cover` IB transactions — needs sample TWS tape with these exact rows to safely tune the regex.
+3. **Wire bracket-lifecycle event persistence into the boot zombie sweeper** — v19.34.11 only persists events from `reissue_bracket_for_trade`. The boot-time `eod_validate_overnight_orders` dry-run sweep should also stamp events so operator history shows "boot detected N orphans, sweep dry-run only".
 
 ### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
 

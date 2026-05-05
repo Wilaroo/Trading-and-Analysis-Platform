@@ -12,6 +12,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Microscope, TrendingUp, TrendingDown, Copy, RefreshCw, Filter } from 'lucide-react';
 import TradeTypeChip from '../components/sentcom/v5/TradeTypeChip';
+// v19.34.12 (2026-05-06) — rejection heatmap sub-tab.
+import RejectionHeatmap from '../components/sentcom/v5/RejectionHeatmap';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -19,6 +21,7 @@ const SUB_TABS = [
   { id: 'trail', label: 'Trail Explorer' },
   { id: 'scorecard', label: 'Module Scorecard' },
   { id: 'funnel', label: 'Pipeline Funnel' },
+  { id: 'rejections', label: 'Rejections' },
   { id: 'day_tape', label: 'Day Tape' },
   { id: 'forensics', label: 'Trade Forensics' },
   { id: 'shadow', label: 'Shadow Decisions' },
@@ -1800,6 +1803,7 @@ export default function DiagnosticsPage() {
         {tab === 'trail' && <TrailExplorer />}
         {tab === 'scorecard' && <ModuleScorecard />}
         {tab === 'funnel' && <PipelineFunnel />}
+        {tab === 'rejections' && <RejectionHeatmap />}
         {tab === 'day_tape' && <DayTapeView />}
         {tab === 'forensics' && <TradeForensicsView />}
         {tab === 'shadow' && <ShadowDecisionsView />}

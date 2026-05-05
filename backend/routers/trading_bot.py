@@ -816,6 +816,200 @@ async def clear_rejection_cooldown(payload: Optional[Dict[str, Any]] = None):
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.11 — Bracket lifecycle history ───────────────────────────
+@router.get("/bracket-history")
+async def get_bracket_history(
+    trade_id: Optional[str] = Query(None, description="Filter by trade ID"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol (case-insensitive)"),
+    days: int = Query(7, ge=1, le=30, description="Lookback window"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Return the bracket-lifecycle event trail.
+
+    Powers the V5 "📜 History" expandable panel inside `OpenPositionsV5.jsx`.
+    Operator sees the full lifecycle of each trade: original bracket →
+    scale-out trim → re-issue → exit, with `reason` chips per event.
+
+    Filters:
+      - `trade_id`: pin to one trade's full history (most common)
+      - `symbol`: pin to a symbol's full history across all trades
+      - `days`: lookback window (default 7d, matches TTL)
+
+    Returns `{success, events: [...], summary: {total, success_count,
+    failure_count, by_reason: {...}}}` sorted newest-first.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    try:
+        db = getattr(_trading_bot, "_db", None)
+        if db is None:
+            return {"success": False, "error": "no_database", "events": [], "summary": {}}
+
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+        query: Dict[str, Any] = {"created_at": {"$gte": cutoff}}
+        if trade_id:
+            query["trade_id"] = trade_id
+        if symbol:
+            query["symbol"] = str(symbol).upper()
+
+        def _read():
+            cur = db["bracket_lifecycle_events"].find(
+                query, {"_id": 0},
+            ).sort("created_at", -1).limit(int(limit))
+            return list(cur)
+
+        rows = await asyncio.to_thread(_read)
+
+        # Stamp ISO `created_at_iso` for the frontend; some downstream
+        # code prefers strings to BSON datetimes.
+        for r in rows:
+            ca = r.get("created_at")
+            if hasattr(ca, "isoformat"):
+                r["created_at_iso"] = ca.isoformat()
+                r["created_at"] = ca.isoformat()
+
+        # Summary block.
+        success_count = sum(1 for r in rows if r.get("success"))
+        failure_count = len(rows) - success_count
+        by_reason: Dict[str, int] = {}
+        for r in rows:
+            k = str(r.get("reason") or "unknown")
+            by_reason[k] = by_reason.get(k, 0) + 1
+
+        return {
+            "success": True,
+            "events": rows,
+            "summary": {
+                "total": len(rows),
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "by_reason": by_reason,
+            },
+            "filters": {
+                "trade_id": trade_id,
+                "symbol": symbol,
+                "days": days,
+                "limit": limit,
+            },
+        }
+    except Exception as e:
+        logger.error(f"bracket-history error: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "events": [], "summary": {}}
+
+
+# ─── v19.34.12 — Rejection events / heatmap ──────────────────────────
+@router.get("/rejection-events")
+async def get_rejection_events(
+    days: int = Query(7, ge=1, le=30),
+    symbol: Optional[str] = Query(None),
+    setup_type: Optional[str] = Query(None),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Return rejection events + aggregations for the V5 Diagnostics
+    "Rejections" sub-tab heatmap.
+
+    Response shape:
+      {
+        success,
+        events: [{symbol, setup_type, reason, rejection_count, extended,
+                  created_at_iso}, ...],
+        heatmap: {
+          rows: [{symbol, setup_type, total_rejections, by_reason: {...}}],
+          symbols: [...], setups: [...],
+          max_rejections: <int>, total_events: <int>,
+          top_reasons: [{reason, count}, ...]
+        },
+        filters: {...}
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    try:
+        db = getattr(_trading_bot, "_db", None)
+        if db is None:
+            return {
+                "success": False, "error": "no_database",
+                "events": [], "heatmap": {"rows": []},
+            }
+
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+        query: Dict[str, Any] = {"created_at": {"$gte": cutoff}}
+        if symbol:
+            query["symbol"] = str(symbol).upper()
+        if setup_type:
+            query["setup_type"] = str(setup_type).lower()
+
+        def _read():
+            cur = db["rejection_events"].find(
+                query, {"_id": 0},
+            ).sort("created_at", -1).limit(int(limit))
+            return list(cur)
+
+        rows = await asyncio.to_thread(_read)
+
+        # Normalise timestamps for the frontend.
+        for r in rows:
+            ca = r.get("created_at")
+            if hasattr(ca, "isoformat"):
+                r["created_at_iso"] = ca.isoformat()
+                r["created_at"] = ca.isoformat()
+
+        # Build heatmap aggregation: (symbol, setup_type) → total + by-reason
+        agg: Dict[tuple, Dict[str, Any]] = {}
+        reason_totals: Dict[str, int] = {}
+        for r in rows:
+            sym = str(r.get("symbol") or "?").upper()
+            stp = str(r.get("setup_type") or "?").lower()
+            rsn = str(r.get("reason") or "unknown")
+            key = (sym, stp)
+            cell = agg.setdefault(key, {
+                "symbol": sym,
+                "setup_type": stp,
+                "total_rejections": 0,
+                "by_reason": {},
+            })
+            cell["total_rejections"] += 1
+            cell["by_reason"][rsn] = cell["by_reason"].get(rsn, 0) + 1
+            reason_totals[rsn] = reason_totals.get(rsn, 0) + 1
+
+        heatmap_rows = sorted(
+            agg.values(),
+            key=lambda c: c["total_rejections"],
+            reverse=True,
+        )
+        symbols = sorted({c["symbol"] for c in heatmap_rows})
+        setups = sorted({c["setup_type"] for c in heatmap_rows})
+        max_rejections = max((c["total_rejections"] for c in heatmap_rows), default=0)
+        top_reasons = sorted(
+            [{"reason": k, "count": v} for k, v in reason_totals.items()],
+            key=lambda x: x["count"], reverse=True,
+        )[:10]
+
+        return {
+            "success": True,
+            "events": rows,
+            "heatmap": {
+                "rows": heatmap_rows,
+                "symbols": symbols,
+                "setups": setups,
+                "max_rejections": max_rejections,
+                "total_events": len(rows),
+                "top_reasons": top_reasons,
+            },
+            "filters": {
+                "days": days,
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "limit": limit,
+            },
+        }
+    except Exception as e:
+        logger.error(f"rejection-events error: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "events": [], "heatmap": {"rows": []}}
+
+
 # ─── v19.34.10 — State integrity (drift watchdog) endpoints ───────────
 @router.get("/integrity-status")
 async def get_integrity_status():

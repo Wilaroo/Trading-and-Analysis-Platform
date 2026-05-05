@@ -2,6 +2,126 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-fourth commit, v19.34.12) — Rejection Heatmap (Diagnostics sub-tab + Mongo log)
+
+Pairs with v19.34.11. Persists every structural rejection that
+triggers a cooldown so the operator can spot blind-spot patterns
+("ORB on XLU always trips max_position_pct") in the V5 Diagnostics
+"Rejections" sub-tab heatmap.
+
+### What ships
+
+1. **`services/rejection_cooldown_service._persist_rejection_event`** —
+   sync best-effort writer called from inside `mark_rejection`. Writes
+   `(symbol, setup_type, reason, rejection_count, extended, created_at)`
+   to a new Mongo `rejection_events` collection. Lazy idempotent
+   ensure of TTL index (7d) + compound index on
+   `(symbol, setup_type, created_at desc)`.
+
+2. **`GET /api/trading-bot/rejection-events`** — query + heatmap
+   aggregation. Filters: `symbol`, `setup_type`, `days` (1-30),
+   `limit` (1-5000). Returns:
+   - `events[]` — raw rows newest-first with `created_at_iso`
+   - `heatmap.rows[]` — sorted (Symbol, Setup) cells with
+     `total_rejections` + `by_reason` map
+   - `heatmap.symbols[]` / `heatmap.setups[]` — axis labels
+   - `heatmap.max_rejections` — for color scaling
+   - `heatmap.top_reasons[]` — global reason histogram
+
+3. **V5 Frontend — `<RejectionHeatmap />` sub-tab in
+   `DiagnosticsPage.jsx`** at id `rejections`, between Pipeline Funnel
+   and Day Tape. Renders:
+   - (Symbol × Setup) grid colored by rejection_count (4-tier heat
+     gradient: amber → orange → rose).
+   - Hover tooltip per cell showing breakdown by reason (max_position_pct
+     ×3, kill_switch ×1, ...).
+   - Top header strip with totals + top 3 reasons + days selector
+     (1/3/7/14).
+   - Toggle to "Raw events" table view for forensic drill-down.
+   - Empty-state when no rejections in window (✓ healthy bot).
+   - Auto-refresh every 30s.
+
+### Verification
+
+- 13 new pytests in `tests/test_rejection_events_v19_34_12.py`
+  covering persistence (initial + extended + transient skip + Mongo
+  blip), endpoint contract (filter uppercase, days bounds, no_db),
+  heatmap aggregation math.
+- Live curl on container backend: `GET /api/trading-bot/rejection-events?days=1`
+  returns `success:true, events:[], heatmap.rows:[]` (no events yet,
+  expected for fresh deploy).
+- Frontend ESLint clean. Webpack compiled.
+
+### Files
+
+- Edited: `backend/services/rejection_cooldown_service.py`
+  (added `_persist_rejection_event` + wired into both `mark_rejection`
+  branches).
+- Edited: `backend/routers/trading_bot.py` (`GET /rejection-events`).
+- New: `frontend/src/components/sentcom/v5/RejectionHeatmap.jsx`.
+- Edited: `frontend/src/pages/DiagnosticsPage.jsx` (added sub-tab).
+- New: `backend/tests/test_rejection_events_v19_34_12.py` (13 tests).
+
+
+## 2026-05-06 (ninety-third commit, v19.34.11) — Bracket Lifecycle History
+
+Operator asked: "where will Bracket History (v19.34.7) and Rejection
+Heatmap (v19.34.8) live in the V5 UI?" Answer: lifecycle history is an
+expandable inner panel inside each Open Position row; rejection
+heatmap is a Diagnostics sub-tab. v19.34.11 ships the first.
+
+### What ships
+
+1. **`services/bracket_reissue_service._persist_lifecycle_event`** —
+   async best-effort writer. Stamps every `reissue_bracket_for_trade`
+   return path (compute / cancel / submit / success) into a new Mongo
+   `bracket_lifecycle_events` collection. Lazy idempotent ensure of
+   TTL index (7d) + lookup indexes on `(trade_id, created_at desc)`
+   and `(symbol, created_at desc)`.
+
+2. **`GET /api/trading-bot/bracket-history`** — query endpoint.
+   Filters: `trade_id`, `symbol` (auto-uppercase), `days` (1-30),
+   `limit` (1-1000). Returns `events[]` (newest-first) +
+   `summary{total, success_count, failure_count, by_reason{}}`.
+
+3. **V5 Frontend — `<BracketHistoryPanel />` lazy-loaded inside
+   `OpenPositionsV5.jsx` expanded row**. Renders:
+   - Click-to-expand "📜 Bracket History (N)" toggle.
+   - Vertical timeline with 1 row per event: timestamp, reason chip
+     (color-coded: scale_out=emerald, scale_in=cyan, tif_promotion=
+     violet, manual=zinc), phase chip (OK/COMPUTE/CANCEL/SUBMIT
+     failure), inline error tooltip.
+   - Per-event detail line: shares, stop, target prices+qtys, TIF.
+   - Footer summary: "N events · K ok · M failed".
+   - Empty-state copy when no re-issues yet for the trade.
+
+4. **Endpoint integrated alongside the v19.34.10 watchdog** in
+   `routers/trading_bot.py`. Both follow the same shape: return
+   `{success, events, summary, filters}`.
+
+### Verification
+
+- 9 new pytests in `tests/test_bracket_history_v19_34_11.py` covering
+  persistence (writes / Mongo blip swallowed / db-None skip),
+  reissue integration (compute-failure path persists event), endpoint
+  contract (503 on missing bot, summary aggregation, symbol uppercase,
+  no_db clean error).
+- Live curl on container backend: `GET /api/trading-bot/bracket-history?days=1`
+  returns `success:true, events:[], summary.total:0`.
+- ESLint clean on `BracketHistoryPanel.jsx` + `OpenPositionsV5.jsx`.
+
+### Files
+
+- Edited: `backend/services/bracket_reissue_service.py` (added
+  `_persist_lifecycle_event` + wired into 4 return paths).
+- Edited: `backend/routers/trading_bot.py` (`GET /bracket-history`).
+- New: `frontend/src/components/sentcom/v5/BracketHistoryPanel.jsx`.
+- Edited: `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`
+  (imported + rendered panel inside expanded row).
+- New: `backend/tests/test_bracket_history_v19_34_11.py` (9 tests).
+
+
+
 ## 2026-05-06 (ninety-second commit, v19.34.10) — Auto-sync integrity check (state drift watchdog)
 
 Operator-approved follow-up to v19.34.9. v19.34.9 plugged the one path

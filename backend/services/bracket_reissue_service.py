@@ -55,6 +55,66 @@ from services.bracket_tif import bracket_tif
 logger = logging.getLogger(__name__)
 
 
+# ─── v19.34.11 — Bracket lifecycle event log ─────────────────────────────
+# Every cancel-old + recompute + submit-new pipeline run is written to the
+# Mongo `bracket_lifecycle_events` collection (TTL 7d). Powers the V5
+# "📜 History" expandable panel inside `OpenPositionsV5.jsx` so the
+# operator sees the full lifecycle of each trade's bracket: original
+# bracket → scale-out trim → re-issue → exit, with `reason` chips per
+# event and rich computed-plan / cancel-result / submit-result detail.
+#
+# Schema-light: persistence failure NEVER blocks the re-issue itself.
+
+async def _persist_lifecycle_event(
+    *,
+    bot,
+    event: Dict[str, Any],
+) -> None:
+    """Best-effort write of one bracket-lifecycle event to Mongo.
+
+    Caller passes the entire `reissue_bracket_for_trade` return dict.
+    We strip pure-debug fields, stamp `created_at`, and upsert into
+    `bracket_lifecycle_events`. Failures swallow silently with a debug
+    log so a Mongo blip never wedges the broker call path.
+    """
+    try:
+        db = getattr(bot, "_db", None)
+        if db is None:
+            return
+        # Lazy idempotent index ensure (once per process).
+        global _lifecycle_indexes_ready
+        if not _lifecycle_indexes_ready:
+            try:
+                await asyncio.to_thread(
+                    db["bracket_lifecycle_events"].create_index,
+                    "created_at", expireAfterSeconds=7 * 24 * 60 * 60,
+                )
+                await asyncio.to_thread(
+                    db["bracket_lifecycle_events"].create_index,
+                    [("trade_id", 1), ("created_at", -1)],
+                )
+                await asyncio.to_thread(
+                    db["bracket_lifecycle_events"].create_index,
+                    [("symbol", 1), ("created_at", -1)],
+                )
+                _lifecycle_indexes_ready = True
+            except Exception:
+                pass  # writes still work without the index
+        # Shallow copy to avoid mutating the live event dict the caller
+        # may still be using.
+        doc = dict(event)
+        doc["created_at"] = datetime.now(timezone.utc)
+        # Keep the document compact — `plan` already contains the rich
+        # computed parameters; don't double-store the trade object.
+        await asyncio.to_thread(db["bracket_lifecycle_events"].insert_one, doc)
+    except Exception as e:
+        logger.debug("[v19.34.11 LIFECYCLE-LOG] persist failed: %s", e)
+
+
+_lifecycle_indexes_ready: bool = False
+
+
+
 # ─── Pure compute helpers ──────────────────────────────────────────────────
 
 
@@ -449,13 +509,17 @@ async def reissue_bracket_for_trade(
             "trade=%s reason=%s: %s",
             getattr(trade, "id", "?"), reason, e,
         )
-        return {
+        ev = {
             "success": False,
             "phase": "compute",
             "error": f"{type(e).__name__}: {e}",
             "trade_id": getattr(trade, "id", None),
+            "symbol": getattr(trade, "symbol", None),
+            "reason": reason,
             "started_at": started_at,
         }
+        await _persist_lifecycle_event(bot=bot, event=ev)
+        return ev
 
     # 2) Cancel old bracket legs and wait for ack.
     cancel_result = await cancel_active_bracket_legs(
@@ -485,7 +549,7 @@ async def reissue_bracket_for_trade(
                 })
         except Exception as e:
             logger.debug("_emit_stream_event failed (non-fatal): %s", e)
-        return {
+        cancel_fail_event = {
             "success": False,
             "phase": "cancel",
             "error": "cancel_failed_abort",
@@ -496,6 +560,8 @@ async def reissue_bracket_for_trade(
             "plan": plan.__dict__,
             "started_at": started_at,
         }
+        await _persist_lifecycle_event(bot=bot, event=cancel_fail_event)
+        return cancel_fail_event
 
     # 3) Submit new OCA pair.
     submit_result = submit_oca_pair(plan=plan, queue_order_fn=queue_order_fn)
@@ -521,7 +587,7 @@ async def reissue_bracket_for_trade(
                 })
         except Exception:
             pass
-        return {
+        submit_fail_event = {
             "success": False,
             "phase": "submit",
             "error": submit_result.get("error", "submit_failed"),
@@ -533,6 +599,8 @@ async def reissue_bracket_for_trade(
             "plan": plan.__dict__,
             "started_at": started_at,
         }
+        await _persist_lifecycle_event(bot=bot, event=submit_fail_event)
+        return submit_fail_event
 
     # 4) Persist the new IDs back onto the trade record so manage-loop tracks them.
     try:
@@ -564,7 +632,7 @@ async def reissue_bracket_for_trade(
         plan.oca_group,
     )
 
-    return {
+    success_event = {
         "success": True,
         "phase": "done",
         "trade_id": plan.trade_id,
@@ -576,3 +644,5 @@ async def reissue_bracket_for_trade(
         "started_at": started_at,
         "finished_at": finished_at,
     }
+    await _persist_lifecycle_event(bot=bot, event=success_event)
+    return success_event

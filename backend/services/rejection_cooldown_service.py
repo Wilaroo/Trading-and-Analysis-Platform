@@ -54,6 +54,67 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+# ─── v19.34.12 — Rejection event log ────────────────────────────────
+# Persistent record of every structural rejection that triggers / extends
+# a cooldown. Backs the V5 Diagnostics → "Rejections" sub-tab heatmap
+# (Symbol × Setup grid colored by rejection_count, broken down by reason).
+#
+# Schema-light: persistence failure NEVER blocks the cooldown logic.
+# TTL: 7 days (operator-tunable via `bot_state.rejection_events_ttl_days`).
+
+def _persist_rejection_event(
+    *,
+    symbol: str,
+    setup_type: str,
+    reason: str,
+    rejection_count: int,
+    extended: bool,
+) -> None:
+    """Best-effort sync write of one rejection event to Mongo.
+
+    Called from inside `mark_rejection` (which holds a threading.Lock,
+    so we must not await here). Writes are fire-and-forget; a Mongo
+    blip is logged at DEBUG and silently dropped — the cooldown still
+    works either way.
+
+    The frontend reads from `rejection_events` collection via the
+    `/api/trading-bot/rejection-events` aggregation endpoint.
+    """
+    try:
+        from database import get_database
+        db = get_database()
+        if db is None:
+            return
+        # Lazy index ensure — idempotent + once-per-process.
+        global _rejection_events_indexes_ready
+        if not _rejection_events_indexes_ready:
+            try:
+                db["rejection_events"].create_index(
+                    "created_at", expireAfterSeconds=7 * 24 * 60 * 60,
+                )
+                db["rejection_events"].create_index(
+                    [("symbol", 1), ("setup_type", 1), ("created_at", -1)],
+                )
+                _rejection_events_indexes_ready = True
+            except Exception:
+                pass  # writes still work without the index
+        doc = {
+            "symbol": (symbol or "").upper(),
+            "setup_type": (setup_type or "").lower(),
+            "reason": str(reason),
+            "rejection_count": int(rejection_count),
+            "extended": bool(extended),
+            "created_at": datetime.now(timezone.utc),
+        }
+        db["rejection_events"].insert_one(doc)
+    except Exception as e:
+        logger.debug("[v19.34.12 REJECTION-LOG] persist failed: %s", e)
+
+
+_rejection_events_indexes_ready: bool = False
+
+
+
 # Default cooldown window in seconds (configurable per env).
 # 5 min is the operator's pick — long enough to cover most "transient"
 # rejection-loop windows, short enough that a legit setup recovery
@@ -229,6 +290,10 @@ class RejectionCooldown:
                     existing.rejection_count, reason,
                     int((existing.expires_at - existing.started_at).total_seconds()),
                 )
+                _persist_rejection_event(
+                    symbol=symbol, setup_type=setup_type, reason=str(reason),
+                    rejection_count=existing.rejection_count, extended=True,
+                )
                 return existing
             entry = CooldownEntry(
                 symbol=symbol.upper(),
@@ -244,6 +309,10 @@ class RejectionCooldown:
                 "reason=%s, %ds (until %s)",
                 symbol, setup_type, reason, seconds,
                 new_expiry.isoformat(),
+            )
+            _persist_rejection_event(
+                symbol=symbol, setup_type=setup_type, reason=str(reason),
+                rejection_count=1, extended=False,
             )
             return entry
 

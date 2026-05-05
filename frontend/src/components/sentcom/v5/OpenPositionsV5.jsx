@@ -23,6 +23,8 @@ import TradeTypeChip from './TradeTypeChip';
 // v19.34.2 (2026-05-04) — quote-freshness chip + legend popover.
 import QuoteFreshnessChip from './QuoteFreshnessChip';
 import OpenPositionsLegend from './OpenPositionsLegend';
+// v19.34.11 (2026-05-06) — bracket lifecycle history panel.
+import BracketHistoryPanel from './BracketHistoryPanel';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -483,6 +485,12 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
               <span>· regime {position.market_regime}</span>
             )}
           </div>
+
+          {/* v19.34.11 — Bracket lifecycle history (lazy-loaded on click) */}
+          <BracketHistoryPanel
+            tradeId={position.trade_id || position.id}
+            symbol={position.symbol}
+          />
         </div>
       )}
     </div>
