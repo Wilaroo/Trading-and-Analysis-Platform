@@ -98,6 +98,41 @@ Per `/app/memory/runbooks/midbar_tick_eval_activation.md`. Defer until GTC fix l
 - (v19.33) Chart header shows cyan **"live"** pip when on a focused intraday chart during RTH.
 - (v19.34.3) RECONCILED + ⚠ CONFLICT chips render on V5 Open Positions row when applicable.
 
+### 🟡 P1 — Persist carry_forward_watch gameplan cards across refresh (v19.34.5 candidate)
+
+**Operator-reported 2026-05-04 EVE.** The SCANNER · LIVE panel showed 4 rich `carry_forward_watch` cards (SBUX, IAU, MA, SYK) with full bot reasoning during/after RTH (graded B/C+, "viable Day-2 play if X opens above today's close"). On hard refresh of the app outside RTH, those cards disappeared and only STX (today's actual position) remained.
+
+**Why this matters:** The cards ARE the morning prep gameplan. Losing them at refresh breaks the premarket workflow.
+
+**Likely causes (investigate):**
+1. Scanner live API returns only a short rolling window (e.g. last 15 min) — carry-forwards > 15 min old drop off.
+2. Default feed filters out `carry_forward_watch` event_kind and only includes `setup_fired` / `breakout`.
+3. Frontend hook keeps cards in component state that gets blown away on hard refresh; no backfill on mount.
+
+**Investigation steps (~30 min):**
+```bash
+# 1. Find the panel's data hook and endpoint
+grep -rn "carry_forward\|scanner.live\|live-alerts" \
+    ~/Trading-and-Analysis-Platform/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx \
+    ~/Trading-and-Analysis-Platform/frontend/src/components/sentcom/hooks/
+
+# 2. Confirm carry_forward_watch events are in Mongo (sentcom_thoughts is the 7d TTL stream)
+db.sentcom_thoughts.countDocuments({kind:/carry_forward/i, created_at:{$gte:"<today>"}})
+
+# 3. Check the API response shape for the panel's endpoint
+curl ${BACKEND_URL}/api/scanner/live-alerts?limit=20 | jq '.alerts[].kind' | sort -u
+```
+
+**Fix scope:**
+- If API filters out carry_forwards → add `kind` flag (e.g. `?include_carry_forwards=true`) and have ScannerCardsV5 always request it.
+- If TTL/window is too short → bump scanner-live API window to "today's session" (since 4 AM ET) instead of last 15 min.
+- If frontend state is the problem → hook should `useEffect` fetch on mount, not rely on websocket-only delta updates.
+- Add a "Pinned for tomorrow" pill on each carry_forward card so operator can see at a glance which symbols the bot will watch at the open.
+
+**Tests required:**
+- `test_v19_34_5_carry_forward_persists_across_session.py` — write 4 carry_forwards to `sentcom_thoughts`, hard-refresh equivalent (call API fresh), assert all 4 returned.
+- `test_v19_34_5_scanner_live_api_includes_carry_forwards.py` — curl the live-alerts endpoint, assert kind=carry_forward_watch entries are present.
+
 ### 🟡 P1 (operator-facing improvements, carried forward)
 - Frontend L1 tick rendering with RAF-coalescing on `/ws/quote-ticks` (deferred from v19.33).
 - `.bat` health screen probes pusher actually (carry-over).
