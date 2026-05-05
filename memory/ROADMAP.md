@@ -50,6 +50,7 @@ Open priorities, deferred ideas, and backlog. Move items to
 1. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred from v19.34.8/9; forensic-only. Needs operator's diagnostic script output for the 13:35:36 trade.
 2. **Extend `audit_ib_fill_tape.py`** to flag unmatched `Sell Short` / `Buy to Cover` IB transactions — needs sample TWS tape with these exact rows to safely tune the regex.
 3. **Wire bracket-lifecycle event persistence into the boot zombie sweeper** — v19.34.11 only persists events from `reissue_bracket_for_trade`. The boot-time `eod_validate_overnight_orders` dry-run sweep should also stamp events so operator history shows "boot detected N orphans, sweep dry-run only".
+4. **Rejection Heatmap per-cell hour-of-day sparkline** (proposed 2026-05-06 after v19.34.12). Add a tiny 24-bar histogram of rejections by hour inside each `(symbol, setup_type)` cell so operator can spot time-of-day clustering ("ORB-on-XLU rejections cluster 14:30-15:00 ET") without leaving the heatmap. Implementation: extend `GET /api/trading-bot/rejection-events` heatmap aggregation to include `by_hour: int[24]` per row (single extra Mongo aggregation pipeline grouping `created_at.hour`); render in `<RejectionHeatmap />` as inline SVG sparklines beneath the count number. Same TTL data — no new collection.
 
 ### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
 
