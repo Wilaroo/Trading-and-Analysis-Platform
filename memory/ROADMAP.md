@@ -33,14 +33,18 @@ Open priorities, deferred ideas, and backlog. Move items to
 2. **`trade_execution.execute_trade`** — gate at top + mark on rejection + mark on guardrail veto. Three integration points cover broker-side AND bot-side rejection paths.
 3. **Operator endpoints** — `GET /api/trading-bot/rejection-cooldowns`, `POST /api/trading-bot/clear-rejection-cooldown`.
 
-### 🟡 Remaining v19.34.8 / v19.34.9 items
+### ✅ v19.34.10 shipped (state-integrity drift watchdog — 2026-05-06)
 
-1. **Boot-time `starting_capital` auto-refresh** — currently operator manually hits `POST /api/trading-bot/refresh-account`. Move into `TradingBotService.start()` so the bot never silently drifts onto the $100k mock value again. Ship as v19.34.9.
-2. **Daily Rejection Heatmap report** — the v19.34.8 cooldown registry now records `(symbol, setup_type, reason, rejection_count, started_at, expires_at)` for every structural rejection. Persist these to a Mongo `rejection_events` collection (TTL 7d) and add a V5 dashboard "Rejection Heatmap" tab showing which (symbol, setup) combos get structurally rejected most often, broken down by reason. Surfaces blind-spot patterns like "this strategy never works in low-volatility regimes" or "this symbol always trips max_position_pct". Pairs with the Bracket History tab from v19.34.7 backlog #1.
-3. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred until v19.34.8 + refresh-account stabilize the pattern.
-4. **V5 dashboard "Bracket History" tab** — see v19.34.7 backlog #1.
-5. **Scale-IN code path** — see v19.34.7 backlog #2.
-6. **Bracket TIF promotion auto-detect** — see v19.34.7 backlog #3.
+1. **`services/state_integrity_service.py`** — 60s background loop comparing in-memory `risk_params` to persisted `bot_state.risk_params`. Field-policy auto-resolve: capital/limit fields → Mongo wins; `setup_min_rr` → memory wins. Forensic events to `state_integrity_events` (TTL 7d). CRITICAL stream event on drift. 21 new tests.
+2. **`GET /api/trading-bot/integrity-status`** + **`POST /api/trading-bot/force-resync`** — operator inspection + on-demand check (with `dry_run` mode).
+3. **Wired into `TradingBotService.start()` + `stop()`** — survives backend restart, 30s grace period, cancelled cleanly on shutdown.
+4. **Default ON**: `STATE_INTEGRITY_CHECK_ENABLED=true`, interval 60s, auto-resolve true. Operator can flip to detect-only via env.
+
+### 🟡 Remaining v19.34.10 / next pickup
+
+1. **V5 Frontend — Bracket History tab** (v19.34.7 backlog item). Per operator sign-off 2026-05-06, lives as expandable inner panel inside each row of `OpenPositionsV5.jsx`. Backend: add `bracket_lifecycle_events` Mongo writer in `bracket_reissue_service.py` + new `GET /api/trading-bot/bracket-history?trade_id=X`. Frontend: new `<BracketHistoryTab />` component rendering full lifecycle (original bracket → scale-out trim → re-issue → exit) with `reason` chips per event.
+2. **V5 Frontend — Rejection Heatmap** (v19.34.8 backlog item). Per operator sign-off 2026-05-06, lives as a new sub-tab in `PipelineHUDV5.jsx`. Backend: persist `rejection_cooldown_service` events to a new `rejection_events` Mongo collection (TTL 7d) + new `GET /api/trading-bot/rejection-events?days=N`. Frontend: (Symbol × Setup) grid colored by rejection_count, tooltips break down by reason.
+3. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred from v19.34.8/9; forensic-only.
 
 ### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
 

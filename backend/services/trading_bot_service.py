@@ -2442,6 +2442,19 @@ class TradingBotService:
             except Exception as e:
                 logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
 
+        # ─── v19.34.10 (2026-05-06) — State integrity watchdog ──────
+        # Catches drift between in-memory `risk_params` and persisted
+        # `bot_state.risk_params` in MongoDB (the v19.34.9 root cause
+        # class). Per-field policy: capital/limit fields → Mongo wins;
+        # setup_min_rr → memory wins. CRITICAL stream event on drift.
+        # Default ON; flip via STATE_INTEGRITY_CHECK_ENABLED=false.
+        try:
+            from services.state_integrity_service import get_state_integrity_service
+            self._integrity_service = get_state_integrity_service()
+            await self._integrity_service.start(self)
+        except Exception as e:
+            logger.warning(f"[v19.34.10 INTEGRITY] schedule failed (non-fatal): {e}")
+
         # Persist state
         await self._save_state()
     
@@ -2487,6 +2500,13 @@ class TradingBotService:
                     pass
         if isinstance(midbar_subs, dict):
             midbar_subs.clear()
+        # v19.34.10 — stop integrity watchdog cleanly.
+        integ = getattr(self, "_integrity_service", None)
+        if integ is not None:
+            try:
+                await integ.stop()
+            except Exception:
+                pass
         logger.info("Trading bot stopped")
         
         # Persist state

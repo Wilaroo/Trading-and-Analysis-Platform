@@ -816,6 +816,66 @@ async def clear_rejection_cooldown(payload: Optional[Dict[str, Any]] = None):
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.10 — State integrity (drift watchdog) endpoints ───────────
+@router.get("/integrity-status")
+async def get_integrity_status():
+    """Return the current drift-watchdog snapshot.
+
+    Surfaces whether the in-memory `risk_params` matches the persisted
+    `bot_state.risk_params` in MongoDB, plus a short history of the
+    most-recent check (drift count, fields involved, resolution policy).
+
+    Built after the v19.34.9 catastrophic skew where in-memory said
+    $236k while Mongo still said $100k, causing 135+ ghost rejection
+    brackets on a stale daily-loss cap. v19.34.10 makes that class of
+    bug auto-detectable and (by default) auto-resolved.
+    """
+    try:
+        from services.state_integrity_service import get_state_integrity_service
+        svc = get_state_integrity_service()
+        return {"success": True, **svc.get_status()}
+    except Exception as e:
+        logger.error(f"integrity-status error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/force-resync")
+async def force_state_resync(payload: Optional[Dict[str, Any]] = None):
+    """Operator-driven on-demand integrity check.
+
+    Body (all optional):
+      {
+        "auto_resolve": true,    // override env STATE_INTEGRITY_AUTO_RESOLVE
+        "dry_run":      false    // alias of auto_resolve=false
+      }
+
+    Returns the same shape as `integrity-status`'s `last_check` plus
+    `{resolved: <int>, unresolved: <int>}`.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    payload = payload or {}
+    try:
+        from services.state_integrity_service import get_state_integrity_service
+        svc = get_state_integrity_service()
+        auto_resolve = payload.get("auto_resolve")
+        if payload.get("dry_run") is True:
+            auto_resolve = False
+        result = await svc.run_check_once(_trading_bot, auto_resolve=auto_resolve)
+        result_dict = result.to_dict()
+        resolved = sum(1 for d in result.drifts if d.resolved)
+        unresolved = len(result.drifts) - resolved
+        return {
+            "success": True,
+            "resolved": resolved,
+            "unresolved": unresolved,
+            **result_dict,
+        }
+    except Exception as e:
+        logger.error(f"force-resync error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into

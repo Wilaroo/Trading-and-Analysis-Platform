@@ -2,6 +2,93 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-second commit, v19.34.10) — Auto-sync integrity check (state drift watchdog)
+
+Operator-approved follow-up to v19.34.9. v19.34.9 plugged the one path
+where `refresh-account` updated in-memory but never flushed to Mongo —
+which caused 135+ ghost rejection brackets on a stale daily-loss cap.
+v19.34.10 makes that **class of bug** detectable + auto-correctable
+across every persistence path, present and future.
+
+### What ships
+
+1. **`services/state_integrity_service.py`** — `StateIntegrityService`
+   singleton with a 60s background watchdog loop. On every tick:
+   - Reads `bot_state.risk_params` from Mongo (via `asyncio.to_thread`,
+     no event-loop block).
+   - Field-by-field compares against `_trading_bot.risk_params`.
+   - Resolves drift per the operator-approved policy:
+     - **Mongo wins** for capital + limit fields (`starting_capital`,
+       `max_daily_loss`, `max_daily_loss_pct`, `max_open_positions`,
+       `max_position_pct`, `min_risk_reward`, `max_notional_per_trade`,
+       `max_risk_per_trade`, `reconciled_default_stop_pct`,
+       `reconciled_default_rr`) — Mongo's persisted value snaps memory
+       back. This is the v19.34.9 case.
+     - **Memory wins** for `setup_min_rr` dict — operator hot-tunes
+       these via `PUT /api/trading-bot/risk-params`; Mongo lag here
+       is benign and gets flushed via `await bot._save_state()`.
+   - Float comparison uses 0.01 epsilon to avoid spurious drift from
+     JSON / Mongo round-trip jitter.
+   - On drift: persists forensic record to `state_integrity_events`
+     Mongo collection (TTL 7d) + emits CRITICAL `state_drift_detected_v19_34_10`
+     Unified Stream event so operator sees it immediately.
+
+2. **Wired into bot lifecycle**:
+   - `TradingBotService.start()` schedules the watchdog after the
+     boot-zombie sweeper.
+   - `TradingBotService.stop()` cancels the loop cleanly.
+   - 30s grace period after start so initial state save happens
+     before the first check.
+
+3. **Operator endpoints**:
+   - `GET /api/trading-bot/integrity-status` — current snapshot
+     (`running`, `enabled`, `auto_resolve_enabled`, `interval_s`,
+     `cumulative_drift_count`, `cumulative_resolved_count`,
+     `last_check`, full `field_policy` map).
+   - `POST /api/trading-bot/force-resync` — on-demand check; body
+     `{auto_resolve?: bool, dry_run?: bool}` (dry_run is alias for
+     `auto_resolve=false`).
+
+4. **Feature flags** (defaults are operator-approved):
+   - `STATE_INTEGRITY_CHECK_ENABLED=true` (default ON)
+   - `STATE_INTEGRITY_CHECK_INTERVAL_S=60` (5s safety floor)
+   - `STATE_INTEGRITY_AUTO_RESOLVE=true` (flip to `false` for
+     detect-only mode where drift is logged but not corrected)
+
+### Why this matters
+
+A future patch in any of the dozens of paths that touch `risk_params`
+(scanner refresh, manual /risk-params PUT, EOD reset, mode change)
+could silently re-introduce the v19.34.9 skew. v19.34.10 means:
+- Drift is **detected** within 60s.
+- Capital/limit drifts (the dangerous ones) are **auto-resolved**.
+- Operator gets a CRITICAL stream event so they know it happened.
+- `state_integrity_events` collection retains a forensic trail.
+
+### Verification
+
+- 21/21 new pytests in `tests/test_state_integrity_v19_34_10.py`
+  covering the policy matrix, auto-resolve toggle, skip / fail-soft,
+  feature flag, forensic persistence, status snapshot, and both
+  endpoints (dry-run + full-run).
+- Live curl of `GET /api/trading-bot/integrity-status` on container
+  backend: `running:true, enabled:true, auto_resolve_enabled:true,
+  interval_s:60` — watchdog confirmed scheduled.
+- Live curl of `POST /api/trading-bot/force-resync {dry_run:true}`:
+  `success:true, healthy:true, drift_count:0`.
+- 46/46 v19.34.8 + v19.34.9 regression tests still green.
+- Cumulative `pytest -k v19_34` count: **252 passing** (was 231)
+  excluding pre-existing unrelated failure in
+  `test_v19_34_2_legend_freshness_resub.py`.
+
+### Files
+
+- New: `backend/services/state_integrity_service.py` (430 LOC)
+- New: `backend/tests/test_state_integrity_v19_34_10.py` (21 tests)
+- Edited: `backend/services/trading_bot_service.py` (start + stop hooks)
+- Edited: `backend/routers/trading_bot.py` (2 new endpoints)
+
+
 ## 2026-05-05 PM (ninety-first commit, v19.34.9) — Refresh-account persistence fix (operator-blocked → unblocked)
 
 Operator hit `/api/trading-bot/refresh-account` on Spark and got the textbook write-but-don't-stick bug:
