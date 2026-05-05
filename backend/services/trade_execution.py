@@ -319,6 +319,46 @@ class TradeExecution:
                 )
 
             print("   📤 [_execute_trade] Calling trade_executor.place_bracket_order...")
+
+            # v19.34.6 (2026-05-05) — Pre-execution Mongo-first sanity
+            # gate. Operator-driven: stamp `bot_trades` with status=PENDING
+            # + `pre_submit_at` BEFORE we hand the order to IB. Eliminates
+            # the "IB fill but no Mongo row" class of bug — if the bot
+            # crashes between submit and fill confirmation, the row is
+            # already on disk and the orphan-recovery loop can adopt it.
+            # Post-fill `_save_trade` calls below upsert by trade.id, so
+            # this row is overwritten with the final OPEN/REJECTED state.
+            try:
+                from services.trading_bot_service import TradeStatus as _TS
+                trade.pre_submit_at = datetime.now(timezone.utc).isoformat()
+                # Only flip status if we haven't already flipped it (e.g.
+                # the strategy-phase / guardrail / dedup branches above
+                # set PAPER / VETOED and returned). Real broker-bound
+                # trades are still in their initial PENDING state.
+                if trade.status not in (_TS.PAPER, _TS.SIMULATED, _TS.VETOED, _TS.REJECTED):
+                    trade.status = _TS.PENDING
+                trade.notes = (trade.notes or "") + " [PRE-SUBMIT-v19.34.6]"
+                await bot._save_trade(trade)
+                logger.info(
+                    "[v19.34.6 PRE-SUBMIT] %s %s %dsh @ $%.2f — Mongo row "
+                    "written before broker call (trade_id=%s)",
+                    trade.symbol,
+                    trade.direction.value if hasattr(trade.direction, "value") else trade.direction,
+                    int(trade.shares or 0),
+                    float(trade.entry_price or 0),
+                    trade.id,
+                )
+            except Exception as _pre_save_err:
+                # NEVER fail-closed on the pre-submit save — better to
+                # risk a missing audit row than block a real entry. Log
+                # loudly so the operator sees the gap.
+                logger.warning(
+                    "[v19.34.6 PRE-SUBMIT] save failed for %s (%s): %s — "
+                    "proceeding to broker anyway",
+                    getattr(trade, "symbol", "?"),
+                    type(_pre_save_err).__name__, _pre_save_err,
+                )
+
             bracket_result = await bot._trade_executor.place_bracket_order(trade)
             use_legacy = (
                 not bracket_result.get('success') and

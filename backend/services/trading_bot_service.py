@@ -735,6 +735,15 @@ class BotTrade:
     #   "default_pct"  — fell back to RiskParameters.reconciled_default_*.
     # Lets the UI show which logic was used.
     synthetic_source: Optional[str] = None
+    # 2026-05-05 v19.34.6 — Pre-execution Mongo-first sanity gate.
+    # ISO timestamp stamped IMMEDIATELY before submitting the trade to
+    # the broker. The trade is upserted to `bot_trades` with
+    # status=PENDING + this field BEFORE any broker call. After fill,
+    # post-fill `_save_trade` overwrites with status=OPEN. If the bot
+    # crashes between the pre-submit write and the fill confirmation,
+    # the orphan-recovery loop sees a stuck PENDING row + uses this
+    # timestamp to detect a crashed in-flight order.
+    pre_submit_at: Optional[str] = None
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -766,6 +775,8 @@ class BotTrade:
         d['prior_verdicts'] = self.prior_verdicts
         d['prior_verdict_conflict'] = self.prior_verdict_conflict
         d['synthetic_source'] = self.synthetic_source
+        # v19.34.6 — Pre-submit Mongo sanity timestamp.
+        d['pre_submit_at'] = self.pre_submit_at
         return d
 
 

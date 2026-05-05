@@ -2046,7 +2046,16 @@ class EnhancedBackgroundScanner:
         if self._running:
             logger.warning("Enhanced scanner already running")
             return
-        
+
+        # 2026-05-05 v19.34.6 — Re-hydrate carry-forward gameplan alerts
+        # from Mongo BEFORE the loop spins up so the morning operator
+        # workflow has yesterday's after-hours plan in `_live_alerts`
+        # immediately. No-op on cold DB / no carry-forwards.
+        try:
+            await self._hydrate_carry_forward_alerts_from_mongo()
+        except Exception as _hydrate_err:
+            logger.debug(f"v19.34.6 carry-forward hydrate skipped: {_hydrate_err}")
+
         self._running = True
         self._scan_task = asyncio.create_task(self._scan_loop())
         logger.info(f"🚀 Enhanced scanner started - {len(self._watchlist)} symbols, {len(self._enabled_setups)} strategies")
@@ -5744,6 +5753,22 @@ class EnhancedBackgroundScanner:
                         tqs_grade=entry.get("tqs_grade") or "",
                     )
                     await self._process_new_alert(new_alert)
+                    # 2026-05-05 v19.34.6 — persist carry-forwards to
+                    # Mongo so they survive backend restart. Operator
+                    # filed bug 2026-05-04 EVE: SCANNER · LIVE panel
+                    # showed 4 rich carry_forward cards (SBUX/IAU/MA/SYK)
+                    # during the day; on hard refresh outside RTH they
+                    # disappeared because `_live_alerts` is in-memory
+                    # only. Now we mirror them to `carry_forward_alerts`
+                    # with TTL = tomorrow's close so the next morning's
+                    # gameplan workflow stays intact.
+                    try:
+                        self._persist_carry_forward_alert(new_alert)
+                    except Exception as _persist_err:
+                        logger.debug(
+                            f"v19.34.6 carry-forward persist failed for "
+                            f"{new_alert.symbol}: {_persist_err}"
+                        )
                     promoted += 1
                 except Exception as exc:
                     logger.debug(f"carry-forward: promote {entry['symbol']} failed: {exc}")
@@ -5767,6 +5792,107 @@ class EnhancedBackgroundScanner:
                 )
         except Exception as e:
             logger.error(f"Carry-forward scan error: {e}")
+
+    # 2026-05-05 v19.34.6 — Carry-forward gameplan persistence helpers.
+    # Operator-filed bug from 2026-05-04 EVE: gameplan cards from the
+    # after-hours `_rank_carry_forward_setups_for_tomorrow` pass were
+    # lost on hard refresh because `_live_alerts` is in-memory only.
+    # Persist on creation + hydrate on `start()` so the morning prep
+    # workflow survives backend restarts.
+    def _persist_carry_forward_alert(self, alert: 'LiveAlert') -> None:
+        """Mirror a carry-forward LiveAlert into `carry_forward_alerts`
+        Mongo collection. Idempotent on `id`. Skips silently when no DB
+        is wired (test runs / pre-init)."""
+        if self.db is None:
+            return
+        try:
+            doc = alert.to_dict()  # asdict + priority enum stringified
+            doc["last_persisted_at"] = datetime.now(timezone.utc).isoformat()
+            self.db.carry_forward_alerts.update_one(
+                {"id": alert.id},
+                {"$set": doc},
+                upsert=True,
+            )
+            # Ensure the TTL-style cleanup index exists. Cheap: noop
+            # after first call thanks to Mongo's existing-index check.
+            try:
+                self.db.carry_forward_alerts.create_index("expires_at")
+                self.db.carry_forward_alerts.create_index("symbol")
+                self.db.carry_forward_alerts.create_index("setup_type")
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug(f"Failed to persist carry-forward {alert.id}: {e}")
+
+    async def _hydrate_carry_forward_alerts_from_mongo(self) -> int:
+        """Re-load non-expired carry-forward alerts from Mongo into the
+        in-memory `_live_alerts` dict at scanner startup. Returns the
+        number of alerts hydrated. Operator-driven: ensures the morning
+        gameplan workflow survives backend restarts.
+        """
+        if self.db is None:
+            return 0
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            # Only hydrate alerts that haven't expired yet. Carry-forwards
+            # expire at tomorrow's open (`_next_market_open_iso`), so the
+            # morning prep window catches them; intraday onward they
+            # naturally roll off via `_cleanup_expired_alerts`.
+            docs = list(
+                self.db.carry_forward_alerts.find(
+                    {
+                        "$or": [
+                            {"expires_at": {"$gte": now_iso}},
+                            {"expires_at": None},
+                        ],
+                        "status": {"$ne": "dismissed"},
+                    },
+                    {"_id": 0},
+                )
+            )
+            hydrated = 0
+            for doc in docs:
+                try:
+                    alert = self._inflate_live_alert_from_mongo(doc)
+                    if alert and alert.id not in self._live_alerts:
+                        self._live_alerts[alert.id] = alert
+                        hydrated += 1
+                except Exception as e:
+                    logger.debug(
+                        f"Skipped hydrating carry-forward "
+                        f"{doc.get('id')}: {e}"
+                    )
+            if hydrated:
+                logger.info(
+                    f"📅 v19.34.6 carry-forward hydrate: restored "
+                    f"{hydrated} non-expired gameplan alerts from Mongo "
+                    f"(survived backend restart)"
+                )
+            return hydrated
+        except Exception as e:
+            logger.warning(f"Carry-forward hydrate failed (non-fatal): {e}")
+            return 0
+
+    def _inflate_live_alert_from_mongo(self, doc: Dict) -> Optional['LiveAlert']:
+        """Reconstruct a LiveAlert dataclass from a Mongo doc, mapping
+        the priority string back to the enum. Returns None if required
+        fields are missing."""
+        try:
+            priority_raw = doc.get("priority", "medium")
+            try:
+                priority = AlertPriority(priority_raw) if isinstance(priority_raw, str) else priority_raw
+            except Exception:
+                priority = AlertPriority.MEDIUM
+
+            # Build kwargs from doc, dropping anything LiveAlert can't accept.
+            import inspect as _inspect
+            valid_keys = set(_inspect.signature(LiveAlert).parameters.keys())
+            kwargs = {k: v for k, v in doc.items() if k in valid_keys}
+            kwargs["priority"] = priority
+            return LiveAlert(**kwargs)
+        except Exception as e:
+            logger.debug(f"_inflate_live_alert_from_mongo failed: {e}")
+            return None
 
     def _next_market_open_iso(self) -> datetime:
         """Return tomorrow's 09:30 ET as a tz-aware UTC datetime.

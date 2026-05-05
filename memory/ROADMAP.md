@@ -8,6 +8,8 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 **v19.34.5 SHIPPED 2026-05-05 AM** — see CHANGELOG eighty-seventh commit. The critical path (bracket TIF classification) is in. **All NEW orders from today onward get correct DAY TIF on intraday, GTC on swing/position.** Old GTC zombies on disk were manually cancelled by operator via TC2000 last night.
 
+**v19.34.6 SHIPPED 2026-05-05 PM** — see CHANGELOG eighty-eighth commit. Six follow-on safety/UX hardening items. 62 new tests, all passing.
+
 ### ✅ v19.34.5 shipped (premarket emergency)
 
 - `services/bracket_tif.py` — single-source-of-truth helper.
@@ -15,40 +17,60 @@ Open priorities, deferred ideas, and backlog. Move items to
 - `tests/test_bracket_tif_v19_34_5.py` — 23 tests, all passing.
 - 96/96 cumulative v19.34.x tests passing. Zero regressions.
 
-### 🟡 Remaining v19.34.6 items (ship over next few sessions, not blocking trading today)
+### ✅ v19.34.6 shipped (operator-driven safety/UX hardening)
 
-1. **Selective boot zombie sweeper** — on startup, enumerate IB open orders. For each: cancel if no matching `bot_trades` parent OR parent is `status=closed`; KEEP if parent is `status=open` AND swing/position style. Lower priority now since operator did a one-time manual flush last night.
-2. **End-of-RTH validator** — sweep all `outside_rth=true` open IB orders, confirm each has an active swing/position `bot_trades` row, else cancel with CRITICAL stream warning.
-3. **Bracket re-issue on classification promotion** — if operator/bot promotes intraday→swing, set `bracket_tif_dirty=true`, cancel DAY legs, re-issue as GTC on next manage-loop tick.
-4. **Pre-execution sanity gate** — write `bot_trades` row with `status='pending'` BEFORE IB submission. Eliminates "IB fill but no Mongo row" class of bug.
-5. **`GET /api/ib/orders` endpoint** — return IB's actual open-order list (404'd 2026-05-04 EVE; needed for boot sweep + audit cross-check + UI debug panel).
-6. **Extend `audit_ib_fill_tape.py`** — flag any `Sell Short`/`Buy to Cover` IB tx without matching `order_queue` entry.
+1. **Open Positions watchlist filter** — suppresses `carry_forward_watch` / `day_2_continuation` / `approaching_*` rows from V5 panel unless IB confirms. (Item b from session plan.)
+2. **Pre-execution Mongo-first sanity gate** — `bot_trades` row written with `status=PENDING` BEFORE broker call. (Item d.)
+3. **`GET /api/ib/orders`** — Mongo `order_queue`-backed visibility endpoint, replaces dead direct-IB `/orders/open`. (Item e.)
+4. **Carry-forward gameplan persistence** — `_persist_carry_forward_alert` + hydrate on `start()` so morning prep workflow survives backend restart. (Item c.)
+5. **`GET /api/trading-bot/effective-limits`** — single canonical AND across all guard layers. (Item h.)
+6. **`POST /api/trading-bot/eod-validate-overnight-orders`** — runtime sweep of GTC/`outside_rth=true` orphans + wrong-TIF rows; two-step confirm. (Item g.)
+7. **`POST /api/trading-bot/cancel-orders-for-symbol`** — EOD pre-cancel guard for one-symbol flatten race. (Item f.)
+
+### 🟡 Remaining v19.34.6 items
+
+1. **Selective boot zombie sweeper** — on startup, enumerate IB open orders. For each: cancel if no matching `bot_trades` parent OR parent is `status=closed`; KEEP if parent is `status=open` AND swing/position style. Lower priority now since operator did a one-time manual flush + (g) endpoint provides on-demand sweep.
+2. **Bracket re-issue on classification promotion** — if operator/bot promotes intraday→swing, set `bracket_tif_dirty=true`, cancel DAY legs, re-issue as GTC on next manage-loop tick.
+3. **Extend `audit_ib_fill_tape.py`** — flag any `Sell Short`/`Buy to Cover` IB tx without matching `order_queue` entry.
+4. **Wire `cancel-orders-for-symbol` into the EOD close path automatically** — currently it's an operator-callable endpoint. The EOD market-close runner should invoke it on each symbol it's about to flatten, before submitting the close order, to neutralize OCA legs proactively.
+5. **Pin watchlist-only setup list as single-source-of-truth** — currently duplicated between `services.sentcom_service._WATCHLIST_ONLY_SETUPS` and `TradingBotService._watchlist_only_setups`. Move to a shared module (`services/setup_classification.py`) so a future setup type addition can't drift.
 
 ### Operator actions completed
 
 - ✅ Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile that had accumulated). 2026-05-04 PM.
 - ✅ Set market BUY 17 STX order for 2026-05-05 open to cover the unwanted short.
 - ✅ v19.34.5 shipped 2026-05-05 AM premarket — bracket TIF classification active for all new orders.
+- ✅ v19.34.6 shipped 2026-05-05 PM — six safety/UX hardening items (62 new tests).
 
-### Verification step — first bracket of the day
+### Verification step — first bracket of the day (still pending operator action)
 
 ```bash
+cd ~/Trading-and-Analysis-Platform/backend && \
+source ~/Trading-and-Analysis-Platform/.venv/bin/activate && \
+set -a && source .env && set +a && \
 python -c "
-import os, json
+import os
+from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 c = MongoClient(os.environ['MONGO_URL'])
 db = c[os.environ['DB_NAME']]
-r = db.order_queue.find_one(
-    {'queued_at': {'\$gte': '2026-05-05'}, 'order_type': 'bracket'},
-    sort=[('queued_at', -1)]
-)
-if r:
-    print(f\"  stop:   TIF={r['stop']['time_in_force']} outside_rth={r['stop'].get('outside_rth')}\")
-    print(f\"  target: TIF={r['target']['time_in_force']} outside_rth={r['target'].get('outside_rth')}\")
+today_iso = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+q = {'order_type': 'bracket',
+     '\$or': [{'queued_at': {'\$gte': today_iso}},
+              {'queued_at': {'\$gte': datetime.now(timezone.utc) - timedelta(hours=12)}}]}
+rows = list(db.order_queue.find(q).sort('queued_at', -1).limit(20))
+print(f'Found {len(rows)} bracket orders today')
+for r in rows:
+    sym = r.get('symbol','?'); qa = r.get('queued_at','?')
+    p, s, t = r.get('parent') or {}, r.get('stop') or {}, r.get('target') or {}
+    print(f'{sym} {qa}')
+    print(f'  parent: TIF={p.get(\"time_in_force\")} outside_rth={p.get(\"outside_rth\")}')
+    print(f'  stop:   TIF={s.get(\"time_in_force\")} outside_rth={s.get(\"outside_rth\")}')
+    print(f'  target: TIF={t.get(\"time_in_force\")} outside_rth={t.get(\"outside_rth\")}')
 "
 ```
 
-Expected for an intraday trade: stop+target both `TIF=DAY`, `outside_rth=False`. **If you see GTC or outside_rth=True on an intraday row → fix didn't deploy correctly, restart backend.**
+Expected for an intraday trade: `stop.TIF=DAY`, `target.TIF=DAY`, `outside_rth=False`. **If you see GTC or outside_rth=True on an intraday row → fix didn't deploy correctly, restart backend.**
 
 
 ## 🔴 Now / Near-term (other carry-over)

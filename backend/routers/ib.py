@@ -1648,6 +1648,115 @@ def get_order_queue_status():
         return {"success": False, "error": str(e)}
 
 
+# 2026-05-05 v19.34.6 — IB orders visibility endpoint.
+# The legacy `/orders/open` endpoint requires a direct IB connection
+# which DGX Spark doesn't have (pusher-only architecture). This new
+# `/orders` endpoint reads from the canonical Mongo `order_queue`
+# collection — the source of truth for everything Spark told the
+# pusher to do. Combined with `bot_trades` cross-checks downstream,
+# this gives the operator full visibility into every order the bot
+# has touched: pending, claimed, executing, filled, rejected,
+# cancelled, expired.
+@router.get("/orders")
+def get_ib_orders(
+    status: Optional[str] = None,
+    symbol: Optional[str] = None,
+    order_type: Optional[str] = None,
+    since: Optional[str] = None,
+    open_only: bool = False,
+    limit: int = 100,
+):
+    """List recent orders from the Mongo order_queue (Spark→pusher
+    canonical record). Returns the orders the bot has submitted plus
+    rich state — filterable by status / symbol / order_type / since
+    timestamp. Used by the V5 UI debug panel + EOD audit cross-check.
+
+    Query params:
+      status      — single status (`pending|claimed|executing|filled|rejected|cancelled|expired|partial|timeout`)
+                    or comma-separated list (`pending,claimed,executing`).
+      symbol      — filter to a single ticker (case-insensitive).
+      order_type  — `bracket`, `MKT`, `LMT`, `STP`, etc.
+      since       — ISO datetime; only return orders queued at-or-after this.
+      open_only   — shorthand for status in (pending,claimed,executing).
+      limit       — max rows (default 100, capped at 500).
+
+    Response:
+      {
+        "success": true,
+        "count": <int>,
+        "orders": [...],
+        "summary": { pending, claimed, executing, filled, rejected, cancelled, ... },
+        "source": "mongo_order_queue",
+        "filters_applied": {...},
+      }
+    """
+    try:
+        service = get_order_queue_service()
+        if not service._initialized:
+            service.initialize()
+        limit = max(1, min(int(limit), 500))
+
+        # Build the Mongo query
+        query: Dict[str, Any] = {}
+
+        # Status filter — supports csv list or `open_only` shorthand
+        if open_only:
+            query["status"] = {"$in": ["pending", "claimed", "executing"]}
+        elif status:
+            statuses = [s.strip().lower() for s in str(status).split(",") if s.strip()]
+            if len(statuses) == 1:
+                query["status"] = statuses[0]
+            elif statuses:
+                query["status"] = {"$in": statuses}
+
+        if symbol:
+            query["symbol"] = str(symbol).upper()
+
+        if order_type:
+            query["order_type"] = str(order_type)
+
+        if since:
+            query["queued_at"] = {"$gte": str(since)}
+
+        rows = list(
+            service._collection.find(query, {"_id": 0})
+            .sort("queued_at", -1)
+            .limit(limit)
+        )
+
+        # Compute a small per-status summary across the matched rows
+        # so the UI can render chip counts at-a-glance.
+        summary: Dict[str, int] = {}
+        for r in rows:
+            st = (r.get("status") or "unknown").lower()
+            summary[st] = summary.get(st, 0) + 1
+
+        return {
+            "success": True,
+            "count": len(rows),
+            "orders": rows,
+            "summary": summary,
+            "source": "mongo_order_queue",
+            "filters_applied": {
+                "status": status,
+                "symbol": symbol,
+                "order_type": order_type,
+                "since": since,
+                "open_only": open_only,
+                "limit": limit,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error in /api/ib/orders: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "count": 0,
+            "orders": [],
+            "summary": {},
+        }
+
+
 @router.get("/orders/latency-stats")
 def get_order_latency_stats(limit: int = 50, order_type: str = None):
     """Latency breakdown for recent orders.

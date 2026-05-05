@@ -23,6 +23,37 @@ from pymongo import MongoClient, DESCENDING
 
 logger = logging.getLogger(__name__)
 
+# 2026-05-05 v19.34.6 — watchlist-only setups that must NEVER appear on
+# the V5 Open Positions panel unless IB confirms a real position with
+# matching direction. Mirrors `TradingBotService._watchlist_only_setups`
+# (kept in sync manually — both lists must be updated together).
+# Operator filed the bug 2026-05-04: a MELI "DAY 2 short" carry-forward
+# gameplan card from yesterday's after-hours scanner was leaking into
+# the Open Positions panel even though IB had no MELI exposure. These
+# rows belong on Scanner / Gameplan surfaces, not Open Positions.
+_WATCHLIST_ONLY_SETUPS = frozenset({
+    # EOD carry-forward gameplan tags (next-day watchlist names)
+    "carry_forward_watch",
+    "day_2_continuation",
+    "day_2_failure",
+    "gap_fill_open",
+    # Pre-trigger proximity warnings (scanner early-warning system)
+    "approaching_breakout",
+    "approaching_hod",
+    "approaching_orb",
+    "approaching_range_break",
+})
+
+
+def _is_watchlist_only_setup(setup_type: Optional[str]) -> bool:
+    """True iff the setup is watchlist-only / pre-trigger and must be
+    suppressed from Open Positions when IB doesn't confirm the position.
+    """
+    if not setup_type:
+        return False
+    return str(setup_type).strip().lower() in _WATCHLIST_ONLY_SETUPS
+
+
 # MongoDB connection for chat persistence
 _db = None
 
@@ -2084,6 +2115,34 @@ class SentComService:
                 if isinstance(open_trades, list):
                     for trade in open_trades:
                         symbol = trade.get("symbol")
+                        # 2026-05-05 v19.34.6 — suppress watchlist-only
+                        # gameplan rows from Open Positions when IB does
+                        # NOT confirm a matching position. These are
+                        # `carry_forward_watch` / `day_2_continuation` /
+                        # `approaching_*` rows that belong on Scanner
+                        # surfaces, not Open Positions. Operator-filed
+                        # bug: MELI "DAY 2 short" gameplan from yesterday
+                        # after-hours scanner leaked into the panel
+                        # despite zero IB exposure. We keep the row only
+                        # when IB confirms — that means the bot DID
+                        # actually fire it and it's a real position.
+                        if _is_watchlist_only_setup(trade.get("setup_type")):
+                            _sym_check = (symbol or "").upper()
+                            _dir_check = (trade.get("direction") or "long").lower()
+                            _ib_check = ib_pos_by_symbol.get(_sym_check)
+                            _has_ib_confirmation = (
+                                _ib_check is not None
+                                and _ib_check.get("direction") == _dir_check
+                                and int(_ib_check.get("abs_qty", 0)) > 0
+                            )
+                            if not _has_ib_confirmation:
+                                logger.debug(
+                                    f"v19.34.6 suppressing watchlist-only "
+                                    f"gameplan row from Open Positions: "
+                                    f"{symbol} setup={trade.get('setup_type')} "
+                                    f"(no IB confirmation)"
+                                )
+                                continue
                         if symbol:
                             seen_symbols.add(symbol)
                         

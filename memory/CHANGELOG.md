@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-05 PM (eighty-eighth commit, v19.34.6) — Operator-driven safety/UX hardening (7 fixes, 51 new tests)
+
+After v19.34.5 shipped premarket and the operator manually flattened legacy orphans (locking in +$940), the next session shipped seven follow-on items the operator queued during the 2026-05-04 audit. All are pure backend additions — no UI changes — to keep the live RTH session uninterrupted.
+
+### Fixes shipped (in order)
+
+1. **Open Positions watchlist filter** — `services/sentcom_service.py` + `tests/test_open_positions_watchlist_filter_v19_34_6.py` (8 tests). Suppresses `carry_forward_watch` / `day_2_continuation` / `approaching_*` rows from V5 Open Positions panel UNLESS IB confirms a real (symbol, direction, qty>0) position. Operator filed bug at 2026-05-04 EVE: a MELI "DAY 2 short" gameplan card from the after-hours `_rank_carry_forward_setups_for_tomorrow` scanner was leaking into the panel despite zero IB exposure.
+
+2. **Pre-execution Mongo-first sanity gate** — `services/trade_execution.py` + `services/trading_bot_service.py` (added `pre_submit_at` field to `BotTrade`) + `tests/test_pre_submit_mongo_first_v19_34_6.py` (6 tests). Right before `place_bracket_order`, the executor now upserts the trade to `bot_trades` with `status=PENDING` and a `pre_submit_at` ISO timestamp. Eliminates the "IB fill but no Mongo row" class of bug — if the bot crashes between submit and fill confirmation, the row is already on disk and orphan-recovery can adopt it. Save failure does NOT block the broker call (fail-open: better a missing audit row than a blocked legit entry).
+
+3. **`GET /api/ib/orders` visibility endpoint** — `routers/ib.py` + `tests/test_ib_orders_endpoint_v19_34_6.py` (16 tests). Reads from canonical Mongo `order_queue` (the source of truth Spark→pusher record). Filterable by `status`, `symbol`, `order_type`, `since`, with shorthand `open_only=true`. Returns rows + summary dict + filters_applied echo. Replaces the dead `/orders/open` endpoint that required a direct IB connection (DGX is pusher-only).
+
+4. **Carry-forward gameplan persistence** — `services/enhanced_scanner.py` (added `_persist_carry_forward_alert`, `_hydrate_carry_forward_alerts_from_mongo`, `_inflate_live_alert_from_mongo`, hooked into `start()`) + `tests/test_carry_forward_persistence_v19_34_6.py` (11 tests). Persists carry-forward alerts to `carry_forward_alerts` Mongo collection on creation; hydrates non-expired non-dismissed alerts back into `_live_alerts` on scanner startup. Operator filed bug 2026-05-04 EVE: 4 rich `carry_forward_watch` cards (SBUX/IAU/MA/SYK) disappeared from SCANNER · LIVE on hard refresh outside RTH because `_live_alerts` was in-memory only.
+
+5. **`/api/trading-bot/effective-limits` endpoint** — `routers/trading_bot.py` + `tests/test_effective_limits_endpoint_v19_34_6.py` (5 tests). Single canonical endpoint returning the most-restrictive AND across all guard layers (Master Safety Guard, bot RiskParameters, PositionSizer, DynamicRisk). Mirrors `/api/safety/effective-risk-caps` so the V5 dashboard's risk card has a co-located endpoint to consume. Fixes the operator confusion at 2026-05-04 (UI showed 25 pos / $5k loss in Morning Prep, `/status` showed 10 pos / $0 loss).
+
+6. **`POST /api/trading-bot/eod-validate-overnight-orders`** — `routers/trading_bot.py` + `_is_overnight_leg` helper + `tests/test_eod_order_safety_v19_34_6.py` (5 tests). Sweeps every active order with a GTC or `outside_rth=True` leg; classifies as `ok_swing_or_position` / `wrong_tif_intraday_parent` / `orphan_no_parent`. Two-step safety: requires BOTH `confirm="CANCEL_ORPHANS"` AND `dry_run=False` to actually cancel. Closes the runtime edge of the GTC-zombie bug that v19.34.5 fixed at *placement* time.
+
+7. **`POST /api/trading-bot/cancel-orders-for-symbol`** — `routers/trading_bot.py` + 6 tests in same file. EOD pre-cancel guard. Targeted cancel of every active order for one symbol BEFORE firing the market-close flatten. Eliminates the race where the EOD market-close hits a position that still has a live OCA bracket. Requires `confirm="CANCEL_FOR_SYMBOL"` token to actually cancel.
+
+### Verification snippet handed to operator (item a)
+
+Live verification of v19.34.5 bracket TIF on this morning's bot fills via direct `order_queue` query — paste-and-go bash that confirms `stop.TIF=DAY` and `target.TIF=DAY` and `outside_rth=False` on all today's intraday bracket orders. **Status: pending operator paste.**
+
+### Tests — net additions
+
+| File | Tests |
+|------|-------|
+| `tests/test_open_positions_watchlist_filter_v19_34_6.py` | 8 |
+| `tests/test_pre_submit_mongo_first_v19_34_6.py` | 6 |
+| `tests/test_ib_orders_endpoint_v19_34_6.py` | 16 |
+| `tests/test_carry_forward_persistence_v19_34_6.py` | 11 |
+| `tests/test_effective_limits_endpoint_v19_34_6.py` | 5 |
+| `tests/test_eod_order_safety_v19_34_6.py` | 16 |
+| **Subtotal v19.34.6 (new)** | **62** |
+
+**106/106 cumulative tests passing across v19.34.4 + v19.34.5 + v19.34.6** — zero regressions in those suites. (Pre-existing `test_async_sync_blockers_v19_30_8.py::test_no_unwrapped_sync_http_in_async_outside_backlog` failure is in `position_reconciler.py:972` + `position_manager.py:698`, neither file touched by this work.)
+
+### Files touched
+
+- **Modified**: `services/sentcom_service.py` (+59 lines), `services/trade_execution.py` (+40), `services/trading_bot_service.py` (+11), `services/enhanced_scanner.py` (+128), `routers/ib.py` (+109), `routers/trading_bot.py` (+333).
+- **Added**: 6 test files (above table).
+
+### Live smoke tests
+
+- `GET /api/ib/orders?limit=5` → `success: true, count: 0` ✅
+- `GET /api/ib/orders?open_only=true&limit=10` → filter applied correctly ✅
+- `GET /api/trading-bot/effective-limits` → `success: true, max_open_positions: 5, $500 daily loss cap` ✅
+- `POST /api/trading-bot/eod-validate-overnight-orders` (empty body) → `dry_run: true, summary: {total_active: 0, ...}` ✅
+- `POST /api/trading-bot/cancel-orders-for-symbol` without confirm → `400 Bad Request` ✅
+
+### Operator next step
+
+Run the verification snippet (item a) on Spark to confirm v19.34.5 stamped `TIF=DAY` on this morning's bot bracket legs. After that, the v19.34.6 endpoints can be wired into the V5 dashboard at the operator's leisure.
+
 ## 2026-05-05 AM (eighty-seventh commit, v19.34.5) — Classification-aware bracket TIF (kills the GTC zombie bug)
 
 **Premarket emergency ship** before 9:30 AM ET market open. Fixes the root-cause bug discovered last night during the 2026-05-04 IB fill-tape audit.

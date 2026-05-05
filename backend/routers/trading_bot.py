@@ -300,6 +300,339 @@ async def get_bot_status():
     return {"success": True, **status}
 
 
+# 2026-05-05 v19.34.6 — Risk Parameters Config Drift fix.
+# Operator filed bug 2026-05-04: the Morning Prep UI reads from Master
+# Safety Guard limits (25 pos, $5k loss) while `/api/trading-bot/status`
+# reads legacy per-trade limits (10 pos, $0 loss). Two surfaces show
+# different numbers — UX confusion about what the bot actually enforces.
+#
+# Fix: a single canonical endpoint that returns the AND (most-restrictive
+# intersection) of every guard layer — Master Safety Guard, bot
+# RiskParameters, PositionSizer, DynamicRisk. Same logic as
+# `/api/safety/effective-risk-caps` but mounted on the trading-bot prefix
+# so the V5 dashboard's risk card has a co-located endpoint to consume.
+@router.get("/effective-limits")
+async def get_effective_limits():
+    """Return the binding (most-restrictive intersection) of every
+    risk-cap source the bot honors.
+
+    Sources (in priority order — strictest wins):
+      1. Master Safety Guard (kill switch) — `services.safety_guardrails`
+      2. Bot RiskParameters (Mongo bot_state.risk_params)
+      3. Position Sizer (`services.position_sizer` defaults)
+      4. Dynamic Risk Engine (`services.dynamic_risk_engine` defaults)
+
+    Response shape mirrors `/api/safety/effective-risk-caps`:
+      {
+        "success": true,
+        "sources": { bot, safety, sizer, dynamic_risk },
+        "effective": { max_open_positions, max_daily_loss_usd,
+                       max_position_pct, max_daily_loss_pct, ... },
+        "conflicts": [<human-readable diagnostics>],
+        "checked_at": "2026-05-05T...",
+      }
+    """
+    try:
+        from services.risk_caps_service import compute_effective_risk_caps
+        db = None
+        try:
+            db = getattr(_trading_bot, "_db", None) if _trading_bot else None
+        except Exception:
+            db = None
+        payload = compute_effective_risk_caps(db)
+        return {"success": True, **payload}
+    except Exception as e:
+        logger.error(f"Error computing effective limits: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "sources": {},
+            "effective": {},
+            "conflicts": [],
+        }
+
+
+# ─── EOD Order Safety (v19.34.6 — 2026-05-05) ──────────────────────────────
+# Operator-filed P1 items: 
+#   (g) End-of-RTH validator — sweep all overnight (GTC / outside_rth=true)
+#       open orders, confirm each has an active swing/position parent in
+#       `bot_trades`; cancel orphans with a CRITICAL warning.
+#   (f) EOD pre-cancel guard — explicitly cancel a symbol's open orders
+#       before firing the market-close flatten so we don't race the OCA.
+#
+# Together these close the GTC-zombie loop that v19.34.5 fixed at
+# *placement* time, by adding *runtime* and *EOD* sweeps.
+
+
+def _is_overnight_leg(order_doc: Dict[str, Any]) -> bool:
+    """Return True if the order has any leg that would survive overnight
+    (TIF=GTC OR outside_rth=True). Checks the parent + stop + target
+    sub-docs for bracket orders, plus the top-level fields for flat
+    orders. Conservative: any GTC anywhere makes the order overnight."""
+    legs = []
+    if isinstance(order_doc.get("parent"), dict):
+        legs.append(order_doc["parent"])
+    if isinstance(order_doc.get("stop"), dict):
+        legs.append(order_doc["stop"])
+    if isinstance(order_doc.get("target"), dict):
+        legs.append(order_doc["target"])
+    # Flat order — top-level TIF
+    if order_doc.get("time_in_force") or "outside_rth" in order_doc:
+        legs.append({
+            "time_in_force": order_doc.get("time_in_force"),
+            "outside_rth":   order_doc.get("outside_rth"),
+        })
+    for leg in legs:
+        tif = (leg.get("time_in_force") or "").upper()
+        if tif == "GTC":
+            return True
+        if leg.get("outside_rth") is True:
+            return True
+    return False
+
+
+@router.post("/eod-validate-overnight-orders")
+async def eod_validate_overnight_orders(payload: Optional[Dict[str, Any]] = None):
+    """Sweep every active order with an overnight (GTC / outside_rth=True)
+    leg and verify a swing/position `bot_trades` parent exists. Orphans
+    (no parent OR intraday parent) are flagged for cancellation. With
+    `confirm="CANCEL_ORPHANS"` they're actively cancelled in the queue.
+
+    Body (all optional):
+      {
+        "confirm":  "CANCEL_ORPHANS" | null  // pass to actually cancel
+        "dry_run":  true | false             // default true
+      }
+
+    Response:
+      {
+        "success": true,
+        "summary": { total_open, overnight_legs, ok, orphans, wrong_tif,
+                     cancelled_count, errors },
+        "rows":    [ { order_id, symbol, status, classification, ... } ],
+        "dry_run": <bool>
+      }
+    """
+    payload = payload or {}
+    confirm = (payload.get("confirm") or "").strip()
+    dry_run = bool(payload.get("dry_run", True))
+    actually_cancel = (confirm == "CANCEL_ORPHANS") and not dry_run
+
+    try:
+        from services.order_queue_service import get_order_queue_service
+        from services.bracket_tif import is_overnight_trade
+        service = get_order_queue_service()
+        if not service._initialized:
+            service.initialize()
+
+        # Pull all currently-active orders (pending / claimed / executing)
+        active = list(service._collection.find(
+            {"status": {"$in": ["pending", "claimed", "executing"]}},
+            {"_id": 0},
+        ))
+
+        # Build a quick lookup of bot_trades by trade_id for parent matching
+        bot_trades_by_id: Dict[str, Dict[str, Any]] = {}
+        if _trading_bot is not None and getattr(_trading_bot, "_db", None) is not None:
+            try:
+                for t in _trading_bot._db.bot_trades.find(
+                    {"status": {"$in": ["open", "pending", "filled"]}},
+                    {"_id": 0, "id": 1, "trade_style": 1, "timeframe": 1,
+                     "symbol": 1, "status": 1, "direction": 1},
+                ):
+                    if t.get("id"):
+                        bot_trades_by_id[t["id"]] = t
+            except Exception as e:
+                logger.debug(f"bot_trades lookup failed (proceeding): {e}")
+
+        rows: List[Dict[str, Any]] = []
+        cancelled_count = 0
+        errors = 0
+
+        for o in active:
+            if not _is_overnight_leg(o):
+                continue  # intraday-only leg — skip silently
+            order_id = o.get("order_id")
+            symbol = o.get("symbol")
+            trade_id = o.get("trade_id")
+            parent = bot_trades_by_id.get(trade_id) if trade_id else None
+            classification = "unknown"
+            should_cancel = False
+            reason = ""
+
+            if not parent:
+                classification = "orphan_no_parent"
+                should_cancel = True
+                reason = "No active bot_trades row for trade_id"
+            elif not is_overnight_trade(parent.get("trade_style"), parent.get("timeframe")):
+                classification = "wrong_tif_intraday_parent"
+                should_cancel = True
+                reason = (
+                    f"Parent trade is intraday ("
+                    f"trade_style={parent.get('trade_style')}, "
+                    f"timeframe={parent.get('timeframe')}) — overnight leg "
+                    f"would zombify after EOD flatten"
+                )
+            else:
+                classification = "ok_swing_or_position"
+
+            row = {
+                "order_id": order_id,
+                "symbol": symbol,
+                "status": o.get("status"),
+                "order_type": o.get("order_type"),
+                "trade_id": trade_id,
+                "queued_at": o.get("queued_at"),
+                "classification": classification,
+                "reason": reason,
+                "parent_status": (parent or {}).get("status"),
+                "parent_trade_style": (parent or {}).get("trade_style"),
+                "parent_timeframe": (parent or {}).get("timeframe"),
+                "tif_summary": {
+                    "parent": (o.get("parent") or {}).get("time_in_force"),
+                    "stop":   (o.get("stop") or {}).get("time_in_force"),
+                    "target": (o.get("target") or {}).get("time_in_force"),
+                    "flat":   o.get("time_in_force"),
+                },
+            }
+
+            if should_cancel and actually_cancel:
+                try:
+                    if service.cancel_order(order_id):
+                        cancelled_count += 1
+                        row["cancelled"] = True
+                        logger.warning(
+                            "[v19.34.6 EOD-VALIDATOR] CANCELLED %s (%s) — %s",
+                            order_id, symbol, reason,
+                        )
+                    else:
+                        row["cancelled"] = False
+                except Exception as e:
+                    errors += 1
+                    row["cancel_error"] = str(e)
+
+            rows.append(row)
+
+        summary = {
+            "total_active": len(active),
+            "overnight_legs": len(rows),
+            "ok": sum(1 for r in rows if r["classification"] == "ok_swing_or_position"),
+            "orphans": sum(1 for r in rows if r["classification"] == "orphan_no_parent"),
+            "wrong_tif": sum(1 for r in rows if r["classification"] == "wrong_tif_intraday_parent"),
+            "cancelled_count": cancelled_count,
+            "errors": errors,
+        }
+
+        return {
+            "success": True,
+            "summary": summary,
+            "rows": rows,
+            "dry_run": dry_run if not actually_cancel else False,
+            "actually_cancelled": actually_cancel,
+        }
+    except Exception as e:
+        logger.error(f"EOD overnight-orders validate error: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "summary": {}, "rows": []}
+
+
+@router.post("/cancel-orders-for-symbol")
+async def cancel_orders_for_symbol(payload: Dict[str, Any]):
+    """EOD pre-cancel guard. Cancels every active (pending/claimed/
+    executing) order in `order_queue` for the given symbol BEFORE the
+    market-close flatten fires. Eliminates the race where the EOD
+    market-close hits a position that still has a live OCA bracket.
+
+    Body:
+      {
+        "symbol":  "STX",                       // required
+        "confirm": "CANCEL_FOR_SYMBOL",         // required token
+        "dry_run": false                        // default false
+      }
+
+    Response:
+      {
+        "success": true,
+        "symbol": "STX",
+        "matched": <int>,
+        "cancelled_count": <int>,
+        "rows": [ {order_id, status, classification, ...} ],
+        "dry_run": <bool>
+      }
+    """
+    if not isinstance(payload, dict) or not payload.get("symbol"):
+        raise HTTPException(status_code=400, detail="symbol is required")
+    confirm = (payload.get("confirm") or "").strip()
+    if confirm != "CANCEL_FOR_SYMBOL":
+        raise HTTPException(
+            status_code=400,
+            detail='confirm must be "CANCEL_FOR_SYMBOL" (safety token)',
+        )
+    symbol = str(payload["symbol"]).upper()
+    dry_run = bool(payload.get("dry_run", False))
+
+    try:
+        from services.order_queue_service import get_order_queue_service
+        service = get_order_queue_service()
+        if not service._initialized:
+            service.initialize()
+
+        active = list(service._collection.find(
+            {
+                "symbol": symbol,
+                "status": {"$in": ["pending", "claimed", "executing"]},
+            },
+            {"_id": 0},
+        ))
+
+        rows: List[Dict[str, Any]] = []
+        cancelled_count = 0
+        for o in active:
+            order_id = o.get("order_id")
+            row = {
+                "order_id": order_id,
+                "status": o.get("status"),
+                "order_type": o.get("order_type"),
+                "trade_id": o.get("trade_id"),
+                "queued_at": o.get("queued_at"),
+            }
+            if not dry_run:
+                try:
+                    if service.cancel_order(order_id):
+                        cancelled_count += 1
+                        row["cancelled"] = True
+                        logger.warning(
+                            "[v19.34.6 EOD-PRE-CANCEL] %s order %s cancelled "
+                            "(symbol pre-cancel before flatten)",
+                            symbol, order_id,
+                        )
+                    else:
+                        row["cancelled"] = False
+                except Exception as e:
+                    row["cancel_error"] = str(e)
+            rows.append(row)
+
+        return {
+            "success": True,
+            "symbol": symbol,
+            "matched": len(active),
+            "cancelled_count": cancelled_count,
+            "rows": rows,
+            "dry_run": dry_run,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"cancel-orders-for-symbol error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "symbol": symbol,
+            "matched": 0,
+            "cancelled_count": 0,
+            "rows": [],
+        }
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into
