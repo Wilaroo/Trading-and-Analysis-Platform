@@ -1280,7 +1280,20 @@ async def share_drift_status(symbols: Optional[str] = None) -> Dict[str, Any]:
     # Per-symbol live snapshot — same data the loop would read.
     from routers.ib import _pushed_ib_data, is_pusher_connected
     pusher_connected = is_pusher_connected()
-    ib_positions = ((_pushed_ib_data or {}).get("positions") or {})
+    raw_positions = ((_pushed_ib_data or {}).get("positions") or {})
+    # Normalize: production pushes either a dict-of-dicts keyed by symbol
+    # OR a list-of-dicts each with a `symbol` field. Coerce to dict.
+    if isinstance(raw_positions, list):
+        ib_positions = {}
+        for p in raw_positions:
+            if isinstance(p, dict):
+                s = (p.get("symbol") or p.get("contract", {}).get("symbol") or "").upper()
+                if s:
+                    ib_positions[s] = p
+    elif isinstance(raw_positions, dict):
+        ib_positions = {(k or "").upper(): v for k, v in raw_positions.items()}
+    else:
+        ib_positions = {}
 
     sym_filter = None
     if symbols:
@@ -1315,7 +1328,15 @@ async def share_drift_status(symbols: Optional[str] = None) -> Dict[str, Any]:
             bot_qty_signed += sign * sh
 
         ib_pos = ib_positions.get(sym) or {}
-        ib_qty_signed = int(ib_pos.get("position") or 0)
+        # Production IB pushers vary on key name: `position` (most common),
+        # `qty`, `quantity`, `size`. Fall back through them.
+        ib_qty_signed = int(
+            ib_pos.get("position")
+            or ib_pos.get("qty")
+            or ib_pos.get("quantity")
+            or ib_pos.get("size")
+            or 0
+        )
         drift = ib_qty_signed - bot_qty_signed
         would_act = abs(drift) > 1
 
