@@ -969,7 +969,13 @@ class PositionReconciler:
                     try:
                         from services.account_guard import classify_account_id
                         from services.ib_pusher_rpc import get_account_snapshot
-                        snap = get_account_snapshot()
+                        # v19.34.8 (2026-05-05) — wrap sync pusher RPC in
+                        # asyncio.to_thread to prevent event-loop wedge.
+                        # `get_account_snapshot` blocks on socket I/O for
+                        # up to 5s during pusher outages; called inline
+                        # from async = the entire FastAPI loop stalls.
+                        # Same wedge class as v19.30.6/v19.30.8 fixes.
+                        snap = await asyncio.to_thread(get_account_snapshot)
                         cur_account_id = (snap or {}).get("account_id") or ""
                         trade.trade_type = classify_account_id(cur_account_id)
                         trade.account_id_at_fill = cur_account_id or None

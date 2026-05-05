@@ -36,10 +36,11 @@ Open priorities, deferred ideas, and backlog. Move items to
 ### 🟡 Remaining v19.34.8 / v19.34.9 items
 
 1. **Boot-time `starting_capital` auto-refresh** — currently operator manually hits `POST /api/trading-bot/refresh-account`. Move into `TradingBotService.start()` so the bot never silently drifts onto the $100k mock value again. Ship as v19.34.9.
-2. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred until v19.34.8 + refresh-account stabilize the pattern.
-3. **V5 dashboard "Bracket History" tab** — see v19.34.7 backlog #1.
-4. **Scale-IN code path** — see v19.34.7 backlog #2.
-5. **Bracket TIF promotion auto-detect** — see v19.34.7 backlog #3.
+2. **Daily Rejection Heatmap report** — the v19.34.8 cooldown registry now records `(symbol, setup_type, reason, rejection_count, started_at, expires_at)` for every structural rejection. Persist these to a Mongo `rejection_events` collection (TTL 7d) and add a V5 dashboard "Rejection Heatmap" tab showing which (symbol, setup) combos get structurally rejected most often, broken down by reason. Surfaces blind-spot patterns like "this strategy never works in low-volatility regimes" or "this symbol always trips max_position_pct". Pairs with the Bracket History tab from v19.34.7 backlog #1.
+3. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred until v19.34.8 + refresh-account stabilize the pattern.
+4. **V5 dashboard "Bracket History" tab** — see v19.34.7 backlog #1.
+5. **Scale-IN code path** — see v19.34.7 backlog #2.
+6. **Bracket TIF promotion auto-detect** — see v19.34.7 backlog #3.
 
 ### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
 

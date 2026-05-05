@@ -53,6 +53,19 @@ New `services/rejection_cooldown_service.py` (singleton, thread-safe). `is_struc
 
 UPS gap_fade trade closed 31s after open via `oca_closed_externally_v19_31`. Deferred until rejection cooldown stabilizes the firing pattern.
 
+### Bonus fix in v19.34.8 — wedge-watchdog regression cleanup
+
+Operator-flagged from the v19.34.8 finish summary: `test_async_sync_blockers_v19_30_8.py::test_no_unwrapped_sync_http_in_async_outside_backlog` was flagging 2 unwrapped sync calls inside `async def`:
+
+- `services/position_reconciler.py:972` — `snap = get_account_snapshot()` inside `reconcile_orphan_positions` async path. Blocks the FastAPI loop on socket I/O for up to 5s during pusher outages. Hot path: every orphan reconciliation.
+- `services/position_manager.py:699` — `rpc.subscribe_symbols(stale_set)` inside `update_open_positions` async path. Blocks the loop until the pusher acks. Hot path: every manage-loop tick when stale subscriptions exist.
+
+Both are textbook v19.30.x wedge-class bugs. Fix is mechanical — wrap each in `asyncio.to_thread(...)`. Same pattern as v19.30.8's `routers/trading_bot.get_bot_status` fix.
+
+Added 2 explicit regression tests (`test_position_reconciler_get_account_snapshot_wrapped`, `test_position_manager_subscribe_symbols_wrapped`) that pin both fixes against future regressions.
+
+**179/179 cumulative tests passing** including the wedge suite.
+
 ## 2026-05-05 PM (eighty-ninth commit, v19.34.7) — Bracket re-issue service (kills the duplicate-OCA + over-protected-stop class of bug)
 
 Operator-driven architectural fix surfaced during the v19.34.6 verification of this morning's bracket TIF. Forensic data showed XLU fired **6 brackets in 4 minutes** on the same symbol — likely a mix of intent-dedup misses + scale-in attempts — leading to overlapping OCA stacks at IB. The bot's existing scale-out path also doesn't update the original OCA's stop quantity after a partial exit, leaving the stop sized for the FULL position. If the stop fires after a partial exit, IB takes the position to a NEGATIVE qty (unintended SHORT). 2026-05-04 STX -17sh phantom was caused by this exact pattern.

@@ -281,6 +281,41 @@ def test_no_unwrapped_sync_http_in_async_outside_backlog():
         raise AssertionError("\n".join(msg_lines))
 
 
+def test_position_reconciler_get_account_snapshot_wrapped():
+    """v19.34.8 (2026-05-05 PM) — `position_reconciler.reconcile_orphan_
+    positions` was calling `get_account_snapshot()` inline. The wedge-
+    audit caught it. MUST now use `asyncio.to_thread` — same wedge class
+    as v19.30.8 wedge #1 in routers/trading_bot.py."""
+    src = (BACKEND_DIR / "services" / "position_reconciler.py").read_text()
+    # Pre-fix pattern must NOT exist
+    assert "snap = get_account_snapshot()" not in src, (
+        "Pre-v19.34.8 inline pattern detected — get_account_snapshot in "
+        "position_reconciler must run via asyncio.to_thread"
+    )
+    # Post-fix pattern MUST exist
+    assert "asyncio.to_thread(get_account_snapshot)" in src, (
+        "Expected `asyncio.to_thread(get_account_snapshot)` in "
+        "position_reconciler.py — v19.34.8 fix"
+    )
+
+
+def test_position_manager_subscribe_symbols_wrapped():
+    """v19.34.8 (2026-05-05 PM) — `position_manager.update_open_positions`
+    was calling `rpc.subscribe_symbols(stale_set)` inline on every manage-
+    loop tick. The wedge-audit caught it. MUST now use `asyncio.to_thread`."""
+    src = (BACKEND_DIR / "services" / "position_manager.py").read_text()
+    # Pre-fix pattern must NOT exist
+    assert "res = rpc.subscribe_symbols(stale_set)" not in src, (
+        "Pre-v19.34.8 inline pattern detected — rpc.subscribe_symbols in "
+        "position_manager must run via asyncio.to_thread"
+    )
+    # Post-fix pattern MUST exist
+    assert "asyncio.to_thread(rpc.subscribe_symbols, stale_set)" in src, (
+        "Expected `asyncio.to_thread(rpc.subscribe_symbols, stale_set)` in "
+        "position_manager.py — v19.34.8 fix"
+    )
+
+
 # ── 3. The pusher_rpc module's docstring contract still holds ─────────
 def test_pusher_rpc_module_contract_intact():
     """The pusher_rpc module docstring must continue to mandate

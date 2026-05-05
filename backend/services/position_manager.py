@@ -696,7 +696,12 @@ class PositionManager:
                         from services.ib_pusher_rpc import get_pusher_rpc_client
                         rpc = get_pusher_rpc_client()
                         if rpc.is_configured():
-                            res = rpc.subscribe_symbols(stale_set)
+                            # v19.34.8 (2026-05-05) — wrap sync pusher RPC in
+                            # asyncio.to_thread to prevent event-loop wedge.
+                            # `subscribe_symbols` blocks on socket I/O until
+                            # the pusher acks; called inline from async on
+                            # every manage-loop tick = compounded stall risk.
+                            res = await asyncio.to_thread(rpc.subscribe_symbols, stale_set)
                             logger.info(
                                 f"[v19.34.2 STALE-RESUB] requested re-subscribe for "
                                 f"{len(stale_set)} symbol(s): "
