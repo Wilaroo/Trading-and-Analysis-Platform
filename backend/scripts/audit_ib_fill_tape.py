@@ -294,6 +294,16 @@ class SymbolAudit:
     fills: list[Fill] = field(default_factory=list)
 
     @property
+    def short_legs(self) -> list[FifoTrade]:
+        """All SHORT round-trip legs (sell-short → buy-to-cover pairs)."""
+        return [t for t in self.closed_legs if t.direction == "SHORT"]
+
+    @property
+    def has_open_short_residual(self) -> bool:
+        """End-of-tape residual is a still-open short position."""
+        return self.open_residual_qty < 0
+
+    @property
     def net_position(self) -> int:
         return self.bought_qty - self.sold_qty
 
@@ -372,10 +382,86 @@ class SymbolAudit:
             "realized_pnl": round(self.realized_pnl, 2),
             "realized_pnl_after_fees": round(self.realized_pnl_after_fees, 2),
             "has_inversion": self.has_inversion,
+            "has_open_short_residual": self.has_open_short_residual,
+            "short_leg_count": len(self.short_legs),
             "verdict": self.verdict(),
             "fragmentation_warning": self.fragmentation_warning(),
             "closed_legs": [asdict(t) for t in self.closed_legs],
         }
+
+
+def find_unmatched_short_activity(
+    audits: dict[str, SymbolAudit],
+    bot_trades_summary: Optional[dict] = None,
+) -> list[dict]:
+    """v19.34.16 — flag Sell Short / Buy to Cover transactions that have
+    NO matching `bot_trades` row.
+
+    Returns one dict per unmatched symbol. Two unmatched classes:
+      • `unmatched_short_round_trip` — tape shows a SHORT FIFO leg
+        (sell-short → buy-to-cover) but `bot_trades` has zero rows
+        with direction=short for the symbol.
+      • `unmatched_open_short` — tape ends with `open_residual_qty < 0`
+        (still-open short position at end-of-tape) and the bot has no
+        open short row for the symbol.
+
+    When `bot_trades_summary` is None, only tape-level signals are
+    used (residual-short symbols are flagged as suspicious-no-record).
+    """
+    findings: list[dict] = []
+    for sym, a in audits.items():
+        bs = (bot_trades_summary or {}).get(sym) or {}
+        # Allow either a list of directions or a CSV string in the
+        # summary. Operator export script may shape it either way.
+        directions_raw = bs.get("directions") or bs.get("direction") or []
+        if isinstance(directions_raw, str):
+            bot_dirs = {d.strip().lower() for d in directions_raw.split(",") if d.strip()}
+        else:
+            bot_dirs = {str(d).lower() for d in directions_raw if d}
+
+        # Class 1: SHORT round-trip(s) on tape, no matching short bot row.
+        if a.short_legs:
+            if bot_trades_summary is None:
+                findings.append({
+                    "symbol": sym,
+                    "kind": "unmatched_short_round_trip_no_bot_data",
+                    "short_leg_count": len(a.short_legs),
+                    "qty_total": sum(t.qty for t in a.short_legs),
+                    "realized_pnl": round(sum(t.pnl for t in a.short_legs), 2),
+                    "detail": "bot_trades_summary not provided — cannot cross-check",
+                })
+            elif "short" not in bot_dirs:
+                findings.append({
+                    "symbol": sym,
+                    "kind": "unmatched_short_round_trip",
+                    "short_leg_count": len(a.short_legs),
+                    "qty_total": sum(t.qty for t in a.short_legs),
+                    "realized_pnl": round(sum(t.pnl for t in a.short_legs), 2),
+                    "bot_directions": sorted(bot_dirs),
+                    "detail": (
+                        f"{sym}: tape has {len(a.short_legs)} SHORT "
+                        f"round-trip(s) but bot_trades has no direction=short row. "
+                        "This is exactly the class of leak v19.34.15a is "
+                        "designed to prevent."
+                    ),
+                })
+
+        # Class 2: residual short open at end-of-tape, no matching bot row.
+        if a.has_open_short_residual:
+            if bot_trades_summary is None or "short" not in bot_dirs:
+                findings.append({
+                    "symbol": sym,
+                    "kind": "unmatched_open_short",
+                    "residual_qty": a.open_residual_qty,
+                    "detail": (
+                        f"{sym}: tape ends with {a.open_residual_qty:+d} sh "
+                        "(still-open short) and bot has no matching short row. "
+                        "Run `POST /api/trading-bot/reconcile-share-drift` "
+                        "to reconcile."
+                    ),
+                })
+
+    return findings
 
 
 def fifo_match_legs(fills: list[Fill]) -> tuple[list[FifoTrade], int]:
@@ -686,6 +772,23 @@ def render_markdown(audits: dict[str, SymbolAudit], bot_trades_summary: Optional
                            f"total qty {bs.get('total_qty', 0)}. Possible phantom or "
                            f"non-paper row.")
 
+    # v19.34.16 — Unmatched Sell Short / Buy to Cover detection.
+    short_findings = find_unmatched_short_activity(audits, bot_trades_summary)
+    if short_findings:
+        out.append("")
+        out.append(f"## ⚠ Unmatched Short Activity ({len(short_findings)})")
+        out.append("")
+        out.append("Sell Short / Buy to Cover transactions on the tape that "
+                   "have **no matching `bot_trades` row**. This is exactly "
+                   "the leak class the v19.34.15a Naked-position safety net "
+                   "is designed to prevent.")
+        out.append("")
+        out.append("| Symbol | Kind | Detail |")
+        out.append("|---|---|---|")
+        for f in short_findings:
+            _det = (f.get('detail') or '').replace('|', r'\|')
+            out.append(f"| **{f['symbol']}** | `{f['kind']}` | {_det} |")
+
     out.append("")
     out.append("---")
     out.append(f"_Report generated {datetime.now().isoformat(timespec='seconds')}_")
@@ -743,6 +846,7 @@ def main(argv: list[str] | None = None) -> int:
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "fill_count": len(fills),
             "symbols": {s: a.to_dict() for s, a in audits.items()},
+            "unmatched_short_activity": find_unmatched_short_activity(audits, bt),
         }
         args.json_out.write_text(json.dumps(payload, indent=2))
         print(f"wrote {args.json_out}", file=sys.stderr)

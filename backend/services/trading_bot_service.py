@@ -2455,6 +2455,62 @@ class TradingBotService:
                             })
                         except Exception:
                             pass
+                        # v19.34.16 — Operator-approved per-trade lifecycle
+                        # persistence so each flagged orphan / wrong-tif
+                        # leg lands a row in `bracket_lifecycle_events`
+                        # (TTL 7d). Powers the V5 "📜 History" panel for
+                        # boot-detected zombies.
+                        try:
+                            from services.bracket_reissue_service import (
+                                _persist_lifecycle_event,
+                            )
+                            for r in report.get("rows") or []:
+                                cls = r.get("classification")
+                                if cls not in ("orphan_no_parent",
+                                               "wrong_tif_intraday_parent"):
+                                    continue
+                                await _persist_lifecycle_event(
+                                    bot=self,
+                                    event={
+                                        "phase": "boot_zombie_sweep",
+                                        "reason": cls,
+                                        "trade_id": r.get("trade_id"),
+                                        "symbol": r.get("symbol"),
+                                        "order_id": r.get("order_id"),
+                                        "order_type": r.get("order_type"),
+                                        "tif_summary": r.get("tif_summary") or {},
+                                        "parent_status": r.get("parent_status"),
+                                        "parent_trade_style": r.get("parent_trade_style"),
+                                        "parent_timeframe": r.get("parent_timeframe"),
+                                        "queued_at": r.get("queued_at"),
+                                        "detail": r.get("reason"),
+                                        "summary_at_sweep": summary,
+                                    },
+                                )
+                        except Exception as e:
+                            logger.debug(
+                                f"[v19.34.16 BOOT-SWEEP] lifecycle persist failed: {e}"
+                            )
+                        # v19.34.16 — Persist a sweep-level summary row
+                        # only when findings exist (operator approved
+                        # "skip clean sweeps to reduce noise").
+                        try:
+                            from services.bracket_reissue_service import (
+                                _persist_lifecycle_event as _p2,
+                            )
+                            await _p2(
+                                bot=self,
+                                event={
+                                    "phase": "boot_zombie_sweep_summary",
+                                    "reason": "boot_sweep_findings",
+                                    "trade_id": None,
+                                    "symbol": None,
+                                    "summary": summary,
+                                    "row_count": len(report.get("rows") or []),
+                                },
+                            )
+                        except Exception:
+                            pass
                     else:
                         logger.info(
                             "[v19.34.7 BOOT-SWEEP] clean — no orphans / wrong-tif "

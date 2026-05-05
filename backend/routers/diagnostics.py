@@ -1154,3 +1154,47 @@ async def get_orphan_origin(
     }
 
     return out
+
+
+
+# ─── v19.34.16 — Unmatched Short Closes ───────────────────────────────
+@router.get("/unmatched-short-closes")
+async def get_unmatched_short_closes(
+    days: int = Query(1, ge=1, le=30),
+    symbol: Optional[str] = Query(None, max_length=10),
+    emit_warning: bool = Query(True),
+) -> Dict[str, Any]:
+    """Detects Sell Short / Buy to Cover transactions in the IB
+    execution tape that have NO matching `bot_trades` row with
+    direction=short. Used by the V5 Diagnostics tab.
+
+    When `emit_warning=true` and findings exist, fires
+    `unmatched_sell_short_or_btc_v19_34_16` to the operator stream.
+
+    See `services/unmatched_short_close_service.py` for algorithm.
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    from services.unmatched_short_close_service import find_unmatched_short_closes
+    result = await find_unmatched_short_closes(_db, days=days, symbol=symbol)
+    if emit_warning and result.get("findings"):
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "unmatched_sell_short_or_btc_v19_34_16",
+                "severity": "high",
+                "text": (
+                    f"⚠ Unmatched Sell Short / Buy to Cover detected on "
+                    f"{result['summary']['unmatched_count']} symbol(s): "
+                    f"{', '.join(result['summary']['symbols'][:8])}"
+                ),
+                "metadata": {
+                    "symbols": result["summary"]["symbols"],
+                    "window_days": days,
+                    "executions_scanned": result.get("executions_scanned", 0),
+                },
+            })
+        except Exception as e:
+            logger.debug(f"unmatched-short-closes stream emit failed: {e}")
+    return result

@@ -2,6 +2,73 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-eighth commit, v19.34.16) — P1 trifecta: UPS forensics + unmatched short-close detector + boot-sweep lifecycle
+
+Three operator-prioritized P1 items shipped together. None modify
+trade-execution code paths (operator standing rule respected).
+
+### 1. UPS 31-second `oca_closed_externally_v19_31` investigation
+
+**Files:**
+- `/app/memory/forensics/ups_31s_close_2026-05-06.md` — full report.
+- `/app/backend/scripts/audit_ups_31s_close.py` — re-runnable audit
+  classifying each `oca_closed_externally_v19_31` close as
+  LEGITIMATE / SUSPICIOUS / UNKNOWN via 5 weighted heuristics:
+  age window, realized PnL stamp, IB tape correlation, bracket
+  lifecycle events, and direction match.
+
+**Verdict pending.** Conditional patch documented in the report:
+if SUSPICIOUS, bump the 30s age floor in `position_manager.py:217`
+to 60s AND require `ib_realized_for_sym != 0` before sweeping.
+Operator must run the script on the DGX (Mongo not reachable from
+fork) before we commit any fix.
+
+### 2. Unmatched Sell Short / Buy to Cover detector
+
+**Files:**
+- `services/unmatched_short_close_service.py` — runtime FIFO walker
+  that pairs IB `ib_executions` SHORT round-trips with `bot_trades`
+  rows. Flags symbols with SHORT activity but no `direction=short`
+  bot row. Also surfaces `open_residual_short` (still-open shorts
+  with no bot record).
+- `scripts/audit_ib_fill_tape.py` — extended with
+  `find_unmatched_short_activity()` helper + new "⚠ Unmatched Short
+  Activity" markdown section + JSON sidecar enrichment.
+- `routers/diagnostics.py` — new `GET /api/diagnostics/unmatched-short-closes`
+  endpoint. Body: `?days=N&symbol=X&emit_warning=bool`. Emits
+  `unmatched_sell_short_or_btc_v19_34_16` HIGH-severity stream
+  warning when findings exist.
+
+### 3. Boot zombie-sweep → bracket lifecycle persistence
+
+**File:** `services/trading_bot_service.py:_boot_zombie_sweep()`
+
+Per operator approval (only-on-findings + per-trade row):
+- For each `orphan_no_parent` or `wrong_tif_intraday_parent` row,
+  writes a `bracket_lifecycle_events` doc with `phase=boot_zombie_sweep`
+  + per-trade context (trade_id, symbol, order_id, tif_summary,
+  parent_trade_style, parent_timeframe, queued_at, detail).
+- Plus a single sweep-level summary row with
+  `phase=boot_zombie_sweep_summary` and aggregate counts.
+- **Zero writes on clean sweeps** (operator-approved noise floor).
+- Persistence failure does NOT wedge the boot path (existing
+  `_persist_lifecycle_event` swallows + debug-logs).
+
+### Tests
+- `tests/test_unmatched_short_closes_v19_34_16.py` — 14/14 passing
+  (helper edge cases + FIFO walker + service end-to-end).
+- `tests/test_boot_sweep_lifecycle_v19_34_16.py` — 4/4 passing
+  (orphan, wrong-tif, summary, persistence-failure swallow).
+- Cumulative v19.34.x: **98/98 passing** (was 65/65). Zero regressions.
+
+### Verified live
+`GET /api/diagnostics/unmatched-short-closes?days=2&symbol=UPS` →
+`{success:true, executions_scanned:0, findings:[], summary:{...}}`
+(no live data in fork environment but route is wired and responding).
+
+---
+
+
 ## 2026-05-06 (ninety-seventh commit, v19.34.15b) — Share-count drift reconciler
 
 **Severity: P0**. Operator caught a 4,879-share UPS drift (IB had

@@ -12,6 +12,8 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 **v19.34.15b SHIPPED 2026-05-06** — see CHANGELOG ninety-seventh commit. Share-count drift reconciler with 24/7 background loop, LIFO partial-shrink, 1%/1R excess-slice defaults. 10/10 tests passing.
 
+**v19.34.16 SHIPPED 2026-05-06** — see CHANGELOG ninety-eighth commit. P1 trifecta: UPS 31s forensic audit script + report, unmatched Sell Short / Buy to Cover detector (service + endpoint + audit-script section), boot zombie-sweep lifecycle persistence (per-trade rows on findings). 98/98 cumulative tests passing.
+
 ### 🔴 v19.34.15a NEXT (Naked-position safety net) — plan + investigate before code
 
 Operator request: investigate carefully before committing. Two-part fix:
