@@ -10,6 +10,18 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 **v19.34.6 SHIPPED 2026-05-05 PM** — see CHANGELOG eighty-eighth commit. Six follow-on safety/UX hardening items. 62 new tests, all passing.
 
+**v19.34.15b SHIPPED 2026-05-06** — see CHANGELOG ninety-seventh commit. Share-count drift reconciler with 24/7 background loop, LIFO partial-shrink, 1%/1R excess-slice defaults. 10/10 tests passing.
+
+### 🔴 v19.34.15a NEXT (Naked-position safety net) — plan + investigate before code
+
+Operator request: investigate carefully before committing. Two-part fix:
+
+1. **In `trade_executor_service.py`**: treat `status: unknown` from pusher as `timeout` (not hard reject). Mark trade `OPEN [TIMEOUT-NEEDS-SYNC]` so the new v19.34.15b drift loop can pick up any silent fill within 30s.
+2. **In `trade_execution.py`**: add a post-rejection IB poll-back task that polls every 1s for 15s after any rejection. If a fill is detected, emit `unbracketed_fill_detected_v19_34_15` stream event and let v19.34.15b auto-spawn the excess slice.
+
+Why this order matters: with v19.34.15b shipped, the drift loop catches the same naked-share class within 30s anyway. v19.34.15a accelerates detection from 30s → ~1s and adds the explicit `unbracketed_fill_detected` event for clearer forensics. **Operator wants to verify v19.34.15b runs cleanly for a few sessions before we touch the broker rejection path.**
+
+
 ### ✅ v19.34.5 shipped (premarket emergency)
 
 - `services/bracket_tif.py` — single-source-of-truth helper.

@@ -2470,6 +2470,61 @@ class TradingBotService:
             except Exception as e:
                 logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
 
+        # ─── v19.34.15b (2026-05-06) — Share-count drift reconciler ──
+        # 24/7 background loop that calls `reconcile_share_drift` every
+        # 30s. Closes the gap from the operator-caught UPS bug where
+        # `[REJECTED: Bracket unknown]` parent-fill races leak naked
+        # shares onto the IB account. The orphan reconciler skips
+        # already-tracked symbols, so this is the only path that
+        # detects share-COUNT drift on tracked symbols.
+        # Feature-flag: SHARE_DRIFT_RECONCILE_ENABLED=true (default ON).
+        # Interval: SHARE_DRIFT_RECONCILE_INTERVAL_S=30 (default 30s).
+        if os.environ.get("SHARE_DRIFT_RECONCILE_ENABLED", "true").lower() in (
+            "true", "1", "yes", "on"
+        ):
+            interval_s = int(
+                os.environ.get("SHARE_DRIFT_RECONCILE_INTERVAL_S", "30") or 30
+            )
+            if interval_s < 10:
+                interval_s = 10  # safety floor
+
+            async def _share_drift_loop():
+                # Initial grace so pusher snapshot + boot-reconcile settle.
+                await asyncio.sleep(60)
+                logger.info(
+                    "[v19.34.15b DRIFT-LOOP] started, interval=%ss", interval_s,
+                )
+                while self._running:
+                    try:
+                        from routers.ib import is_pusher_connected
+                        if is_pusher_connected():
+                            result = await self._position_reconciler.reconcile_share_drift(
+                                self,
+                                drift_threshold=1,
+                                auto_resolve=True,
+                            )
+                            if result.get("drifts_resolved"):
+                                logger.warning(
+                                    "[v19.34.15b DRIFT-LOOP] resolved %d drift(s): %s",
+                                    len(result["drifts_resolved"]),
+                                    [d.get("symbol") for d in result["drifts_resolved"]][:8],
+                                )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.debug(f"[v19.34.15b DRIFT-LOOP] tick failed: {e}")
+                    try:
+                        await asyncio.sleep(interval_s)
+                    except asyncio.CancelledError:
+                        raise
+
+            try:
+                self._share_drift_task = asyncio.create_task(_share_drift_loop())
+            except Exception as e:
+                logger.warning(
+                    f"[v19.34.15b DRIFT-LOOP] failed to schedule (non-fatal): {e}"
+                )
+
         # ─── v19.34.10 (2026-05-06) — State integrity watchdog ──────
         # Catches drift between in-memory `risk_params` and persisted
         # `bot_state.risk_params` in MongoDB (the v19.34.9 root cause
@@ -2501,6 +2556,16 @@ class TradingBotService:
             task.cancel()
             try:
                 await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        # v19.34.15b — cancel the share-count drift loop if it's running.
+        sdt = getattr(self, "_share_drift_task", None)
+        if sdt is not None:
+            sdt.cancel()
+            try:
+                await sdt
             except asyncio.CancelledError:
                 pass
             except Exception:

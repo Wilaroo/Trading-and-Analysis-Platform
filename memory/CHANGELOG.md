@@ -2,6 +2,58 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-seventh commit, v19.34.15b) — Share-count drift reconciler
+
+**Severity: P0**. Operator caught a 4,879-share UPS drift (IB had
+5,304 long, bot tracked 425) caused by the v19.34.15a `[REJECTED:
+Bracket unknown]` race. Orphan reconciler skips already-tracked
+symbols, so share-COUNT drift on tracked positions was a blind spot.
+
+### What shipped
+
+**1. `reconcile_share_drift()`** (`position_reconciler.py`):
+   - 3 cases (per operator approval 2026-05-06):
+     • EXCESS — IB > bot → spawn `reconciled_excess_slice` BotTrade
+       for the delta. Stamped `entered_by="reconciled_excess_v19_34_15b"`.
+     • PARTIAL — IB < bot, IB > 0 → shrink bot tracking via
+       **LIFO** (newest trade drained first, `shrink_strategy=lifo`).
+     • ZERO — IB == 0 → close bot_trade with
+       `close_reason="external_close_v19_34_15b"`.
+   - Excess slices use **1% stop / 1R target** (overrides the 2%/2R
+     orphan-reconcile defaults — operator-approved tighter risk for
+     unknown-origin shares).
+   - Threshold default: 1 share (drift ≤ threshold → silent skip).
+   - Forensic write to `share_drift_events` collection (TTL 7d).
+
+**2. 24/7 background loop** (`trading_bot_service.py`):
+   - `_share_drift_task` runs every 30s (env-tunable via
+     `SHARE_DRIFT_RECONCILE_INTERVAL_S`, floor 10s).
+   - Feature-flag: `SHARE_DRIFT_RECONCILE_ENABLED=true` (default ON).
+   - Cancelled cleanly on `bot.stop()`.
+
+**3. API endpoint** `POST /api/trading-bot/reconcile-share-drift`:
+   - Body: `{drift_threshold, auto_resolve, dry_run}` (all optional).
+   - Returns full report: `drifts_detected`, `drifts_resolved`,
+     `skipped`, `errors`.
+
+**4. `PositionReconciler.__init__(db=None)`**:
+   - Lazy-resolves `database.get_database()` when `db` not provided
+     (fixes the silent `AttributeError` swallow on `_persist_drift_event`).
+
+### Tests
+`/app/backend/tests/test_share_drift_reconciler_v19_34_15b.py` —
+**10/10 passing**. Pins UPS-class drift, short-direction excess,
+LIFO-newest-first shrink, 1%/1R defaults, threshold gate, dry-run
+detect-only, and in-sync no-op.
+
+### Next
+v19.34.15a (Naked-position safety net) — treat
+`status: unknown` from pusher as `timeout` (not hard reject) and
+add post-rejection IB poll-back. **Plan + investigate** before code.
+
+---
+
+
 ## 2026-05-06 (ninety-sixth commit, v19.34.14) — CRITICAL hotfix: policy flip + drift-loop detector
 
 **Severity: P0**. Operator caught the v19.34.10 watchdog snapping

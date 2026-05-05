@@ -266,3 +266,97 @@ class TestInSync:
         assert result["success"] is True
         assert len(result["drifts_detected"]) == 0
         assert len(result["drifts_resolved"]) == 0
+
+
+# ─── User-approved tweaks (2026-05-06) ─────────────────────────────
+# 1. Excess slices use 1% stop / 1R target (NOT the 2%/2R orphan defaults).
+# 2. Partial-close shrink is LIFO (newest trade first).
+
+class TestExcessSliceUsesTighterDefaults:
+
+    @pytest.mark.asyncio
+    async def test_excess_slice_uses_one_pct_stop_one_r_target(self):
+        """Operator approved 1% / 1R for unknown-origin excess shares."""
+        recon, _ = _make_reconciler_with_db()
+        bot_t = _make_open_trade(sym="UPS", direction="long",
+                                 remaining=425, trade_id="t-ups")
+        bot = _make_bot(
+            open_trades=[bot_t],
+            ib_positions=[{"symbol": "UPS", "position": 5304,
+                           "avgCost": 97.24, "marketPrice": 100.00}],
+            ib_quotes={"UPS": {"last": 100.00}},
+        )
+        with patch("routers.ib.is_pusher_connected", return_value=True):
+            with patch("services.sentcom_service.emit_stream_event",
+                       new=AsyncMock(), create=True):
+                result = await recon.reconcile_share_drift(bot)
+
+        d = result["drifts_resolved"][0]
+        new_trade = bot._open_trades[d["new_trade_id"]]
+        # Stop should be 1% below current_price (100 → 99); target 1R = 100 + 1 = 101.
+        assert abs(new_trade.stop_price - 99.00) < 0.01
+        assert abs(new_trade.target_prices[0] - 101.00) < 0.01
+        assert new_trade.risk_reward_ratio == 1.0
+
+
+class TestLIFOShrink:
+
+    @pytest.mark.asyncio
+    async def test_partial_close_shrinks_lifo_newest_first(self):
+        """Bot tracks 2 trades (50 old + 50 new = 100). IB has 50.
+        LIFO must shrink the NEWEST trade to 0 first, leaving old at 50."""
+        old_t = _make_open_trade(sym="AAPL", direction="long",
+                                 remaining=50, trade_id="t-old")
+        old_t.entry_time = "2026-05-06T10:00:00+00:00"
+        old_t.executed_at = "2026-05-06T10:00:00+00:00"
+        new_t = _make_open_trade(sym="AAPL", direction="long",
+                                 remaining=50, trade_id="t-new")
+        new_t.entry_time = "2026-05-06T14:00:00+00:00"
+        new_t.executed_at = "2026-05-06T14:00:00+00:00"
+        recon, _ = _make_reconciler_with_db()
+        bot = _make_bot(
+            open_trades=[old_t, new_t],
+            ib_positions=[{"symbol": "AAPL", "position": 50,
+                           "avgCost": 145.0, "marketPrice": 146.0}],
+        )
+        with patch("routers.ib.is_pusher_connected", return_value=True):
+            with patch("services.sentcom_service.emit_stream_event",
+                       new=AsyncMock(), create=True):
+                result = await recon.reconcile_share_drift(bot)
+
+        d = result["drifts_resolved"][0]
+        assert d["kind"] == "partial_external_close"
+        assert d.get("shrink_strategy") == "lifo"
+        # Newest trade fully drained, oldest preserved.
+        assert new_t.remaining_shares == 0
+        assert old_t.remaining_shares == 50
+        # Total now equals IB.
+        assert (old_t.remaining_shares + new_t.remaining_shares) == 50
+
+    @pytest.mark.asyncio
+    async def test_partial_close_lifo_partial_drain_of_newest(self):
+        """Bot tracks 2 trades (100 old + 100 new = 200). IB has 150.
+        LIFO must drain 50 from newest only, leaving old=100, new=50."""
+        old_t = _make_open_trade(sym="AAPL", direction="long",
+                                 remaining=100, trade_id="t-old")
+        old_t.entry_time = "2026-05-06T10:00:00+00:00"
+        old_t.executed_at = "2026-05-06T10:00:00+00:00"
+        new_t = _make_open_trade(sym="AAPL", direction="long",
+                                 remaining=100, trade_id="t-new")
+        new_t.entry_time = "2026-05-06T14:00:00+00:00"
+        new_t.executed_at = "2026-05-06T14:00:00+00:00"
+        recon, _ = _make_reconciler_with_db()
+        bot = _make_bot(
+            open_trades=[old_t, new_t],
+            ib_positions=[{"symbol": "AAPL", "position": 150,
+                           "avgCost": 145.0, "marketPrice": 146.0}],
+        )
+        with patch("routers.ib.is_pusher_connected", return_value=True):
+            with patch("services.sentcom_service.emit_stream_event",
+                       new=AsyncMock(), create=True):
+                result = await recon.reconcile_share_drift(bot)
+
+        d = result["drifts_resolved"][0]
+        assert d.get("shrink_strategy") == "lifo"
+        assert old_t.remaining_shares == 100
+        assert new_t.remaining_shares == 50

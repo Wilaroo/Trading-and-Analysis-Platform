@@ -99,6 +99,23 @@ def is_direction_stable(symbol: str, expected_direction: str) -> tuple:
 class PositionReconciler:
     """Manages IB position reconciliation and sync."""
 
+    def __init__(self, db=None):
+        # `db` is optional — when omitted (the bot's instantiation path
+        # at `services/trading_bot_service.py`), we lazy-resolve via
+        # `database.get_database()` on first read. This keeps the
+        # router endpoint's explicit-db construction working too.
+        self._db = db
+
+    @property
+    def db(self):
+        if self._db is None:
+            try:
+                from database import get_database
+                self._db = get_database()
+            except Exception:
+                return None
+        return self._db
+
     async def reconcile_positions_with_ib(self, bot: 'TradingBotService') -> Dict:
         """
         Reconcile bot's internal trades with actual IB positions.
@@ -1191,8 +1208,19 @@ class PositionReconciler:
             # Iterate every symbol that's tracked OR present at IB.
             all_syms = set(bot_qty_by_sym.keys()) | set(ib_qty_by_sym.keys())
 
-            default_stop_pct = float(getattr(bot.risk_params, "reconciled_default_stop_pct", 2.0))
-            default_rr = float(getattr(bot.risk_params, "reconciled_default_rr", 2.0))
+            # v19.34.15b — operator-approved 2026-05-06: excess slices use
+            # tighter defaults than the orphan-reconcile path because the
+            # entry origin is unknown (likely a [REJECTED: Bracket unknown]
+            # parent fill). 1% stop / 1R target keeps blast-radius bounded
+            # even if current_price is mid-range. Orphan reconciler keeps
+            # using risk_params defaults because those positions were
+            # discovered fresh on a known cost-basis.
+            excess_stop_pct = float(getattr(
+                bot.risk_params, "drift_excess_stop_pct", 1.0,
+            ))
+            excess_rr = float(getattr(
+                bot.risk_params, "drift_excess_rr", 1.0,
+            ))
 
             for sym in sorted(all_syms):
                 bot_q = bot_qty_by_sym.get(sym, 0.0)
@@ -1262,8 +1290,8 @@ class PositionReconciler:
                             bot_q=bot_q,
                             ib_meta=ib_meta_by_sym.get(sym, {}),
                             ib_quote=ib_quotes.get(sym, {}) or {},
-                            stop_pct=default_stop_pct,
-                            rr=default_rr,
+                            stop_pct=excess_stop_pct,
+                            rr=excess_rr,
                             BotTrade=BotTrade,
                             TradeDirection=TradeDirection,
                             TradeStatus=TradeStatus,
@@ -1346,24 +1374,46 @@ class PositionReconciler:
     async def _shrink_drift_trades(
         self, bot, sym, trades, new_total_abs: int, drift_record: Dict[str, Any]
     ) -> None:
-        """Case 2: shrink remaining_shares pro-rata across open trades."""
-        cur_total = sum(int(abs(getattr(t, "remaining_shares", 0) or 0)) for t in trades)
+        """Case 2: LIFO shrink — peel shares off the most recent trade
+        first until total matches IB. Operator-approved 2026-05-06:
+        when a bracket parent leg fires at IB and the bot writes off
+        the trade, the WORKING children that DID end up filling are
+        always the most-recent slices. LIFO returns capital to the
+        latest entry first, which mirrors how IB's own partial-close
+        accounting collapses positions.
+        """
+        # Sort by entry_time / executed_at descending (newest first).
+        def _sort_key(t):
+            for attr in ("entry_time", "executed_at", "created_at"):
+                v = getattr(t, attr, None)
+                if v:
+                    return str(v)
+            return ""
+        trades_lifo = sorted(trades, key=_sort_key, reverse=True)
+
+        cur_total = sum(int(abs(getattr(t, "remaining_shares", 0) or 0)) for t in trades_lifo)
         if cur_total <= 0:
             return
-        # Pro-rata shrink (simple: scale each trade by ratio).
-        ratio = new_total_abs / cur_total
+        # How many shares to remove total (positive int).
+        to_remove = max(0, cur_total - new_total_abs)
         applied: list = []
-        for t in trades:
+        for t in trades_lifo:
             old = int(abs(getattr(t, "remaining_shares", 0) or 0))
-            new = max(0, int(round(old * ratio)))
+            if to_remove <= 0:
+                applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": old})
+                continue
+            take = min(old, to_remove)
+            new = old - take
             t.remaining_shares = new
-            t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new}]"
+            t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new} (LIFO)]"
+            to_remove -= take
             applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": new})
         drift_record["shrink_detail"] = applied
+        drift_record["shrink_strategy"] = "lifo"
         # Persist via bot._save_trade.
         save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
         if save_fn:
-            for t in trades:
+            for t in trades_lifo:
                 try:
                     result = save_fn(t)
                     if asyncio.iscoroutine(result):
