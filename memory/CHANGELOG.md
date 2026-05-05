@@ -2,6 +2,104 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-fifth commit, v19.34.13) — STALE chip fix + redundant pusher chip removed + boot-reconcile retry pass
+
+Fast follow-up to v19.34.12 after operator validated the dashboard
+post-deploy. Three operator-driven fixes in one commit.
+
+### 1. STALE 240m on every Open Position fixed
+
+**Root cause**: `routers/ib.receive_pushed_ib_data` merged raw L1 quote
+dicts from the Windows pusher with no per-quote timestamp. Downstream
+the V5 freshness chip in `sentcom_service.get_our_positions` looked
+for `pushed_at` / `as_of` / `timestamp` / `ts` on each quote — found
+none, fell through to the catch-all stale branch — and rendered
+"STALE 240m" on every position even though the pusher was LIVE 1s
+and PnL/charts were updating in real time.
+
+**Fix**:
+- `routers/ib.py` line ~493: stamp `pushed_at` on every quote dict at
+  merge time using the top-level `_pushed_ib_data["last_update"]`
+  ISO timestamp. One-line at the merge point fixes EVERY downstream
+  consumer (sentcom_service, position_manager) for free.
+- `services/sentcom_service.py`: defensive belt-and-braces fallback
+  to top-level `last_update` when a quote dict lacks per-quote
+  timestamps (handles synthesized quotes from cache rehydrate / lazy
+  reconcile path).
+
+### 2. Redundant `<PusherHealthChip />` removed from HUD top strip
+
+Operator feedback: the small "Pusher LIVE 1s" chip duplicates the
+larger `<PusherHeartbeatTile />` panel directly below in the status
+strip. One source of truth is enough — the heartbeat tile shows push
+rate + RPC + last-push age in much richer detail. Removed both the
+chip render and the unused import in `SentComV5View.jsx`.
+
+### 3. Auto-reconcile-at-boot retry pass + skip-reason exposure
+
+Operator reported: "after pulling v19.34.12, RECONCILE 1 badge still
+shows 1 orphan unreconciled despite the morning auto-reconcile claim".
+
+**Root cause**: `position_reconciler.reconcile_orphan_positions`
+requires 30s of continuous direction observation before claiming
+(v19.29 SOFI safety gate). At boot, the observation tracker has 0
+history — the 20s post-boot timer fires before all symbols have
+filled their stability window, so any symbol whose IB position
+flickered close to boot time gets `direction_unstable` skipped and
+left behind.
+
+**Fix in `trading_bot_service._startup_auto_reconcile`** (refactored
+into `_do_pass(retry_pass=False)` helper):
+- After the initial 20s pass, if any orphans were skipped, schedule
+  a retry pass at 90s total (60s after the first). By then every
+  observation window has filled, naturally clearing
+  `direction_unstable` skips.
+- Persist `skipped[]` array (with `symbol`, `reason`, `detail` per
+  orphan) into `bot_state.last_auto_reconcile_at_boot` so operator
+  can diagnose WHY orphans were left behind without grepping logs.
+- Persist `retry_pass: bool` flag.
+
+**Endpoint update** — `GET /api/trading-bot/boot-reconcile-status`
+now returns `skipped[]` + `retry_pass` fields (backward-compatible:
+old docs without these fields return empty defaults).
+
+**V5 BootReconcilePill enhanced** — three new states:
+- `🔁 Auto-claimed N (retry)` — cyan, retry pass succeeded
+- `🔁 Claimed N · K left` — amber, partial reconcile
+- `🔁 Boot · K skipped` — amber, nothing claimed but orphans remain
+- (existing) `🔁 Boot OK · 0 claims` — slate
+Tooltip now lists per-orphan skip detail (`UPS: direction_unstable
+(observed 12s, need 30s)`) so operator never needs to grep logs.
+
+### Verification
+
+- 8 new pytests in `tests/test_quote_freshness_v19_34_13.py`:
+  pushed_at stamping correctness, non-dict safety, push refresh,
+  fallback chain, skip-reason endpoint, backward-compat.
+- 46/46 across v19.34.10-13 suites passing.
+- Live curl on container: `GET /api/trading-bot/boot-reconcile-status`
+  returns `ran:false` (correct — fresh container with no boot
+  reconcile yet) without crashing on missing fields.
+- ESLint clean across all 4 changed frontend files. Webpack compiled.
+
+### Files
+
+- Edited: `backend/routers/ib.py` (1-line `pushed_at` stamp at merge).
+- Edited: `backend/services/sentcom_service.py` (defensive fallback
+  in quote-age computation).
+- Edited: `backend/services/trading_bot_service.py`
+  (`_startup_auto_reconcile` refactored to `_do_pass()` helper +
+  90s retry on skip).
+- Edited: `backend/routers/trading_bot.py` (boot-reconcile-status
+  exposes `skipped[]` + `retry_pass`).
+- Edited: `frontend/src/components/sentcom/SentComV5View.jsx`
+  (removed `<PusherHealthChip />` + import).
+- Edited: `frontend/src/components/sentcom/v5/BootReconcilePill.jsx`
+  (3 new pill states + skip-detail tooltip).
+- New: `backend/tests/test_quote_freshness_v19_34_13.py` (8 tests).
+
+
+
 ## 2026-05-06 (ninety-fourth commit, v19.34.12) — Rejection Heatmap (Diagnostics sub-tab + Mongo log)
 
 Pairs with v19.34.11. Persists every structural rejection that

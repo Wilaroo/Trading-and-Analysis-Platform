@@ -38,7 +38,6 @@ import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
-import { PusherHealthChip } from './v5/PusherHealthChip';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
@@ -410,7 +409,12 @@ export const SentComV5View = ({
             </button>
             <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
             <ConnectivityCheck />
-            <PusherHealthChip />
+            {/* v19.34.13 (2026-05-06) — `<PusherHealthChip />` removed
+                here. Operator feedback after v19.34.12: the chip
+                duplicates the larger `<PusherHeartbeatTile />` panel
+                in the status strip below (line ~444). One source of
+                truth is enough; the heartbeat tile shows push rate +
+                RPC + last-push age in richer detail. */}
             <DeadLetterBadge />
             <FlattenAllButtonV5 safety={safety} inline />
             <AccountModeBadge />

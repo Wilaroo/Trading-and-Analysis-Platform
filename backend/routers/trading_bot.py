@@ -4089,6 +4089,10 @@ async def get_boot_reconcile_status(pill_visible_seconds: int = 600):
         "skipped_count": int(doc.get("skipped_count") or 0),
         "errors_count": int(doc.get("errors_count") or 0),
         "symbols": list(doc.get("symbols") or [])[:32],
+        # v19.34.13 — surface skip reasons so operator can diagnose
+        # "why was 1 orphan left behind" without grepping logs.
+        "skipped": list(doc.get("skipped") or [])[:32],
+        "retry_pass": bool(doc.get("retry_pass", False)),
         "show_pill": bool(show_pill),
         "pill_visible_seconds": pill_visible_seconds,
     }

@@ -2015,106 +2015,134 @@ class TradingBotService:
                 "1", "true", "yes", "on"
             ):
                 async def _startup_auto_reconcile():
-                    try:
-                        # 20s — runs after orphan-guard's 15s emergency
-                        # stops are placed, and gives the pusher snapshot
-                        # extra time to arrive.
-                        await asyncio.sleep(20)
-                        result = await self.reconcile_orphan_positions(
-                            all_orphans=True,
-                        )
-                        n_recon = len(result.get("reconciled", []))
-                        n_skip = len(result.get("skipped", []))
-                        n_err = len(result.get("errors", []))
-                        if n_recon:
-                            logger.warning(
-                                f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile claimed "
-                                f"{n_recon} orphan position(s); skipped={n_skip} "
-                                f"errors={n_err}"
+                    """v19.34.13 (2026-05-06) — boot reconcile + 90s retry pass.
+
+                    Operator reported 1 orphan persistently surviving the
+                    initial 20s pass. Root cause: `direction_unstable`
+                    skip — the reconciler requires 30s of continuous
+                    direction observation, but on a cold boot the
+                    observation history is empty. Fix: run a 2nd pass
+                    90s later (60s after the first), by which point
+                    every observation window has filled.
+                    """
+                    def _persist_boot_result(result, n_recon, n_skip, n_err, *, retry_pass=False):
+                        try:
+                            from database import get_database as _gdb
+                            _db_br = _gdb()
+                            if _db_br is None:
+                                return
+                            # v19.34.13 — persist skip reasons + retry
+                            # marker so `/boot-reconcile-status` can
+                            # surface WHY orphans were left behind
+                            # instead of just the count.
+                            _skipped_rows = [
+                                {
+                                    "symbol": s.get("symbol"),
+                                    "reason": s.get("reason"),
+                                    "detail": s.get("detail"),
+                                }
+                                for s in (result.get("skipped") or [])
+                                if s.get("symbol")
+                            ][:32]
+                            _db_br["bot_state"].update_one(
+                                {"_id": "last_auto_reconcile_at_boot"},
+                                {"$set": {
+                                    "ran_at": datetime.now(timezone.utc).isoformat(),
+                                    "reconciled_count": n_recon,
+                                    "skipped_count": n_skip,
+                                    "errors_count": n_err,
+                                    "symbols": [
+                                        r.get("symbol") for r in (result.get("reconciled") or [])
+                                        if r.get("symbol")
+                                    ][:32],
+                                    "skipped": _skipped_rows,
+                                    "retry_pass": bool(retry_pass),
+                                }},
+                                upsert=True,
                             )
-                            # v19.31.14 — persist the last-boot-reconcile
-                            # result so the V5 HUD can render a "🔁 Auto-
-                            # claimed N at boot" status pill that fades
-                            # ~10 minutes after the boot event. Stored
-                            # both in `bot_state` (survives restart) and
-                            # exposed via `/api/trading-bot/boot-reconcile-
-                            # status` for the operator.
-                            try:
-                                from database import get_database as _gdb
-                                _db_br = _gdb()
-                                if _db_br is not None:
-                                    _db_br["bot_state"].update_one(
-                                        {"_id": "last_auto_reconcile_at_boot"},
-                                        {"$set": {
-                                            "ran_at": datetime.now(timezone.utc).isoformat(),
-                                            "reconciled_count": n_recon,
-                                            "skipped_count": n_skip,
-                                            "errors_count": n_err,
-                                            "symbols": [
-                                                r.get("symbol") for r in result.get("reconciled", [])
-                                                if r.get("symbol")
-                                            ][:32],
-                                        }},
-                                        upsert=True,
-                                    )
-                            except Exception:
-                                pass
-                            # Surface in the operator stream so it shows
-                            # up in Unified Stream alongside other boot
-                            # events.
-                            try:
-                                from services.sentcom_service import emit_stream_event
+                        except Exception:
+                            pass
+
+                    async def _emit_boot_event(claimed_syms, n_recon, n_skip, n_err, *, retry_pass=False):
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            tag = " (retry)" if retry_pass else ""
+                            await emit_stream_event({
+                                "kind": "info",
+                                "event": "auto_reconcile_at_boot",
+                                "text": (
+                                    f"🔁 Auto-reconcile{tag} claimed {n_recon} orphan "
+                                    f"position(s) at boot: "
+                                    f"{', '.join(claimed_syms[:8])}"
+                                    + (f" (+{len(claimed_syms)-8} more)"
+                                       if len(claimed_syms) > 8 else "")
+                                ),
+                                "metadata": {
+                                    "reconciled_count": n_recon,
+                                    "skipped_count": n_skip,
+                                    "errors_count": n_err,
+                                    "symbols": claimed_syms,
+                                    "retry_pass": retry_pass,
+                                },
+                            })
+                        except Exception:
+                            pass
+
+                    async def _do_pass(retry_pass=False):
+                        try:
+                            result = await self.reconcile_orphan_positions(
+                                all_orphans=True,
+                            )
+                            n_recon = len(result.get("reconciled", []))
+                            n_skip = len(result.get("skipped", []))
+                            n_err = len(result.get("errors", []))
+                            tag = "[v19.34.13 RETRY]" if retry_pass else "[v19.31 AUTO-RECONCILE]"
+                            if n_recon:
+                                logger.warning(
+                                    f"🔁 {tag} Boot reconcile claimed "
+                                    f"{n_recon} orphan position(s); skipped={n_skip} "
+                                    f"errors={n_err}"
+                                )
+                                _persist_boot_result(result, n_recon, n_skip, n_err, retry_pass=retry_pass)
                                 claimed_syms = [
                                     r.get("symbol") for r in result.get("reconciled", [])
                                     if r.get("symbol")
                                 ]
-                                await emit_stream_event({
-                                    "kind": "info",
-                                    "event": "auto_reconcile_at_boot",
-                                    "text": (
-                                        f"🔁 Auto-reconcile claimed {n_recon} orphan "
-                                        f"position(s) at boot: "
-                                        f"{', '.join(claimed_syms[:8])}"
-                                        + (f" (+{len(claimed_syms)-8} more)"
-                                           if len(claimed_syms) > 8 else "")
-                                    ),
-                                    "metadata": {
-                                        "reconciled_count": n_recon,
-                                        "skipped_count": n_skip,
-                                        "errors_count": n_err,
-                                        "symbols": claimed_syms,
-                                    },
-                                })
-                            except Exception:
-                                pass
-                        else:
-                            logger.info(
-                                "🔁 [v19.31 AUTO-RECONCILE] Boot reconcile found "
-                                f"nothing to claim (skipped={n_skip} errors={n_err})"
+                                await _emit_boot_event(
+                                    claimed_syms, n_recon, n_skip, n_err,
+                                    retry_pass=retry_pass,
+                                )
+                            else:
+                                logger.info(
+                                    f"🔁 {tag} Boot reconcile found "
+                                    f"nothing to claim (skipped={n_skip} errors={n_err})"
+                                )
+                                # Only overwrite the persisted state on
+                                # the FIRST pass; retry-pass no-ops keep
+                                # the original boot pill untouched.
+                                if not retry_pass:
+                                    _persist_boot_result(result, 0, n_skip, n_err)
+                            return n_skip
+                        except Exception as e:
+                            logger.warning(
+                                f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile failed "
+                                f"(non-fatal): {e}"
                             )
-                            # v19.31.14 — also persist the no-op result so
-                            # the HUD pill can show "🔁 Boot OK · nothing
-                            # to claim".
-                            try:
-                                from database import get_database as _gdb
-                                _db_br = _gdb()
-                                if _db_br is not None:
-                                    _db_br["bot_state"].update_one(
-                                        {"_id": "last_auto_reconcile_at_boot"},
-                                        {"$set": {
-                                            "ran_at": datetime.now(timezone.utc).isoformat(),
-                                            "reconciled_count": 0,
-                                            "skipped_count": n_skip,
-                                            "errors_count": n_err,
-                                            "symbols": [],
-                                        }},
-                                        upsert=True,
-                                    )
-                            except Exception:
-                                pass
+                            return 0
+
+                    try:
+                        await asyncio.sleep(20)
+                        first_skip = await _do_pass(retry_pass=False)
+
+                        # v19.34.13 — only retry if the first pass left
+                        # skipped orphans behind (avoids a useless 2nd
+                        # call when there's nothing to clean up).
+                        if first_skip > 0:
+                            await asyncio.sleep(60)  # total 80s — direction-stability gate (30s) clears for any new arrival
+                            await _do_pass(retry_pass=True)
                     except Exception as e:
                         logger.warning(
-                            f"🔁 [v19.31 AUTO-RECONCILE] Boot reconcile failed "
+                            f"🔁 [v19.34.13 AUTO-RECONCILE] startup task failed "
                             f"(non-fatal): {e}"
                         )
                 asyncio.create_task(_startup_auto_reconcile())

@@ -2028,6 +2028,15 @@ class SentComService:
             # v19.34.2 — quote-age computation per symbol, mirrors the
             # logic in position_manager.update_open_positions.
             _quotes_dict = _pushed_ib_data.get("quotes") or {}
+            # v19.34.13 (2026-05-06) — top-level fallback for the rare
+            # quote dict that lacks a per-quote `pushed_at`. Every
+            # /push-data merge stamps `pushed_at` on each quote (see
+            # routers.ib.receive_pushed_ib_data), but synthetic quotes
+            # injected by other paths (cache rehydrate, lazy reconcile)
+            # may be timestampless. The top-level `last_update` is the
+            # safest "as of when did the pusher last say anything?"
+            # signal we have.
+            _push_last_update = _pushed_ib_data.get("last_update")
             for _sym_q, _q in _quotes_dict.items():
                 if not isinstance(_q, dict):
                     continue
@@ -2036,6 +2045,7 @@ class SentComService:
                     or _q.get("as_of")
                     or _q.get("timestamp")
                     or _q.get("ts")
+                    or _push_last_update
                 )
                 _age_s: Optional[float] = None
                 if _q_ts_raw is not None:

@@ -49,28 +49,48 @@ export default function BootReconcilePill() {
   if (!data || !data.show_pill) return null;
 
   const claimed = Number(data.reconciled_count) || 0;
+  const skipped = Number(data.skipped_count) || 0;
   const ago = fmtAgo(data.age_seconds);
+  const retry = !!data.retry_pass;
 
-  // Two distinct states:
-  //   claimed > 0 → cyan "auto-claimed N"
-  //   claimed == 0 → slate "boot ok · nothing to claim"
-  const cls = claimed > 0
-    ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800 hover:border-cyan-600'
-    : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:border-slate-600';
+  // v19.34.13 (2026-05-06) — three distinct states now:
+  //   claimed > 0 + skipped == 0 → cyan "auto-claimed N" (clean)
+  //   claimed > 0 + skipped > 0  → amber "auto-claimed N · K left" (partial)
+  //   claimed == 0 + skipped > 0 → amber "Boot · K skipped"
+  //   claimed == 0 + skipped == 0 → slate "Boot OK · 0 claims"
+  let cls;
+  let label;
+  if (claimed > 0 && skipped === 0) {
+    cls = 'bg-cyan-950/60 text-cyan-300 border-cyan-800 hover:border-cyan-600';
+    label = `🔁 Auto-claimed ${claimed}${retry ? ' (retry)' : ''}`;
+  } else if (claimed > 0 && skipped > 0) {
+    cls = 'bg-amber-950/60 text-amber-300 border-amber-800 hover:border-amber-600';
+    label = `🔁 Claimed ${claimed} · ${skipped} left`;
+  } else if (claimed === 0 && skipped > 0) {
+    cls = 'bg-amber-950/60 text-amber-300 border-amber-800 hover:border-amber-600';
+    label = `🔁 Boot · ${skipped} skipped`;
+  } else {
+    cls = 'bg-slate-900/80 text-slate-400 border-slate-800 hover:border-slate-600';
+    label = '🔁 Boot OK · 0 claims';
+  }
 
-  const label = claimed > 0
-    ? `🔁 Auto-claimed ${claimed}`
-    : '🔁 Boot OK · 0 claims';
+  // v19.34.13 — surface per-orphan skip reasons in the tooltip so
+  // operator can diagnose "why was 1 orphan left behind" without
+  // grepping logs.
+  const skipDetail = (data.skipped || [])
+    .map((s) => `  • ${s.symbol}: ${s.reason}${s.detail ? ` (${s.detail})` : ''}`)
+    .join('\n');
 
   const tooltipLines = [
     claimed > 0
       ? `Auto-reconcile at boot claimed ${claimed} orphan position(s)`
       : 'Auto-reconcile at boot found nothing to claim',
-    `Skipped: ${data.skipped_count} · Errors: ${data.errors_count}`,
+    `Skipped: ${skipped} · Errors: ${data.errors_count}${retry ? ' · 90s retry pass ran' : ''}`,
     data.ran_at ? `Ran at: ${data.ran_at}` : '',
     data.symbols && data.symbols.length
       ? `Symbols: ${data.symbols.slice(0, 8).join(', ')}${data.symbols.length > 8 ? ` (+${data.symbols.length - 8} more)` : ''}`
       : '',
+    skipDetail ? `Skipped detail:\n${skipDetail}` : '',
     `Pill auto-hides after ${data.pill_visible_seconds}s`,
   ].filter(Boolean);
 

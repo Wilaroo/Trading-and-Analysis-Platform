@@ -490,6 +490,18 @@ async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response)
 
         # Merge quotes (in-memory, fast).
         if request.quotes:
+            # v19.34.13 (2026-05-06) — stamp `pushed_at` on every quote
+            # at merge time. Pusher sends raw L1 dicts without any
+            # timestamp, so downstream consumers (sentcom_service,
+            # position_manager) couldn't compute per-quote freshness
+            # and the V5 freshness chip incorrectly rendered "STALE
+            # 240m" on every position even when the pusher was LIVE 1s.
+            # Stamping here means EVERY consumer gets a fresh
+            # `pushed_at` for free on every push without per-call work.
+            _push_iso = _pushed_ib_data["last_update"]
+            for _sym, _q in request.quotes.items():
+                if isinstance(_q, dict):
+                    _q["pushed_at"] = _push_iso
             _pushed_ib_data["quotes"].update(request.quotes)
 
             # v19.34 (2026-05-04) — Publish to the in-memory L1 quote
