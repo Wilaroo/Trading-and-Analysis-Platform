@@ -34,10 +34,11 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ### 🟡 Remaining v19.34.7 / future items
 
-1. **Scale-IN code path** — bot doesn't have an explicit scale-in feature today. When added, call `reissue_bracket_for_trade(trade, reason="scale_in", new_total_shares=N+added, new_avg_entry=weighted_avg)`. Service is ready.
-2. **Bracket TIF promotion (intraday → swing)** — same service, `reason="tif_promotion"`.
-3. **Investigate XLU 6-bracket pattern from 2026-05-05 AM** — pending operator's diagnostic script output. Likely intent-dedup miss OR legit re-entries; bracket re-issue service now contains the damage either way.
-4. **Extend `audit_ib_fill_tape.py`** to flag unmatched `Sell Short`/`Buy to Cover` IB transactions — deferred (existing `INVERSION_SHORT_COVER` verdict already captures the semantics; explicit subtype detection needs sample TWS tape with the new wording).
+1. **V5 dashboard "Bracket History" tab on each open position** — surface the bracket-reissue rich event trail (cancel_result + submit_result + plan + rationale[]) per trade. Operator sees full lifecycle: original bracket → scale-out trim → re-issue → eventual exit, with the WHY for each re-issue (`reason: scale_out_t1`, `tif_promotion`, etc.). Audit-grade trail for the V5 bot-thought bubbles. Backend already emits the events; needs a Mongo `bracket_lifecycle_events` collection writer in `bracket_reissue_service.py` + `GET /api/trading-bot/bracket-history?trade_id=X` + `<BracketHistoryTab />` React component.
+2. **Scale-IN code path** — bot doesn't have an explicit scale-in feature today. When added, call `reissue_bracket_for_trade(trade, reason="scale_in", new_total_shares=N+added, new_avg_entry=weighted_avg)`. Service is ready.
+3. **Bracket TIF promotion (intraday → swing)** — same service, `reason="tif_promotion"`.
+4. **Investigate XLU 6-bracket pattern from 2026-05-05 AM** — pending operator's diagnostic script output. Likely intent-dedup miss OR legit re-entries; bracket re-issue service now contains the damage either way.
+5. **Extend `audit_ib_fill_tape.py`** to flag unmatched `Sell Short`/`Buy to Cover` IB transactions — deferred (existing `INVERSION_SHORT_COVER` verdict already captures the semantics; explicit subtype detection needs sample TWS tape with the new wording).
 
 ### 🟡 Remaining v19.34.6 items
 
