@@ -2,6 +2,100 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-05 AM (eighty-seventh commit, v19.34.5) — Classification-aware bracket TIF (kills the GTC zombie bug)
+
+**Premarket emergency ship** before 9:30 AM ET market open. Fixes the root-cause bug discovered last night during the 2026-05-04 IB fill-tape audit.
+
+### The bug (recap from 2026-05-04 EVE forensic write-up)
+
+Pre-v19.34.5, every bracket order's stop+target legs were hard-coded `time_in_force="GTC"` regardless of trade_style. For intraday trades, GTC legs survived EOD/restarts/weekends, sat alive at IB indefinitely, and randomly fired when price touched their levels — creating "Sell Short" / "Buy to Cover" transactions the bot didn't intend or track. Forensic evidence: -17 STX short opened by an orphan GTC SELL leg firing at 3:57 PM AFTER the bot's EOD market-flatten took position to 0. Same pattern caused 6 of the 21 day-of qty mismatches I had initially mis-attributed to operator manual trading.
+
+### The fix — `services/bracket_tif.py`
+
+Single source of truth for bracket TIF classification:
+
+```python
+def bracket_tif(trade_style, timeframe=None) -> tuple[str, bool]:
+    """Returns (time_in_force, outside_rth) for stop/target legs."""
+    # Intraday (scalp, intraday, move_2_move, trade_2_hold, day_trade) → DAY
+    # Overnight (multi_day, a_plus, swing, position, investment, long_term) → GTC
+    # Unknown style → consult timeframe; fall back to DAY (fail-safe)
+```
+
+Wired into:
+1. **`services/trade_executor_service.py`** — main bot bracket builder (`order_queue` writes).
+2. **`services/ib_service.py`** — direct ib_insync bracket placer.
+3. **`services/position_reconciler.py`** — emergency stop placer (now respects classification when bot_trades row exists for the orphan).
+
+`close_at_eod` flag handling in `position_manager.py:check_eod_close()` already correctly skips swing/position trades — no change needed there. The EOD flatten now naturally aligns with the new bracket TIFs (intraday brackets die at EOD with the parent; swing brackets keep their GTC stop overnight).
+
+### Tests — `tests/test_bracket_tif_v19_34_5.py`
+
+23 tests covering:
+- Canonical intraday styles (scalp, intraday) → DAY
+- Canonical overnight styles (multi_day, swing, position, investment) → GTC + outside_rth
+- Deprecated aliases (trade_2_hold, a_plus, move_2_move) preserved
+- None / empty / garbage trade_style → DAY (fail-safe)
+- Timeframe tiebreaker when style is missing
+- Style overrides timeframe when both present
+- Case-insensitivity + whitespace tolerance
+- Integration paths through executor and ib_service bracket builders
+
+**96/96 cumulative tests passing across v19.34.x + bracket_tif** — zero regressions.
+
+### Why this was the only critical fix to ship before 9:30 AM
+
+The other v19.34.5 P0 items in ROADMAP (selective boot zombie sweep, `/api/ib/orders` endpoint, pre-execution Mongo-first sanity gate, audit tooling extension) are valuable but not urgent — operator manually cancelled ALL open IB orders via TC2000 last night, so today's session starts with a clean broker-side slate. The bracket TIF fix STOPS NEW zombies from being created. The other items can ship in v19.34.6 over the next few sessions.
+
+### Files touched
+
+- new `backend/services/bracket_tif.py` (classifier, 110 LOC)
+- patched `backend/services/trade_executor_service.py` (4-line change at the bracket builder)
+- patched `backend/services/ib_service.py` (4-line change at the OCA bracket builder)
+- patched `backend/services/position_reconciler.py` (4-line change at the emergency stop placer)
+- new `backend/tests/test_bracket_tif_v19_34_5.py` (23 tests)
+
+### Operator action (to land the fix on Spark)
+
+```bash
+# 1. From Emergent UI: click "Save to GitHub"
+# 2. On Spark:
+cd ~/Trading-and-Analysis-Platform
+git pull
+# 3. Restart backend BEFORE 9:30 AM ET to load the patched modules
+pkill -f "python.*server.py"
+sleep 2
+./start_backend.sh
+sleep 8
+curl -s http://localhost:8001/api/health
+```
+
+### Verification at 9:35 AM ET
+
+After the bot fires its first bracket of the day:
+
+```bash
+python -c "
+import os, json
+from pymongo import MongoClient
+c = MongoClient(os.environ['MONGO_URL'])
+db = c[os.environ['DB_NAME']]
+r = db.order_queue.find_one(
+    {'queued_at': {'\$gte': '2026-05-05'}, 'order_type': 'bracket'},
+    sort=[('queued_at', -1)]
+)
+if r:
+    print(f\"Symbol: {r['symbol']}\")
+    print(f\"  parent: {r['parent']['action']} {r['parent']['quantity']} TIF={r['parent']['time_in_force']}\")
+    print(f\"  stop:   TIF={r['stop']['time_in_force']} outside_rth={r['stop'].get('outside_rth')}\")
+    print(f\"  target: TIF={r['target']['time_in_force']} outside_rth={r['target'].get('outside_rth')}\")
+"
+```
+
+Expected for an intraday trade: stop+target both `TIF=DAY`, `outside_rth=False`.
+
+---
+
 ## 2026-05-04 EVE (eighty-sixth commit, v19.34.4 forensic) — **CRITICAL: GTC zombie order discovery**
 
 **No code shipped — root-cause investigation finding.** The audit tooling shipped earlier in the day surfaced a deep, recurring bug while reconciling today's IB tape with `bot_trades`.

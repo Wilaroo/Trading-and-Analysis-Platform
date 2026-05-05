@@ -1172,6 +1172,17 @@ class PositionReconciler:
                     continue
 
                 action = "SELL" if is_long else "BUY"
+                # v19.34.5 — even emergency stops respect classification.
+                # If we have a bot_trades row for this symbol, honor its style;
+                # otherwise default to GTC since we don't know whether the
+                # position is intraday or overnight (safer to protect).
+                _legs_tif, _legs_outside_rth = ("GTC", True)
+                if trade is not None:
+                    from services.bracket_tif import bracket_tif as _bracket_tif
+                    _legs_tif, _legs_outside_rth = _bracket_tif(
+                        getattr(trade, "trade_style", None),
+                        getattr(trade, "timeframe", None),
+                    )
                 stop_payload = {
                     "symbol": symbol,
                     "action": action,
@@ -1179,8 +1190,8 @@ class PositionReconciler:
                     "order_type": "STP",
                     "stop_price": stop_price,
                     "limit_price": None,
-                    "time_in_force": "GTC",
-                    "outside_rth": True,
+                    "time_in_force": _legs_tif,
+                    "outside_rth": _legs_outside_rth,
                     "trade_id": f"EMERGENCY-STOP-{symbol}-{uuid.uuid4().hex[:6]}",
                 }
 

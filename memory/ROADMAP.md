@@ -6,67 +6,49 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🚨 P0 — TOP OF NEXT SESSION (the GTC zombie bug — classification-aware fix)
 
-**Discovered 2026-05-04 EVE during forensic audit. Single root cause for ~25% of today's accounting drift, multi-week phantom accumulation, and the unwanted -17 STX short.** Full forensic write-up in `CHANGELOG.md` 2026-05-04 EVE entry.
+**v19.34.5 SHIPPED 2026-05-05 AM** — see CHANGELOG eighty-seventh commit. The critical path (bracket TIF classification) is in. **All NEW orders from today onward get correct DAY TIF on intraday, GTC on swing/position.** Old GTC zombies on disk were manually cancelled by operator via TC2000 last night.
 
-### The bug in one line
-Every bracket order's stop+target legs are placed `time_in_force: GTC` regardless of trade classification. For intraday trades these GTC legs survive EOD/restarts/weekends, sit alive at IB indefinitely, and randomly fire when price touches their levels — creating "Sell Short" / "Buy to Cover" transactions the bot didn't intend.
+### ✅ v19.34.5 shipped (premarket emergency)
 
-**For swing / position / investment trades, GTC IS correct** — those positions need overnight stop protection. The fix must be classification-aware, not a blanket GTC→DAY flip.
+- `services/bracket_tif.py` — single-source-of-truth helper.
+- 3 call sites patched: `trade_executor_service.py`, `ib_service.py`, `position_reconciler.py`.
+- `tests/test_bracket_tif_v19_34_5.py` — 23 tests, all passing.
+- 96/96 cumulative v19.34.x tests passing. Zero regressions.
 
-### Classification-aware TIF rules
+### 🟡 Remaining v19.34.6 items (ship over next few sessions, not blocking trading today)
 
-| Trade class | Stop/Target TIF | `outside_rth` | EOD flatten applies? |
-|---|---|---|---|
-| `timeframe='intraday'` or `trade_style ∈ {trade_1_morning, trade_2_hold, scalp}` | **DAY** | false | ✅ Yes |
-| `trade_style='trade_3_swing'` (1-5 day hold) | **GTC** | true | ❌ No |
-| `timeframe='position'` / `'investment'` (weeks-months) | **GTC** | true | ❌ No |
+1. **Selective boot zombie sweeper** — on startup, enumerate IB open orders. For each: cancel if no matching `bot_trades` parent OR parent is `status=closed`; KEEP if parent is `status=open` AND swing/position style. Lower priority now since operator did a one-time manual flush last night.
+2. **End-of-RTH validator** — sweep all `outside_rth=true` open IB orders, confirm each has an active swing/position `bot_trades` row, else cancel with CRITICAL stream warning.
+3. **Bracket re-issue on classification promotion** — if operator/bot promotes intraday→swing, set `bracket_tif_dirty=true`, cancel DAY legs, re-issue as GTC on next manage-loop tick.
+4. **Pre-execution sanity gate** — write `bot_trades` row with `status='pending'` BEFORE IB submission. Eliminates "IB fill but no Mongo row" class of bug.
+5. **`GET /api/ib/orders` endpoint** — return IB's actual open-order list (404'd 2026-05-04 EVE; needed for boot sweep + audit cross-check + UI debug panel).
+6. **Extend `audit_ib_fill_tape.py`** — flag any `Sell Short`/`Buy to Cover` IB tx without matching `order_queue` entry.
 
-### v19.34.5 ship list (estimated 1 session of work)
+### Operator actions completed
 
-1. **Bracket builder reads `trade_style`/`timeframe` to choose TIF.** Add `_bracket_tif(trade) → (tif, outside_rth)` helper. Apply to both `stop` and `target` legs of every bracket. Find via:
-   ```bash
-   grep -rn "time_in_force.*GTC\|'GTC'" backend/services/ | grep -i "stop\|target\|bracket"
-   ```
+- ✅ Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile that had accumulated). 2026-05-04 PM.
+- ✅ Set market BUY 17 STX order for 2026-05-05 open to cover the unwanted short.
+- ✅ v19.34.5 shipped 2026-05-05 AM premarket — bracket TIF classification active for all new orders.
 
-2. **EOD flatten exempts swing/position trades.** Loop iteration must skip rows where `timeframe != 'intraday'` AND `trade_style not in INTRADAY_STYLES`. Cancel symbol's open orders BEFORE the market close (belt-and-suspenders against any DAY brackets that didn't expire).
+### Verification step — first bracket of the day
 
-3. **Boot zombie sweep is selective.** On startup, enumerate IB open orders. For each:
-   - No matching `bot_trades` row → cancel (orphan_no_bot_trade_v19_34_5).
-   - Matching row with `status='closed'` → cancel (orphan_post_close_leg_v19_34_5).
-   - Matching row with `status='open'` AND swing/position style → **keep** (valid GTC).
-   - Matching row with `status='open'` AND intraday style → keep but warn if leg is still GTC (legacy carry-in from before fix; let bracket-rebuilder re-issue as DAY on next manage-loop tick).
+```bash
+python -c "
+import os, json
+from pymongo import MongoClient
+c = MongoClient(os.environ['MONGO_URL'])
+db = c[os.environ['DB_NAME']]
+r = db.order_queue.find_one(
+    {'queued_at': {'\$gte': '2026-05-05'}, 'order_type': 'bracket'},
+    sort=[('queued_at', -1)]
+)
+if r:
+    print(f\"  stop:   TIF={r['stop']['time_in_force']} outside_rth={r['stop'].get('outside_rth')}\")
+    print(f\"  target: TIF={r['target']['time_in_force']} outside_rth={r['target'].get('outside_rth')}\")
+"
+```
 
-4. **End-of-RTH validator**: after RTH closes, sweep all `outside_rth=true` open IB orders. For each, confirm an active swing/position `bot_trades` row exists. If not → cancel with CRITICAL stream warning (catches mis-classified or corrupted state).
-
-5. **Bracket re-issue on classification promotion**: if operator/bot promotes a trade's `trade_style` from intraday to swing (via a "manage rules" upgrade path), set `bracket_tif_dirty=true` and have the next manage-loop tick cancel the DAY legs and re-issue as GTC.
-
-6. **Pre-execution sanity gate**: before the executor submits ANY order to IB, write the `bot_trades` row with `status='pending'`. Only update to `executed` after IB confirms fill. If Mongo write fails before IB submission, abort the order. Eliminates the "IB fill but no Mongo row" class of bug entirely.
-
-7. **Add `GET /api/ib/orders`** endpoint returning IB's actual open-order list. Required for the boot zombie sweep + audit cross-check + UI debugging panel.
-
-8. **Extend `audit_ib_fill_tape.py`** to flag any `Sell Short` / `Buy to Cover` IB transaction without a matching `order_queue` entry.
-
-### Operator actions taken tonight (defensive, before fix lands)
-
-- ✅ Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile that had accumulated).
-- ✅ Set market BUY 17 STX order for tomorrow's open to cover the unwanted short.
-
-### Tests required for v19.34.5
-
-- `test_v19_34_5_bracket_tif_intraday_gets_day.py` — bracket builder produces DAY TIF for intraday trades.
-- `test_v19_34_5_bracket_tif_swing_gets_gtc.py` — bracket builder produces GTC TIF + outside_rth=true for swing trades.
-- `test_v19_34_5_bracket_tif_position_gets_gtc.py` — same for position/investment.
-- `test_v19_34_5_eod_flatten_skips_swing.py` — EOD flatten leaves swing rows alone.
-- `test_v19_34_5_eod_flatten_cancels_orders.py` — EOD flatten cancels open orders before market close on intraday rows.
-- `test_v19_34_5_boot_sweep_keeps_swing_gtc.py` — boot zombie sweep does NOT cancel valid swing GTC brackets.
-- `test_v19_34_5_boot_sweep_cancels_orphan_legs.py` — boot zombie sweep DOES cancel post-close orphan legs.
-- `test_v19_34_5_pre_exec_sanity_gate.py` — order submission aborts when Mongo precursor write fails.
-
-### Tomorrow morning before market open
-
-- Ship v19.34.5 with all of the above. Save-to-GitHub, pull on Spark, restart backend BEFORE 9:30 AM ET.
-- Manual smoke test at 9:35 AM ET: run today's audit script after first 5 minutes of activity. Cross-check should show ZERO unaccounted IB fills.
-- Verify boot zombie sweep emitted CRITICAL warnings for any leftover orders the manual TC2000 cancel missed.
+Expected for an intraday trade: stop+target both `TIF=DAY`, `outside_rth=False`. **If you see GTC or outside_rth=True on an intraday row → fix didn't deploy correctly, restart backend.**
 
 
 ## 🔴 Now / Near-term (other carry-over)

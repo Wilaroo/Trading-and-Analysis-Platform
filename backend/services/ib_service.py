@@ -525,6 +525,15 @@ class IBWorkerThread(threading.Thread):
             tif = (params.get("time_in_force") or "DAY").upper()
             oca_group = params.get("oca_group") or f"oca_{symbol}_{uuid.uuid4().hex[:8]}"
 
+            # v19.34.5 — classification-aware TIF for stop/target legs.
+            # Caller may pass `trade_style` and `timeframe`; if absent we
+            # consult bracket_tif() which defaults intraday-by-default.
+            from services.bracket_tif import bracket_tif as _bracket_tif
+            _legs_tif, _legs_outside_rth = _bracket_tif(
+                params.get("trade_style"),
+                params.get("timeframe"),
+            )
+
             # Validation — bracket is atomic; require the full triple
             if not symbol or action not in ("BUY", "SELL") or quantity <= 0:
                 return IBResponse(success=False, error="Invalid symbol/action/quantity")
@@ -578,11 +587,11 @@ class IBWorkerThread(threading.Thread):
                 orderType="STP",
                 auxPrice=float(stop_price),
                 parentId=parent_oid,
-                tif="GTC",
+                tif=_legs_tif,
                 ocaGroup=oca_group,
                 ocaType=1,  # 1 = cancel on fill with block
                 transmit=False,
-                outsideRth=True,
+                outsideRth=_legs_outside_rth,
             )
             target = Order(
                 orderId=target_oid,
@@ -591,11 +600,11 @@ class IBWorkerThread(threading.Thread):
                 orderType="LMT",
                 lmtPrice=float(target_price),
                 parentId=parent_oid,
-                tif="GTC",
+                tif=_legs_tif,
                 ocaGroup=oca_group,
                 ocaType=1,
                 transmit=True,  # atomic commit — activates all 3
-                outsideRth=True,
+                outsideRth=_legs_outside_rth,
             )
 
             # Submit all 3 through ib_insync. Order matters:

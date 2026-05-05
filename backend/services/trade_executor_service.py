@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Any
 from enum import Enum
 
+from services.bracket_tif import bracket_tif
+
 logger = logging.getLogger(__name__)
 
 # Alpaca configuration
@@ -544,6 +546,17 @@ class TradeExecutorService:
                 return {"success": False,
                         "error": "bracket_missing_stop_or_target", "fallback": "legacy"}
 
+            # v19.34.5 — classification-aware TIF for stop/target legs.
+            # Intraday/scalp trades get DAY TIF (legs die at EOD with the parent),
+            # swing/multi-day/position trades get GTC + outside_rth=True (must
+            # survive overnight to provide stop protection). See
+            # services/bracket_tif.py for the full decision tree and the bug
+            # this fixes (forensic write-up in CHANGELOG 2026-05-04 EVE).
+            _bracket_leg_tif, _bracket_leg_outside_rth = bracket_tif(
+                getattr(trade, "trade_style", None),
+                getattr(trade, "timeframe", None),
+            )
+
             payload = {
                 "type": "bracket",
                 "trade_id": trade.id,
@@ -561,16 +574,16 @@ class TradeExecutorService:
                     "quantity": trade.shares,
                     "order_type": "STP",
                     "stop_price": float(trade.stop_price),
-                    "time_in_force": "GTC",
-                    "outside_rth": True,
+                    "time_in_force": _bracket_leg_tif,
+                    "outside_rth": _bracket_leg_outside_rth,
                 },
                 "target": {
                     "action": child_action,
                     "quantity": trade.shares,
                     "order_type": "LMT",
                     "limit_price": float(target_price),
-                    "time_in_force": "GTC",
-                    "outside_rth": True,
+                    "time_in_force": _bracket_leg_tif,
+                    "outside_rth": _bracket_leg_outside_rth,
                 },
             }
 
