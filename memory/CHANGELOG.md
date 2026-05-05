@@ -2,6 +2,57 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-05 PM (ninetieth commit, v19.34.8) — Rejection cooldown + operator forensics from XLU 110-bracket loop
+
+Operator-driven forensic from the v19.34.7 verification dump:
+
+> XLU: **135 brackets / 0 bot_trades** in 95 min. 13:30-13:51 looked normal (~12 fills). 13:58 onward: **110 brackets, ALL rejected, ALL distinct trade_ids.** Same with UPS: 86 brackets, 7 fills, rest rejected.
+
+### Root cause double-stack
+
+1. **`starting_capital=$100k` mock value** was still in `risk_params.starting_capital` despite the operator's real DGX paper account being materially larger. The bot computed `max_daily_loss_usd = 1% × $100k = $1000` and tripped the cap very early. After that, every bot eval generated a structural rejection.
+2. **NO rejection cooldown** — the bot re-evaluated XLU's setup every 30-60s, generated a fresh `trade_id` with size pumped by current equity (so qty fluctuated 1845→922→463→277, well outside `OrderIntentDedup`'s 5% qty tolerance), and re-fired. Loop ran for 71 minutes accumulating 110 phantom rejections.
+
+### v19.34.8 fix #2 — rejection cooldown service
+
+New `services/rejection_cooldown_service.py` (singleton, thread-safe). `is_structural_rejection(reason)` classifier separates `(max_daily_loss, kill_switch, max_positions, max_position_pct, max_total_exposure, max_symbol_exposure, buying_power, exposure_cap, capital_insufficient)` from transient (`stale_quote, intent_already_pending, execution_exception, guardrail_veto`). `mark_rejection(sym, setup, reason)` records + extends the cooldown window on repeat rejections; `is_in_cooldown` is the gate check; `clear_cooldown` / `clear_all` are operator overrides. Default cooldown = 300s (`REJECTION_COOLDOWN_SECONDS` env).
+
+### Wired into `trade_execution.execute_trade`
+
+1. **TOP of execute_trade** (after strategy-phase, before guardrails): `is_in_cooldown(symbol, setup_type)` → if True, abort with `TradeStatus.VETOED + close_reason="rejection_cooldown_active"`.
+2. **Broker rejection branch**: on `TradeStatus.REJECTED`, call `mark_rejection`. Classifier filters out transient.
+3. **Guardrail veto branch**: also calls `mark_rejection`. Catches structural rejections at the guardrail layer.
+
+### Operator endpoints
+
+- `GET  /api/trading-bot/rejection-cooldowns` — list active + stats
+- `POST /api/trading-bot/clear-rejection-cooldown` — `{symbol, setup_type}` for one or `{clear_all: true}` for nuke-all
+
+### Tests — 40 new pytests
+
+`tests/test_rejection_cooldown_v19_34_8.py` — 15 classifier cases + 6 round-trip + 2 auto-expiry + 3 manual clear + 3 stats/list + 1 env config + 4 endpoints + 6 edge cases.
+
+**173/173 cumulative tests passing across v19.34.4 → v19.34.8** — zero regressions.
+
+### Live smoke tests
+
+- `GET /api/trading-bot/rejection-cooldowns` → `{success: true, active_cooldowns: 0, default_cooldown_seconds: 300}` ✅
+- `POST /api/trading-bot/clear-rejection-cooldown` no args → `400 Either {symbol, setup_type} OR {clear_all: true} required` ✅
+- Backend boots clean with all v19.34.8 code loaded ✅
+
+### Files touched
+
+- **Added**: `services/rejection_cooldown_service.py` (250 lines), `tests/test_rejection_cooldown_v19_34_8.py` (40 tests)
+- **Modified**: `services/trade_execution.py` (+72 lines for cooldown gate + mark calls in 3 places), `routers/trading_bot.py` (+76 lines for 2 endpoints)
+
+### Operator action item (P0-1, NOT yet shipped as code)
+
+**Operator hits `POST /api/trading-bot/refresh-account` on Spark** to pull live IB equity into `risk_params.starting_capital`. This unsticks the rejection wall by allowing the bot's daily-loss cap to compute correctly against the real account size. **Pending operator confirmation.** Future hardening: v19.34.9 boot-time auto-refresh so this never silently drifts again.
+
+### Pending investigation (P1)
+
+UPS gap_fade trade closed 31s after open via `oca_closed_externally_v19_31`. Deferred until rejection cooldown stabilizes the firing pattern.
+
 ## 2026-05-05 PM (eighty-ninth commit, v19.34.7) — Bracket re-issue service (kills the duplicate-OCA + over-protected-stop class of bug)
 
 Operator-driven architectural fix surfaced during the v19.34.6 verification of this morning's bracket TIF. Forensic data showed XLU fired **6 brackets in 4 minutes** on the same symbol — likely a mix of intent-dedup misses + scale-in attempts — leading to overlapping OCA stacks at IB. The bot's existing scale-out path also doesn't update the original OCA's stop quantity after a partial exit, leaving the stop sized for the FULL position. If the stop fires after a partial exit, IB takes the position to a NEGATIVE qty (unintended SHORT). 2026-05-04 STX -17sh phantom was caused by this exact pattern.

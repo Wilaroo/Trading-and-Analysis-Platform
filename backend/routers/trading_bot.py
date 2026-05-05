@@ -748,6 +748,74 @@ async def reissue_bracket(payload: Dict[str, Any]):
         }
 
 
+# ─── v19.34.8 — Rejection cooldown operator endpoints ─────────────────
+@router.get("/rejection-cooldowns")
+async def list_rejection_cooldowns():
+    """List every active `(symbol, setup_type)` rejection cooldown.
+
+    Operator inspection endpoint added after the 2026-05-05 XLU/UPS
+    forensic showed 110+ rejected brackets in 71min on the same setup.
+    Returns `{success, cooldowns: [...], stats: {...}}`.
+    """
+    try:
+        from services.rejection_cooldown_service import get_rejection_cooldown
+        rc = get_rejection_cooldown()
+        return {
+            "success": True,
+            "cooldowns": rc.list_active(),
+            "stats": rc.stats(),
+        }
+    except Exception as e:
+        logger.error(f"list_rejection_cooldowns error: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "cooldowns": [], "stats": {}}
+
+
+@router.post("/clear-rejection-cooldown")
+async def clear_rejection_cooldown(payload: Optional[Dict[str, Any]] = None):
+    """Manually clear a rejection cooldown.
+
+    Body:
+      {
+        "symbol":     "XLU"  | null,    // omit + clear_all=true to nuke
+        "setup_type": "orb"  | null,    // omit + clear_all=true to nuke
+        "clear_all":  false              // require explicit opt-in
+      }
+
+    Returns `{success, cleared: <bool|int>, ...}`.
+    """
+    payload = payload or {}
+    try:
+        from services.rejection_cooldown_service import get_rejection_cooldown
+        rc = get_rejection_cooldown()
+
+        if payload.get("clear_all") is True:
+            n = rc.clear_all()
+            logger.warning(
+                "[v19.34.8] operator cleared ALL rejection cooldowns (n=%d)", n,
+            )
+            return {"success": True, "cleared_all": True, "cleared_count": n}
+
+        symbol = payload.get("symbol")
+        setup_type = payload.get("setup_type")
+        if not symbol or not setup_type:
+            raise HTTPException(
+                status_code=400,
+                detail="Either {symbol, setup_type} OR {clear_all: true} required",
+            )
+        cleared = rc.clear_cooldown(symbol, setup_type)
+        return {
+            "success": True,
+            "cleared": cleared,
+            "symbol": str(symbol).upper(),
+            "setup_type": str(setup_type).lower(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"clear_rejection_cooldown error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into

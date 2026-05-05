@@ -27,6 +27,20 @@ Open priorities, deferred ideas, and backlog. Move items to
 6. **`POST /api/trading-bot/eod-validate-overnight-orders`** — runtime sweep of GTC/`outside_rth=true` orphans + wrong-TIF rows; two-step confirm. (Item g.)
 7. **`POST /api/trading-bot/cancel-orders-for-symbol`** — EOD pre-cancel guard for one-symbol flatten race. (Item f.)
 
+### ✅ v19.34.8 shipped (rejection cooldown — kills the 110-bracket loop class of bug)
+
+1. **`services/rejection_cooldown_service.py`** — per-`(symbol, setup_type)` cooldown after structural rejections (capital, kill-switch, exposure caps, buying-power). Default 5 min, configurable via `REJECTION_COOLDOWN_SECONDS`. 40 new tests.
+2. **`trade_execution.execute_trade`** — gate at top + mark on rejection + mark on guardrail veto. Three integration points cover broker-side AND bot-side rejection paths.
+3. **Operator endpoints** — `GET /api/trading-bot/rejection-cooldowns`, `POST /api/trading-bot/clear-rejection-cooldown`.
+
+### 🟡 Remaining v19.34.8 / v19.34.9 items
+
+1. **Boot-time `starting_capital` auto-refresh** — currently operator manually hits `POST /api/trading-bot/refresh-account`. Move into `TradingBotService.start()` so the bot never silently drifts onto the $100k mock value again. Ship as v19.34.9.
+2. **UPS `oca_closed_externally_v19_31` 31-sec close investigation** — deferred until v19.34.8 + refresh-account stabilize the pattern.
+3. **V5 dashboard "Bracket History" tab** — see v19.34.7 backlog #1.
+4. **Scale-IN code path** — see v19.34.7 backlog #2.
+5. **Bracket TIF promotion auto-detect** — see v19.34.7 backlog #3.
+
 ### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
 
 1. **Bracket re-issue service** (`services/bracket_reissue_service.py`) — unified cancel-old + recompute + submit-new OCA pair. Auto-wired into scale-out path. Operator endpoint `POST /api/trading-bot/reissue-bracket` for manual + future scale-in. 19 + 8 = 27 new tests.

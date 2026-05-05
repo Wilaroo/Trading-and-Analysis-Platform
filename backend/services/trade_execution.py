@@ -169,6 +169,70 @@ class TradeExecution:
                         type(e).__name__, e, exc_info=True,
                     )
 
+            # === v19.34.8 REJECTION-COOLDOWN GATE ===
+            # Operator-driven (2026-05-05 PM): after the XLU/UPS forensic
+            # showed 110+ rejected brackets in 71 min on the same setup
+            # (caused by structural rejections re-firing every 30s), we
+            # short-circuit any (symbol, setup_type) that just got
+            # structurally rejected. Cooldown defaults to 5 min and
+            # extends on repeat rejections within the window.
+            try:
+                from services.rejection_cooldown_service import get_rejection_cooldown
+                _cooldown = get_rejection_cooldown().is_in_cooldown(
+                    symbol=trade.symbol,
+                    setup_type=getattr(trade, "setup_type", None) or "unknown",
+                )
+                if _cooldown is not None:
+                    logger.warning(
+                        "🧊 [v19.34.8 REJECTION-COOLDOWN] Skipping %s/%s — "
+                        "in cooldown (rejection #%d, reason=%s, %ds left). "
+                        "Cooldown started at %s.",
+                        trade.symbol, _cooldown.setup_type,
+                        _cooldown.rejection_count, _cooldown.reason,
+                        int(_cooldown.remaining_seconds()),
+                        _cooldown.started_at.isoformat(),
+                    )
+                    trade.status = TradeStatus.VETOED
+                    trade.notes = (
+                        (trade.notes or "")
+                        + f" [REJECTION-COOLDOWN: {_cooldown.reason} "
+                        f"({int(_cooldown.remaining_seconds())}s left)]"
+                    )
+                    trade.close_reason = "rejection_cooldown_active"
+                    if trade.id in bot._pending_trades:
+                        del bot._pending_trades[trade.id]
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="rejection_cooldown",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=(
+                                trade.direction.value if hasattr(trade.direction, "value")
+                                else str(trade.direction)
+                            ),
+                            reason=f"cooldown_active_{_cooldown.reason}",
+                            context={
+                                "trade_id": trade.id,
+                                "cooldown_started_at": _cooldown.started_at.isoformat(),
+                                "cooldown_expires_at": _cooldown.expires_at.isoformat(),
+                                "rejection_count": _cooldown.rejection_count,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    await bot._save_trade(trade)
+                    return
+            except Exception as e:
+                # Fail-OPEN on cooldown infrastructure failure — better
+                # to allow than to silently block all trading on a bug
+                # in the cooldown service.
+                logger.warning(
+                    "Rejection cooldown check failed (allowing trade) (%s): %s",
+                    type(e).__name__, e,
+                )
+
             # === PRE-EXECUTION GUARD RAILS (2026-04-21) ===
             # Block pathologically tight stops and oversized positions BEFORE
             # any order hits the broker. See services/execution_guardrails.py
@@ -176,7 +240,6 @@ class TradeExecution:
             # motivated these (USO $0.03 stop on a $108 stock = -261R bleed).
             try:
                 from services.execution_guardrails import run_all_guardrails
-
                 # Best-effort ATR lookup — fall back to None if unavailable
                 atr_14 = getattr(trade, "atr_14", None)
                 if atr_14 is None and hasattr(bot, "_atr_cache"):
@@ -204,6 +267,18 @@ class TradeExecution:
                     trade.status = TradeStatus.VETOED
                     trade.notes = (trade.notes or "") + f" [GUARDRAIL: {veto.reason}]"
                     trade.close_reason = "guardrail_veto"
+                    # v19.34.8 — guardrail vetoes that are structural in
+                    # nature (capital, exposure, etc.) feed the cooldown.
+                    # Transient vetoes (stop-too-tight, etc.) do NOT.
+                    try:
+                        from services.rejection_cooldown_service import get_rejection_cooldown
+                        get_rejection_cooldown().mark_rejection(
+                            symbol=trade.symbol,
+                            setup_type=getattr(trade, "setup_type", None) or "unknown",
+                            reason=str(veto.reason),
+                        )
+                    except Exception:
+                        pass
                     if trade.id in bot._pending_trades:
                         del bot._pending_trades[trade.id]
                     try:
@@ -593,6 +668,20 @@ class TradeExecution:
                     )
                 except Exception:
                     pass
+                # v19.34.8 (2026-05-05 PM) — Mark structural rejections so
+                # the next eval of the same (symbol, setup_type) is short-
+                # circuited at the cooldown gate (see top of execute_trade).
+                # Operator-driven after XLU 110-bracket loop forensic.
+                try:
+                    from services.rejection_cooldown_service import get_rejection_cooldown
+                    _reason = str(result.get("error") or result.get("status") or "unknown")
+                    get_rejection_cooldown().mark_rejection(
+                        symbol=trade.symbol,
+                        setup_type=getattr(trade, "setup_type", None) or "unknown",
+                        reason=_reason,
+                    )
+                except Exception as _cd_err:
+                    logger.debug(f"rejection_cooldown.mark_rejection failed: {_cd_err}")
                 # ──────────────────────────────────────────────────────
                 # Forensic instrumentation (2026-04-30) — root-cause of
                 # the April 16 silent regression. The legacy code path
