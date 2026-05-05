@@ -2,6 +2,59 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-05 PM (ninety-first commit, v19.34.9) — Refresh-account persistence fix (operator-blocked → unblocked)
+
+Operator hit `/api/trading-bot/refresh-account` on Spark and got the textbook write-but-don't-stick bug:
+
+```
+BEFORE: starting_capital=100000.0  max_daily_loss_usd=1000.0
+Refresh: success=true, old=$236487.27, new=$236487.27, delta=$0
+AFTER:  starting_capital=100000.0  max_daily_loss_usd=1000.0  ← STILL STALE
+```
+
+Two-source mismatch confirmed:
+- **In-memory** `_trading_bot.risk_params.starting_capital` = `$236,487.27` (correct, pulled from IB)
+- **Mongo** `bot_state.risk_params.starting_capital` = `$100,000.00` (stale, never written by refresh-account)
+- `effective-limits` (and any other reader of `risk_caps_service`) reads from Mongo → operator's view stuck on $1k daily-loss cap.
+
+### Fix (3 parts)
+
+1. **`refresh-account` now `await bot._save_state()`** after the in-memory update. This is the canonical persist path — writes the entire risk_params block to Mongo `bot_state` with `_id="bot_state"`. Save failure does NOT block the response (next manage-loop save will retry).
+
+2. **`refresh-account` also recomputes `max_daily_loss`** (USD absolute) from `new_starting_capital × max_daily_loss_pct / 100`. Without this, `bot.risk_params.max_daily_loss` would stay at whatever was loaded last (often $0 or stale $1k), and the bot's gate at `trading_bot_service.py:2536` wouldn't bind correctly even after refresh.
+
+3. **`risk_caps_service._read_bot_risk_params` adds explicit `_id="bot_state"` filter** with fallback to `find_one({})` — guards against legacy `_id="main"` docs that might accidentally win the natural-order race.
+
+### New response field
+
+`refresh-account` now also returns `persisted_to_mongo: true` and `max_daily_loss_usd_recomputed: <float>` so the operator can verify both writes happened in the same response.
+
+### Tests — 6 new pytests
+
+| File | Tests |
+|------|-------|
+| `tests/test_refresh_account_persistence_v19_34_9.py` | 6 — `_save_state` is awaited, `max_daily_loss` recomputed, save-failure-no-block (defensive), explicit `_id="bot_state"` filter wins, fallback to `{}` when canonical missing, empty/None defensive |
+
+**185/185 cumulative tests passing across v19.34.4 → v19.34.9** — zero regressions.
+
+### Files touched
+
+- **Modified**: `routers/trading_bot.py` (refresh_account: +20 lines for `_save_state` + `max_daily_loss` recompute), `services/risk_caps_service.py` (+8 lines for explicit `_id` filter + fallback)
+- **Added**: `tests/test_refresh_account_persistence_v19_34_9.py` (6 tests)
+
+### Operator action item — re-run refresh-account
+
+After pulling v19.34.9 + restarting, the operator's same curl from earlier now WILL stick. Expected output post-fix:
+
+```
+BEFORE: starting_capital=100000.0  max_daily_loss_usd=1000.0
+Refresh: success=true, old=$100000.0, new=$236487.27, delta=$136487.27,
+         max_daily_loss_usd_recomputed=$2364.87, persisted_to_mongo=true
+AFTER:  starting_capital=236487.27  max_daily_loss_usd=2364.87
+```
+
+Note: `delta` will now show the actual jump (was $0 because `old` and `new` were both reading in-memory; now `old` reads in-memory pre-call, `new` is the IB pull, and Mongo gets persisted at the end — all three line up).
+
 ## 2026-05-05 PM (ninetieth commit, v19.34.8) — Rejection cooldown + operator forensics from XLU 110-bracket loop
 
 Operator-driven forensic from the v19.34.7 verification dump:

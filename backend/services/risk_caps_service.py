@@ -79,7 +79,19 @@ def _read_bot_risk_params(db) -> Dict[str, Any]:
     if db is None:
         return {}
     try:
-        state = db["bot_state"].find_one({}, {"_id": 0, "risk_params": 1})
+        # 2026-05-05 v19.34.9 — explicit `_id="bot_state"` filter to
+        # guard against stale alternative docs (e.g. legacy `_id="main"`)
+        # that may have been written by older bot versions and then
+        # become the first match for `find_one({})` when sorted by Mongo
+        # natural order. Operator surfaced this as the root cause of
+        # `refresh-account` reporting success but `effective-limits`
+        # showing stale $100k starting_capital.
+        state = db["bot_state"].find_one(
+            {"_id": "bot_state"}, {"_id": 0, "risk_params": 1},
+        )
+        if not state:
+            # Fallback: any doc — covers legacy schemas
+            state = db["bot_state"].find_one({}, {"_id": 0, "risk_params": 1})
         return (state or {}).get("risk_params") or {}
     except Exception:
         return {}

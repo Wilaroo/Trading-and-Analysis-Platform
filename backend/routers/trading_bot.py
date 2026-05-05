@@ -859,6 +859,35 @@ async def refresh_account():
 
         old_capital = float(_trading_bot.risk_params.starting_capital or 0)
         _trading_bot.risk_params.starting_capital = float(net_liq)
+        # v19.34.9 (2026-05-05 PM) — also recompute the absolute USD
+        # daily-loss cap from the new starting_capital. Without this,
+        # `max_daily_loss` stays at whatever it was on previous bootup
+        # (often $0 or stale) and the bot's gate at line 2536 of
+        # trading_bot_service.py won't bind correctly.
+        try:
+            _trading_bot.risk_params.max_daily_loss = (
+                float(net_liq) * float(_trading_bot.risk_params.max_daily_loss_pct or 0) / 100.0
+            )
+        except Exception:
+            pass
+        # v19.34.9 — CRITICAL: persist to Mongo `bot_state` so the
+        # `risk_caps_service.compute_effective_risk_caps` reader (and
+        # any other Mongo-driven consumer) sees the new value. Operator
+        # surfaced this 2026-05-05 PM: refresh-account reported success
+        # but `effective-limits` kept showing the stale $100k value
+        # because risk_caps_service reads from Mongo while refresh
+        # was only updating in-memory.
+        try:
+            await _trading_bot._save_state()
+            logger.info(
+                "💾 [v19.34.9] refresh-account persisted starting_capital="
+                f"${net_liq:,.0f} to Mongo bot_state"
+            )
+        except Exception as _save_err:
+            logger.warning(
+                f"refresh-account save_state failed (in-memory updated, "
+                f"Mongo NOT updated — re-run on next manage-loop save): {_save_err}"
+            )
         logger.info(
             f"💰 Manual refresh: starting_capital ${old_capital:,.0f} → ${net_liq:,.0f}"
         )
@@ -867,6 +896,8 @@ async def refresh_account():
             "old_starting_capital": old_capital,
             "new_starting_capital": float(net_liq),
             "delta": float(net_liq) - old_capital,
+            "max_daily_loss_usd_recomputed": float(_trading_bot.risk_params.max_daily_loss),
+            "persisted_to_mongo": True,
             "source": "rpc" if not (_pushed_ib_data or {}).get("account_seeded_by_push") else "push",
         }
     except Exception as e:
