@@ -1320,12 +1320,29 @@ async def share_drift_status(symbols: Optional[str] = None) -> Dict[str, Any]:
     for sym in sorted(universe):
         trades = by_sym.get(sym, [])
         bot_qty_signed = 0
+        # v19.34.18b — capture raw per-trade detail so the endpoint can
+        # diagnose direction/remaining_shares mismatches between this
+        # endpoint and the reconciler. Mirror reconciler logic at
+        # `position_reconciler.py:1209-1212` exactly.
+        trade_detail = []
         for t in trades:
-            sh = int(abs(getattr(t, "remaining_shares", 0) or 0))
-            direction = (getattr(t, "direction", None))
-            dir_val = getattr(direction, "value", None) or str(direction or "").lower()
-            sign = 1 if dir_val == "long" else (-1 if dir_val == "short" else 0)
-            bot_qty_signed += sign * sh
+            rs = float(getattr(t, "remaining_shares", 0) or 0)
+            d = getattr(t, "direction", None)
+            d_val = getattr(d, "value", str(d) if d else "long").lower()
+            signed = rs if d_val == "long" else (-rs if d_val == "short" else 0)
+            bot_qty_signed += signed
+            trade_detail.append({
+                "trade_id": getattr(t, "id", None),
+                "status": str(getattr(t, "status", None) or ""),
+                "direction_raw": str(d),
+                "direction_val": d_val,
+                "remaining_shares": int(rs),
+                "original_shares": int(getattr(t, "original_shares", 0) or getattr(t, "shares", 0) or 0),
+                "fill_price": float(getattr(t, "fill_price", 0) or 0),
+                "entered_by": str(getattr(t, "entered_by", "") or ""),
+                "trade_style": str(getattr(t, "trade_style", "") or ""),
+                "signed_contribution": signed,
+            })
 
         ib_pos = ib_positions.get(sym) or {}
         # Production IB pushers vary on key name: `position` (most common),
@@ -1337,20 +1354,20 @@ async def share_drift_status(symbols: Optional[str] = None) -> Dict[str, Any]:
             or ib_pos.get("size")
             or 0
         )
-        drift = ib_qty_signed - bot_qty_signed
-        would_act = abs(drift) > 1
 
         per_symbol.append({
             "symbol": sym,
-            "bot_qty_signed": bot_qty_signed,
+            "bot_qty_signed": int(bot_qty_signed),
             "ib_qty_signed": ib_qty_signed,
-            "drift": drift,
-            "drift_abs": abs(drift),
-            "would_act": would_act,
+            "drift": int(ib_qty_signed - bot_qty_signed),
+            "drift_abs": int(abs(ib_qty_signed - bot_qty_signed)),
+            "would_act": bool(abs(ib_qty_signed - bot_qty_signed) > 1),
             "tracked_trades": len(trades),
+            "trade_detail": trade_detail,
+            "ib_pos_keys": list(ib_pos.keys()),
             "verdict": (
-                "drift_detected" if would_act else
-                "in_sync" if abs(drift) <= 1 else "untracked"
+                "drift_detected" if abs(ib_qty_signed - bot_qty_signed) > 1 else
+                "in_sync"
             ),
         })
 
