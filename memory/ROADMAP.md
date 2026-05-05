@@ -4,37 +4,52 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 Now / Near-term (next session pickup — 2026-05-04 v19.34.4)
+## 🚨 P0 — TOP OF NEXT SESSION (the GTC zombie bug)
+
+**Discovered 2026-05-04 EVE during forensic audit. Single root cause for ~25% of today's accounting drift, multi-week phantom accumulation, and the unwanted -17 STX short.** Full forensic write-up in `CHANGELOG.md` 2026-05-04 EVE entry.
+
+### The bug in one line
+Every bracket order's stop+target legs are placed `time_in_force: GTC` (Good-Til-Cancel forever). They survive EOD/restarts/weekends, sit alive at IB indefinitely, and randomly fire when price touches their levels — creating "Sell Short" / "Buy to Cover" transactions the bot didn't intend and doesn't track.
+
+### The 5-line fix + 4 supporting fixes
+
+1. **Flip `time_in_force: "GTC"` → `"DAY"` on stop+target legs in the bracket builder.** This single change prevents the entire bug class going forward. Find via:
+   ```bash
+   grep -rn "time_in_force.*GTC\|'GTC'" backend/services/ | grep -i "stop\|target\|bracket"
+   ```
+2. **EOD flatten must `cancelAllOrders(symbol)` BEFORE the market close-order fires.** Belt-and-suspenders against any GTC orders left from prior code paths.
+3. **Boot-time zombie sweep**: in `auto_reconcile_at_boot`, enumerate ALL IB open orders. For any order whose parent `bot_trades` row is `status=closed`, cancel it. Emit CRITICAL stream warning per cancelled zombie. Adds a "weekly zombie cleanup" event.
+4. **Pre-execution sanity gate**: before the executor submits ANY order to IB, write a `bot_trades` row with `status='pending'`. Only update to `executed` after IB confirms fill. Eliminates the "IB fill but no Mongo row" class of bug entirely (today's STX short, FDX/LHX/V/SBUX/BP/WDC mismatches).
+5. **Add `GET /api/ib/orders` endpoint** that returns IB's actual open-order list (404'd tonight; needed for the boot zombie sweep + audit cross-check).
+6. **Extend `audit_ib_fill_tape.py`** to flag any `Sell Short` / `Buy to Cover` IB transaction without a matching bot `order_id` in `order_queue`.
+
+### Operator actions already taken tonight
+
+- ✅ Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile that had accumulated).
+- ✅ Set market BUY 17 STX order for tomorrow's open to cover the unwanted short.
+
+### Tomorrow morning before market open
+
+- Write `tests/test_v19_34_5_gtc_to_day_bracket.py` covering the bracket builder change.
+- Write `tests/test_v19_34_5_eod_flatten_cancels_orders.py` covering the EOD pre-cancel.
+- Write `tests/test_v19_34_5_boot_zombie_sweep.py` covering the startup cleanup.
+- Ship v19.34.5 with all of the above. Save-to-GitHub, pull on Spark, restart backend BEFORE 9:30 AM ET.
+- Manual smoke test at 9:35 AM ET: run today's audit script after first 5 minutes of activity. Cross-check should show ZERO unaccounted IB fills.
+
+
+## 🔴 Now / Near-term (other carry-over)
 
 ### 🎯 Just shipped 2026-05-04 v19.34.4 — see CHANGELOG (eighty-fifth commit)
 **IB fill-tape auditor + Spark Mongo cross-check + 2026-05-04 audit run.**
 
 - ✅ `backend/scripts/audit_ib_fill_tape.py` — TWS-paste parser + FIFO PnL + verdict classifier (`CARRYOVER_FLATTENED` / `OPEN_POSITION_LONG` / `MULTI_LEG_*` / `INVERSION_SHORT_COVER` / `CLEAN_ROUND_TRIP`).
-- ✅ `backend/scripts/export_bot_trades_for_audit.py` — Spark Mongo export (today's `bot_trades` rows with full v19.34.3 provenance fields).
+- ✅ `backend/scripts/export_bot_trades_for_audit.py` — Spark Mongo export with ISO-string + datetime hybrid query, `--status` flag (default closed,open) for filtering rejected/vetoed evaluation noise.
 - ✅ `memory/runbooks/audit_ib_fill_tape.md` — 5-phase operator runbook.
-- ✅ 2026-05-04 audit complete: **328 fills / 21 symbols / -$14,560 net** PAPER day. Single residual `STX -17sh` flagged as carryover.
+- ✅ 2026-05-04 audit complete: **328 fills / 21 symbols / -$14,560 net** PAPER day. Single residual `STX -17sh` flagged as carryover — now traced to GTC zombie order bug above.
 - ✅ **15/15 new pytests passing**, **256/256 cumulative across all v19.x suites**.
 
-### 🔴 P0 — Top of next session (operator-driven, requires Spark access)
-
-**Step 1 — Spark cross-check the 2026-05-04 audit:**
-```bash
-cd ~/Trading-and-Analysis-Platform/backend
-python -m scripts.export_bot_trades_for_audit --date 2026-05-04 --out /tmp/bt_2026_05_04.json
-python -m scripts.audit_ib_fill_tape \
-    --input ../memory/audit/2026-05-04_ib_fill_tape.txt \
-    --bot-trades-json /tmp/bt_2026_05_04.json \
-    --out /tmp/audit_2026_05_04_with_xcheck.md
-```
-- **Investigate the STX -17sh carryover** — confirm via `/api/diagnostics/orphan-origin/STX?days=7` whether the bot ever owned those 17 shares or they were a manual click / prior session that the morning reset didn't close.
-- **VALE confirmation** — the audit flags VALE as `MULTI_LEG_LONG` with -$1,528 realized; verify v19.34.3's `prior_verdict_conflict` flag on the matching `bot_trades` row (operator's previous bug).
-- **Spot-check fragmentation** on BKNG (87 fills) and V (46 fills) — confirm bot has 1 row per parent order, not 1 row per venue child fill.
-
 ### 🔴 P0 — MID_BAR_TICK_EVAL activation (carry-over from v19.34)
-Per `/app/memory/runbooks/midbar_tick_eval_activation.md`:
-1. `curl ${BACKEND_URL}/api/ib/quote-tick-bus/health` — confirm `enabled=true`, `publish_total > 0`, `drop_total ≈ 0` for 30 min during RTH.
-2. Flip `MID_BAR_TICK_EVAL_ENABLED=true` in `.env` and restart.
-3. Verify `[v19.34 MID-BAR TICK]` subscriber-spawn logs and `mid_bar_v19_34` close-reason stamping in Day Tape on next stop hit.
+Per `/app/memory/runbooks/midbar_tick_eval_activation.md`. Defer until GTC fix lands; no point activating mid-bar fires while zombie orders are still in play.
 
 ### 🔴 P0 — Carry-over verifications (still pending operator confirmation)
 
@@ -56,11 +71,11 @@ Per `/app/memory/runbooks/midbar_tick_eval_activation.md`:
 - `.bat` health screen probes pusher actually (carry-over).
 - Pusher auto-restart on Windows (carry-over).
 - Shadow-vs-Real gap drilldown (carry-over).
-- Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over).
+- Drift detector — CRITICAL stream when bot tracks <80% of IB shares (carry-over). **NOTE: would have caught the STX -17 today.**
 - Pusher honors `max_concurrent_workers` from `/api/ib-collector/throttle-policy`.
 
 ### 🟢 P2 / P3 (future evolution paths now unlocked by v19.34)
-- **Stop-distance journal → ML training data** (operator-suggested 2026-05-04) — pipe `tick_evaluated` annotations into `sentcom_thoughts` on every mid-bar eval. After a week, microsecond-resolution journal of every stop's distance-to-fire — perfect training data for a "predict stop-run probability before the wick fires" ML module.
+- **Stop-distance journal → ML training data** (operator-suggested 2026-05-04: pipe `tick_evaluated` annotations on every mid-bar eval, train classifier on `(distance, volatility, time-of-day, regime)` → `P(stop hit within next N seconds)`).
 - **Sub-bar trailing stops** — once mid-bar is proven safe.
 - **Mid-bar entry eval** — selectively front-run entries on high-conviction signals.
 - **L1 → L2 escalation** — request L2 depth via the tick bus for actively-evaluated symbols.

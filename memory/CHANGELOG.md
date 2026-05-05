@@ -2,6 +2,77 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-04 EVE (eighty-sixth commit, v19.34.4 forensic) — **CRITICAL: GTC zombie order discovery**
+
+**No code shipped — root-cause investigation finding.** The audit tooling shipped earlier in the day surfaced a deep, recurring bug while reconciling today's IB tape with `bot_trades`.
+
+### The discovery chain
+
+1. Operator's "Closed Today" panel showed 21 trades / -$14,560 net. IB tape showed 21 symbols × 21 different fill counts. 13 matched bot rows perfectly.
+2. **6 symbols had qty mismatches** (FDX, LHX, V early-morning churn, SBUX adds, BP adds, WDC, STX over-sell). I initially diagnosed as "operator manual trading" — operator firmly denied, said all trades came from the platform.
+3. After UI showed `STX SHORT ORPHAN 17sh STALE 240m`, dug into `/api/sentcom/positions`: confirmed real -17 STX short at IB with `source: ib`, `bot_tracked_shares: 0`, `unclaimed_shares: 17`.
+4. Backend log: 56 STX mentions, ZERO containing `sell|order|fill|short|fashion|fade|place`. Bot DID NOT submit the short order.
+5. Operator's IB Transaction History showed `Sell Short -17 @ $737.71` as a **distinct transaction type** from regular `Sell` — IB explicitly recognized it as opening a short position.
+6. **Root cause identified in `order_queue`**: every bracket order has `time_in_force: GTC` on the stop AND target legs (with `outside_rth: true`).
+
+### The bug
+
+Bot places brackets like:
+```json
+{
+  "parent": {"action": "BUY",  "quantity": 113, "time_in_force": "DAY"},
+  "stop":   {"action": "SELL", "quantity": 113, "time_in_force": "GTC", "outside_rth": true},
+  "target": {"action": "SELL", "quantity": 113, "time_in_force": "GTC", "outside_rth": true}
+}
+```
+
+`GTC` = Good-Til-Cancel forever. The stop and target SELL legs **survive end-of-day, weekends, and bot restarts**, sitting alive at IB until either filled or explicitly cancelled.
+
+EOD flatten fires a market SELL to close the position to 0, but **does not cancel the open GTC SELL legs first**. Later in the day (or even days later), price ticks through one of those orphaned GTC stops/targets and the SELL fires. Because the bot's position is already 0, IB classifies it as "Sell Short" — opening an unwanted short. The bot has no record of placing this order and no `bot_trades` row exists for it.
+
+This bug compounds: every day the bot trades adds more GTC SELL/BUY zombie legs at IB. After weeks of operation, dozens or hundreds of zombie orders accumulate, firing randomly when price touches their levels and creating phantom positions.
+
+### Symptoms this explains
+
+- 6 of the 21 symbol qty mismatches in today's audit (FDX, LHX, V early, SBUX adds, BP adds, WDC) — old GTC legs firing during today's session.
+- The recurring `phantom_v19_31_oca_closed_swept` close-reasons all day — phantom-sweep catching orphaned GTC fills.
+- 19 mystery symbols in `bot_trades` not in IB tape (NVD 15K sh, XLV 21K sh, IAU 11K sh, TMUS 7K sh, etc.) — accumulated phantom history from prior days' GTC legs.
+- The STX -17 short at end of day (a 17 sh GTC SELL leg fired at 3:57 PM after the EOD flatten took position to 0).
+- VALE -$1,528 + CRCL -$875 reconciler-adoption losses from this morning — possibly orphan IB positions left from prior days' GTC legs that the morning reconciler claimed.
+
+### Operator actions taken tonight (defensive)
+
+- Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile).
+- Set a market BUY 17 STX order for tomorrow's open to cover the unwanted short.
+
+### Tomorrow's P0 fixes (5-line change, massive impact)
+
+1. **Flip `time_in_force: "GTC"` → `"DAY"` on stop+target legs in the bracket builder.** Brackets die at EOD with the parent. Single change prevents the entire bug class.
+2. **EOD flatten cancels all open IB orders for the symbol BEFORE submitting the market close.** Belt-and-suspenders.
+3. **Boot-time zombie sweep**: enumerate all IB open orders, identify ones whose parent `bot_trades` row is `status=closed`, cancel them all, emit CRITICAL stream warning per cancelled zombie.
+4. **Pre-execution sanity gate**: before any executor submits an order, write `bot_trades` row with `status='pending'`. Only mark `executed` after IB confirms fill. Eliminates the "IB fill but no Mongo row" class of bug entirely.
+5. **Add `/api/ib/orders` endpoint** that returns IB's actual open-order list (404'd tonight).
+6. **Extend `audit_ib_fill_tape.py`** to flag any `Sell Short` / `Buy to Cover` IB transaction without a matching bot `order_id`.
+
+### Files of reference for tomorrow
+
+- `backend/services/order_queue.py` (likely where the bracket builder lives — find the `time_in_force: 'GTC'` literal and change to 'DAY')
+- `backend/services/position_manager.py` or `services/sentcom_service.py` (EOD flatten logic — add `cancelOpenOrders(symbol)` before market close)
+- `backend/services/trading_bot_service.py` (`auto_reconcile_at_boot` — add zombie-sweep step)
+- `backend/routers/ib.py` or similar (add `/api/ib/orders` endpoint)
+- `backend/scripts/audit_ib_fill_tape.py` (extend with order_queue cross-check)
+
+### What we know vs what's still TBD
+
+| Verified | Speculation |
+|---|---|
+| Bot brackets use GTC on stop+target | Whether 19 phantom-symbol rows in bot_trades all stem from GTC legs |
+| -17 STX short was a real "Sell Short" tx at IB | Whether VALE/CRCL morning orphans were prior-day GTC legs (likely) |
+| Bot log has zero record of placing 17 sh short | Whether TC2000 had dozens of zombie orders before manual cancel |
+| Cancelling all IB orders is a clean reset | Whether other accounts using bot have same accumulation |
+
+---
+
 ## 2026-05-04 (eighty-fifth commit, v19.34.4) — IB Fill-Tape Auditor + Spark Mongo cross-check + Operator findings report
 
 **Operator pasted the day's full IB execution tape (328 fills across 21 symbols) for audit against the bot's `bot_trades` collection.** Built a self-contained parser + audit pipeline so this becomes a one-command operation going forward.
