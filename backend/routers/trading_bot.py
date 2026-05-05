@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -1243,6 +1244,117 @@ async def force_state_resync(payload: Optional[Dict[str, Any]] = None):
     except Exception as e:
         logger.error(f"force-resync error: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+# ─── v19.34.18 — Share-drift loop diagnostic ────────────────────────
+@router.get("/share-drift-status")
+async def share_drift_status(symbols: Optional[str] = None) -> Dict[str, Any]:
+    """Read-only diagnostic for the v19.34.15b share-count drift loop.
+
+    Returns:
+      • loop_alive: is the background task running + heart-beating?
+      • diag: tick count, last_tick_at, last_tick_status, last_result_summary
+      • per_symbol: for each tracked symbol (or filtered), shows
+          { bot_qty, ib_qty, drift, would_act, threshold }
+        — pure read-only snapshot of what the loop would see right now.
+
+    Query: ?symbols=FDX,UPS to filter; omit for all tracked symbols.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+
+    # Loop liveness
+    task = getattr(_trading_bot, "_share_drift_task", None)
+    loop_alive = bool(task) and not (task.done() if task else True)
+    task_exception = None
+    if task and task.done():
+        try:
+            task_exception = repr(task.exception()) if task.exception() else None
+        except Exception:
+            task_exception = "could not read exception"
+
+    diag = getattr(_trading_bot, "_share_drift_diag", None) or {
+        "tick_count": 0, "last_tick_at": None, "last_tick_status": "never_ran",
+    }
+
+    # Per-symbol live snapshot — same data the loop would read.
+    from routers.ib import _pushed_ib_data, is_pusher_connected
+    pusher_connected = is_pusher_connected()
+    ib_positions = ((_pushed_ib_data or {}).get("positions") or {})
+
+    sym_filter = None
+    if symbols:
+        sym_filter = {s.strip().upper() for s in symbols.split(",") if s.strip()}
+
+    per_symbol: List[Dict[str, Any]] = []
+    open_trades = getattr(_trading_bot, "_open_trades", {}) or {}
+    by_sym: Dict[str, list] = {}
+    for t in open_trades.values():
+        s = (getattr(t, "symbol", None) or "").upper()
+        if not s:
+            continue
+        by_sym.setdefault(s, []).append(t)
+
+    universe = set(by_sym.keys())
+    # Also include IB-side symbols even if bot doesn't track (orphans).
+    for raw_sym in ib_positions.keys():
+        s = (raw_sym or "").upper()
+        if s:
+            universe.add(s)
+    if sym_filter:
+        universe = {s for s in universe if s in sym_filter}
+
+    for sym in sorted(universe):
+        trades = by_sym.get(sym, [])
+        bot_qty_signed = 0
+        for t in trades:
+            sh = int(abs(getattr(t, "remaining_shares", 0) or 0))
+            direction = (getattr(t, "direction", None))
+            dir_val = getattr(direction, "value", None) or str(direction or "").lower()
+            sign = 1 if dir_val == "long" else (-1 if dir_val == "short" else 0)
+            bot_qty_signed += sign * sh
+
+        ib_pos = ib_positions.get(sym) or {}
+        ib_qty_signed = int(ib_pos.get("position") or 0)
+        drift = ib_qty_signed - bot_qty_signed
+        would_act = abs(drift) > 1
+
+        per_symbol.append({
+            "symbol": sym,
+            "bot_qty_signed": bot_qty_signed,
+            "ib_qty_signed": ib_qty_signed,
+            "drift": drift,
+            "drift_abs": abs(drift),
+            "would_act": would_act,
+            "tracked_trades": len(trades),
+            "verdict": (
+                "drift_detected" if would_act else
+                "in_sync" if abs(drift) <= 1 else "untracked"
+            ),
+        })
+
+    return {
+        "success": True,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "loop": {
+            "alive": loop_alive,
+            "task_exception": task_exception,
+            "feature_flag": os.environ.get(
+                "SHARE_DRIFT_RECONCILE_ENABLED", "true"
+            ).lower() in ("true", "1", "yes", "on"),
+            "interval_s": int(os.environ.get("SHARE_DRIFT_RECONCILE_INTERVAL_S", "30") or 30),
+        },
+        "diag": diag,
+        "pusher_connected": pusher_connected,
+        "drift_threshold": 1,
+        "symbol_filter": sorted(sym_filter) if sym_filter else None,
+        "per_symbol": per_symbol,
+        "summary": {
+            "total_symbols": len(per_symbol),
+            "drift_detected_count": sum(1 for r in per_symbol if r["would_act"]),
+            "drift_symbols": [r["symbol"] for r in per_symbol if r["would_act"]],
+        },
+    }
 
 
 # ─── v19.34.15b — Share-count drift reconciler ──────────────────────

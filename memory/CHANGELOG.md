@@ -2,6 +2,60 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (one-hundredth commit, v19.34.18) — Drift loop diagnostic + read-only investigation
+
+**Severity: P1**. Operator caught 2026-05-06 EOD with 93sh FDX + 338sh
+UPS naked-share drift unmanaged by v19.34.15b's 24/7 drift loop.
+Plan: investigate **read-only** before any state-mutating reconcile.
+
+### What shipped
+
+**1. Drift-loop instrumentation** (`trading_bot_service.py:_share_drift_loop`):
+   - New `self._share_drift_diag` dict captures: `started_at`,
+     `interval_s`, `tick_count`, `last_tick_at`, `last_tick_status`
+     (`ok`/`exception`/`skipped_no_pusher`), `last_tick_error`,
+     `last_result_summary` (detected/resolved/skipped/errors),
+     `last_drifts_detected[:10]`, `last_drifts_resolved[:10]`,
+     `consecutive_failures`.
+   - Previously the loop swallowed exceptions silently with `logger.debug`
+     — explains why no one noticed it was missing FDX/UPS.
+
+**2. New `GET /api/trading-bot/share-drift-status` endpoint**:
+   - Returns `{loop, diag, per_symbol, summary}`.
+   - `loop.alive` flags task-done crashes; `task_exception` surfaces them.
+   - `per_symbol` shows live snapshot for every tracked symbol AND
+     orphan IB-only symbols: `{bot_qty_signed, ib_qty_signed, drift,
+     would_act, verdict}`. `verdict ∈ {drift_detected, in_sync, untracked}`.
+   - `?symbols=FDX,UPS` filters; omit for full universe.
+   - Pure read-only — no state mutation.
+
+### Investigation protocol (operator runs on DGX)
+
+```bash
+# Step 1: drift loop health
+curl http://localhost:8001/api/trading-bot/share-drift-status?symbols=FDX,UPS | jq
+
+# Step 2: dry-run what 15b WOULD do (already shipped in v19.34.15b)
+curl -X POST http://localhost:8001/api/trading-bot/reconcile-share-drift \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run": true}' | jq
+
+# Step 3 (only if dry-run looks correct): heal
+curl -X POST http://localhost:8001/api/trading-bot/reconcile-share-drift \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run": false, "auto_resolve": true}' | jq
+```
+
+### Tests
+`tests/test_share_drift_status_v19_34_18.py` — 6/6 passing:
+- Endpoint shape, drift detection (93/338), in-sync match, symbol
+  filter, dead-loop exception surfacing, orphan IB-only symbols.
+
+Cumulative v19.34.x: **107/107 passing.**
+
+---
+
+
 ## 2026-05-06 (ninety-ninth commit, v19.34.17) — EOD policy fix for orphan-reconciled positions
 
 **Severity: P0**. Operator caught 2026-05-06 EOD: SBUX (273sh short) /

@@ -2612,15 +2612,46 @@ class TradingBotService:
                 logger.info(
                     "[v19.34.15b DRIFT-LOOP] started, interval=%ss", interval_s,
                 )
+                # v19.34.18 — diagnostic state for `/share-drift-status`.
+                self._share_drift_diag = {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "interval_s": interval_s,
+                    "tick_count": 0,
+                    "last_tick_at": None,
+                    "last_tick_status": "pending",
+                    "last_tick_error": None,
+                    "last_result_summary": None,
+                    "last_drifts_detected": [],
+                    "last_drifts_resolved": [],
+                    "consecutive_failures": 0,
+                }
                 while self._running:
+                    tick_started = datetime.now(timezone.utc)
                     try:
                         from routers.ib import is_pusher_connected
-                        if is_pusher_connected():
+                        if not is_pusher_connected():
+                            self._share_drift_diag["last_tick_status"] = "skipped_no_pusher"
+                            self._share_drift_diag["last_tick_at"] = tick_started.isoformat()
+                            self._share_drift_diag["tick_count"] += 1
+                        else:
                             result = await self._position_reconciler.reconcile_share_drift(
                                 self,
                                 drift_threshold=1,
                                 auto_resolve=True,
                             )
+                            self._share_drift_diag["tick_count"] += 1
+                            self._share_drift_diag["last_tick_at"] = tick_started.isoformat()
+                            self._share_drift_diag["last_tick_status"] = "ok" if result.get("success") else "error"
+                            self._share_drift_diag["last_tick_error"] = result.get("error")
+                            self._share_drift_diag["last_result_summary"] = {
+                                "detected": len(result.get("drifts_detected") or []),
+                                "resolved": len(result.get("drifts_resolved") or []),
+                                "skipped": len(result.get("skipped") or []),
+                                "errors": len(result.get("errors") or []),
+                            }
+                            self._share_drift_diag["last_drifts_detected"] = (result.get("drifts_detected") or [])[:10]
+                            self._share_drift_diag["last_drifts_resolved"] = (result.get("drifts_resolved") or [])[:10]
+                            self._share_drift_diag["consecutive_failures"] = 0
                             if result.get("drifts_resolved"):
                                 logger.warning(
                                     "[v19.34.15b DRIFT-LOOP] resolved %d drift(s): %s",
@@ -2630,7 +2661,13 @@ class TradingBotService:
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
-                        logger.debug(f"[v19.34.15b DRIFT-LOOP] tick failed: {e}")
+                        self._share_drift_diag["last_tick_status"] = "exception"
+                        self._share_drift_diag["last_tick_error"] = f"{type(e).__name__}: {e}"
+                        self._share_drift_diag["last_tick_at"] = tick_started.isoformat()
+                        self._share_drift_diag["consecutive_failures"] = (
+                            self._share_drift_diag.get("consecutive_failures", 0) + 1
+                        )
+                        logger.warning(f"[v19.34.15b DRIFT-LOOP] tick failed: {e}")
                     try:
                         await asyncio.sleep(interval_s)
                     except asyncio.CancelledError:
