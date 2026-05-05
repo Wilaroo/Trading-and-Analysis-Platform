@@ -45,14 +45,24 @@ This bug compounds: every day the bot trades adds more GTC SELL/BUY zombie legs 
 - Cancelled ALL open IB orders manually via TC2000 (kills the entire zombie pile).
 - Set a market BUY 17 STX order for tomorrow's open to cover the unwanted short.
 
-### Tomorrow's P0 fixes (5-line change, massive impact)
+### Tomorrow's P0 fixes (classification-aware, ~1 session of work)
 
-1. **Flip `time_in_force: "GTC"` → `"DAY"` on stop+target legs in the bracket builder.** Brackets die at EOD with the parent. Single change prevents the entire bug class.
-2. **EOD flatten cancels all open IB orders for the symbol BEFORE submitting the market close.** Belt-and-suspenders.
-3. **Boot-time zombie sweep**: enumerate all IB open orders, identify ones whose parent `bot_trades` row is `status=closed`, cancel them all, emit CRITICAL stream warning per cancelled zombie.
-4. **Pre-execution sanity gate**: before any executor submits an order, write `bot_trades` row with `status='pending'`. Only mark `executed` after IB confirms fill. Eliminates the "IB fill but no Mongo row" class of bug entirely.
-5. **Add `/api/ib/orders` endpoint** that returns IB's actual open-order list (404'd tonight).
-6. **Extend `audit_ib_fill_tape.py`** to flag any `Sell Short` / `Buy to Cover` IB transaction without a matching bot `order_id`.
+**The fix is NOT a blanket GTC→DAY flip.** Swing/position trades legitimately need GTC stop protection overnight. The fix must read each trade's `trade_style`/`timeframe` and choose TIF accordingly:
+
+| Trade class | Stop/Target TIF | EOD flatten |
+|---|---|---|
+| Intraday (`trade_1_morning`, `trade_2_hold`, scalp) | DAY | Yes |
+| Swing (`trade_3_swing`, 1-5d hold) | GTC + outside_rth | No |
+| Position/investment (weeks-months) | GTC + outside_rth | No |
+
+1. **Bracket builder reads `trade_style`/`timeframe` to choose TIF** (helper: `_bracket_tif(trade) → (tif, outside_rth)`).
+2. **EOD flatten exempts swing/position rows** — only flattens intraday, and cancels open orders for symbol BEFORE market close.
+3. **Boot zombie sweep is selective**: cancels orphan legs (no parent or parent closed) but KEEPS valid GTC brackets on `status=open` swing/position rows.
+4. **End-of-RTH validator**: any IB order with `outside_rth=true` must have a matching active swing/position `bot_trades` row, else cancel.
+5. **Bracket re-issue on classification promotion**: when a trade's style is upgraded (intraday→swing), set `bracket_tif_dirty=true` and re-issue legs as GTC on next manage-loop tick.
+6. **Pre-execution sanity gate**: Mongo `bot_trades` row written with `status='pending'` BEFORE IB submission. If write fails → don't submit. Eliminates "IB fill but no Mongo row" class.
+7. **Add `/api/ib/orders` endpoint** returning IB's actual open-order list.
+8. **Extend `audit_ib_fill_tape.py`** to flag any `Sell Short`/`Buy to Cover` IB tx without a matching `order_queue` entry.
 
 ### Files of reference for tomorrow
 
