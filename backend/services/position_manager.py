@@ -12,6 +12,7 @@ Handles open position lifecycle:
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, TYPE_CHECKING
@@ -1129,6 +1130,51 @@ class PositionManager:
                     logger.info(f"Scale-out complete: {trade.symbol} T{i+1} - Sold {shares_to_sell} @ ${fill_price:.2f}, P&L: ${partial_pnl:.2f}, Remaining: {trade.remaining_shares}")
 
                     await bot._notify_trade_update(trade, f"scale_out_t{i+1}")
+
+                    # 2026-05-05 v19.34.7 — Bracket re-issue after scale-out.
+                    # Operator-filed bug: bot was firing a SEPARATE LMT to
+                    # exit `shares_to_sell` shares, but the original OCA
+                    # bracket's stop was still sized for the FULL position.
+                    # If price reversed and the stop fired, IB sold the
+                    # original qty, taking the position to a negative
+                    # (short) qty. Forensic evidence: 2026-05-04 STX -17sh
+                    # phantom from this exact pattern. Cancel the old
+                    # stale legs and re-issue with the reduced qty so the
+                    # protective stop covers ONLY the remaining shares.
+                    # Skipped when fully closing — re-issue is pointless.
+                    if (
+                        trade.remaining_shares > 0
+                        and os.environ.get("BRACKET_REISSUE_AUTO_ENABLED", "true").lower()
+                        in ("true", "1", "yes", "on")
+                    ):
+                        try:
+                            from services.bracket_reissue_service import (
+                                reissue_bracket_for_trade,
+                            )
+                            reissue_result = await reissue_bracket_for_trade(
+                                trade=trade,
+                                bot=bot,
+                                reason=f"scale_out_t{i + 1}",
+                                new_total_shares=trade.shares,
+                                already_executed_shares=int(trade.shares - trade.remaining_shares),
+                                new_avg_entry=trade.fill_price,
+                                preserve_target_levels=True,
+                            )
+                            if not reissue_result.get("success"):
+                                logger.warning(
+                                    "[v19.34.7] post-scale-out bracket re-issue "
+                                    "failed for %s (phase=%s, error=%s) — old "
+                                    "legs may still be active at IB",
+                                    trade.symbol,
+                                    reissue_result.get("phase"),
+                                    reissue_result.get("error"),
+                                )
+                        except Exception as _reissue_err:
+                            logger.exception(
+                                "[v19.34.7] bracket re-issue raised after scale-out "
+                                "for %s — manage-loop will retry on next tick: %s",
+                                trade.symbol, _reissue_err,
+                            )
 
                     # If all shares sold, close the trade
                     if trade.remaining_shares <= 0:

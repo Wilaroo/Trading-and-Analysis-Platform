@@ -27,6 +27,18 @@ Open priorities, deferred ideas, and backlog. Move items to
 6. **`POST /api/trading-bot/eod-validate-overnight-orders`** — runtime sweep of GTC/`outside_rth=true` orphans + wrong-TIF rows; two-step confirm. (Item g.)
 7. **`POST /api/trading-bot/cancel-orders-for-symbol`** — EOD pre-cancel guard for one-symbol flatten race. (Item f.)
 
+### ✅ v19.34.7 shipped (operator-driven bracket lifecycle architecture)
+
+1. **Bracket re-issue service** (`services/bracket_reissue_service.py`) — unified cancel-old + recompute + submit-new OCA pair. Auto-wired into scale-out path. Operator endpoint `POST /api/trading-bot/reissue-bracket` for manual + future scale-in. 19 + 8 = 27 new tests.
+2. **Boot zombie sweeper** — wired into `TradingBotService.start()`. Dry-run sweep at startup + operator stream warning. Manual cancel via `eod-validate-overnight-orders` with confirm token.
+
+### 🟡 Remaining v19.34.7 / future items
+
+1. **Scale-IN code path** — bot doesn't have an explicit scale-in feature today. When added, call `reissue_bracket_for_trade(trade, reason="scale_in", new_total_shares=N+added, new_avg_entry=weighted_avg)`. Service is ready.
+2. **Bracket TIF promotion (intraday → swing)** — same service, `reason="tif_promotion"`.
+3. **Investigate XLU 6-bracket pattern from 2026-05-05 AM** — pending operator's diagnostic script output. Likely intent-dedup miss OR legit re-entries; bracket re-issue service now contains the damage either way.
+4. **Extend `audit_ib_fill_tape.py`** to flag unmatched `Sell Short`/`Buy to Cover` IB transactions — deferred (existing `INVERSION_SHORT_COVER` verdict already captures the semantics; explicit subtype detection needs sample TWS tape with the new wording).
+
 ### 🟡 Remaining v19.34.6 items
 
 1. **Selective boot zombie sweeper** — on startup, enumerate IB open orders. For each: cancel if no matching `bot_trades` parent OR parent is `status=closed`; KEEP if parent is `status=open` AND swing/position style. Lower priority now since operator did a one-time manual flush + (g) endpoint provides on-demand sweep.

@@ -2,6 +2,60 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-05 PM (eighty-ninth commit, v19.34.7) — Bracket re-issue service (kills the duplicate-OCA + over-protected-stop class of bug)
+
+Operator-driven architectural fix surfaced during the v19.34.6 verification of this morning's bracket TIF. Forensic data showed XLU fired **6 brackets in 4 minutes** on the same symbol — likely a mix of intent-dedup misses + scale-in attempts — leading to overlapping OCA stacks at IB. The bot's existing scale-out path also doesn't update the original OCA's stop quantity after a partial exit, leaving the stop sized for the FULL position. If the stop fires after a partial exit, IB takes the position to a NEGATIVE qty (unintended SHORT). 2026-05-04 STX -17sh phantom was caused by this exact pattern.
+
+### The unified fix — `services/bracket_reissue_service.py`
+
+Three building blocks + one orchestrator:
+
+1. **`compute_reissue_params`** — pure function. Recomputes stop from new weighted-avg-entry × `RiskParameters.reconciled_default_stop_pct`. Preserves target PRICE LEVELS but recomputes target QUANTITIES from new total × original `scale_out_pcts` (Bellafiore-style: targets are thesis levels, scale-in is conviction not extension). Re-resolves TIF via `bracket_tif()` (intraday → DAY, swing → GTC). Generates a unique OCA group string per re-issue.
+
+2. **`cancel_active_bracket_legs`** — cancels every active STP/LMT/bracket row in `order_queue` for a given `trade_id`. Polls Mongo for status=cancelled ack with configurable timeout (default 2s). Reports stuck orders so orchestrator can abort.
+
+3. **`submit_oca_pair`** — submits one STP (full remaining qty) + N LMTs (multi-target qty split) as flat `queue_order` payloads sharing the same `oca_group` string. Pusher already supports `oca_group` on flat orders; no pusher upgrade needed.
+
+4. **`reissue_bracket_for_trade`** — orchestrator. **Cancel old → wait for ack → submit new**. On any cancel failure: ABORT, do NOT submit (never both old and new live). On compute failure: ABORT before touching IB. On submit failure after successful cancel: emit CRITICAL stream warning (position is naked until manage-loop tick replaces stops).
+
+### Auto-wired into the scale-out path
+
+`position_manager.py:check_and_execute_scale_out` now calls the orchestrator with `reason=scale_out_t{i+1}` immediately after the partial exit fills successfully. Closes the "OCA stop sized for original qty" gap. Feature-flagged via `BRACKET_REISSUE_AUTO_ENABLED=true` (default ON).
+
+### Operator endpoint — `POST /api/trading-bot/reissue-bracket`
+
+Manual trigger for: scale-in events (when wired), TIF promotion (intraday → swing), stop widening, or any operator override. Body supports `dry_run=true` to preview the computed plan without touching IB.
+
+### Boot zombie sweeper — auto-wired into `TradingBotService.start()`
+
+After 30s startup delay (lets pusher publish snapshot + auto-reconcile finish), runs `eod_validate_overnight_orders` in **dry-run mode** and logs / streams the orphan + wrong-TIF count. Operator manually triggers cancel via the same endpoint with `confirm="CANCEL_ORPHANS"`. Feature-flag: `BOOT_ZOMBIE_SWEEP_ENABLED=true` (default ON).
+
+### Tests — 27 new pytests (all passing)
+
+| File | Tests |
+|------|-------|
+| `tests/test_bracket_reissue_v19_34_7.py` | 19 — pure compute (11 cases incl. long/short/edge) + cancel/ack flow (3) + submit OCA pair (2) + orchestrator (3 happy/abort paths) |
+| `tests/test_reissue_bracket_endpoint_v19_34_7.py` | 8 — endpoint guards (400/404/503), dry_run, happy path delegation, error envelopes |
+
+**133/133 cumulative tests passing across v19.34.4 + v19.34.5 + v19.34.6 + v19.34.7** — zero regressions.
+
+### Live smoke tests
+
+- `POST /api/trading-bot/reissue-bracket` no body → `400 trade_id is required` ✅
+- `POST /api/trading-bot/reissue-bracket {trade_id: "ghost"}` → `404 not found in open trades` ✅
+- Backend boots clean with all v19.34.7 code loaded ✅
+
+### Files touched
+
+- **Added**: `services/bracket_reissue_service.py` (450 lines), 2 test files (27 tests)
+- **Modified**: `routers/trading_bot.py` (+`/reissue-bracket` endpoint, 105 lines), `services/position_manager.py` (auto-wire post-scale-out, 35 lines), `services/trading_bot_service.py` (boot zombie sweep task, 65 lines)
+
+### What's NOT yet wired (operator follow-up)
+
+- **Scale-IN code path** — bot doesn't currently have an explicit scale-in feature. When operator adds it, the new code calls `reissue_bracket_for_trade(trade, reason="scale_in", new_total_shares=N+added)` and the bracket re-issues correctly. Service is ready.
+- **Bracket TIF promotion (intraday → swing)** — same mechanism, just `reason="tif_promotion"`.
+- **Audit-script extension for `Sell Short` / `Buy to Cover`** — deferred (the existing `INVERSION_SHORT_COVER` verdict already captures this semantically; explicit subtype detection requires sample TWS tape with the new wording I don't have access to).
+
 ## 2026-05-05 PM (eighty-eighth commit, v19.34.6) — Operator-driven safety/UX hardening (7 fixes, 51 new tests)
 
 After v19.34.5 shipped premarket and the operator manually flattened legacy orphans (locking in +$940), the next session shipped seven follow-on items the operator queued during the 2026-05-04 audit. All are pure backend additions — no UI changes — to keep the live RTH session uninterrupted.

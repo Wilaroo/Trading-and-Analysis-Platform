@@ -2373,6 +2373,75 @@ class TradingBotService:
                 f"[v19.34 MID-BAR TICK] failed to schedule (non-fatal): {e}"
             )
 
+        # 2026-05-05 v19.34.7 — Selective boot zombie-bracket sweeper.
+        # Operator-driven: at startup, after the pusher publishes its
+        # snapshot (~30s), call POST /api/trading-bot/eod-validate-overnight-orders
+        # in DRY-RUN mode and log the report. We intentionally do NOT
+        # auto-cancel at boot — the operator should review the wrong-TIF
+        # / orphan list before any cancels go through. Auto-cancel can
+        # still be triggered manually via the same endpoint with confirm.
+        # Feature-flag: BOOT_ZOMBIE_SWEEP_ENABLED=true (default ON).
+        if os.environ.get("BOOT_ZOMBIE_SWEEP_ENABLED", "true").lower() in (
+            "true", "1", "yes", "on"
+        ):
+            async def _boot_zombie_sweep():
+                try:
+                    # Wait for pusher snapshot + auto-reconcile to settle
+                    # before we read order_queue (otherwise we may sweep
+                    # rows that are about to flip status).
+                    await asyncio.sleep(30)
+                    from routers.trading_bot import eod_validate_overnight_orders
+                    report = await eod_validate_overnight_orders({"dry_run": True})
+                    if not report.get("success"):
+                        logger.warning(
+                            "[v19.34.7 BOOT-SWEEP] dry-run failed: %s",
+                            report.get("error"),
+                        )
+                        return
+                    summary = report.get("summary") or {}
+                    if (summary.get("orphans", 0) + summary.get("wrong_tif", 0)) > 0:
+                        logger.warning(
+                            "[v19.34.7 BOOT-SWEEP] flagged %s orphan(s) + %s "
+                            "wrong-tif row(s) at startup. Total active=%s, "
+                            "ok=%s. Review via POST /api/trading-bot/"
+                            "eod-validate-overnight-orders {confirm: \"CANCEL_"
+                            "ORPHANS\", dry_run: false} to clean up.",
+                            summary.get("orphans"),
+                            summary.get("wrong_tif"),
+                            summary.get("total_active"),
+                            summary.get("ok"),
+                        )
+                        # Surface the warning in the operator stream
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "alert",
+                                "severity": "warning",
+                                "event": "boot_zombie_sweep",
+                                "text": (
+                                    f"⚠️ Boot sweep: {summary.get('orphans')} "
+                                    f"orphan + {summary.get('wrong_tif')} wrong-"
+                                    f"tif overnight bracket(s) found"
+                                ),
+                                "metadata": summary,
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        logger.info(
+                            "[v19.34.7 BOOT-SWEEP] clean — no orphans / wrong-tif "
+                            "rows (active=%s, ok=%s)",
+                            summary.get("total_active"), summary.get("ok"),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "[v19.34.7 BOOT-SWEEP] failed (non-fatal): %s", e,
+                    )
+            try:
+                asyncio.create_task(_boot_zombie_sweep())
+            except Exception as e:
+                logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
+
         # Persist state
         await self._save_state()
     

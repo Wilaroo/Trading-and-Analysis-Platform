@@ -633,6 +633,121 @@ async def cancel_orders_for_symbol(payload: Dict[str, Any]):
         }
 
 
+# ─── Bracket re-issue (v19.34.7 — 2026-05-05 PM) ──────────────────────────
+# Operator-driven endpoint. Cancels the existing OCA bracket legs for an
+# open trade, recomputes stop/target/qty for the post-event position,
+# and submits a new OCA pair. Designed for:
+#   - scale-in events (when scale-in is wired into the bot it'll call
+#     this with `reason="scale_in"` + `new_total_shares`).
+#   - manual operator overrides ("bot's stop is too tight, widen it").
+#   - bracket TIF promotion (intraday → swing — recomputes with GTC TIF).
+# Auto-called from position_manager.check_and_execute_scale_out post-fill.
+@router.post("/reissue-bracket")
+async def reissue_bracket(payload: Dict[str, Any]):
+    """Cancel existing bracket legs + submit a freshly-computed OCA pair.
+
+    Body:
+      {
+        "trade_id":              "trade-abc",       // required
+        "reason":                "scale_in" | "scale_out" | "tif_promotion"
+                                 | "manual" | "stop_widen" | ...,
+        "new_total_shares":      <int> | null,      // defaults to trade.shares
+        "new_avg_entry":         <float> | null,    // defaults to trade.entry_price
+        "already_executed_shares": <int> = 0,       // for scale-out math
+        "preserve_target_levels": true,             // false → 2R synthesis
+        "cancel_ack_timeout_s":  2.0,
+        "dry_run":               false              // compute only, no IB calls
+      }
+
+    Response: rich dict with cancel_result, submit_result, plan, error
+    (mirrors the `bracket_reissue_service.reissue_bracket_for_trade`
+    return shape — see that module for full schema).
+
+    Returns 400 if trade_id missing or trade not in `_open_trades`.
+    """
+    if not isinstance(payload, dict) or not payload.get("trade_id"):
+        raise HTTPException(status_code=400, detail="trade_id is required")
+
+    trade_id = str(payload["trade_id"])
+    reason = str(payload.get("reason") or "manual")
+    new_total = payload.get("new_total_shares")
+    if new_total is not None:
+        try:
+            new_total = int(new_total)
+        except Exception:
+            raise HTTPException(status_code=400, detail="new_total_shares must be int")
+    new_avg = payload.get("new_avg_entry")
+    if new_avg is not None:
+        try:
+            new_avg = float(new_avg)
+        except Exception:
+            raise HTTPException(status_code=400, detail="new_avg_entry must be number")
+    already_executed = int(payload.get("already_executed_shares") or 0)
+    preserve = bool(payload.get("preserve_target_levels", True))
+    cancel_timeout = float(payload.get("cancel_ack_timeout_s") or 2.0)
+    dry_run = bool(payload.get("dry_run", False))
+
+    if _trading_bot is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+
+    trade = (_trading_bot._open_trades or {}).get(trade_id)
+    if trade is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"trade_id {trade_id!r} not found in open trades",
+        )
+
+    if dry_run:
+        # Compute-only mode. Useful for the V5 "preview re-issue" UX.
+        try:
+            from services.bracket_reissue_service import compute_reissue_params
+            plan = compute_reissue_params(
+                trade=trade,
+                risk_params=_trading_bot.risk_params,
+                reason=reason,
+                new_total_shares=new_total,
+                new_avg_entry=new_avg,
+                already_executed_shares=already_executed,
+                preserve_target_levels=preserve,
+            )
+            return {
+                "success": True,
+                "phase": "compute",
+                "dry_run": True,
+                "plan": plan.__dict__,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "phase": "compute",
+                "dry_run": True,
+                "error": f"{type(e).__name__}: {e}",
+            }
+
+    try:
+        from services.bracket_reissue_service import reissue_bracket_for_trade
+        result = await reissue_bracket_for_trade(
+            trade=trade,
+            bot=_trading_bot,
+            reason=reason,
+            new_total_shares=new_total,
+            new_avg_entry=new_avg,
+            already_executed_shares=already_executed,
+            preserve_target_levels=preserve,
+            cancel_ack_timeout_s=cancel_timeout,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"reissue-bracket error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "phase": "orchestrator",
+            "error": f"{type(e).__name__}: {e}",
+            "trade_id": trade_id,
+            "reason": reason,
+        }
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into
