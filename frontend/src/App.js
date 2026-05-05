@@ -11,6 +11,7 @@ import { TourOverlay } from './components/TourOverlay';
 import { useHelpOverlay } from './hooks/useHelpOverlay';
 import { HelpCircle } from 'lucide-react';
 import { AuraMockupPreview } from './pages/AuraMockupPreview';
+import { V6LayoutPreview } from './pages/V6LayoutPreview';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -117,6 +118,8 @@ function App() {
   // very top of the JSX render below.
   const isAuraPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=aura');
+  const isV6Preview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=v6');
 
   // Startup status dashboard - shows system initialization progress
   const [showStartupStatus, setShowStartupStatus] = useState(false);
@@ -465,6 +468,8 @@ function App() {
           until consumed) so the preview is isolated and reversible. */}
       {isAuraPreview ? (
         <AuraMockupPreview />
+      ) : isV6Preview ? (
+        <V6LayoutPreview />
       ) : (
       <>
       {/* Sync WebSocket status to SystemStatusContext */}
