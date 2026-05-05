@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# v19.34.15b — lazy idempotent index-ready flag for share_drift_events TTL.
+_share_drift_indexes_ready: bool = False
+
 # v19.29 (2026-05-01) — Direction stability tracker for reconcile.
 # Operator caught SOFI being auto-reconciled as SHORT mid-flatten on
 # 2026-05-01 even though the position was actually LONG — the IB
@@ -1080,6 +1083,441 @@ class PositionReconciler:
             report["success"] = False
             report["error"] = str(e)
             return report
+
+
+    # ============== v19.34.15b SHARE-COUNT DRIFT RECONCILER (2026-05-06) =============
+
+    async def reconcile_share_drift(
+        self,
+        bot: 'TradingBotService',
+        drift_threshold: int = 1,
+        auto_resolve: bool = True,
+    ) -> Dict[str, Any]:
+        """Detect + resolve share-count drift on already-tracked symbols.
+
+        v19.34.15b. Operator caught a 4,879-share UPS drift (IB had
+        5,304 long, app tracked only 425) caused by `[REJECTED: Bracket
+        unknown]` parent orders firing at IB despite the bot writing
+        them off. The orphan reconciler skips with `already_tracked`
+        whenever `sym in bot._open_trades` — it's blind to share-count
+        drift. This method fills that gap.
+
+        Three cases (per operator approval 2026-05-06):
+
+          1. **Excess** (IB qty > tracked qty + threshold) — spawn a
+             new BotTrade for the delta as `reconciled_excess_slice`,
+             anchored on `current_price` with default 2% stop / 2R
+             target (same defaults as orphan reconcile). Stamps
+             `reconciled_excess_v19_34_15b` provenance for the V5 UI.
+
+          2. **Partial** (IB qty < tracked qty, IB qty > 0) — shrink
+             the bot's tracked `remaining_shares` to match IB. Emits
+             `external_partial_close_v19_34_15b` stream event so the
+             operator sees what happened. Does NOT close the trade —
+             let manage-loop continue tracking the remainder.
+
+          3. **Zero** (IB qty == 0, tracked qty > 0) — close the
+             bot_trade with `close_reason='external_close_v19_34_15b'`
+             (operator-approved auto-close on inverse case). Removes
+             from `_open_trades` and persists the close to Mongo.
+
+        Threshold default `1` share matches operator approval. Bumped
+        via the endpoint payload for fractional-share / rounding noise.
+
+        Returns:
+            {
+              success, timestamp,
+              drifts_resolved: [{symbol, kind, ...detail}],
+              drifts_detected: [...],   # all drifts including unresolved
+              skipped: [...],
+              errors: [...],
+            }
+        """
+        from services.trading_bot_service import (
+            TradeDirection, TradeStatus, BotTrade,
+        )
+
+        report: Dict[str, Any] = {
+            "success": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "auto_resolve": auto_resolve,
+            "drift_threshold": drift_threshold,
+            "drifts_detected": [],
+            "drifts_resolved": [],
+            "skipped": [],
+            "errors": [],
+        }
+
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+            if not is_pusher_connected():
+                report["success"] = False
+                report["error"] = "IB pusher not connected"
+                return report
+
+            # Reuse the orphan reconciler's IB-position-map shape.
+            ib_positions = _pushed_ib_data.get("positions", []) or []
+            ib_qty_by_sym: Dict[str, float] = {}
+            ib_meta_by_sym: Dict[str, Dict[str, Any]] = {}
+            for pos in ib_positions:
+                sym = (pos.get("symbol") or pos.get("contract", {}).get("symbol") or "").upper()
+                if not sym:
+                    continue
+                qty = float(pos.get("position", pos.get("qty", 0)) or 0)
+                # Keep zero-qty entries here — we WANT to detect "IB has 0".
+                ib_qty_by_sym[sym] = qty
+                ib_meta_by_sym[sym] = {
+                    "avg_cost": float(pos.get("avgCost", pos.get("avg_cost", 0)) or 0),
+                    "market_price": float(
+                        pos.get("marketPrice", pos.get("market_price", 0)) or 0
+                    ),
+                }
+            ib_quotes = _pushed_ib_data.get("quotes", {}) or {}
+
+            # Build bot signed-qty map from in-memory _open_trades.
+            bot_qty_by_sym: Dict[str, float] = {}
+            bot_trades_by_sym: Dict[str, list] = {}
+            for t in list(bot._open_trades.values()):
+                ssym = (getattr(t, "symbol", "") or "").upper()
+                if not ssym:
+                    continue
+                rs = float(getattr(t, "remaining_shares", 0) or 0)
+                d = getattr(t, "direction", None)
+                d_val = getattr(d, "value", str(d) if d else "long").lower()
+                signed = rs if d_val == "long" else -rs
+                bot_qty_by_sym[ssym] = bot_qty_by_sym.get(ssym, 0.0) + signed
+                bot_trades_by_sym.setdefault(ssym, []).append(t)
+
+            # Iterate every symbol that's tracked OR present at IB.
+            all_syms = set(bot_qty_by_sym.keys()) | set(ib_qty_by_sym.keys())
+
+            default_stop_pct = float(getattr(bot.risk_params, "reconciled_default_stop_pct", 2.0))
+            default_rr = float(getattr(bot.risk_params, "reconciled_default_rr", 2.0))
+
+            for sym in sorted(all_syms):
+                bot_q = bot_qty_by_sym.get(sym, 0.0)
+                ib_q = ib_qty_by_sym.get(sym, 0.0)
+                drift = ib_q - bot_q
+
+                # In sync (within threshold)? → skip.
+                if abs(drift) <= drift_threshold:
+                    continue
+
+                # Sym tracked but no entry in _open_trades is impossible
+                # (we built bot_qty from _open_trades). The only-IB case
+                # is what reconcile_orphan_positions handles; skip here.
+                if sym not in bot_qty_by_sym or abs(bot_q) < 0.01:
+                    report["skipped"].append({
+                        "symbol": sym, "reason": "ib_only_use_orphan_reconciler",
+                        "ib_qty": ib_q,
+                    })
+                    continue
+
+                drift_record = {
+                    "symbol": sym,
+                    "ib_qty": ib_q,
+                    "bot_qty": bot_q,
+                    "drift_shares": drift,
+                }
+
+                try:
+                    # ── Case 3: ZERO at IB, bot still tracking ──
+                    if abs(ib_q) < 0.01:
+                        drift_record["kind"] = "zero_external_close"
+                        report["drifts_detected"].append(drift_record)
+                        if not auto_resolve:
+                            continue
+                        await self._close_drift_trades_zero(
+                            bot, sym, bot_trades_by_sym[sym]
+                        )
+                        report["drifts_resolved"].append(drift_record)
+
+                    # ── Case 2: PARTIAL — IB has fewer shares than bot tracks ──
+                    elif (ib_q > 0 and bot_q > 0 and ib_q < bot_q) or \
+                         (ib_q < 0 and bot_q < 0 and abs(ib_q) < abs(bot_q)):
+                        drift_record["kind"] = "partial_external_close"
+                        report["drifts_detected"].append(drift_record)
+                        if not auto_resolve:
+                            continue
+                        target_total_abs = int(abs(ib_q))
+                        await self._shrink_drift_trades(
+                            bot, sym, bot_trades_by_sym[sym],
+                            new_total_abs=target_total_abs,
+                            drift_record=drift_record,
+                        )
+                        report["drifts_resolved"].append(drift_record)
+
+                    # ── Case 1: EXCESS — IB has MORE than bot tracks ──
+                    elif (ib_q > 0 and bot_q > 0 and ib_q > bot_q) or \
+                         (ib_q < 0 and bot_q < 0 and abs(ib_q) > abs(bot_q)) or \
+                         (ib_q * bot_q < 0):  # direction flipped — treat as excess
+                        excess_qty = drift  # signed
+                        drift_record["kind"] = "excess_unbracketed"
+                        drift_record["excess_qty"] = excess_qty
+                        report["drifts_detected"].append(drift_record)
+                        if not auto_resolve:
+                            continue
+                        new_trade_id = await self._spawn_excess_slice(
+                            bot, sym, ib_q,
+                            bot_q=bot_q,
+                            ib_meta=ib_meta_by_sym.get(sym, {}),
+                            ib_quote=ib_quotes.get(sym, {}) or {},
+                            stop_pct=default_stop_pct,
+                            rr=default_rr,
+                            BotTrade=BotTrade,
+                            TradeDirection=TradeDirection,
+                            TradeStatus=TradeStatus,
+                        )
+                        drift_record["new_trade_id"] = new_trade_id
+                        report["drifts_resolved"].append(drift_record)
+
+                    else:
+                        # Shouldn't reach here, but be defensive.
+                        drift_record["kind"] = "unclassified"
+                        report["skipped"].append(drift_record)
+                except Exception as inner_err:
+                    logger.exception(
+                        f"reconcile_share_drift({sym}) failed: {inner_err}"
+                    )
+                    report["errors"].append({
+                        "symbol": sym, "error": str(inner_err),
+                        "drift_record": drift_record,
+                    })
+
+            # Persist forensic event (TTL 7d via lazy index).
+            try:
+                if report["drifts_detected"]:
+                    await self._persist_drift_event(report)
+            except Exception:
+                pass
+
+            return report
+
+        except Exception as e:
+            logger.exception(f"reconcile_share_drift error: {e}")
+            report["success"] = False
+            report["error"] = str(e)
+            return report
+
+    async def _close_drift_trades_zero(self, bot, sym, trades) -> None:
+        """Case 3: IB has 0; close every bot_trade for this symbol."""
+        from services.trading_bot_service import TradeStatus
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for t in trades:
+            try:
+                t.status = TradeStatus.CLOSED
+                t.closed_at = now_iso
+                t.close_reason = "external_close_v19_34_15b"
+                if hasattr(t, "remaining_shares"):
+                    t.remaining_shares = 0
+                t.notes = (t.notes or "") + " [v19.34.15b: IB qty was 0; auto-closed]"
+                # Persist via bot._save_trade if available (mirror existing pattern).
+                save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+                if save_fn:
+                    try:
+                        result = save_fn(t)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception:
+                        pass
+                # Drop from in-memory tracking.
+                if hasattr(bot, "_open_trades") and t.id in bot._open_trades:
+                    del bot._open_trades[t.id]
+            except Exception as ex:
+                logger.warning(f"[v19.34.15b] close-drift {sym} failed: {ex}")
+        # Stream emit so operator sees it.
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "external_close_v19_34_15b",
+                "symbol": sym,
+                "text": (f"⚠ {sym} flat at IB but bot was tracking "
+                         f"{len(trades)} trade(s). Auto-closed."),
+                "metadata": {"closed_count": len(trades)},
+            })
+        except Exception:
+            pass
+        logger.warning(
+            f"[v19.34.15b DRIFT] {sym} ZERO at IB — closed "
+            f"{len(trades)} bot_trade(s) as external_close_v19_34_15b"
+        )
+
+    async def _shrink_drift_trades(
+        self, bot, sym, trades, new_total_abs: int, drift_record: Dict[str, Any]
+    ) -> None:
+        """Case 2: shrink remaining_shares pro-rata across open trades."""
+        cur_total = sum(int(abs(getattr(t, "remaining_shares", 0) or 0)) for t in trades)
+        if cur_total <= 0:
+            return
+        # Pro-rata shrink (simple: scale each trade by ratio).
+        ratio = new_total_abs / cur_total
+        applied: list = []
+        for t in trades:
+            old = int(abs(getattr(t, "remaining_shares", 0) or 0))
+            new = max(0, int(round(old * ratio)))
+            t.remaining_shares = new
+            t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new}]"
+            applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": new})
+        drift_record["shrink_detail"] = applied
+        # Persist via bot._save_trade.
+        save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+        if save_fn:
+            for t in trades:
+                try:
+                    result = save_fn(t)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception:
+                    pass
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "external_partial_close_v19_34_15b",
+                "symbol": sym,
+                "text": (f"⚠ {sym} partial external close detected — "
+                         f"shrunk bot tracking from {cur_total} → {new_total_abs} sh"),
+                "metadata": drift_record,
+            })
+        except Exception:
+            pass
+        logger.warning(
+            f"[v19.34.15b DRIFT] {sym} PARTIAL external close — "
+            f"shrunk {cur_total}→{new_total_abs} sh across {len(trades)} bot_trade(s)"
+        )
+
+    async def _spawn_excess_slice(
+        self, bot, sym, ib_qty_signed, *, bot_q, ib_meta, ib_quote,
+        stop_pct, rr, BotTrade, TradeDirection, TradeStatus,
+    ) -> str:
+        """Case 1: spawn a new BotTrade for the excess (IB - bot) shares."""
+        excess_signed = ib_qty_signed - bot_q
+        excess_abs = int(abs(excess_signed))
+        direction = TradeDirection.LONG if excess_signed > 0 else TradeDirection.SHORT
+
+        avg_cost = float(ib_meta.get("avg_cost") or ib_meta.get("market_price") or 0)
+        current_price = float(
+            ib_quote.get("last") or ib_quote.get("close")
+            or ib_meta.get("market_price") or avg_cost
+        )
+        # If we can't anchor on a real price, refuse — never write a
+        # synthetic stop based on garbage.
+        if avg_cost <= 0 or current_price <= 0:
+            raise ValueError(f"{sym}: missing avg_cost/current_price for excess slice")
+
+        # Anchor stop on CURRENT_PRICE not avg_cost (we don't know
+        # the excess slice's actual entry — current_price is the
+        # safest "what we know now" baseline).
+        stop_distance = current_price * (stop_pct / 100.0)
+        target_distance = stop_distance * rr
+        if direction == TradeDirection.LONG:
+            stop_price = current_price - stop_distance
+            target_1 = current_price + target_distance
+        else:
+            stop_price = current_price + stop_distance
+            target_1 = current_price - target_distance
+
+        trade_id = str(uuid.uuid4())[:8]
+        trade = BotTrade(
+            id=trade_id,
+            symbol=sym,
+            direction=direction,
+            status=TradeStatus.OPEN,
+            setup_type="reconciled_excess_slice",
+            timeframe="intraday",
+            quality_score=50,
+            quality_grade="R",
+            entry_price=current_price,
+            current_price=current_price,
+            stop_price=stop_price,
+            target_prices=[target_1],
+            shares=excess_abs,
+            risk_amount=stop_distance * excess_abs,
+            potential_reward=target_distance * excess_abs,
+            risk_reward_ratio=rr,
+            trade_style="reconciled",
+            smb_grade="R",
+            close_at_eod=False,
+        )
+        trade.fill_price = current_price
+        trade.remaining_shares = excess_abs
+        trade.original_shares = excess_abs
+        trade.entry_time = datetime.now(timezone.utc)
+        trade.executed_at = datetime.now(timezone.utc).isoformat()
+        trade.created_at = datetime.now(timezone.utc).isoformat()
+        trade.entered_by = "reconciled_excess_v19_34_15b"
+        trade.synthetic_source = "share_drift_excess"
+        trade.notes = (
+            f"v19.34.15b: spawned to claim excess of {excess_abs} sh "
+            f"(IB had {ib_qty_signed:+.0f}, bot tracked {bot_q:+.0f}). "
+            f"Stop {stop_pct:.1f}% from current_price."
+        )
+
+        # Insert into _open_trades + persist.
+        bot._open_trades[trade.id] = trade
+        save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+        if save_fn:
+            try:
+                result = save_fn(trade)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as ex:
+                logger.warning(f"[v19.34.15b] excess persist failed for {sym}: {ex}")
+
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "reconciled_excess_v19_34_15b",
+                "symbol": sym,
+                "text": (
+                    f"🔁 {sym} share drift detected: IB had {ib_qty_signed:+.0f}, "
+                    f"bot tracked {bot_q:+.0f}. Spawned excess slice for "
+                    f"{excess_abs} sh @ ${current_price:.2f} · SL ${stop_price:.2f} · "
+                    f"PT ${target_1:.2f}"
+                ),
+                "metadata": {
+                    "trade_id": trade.id, "excess_shares": excess_abs,
+                    "ib_qty": ib_qty_signed, "bot_qty": bot_q,
+                    "stop_price": stop_price, "target_1": target_1,
+                },
+            })
+        except Exception:
+            pass
+
+        logger.warning(
+            f"[v19.34.15b DRIFT] {sym} EXCESS — spawned slice trade "
+            f"{trade.id} for {excess_abs}sh @ ${current_price:.2f} "
+            f"(SL ${stop_price:.2f}, PT ${target_1:.2f})"
+        )
+        return trade.id
+
+    async def _persist_drift_event(self, report: Dict[str, Any]) -> None:
+        """Forensic write to `share_drift_events` (TTL 7d)."""
+        try:
+            global _share_drift_indexes_ready
+            if not _share_drift_indexes_ready:
+                try:
+                    self.db["share_drift_events"].create_index(
+                        "created_at", expireAfterSeconds=7 * 24 * 60 * 60,
+                    )
+                    self.db["share_drift_events"].create_index([("symbol", 1)])
+                    _share_drift_indexes_ready = True
+                except Exception:
+                    pass
+            doc = {
+                "created_at": datetime.now(timezone.utc),
+                "auto_resolve": report.get("auto_resolve"),
+                "drift_threshold": report.get("drift_threshold"),
+                "drifts_detected": report.get("drifts_detected") or [],
+                "drifts_resolved": report.get("drifts_resolved") or [],
+                "skipped": report.get("skipped") or [],
+                "errors": report.get("errors") or [],
+            }
+            self.db["share_drift_events"].insert_one(doc)
+        except Exception as e:
+            logger.debug(f"[v19.34.15b] persist drift event failed: {e}")
 
 
     # ==================== EMERGENCY STOP PROTECTION (Phase 4 — 2026-04-22) ==================

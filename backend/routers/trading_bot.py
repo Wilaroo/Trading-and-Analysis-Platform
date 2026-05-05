@@ -1245,6 +1245,54 @@ async def force_state_resync(payload: Optional[Dict[str, Any]] = None):
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.15b — Share-count drift reconciler ──────────────────────
+@router.post("/reconcile-share-drift")
+async def reconcile_share_drift_endpoint(
+    payload: Optional[Dict[str, Any]] = None,
+):
+    """Detect + resolve share-count drift on already-tracked symbols.
+
+    Body (all optional):
+      {
+        "drift_threshold": 1,        // shares; ignored when |drift| <= this
+        "auto_resolve":     true,    // false → detect-only dry run
+        "dry_run":          false    // alias for auto_resolve=false
+      }
+
+    Returns the full drift report with three classes of drift:
+      • excess_unbracketed   IB has more — spawned `reconciled_excess_slice`
+      • partial_external_close   IB has fewer — shrunk bot tracking
+      • zero_external_close   IB has 0 — closed bot tracking
+
+    Built after v19.34.15b operator-caught UPS drift (IB 5,304 vs bot 425).
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    payload = payload or {}
+    threshold = int(payload.get("drift_threshold") or 1)
+    if threshold < 1:
+        threshold = 1
+    auto_resolve = payload.get("auto_resolve", True)
+    if payload.get("dry_run") is True:
+        auto_resolve = False
+
+    try:
+        # Reuse the position_reconciler instance owned by the bot.
+        reconciler = getattr(_trading_bot, "_position_reconciler", None)
+        if reconciler is None:
+            from services.position_reconciler import PositionReconciler
+            reconciler = PositionReconciler(_trading_bot._db)
+        result = await reconciler.reconcile_share_drift(
+            _trading_bot,
+            drift_threshold=threshold,
+            auto_resolve=bool(auto_resolve),
+        )
+        return result
+    except Exception as e:
+        logger.error(f"reconcile-share-drift error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into
