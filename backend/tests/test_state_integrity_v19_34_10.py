@@ -74,16 +74,16 @@ class TestMongoWinsPolicy:
 
     @pytest.mark.asyncio
     async def test_starting_capital_drift_resolved_mongo_to_memory(self):
-        """v19.34.9 root-cause case: memory says $100k, Mongo says $236k.
-        Watchdog snaps memory back to $236k."""
+        """v19.34.14: `starting_capital` is now MEMORY_WINS (memory comes
+        from live IB / refresh-account; Mongo is just last persisted
+        snapshot). Test that drift is resolved memory→mongo."""
         from services.state_integrity_service import get_state_integrity_service
         from services.trading_bot_service import RiskParameters
         rp = RiskParameters()
-        # Provide a complete Mongo doc so the only drift is on the two
-        # capital fields under test.
+        # Provide a complete Mongo doc.
         full_mongo = {
-            "starting_capital": 236487.27,
-            "max_daily_loss": 2364.87,
+            "starting_capital": 100000.0,  # stale Mongo value
+            "max_daily_loss": 1000.0,
             "max_daily_loss_pct": rp.max_daily_loss_pct,
             "max_open_positions": rp.max_open_positions,
             "max_position_pct": rp.max_position_pct,
@@ -95,24 +95,53 @@ class TestMongoWinsPolicy:
             "setup_min_rr": dict(rp.setup_min_rr),
         }
         bot = _make_bot(
-            memory_kwargs={"starting_capital": 100000.0, "max_daily_loss": 1000.0},
+            memory_kwargs={"starting_capital": 236487.27, "max_daily_loss": 2364.87},
             mongo_risk_params=full_mongo,
         )
         with patch("services.sentcom_service.emit_stream_event", new=AsyncMock(), create=True):
             svc = get_state_integrity_service()
             result = await svc.run_check_once(bot)
         assert result.healthy is False
-        # Drift on starting_capital + max_daily_loss
         fields = {d.field for d in result.drifts}
         assert "starting_capital" in fields
-        assert "max_daily_loss" in fields
-        # Memory snapped to Mongo
+        # v19.34.14: MEMORY wins → memory unchanged, _save_state called
         assert bot.risk_params.starting_capital == 236487.27
-        assert bot.risk_params.max_daily_loss == pytest.approx(2364.87)
+        bot._save_state.assert_awaited()
         for d in result.drifts:
-            assert d.policy == "mongo_wins"
-            assert d.resolved is True
-            assert d.resolution == "mongo→memory"
+            if d.field == "starting_capital":
+                assert d.policy == "memory_wins"
+                assert d.resolved is True
+                assert d.resolution == "memory→mongo"
+
+    @pytest.mark.asyncio
+    async def test_max_open_positions_still_mongo_wins(self):
+        """Operator-tuned limits (max_open_positions) STAY mongo_wins."""
+        from services.state_integrity_service import get_state_integrity_service
+        from services.trading_bot_service import RiskParameters
+        rp = RiskParameters()
+        full_mongo = {
+            "starting_capital": rp.starting_capital,
+            "max_daily_loss": rp.max_daily_loss,
+            "max_daily_loss_pct": rp.max_daily_loss_pct,
+            "max_open_positions": 10,  # operator's persisted intent
+            "max_position_pct": rp.max_position_pct,
+            "min_risk_reward": rp.min_risk_reward,
+            "max_notional_per_trade": rp.max_notional_per_trade,
+            "max_risk_per_trade": rp.max_risk_per_trade,
+            "reconciled_default_stop_pct": rp.reconciled_default_stop_pct,
+            "reconciled_default_rr": rp.reconciled_default_rr,
+            "setup_min_rr": dict(rp.setup_min_rr),
+        }
+        bot = _make_bot(
+            memory_kwargs={"max_open_positions": 25},  # drifted
+            mongo_risk_params=full_mongo,
+        )
+        with patch("services.sentcom_service.emit_stream_event", new=AsyncMock(), create=True):
+            svc = get_state_integrity_service()
+            result = await svc.run_check_once(bot)
+        # Drift on max_open_positions; memory snapped DOWN to Mongo's 10
+        assert any(d.field == "max_open_positions" for d in result.drifts)
+        assert bot.risk_params.max_open_positions == 10
 
     @pytest.mark.asyncio
     async def test_no_drift_when_values_match(self):
@@ -176,6 +205,7 @@ class TestMongoWinsPolicy:
 
     @pytest.mark.asyncio
     async def test_max_open_positions_drift_resolved(self):
+        """Backward-compat marker: operator-tuned int field still mongo_wins."""
         from services.state_integrity_service import get_state_integrity_service
         bot = _make_bot(
             memory_kwargs={"max_open_positions": 25},
@@ -345,8 +375,8 @@ class TestForensicPersistence:
         torpedo the drift watcher)."""
         from services.state_integrity_service import get_state_integrity_service
         bot = _make_bot(
-            memory_kwargs={"starting_capital": 100000.0},
-            mongo_risk_params={"starting_capital": 236487.27},
+            memory_kwargs={"max_open_positions": 25},
+            mongo_risk_params={"max_open_positions": 10},
         )
         with patch(
             "services.sentcom_service.emit_stream_event",
@@ -356,8 +386,8 @@ class TestForensicPersistence:
             svc = get_state_integrity_service()
             result = await svc.run_check_once(bot)
         # Drift still detected and resolved despite stream failure
-        assert any(d.field == "starting_capital" for d in result.drifts)
-        assert bot.risk_params.starting_capital == 236487.27
+        assert any(d.field == "max_open_positions" for d in result.drifts)
+        assert bot.risk_params.max_open_positions == 10
 
 
 # ─── Status snapshot for /api/trading-bot/integrity-status ───────
@@ -368,8 +398,8 @@ class TestStatusSnapshot:
     async def test_status_reports_cumulative_drifts(self):
         from services.state_integrity_service import get_state_integrity_service
         bot = _make_bot(
-            memory_kwargs={"starting_capital": 100000.0},
-            mongo_risk_params={"starting_capital": 236487.27},
+            memory_kwargs={"max_open_positions": 25},
+            mongo_risk_params={"max_open_positions": 10},
         )
         with patch("services.sentcom_service.emit_stream_event", new=AsyncMock(), create=True):
             svc = get_state_integrity_service()
@@ -379,7 +409,9 @@ class TestStatusSnapshot:
         assert status["cumulative_drift_count"] >= 1
         assert status["cumulative_resolved_count"] >= 1
         assert "field_policy" in status
-        assert "starting_capital" in status["field_policy"]["mongo_wins"]
+        assert "max_open_positions" in status["field_policy"]["mongo_wins"]
+        # v19.34.14 — starting_capital MOVED to memory_wins.
+        assert "starting_capital" in status["field_policy"]["memory_wins"]
 
     def test_status_when_never_started(self):
         from services.state_integrity_service import get_state_integrity_service
@@ -419,8 +451,8 @@ class TestEndpoints:
     async def test_force_resync_endpoint_dry_run_does_not_mutate(self):
         from routers import trading_bot as tb
         bot = _make_bot(
-            memory_kwargs={"starting_capital": 100000.0},
-            mongo_risk_params={"starting_capital": 236487.27},
+            memory_kwargs={"max_open_positions": 25},
+            mongo_risk_params={"max_open_positions": 10},
         )
         original = tb._trading_bot
         tb._trading_bot = bot
@@ -431,14 +463,14 @@ class TestEndpoints:
             tb._trading_bot = original
         assert resp["success"] is True
         assert resp["unresolved"] >= 1
-        assert bot.risk_params.starting_capital == 100000.0  # not mutated
+        assert bot.risk_params.max_open_positions == 25  # not mutated
 
     @pytest.mark.asyncio
     async def test_force_resync_endpoint_full_run_resolves(self):
         from routers import trading_bot as tb
         bot = _make_bot(
-            memory_kwargs={"starting_capital": 100000.0},
-            mongo_risk_params={"starting_capital": 236487.27},
+            memory_kwargs={"max_open_positions": 25},
+            mongo_risk_params={"max_open_positions": 10},
         )
         original = tb._trading_bot
         tb._trading_bot = bot
@@ -449,4 +481,4 @@ class TestEndpoints:
             tb._trading_bot = original
         assert resp["success"] is True
         assert resp["resolved"] >= 1
-        assert bot.risk_params.starting_capital == 236487.27
+        assert bot.risk_params.max_open_positions == 10

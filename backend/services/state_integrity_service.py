@@ -49,33 +49,39 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ─── Field policy ─────────────────────────────────────────────────
-# `mongo_wins` fields: when in-memory diverges from Mongo, Mongo is
-# the authoritative source — persistence beat memory in the v19.34.9
-# case (operator hit `refresh-account` then a different code path
-# reverted memory; Mongo had the correct $236k all along).
+# v19.34.14 (2026-05-06) — POLICY FLIP after operator caught the
+# watchdog snapping live IB capital ($236k) DOWN to mock default
+# ($100k) on a real Spark deployment. The original "Mongo wins for
+# all capital fields" policy was wrong-by-design: in the v19.34.9
+# RCA, memory had the CORRECT $236k (from /refresh-account → live
+# IB) and Mongo had the STALE $100k. Mongo was the lagging side,
+# not the leading side.
 #
-# `memory_wins` fields: operator hot-tunes via PUT and the change is
-# not yet flushed (a later /risk-params PUT is what eventually
-# persists it). Mongo lag here is expected and benign.
-#
-# `detect_only` fields: drift is NOTICEABLE but auto-resolving is
-# unsafe (e.g. could re-enable a kill switch the operator just
-# tripped). We log + emit a CRITICAL event and let the operator
-# decide via `POST /api/trading-bot/force-resync`.
+# Smart split (operator-approved 2026-05-06):
+#   • IB-sourced capital → memory wins. These get sourced from the
+#     live broker via /refresh-account or pusher. Mongo is just the
+#     last persisted snapshot, which can lag arbitrarily long.
+#   • Operator-tuned limits → Mongo wins. These get set via PUT
+#     /risk-params and the persisted value IS the operator's intent;
+#     a flickering in-memory value is the suspect side.
+#   • setup_min_rr → memory wins (operator hot-tunes via PUT, may
+#     not have flushed yet).
 MONGO_WINS_FIELDS: Tuple[str, ...] = (
-    "starting_capital",
-    "max_daily_loss",
     "max_daily_loss_pct",
     "max_open_positions",
     "max_position_pct",
     "min_risk_reward",
-    "max_notional_per_trade",
-    "max_risk_per_trade",
     "reconciled_default_stop_pct",
     "reconciled_default_rr",
 )
 
 MEMORY_WINS_FIELDS: Tuple[str, ...] = (
+    # IB-sourced (live broker is source of truth):
+    "starting_capital",
+    "max_daily_loss",            # computed from starting_capital × pct
+    "max_notional_per_trade",
+    "max_risk_per_trade",
+    # Operator-tuned dict that may not have flushed yet:
     "setup_min_rr",
 )
 
@@ -86,6 +92,15 @@ DETECT_ONLY_FIELDS: Tuple[str, ...] = (
 # Float comparison tolerance — avoids spurious drift events from
 # normal float round-trip noise through JSON / Mongo.
 FLOAT_EPSILON: float = 0.01
+
+# ─── v19.34.14 — drift-loop detector ───────────────────────────
+# Prevents the watchdog itself from oscillating. If the same field
+# flips between the same two values >= LOOP_DEMOTE_FLIPS times in
+# LOOP_DEMOTE_WINDOW_S seconds, we DEMOTE that field to detect-only
+# mode for the rest of the process lifetime — operator gets alerts
+# but no auto-mutation. Cleared by `reset_loop_state()` (test hook).
+LOOP_DEMOTE_FLIPS: int = 3
+LOOP_DEMOTE_WINDOW_S: int = 600   # 10 min
 
 
 # ─── Data classes ─────────────────────────────────────────────────
@@ -178,6 +193,12 @@ class StateIntegrityService:
         self._cumulative_drift_count: int = 0
         self._cumulative_resolved_count: int = 0
         self._started_at: Optional[str] = None
+        # v19.34.14 — drift-loop detector state.
+        # Maps `field` → list of (timestamp, memory_value, mongo_value)
+        # tuples. When >= LOOP_DEMOTE_FLIPS distinct value-pair flips
+        # in LOOP_DEMOTE_WINDOW_S, we demote the field to detect-only.
+        self._flip_history: Dict[str, List[Tuple[float, Any, Any]]] = {}
+        self._demoted_fields: set = set()
 
     @property
     def is_running(self) -> bool:
@@ -219,7 +240,55 @@ class StateIntegrityService:
                 "memory_wins": list(MEMORY_WINS_FIELDS),
                 "detect_only": list(DETECT_ONLY_FIELDS),
             },
+            # v19.34.14 — drift-loop detector status.
+            "demoted_fields": sorted(self._demoted_fields),
+            "loop_detector": {
+                "demote_after_flips": LOOP_DEMOTE_FLIPS,
+                "window_seconds": LOOP_DEMOTE_WINDOW_S,
+            },
         }
+
+    # v19.34.14 — drift-loop detector helpers.
+
+    def _record_flip_and_check_demote(
+        self,
+        field: str,
+        memory_value: Any,
+        mongo_value: Any,
+    ) -> bool:
+        """Record one flip; return True iff `field` is now demoted.
+
+        A flip is one (memory_value, mongo_value) pair observed while
+        the field was drifting. If the SAME field has flipped >=
+        `LOOP_DEMOTE_FLIPS` times in the last `LOOP_DEMOTE_WINDOW_S`
+        seconds — regardless of whether the value pairs are
+        identical — that's an oscillating watchdog, demote it.
+        """
+        import time as _time
+        now = _time.time()
+        history = self._flip_history.setdefault(field, [])
+        # Prune history outside the window.
+        cutoff = now - LOOP_DEMOTE_WINDOW_S
+        history[:] = [(t, m, mo) for (t, m, mo) in history if t >= cutoff]
+        history.append((now, memory_value, mongo_value))
+        if len(history) >= LOOP_DEMOTE_FLIPS and field not in self._demoted_fields:
+            self._demoted_fields.add(field)
+            logger.error(
+                "[v19.34.14 INTEGRITY] field %r DEMOTED to detect-only after "
+                "%d flips in %ds — watchdog was oscillating. Operator must "
+                "force-resync manually to re-arm.",
+                field, len(history), LOOP_DEMOTE_WINDOW_S,
+            )
+            return True
+        return field in self._demoted_fields
+
+    def _is_demoted(self, field: str) -> bool:
+        return field in self._demoted_fields
+
+    def reset_loop_state(self) -> None:
+        """Test / operator hook — clear flip history + demote set."""
+        self._flip_history.clear()
+        self._demoted_fields.clear()
 
     # ── lifecycle ──────────────────────────────────────────────
 
@@ -319,6 +388,10 @@ class StateIntegrityService:
                 if mongo_val is None:
                     continue
                 if _values_differ(mem_val, mongo_val):
+                    # v19.34.14 — record the flip + check for loop demote.
+                    demoted = self._record_flip_and_check_demote(
+                        fname, mem_val, mongo_val,
+                    )
                     drift = FieldDrift(
                         field=fname,
                         memory_value=mem_val,
@@ -327,7 +400,7 @@ class StateIntegrityService:
                         resolved=False,
                         resolution="detect_only",
                     )
-                    if result.auto_resolve_enabled:
+                    if result.auto_resolve_enabled and not demoted:
                         try:
                             setattr(risk_params, fname, mongo_val)
                             drift.resolved = True
@@ -337,12 +410,18 @@ class StateIntegrityService:
                                 f"[v19.34.10 INTEGRITY] failed to flush "
                                 f"{fname} mongo→memory: {ex}"
                             )
+                    elif demoted:
+                        drift.resolution = "demoted_loop"
                     drifts.append(drift)
 
             for fname in MEMORY_WINS_FIELDS:
                 mem_val = getattr(risk_params, fname, None)
                 mongo_val = mongo_risk_params.get(fname)
                 if _values_differ(mem_val, mongo_val):
+                    # v19.34.14 — record the flip + check for loop demote.
+                    demoted = self._record_flip_and_check_demote(
+                        fname, mem_val, mongo_val,
+                    )
                     drift = FieldDrift(
                         field=fname,
                         memory_value=mem_val,
@@ -352,7 +431,7 @@ class StateIntegrityService:
                         resolution="detect_only",
                     )
                     # Memory-wins: re-flush by saving state.
-                    if result.auto_resolve_enabled:
+                    if result.auto_resolve_enabled and not demoted:
                         try:
                             save_state = getattr(bot, "_save_state", None)
                             if save_state is not None:
@@ -364,6 +443,8 @@ class StateIntegrityService:
                                 f"[v19.34.10 INTEGRITY] failed to flush "
                                 f"{fname} memory→mongo: {ex}"
                             )
+                    elif demoted:
+                        drift.resolution = "demoted_loop"
                     drifts.append(drift)
 
             for fname in DETECT_ONLY_FIELDS:

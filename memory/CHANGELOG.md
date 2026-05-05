@@ -2,6 +2,106 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-sixth commit, v19.34.14) — CRITICAL hotfix: policy flip + drift-loop detector
+
+**Severity: P0**. Operator caught the v19.34.10 watchdog snapping
+live IB capital ($236,344.65) DOWN to mock default ($100,000) on
+their Spark deployment — exactly the catastrophic v19.34.9 skew the
+watchdog was supposed to prevent, but caused BY the watchdog itself
+because the v19.34.10 `mongo_wins` policy was wrong-by-design for
+IB-sourced fields.
+
+### Root cause
+
+The v19.34.10 policy assumed Mongo holds the truth (per the v19.34.9
+RCA writeup), but the actual v19.34.9 case had **memory=correct $236k
+(from /refresh-account → live IB), Mongo=stale $100k**. Mongo was
+the LAGGING side. The watchdog correctly detected drift but inverted
+the resolve direction — pulling memory toward stale Mongo instead of
+flushing live memory to lagging Mongo.
+
+Operator's `cumulative_drift_count: 2` showed the bot was actively
+oscillating: /refresh-account would set memory to $236k → watchdog
+would snap memory to $100k → operator would see wrong capital → hit
+/refresh-account again → repeat.
+
+### The fix
+
+**1. Policy flip** (`state_integrity_service.py`):
+   - Moved to `MEMORY_WINS_FIELDS`: `starting_capital`,
+     `max_daily_loss` (computed from capital × pct),
+     `max_notional_per_trade`, `max_risk_per_trade`. These are
+     IB-sourced via /refresh-account / pusher; memory IS the truth,
+     Mongo is just the last persisted snapshot.
+   - Stayed in `MONGO_WINS_FIELDS`: `max_daily_loss_pct`,
+     `max_open_positions`, `max_position_pct`, `min_risk_reward`,
+     `reconciled_default_stop_pct`, `reconciled_default_rr`. These
+     are operator-tuned via PUT /risk-params; the persisted Mongo
+     value IS the operator's intent.
+   - `setup_min_rr` stays memory_wins (operator hot-tunes via PUT,
+     may not have flushed yet).
+
+**2. Drift-loop detector** (per operator approval): if the same
+field flips >= 3 times in 600s, demote it to detect-only for the
+rest of the process lifetime. Prevents the watchdog itself from
+oscillating. Demoted fields appear in `integrity-status.demoted_fields`
+and on the next drift their `resolution` is `"demoted_loop"` instead
+of mutating either side.
+
+**3. Operator re-arm**: `POST /api/trading-bot/force-resync`
+accepts new `{rearm_demoted: true}` flag — clears the demote set
+before running, so operator can re-arm a field after fixing state
+manually.
+
+**4. Public API additions** to `GET /api/trading-bot/integrity-status`:
+   - `demoted_fields[]` — list of fields currently demoted by the
+     loop detector.
+   - `loop_detector.{demote_after_flips, window_seconds}` —
+     compile-time constants for operator visibility.
+
+### Verification
+
+- 11 new pytests in `tests/test_state_integrity_v19_34_14.py`:
+  policy flip pinning, capital-derived flip together, max_open_positions
+  still mongo_wins, loop detector demotes after 3 flips, demoted
+  field stops mutating, `reset_loop_state` re-arms, status surfaces
+  demoted set, `force-resync rearm_demoted` clears the set.
+- v19.34.10 tests updated: 4 tests previously asserting `starting_capital`
+  was mongo_wins now use `max_open_positions` (still mongo_wins) as
+  the canonical example. 22/22 passing.
+- 55/55 across v19.34.10 + 11 + 12 + 13 + 14 suites passing.
+- Live curl on container: `integrity-status.field_policy.memory_wins`
+  includes `starting_capital, max_daily_loss, max_notional_per_trade,
+  max_risk_per_trade, setup_min_rr`. `loop_detector.demote_after_flips:3`.
+
+### Files
+
+- Edited: `backend/services/state_integrity_service.py` (policy flip
+  + drift-loop detector + `reset_loop_state` + `_is_demoted` +
+  `_record_flip_and_check_demote` + status surface).
+- Edited: `backend/routers/trading_bot.py` (`force-resync` accepts
+  `rearm_demoted` payload flag).
+- Edited: `backend/tests/test_state_integrity_v19_34_10.py`
+  (4 tests migrated to `max_open_positions` example).
+- New: `backend/tests/test_state_integrity_v19_34_14.py` (11 tests).
+
+### Operator action required on Spark
+
+After `git pull` + `./start_backend.sh`:
+```bash
+# 1. Restore live capital (re-pulls from IB)
+curl -s -X POST "$API/trading-bot/refresh-account" | python3 -m json.tool
+
+# 2. Verify watchdog policy is correct
+curl -s "$API/trading-bot/integrity-status" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); \
+    print('starting_capital in:', \
+      'memory_wins' if 'starting_capital' in d['field_policy']['memory_wins'] else 'WRONG')"
+# Expect: starting_capital in: memory_wins
+```
+
+
+
 ## 2026-05-06 (ninety-fifth commit, v19.34.13) — STALE chip fix + redundant pusher chip removed + boot-reconcile retry pass
 
 Fast follow-up to v19.34.12 after operator validated the dashboard

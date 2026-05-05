@@ -45,6 +45,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 1. **v19.34.11 — Bracket History**: `services/bracket_reissue_service._persist_lifecycle_event` writes every reissue path to Mongo `bracket_lifecycle_events` (TTL 7d). `GET /api/trading-bot/bracket-history?trade_id|symbol&days&limit` returns events + summary aggregations. V5 `<BracketHistoryPanel />` is a lazy-loaded expandable inner panel inside `OpenPositionsV5.jsx` expanded row with reason chips (color-coded by reason: scale_out=emerald, scale_in=cyan, tif_promotion=violet, manual=zinc) + phase chips + per-event detail. 9 new tests.
 2. **v19.34.12 — Rejection Heatmap**: `services/rejection_cooldown_service._persist_rejection_event` writes every structural rejection to Mongo `rejection_events` (TTL 7d) with TTL + compound (symbol, setup_type, created_at) indexes. `GET /api/trading-bot/rejection-events?symbol&setup_type&days&limit` returns events + heatmap aggregation (rows by Symbol × Setup, by_reason maps, top reasons, max_rejections). V5 `<RejectionHeatmap />` is a new Diagnostics sub-tab at id `rejections` rendering the (Symbol × Setup) grid with 4-tier heat colors + hover tooltips per cell + raw-events table toggle + days selector + auto-refresh 30s. 13 new tests.
 
+### ✅ v19.34.14 shipped (CRITICAL hotfix: drift watchdog policy flip + loop detector — 2026-05-06)
+
+Operator caught the v19.34.10 watchdog snapping live IB capital ($236,344.65) DOWN to mock default ($100,000) — exactly the v19.34.9 catastrophic skew, but caused BY the watchdog. Root cause: v19.34.10 `mongo_wins` policy was wrong-by-design; in v19.34.9 RCA, memory had the correct value (from live IB) and Mongo was the lagging side.
+
+1. **Policy flip**: Moved `starting_capital`, `max_daily_loss`, `max_notional_per_trade`, `max_risk_per_trade` to `MEMORY_WINS_FIELDS`. Kept `max_open_positions`, `max_position_pct`, `min_risk_reward`, `max_daily_loss_pct`, `reconciled_default_*` as `MONGO_WINS_FIELDS` (operator-tuned via /risk-params PUT).
+2. **Drift-loop detector**: same field flips ≥3 times in 600s → demoted to detect-only for process lifetime. Prevents watchdog oscillation.
+3. **`POST /force-resync {rearm_demoted: true}`** — operator re-arm path after manual fix.
+4. **`GET /integrity-status`** now exposes `demoted_fields[]` + `loop_detector` constants.
+5. 11 new tests + 4 v19.34.10 tests migrated to `max_open_positions` as canonical mongo_wins example. 55/55 passing across v19.34.10-14 suites.
+6. Operator action on Spark after pull: `curl -X POST "$API/trading-bot/refresh-account"` to restore live capital.
+
 ### ✅ v19.34.13 shipped (STALE chip fix + redundant pusher chip removed + boot-reconcile retry pass — 2026-05-06)
 
 1. **STALE 240m chip fix**: `routers/ib.receive_pushed_ib_data` now stamps `pushed_at` on every quote dict at merge time using top-level `last_update`. `services/sentcom_service.get_our_positions` adds defensive fallback to top-level `last_update` for synthesized quotes. Fixes V5 freshness chip that was rendering "STALE 240m" on every Open Position even when pusher was LIVE 1s.

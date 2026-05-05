@@ -1040,7 +1040,9 @@ async def force_state_resync(payload: Optional[Dict[str, Any]] = None):
     Body (all optional):
       {
         "auto_resolve": true,    // override env STATE_INTEGRITY_AUTO_RESOLVE
-        "dry_run":      false    // alias of auto_resolve=false
+        "dry_run":      false,   // alias of auto_resolve=false
+        "rearm_demoted": false   // v19.34.14 — clear loop-demote set first
+                                 //              (use after manual fix)
       }
 
     Returns the same shape as `integrity-status`'s `last_check` plus
@@ -1052,6 +1054,10 @@ async def force_state_resync(payload: Optional[Dict[str, Any]] = None):
     try:
         from services.state_integrity_service import get_state_integrity_service
         svc = get_state_integrity_service()
+        # v19.34.14 — let operator re-arm a field that the loop
+        # detector demoted to detect-only after watchdog oscillation.
+        if payload.get("rearm_demoted") is True:
+            svc.reset_loop_state()
         auto_resolve = payload.get("auto_resolve")
         if payload.get("dry_run") is True:
             auto_resolve = False
