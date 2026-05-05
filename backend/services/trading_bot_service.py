@@ -2526,6 +2526,68 @@ class TradingBotService:
             except Exception as e:
                 logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
 
+        # ─── v19.34.17 (2026-05-06) — EOD-close policy migration ──────
+        # Operator caught 2026-05-06 EOD: SBUX/ADBE/LITE/LIN reconciled
+        # orphan positions stayed OPEN past the 3:55pm flatten window
+        # because the v19.24 reconciler stamped `close_at_eod=False`.
+        # Operator-approved policy: orphan-reconciled + drift-excess
+        # slices ALWAYS flatten at EOD (bot has no thesis tying them to
+        # a multi-day swing). The reconciler defaults are now `True`
+        # for new spawns; this migration retro-flips already-open trades
+        # whose provenance is reconciled. Bot-originated `day_swing`/
+        # `position` trades are NOT touched.
+        async def _eod_policy_migration():
+            try:
+                await asyncio.sleep(45)  # let boot reconcile + DB load settle
+                flipped = []
+                for tid, t in list(self._open_trades.items()):
+                    eb = (getattr(t, "entered_by", "") or "").lower()
+                    is_reconciled = (
+                        eb.startswith("reconciled_") or
+                        getattr(t, "trade_style", "") == "reconciled"
+                    )
+                    if is_reconciled and getattr(t, "close_at_eod", False) is False:
+                        t.close_at_eod = True
+                        t.notes = (t.notes or "") + (
+                            " [v19.34.17 EOD policy migration: close_at_eod False→True]"
+                        )
+                        flipped.append({"trade_id": tid, "symbol": t.symbol})
+                        save_fn = getattr(self, "_save_trade", None) or getattr(self, "_persist_trade", None)
+                        if save_fn:
+                            try:
+                                res = save_fn(t)
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:
+                                pass
+                if flipped:
+                    logger.warning(
+                        "[v19.34.17 EOD-MIGRATION] flipped close_at_eod False→True "
+                        "on %d reconciled trade(s): %s",
+                        len(flipped), [f["symbol"] for f in flipped][:8],
+                    )
+                    try:
+                        from services.sentcom_service import emit_stream_event
+                        await emit_stream_event({
+                            "kind": "info",
+                            "event": "eod_policy_migration_v19_34_17",
+                            "text": (
+                                f"⚙ EOD policy migration: {len(flipped)} reconciled "
+                                f"position(s) will now flatten at EOD"
+                            ),
+                            "metadata": {"flipped": flipped},
+                        })
+                    except Exception:
+                        pass
+                else:
+                    logger.info("[v19.34.17 EOD-MIGRATION] no reconciled trades needed flipping")
+            except Exception as e:
+                logger.warning(f"[v19.34.17 EOD-MIGRATION] failed: {e}")
+        try:
+            asyncio.create_task(_eod_policy_migration())
+        except Exception as e:
+            logger.debug(f"[v19.34.17 EOD-MIGRATION] schedule failed: {e}")
+
         # ─── v19.34.15b (2026-05-06) — Share-count drift reconciler ──
         # 24/7 background loop that calls `reconcile_share_drift` every
         # 30s. Closes the gap from the operator-caught UPS bug where

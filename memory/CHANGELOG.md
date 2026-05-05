@@ -2,6 +2,44 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (ninety-ninth commit, v19.34.17) — EOD policy fix for orphan-reconciled positions
+
+**Severity: P0**. Operator caught 2026-05-06 EOD: SBUX (273sh short) /
+ADBE (15sh short) / LITE (8sh long) / LIN (6sh short) — all
+ORPHAN-reconciled positions — stayed OPEN past the 3:55pm flatten
+window. Root cause: v19.24 orphan reconciler hard-coded
+`close_at_eod=False` for every orphan it materialized.
+
+### Operator-approved policy (2026-05-06)
+- **Bot-originated `day_swing`/`position` trades**: stay open as designed (e.g. FDX, UPS DAY 2 long)
+- **Orphan-reconciled positions**: flatten at EOD (no thesis ties them to a swing)
+- **Drift-excess slices** (v19.34.15b `reconciled_excess`): flatten at EOD too (unknown-origin shares)
+- Manual override available via `close_at_eod` flag on individual trades
+
+### What shipped
+
+**1. `position_reconciler.py:813,1491`**: flipped both reconcile spawn paths from `close_at_eod=False` → `close_at_eod=True` with explanatory comments. Net 2 logical lines changed.
+
+**2. `trading_bot_service.py`**: new `_eod_policy_migration()` task on bot start. Sleeps 45s for boot to settle, then walks `_open_trades` and flips ALREADY-OPEN reconciled trades' `close_at_eod` False → True. Detection rule: `entered_by.startswith("reconciled_")` OR `trade_style == "reconciled"`. Bot-originated swings untouched. Idempotent. Emits `eod_policy_migration_v19_34_17` stream event with affected symbols.
+
+### Tests
+`tests/test_eod_policy_v19_34_17.py` — 5/5 passing:
+- Source-text assertions confirm both reconciler spots stamp `True`
+- Migration decision rule covers reconciled_external, reconciled_excess_v19_34_15b, bot-originated swing (no flip), already-True (no flip)
+- Position-manager filter sanity check matches the existing logic
+
+Cumulative v19.34.x: **103/103 passing.**
+
+### Outstanding (next investigation)
+The operator also flagged a separate v19.34.15b regression: 93sh FDX +
+338sh UPS naked-share drift went undetected by the 24/7 drift loop.
+Plan: dry-run `POST /api/trading-bot/reconcile-share-drift`, run
+`scripts/audit_ib_fill_tape.py`, and inspect drift-loop logs to find
+why those didn't auto-spawn `reconciled_excess_slice` trades.
+
+---
+
+
 ## 2026-05-06 (ninety-eighth commit, v19.34.16) — P1 trifecta: UPS forensics + unmatched short-close detector + boot-sweep lifecycle
 
 Three operator-prioritized P1 items shipped together. None modify

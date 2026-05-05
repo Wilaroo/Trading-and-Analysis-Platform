@@ -12,6 +12,8 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 **v19.34.15b SHIPPED 2026-05-06** — see CHANGELOG ninety-seventh commit. Share-count drift reconciler with 24/7 background loop, LIFO partial-shrink, 1%/1R excess-slice defaults. 10/10 tests passing.
 
+**v19.34.17 SHIPPED 2026-05-06** — see CHANGELOG ninety-ninth commit. EOD policy fix: ORPHAN-reconciled positions + v19.34.15b drift-excess slices now flatten at EOD (was: hold overnight). One-shot migration on bot start flips already-open reconciled trades' `close_at_eod` False→True. Bot-originated `day_swing`/`position` trades unaffected. 5/5 tests passing.
+
 **v19.34.16 SHIPPED 2026-05-06** — see CHANGELOG ninety-eighth commit. P1 trifecta: UPS 31s forensic audit script + report, unmatched Sell Short / Buy to Cover detector (service + endpoint + audit-script section), boot zombie-sweep lifecycle persistence (per-trade rows on findings). 98/98 cumulative tests passing.
 
 ### 🔴 v19.34.15a NEXT (Naked-position safety net) — plan + investigate before code

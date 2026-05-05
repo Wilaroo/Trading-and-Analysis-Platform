@@ -810,7 +810,15 @@ class PositionReconciler:
                         risk_reward_ratio=default_rr,
                         trade_style="reconciled",
                         smb_grade="R",
-                        close_at_eod=False,  # orphan reconciles default to hold overnight
+                        # v19.34.17 (2026-05-06) — operator-approved EOD policy:
+                        # ORPHAN reconciled positions flatten at EOD. Rationale:
+                        # the bot didn't originate them (came in via v19.24
+                        # orphan-reconcile path) so it has no thesis tying them
+                        # to a multi-day swing — they should not carry overnight
+                        # risk. Bot-originated `day_swing`/`position` trades
+                        # still set `close_at_eod=False` at entry-time and are
+                        # unaffected by this change.
+                        close_at_eod=True,
                     )
                     trade.fill_price = avg_cost
                     trade.remaining_shares = abs_qty
@@ -1488,7 +1496,11 @@ class PositionReconciler:
             risk_reward_ratio=rr,
             trade_style="reconciled",
             smb_grade="R",
-            close_at_eod=False,
+            # v19.34.17 (2026-05-06) — operator-approved: drift-excess slices
+            # also EOD-close. These are unknown-origin shares (the v19.34.15a
+            # `[REJECTED: Bracket unknown]` race fingerprint) and should not
+            # carry overnight risk for the same reason orphan reconciles don't.
+            close_at_eod=True,
         )
         trade.fill_price = current_price
         trade.remaining_shares = excess_abs
