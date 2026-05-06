@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-eighth commit, v19.34.24b) — Flatten-All was completely broken: every click no-op'd silently
+
+**Severity: P0 (CRITICAL)**. Operator-discovered 2026-02-XX during an attempted emergency flatten of 17 positions. Banner showed `flatten-all initiated`, kill-switch tripped, and the endpoint returned `success: True` — but **NOT A SINGLE close order left the backend**. Backend log:
+
+```
+[SAFETY] FLATTEN-ALL complete: {
+  'positions_requested_close': 0,
+  'positions_succeeded': 0,
+  'positions_failed': 0,
+  'close_errors': [{'stage': 'close-positions',
+                    'err': "cannot import name 'get_trading_bot' from
+                            'services.trading_bot_service'"}],
+  'orders_cancelled': 0
+}
+```
+
+Two compounding latent bugs in `routers/safety_router.py:flatten_all`:
+
+1. **Wrong import name**: `from services.trading_bot_service import get_trading_bot` — the actual exported singleton accessor is `get_trading_bot_service` (see `server.py:469`). The `ImportError` raised immediately, was swallowed by the broad `except` at line 250, dumped into the response's `close_errors[]` JSON field, and the endpoint returned a success envelope with `positions_requested_close: 0`. Operator saw "success" + the kill-switch banner and reasonably assumed flatten ran.
+
+2. **Wrong trade-id field**: pre-fix code did `getattr(t, "trade_id", None)`. The `BotTrade` dataclass (`services/trading_bot_service.py:586`) defines `id: str`, NOT `trade_id`. `bot._open_trades` is `Dict[str, BotTrade]` keyed by `id`. Every `getattr` returned None → every iteration hit `if not trade_id: continue` → zero closes attempted. Even if (1) hadn't crashed first, this would have produced the same `positions_requested_close: 0` symptom (after the count was set, but before any close fired).
+
+This bug class is exactly the `Don't add error handling, fallbacks, or validation for scenarios that can't happen` anti-pattern in reverse — the broad `try/except` here turned a fatal config error into a silent-success JSON field with no operator-visible signal.
+
+### Fix — `routers/safety_router.py:flatten_all`
+
+1. Import the correct accessor: `from services.trading_bot_service import get_trading_bot_service` and call it.
+2. Resolve the trade-id with a fallback chain that supports both the canonical `BotTrade.id` AND legacy dict-shape `{"trade_id": ...}` records (defense in depth, in case rehydration ever drops a dict into `_open_trades`).
+3. Inline forensic comments explaining both bugs so the next agent (or operator forensic) can see the full causal chain without git-blame archaeology.
+
+Did NOT change:
+- The broad outer `except` is preserved (other failure modes — Mongo down, motor lib import failure — still need to be caught into `close_errors` so the endpoint returns a usable summary). The fix is to make sure the COMMON path doesn't fall into it.
+- The Mongo `order_queue` cancel step (step 2 of the endpoint) is unchanged — it never hit either bug.
+
+### Tests shipped
+
+- `tests/test_flatten_all_v19_34_24b.py` (4 tests, all green):
+  1. Happy path: 3 open trades, `close_trade` invoked with each `BotTrade.id` and `reason="emergency_flatten_all"`. `positions_succeeded == 3`.
+  2. Mixed outcomes: one returns True, one returns False, one raises `INSUFFICIENT_QUANTITY`. Loop never aborts; failures recorded with the exception message in `close_errors[].err`.
+  3. Defensive: legacy dict-shape trade with `{"trade_id": "..."}` (no `id` field) still resolves via the fallback chain.
+  4. Confirm guard still required (`?confirm=FLATTEN` → 400 if missing).
+- `tests/test_partial_exit_live_v19_34_24.py` (7 tests, still green): unchanged from earlier in this session.
+
+### Operator-side impact
+
+- **Flatten All actually flattens now.** Next click: every position in `bot._open_trades` is iterated, `close_trade(id, reason="emergency_flatten_all")` fires for each, and `_ib_close_position` cancels bracket children + submits MKT close via the IB pusher queue.
+- The endpoint summary's `positions_requested_close` field is now meaningful (was always 0 pre-fix); operators should sanity-check it matches the `Open (N)` count before clicking `Acknowledge + Unlock`.
+- The 2026-02-XX failed flatten left 16/17 positions open — these need to be closed manually in TWS OR a re-click of Flatten All after pulling this fix. The 1 position that disappeared (APO) closed via a non-flatten path (likely external-close detection on a TWS click or EOD policy).
+
+### Known follow-up (pre-existing, NOT introduced by this fix)
+
+- **Phantom share counts**: V5 UI shows BMNR group = 5,472sh across 5 underlying bot trades, but IB only has 1,905sh. Same pattern on LIN (167 vs -6), LITE (32 vs 10), FDX (625 vs 369). These are stale `reconciled_excess_slice` records from before v19.34.22 that compounded across restarts. Now that flatten-all actually fires, the per-leg MKT closes will FAIL with `INSUFFICIENT_QUANTITY` against IB for the phantom slices — IB is the safe authority and will reject. Cleanup path documented separately in v19.34.25 backlog: query live IB position, cap close MKT at `min(trade.shares, ib_actual_remaining)`, divvy real shares across legs by entry-time order, mark phantoms `closed: phantom_reconcile`.
+
+
+
 ## 2026-02-XX (one-hundred-seventh commit, v19.34.24) — Live partial-exit fix: reconciled positions can now hit their PT
 
 **Severity: P0**. Operator forensic on FDX 2026-02-XX revealed that price spiked through both reconciled legs' PTs ($374.44 + $375.08, peak ~$378) but neither closed and the SL never trailed up. The Open Positions panel showed `+$5,228 +1.0R` unrealized — money the bot should have booked. Two compounding bugs:

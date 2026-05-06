@@ -226,13 +226,40 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
 
     # 1. Close every open trade via the bot's position_manager
     try:
-        from services.trading_bot_service import get_trading_bot
-        bot = get_trading_bot()
+        # v19.34.24 (2026-02-XX) — Fixed two latent bugs in this block that
+        # caused EVERY flatten-all click to silently no-op:
+        #
+        #   (a) `from services.trading_bot_service import get_trading_bot`
+        #       — the actual exported singleton accessor is named
+        #       `get_trading_bot_service` (see server.py:469). The wrong
+        #       name raised ImportError immediately and the broad except
+        #       at line ~250 caught it into the close_errors list as a
+        #       JSON field, so the operator saw a "success: True" envelope
+        #       with `positions_requested_close: 0` and no other clue.
+        #
+        #   (b) Trade-id key is `id`, NOT `trade_id`. The BotTrade dataclass
+        #       (services/trading_bot_service.py:586) defines `id: str` and
+        #       `bot._open_trades` is `Dict[str, BotTrade]` keyed by `id`.
+        #       The pre-fix `getattr(t, "trade_id", None)` always returned
+        #       None, so the loop hit the `if not trade_id: continue` bail
+        #       on every position even if (a) hadn't already crashed first.
+        #
+        # Operator-discovered 2026-02-XX after FDX flatten attempt: log
+        # showed `positions_requested_close: 0` while 17 positions were
+        # visibly open. Both bugs would individually have produced the
+        # same symptom; (a) crashed first so we never saw (b) bite.
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
         open_trades: List[Any] = list(getattr(bot, "_open_trades", {}).values()) if bot else []
         summary["positions_requested_close"] = len(open_trades)
 
         for t in open_trades:
-            trade_id = getattr(t, "trade_id", None) or (t.get("trade_id") if isinstance(t, dict) else None)
+            trade_id = (
+                getattr(t, "id", None)
+                or getattr(t, "trade_id", None)  # legacy dict shape, defensive
+                or (t.get("id") if isinstance(t, dict) else None)
+                or (t.get("trade_id") if isinstance(t, dict) else None)
+            )
             if not trade_id:
                 summary["positions_failed"] += 1
                 summary["close_errors"].append({"trade": str(t)[:120], "err": "no trade_id"})
