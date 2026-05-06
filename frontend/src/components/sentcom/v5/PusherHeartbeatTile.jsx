@@ -68,45 +68,47 @@ export const PusherHeartbeatTile = () => {
   return (
     <div
       data-testid="pusher-heartbeat-tile"
-      className="flex items-center gap-3 px-2 py-0.5 bg-zinc-950/60 text-[11px]"
+      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/60 text-[11px] leading-none whitespace-nowrap overflow-hidden"
     >
-      {/* Pulse dot + label */}
-      <div className="flex items-center gap-1.5 min-w-[125px]">
-        <span className="relative flex h-2 w-2">
-          {pulse && (
-            <span
-              className={`absolute inline-flex h-full w-full rounded-full ${palette.dot} opacity-75 animate-ping`}
-            />
-          )}
+      {/* ── v19.34.25 (2026-05-06) — collapsed to a single horizontal line.
+          Pre-fix used flex-col for status+age stack + 4 separate flex
+          rows (rate, RPC, total, counts) → forced strip height to ~80px.
+          Now all 1 line, verbose secondary stats moved to `title` tooltip
+          (hover the tile to see p95, avg, sample size, total counter,
+          L2 symbols). */}
+      <span className="relative flex h-2 w-2 flex-shrink-0">
+        {pulse && (
           <span
-            className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot} shadow-md ${palette.ring}`}
-            data-testid="pusher-heartbeat-pulse"
+            className={`absolute inline-flex h-full w-full rounded-full ${palette.dot} opacity-75 animate-ping`}
           />
-        </span>
-        <div className="flex flex-col leading-tight">
-          <span className={`text-[10px] font-bold tracking-wider ${palette.text}`}>
-            PUSHER {data.health?.toUpperCase() || '—'}
-          </span>
-          <span className="text-[10px] text-zinc-500 v5-mono">
-            last push {fmtAge(data.age_seconds)} ago
-          </span>
-        </div>
-      </div>
-
-      {/* Pushes/min */}
-      <div
-        className="flex items-center gap-1.5 text-xs"
+        )}
+        <span
+          className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot} shadow-md ${palette.ring}`}
+          data-testid="pusher-heartbeat-pulse"
+        />
+      </span>
+      <span className={`text-[10px] font-bold tracking-wider ${palette.text}`}>
+        PUSHER {data.health?.toUpperCase() || '—'}
+      </span>
+      <span className="text-zinc-500 v5-mono">
+        {fmtAge(data.age_seconds)} ago
+      </span>
+      <span className="text-zinc-700">·</span>
+      <span
         data-testid="pusher-heartbeat-rate"
+        className="flex items-center gap-1"
+        title={
+          totalPushes != null
+            ? `Total pushes since boot: ${totalPushes.toLocaleString()}`
+            : undefined
+        }
       >
-        <Send className="w-3.5 h-3.5 text-zinc-500" />
-        <span className="text-zinc-500">push rate</span>
-        <span className="font-bold text-zinc-200 v5-mono">
-          {pushesPerMin ?? '—'}
-        </span>
+        <Send className="w-3 h-3 text-zinc-500" />
+        <span className="font-bold text-zinc-200 v5-mono">{pushesPerMin ?? '—'}</span>
         <span className="text-zinc-500">/min</span>
         {rateHealth && rateHealth !== 'healthy' && pushesPerMin != null && (
           <span
-            className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold tracking-wider ${
+            className={`ml-1 px-1 py-0 rounded text-[10px] font-bold tracking-wider ${
               rateHealth === 'degraded'
                 ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                 : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
@@ -115,83 +117,53 @@ export const PusherHeartbeatTile = () => {
             {RATE_LABEL[rateHealth]}
           </span>
         )}
-      </div>
-
-      {/* RPC latency — headline is `last` (most actionable "right now"
-          number); `avg` and `p95` are demoted to context because a few
-          slow outliers skew avg above p95 and confuse operators. */}
-      <div
-        className="flex items-center gap-1.5 text-xs"
+      </span>
+      <span className="text-zinc-700">·</span>
+      <span
         data-testid="pusher-heartbeat-rpc"
+        className="flex items-center gap-1"
+        title={
+          [
+            rpcLast != null ? `last ${fmtLat(rpcLast)}` : null,
+            rpcP95 != null ? `p95 ${fmtLat(rpcP95)}` : null,
+            rpcAvg != null ? `avg ${fmtLat(rpcAvg)}` : null,
+            rpcSamples > 0 ? `n=${rpcSamples}` : null,
+          ].filter(Boolean).join(' · ') || undefined
+        }
       >
-        <Zap className="w-3.5 h-3.5 text-zinc-500" />
+        <Zap className="w-3 h-3 text-zinc-500" />
         <span className="text-zinc-500">RPC</span>
         <span className="font-bold text-zinc-200 v5-mono">{fmtLat(rpcLast)}</span>
-        <span className="text-zinc-500 text-[12px]">
-          last
-          {rpcP95 != null && (
-            <span className="ml-1">· p95 {fmtLat(rpcP95)}</span>
-          )}
-          {rpcAvg != null && (
-            <span className="ml-1">· avg {fmtLat(rpcAvg)}</span>
-          )}
-        </span>
-        {rpcSamples > 0 && (
-          <span className="text-zinc-600 text-[11px]">(n={rpcSamples})</span>
-        )}
-      </div>
-
-      {/* Total pushes (session counter) */}
-      {totalPushes != null && (
-        <div
-          className="flex items-center gap-1.5 text-xs"
-          data-testid="pusher-heartbeat-total"
-        >
-          <BarChart3 className="w-3.5 h-3.5 text-zinc-500" />
-          <span className="text-zinc-500">total</span>
-          <span className="font-bold text-zinc-200 v5-mono">
-            {totalPushes.toLocaleString()}
-          </span>
-        </div>
-      )}
-
-      {/* Counts (quotes / positions) */}
-      <div
-        className="flex items-center gap-1.5 text-xs ml-auto"
+      </span>
+      <span className="text-zinc-700">·</span>
+      <span
         data-testid="pusher-heartbeat-counts"
+        className="flex items-center gap-1"
+        title={
+          data.counts?.level2_symbols > 0
+            ? `${data.counts.level2_symbols} L2 symbols`
+            : undefined
+        }
       >
-        <Activity className="w-3.5 h-3.5 text-zinc-500" />
-        <span className="text-zinc-500">tracking</span>
+        <Activity className="w-3 h-3 text-zinc-500" />
         <span className="font-bold text-zinc-200 v5-mono">
           {data.counts?.quotes ?? 0}
         </span>
-        <span className="text-zinc-500">quotes</span>
+        <span className="text-zinc-500">q</span>
         <span className="text-zinc-700">·</span>
         <span className="font-bold text-zinc-200 v5-mono">
           {data.counts?.positions ?? 0}
         </span>
         <span className="text-zinc-500">pos</span>
-        {data.counts?.level2_symbols > 0 && (
-          <>
-            <span className="text-zinc-700">·</span>
-            <span className="font-bold text-zinc-200 v5-mono">
-              {data.counts.level2_symbols}
-            </span>
-            <span className="text-zinc-500">L2</span>
-          </>
-        )}
-      </div>
-
-      {/* Tiny secondary banner only when fully dead — still terse so the
-          big PusherDeadBanner above can carry the loud message. */}
+      </span>
       {data.pusher_dead && (
-        <div
-          className="flex items-center gap-1 text-[12px] text-rose-300/80"
+        <span
+          className="flex items-center gap-1 text-[10px] text-rose-300/80 ml-1"
           data-testid="pusher-heartbeat-dead-hint"
         >
           <Clock className="w-3 h-3" />
-          paused — restart pusher
-        </div>
+          paused
+        </span>
       )}
     </div>
   );

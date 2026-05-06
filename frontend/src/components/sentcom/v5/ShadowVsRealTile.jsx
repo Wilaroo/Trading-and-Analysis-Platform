@@ -137,89 +137,73 @@ export const ShadowVsRealTile = () => {
   return (
     <div
       data-testid="shadow-vs-real-tile"
-      className="px-3 py-1 bg-zinc-950/40 border-t border-zinc-900 text-[11px] text-zinc-300"
+      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/40 border-t border-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap overflow-hidden"
+      title={
+        // ── v19.34.25 (2026-05-06) — collapsed to a single line.
+        // Pre-fix used a 2-column grid with 4 lines per column → forced
+        // strip height to ~120px. Verbose breakdown (graded vs logged
+        // vs exec vs watch-only counts) moved to this hover tooltip.
+        [
+          shadowOutcomes != null
+            ? `Shadow: ${_fmtCount(shadowOutcomes)} graded · ${_fmtCount(shadowTotal)} logged${
+                shadowExecuted !== null ? ` · ${_fmtCount(shadowExecuted)} exec` : ''
+              }${shadowOnly !== null ? ` · ${_fmtCount(shadowOnly)} watch-only` : ''}`
+            : null,
+          realTotal != null ? `Real: ${_fmtCount(realTotal)} closed` : null,
+        ].filter(Boolean).join(' | ')
+      }
     >
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5 text-zinc-400">
-          <Eye className="w-3.5 h-3.5" />
-          <span className="font-semibold uppercase tracking-wide text-[12px]">
-            Shadow vs Real
+      <Eye className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+      <span className="text-zinc-400 font-semibold uppercase tracking-wide text-[10px]">
+        S vs R
+      </span>
+      {divergence !== null && (
+        <span
+          data-testid="shadow-vs-real-divergence"
+          className={`flex items-center gap-0.5 ${divergenceClass}`}
+        >
+          <DivergenceIcon className="w-3 h-3" />
+          <span className="font-mono text-[10px]">
+            {divergence > 0 ? '+' : ''}{divergence.toFixed(0)}pp
           </span>
-        </div>
-        {divergence !== null && (
-          <div
-            data-testid="shadow-vs-real-divergence"
-            className={`flex items-center gap-1 ${divergenceClass}`}
+        </span>
+      )}
+      <span className="text-zinc-700">·</span>
+      <span
+        data-testid="shadow-vs-real-shadow-col"
+        className="flex items-center gap-1 text-violet-300"
+      >
+        <span className="text-[10px] uppercase tracking-wide">Shadow</span>
+        <span className="font-mono font-bold text-violet-200">
+          {_fmtPct(shadowWr)}
+        </span>
+        <span className="text-zinc-500 text-[10px]">
+          ({_fmtCount(shadowOutcomes)})
+        </span>
+      </span>
+      <span className="text-zinc-700">·</span>
+      <span
+        data-testid="shadow-vs-real-real-col"
+        className="flex items-center gap-1 text-emerald-300"
+      >
+        <Activity className="w-3 h-3" />
+        <span className="text-[10px] uppercase tracking-wide">Real</span>
+        <span className="font-mono font-bold text-emerald-200">
+          {_fmtPct(realWr)}
+        </span>
+        <span className="text-zinc-500 text-[10px]">
+          ({_fmtCount(realTotal)})
+        </span>
+        {realPnl !== null && (
+          <span
+            className={`font-mono text-[10px] ${
+              realPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            }`}
           >
-            <DivergenceIcon className="w-3 h-3" />
-            <span className="font-mono text-[12px]">
-              {divergence > 0 ? '+' : ''}{divergence.toFixed(0)}pp · {divergenceLabel}
-            </span>
-          </div>
+            {realPnl >= 0 ? '+' : ''}${Number(realPnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </span>
         )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {/* Shadow column */}
-        <div
-          data-testid="shadow-vs-real-shadow-col"
-          className="rounded bg-violet-950/30 px-2 py-1.5 border border-violet-900/40"
-        >
-          <div className="flex items-center gap-1 text-violet-300 mb-0.5">
-            <Eye className="w-3 h-3" />
-            <span className="text-[12px] font-semibold uppercase tracking-wide">
-              Shadow
-            </span>
-          </div>
-          <div className="font-mono text-base font-bold text-violet-200">
-            {_fmtPct(shadowWr)}
-          </div>
-          <div className="text-[12px] text-zinc-500">
-            {_fmtCount(shadowOutcomes)} graded · {_fmtCount(shadowTotal)} logged
-          </div>
-          {(shadowExecuted !== null || shadowOnly !== null) && (
-            <div className="text-[12px] text-zinc-500 mt-0.5">
-              {shadowExecuted !== null && (
-                <span>
-                  {_fmtCount(shadowExecuted)} exec
-                </span>
-              )}
-              {shadowExecuted !== null && shadowOnly !== null && <span> · </span>}
-              {shadowOnly !== null && (
-                <span>{_fmtCount(shadowOnly)} watch-only</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Real column */}
-        <div
-          data-testid="shadow-vs-real-real-col"
-          className="rounded bg-emerald-950/30 px-2 py-1.5 border border-emerald-900/40"
-        >
-          <div className="flex items-center gap-1 text-emerald-300 mb-0.5">
-            <Activity className="w-3 h-3" />
-            <span className="text-[12px] font-semibold uppercase tracking-wide">
-              Real
-            </span>
-          </div>
-          <div className="font-mono text-base font-bold text-emerald-200">
-            {_fmtPct(realWr)}
-          </div>
-          <div className="text-[12px] text-zinc-500">
-            {_fmtCount(realTotal)} closed
-          </div>
-          {realPnl !== null && (
-            <div
-              className={`text-[12px] mt-0.5 ${
-                realPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-              }`}
-            >
-              {realPnl >= 0 ? '+' : ''}${Number(realPnl).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </div>
-          )}
-        </div>
-      </div>
+      </span>
     </div>
   );
 };
