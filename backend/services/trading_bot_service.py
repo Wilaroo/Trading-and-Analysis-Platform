@@ -2638,6 +2638,14 @@ class TradingBotService:
                                 self,
                                 drift_threshold=1,
                                 auto_resolve=True,
+                                # v19.34.19 — operator-gated: zombie-trade
+                                # drift detection ON in the loop, but
+                                # auto-heal only when SHARE_DRIFT_ZOMBIE_AUTO_HEAL=true.
+                                # Default False so first-ever zombie population
+                                # gets reviewed before any slice spawn.
+                                zombie_detect_only=os.environ.get(
+                                    "SHARE_DRIFT_ZOMBIE_AUTO_HEAL", "false"
+                                ).lower() not in ("true", "1", "yes", "on"),
                             )
                             self._share_drift_diag["tick_count"] += 1
                             self._share_drift_diag["last_tick_at"] = tick_started.isoformat()

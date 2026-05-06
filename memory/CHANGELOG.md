@@ -2,6 +2,97 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (one-hundred-first commit, v19.34.19) — Zombie-trade drift blind spot fix
+
+**Severity: P0**. Operator caught 2026-05-06: 1592 unmanaged shares
+(369 FDX + 1223 UPS) at IB while bot's `_open_trades` had 3 OPEN
+trade rows for these symbols with `remaining_shares=0`. The v19.34.15b
+drift loop wrote diagnostic `last_result_summary: {detected:0, skipped:7}`
+— it was skipping every zombie symbol.
+
+### The blind spot
+`position_reconciler.py:1245` had:
+```python
+if sym not in bot_qty_by_sym or abs(bot_q) < 0.01:
+    skip → defer to orphan reconciler
+```
+The conjunction collapsed two distinct cases:
+- **(A)** sym not tracked at all → orphan reconciler handles ✓
+- **(B)** sym IS tracked but bot_q=0 (zombie) → orphan reconciler skips
+  these (sym in `_open_trades` filter), and 15b also skips them →
+  **NEITHER PATH CATCHES**. Net: unmanaged IB shares accumulate
+  invisibly until operator notices.
+
+### What shipped
+
+**1. `position_reconciler.py:reconcile_share_drift`**:
+   - New parameter `zombie_detect_only: bool = False`.
+   - Split the buggy conjunction. New zombie branch when `sym in
+     bot_qty_by_sym AND abs(bot_q) < 0.01 AND len(zombies) > 0
+     AND abs(ib_q) >= 1`. Records `kind="zombie_trade_drift"` with
+     `zombie_count` + `zombie_trade_ids`.
+   - When `auto_resolve=True AND zombie_detect_only=False`: spawns
+     `reconciled_excess_slice` for the IB qty (1% stop / 1R target
+     per existing v19.34.15b excess defaults), closes all zombie
+     bot_trades with `close_reason="zombie_cleanup_v19_34_19"` +
+     audit notes pointing at the new slice, drops zombies from
+     `_open_trades`. Persists drift event + emits
+     `zombie_trade_drift_v19_34_19` stream event.
+
+**2. `routers/trading_bot.py:reconcile_share_drift_endpoint`**:
+   - New body field `zombie_detect_only: bool` (default `False`).
+   - Plumbs through to the reconciler.
+
+**3. `trading_bot_service.py:_share_drift_loop`**:
+   - 24/7 loop now reads env-flag `SHARE_DRIFT_ZOMBIE_AUTO_HEAL`
+     (default `false`). When false, loop runs with
+     `zombie_detect_only=True` — detects zombies in the diagnostic
+     output but does NOT auto-spawn. **Operator-gated** by design —
+     first zombie population must be reviewed manually.
+   - Other drift cases (Case 1 excess, Case 2 partial-close, zero)
+     continue to auto-resolve as before.
+
+### Operator runbook (DGX)
+
+```bash
+# Step 1: dry-run zombie detection (read-only)
+curl -X POST http://localhost:8001/api/trading-bot/reconcile-share-drift \
+  -H 'Content-Type: application/json' \
+  -d '{"zombie_detect_only":true,"auto_resolve":true}' | jq
+
+# Step 2: review `drifts_detected[].kind=="zombie_trade_drift"` entries
+# Confirm zombie_count + ib_qty + zombie_trade_ids match expectations.
+
+# Step 3: full heal — spawns slices + closes zombies
+curl -X POST http://localhost:8001/api/trading-bot/reconcile-share-drift \
+  -H 'Content-Type: application/json' \
+  -d '{"zombie_detect_only":false,"auto_resolve":true}' | jq
+
+# Step 4 (optional): enable 24/7 auto-heal in env, then restart backend
+echo 'SHARE_DRIFT_ZOMBIE_AUTO_HEAL=true' >> backend/.env
+```
+
+### Tests
+`tests/test_zombie_drift_v19_34_19.py` — 5/5 passing:
+- Detection when `remaining_shares=0` on OPEN trades
+- `zombie_detect_only` mode does NOT spawn/close
+- Full heal flow: spawn + close + audit notes + drop from `_open_trades`
+- Pure orphan still defers (regression check)
+- Existing Case 1 excess path unchanged
+
+Cumulative v19.34.x: **112/112 passing.**
+
+### Outstanding (separate investigation)
+**Why does the bot create zombies?** Trade-lifecycle bug: somewhere
+the partial-close / scale-out path decrements `remaining_shares` to
+0 without flipping `status` to `CLOSED`. Likely suspects:
+`trade_manager._apply_partial_close`, `position_manager._close_leg`,
+`stop_manager` / `scale_out_manager`. Read-only investigation only —
+fix prevents NEW zombies, v19.34.19 already heals existing ones.
+
+---
+
+
 ## 2026-05-06 (one-hundredth commit, v19.34.18) — Drift loop diagnostic + read-only investigation
 
 **Severity: P1**. Operator caught 2026-05-06 EOD with 93sh FDX + 338sh

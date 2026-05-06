@@ -1425,6 +1425,11 @@ async def reconcile_share_drift_endpoint(
     auto_resolve = payload.get("auto_resolve", True)
     if payload.get("dry_run") is True:
         auto_resolve = False
+    # v19.34.19 — `zombie_detect_only`: detect zombie-trade drift but do
+    # NOT spawn slices or close zombies. Other drift cases still resolve
+    # if `auto_resolve` is True. Use this BEFORE flipping the for-real
+    # path on a brand-new zombie population.
+    zombie_detect_only = bool(payload.get("zombie_detect_only", False))
 
     try:
         # Reuse the position_reconciler instance owned by the bot.
@@ -1436,6 +1441,7 @@ async def reconcile_share_drift_endpoint(
             _trading_bot,
             drift_threshold=threshold,
             auto_resolve=bool(auto_resolve),
+            zombie_detect_only=zombie_detect_only,
         )
         return result
     except Exception as e:

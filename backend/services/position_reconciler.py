@@ -1117,6 +1117,7 @@ class PositionReconciler:
         bot: 'TradingBotService',
         drift_threshold: int = 1,
         auto_resolve: bool = True,
+        zombie_detect_only: bool = False,
     ) -> Dict[str, Any]:
         """Detect + resolve share-count drift on already-tracked symbols.
 
@@ -1166,6 +1167,7 @@ class PositionReconciler:
             "success": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "auto_resolve": auto_resolve,
+            "zombie_detect_only": zombie_detect_only,
             "drift_threshold": drift_threshold,
             "drifts_detected": [],
             "drifts_resolved": [],
@@ -1239,14 +1241,88 @@ class PositionReconciler:
                 if abs(drift) <= drift_threshold:
                     continue
 
-                # Sym tracked but no entry in _open_trades is impossible
-                # (we built bot_qty from _open_trades). The only-IB case
-                # is what reconcile_orphan_positions handles; skip here.
-                if sym not in bot_qty_by_sym or abs(bot_q) < 0.01:
+                # ── v19.34.19 (2026-05-06) — Zombie-trade blind spot fix ──
+                # OLD: `sym not in bot_qty_by_sym or abs(bot_q) < 0.01` → skip
+                # both cases. That hid the "zombie" pattern caught 2026-05-06
+                # by operator: bot tracks 3 OPEN trades for FDX/UPS with
+                # `remaining_shares=0` (lifecycle bug — partial-close path
+                # zeroed shares without flipping status to CLOSED). Bot_q sums
+                # to 0 but IB still has the parent fill. Orphan reconciler
+                # ignores them (sym IS tracked); old 15b skipped them too.
+                # 1592 unmanaged shares accumulated.
+                #
+                # NEW: distinguish the cases.
+                if sym not in bot_qty_by_sym:
+                    # Pure orphan — defer to reconcile_orphan_positions.
                     report["skipped"].append({
                         "symbol": sym, "reason": "ib_only_use_orphan_reconciler",
                         "ib_qty": ib_q,
                     })
+                    continue
+
+                zombies = [
+                    t for t in bot_trades_by_sym.get(sym, [])
+                    if int(abs(getattr(t, "remaining_shares", 0) or 0)) == 0
+                ]
+                if abs(bot_q) < 0.01 and len(zombies) > 0 and abs(ib_q) >= 1:
+                    # Tracked-but-zombie drift: bot has OPEN trades but
+                    # zero remaining_shares while IB still holds the position.
+                    # Spawn a `reconciled_excess_slice` to bracket the IB
+                    # qty AND mark the zombie bot_trades closed for audit.
+                    drift_record = {
+                        "symbol": sym, "ib_qty": ib_q, "bot_qty": bot_q,
+                        "drift_shares": drift, "kind": "zombie_trade_drift",
+                        "zombie_count": len(zombies),
+                        "zombie_trade_ids": [getattr(z, "id", None) for z in zombies],
+                    }
+                    report["drifts_detected"].append(drift_record)
+                    if not auto_resolve or zombie_detect_only:
+                        continue
+                    try:
+                        new_trade_id = await self._spawn_excess_slice(
+                            bot, sym, ib_q,
+                            bot_q=bot_q,
+                            ib_meta=ib_meta_by_sym.get(sym, {}),
+                            ib_quote=ib_quotes.get(sym, {}) or {},
+                            stop_pct=excess_stop_pct,
+                            rr=excess_rr,
+                            BotTrade=BotTrade,
+                            TradeDirection=TradeDirection,
+                            TradeStatus=TradeStatus,
+                        )
+                        drift_record["new_trade_id"] = new_trade_id
+                        # Close out the zombie bot_trades (audit trail).
+                        zombies_closed = []
+                        for zt in zombies:
+                            zt.status = TradeStatus.CLOSED
+                            zt.close_reason = "zombie_cleanup_v19_34_19"
+                            zt.closed_at = datetime.now(timezone.utc).isoformat()
+                            zt.notes = (zt.notes or "") + (
+                                " [v19.34.19: zombie cleanup, IB qty reclaimed via "
+                                f"new bracketed slice {new_trade_id}]"
+                            )
+                            zombies_closed.append(getattr(zt, "id", None))
+                            save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+                            if save_fn:
+                                try:
+                                    res = save_fn(zt)
+                                    if asyncio.iscoroutine(res):
+                                        await res
+                                except Exception:
+                                    pass
+                            # Drop zombie from in-memory _open_trades.
+                            _ot = getattr(bot, "_open_trades", None)
+                            if _ot and getattr(zt, "id", None) in _ot:
+                                _ot.pop(zt.id, None)
+                        drift_record["zombies_closed"] = zombies_closed
+                        report["drifts_resolved"].append(drift_record)
+                        await self._persist_drift_event(drift_record)
+                        await self._emit_drift_event(
+                            bot, "zombie_trade_drift_v19_34_19", drift_record
+                        )
+                    except Exception as e:
+                        drift_record["error"] = f"{type(e).__name__}: {e}"
+                        report["errors"].append(drift_record)
                     continue
 
                 drift_record = {
