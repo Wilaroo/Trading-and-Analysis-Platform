@@ -37,7 +37,7 @@ import { BriefingsCompactStrip } from './v5/BriefingsCompactStrip';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
-import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5 } from './v5/SafetyV5';
+import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5, IbLiveChipV5, ScannerPausedBannerV5 } from './v5/SafetyV5';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
@@ -420,6 +420,10 @@ export const SentComV5View = ({
             <AccountModeBadge />
             <BootReconcilePill />
             <AccountGuardChipV5 safety={safety} />
+            {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
+                chip. Distinguishes 'logged in elsewhere' / socket-down /
+                shadow-divergence states the pusher heartbeat can't see. */}
+            <IbLiveChipV5 />
             <SafetyHudChip safety={safety} />
           </div>
         }
@@ -520,6 +524,13 @@ export const SentComV5View = ({
             </div>
           </div>
           <div className="overflow-y-auto flex-1 v5-scroll">
+            {/* v19.34.27 — Persistent banner when scanner is paused.
+                Self-hides when scanner_paused=false. Sticky at the top
+                of the scroll container so it stays visible no matter
+                how far the operator scrolls. */}
+            <div className="sticky top-0 z-[6]">
+              <ScannerPausedBannerV5 safety={safety} />
+            </div>
             <PanelErrorBoundary label="scanner">
               <ScannerCardsV5
                 setups={setups}

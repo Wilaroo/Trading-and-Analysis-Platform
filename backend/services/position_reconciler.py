@@ -1797,6 +1797,66 @@ class PositionReconciler:
             f"{trade.id} for {excess_abs}sh @ ${current_price:.2f} "
             f"(SL ${stop_price:.2f}, PT ${target_1:.2f})"
         )
+
+        # ── v19.34.27 — Attach standalone IB stop on adoption ──────
+        # Pre-fix the spawned slice was naked at IB: bot's `_open_trades`
+        # cache had a stop_price field, but no STP order existed at the
+        # broker. If the bot crashed (or the manage loop's mid-bar stop
+        # check missed), the position drifted with no protection.
+        # Now: best-effort fire `place_stop_order(trade)` immediately
+        # after persisting. Failures are LOUD-LOGGED (not raised) so
+        # the slice still gets adopted into _open_trades for the
+        # manage loop to track, but the operator sees the missing stop
+        # in the trade-drops feed and can fix it manually before the
+        # bot crashes and loses its in-memory stop reference.
+        try:
+            executor = getattr(bot, "_trade_executor", None)
+            if executor and hasattr(executor, "place_stop_order"):
+                stop_result = await executor.place_stop_order(trade)
+                if stop_result and stop_result.get("success"):
+                    trade.stop_order_id = (
+                        stop_result.get("order_id")
+                        or stop_result.get("stop_order_id")
+                    )
+                    logger.warning(
+                        f"[v19.34.27] {sym} adopted slice {trade.id} stop "
+                        f"attached at IB: order={trade.stop_order_id}, "
+                        f"stop=${stop_price:.2f}"
+                    )
+                else:
+                    err = (stop_result or {}).get("error", "no result")
+                    logger.error(
+                        f"[v19.34.27 NAKED-SLICE] {sym} adopted slice "
+                        f"{trade.id} but FAILED to attach IB stop: {err}. "
+                        f"Position is unprotected at the broker. Operator "
+                        f"must place a manual stop at ${stop_price:.2f} "
+                        f"or close the position in TWS."
+                    )
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            trade,
+                            gate="naked_adopted_slice",
+                            context={
+                                "phase": "spawn_excess_slice",
+                                "stop_price": stop_price,
+                                "shares": excess_abs,
+                                "error": str(err)[:200],
+                            },
+                        )
+                    except Exception:
+                        pass
+            else:
+                logger.warning(
+                    f"[v19.34.27] {sym} adopted slice {trade.id}: no "
+                    f"_trade_executor on bot — slice is NAKED at IB."
+                )
+        except Exception as stop_err:
+            logger.error(
+                f"[v19.34.27] {sym} adopted slice {trade.id} stop-attach "
+                f"raised: {stop_err}. Slice is naked at IB."
+            )
+
         return trade.id
 
     async def _persist_drift_event(self, report: Dict[str, Any]) -> None:

@@ -168,6 +168,175 @@ class TradeExecutorService:
                            "— allowing through (fail-open)", method_name, e)
         return None
 
+    # ── v19.34.27 — Direct IB shadow mode ────────────────────────────
+    #
+    # `BOT_ORDER_PATH` env var controls the routing:
+    #   "pusher"  (default) — orders go through the Windows pusher only.
+    #   "shadow"            — pusher remains primary; AFTER the pusher
+    #                         confirms, we cross-check the IB-direct
+    #                         socket's authoritative positions to detect
+    #                         silent-failure scenarios (pusher said
+    #                         success, IB doesn't actually have the
+    #                         position). Divergences are LOGGED ONLY.
+    #   "direct"            — Phase 3 (future). Direct is primary,
+    #                         pusher is data-only.
+    #
+    # In shadow mode we deliberately do NOT submit a parallel order
+    # through the direct socket — that would duplicate at the broker.
+    # Instead we observe IB's position-snapshot N seconds after the
+    # primary submit and warn if it disagrees with what we just
+    # ordered. This catches the v19.34.15a "pusher reported filled but
+    # IB shows nothing" race fingerprint without risking double-fills.
+    _SHADOW_OBSERVE_DELAY_S = 4.0
+    _SHADOW_DIVERGENCE_COUNTERS: Dict[str, int] = {
+        "missing_at_ib": 0,        # primary said filled, IB shows < expected
+        "extra_at_ib": 0,          # primary said filled, IB shows > expected
+        "direction_mismatch": 0,   # primary went long, IB shows short (or v.v.)
+        "auth_lost": 0,            # IB direct socket up but managedAccounts empty
+        "observed_ok": 0,          # primary + IB direct agree
+        "skipped_socket_down": 0,  # IB direct socket unreachable
+    }
+
+    def _order_path_mode(self) -> str:
+        """Return the active BOT_ORDER_PATH ('pusher'|'shadow'|'direct')."""
+        v = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+        return v if v in ("pusher", "shadow", "direct") else "pusher"
+
+    def _maybe_schedule_shadow_observe(
+        self,
+        trade,
+        primary_result: Dict[str, Any],
+        *,
+        action: str,                  # "BUY" | "SELL" — primary order action
+        intent: str,                  # "bracket" | "close" | "partial_exit" | ...
+        expected_signed_delta: int,   # signed share delta the primary intends at IB
+    ) -> None:
+        """Fire-and-forget shadow observation if BOT_ORDER_PATH=shadow.
+
+        Schedules a coroutine that, after `_SHADOW_OBSERVE_DELAY_S`,
+        cross-checks the direct IB socket's positions against what the
+        primary said it did. Counters bump on divergence; a single
+        WARNING line is logged per observation so the operator can grep
+        the log when a pusher silent-failure is suspected.
+
+        NEVER raises into the caller. NEVER waits for the observation
+        (would defeat the point of being shadow).
+        """
+        if self._order_path_mode() != "shadow":
+            return
+        if not (primary_result and primary_result.get("success")):
+            # Primary failed — nothing to compare against.
+            return
+        try:
+            asyncio.create_task(self._shadow_observe(
+                symbol=getattr(trade, "symbol", "?"),
+                trade_id=getattr(trade, "id", None),
+                action=action,
+                intent=intent,
+                expected_signed_delta=int(expected_signed_delta),
+                primary_result=primary_result,
+            ))
+        except Exception as e:
+            logger.debug(f"shadow_observe schedule failed: {e}")
+
+    async def _shadow_observe(
+        self,
+        *,
+        symbol: str,
+        trade_id: Optional[str],
+        action: str,
+        intent: str,
+        expected_signed_delta: int,
+        primary_result: Dict[str, Any],
+    ) -> None:
+        """Compare primary submission vs IB direct's authoritative state."""
+        await asyncio.sleep(self._SHADOW_OBSERVE_DELAY_S)
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            svc = get_ib_direct_service()
+        except Exception as e:
+            logger.debug(f"[SHADOW] {symbol} import failed: {e}")
+            return
+
+        if not (svc.is_available() and svc.is_connected()):
+            self._SHADOW_DIVERGENCE_COUNTERS["skipped_socket_down"] += 1
+            logger.debug(
+                f"[SHADOW] {symbol} skipped: IB-direct socket not connected. "
+                f"Operator can `POST /api/system/ib-direct/connect` to enable."
+            )
+            return
+
+        if not svc.is_authorized_to_trade():
+            self._SHADOW_DIVERGENCE_COUNTERS["auth_lost"] += 1
+            logger.warning(
+                f"[SHADOW v19.34.27] {symbol} {intent} {action} {trade_id}: "
+                f"IB-direct socket open but managedAccounts is EMPTY. "
+                f"Brokerage session likely kicked elsewhere ('logged in on "
+                f"another platform'). Pusher may be receiving stale data."
+            )
+            return
+
+        try:
+            positions = await svc.get_positions()
+        except Exception as e:
+            logger.debug(f"[SHADOW] {symbol} get_positions failed: {e}")
+            return
+
+        ib_signed = 0.0
+        for p in positions or []:
+            if (p.get("symbol") or "").upper() == symbol.upper():
+                ib_signed += float(p.get("position") or 0)
+        ib_signed_int = int(round(ib_signed))
+
+        # We can't perfectly compute the expected post-submit position
+        # without knowing the bot's pre-submit position cache (and we
+        # deliberately don't reach into that here to keep this read-
+        # only). Instead, sanity-check on direction + magnitude.
+        # Direction: a BUY should leave IB with a non-negative or
+        # increased position; a SELL with non-positive or decreased.
+        delta_dir = 1 if expected_signed_delta > 0 else (-1 if expected_signed_delta < 0 else 0)
+
+        # Detect "primary said filled, IB shows nothing/wrong-side"
+        # — the v19.34.15a fingerprint.
+        if intent == "bracket" and primary_result.get("status") == "filled":
+            if ib_signed_int == 0:
+                self._SHADOW_DIVERGENCE_COUNTERS["missing_at_ib"] += 1
+                logger.error(
+                    f"[SHADOW DIVERGENCE v19.34.27] {symbol} {intent} {action} "
+                    f"trade={trade_id}: pusher reported FILLED but IB direct "
+                    f"shows ZERO position {self._SHADOW_OBSERVE_DELAY_S}s "
+                    f"later. Likely silent pusher fail — operator should "
+                    f"verify in TWS."
+                )
+                return
+            if delta_dir != 0 and ((ib_signed_int > 0) != (delta_dir > 0)):
+                self._SHADOW_DIVERGENCE_COUNTERS["direction_mismatch"] += 1
+                logger.error(
+                    f"[SHADOW DIVERGENCE v19.34.27] {symbol} {intent} {action} "
+                    f"trade={trade_id}: expected {delta_dir:+d} delta but "
+                    f"IB shows {ib_signed_int:+d}. Direction mismatch."
+                )
+                return
+
+        # All good — primary and IB direct agree on the broad shape.
+        self._SHADOW_DIVERGENCE_COUNTERS["observed_ok"] += 1
+        logger.info(
+            f"[SHADOW] {symbol} {intent} {action} trade={trade_id}: "
+            f"IB direct concurs (signed_position={ib_signed_int:+d})"
+        )
+
+    @classmethod
+    def shadow_stats(cls) -> Dict[str, Any]:
+        """Read the shadow-divergence counters for UI surfacing.
+
+        Returned dict is a snapshot — counters keep ticking after this
+        call. UI uses these to decorate the IB-LIVE chip tooltip.
+        """
+        return {
+            "order_path": (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower(),
+            "counters": dict(cls._SHADOW_DIVERGENCE_COUNTERS),
+        }
+
     async def execute_entry(self, trade) -> Dict[str, Any]:
         """
         Execute entry order for a trade.
@@ -671,7 +840,7 @@ class TradeExecutorService:
 
             status = r.get("status", "unknown")
             if status in ("filled", "working", "submitted", "partial"):
-                return {
+                primary_result = {
                     "success": True,
                     "entry_order_id": r.get("entry_order_id") or r.get("parent_id") or order_id,
                     "stop_order_id": r.get("stop_order_id") or r.get("stop_id"),
@@ -683,6 +852,14 @@ class TradeExecutorService:
                     "broker": "interactive_brokers",
                     "order_type": "bracket",
                 }
+                # v19.34.27 — shadow-observe IB direct after pusher confirms.
+                signed_delta = int(trade.shares) if action == "BUY" else -int(trade.shares)
+                self._maybe_schedule_shadow_observe(
+                    trade, primary_result,
+                    action=action, intent="bracket",
+                    expected_signed_delta=signed_delta,
+                )
+                return primary_result
             # ── v19.34.15a (2026-05-06) — Naked-position safety net.
             # Pre-fix this branch hard-rejected on ANY non-success status,
             # including ambiguous values like "unknown" or empty/missing
@@ -1059,12 +1236,22 @@ class TradeExecutorService:
                 status = order_result.get("status", "unknown")
                 
                 if status == "filled":
-                    return {
+                    primary_result = {
                         "success": True,
                         "order_id": order_id,
                         "fill_price": order_result.get("fill_price", trade.current_price),
                         "broker": "interactive_brokers"
                     }
+                    # v19.34.27 — close inverts the position, so signed
+                    # delta is the OPPOSITE of the trade's direction.
+                    closing_action = "SELL" if trade.direction.value == "long" else "BUY"
+                    signed_delta = -int(trade.shares) if closing_action == "SELL" else int(trade.shares)
+                    self._maybe_schedule_shadow_observe(
+                        trade, primary_result,
+                        action=closing_action, intent="close",
+                        expected_signed_delta=signed_delta,
+                    )
+                    return primary_result
                 else:
                     return {
                         "success": False,

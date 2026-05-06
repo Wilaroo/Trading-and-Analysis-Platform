@@ -524,3 +524,221 @@ export const ScannerPauseToggleV5 = ({ safety, compact = false }) => {
     </button>
   );
 };
+
+
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/*  IB-LIVE brokerage-permission chip (v19.34.27)                           */
+/*                                                                          */
+/*  Polls /api/system/ib-direct/status every 15s. Surfaces FOUR distinct    */
+/*  states the operator needs to distinguish at a glance:                   */
+/*                                                                          */
+/*    IB-LIVE   (green)  connected + authorized_to_trade — orders OK        */
+/*    IB-AUTH   (amber)  connected, but managedAccounts is empty            */
+/*                       ("logged in on another platform" scenario)         */
+/*    IB-DOWN   (red)    socket not connected — pusher might still work     */
+/*    IB-OFF    (gray)   ib_async not installed (Phase 1 not deployed)      */
+/*                                                                          */
+/*  Tooltip surfaces order_path mode + shadow divergence counters when      */
+/*  BOT_ORDER_PATH=shadow so the operator can see at-a-glance whether       */
+/*  pusher and IB-direct have been agreeing today.                          */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+export const useIbDirectStatus = ({ pollMs = 15_000 } = {}) => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await api.get('/api/system/ib-direct/status', { timeout: 6000 });
+      setData(r.data);
+      setError(null);
+    } catch (err) {
+      setError(err?.message || 'fetch failed');
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!pollMs) return undefined;
+    const id = setInterval(refresh, pollMs);
+    return () => clearInterval(id);
+  }, [pollMs, refresh]);
+
+  return { data, error, refresh };
+};
+
+export const IbLiveChipV5 = () => {
+  const { data } = useIbDirectStatus();
+  const [connecting, setConnecting] = useState(false);
+
+  // First paint: render a neutral placeholder rather than nothing so
+  // the status strip doesn't layout-shift on initial load.
+  if (!data) {
+    return (
+      <span
+        data-testid="v5-ib-live-chip"
+        data-state="loading"
+        className="v5-chip v5-chip-close"
+        title="IB direct status loading…"
+      >
+        IB-…
+      </span>
+    );
+  }
+
+  const ibAvailable = !!data.ib_async_available;
+  const connected = !!data.connected;
+  const authorized = !!data.authorized_to_trade;
+  const orderPath = data.shadow?.order_path || 'pusher';
+  const counters = data.shadow?.counters || {};
+  const divergences =
+    (counters.missing_at_ib || 0) +
+    (counters.direction_mismatch || 0) +
+    (counters.auth_lost || 0);
+
+  let label;
+  let color;
+  let state;
+  if (!ibAvailable) {
+    label = 'IB-OFF'; color = 'v5-chip-close'; state = 'unavailable';
+  } else if (!connected) {
+    label = 'IB-DOWN'; color = 'v5-chip-veto'; state = 'disconnected';
+  } else if (!authorized) {
+    label = 'IB-AUTH'; color = 'v5-chip-eval'; state = 'auth_lost';
+  } else {
+    label = 'IB-LIVE'; color = 'v5-chip-manage'; state = 'live';
+  }
+
+  // Operator can click an IB-DOWN chip to attempt a reconnect without
+  // hunting for the curl endpoint.
+  const onClick = async () => {
+    if (connecting) return;
+    if (state === 'disconnected' && ibAvailable) {
+      setConnecting(true);
+      try { await api.post('/api/system/ib-direct/connect'); }
+      catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[IbLiveChipV5] connect failed:', e?.message || e);
+      } finally { setConnecting(false); }
+    }
+  };
+
+  const tooltipLines = [
+    `IB direct: ${state}`,
+    `host=${data.host}:${data.port} clientId=${data.client_id}`,
+    data.managed_accounts?.length
+      ? `accounts: ${data.managed_accounts.join(', ')}`
+      : 'managedAccounts: (none)',
+    `order_path: ${orderPath}`,
+  ];
+  if (orderPath === 'shadow') {
+    tooltipLines.push(
+      `shadow: ${counters.observed_ok || 0} ok · ${divergences} divergences`
+    );
+  }
+  if (state === 'disconnected') tooltipLines.push('Click to attempt reconnect');
+  if (data.last_connect_error) tooltipLines.push(`last error: ${data.last_connect_error}`);
+
+  return (
+    <span
+      role={state === 'disconnected' ? 'button' : undefined}
+      onClick={state === 'disconnected' ? onClick : undefined}
+      data-testid="v5-ib-live-chip"
+      data-state={state}
+      data-order-path={orderPath}
+      className={`v5-chip ${color}`}
+      title={tooltipLines.join('\n')}
+      style={{
+        cursor: state === 'disconnected' && !connecting ? 'pointer' : 'default',
+        opacity: connecting ? 0.6 : 1,
+      }}
+    >
+      {connecting ? '…' : label}
+      {orderPath === 'shadow' && divergences > 0 && (
+        <span
+          data-testid="v5-ib-live-shadow-divergences"
+          style={{ marginLeft: 4, color: '#f87171' }}
+        >
+          ⚠{divergences}
+        </span>
+      )}
+    </span>
+  );
+};
+
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/*  ScannerPausedBannerV5 (v19.34.27 — UX nudge)                            */
+/*                                                                          */
+/*  Persistent banner above the Scanner card list when the pause latch is   */
+/*  active. Loud yellow strip with elapsed time so the operator can't       */
+/*  forget the soft-brake is on the morning after.                          */
+/*                                                                          */
+/*  Compact one-liner — does NOT push the cards or chart out of view.       */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+export const ScannerPausedBannerV5 = ({ safety }) => {
+  const paused = !!safety?.data?.state?.scanner_paused;
+  const pausedAt = safety?.data?.state?.scanner_paused_at;
+  const reason = safety?.data?.state?.scanner_paused_reason;
+  const [now, setNow] = useState(Date.now());
+  const [resuming, setResuming] = useState(false);
+
+  // Tick every 15s for the elapsed-time render so the operator sees
+  // the pause duration grow. 15s is plenty granular for "30m" or "2h"
+  // displays without burning render cycles.
+  useEffect(() => {
+    if (!paused) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [paused]);
+
+  if (!paused) return null;
+
+  const elapsedSec = pausedAt ? Math.max(0, Math.floor(now / 1000 - pausedAt)) : 0;
+  let elapsedText;
+  if (elapsedSec < 60)        elapsedText = `${elapsedSec}s`;
+  else if (elapsedSec < 3600) elapsedText = `${Math.floor(elapsedSec / 60)}m`;
+  else                        elapsedText = `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`;
+
+  const onResume = async () => {
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await api.post('/api/safety/scanner/resume');
+      await safety?.refresh?.();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[ScannerPausedBannerV5] resume failed:', e?.message || e);
+    } finally { setResuming(false); }
+  };
+
+  const reasonLabel = reason && reason !== 'manual_pause' && reason !== 'operator_toggle'
+    ? ` · ${reason}`
+    : '';
+
+  return (
+    <div
+      data-testid="v5-scanner-paused-banner"
+      role="status"
+      className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/40 bg-amber-500/15 text-amber-100"
+      title={`Scanner alert intake paused since ${pausedAt ? fmtET12Sec(pausedAt * 1000) : '—'}${reasonLabel}. Open-position management continues normally.`}
+    >
+      <Power size={11} className="flex-shrink-0 text-amber-300" />
+      <div className="flex-1 min-w-0 v5-mono text-[11px] truncate">
+        <span className="font-bold">Scanner paused</span>
+        <span className="opacity-70"> · {elapsedText}{reasonLabel} · open positions keep managing</span>
+      </div>
+      <button
+        type="button"
+        data-testid="v5-scanner-paused-banner-resume"
+        onClick={onResume}
+        disabled={resuming}
+        className="v5-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 border border-amber-400/40 hover:bg-amber-500/25 text-amber-100 rounded-sm flex-shrink-0 disabled:opacity-50"
+      >
+        {resuming ? '…' : 'resume'}
+      </button>
+    </div>
+  );
+};

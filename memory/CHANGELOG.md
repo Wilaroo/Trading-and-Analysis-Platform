@@ -2,45 +2,71 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
-## 2026-02-XX (one-hundred-tenth commit, v19.34.27) — Scanner Pause toggle UI + Boot rehydration format-string crash fix
+## 2026-02-XX (one-hundred-tenth commit, v19.34.27) — Scanner Pause toggle UI + Boot rehydration crash fix + Phantom-share clamp + IB-direct shadow mode + Reconciler stop attach + IB-LIVE chip + Scanner paused banner
 
-**Severity: P0 (UI completion of v19.34.26 backend), P1 (boot noise hardening)**.
+**Severity: P0/P1 — closes the v19.34.26 thread + ships four new operator-protection layers.**
 
-Two small but operator-visible fixes finishing the v19.34.26 thread:
+This is a "consolidation" commit covering everything that was queued behind v19.34.26's executor-guard. Six independent fixes ship together, all responding to today's session's lessons:
 
 ### 1. Scanner Pause power-button — `frontend/src/components/sentcom/v5/SafetyV5.jsx` + `SentComV5View.jsx`
 
-The v19.34.26 backend shipped `/api/safety/scanner/{pause,resume,status}` endpoints (with persistence to the `safety_state` Mongo collection) but no UI surface — the operator could only toggle by curl. v19.34.27 ships the missing button.
-
-New `<ScannerPauseToggleV5 safety={safety} compact />` lives in the Scanner panel header (left column of V5 grid, next to the "Scanner · Live" title and `LiveDataChip`). Reads `safety.data.state.scanner_paused` from the existing `useSafety()` poll (8s cadence, no separate poll). Click flips state via the appropriate POST endpoint and force-refreshes the safety hook so the next render is correct without waiting for the next 8s tick. Visual states:
-
-- **LIVE** (running)  → emerald pill + Power icon — click to pause
-- **PAUSED** (paused) → amber pill + Power icon — click to resume; tooltip surfaces `paused_at` ET timestamp
-- **busy**            → spinner replaces icon, `cursor-wait`, button disabled
-
-Returns `null` when `safety.data` hasn't loaded yet so the header doesn't layout-shift on first paint.
-
-This is the soft-brake the operator asked for — quieter than the kill-switch. In-flight evals + open-position management continue normally; only NEW alert intake is blocked. Persists across backend restarts via the same `safety_state` collection that holds the kill-switch latch.
+The v19.34.26 backend shipped `/api/safety/scanner/{pause,resume,status}` endpoints (with persistence to the `safety_state` Mongo collection) but no UI surface. New `<ScannerPauseToggleV5 safety={safety} compact />` lives in the Scanner panel header. Reads `safety.data.state.scanner_paused` from the existing `useSafety()` poll. Click flips state via the appropriate POST endpoint and force-refreshes the safety hook. Visual states: **LIVE** emerald → **PAUSED** amber.
 
 ### 2. Boot rehydration `NoneType.__format__` crash — `backend/services/bot_persistence.py:restore_open_trades`
 
-**The bug class.** The restore-trade log line at the bottom of the loop was:
-```py
-logger.info(f"... @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}")
-```
-When a `bot_trades` Mongo document had `fill_price: null` or `stop_price: null` (closed/stale records, or trades saved BEFORE the entry actually filled), `dict.get(key, default)` returned `None` — NOT the default — because the key is PRESENT but the value is None. Applying `:.2f` to None raised `unsupported format string passed to NoneType.__format__`, caught by the surrounding broad except, which warned `Failed to restore trade SYMBOL` for every record on every boot. Trade itself was already wired into `_open_trades` above the log line, so the crash was log-only — but noisy enough to mask real restore failures.
+`f"... @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}"` raised `unsupported format string passed to NoneType.__format__` for any `bot_trades` document with `fill_price: null` or `stop_price: null` (closed/stale records). Two-layer fix: coerce None→`entry_price` at restore time + None→`0.0` at log time. 8 pytest cases pin the regression.
 
-**The fix.** Two-layer:
-- At restore time: `raw_fill = trade_doc.get("fill_price")` then `trade.fill_price = raw_fill if raw_fill is not None else entry_price` — so downstream math + formatting never inherit a None from a partial document.
-- At log time: `fp = trade.fill_price if trade.fill_price is not None else 0.0` (and same for `sp`). Defense in depth — even if the upstream coercion ever drops, the boot log doesn't crash.
+### 3. Phantom-share-aware close path — `backend/services/position_manager.py:close_trade`
 
-8 pytest cases in `tests/test_restore_open_trades_format_v19_34_27.py`:
-1-2. Pre-fix path raises `TypeError("unsupported format string")` for both None inputs (sanity — confirms the failure mode is real)
-3-5. Post-fix path produces clean `$0.00` strings for None inputs
-6.   Post-fix path preserves the normal-input output unchanged
-7-8. Source-code asserts that pin the fix in place against future refactors
+**The bug class.** Pre-fix `close_trade` fired a market close blindly using the bot's tracked `remaining_shares`. When the bot's count was inflated relative to IB (operator manually closed a partial in TWS, or the v19.34.15a/b reconciler spawned a phantom excess slice that didn't actually exist on IB), the close MKT would oversell — flipping a long → short by the phantom amount. Today's BMNR scenario (bot 5,472 vs IB 1,905) would have netted -3,567 shares short on the operator's account.
 
-All 8 green; ruff clean.
+**The fix.** New `_clamp_shares_to_ib_position` helper queries the `ib_direct_service.get_positions()` authoritative position before firing the close MKT. Behaviour matrix:
+- Direct IB unavailable / not connected → return intended (no clamp; pre-v19.34.27 behaviour, never blocks the close).
+- Symbol not in IB positions → return 0 (entire position is phantom). `close_trade` then marks the trade CLOSED locally with `close_reason="*_phantom_recovery_v19_34_27"` and skips the broker call entirely.
+- IB has fewer shares → return IB count. Closes only what IB actually holds.
+- Direction mismatch (bot tracks long, IB shows short) → return 0 + LOUD ERROR. Operator must reconcile manually.
+
+9 pytest cases in `tests/test_phantom_share_clamp_v19_34_27.py` cover every branch.
+
+### 4. Direct IB shadow mode — `backend/services/trade_executor_service.py`
+
+New `BOT_ORDER_PATH` env var (`pusher` default | `shadow` | `direct` future). In `shadow` mode, after every successful pusher submit through `_ib_bracket` or `_ib_close_position`, an async task fires:
+- After 4s, queries `ib_direct_service.get_positions()`.
+- Compares against the order's expected signed delta.
+- LOGs (does not act) on divergences:
+  - **missing_at_ib**: pusher said filled, IB shows zero — the v19.34.15a fingerprint.
+  - **direction_mismatch**: pusher BUY but IB has short.
+  - **auth_lost**: socket open but `managedAccounts=[]` — "logged in elsewhere" scenario.
+  - **observed_ok**: pusher and IB-direct agree.
+
+Counters are class-level + exposed via `TradeExecutorService.shadow_stats()`. `/api/system/ib-direct/status` now returns the shadow block so the V5 IB-LIVE chip can surface divergence counts. **Does NOT submit a parallel order through the direct socket** — that would duplicate at the broker. Pure observation. 11 pytest cases.
+
+### 5. Reconciler attaches IB stop on `_spawn_excess_slice` adoption — `backend/services/position_reconciler.py`
+
+Pre-fix the spawned slice was naked at IB: bot's `_open_trades` cache had a `stop_price` field but no STP order existed at the broker. Bot crash → drift unprotected. Post-fix: best-effort `bot._trade_executor.place_stop_order(trade)` immediately after persisting the slice, stamping `trade.stop_order_id` on success. Failures emit `[v19.34.27 NAKED-SLICE]` ERROR + a trade-drop record so the operator can grep / fix manually. Slice still gets adopted into `_open_trades` regardless (manage loop must keep tracking). 4 pytest cases including exception path.
+
+Followup (deferred): wire the OCA-linked target leg too; current commit attaches stop only because that's the critical-path protection. Target adoption is a P2.
+
+### 6. IB-LIVE brokerage-permission chip + Scanner Paused banner — frontend
+
+New `<IbLiveChipV5 />` mounted in the V5 status strip (next to `AccountGuardChipV5`). Polls `/api/system/ib-direct/status` every 15s. Four states:
+- **IB-LIVE** (green): connected + authorized.
+- **IB-AUTH** (amber): connected but `managedAccounts=[]` — "logged in on another platform".
+- **IB-DOWN** (red): socket not connected. CLICKABLE — clicking POSTs `/connect` to attempt reconnect.
+- **IB-OFF** (gray): `ib_async` not installed.
+
+Tooltip surfaces `BOT_ORDER_PATH` mode + shadow divergence counters when in shadow mode. A `⚠N` badge appears next to the chip when divergences > 0.
+
+New `<ScannerPausedBannerV5 safety={safety} />` mounted sticky-top inside the Scanner panel scroll container. Self-hides when `scanner_paused=false`. Renders an amber strip with elapsed pause duration (ticks every 15s) + reason + inline RESUME button. Prevents the "I forgot the scanner is paused this morning" UX trap.
+
+### Test coverage
+
+`tests/test_phantom_share_clamp_v19_34_27.py`            9 cases
+`tests/test_shadow_mode_v19_34_27.py`                   11 cases
+`tests/test_reconciler_attach_stop_v19_34_27.py`         4 cases
+`tests/test_restore_open_trades_format_v19_34_27.py`     8 cases
+                                                       ─────────
+                                                        32 cases — all green
 
 
 

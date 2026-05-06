@@ -1291,6 +1291,110 @@ class PositionManager:
                 'target_idx': target_idx,
             }
 
+    async def _clamp_shares_to_ib_position(
+        self,
+        trade,
+        intended_shares: int,
+        *,
+        reason: str = "manual",
+    ) -> int:
+        """v19.34.27 — return min(intended_shares, |IB position for symbol|).
+
+        Queries the direct IB API service for the live, authoritative
+        position on `trade.symbol`. If IB shows fewer shares than the
+        bot's tracked count (phantom shares), returns the IB number so
+        the close MKT can't oversell.
+
+        Behaviour matrix:
+          - Direct IB unavailable / not connected   → return intended (no clamp)
+          - Symbol not in IB positions               → return 0 (entire position is phantom)
+          - IB shares ≥ intended                     → return intended (no clamp needed)
+          - IB shares <  intended                    → return IB shares (CLAMPED)
+          - Direction mismatch (long bot vs short IB)→ return 0 (refuse, log loud)
+
+        The "fewer shares than tracked" case is the BMNR scenario; the
+        "direction mismatch" case is the v19.34.15a `[REJECTED: Bracket
+        unknown]` race fingerprint where the bot believes it's long
+        but IB has flipped or zeroed the position.
+
+        Direction is signed in IB's API: positive = long, negative =
+        short. We compare on absolute value but log if the sign
+        disagrees with the bot's tracked direction so the operator can
+        see the divergence.
+        """
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+        except Exception:
+            return intended_shares
+
+        svc = get_ib_direct_service()
+        if not (svc.is_available() and svc.is_connected()):
+            # Direct socket isn't up — can't clamp. Caller falls back
+            # to the bot's tracked count, which is the pre-v19.34.27
+            # behaviour.
+            return intended_shares
+
+        try:
+            positions = await svc.get_positions()
+        except Exception as e:
+            logger.debug(
+                f"_clamp_shares_to_ib_position: get_positions failed for "
+                f"{trade.symbol} ({e}); returning intended {intended_shares}"
+            )
+            return intended_shares
+
+        # Find the symbol's signed position (sum across accounts is fine
+        # — operator runs single-account so this is always 1 row).
+        ib_signed = 0.0
+        for p in positions or []:
+            if (p.get("symbol") or "").upper() == trade.symbol.upper():
+                ib_signed += float(p.get("position") or 0)
+
+        ib_abs = int(abs(round(ib_signed)))
+        # Direction sign check: -1 short, +1 long, 0 flat.
+        ib_sign = 0 if ib_abs == 0 else (1 if ib_signed > 0 else -1)
+        try:
+            from services.trading_bot_service import TradeDirection
+            bot_sign = 1 if trade.direction == TradeDirection.LONG else -1
+        except Exception:
+            bot_sign = 1 if str(getattr(trade.direction, "value", trade.direction)).lower() == "long" else -1
+
+        if ib_abs == 0:
+            logger.warning(
+                f"[v19.34.27 PHANTOM] {trade.symbol} close_trade(reason={reason}) "
+                f"clamped {intended_shares}→0: IB shows ZERO position. Trade "
+                f"{trade.id} will be marked CLOSED locally without broker call."
+            )
+            return 0
+
+        if ib_sign != bot_sign:
+            # Direction mismatch — bot thinks long, IB has short (or
+            # vice versa). Refuse the close: firing a market sell on a
+            # short position would actually OPEN more short. Operator
+            # must reconcile manually.
+            logger.error(
+                f"[v19.34.27 PHANTOM] {trade.symbol} close_trade(reason={reason}) "
+                f"REFUSING to fire — direction mismatch: bot tracks "
+                f"{('long' if bot_sign > 0 else 'short')} {intended_shares}sh, "
+                f"IB has {('long' if ib_sign > 0 else 'short')} {ib_abs}sh. "
+                f"Trade {trade.id} will be marked CLOSED locally; operator "
+                f"must reconcile the IB-side residual manually."
+            )
+            return 0
+
+        if ib_abs >= intended_shares:
+            return intended_shares
+
+        # IB has fewer shares than tracked — clamp.
+        logger.warning(
+            f"[v19.34.27 PHANTOM] {trade.symbol} close_trade(reason={reason}) "
+            f"clamped {intended_shares}→{ib_abs}: bot tracked "
+            f"{intended_shares}sh, IB authoritative position is {ib_abs}sh "
+            f"({ib_signed:+.0f} signed). Closing only what IB actually holds."
+        )
+        return ib_abs
+
+
     async def close_trade(self, trade_id: str, bot: 'TradingBotService', reason: str = "manual"):
         """Close an open trade (sells remaining shares).
 
@@ -1302,6 +1406,28 @@ class PositionManager:
         a hard return — the trade stays OPEN locally so the manage
         loop can retry on the next pass and the operator can see the
         failure in the trade-drops feed.
+
+        2026-02-XX v19.34.27 — Phantom-share-aware close. Pre-fix this
+        method fired a market close blindly using the bot's tracked
+        share count. When the bot's `remaining_shares` was inflated
+        relative to IB's authoritative position (e.g., the operator
+        manually closed a partial in TWS, or the v19.34.15a/b
+        reconciler spawned a phantom excess slice that didn't exist on
+        IB), the close MKT would oversell — flipping a long → short
+        (or short → long) by the phantom amount. Today's BMNR scenario
+        (bot 5,472 vs IB 1,905) would have netted -3,567 shares short
+        on the operator's account if any position-manager close path
+        had triggered before reconciliation caught up.
+
+        Fix: query the direct IB API for the live position before
+        firing the close MKT and cap `shares_to_close` at
+        `min(internal_remaining, ib_actual_abs)`. If the direct socket
+        isn't connected we fall back to the bot's tracked count (safer
+        than blocking — the manage loop must always be able to close).
+        Same-symbol multi-trade fan-out is conservative: the cap is
+        applied per close call, so two trades trying to close the same
+        ticker can't oversell IB's actual position even if invoked
+        back-to-back.
         """
         from services.trading_bot_service import TradeDirection, TradeStatus
 
@@ -1312,6 +1438,47 @@ class PositionManager:
 
         # Use remaining shares if we've done partial exits, otherwise use original shares
         shares_to_close = trade.remaining_shares if trade.remaining_shares > 0 else trade.shares
+
+        # ── v19.34.27 phantom-share clamp ─────────────────────────
+        # Best-effort cross-check against IB's authoritative position.
+        # Failures here NEVER block the close — they just leave the
+        # bot's tracked count as the cap, which is the pre-v19.34.27
+        # behavior.
+        try:
+            shares_to_close = await self._clamp_shares_to_ib_position(
+                trade, shares_to_close, reason=reason
+            )
+        except Exception as clamp_err:
+            logger.debug(
+                f"close_trade: phantom-share clamp errored for {trade.symbol} "
+                f"({clamp_err}); using bot-tracked count {shares_to_close}"
+            )
+
+        # If the clamp dropped the close to zero (IB shows zero
+        # position for this symbol — i.e., the entire position is a
+        # phantom), there's nothing to close at the broker. Mark the
+        # trade closed locally at current_price and return True so the
+        # manage loop stops retrying. This is the "phantom recovery"
+        # path the operator hit during the BMNR reconciliation today.
+        if shares_to_close == 0:
+            logger.warning(
+                f"close_trade: {trade.symbol} clamped to 0 shares — IB shows "
+                f"no position. Marking trade {trade_id} CLOSED locally "
+                f"(reason={reason}) without broker call."
+            )
+            trade.exit_price = trade.current_price
+            trade.status = TradeStatus.CLOSED
+            trade.closed_at = datetime.now(timezone.utc).isoformat()
+            trade.close_reason = f"{reason}_phantom_recovery_v19_34_27"
+            trade.unrealized_pnl = 0
+            trade.remaining_shares = 0
+            del bot._open_trades[trade_id]
+            bot._closed_trades.append(trade)
+            try:
+                await bot._save_trade(trade)
+            except Exception as e:
+                logger.warning(f"close_trade phantom-recovery save failed: {e}")
+            return True
 
         try:
             executor_failed = False

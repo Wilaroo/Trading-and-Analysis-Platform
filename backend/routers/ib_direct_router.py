@@ -38,8 +38,19 @@ async def ib_direct_status() -> Dict[str, Any]:
     Returns success=True even when not connected — the response payload
     carries `connected`/`authorized_to_trade` flags. This matches the
     pattern of other system endpoints (status check itself succeeds).
+
+    v19.34.27 — also surfaces the BOT_ORDER_PATH mode + shadow-observe
+    divergence counters so the V5 IB-LIVE chip tooltip can show whether
+    pusher/IB-direct have been agreeing in shadow mode.
     """
-    return get_ib_direct_service().status()
+    payload = get_ib_direct_service().status()
+    try:
+        from services.trade_executor_service import TradeExecutorService
+        payload["shadow"] = TradeExecutorService.shadow_stats()
+    except Exception as e:
+        logger.debug("ib_direct_status: shadow_stats lookup failed: %s", e)
+        payload["shadow"] = {"order_path": "pusher", "counters": {}}
+    return payload
 
 
 @router.post("/connect")
