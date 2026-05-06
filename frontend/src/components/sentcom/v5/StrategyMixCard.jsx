@@ -97,7 +97,7 @@ export const StrategyMixCard = () => {
   return (
     <div
       data-testid="strategy-mix-card"
-      className="px-4 py-3 bg-zinc-950/40 space-y-2"
+      className="px-3 py-1 bg-zinc-950/40 space-y-1 text-[11px]"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs">

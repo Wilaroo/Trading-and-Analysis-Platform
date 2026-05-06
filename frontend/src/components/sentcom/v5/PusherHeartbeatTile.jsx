@@ -68,26 +68,26 @@ export const PusherHeartbeatTile = () => {
   return (
     <div
       data-testid="pusher-heartbeat-tile"
-      className="flex items-center gap-4 px-4 py-1 bg-zinc-950/60"
+      className="flex items-center gap-3 px-2 py-0.5 bg-zinc-950/60 text-[11px]"
     >
       {/* Pulse dot + label */}
-      <div className="flex items-center gap-2 min-w-[140px]">
-        <span className="relative flex h-2.5 w-2.5">
+      <div className="flex items-center gap-1.5 min-w-[125px]">
+        <span className="relative flex h-2 w-2">
           {pulse && (
             <span
               className={`absolute inline-flex h-full w-full rounded-full ${palette.dot} opacity-75 animate-ping`}
             />
           )}
           <span
-            className={`relative inline-flex h-2.5 w-2.5 rounded-full ${palette.dot} shadow-md ${palette.ring}`}
+            className={`relative inline-flex h-2 w-2 rounded-full ${palette.dot} shadow-md ${palette.ring}`}
             data-testid="pusher-heartbeat-pulse"
           />
         </span>
         <div className="flex flex-col leading-tight">
-          <span className={`text-xs font-bold tracking-wider ${palette.text}`}>
+          <span className={`text-[10px] font-bold tracking-wider ${palette.text}`}>
             PUSHER {data.health?.toUpperCase() || '—'}
           </span>
-          <span className="text-[12px] text-zinc-500 v5-mono">
+          <span className="text-[10px] text-zinc-500 v5-mono">
             last push {fmtAge(data.age_seconds)} ago
           </span>
         </div>
