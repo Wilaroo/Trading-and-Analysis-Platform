@@ -2,6 +2,40 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-sixth commit, v19.34.23) — Open Positions UX cleanup: drop loud per-row badges, add subtle auto-heal pill
+
+**Severity: P0 (UX)**. After v19.34.22 the bot now auto-heals orphan / partial / stale-bot / reconciled-external positions seamlessly within the same reconciler tick, but the V5 `OpenPositionsV5` panel still rendered every legacy state as a loud per-row badge. Operator screenshot showed 11 of 17 rows tagged with contradictory pairs like `ORPHAN ... RECONCILED` (the position WAS an orphan; it isn't anymore — the bot just adopted it). The badges added cognitive load with no operator action attached and overlapped the `2×` member-count chip + PnL.
+
+### Frontend — `components/sentcom/v5/OpenPositionsV5.jsx`
+
+1. **Removed per-row source badges**: `ORPHAN` (`source=='ib'`), `PARTIAL` (`source=='partial'`), and `STALE` (`source=='stale_bot'`) are no longer rendered on individual rows. The `SOURCE_BADGE` constant + `sourceBadge` prop on `PositionRow` were deleted. The underlying `g.source` value is still consulted by the `Reconcile N` button (the sole place where these states are operator-actionable).
+2. **Removed per-row `RECONCILED` provenance chip**: the fuchsia `RECONCILED` chip that fired whenever `entered_by === 'reconciled_external'` was contradictory once paired with the orphan badge and noisy on the 11/17 reconciled-adoption rows in the operator screenshot. The expanded-row "Reconciled from IB orphan" callout is preserved in full — provenance is still one click away, just not blasted on every collapsed row.
+3. **`QuoteFreshnessChip` only renders when state ≠ `fresh`**: every healthy row was carrying a green `FRESH · 1s old` chip whose information value was nil. The chip now shows only for `amber`, `stale`, and `unknown` states — i.e. only when the bot may not be able to fire stops on that row. (`title` tooltip semantics unchanged for the visible states.)
+4. **New header pill — `auto-heal · N`**: a single subtle zinc-toned pill aggregates the count of positions the bot is currently auto-healing (`stale_bot` phantom-share rows + `reconciled_external` adoptions). Hover for the breakdown. Stays invisible when N == 0. Lives next to the existing actionable `Reconcile N` button so the operator's "what's the bot doing right now?" answer is one glance away.
+
+Kept untouched (operator action still required when these fire):
+- `⚠ CONFLICT` chip (reconciled adoption whose recent verdicts were REJECT).
+- `Reconcile N` button (orphans + partials that need the operator to claim).
+
+### Files touched
+- `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx` (badges removed, header pill added).
+
+### Operator-side impact
+- Open Positions panel is now visually quiet by default. Per-row chips: `2× memberCount`, `TradeTypeChip`, plus quote-freshness ONLY when degraded.
+- Active healing activity surfaces once in the panel header (`auto-heal · 11`) instead of 11 separate row-level chips.
+- Tooltip on the new pill reads:
+  > Auto-healed by bot — no operator action needed.
+  > · N reconciled (adopted from IB orphan)
+  > · N stale (phantom shares being swept)
+  > Full provenance is preserved in each row's expanded detail.
+
+### Build / verification
+- `cd frontend && yarn build` — clean (no new warnings).
+- ESLint: clean.
+- Backend untouched. No reconciler / data-pipeline regression risk.
+
+
+
 ## 2026-05-07 (one-hundred-fifth commit, v19.34.22) — Orphan-reconciler duplicate-spawn fix
 
 **Severity: P1**. During v19.34.19 zombie-cleanup forensics the operator identified a latent duplicate-spawn bug in `reconcile_orphan_positions`: when a `reconciled_excess_v19_34_15b` / `reconciled_excess_v19_34_19` slice (or a v19.24 `reconciled_external` orphan) is persisted to `bot_trades` (`status==open`) but NOT yet hydrated into `bot._open_trades` (restart race window, or out-of-band insert from another worker), the reconciler treated the symbol as "untracked" and spawned a duplicate `reconciled_orphan` BotTrade against the same IB position. The bot then believed it owned 2× the IB qty.

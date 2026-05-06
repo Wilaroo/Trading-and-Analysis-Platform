@@ -9,7 +9,7 @@ import requests
 import os
 
 # Get API URL from environment
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://position-sync-v15.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://orphan-reconciler-v6.preview.emergentagent.com').rstrip('/')
 
 
 class TestRegimePerformanceEndpoints:

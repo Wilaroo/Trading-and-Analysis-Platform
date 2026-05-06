@@ -17,7 +17,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://position-sync-v15.preview.emergentagent.com
+set CLOUD_URL=https://orphan-reconciler-v6.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%post_restart.log
 
 :: Log start time

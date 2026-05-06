@@ -150,7 +150,7 @@ const Sparkline = ({ points, color }) => {
 };
 
 
-const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, memberCount }) => {
+const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => {
   const dir = (position.direction || position.side || '').toLowerCase();
   const isShort = dir === 'short';
   const pnlUsd = position.unrealized_pnl ?? position.pnl ?? 0;
@@ -212,19 +212,20 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
               {memberCount}×
             </span>
           )}
-          {sourceBadge && (
-            <span
-              data-testid={`group-source-badge-${position.symbol}`}
-              className={`px-1 py-0 text-[9px] uppercase tracking-wider border rounded ${sourceBadge.color}`}
-              title={sourceBadge.title}
-            >
-              {sourceBadge.label}
-            </span>
-          )}
+          {/* v19.34.23 (2026-02-XX) — Per-row ORPHAN / PARTIAL / STALE-bot
+              source badges and the RECONCILED provenance chip removed.
+              Operator feedback: now that the bot auto-heals all of these
+              within the same tick (Orphan Reconciler + drift watchdog),
+              the badges contradicted themselves on every row
+              ("ORPHAN ... RECONCILED") and added cognitive load with
+              no operator action attached. The aggregate count is now
+              surfaced ONCE in the panel header as a subtle
+              "auto-healed: N" pill (see AutoHealHeaderPill below). The
+              full provenance is still preserved in the row's expanded
+              detail callout. */}
           {/* v19.31.13 — trade origin chip (PAPER amber, LIVE red, SHADOW sky).
               v19.34.1 — render even when type is "unknown" so the operator
-              never has a row without a mode tag. The pusher-account
-              fallback in sentcom_service should normally fill this in. */}
+              never has a row without a mode tag. */}
           <TradeTypeChip
             type={position.trade_type}
             size="xs"
@@ -236,32 +237,17 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
             }
           />
           {/* v19.34.2 — quote freshness chip. Shows whether the bot
-              can currently fire stops on this position (FRESH / AMBER /
-              STALE) so the operator never has to guess if a row is
-              actively protected. */}
-          <QuoteFreshnessChip
-            state={position.quote_state}
-            ageSeconds={position.quote_age_s}
-            size="xs"
-            testIdSuffix={`open-pos-${position.symbol}`}
-          />
-          {/* v19.34.3 — provenance chip. Distinguishes RECONCILED
-              (orphan adoption — bot did not open this) from BOT
-              (bot's own evaluation + execution). Operator-discovered
-              VALE bug: synthetic SL/PT didn't reflect bot's prior
-              REJECT verdicts. */}
-          {position.entered_by === 'reconciled_external' && (
-            <span
-              data-testid={`provenance-chip-${position.symbol}`}
-              className="px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800 font-bold"
-              title={
-                position.synthetic_source === 'last_verdict'
-                  ? 'RECONCILED — Bot did not open this. SL/PT pulled from bot\'s last verdict numbers.'
-                  : 'RECONCILED — Bot did not open this. SL/PT are synthetic defaults (e.g. 2% from avg cost).'
-              }
-            >
-              RECONCILED
-            </span>
+              can currently fire stops on this position. v19.34.23 —
+              hide when state is FRESH (the healthy default). The chip
+              now renders ONLY when the operator should care
+              (amber / stale / unknown). */}
+          {position.quote_state && String(position.quote_state).toLowerCase() !== 'fresh' && (
+            <QuoteFreshnessChip
+              state={position.quote_state}
+              ageSeconds={position.quote_age_s}
+              size="xs"
+              testIdSuffix={`open-pos-${position.symbol}`}
+            />
           )}
           {/* v19.34.3 — prior-verdict-conflict warning chip. Triggered
               when ≥2 of the bot's last 3 verdicts on this symbol/setup
@@ -508,12 +494,12 @@ const PositionRow = ({ position, onClick, expanded, onToggle, sourceBadge, membe
 // confusing — operator couldn't tell "is this 1 IB position or 2?"
 // ───────────────────────────────────────────────────────────────────────
 
-const SOURCE_BADGE = {
-  ib:        { label: 'ORPHAN',  color: 'bg-amber-900/40 text-amber-300 border-amber-800/60' },
-  partial:   { label: 'PARTIAL', color: 'bg-orange-900/40 text-orange-300 border-orange-800/60' },
-  stale_bot: { label: 'STALE',   color: 'bg-rose-900/40 text-rose-300 border-rose-800/60' },
-  bot:       null,  // no badge for clean tracking
-};
+// v19.34.23 (2026-02-XX) — Per-row ORPHAN / PARTIAL / STALE-bot source
+// badges removed (operator feedback: contradictory + redundant once the
+// reconciler auto-heals these within the same tick). Aggregate counts
+// are now surfaced once in the panel header via `autoHealCounts`. The
+// `g.source` value is still used by the `Reconcile N` button to find
+// orphan + partial groups that need user action.
 
 const groupBySymbolDirection = (open) => {
   const buckets = new Map();  // key: `${symbol}|${direction}` → { symbol, direction, members: [...] }
@@ -657,6 +643,24 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
   );
   const reconcileCount = reconcileTargets.length;
 
+  // v19.34.23 (2026-02-XX) — Aggregate auto-heal count surfaced ONCE in
+  // the panel header (replaces per-row ORPHAN / STALE / RECONCILED
+  // badges). Counts positions the bot is actively healing without
+  // operator action: stale-bot phantom shares + reconciled-external
+  // adoptions. Excludes orphans/partials (those have the actionable
+  // `Reconcile N` button instead).
+  const autoHealCounts = useMemo(() => {
+    let stale = 0;
+    let adopted = 0;
+    for (const g of groups) {
+      if (g.source === 'stale_bot') stale += 1;
+      // `entered_by` lives on the representative member after grouping.
+      const rep = g._members?.[0] || g;
+      if (rep?.entered_by === 'reconciled_external') adopted += 1;
+    }
+    return { stale, adopted, total: stale + adopted };
+  }, [groups]);
+
   const handleReconcile = async () => {
     if (reconcileBusy) return;
     const symbols = reconcileTargets.map(g => g.symbol).filter(Boolean);
@@ -753,6 +757,30 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
               {reconcileBusy ? 'Reconciling…' : `Reconcile ${reconcileCount}`}
             </button>
           )}
+          {/* v19.34.23 (2026-02-XX) — Subtle auto-heal pill. Replaces
+              the loud per-row ORPHAN / STALE / RECONCILED badges with a
+              single header indicator that only renders when the bot is
+              actively healing something. Stays invisible 99% of the
+              time; pulses zinc (not amber) so it doesn't compete with
+              the actionable `Reconcile N` button. Hover for breakdown. */}
+          {autoHealCounts.total > 0 && (
+            <span
+              data-testid="open-positions-auto-heal-pill"
+              data-stale={autoHealCounts.stale}
+              data-adopted={autoHealCounts.adopted}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] uppercase tracking-wider rounded border border-zinc-700 bg-zinc-900/60 text-zinc-400 cursor-help"
+              title={[
+                'Auto-healed by bot — no operator action needed.',
+                autoHealCounts.adopted > 0 && `· ${autoHealCounts.adopted} reconciled (adopted from IB orphan)`,
+                autoHealCounts.stale > 0    && `· ${autoHealCounts.stale} stale (phantom shares being swept)`,
+                '',
+                'Full provenance is preserved in each row\'s expanded detail.',
+              ].filter(Boolean).join('\n')}
+            >
+              <span aria-hidden className="inline-block w-1.5 h-1.5 rounded-full bg-zinc-500" />
+              auto-heal · {autoHealCounts.total}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {reconcileMsg && (
@@ -779,23 +807,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
         )}
         {groups.map(g => {
           const isExpanded = expandedKey === g._group_key;
-          const sourceBadgeRaw = SOURCE_BADGE[g.source];
           const memberCount = g._members.length;
-          // 2026-05-04 — sourceBadge now inlined into PositionRow's left
-          // cluster (was an absolute overlay on the right that obscured
-          // live PnL). Build the title/tooltip here so PositionRow stays
-          // dumb about source semantics.
-          const sourceBadge = sourceBadgeRaw
-            ? {
-                ...sourceBadgeRaw,
-                title:
-                  g.source === 'partial'
-                    ? `Bot tracks ${(g._members.find(m => m.source === 'bot')?.shares) ?? 0}sh, IB has more — ${g._unclaimed_shares}sh untracked`
-                    : g.source === 'stale_bot'
-                    ? 'Bot tracks shares IB does not show — phantom shares, will auto-sweep'
-                    : 'IB position with no bot tracking — click Reconcile to claim',
-              }
-            : null;
           return (
             <div
               key={g._group_key}
@@ -806,7 +818,6 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
                 expanded={isExpanded}
                 onToggle={() => handleToggle(g._group_key)}
                 onClick={() => onSelectPosition?.(g)}
-                sourceBadge={sourceBadge}
                 memberCount={memberCount}
               />
               {isExpanded && memberCount > 1 && (

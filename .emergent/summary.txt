@@ -1,61 +1,38 @@
-<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. A critical data integrity bug was identified where the bot accumulated 4,879 unmanaged, unbracketed naked UPS shares at IB because parent entries filled while the bracket attachment failed ( interpreted as full rejection). 
+<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. A critical data integrity bug where the bot accumulated unmanaged shares at IB was fixed, but the Orphan Reconciler was duplicating  trades. This was resolved, and now the user is questioning the utility of showing , , and  UI badges on trades if the bot handles them automatically.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A hardened, full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (:8001) + React (:3000) + MongoDB, and a Windows PC running IB Gateway + IB Data Pusher. The UI is upgraded to the V5 spec. A newly built state integrity drift watchdog, bracket history UI, and rejection heatmap UI are live.
+**what currently exists?**: A hardened, full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (:8001) + React (:3000) + MongoDB. The Orphan Reconciler Duplicating Trades bug (v19.34.22) has been successfully fixed and tested. However, the user is currently looking at the V5 UI and asking why trades are still displaying , , and  badges, questioning if these should be hidden since the system now auto-heals them.
 
-**Last working item**:
-    - Last item agent was working: Building  (Share-count drift reconciler). The agent just called  to propose the execution plan for 15b and is waiting for user approval before modifying .
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by curl/ pytest / python -c. (Automated testing agents WILL FAIL due to DGX/Windows hardware bindings. DO NOT use testing agents).
-    - User Testing Done: N
+**Last working item**: 
+    - Last item agent was working: Addressing the user's immediate question regarding the UI badges (, , ). The user uploaded screenshots showing these tags dominating the Open Positions panel and asked why they are still visible if the bot resolves them automatically.
+    - Status: NOT STARTED (Agent just received the user's query after completing the previous fix)
+    - Agent Testing Done: N/A
+    - Which testing method agent to use? manual testing by curl / python -c / bash (Automated testing agents WILL FAIL due to DGX/Windows hardware bindings. DO NOT use testing agents). Screenshot tool for frontend verification.
+    - User Testing Done: N/A
 
 **All Pending/In progress Issue list**:
-  Issue 1: 🔴 (P0) Share-Count Drift Reconciler (v19.34.15b)
-     - Attempted fixes: Investigated the UPS data anomaly. Formulated a plan. Fired  to get user approval before writing code.
-     - Next debug checklist: In , build logic so when , compare IB qty vs . Threshold for drift is . 
-       - Case A (IB qty > bot qty): Spawn a new  for the excess delta as  anchored on  with a default 2% stop / 2R target.
-       - Case B (IB qty < bot qty): Shrink  to match IB, emit  event, and auto-close if IB qty == 0.
-     - Why fix this issue and what will be achieved with the fix? Creates a self-healing mechanism that catches and resolves position desyncs between the bot and IB within ~30 seconds.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on other issue: Waiting for user reply to .
-
-  Issue 2: 🔴 (P0) The Bracket unknown Race / Naked-position safety net (v19.34.15a)
-     - Attempted fixes: Investigated . Found that  from the pusher is treated as a hard rejection.
-     - Next debug checklist: In , treat ambiguous statuses () as a  instead of a hard rejection ( with ). In , add a post-rejection IB poll-back task (poll 1s for 15s) to verify unexpected fills, and emit a  stream event.
-     - Why fix this issue and what will be achieved with the fix? Stops the root cause of the 4,879 naked shares bug.
-     - Status: NOT STARTED (Do this AFTER 15b is shipped and verified)
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on other issue: Issue 1 (Ship 15b first)
-
-  Issue 3: 🟡 (P1) UPS 31-second  close investigation
+  Issue 1: 🔴 (P0) Address User Feedback on UI Badges (, , )
      - Attempted fixes: None yet.
-     - Next debug checklist: Review logs/tape for the UPS trade closed 31 seconds after opening to determine if the exit was a valid target hit or a misfired external resolution.
-     - Why fix this issue and what will be achieved with the fix? Ensure bracket stops are accurate and not overly tight.
+     - Next debug checklist: Review the frontend logic (likely in  or similar V5/V6 components). Formulate a response explaining *why* the tags are currently shown (transparency/auditability), but propose a plan to hide them or move them to a consolidated Status Pill or tooltip to reduce UI clutter as requested by the user.
+     - Why fix this issue and what will be achieved with the fix? Improves operator UX by removing unnecessary cognitive load for automatically handled events.
      - Status: NOT STARTED
-     - Is recurring issue? Unknown
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on other issue: None
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None.
 
 **In progress Task List**:
-  Task 1: 🔴 (P0) Implement  Share-count drift reconciler
-     - Where to resume: Await user response to the pending  call. Once approved, implement logic in .
-     - What will be achieved with this? Bot automatically heals any share-count discrepancies with IB.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on something: User response to .
+  Task 1: 🟡 (P1) Implement SentCom V6 UI Refactor
+     - Where to resume: Waiting for user direction to implement Variant C of the V6 layout across main components. This replaces the cluttered V5 UI.
+     - What will be achieved with this? Streamlined 4-pane + status-strip architecture prioritizing bot reasoning.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on something: Needs user approval to begin after addressing the immediate P0 UI badge issue.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P0) Ship  (Naked-position safety net) (See Issue 2 above - MUST follow 15b).
-    - 🟡 (P1) Extend  to explicitly flag unmatched  /  transactions.
-    - 🟡 (P1) Wire bracket-lifecycle persistence into the boot zombie sweeper.
-    - 🟢 (P2) Ship the Rejection Heatmap per-cell hour-of-day sparkline improvement (logged in ).
-    - 🟢 (P2) Ship the drift-loop knobs as  improvement (logged in ).
+    - 🟡 (P1) Implement V6 UI components permanently replacing V5.
+    - 🟡 (P1) Implement proposed  UI status pill for zombie drift failures (consolidating the noisy badges into a single global indicator).
 
     Future Tasks:
     - 🟢 (P2) Tick-level Stop Run Probability ML Module.
@@ -67,8 +44,9 @@
     - 🟢 (P3) Break up  monolith.
 
 **Completed work in this session**
-- Agent formulated a plan and called  to propose the execution strategy for 15b. (Awaiting response)
-*(Note: v19.34.10 through v19.34.14 were completed in the prior session context)*
+- : Fixed Orphan Reconciler duplication bug. Patched  in  to recognize  values associated with drift-healing (, etc.) as valid tracked trades. (DONE)
+- Created and passed test suite . (DONE)
+- Updated  and . (DONE)
 
 **Earlier issues found/mentioned but not fixed**
 None.
@@ -79,7 +57,9 @@ None.
   - Status: RESOLVED
 
 **Code Architecture**
-- DGX Spark (Linux) running FastAPI (Backend) and React (Frontend). Target user directory is .
+- DGX Spark (Linux) running FastAPI (Backend).
+- React (Frontend) is built into static files () and served directly by the FastAPI backend.
+- Target user directory is .
 - Windows PC running IB Gateway + IB Data Pusher ().
 
 **Key Technical Concepts**
@@ -87,37 +67,33 @@ FastAPI, React, MongoDB, State Integrity Watchdogs, Bracket Orders (OCA), IB Orp
 
 **key DB schema**
   - : Canonical trade record.
-  - : Stores risk parameters and state flags.
-  - : TTL 7d collection for bracket history auditing.
-  - : TTL 7d collection tracking bot trade rejections for the heatmap.
+  - : TTL 7d collection for bracket history.
+  - : Logs drift detections and resolutions.
 
 **changes in tech stack**
   - None
 
 **All files of reference**
-  -  (Target for 15b share-count logic)
-  -  (Bug resides here for 15a)
-  -  (Bug path and poll-back target for 15a)
-  -  
-  - 
-  - 
+  -  (Recently modified to fix duplicator bug)
+  -  (Likely location of the V5 UI badges)
+  -  (Created this session)
+  -  &  (Updated this session)
 
 **Areas that need refactoring**:
-  -  bracket placement paths blindly reject on , leaking filled parent orders. Needs refactoring to handle ambiguous responses via a timeout flow (Scope of 15a).
+  -  (Monolith)
+  - V5 UI components (Currently migrating to V6 layout).
 
 **key api endpoints**
   - 
   - 
-  - 
-  - 
 
 **Critical Info for New Agent**
-- **Hardware Limitations:** Standard automated testing agents *WILL FAIL* because they lack access to the physical DGX hardware + Windows IB Gateway bindings. DO NOT USE THEM. Rely strictly on manual python snippets via , , and ============================= test session starts ==============================
+- **Hardware Limitations:** Standard automated testing agents *WILL FAIL* because they lack access to the physical DGX hardware + Windows IB Gateway bindings. DO NOT USE THEM. Rely strictly on manual python snippets via , , ============================= test session starts ==============================
 platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
 rootdir: /app
 plugins: asyncio-1.3.0, anyio-3.7.1
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 4371 items / 3 errors
+collected 4438 items / 3 errors
 
 ==================================== ERRORS ====================================
 __________ ERROR collecting backend/tests/test_asyncio_performance.py __________
@@ -144,11 +120,11 @@ E   ModuleNotFoundError: No module named 'backend'
     import multipart
 
 ../root/.venv/lib/python3.11/site-packages/xgboost/training.py:200
-  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [18:48:03] WARNING: /__w/xgboost/xgboost/src/context.cc:53: No visible GPU is found, setting device to CPU.
+  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [15:51:49] WARNING: /__w/xgboost/xgboost/src/context.cc:53: No visible GPU is found, setting device to CPU.
     bst.update(dtrain, iteration=i, fobj=obj)
 
 ../root/.venv/lib/python3.11/site-packages/xgboost/training.py:200
-  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [18:48:03] WARNING: /__w/xgboost/xgboost/src/context.cc:207: Device is changed from GPU to CPU as we couldn't find any available GPU on the system.
+  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [15:51:49] WARNING: /__w/xgboost/xgboost/src/context.cc:207: Device is changed from GPU to CPU as we couldn't find any available GPU on the system.
     bst.update(dtrain, iteration=i, fobj=obj)
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -157,21 +133,570 @@ ERROR backend/tests/test_asyncio_performance.py - ValueError: REACT_APP_BACKE...
 ERROR backend/tests/test_hindsight_analysis.py - ValueError: MONGO_URL enviro...
 ERROR backend/tests/test_triple_barrier_labeler.py
 !!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
-======================== 3 warnings, 3 errors in 9.98s =========================.
-- **RTH is Active:** Live paper trading is occurring. Be extremely careful when editing trade execution files.
-- **Workflow Context:** You must wait for the user's response to the pending  tool call. The user explicitly requested to ship **v19.34.15b FIRST**, let them verify it, and then carefully plan out and investigate **v19.34.15a** before committing code for it. Do not conflate the two commits.
+======================== 3 warnings, 3 errors in 11.01s ======================== and screenshot tool.
+- **Frontend Build Workflow:** The FastAPI server serves a static production build of the React app. **Whenever you modify frontend code, you MUST run yarn run v1.22.22
+$ react-scripts build
+Creating an optimized production build...
+Compiled with warnings.
+
+[eslint] 
+src/App.js
+  Line 2:10:    'motion' is defined but never used                        no-unused-vars
+  Line 2:18:    'AnimatePresence' is defined but never used               no-unused-vars
+  Line 3:10:    'Volume2' is defined but never used                       no-unused-vars
+  Line 3:19:    'VolumeX' is defined but never used                       no-unused-vars
+  Line 37:8:    'SystemStatusBar' is defined but never used               no-unused-vars
+  Line 38:8:    'FocusModeSelector' is defined but never used             no-unused-vars
+  Line 57:7:    'WidgetErrorBoundary' is assigned a value but never used  no-unused-vars
+  Line 154:10:  'loading' is assigned a value but never used              no-unused-vars
+
+src/components/BotPerformanceChart.jsx
+  Line 17:8:   'api' is defined but never used                                                                                        no-unused-vars
+  Line 17:24:  'safePost' is defined but never used                                                                                   no-unused-vars
+  Line 45:10:  'mousePos' is assigned a value but never used                                                                          no-unused-vars
+  Line 451:6:  React Hook useCallback has a missing dependency: 'chartData.length'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/BriefMeModal.jsx
+  Line 12:15:  'safeGet' is defined but never used                                                                            no-unused-vars
+  Line 12:24:  'safePost' is defined but never used                                                                           no-unused-vars
+  Line 14:28:  'TrendingDown' is defined but never used                                                                       no-unused-vars
+  Line 65:6:   React Hook useEffect has a missing dependency: 'fetchBrief'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 294:9:  'briefData' is assigned a value but never used                                                                 no-unused-vars
+
+src/components/ChatBubbleOverlay.jsx
+  Line 10:24:  'X' is defined but never used      no-unused-vars
+  Line 10:42:  'Gauge' is defined but never used  no-unused-vars
+  Line 14:10:  'toast' is defined but never used  no-unused-vars
+
+src/components/ConversationPanel.jsx
+  Line 7:59:  'useMemo' is defined but never used            no-unused-vars
+  Line 16:7:  'API_BASE' is assigned a value but never used  no-unused-vars
+
+src/components/DetailedPositionsPanel.jsx
+  Line 16:44:  'Shield' is defined but never used             no-unused-vars
+  Line 19:16:  'Percent' is defined but never used            no-unused-vars
+  Line 85:9:   'isIbOnly' is assigned a value but never used  no-unused-vars
+
+src/components/DynamicRiskPanel.jsx
+  Line 7:51:    'useRef' is defined but never used                   no-unused-vars
+  Line 10:11:   'TrendingUp' is defined but never used               no-unused-vars
+  Line 10:23:   'TrendingDown' is defined but never used             no-unused-vars
+  Line 11:3:    'AlertTriangle' is defined but never used            no-unused-vars
+  Line 12:3:    'Zap' is defined but never used                      no-unused-vars
+  Line 12:8:    'Target' is defined but never used                   no-unused-vars
+  Line 12:16:   'BarChart3' is defined but never used                no-unused-vars
+  Line 12:27:   'Clock' is defined but never used                    no-unused-vars
+  Line 12:34:   'Settings' is defined but never used                 no-unused-vars
+  Line 16:24:   'safePost' is defined but never used                 no-unused-vars
+  Line 149:15:  Destructuring assignment data unnecessarily renamed  no-useless-rename
+
+src/components/EnhancedTickerModal.jsx
+  Line 12:59:  'useMemo' is defined but never used                                                                                   no-unused-vars
+  Line 21:3:   'TrendingUp' is defined but never used                                                                                no-unused-vars
+  Line 22:3:   'TrendingDown' is defined but never used                                                                              no-unused-vars
+  Line 27:3:   'Plus' is defined but never used                                                                                      no-unused-vars
+  Line 28:3:   'Bell' is defined but never used                                                                                      no-unused-vars
+  Line 33:3:   'LineChart' is defined but never used                                                                                 no-unused-vars
+  Line 41:10:  'HelpTooltip' is defined but never used                                                                               no-unused-vars
+  Line 129:9:  'stopPct' is assigned a value but never used                                                                          no-unused-vars
+  Line 708:6:  React Hook useEffect has a missing dependency: 'selectedTimeframe'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 950:9:  'matchedStrategies' is assigned a value but never used                                                                no-unused-vars
+  Line 952:9:  'news' is assigned a value but never used                                                                             no-unused-vars
+  Line 962:9:  'positionPnlPct' is assigned a value but never used                                                                   no-unused-vars
+
+src/components/FocusModeBadge.jsx
+  Line 45:9:  'Icon' is assigned a value but never used  no-unused-vars
+
+src/components/JobManager.jsx
+  Line 21:3:    'Pause' is defined but never used                            no-unused-vars
+  Line 28:3:    'AlertCircle' is defined but never used                      no-unused-vars
+  Line 32:3:    'Calendar' is defined but never used                         no-unused-vars
+  Line 40:15:   'safeGet' is defined but never used                          no-unused-vars
+  Line 213:22:  'setMode' is assigned a value but never used                 no-unused-vars
+  Line 213:31:  'resetToLive' is assigned a value but never used             no-unused-vars
+  Line 230:10:  'notificationPermission' is assigned a value but never used  no-unused-vars
+  Line 236:30:  'setCollectionDuration' is assigned a value but never used   no-unused-vars
+  Line 248:28:  'setBacktestUniverse' is assigned a value but never used     no-unused-vars
+
+src/components/Journal/DRCTab.jsx
+  Line 4:13:  'Plus' is defined but never used          no-unused-vars
+  Line 4:26:  'X' is defined but never used             no-unused-vars
+  Line 4:35:  'ChevronDown' is defined but never used   no-unused-vars
+  Line 5:10:  'Target' is defined but never used        no-unused-vars
+  Line 5:18:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 5:30:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 5:44:  'AlertCircle' is defined but never used   no-unused-vars
+  Line 6:31:  'Activity' is defined but never used      no-unused-vars
+
+src/components/Journal/GamePlanTab.jsx
+  Line 4:38:  'ChevronDown' is defined but never used   no-unused-vars
+  Line 5:11:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 5:23:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 5:57:  'Clock' is defined but never used         no-unused-vars
+  Line 6:3:   'Zap' is defined but never used           no-unused-vars
+  Line 6:18:  'BarChart3' is defined but never used     no-unused-vars
+  Line 6:39:  'DollarSign' is defined but never used    no-unused-vars
+
+src/components/Journal/PlaybookTab.jsx
+  Line 4:28:   'Edit3' is defined but never used                         no-unused-vars
+  Line 4:35:   'Trash2' is defined but never used                        no-unused-vars
+  Line 4:43:   'ChevronDown' is defined but never used                   no-unused-vars
+  Line 5:3:    'Target' is defined but never used                        no-unused-vars
+  Line 5:11:   'TrendingUp' is defined but never used                    no-unused-vars
+  Line 5:23:   'TrendingDown' is defined but never used                  no-unused-vars
+  Line 5:37:   'AlertCircle' is defined but never used                   no-unused-vars
+  Line 5:50:   'Check' is defined but never used                         no-unused-vars
+  Line 5:57:   'Star' is defined but never used                          no-unused-vars
+  Line 6:8:    'Activity' is defined but never used                      no-unused-vars
+  Line 6:18:   'BarChart3' is defined but never used                     no-unused-vars
+  Line 6:29:   'Clock' is defined but never used                         no-unused-vars
+  Line 6:36:   'DollarSign' is defined but never used                    no-unused-vars
+  Line 6:48:   'Percent' is defined but never used                       no-unused-vars
+  Line 6:57:   'Award' is defined but never used                         no-unused-vars
+  Line 19:10:  'selectedPlaybook' is assigned a value but never used     no-unused-vars
+  Line 19:28:  'setSelectedPlaybook' is assigned a value but never used  no-unused-vars
+
+src/components/Journal/TraderSyncImport.jsx
+  Line 2:10:   'motion' is defined but never used                     no-unused-vars
+  Line 2:18:   'AnimatePresence' is defined but never used            no-unused-vars
+  Line 4:11:   'Download' is defined but never used                   no-unused-vars
+  Line 4:49:   'X' is defined but never used                          no-unused-vars
+  Line 5:18:   'AlertCircle' is defined but never used                no-unused-vars
+  Line 5:31:   'ChevronDown' is defined but never used                no-unused-vars
+  Line 5:44:   'ChevronRight' is defined but never used               no-unused-vars
+  Line 17:10:  'expandedBatch' is assigned a value but never used     no-unused-vars
+  Line 17:25:  'setExpandedBatch' is assigned a value but never used  no-unused-vars
+
+src/components/Journal/WeeklyReportTab.jsx
+  Line 2:10:  'motion' is defined but never used              no-unused-vars
+  Line 2:18:  'AnimatePresence' is defined but never used     no-unused-vars
+  Line 20:3:  'Award' is defined but never used               no-unused-vars
+  Line 36:7:  'StatBadge' is assigned a value but never used  no-unused-vars
+
+src/components/LearningInsightsWidget.jsx
+  Line 12:3:   'TrendingUp' is defined but never used    no-unused-vars
+  Line 12:15:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 12:29:  'RefreshCw' is defined but never used     no-unused-vars
+
+src/components/LiveAlertsPanel.jsx
+  Line 23:3:    'ChevronRight' is defined but never used                                                      no-unused-vars
+  Line 24:3:    'ChevronDown' is defined but never used                                                       no-unused-vars
+  Line 29:3:    'Trash2' is defined but never used                                                            no-unused-vars
+  Line 39:10:   'Tip' is defined but never used                                                               no-unused-vars
+  Line 39:15:   'TipIcon' is defined but never used                                                           no-unused-vars
+  Line 40:24:   'safePost' is defined but never used                                                          no-unused-vars
+  Line 98:9:    'PriorityIcon' is assigned a value but never used                                             no-unused-vars
+  Line 139:71:  Unexpected mix of '||' and '&&'. Use parentheses to clarify the intended order of operations  no-mixed-operators
+  Line 140:74:  Unexpected mix of '||' and '&&'. Use parentheses to clarify the intended order of operations  no-mixed-operators
+
+src/components/MarketIntelPanel.jsx
+  Line 22:10:  'CustomTip' is defined but never used             no-unused-vars
+  Line 42:7:   'REPORT_TIPS' is assigned a value but never used  no-unused-vars
+
+src/components/MarketRegimeWidget.jsx
+  Line 19:3:   'BarChart3' is defined but never used                                                                        no-unused-vars
+  Line 20:3:   'Gauge' is defined but never used                                                                            no-unused-vars
+  Line 21:3:   'Zap' is defined but never used                                                                              no-unused-vars
+  Line 208:6:  React Hook useCallback has a missing dependency: 'regime'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/MarketScannerPanel.jsx
+  Line 3:10:    'Tip' is defined but never used                                                                                     no-unused-vars
+  Line 3:15:    'CustomTip' is defined but never used                                                                               no-unused-vars
+  Line 4:24:    'safePost' is defined but never used                                                                                no-unused-vars
+  Line 83:6:    React Hook useEffect has a missing dependency: 'loadRecentScans'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 106:6:   React Hook useEffect has a missing dependency: 'loadRecentScans'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 122:15:  Destructuring assignment data unnecessarily renamed                                                                 no-useless-rename
+
+src/components/MorningBriefingModal.jsx
+  Line 112:9:  The 'positions' logical expression could make the dependencies of useMemo Hook (at line 126) change on every render. Move it inside the useMemo callback. Alternatively, wrap the initialization of 'positions' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/NIA/DataCollectionPanel.jsx
+  Line 7:13:    'BarChart3' is defined but never used                 no-unused-vars
+  Line 7:24:    'XCircle' is defined but never used                   no-unused-vars
+  Line 123:10:  'pendingRequests' is assigned a value but never used  no-unused-vars
+  Line 130:9:   'lastDataRef' is assigned a value but never used      no-unused-vars
+
+src/components/NIA/SentComIntelligencePanel.jsx
+  Line 12:30:  'TrendingDown' is defined but never used    no-unused-vars
+  Line 14:17:  'ArrowDownRight' is defined but never used  no-unused-vars
+
+src/components/NIA/ValidationResultsPanel.jsx
+  Line 17:9:  'promotedRecords' is assigned a value but never used  no-unused-vars
+  Line 18:9:  'rejectedRecords' is assigned a value but never used  no-unused-vars
+  Line 19:9:  'pendingRecords' is assigned a value but never used   no-unused-vars
+
+src/components/NIA/index.jsx
+  Line 234:6:  React Hook useCallback has an unnecessary dependency: 'setCached'. Either exclude it or remove the dependency array                                     react-hooks/exhaustive-deps
+  Line 276:6:  React Hook useEffect has a missing dependency: 'isTrainingActive'. Either include it or remove the dependency array                                     react-hooks/exhaustive-deps
+  Line 305:6:  React Hook useEffect has missing dependencies: 'data.collectionQueue' and 'data.setupModelsStatus'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/NewDashboard.jsx
+  Line 16:3:    'Wifi' is defined but never used                                 no-unused-vars
+  Line 16:9:    'WifiOff' is defined but never used                              no-unused-vars
+  Line 16:18:   'Brain' is defined but never used                                no-unused-vars
+  Line 16:35:   'Activity' is defined but never used                             no-unused-vars
+  Line 17:23:   'Clock' is defined but never used                                no-unused-vars
+  Line 17:30:   'TrendingUp' is defined but never used                           no-unused-vars
+  Line 17:42:   'TrendingDown' is defined but never used                         no-unused-vars
+  Line 18:3:    'Pause' is defined but never used                                no-unused-vars
+  Line 18:10:   'Play' is defined but never used                                 no-unused-vars
+  Line 18:16:   'Zap' is defined but never used                                  no-unused-vars
+  Line 18:21:   'RefreshCw' is defined but never used                            no-unused-vars
+  Line 18:32:   'Shield' is defined but never used                               no-unused-vars
+  Line 18:40:   'DollarSign' is defined but never used                           no-unused-vars
+  Line 18:52:   'Wallet' is defined but never used                               no-unused-vars
+  Line 19:3:    'ArrowRight' is defined but never used                           no-unused-vars
+  Line 19:15:   'AlertTriangle' is defined but never used                        no-unused-vars
+  Line 29:8:    'SystemStatusBar' is defined but never used                      no-unused-vars
+  Line 30:8:    'api' is defined but never used                                  no-unused-vars
+  Line 30:24:   'safePost' is defined but never used                             no-unused-vars
+  Line 31:7:    'API_URL' is assigned a value but never used                     no-unused-vars
+  Line 33:7:    'DASHBOARD_REFRESH_INTERVAL' is assigned a value but never used  no-unused-vars
+  Line 34:7:    'ACCOUNT_REFRESH_INTERVAL' is assigned a value but never used    no-unused-vars
+  Line 38:7:    'DashboardHeader' is assigned a value but never used             no-unused-vars
+  Line 68:9:    'dailyLossPct' is assigned a value but never used                no-unused-vars
+  Line 71:9:    'exposurePct' is assigned a value but never used                 no-unused-vars
+  Line 159:7:   'ActivePositionsCard' is assigned a value but never used         no-unused-vars
+  Line 255:7:   'WatchingSetupsCard' is assigned a value but never used          no-unused-vars
+  Line 336:7:   'ScannerAlertsStrip' is assigned a value but never used          no-unused-vars
+  Line 469:10:  'orderQueue' is assigned a value but never used                  no-unused-vars
+  Line 470:10:  'isLoading' is assigned a value but never used                   no-unused-vars
+  Line 471:10:  'error' is assigned a value but never used                       no-unused-vars
+  Line 630:9:   'effectiveBotStatus' is assigned a value but never used          no-unused-vars
+  Line 632:9:   'effectiveOpenPnl' is assigned a value but never used            no-unused-vars
+  Line 647:9:   'riskStatus' is assigned a value but never used                  no-unused-vars
+
+src/components/RightSidebar.jsx
+  Line 17:3:    'Star' is defined but never used                                                                                                       no-unused-vars
+  Line 18:3:    'Target' is defined but never used                                                                                                     no-unused-vars
+  Line 333:6:   React Hook useEffect has missing dependencies: 'fetchWatchlist' and 'wsWatchlist'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  Line 559:6:   React Hook useEffect has missing dependencies: 'fetchAlerts' and 'wsAlerts'. Either include them or remove the dependency array        react-hooks/exhaustive-deps
+  Line 691:23:  'label' is assigned a value but never used                                                                                             no-unused-vars
+
+src/components/ScannerAlertsPanel.jsx
+  Line 10:13:  'Bell' is defined but never used  no-unused-vars
+  Line 11:31:  'Zap' is defined but never used   no-unused-vars
+
+src/components/SentCom.jsx
+  Line 14:38:   'useCallback' is defined but never used               no-unused-vars
+  Line 14:59:   'useMemo' is defined but never used                   no-unused-vars
+  Line 15:8:    'ReactDOM' is defined but never used                  no-unused-vars
+  Line 18:3:    'Send' is defined but never used                      no-unused-vars
+  Line 18:28:   'Target' is defined but never used                    no-unused-vars
+  Line 18:36:   'AlertCircle' is defined but never used               no-unused-vars
+  Line 19:27:   'TrendingUp' is defined but never used                no-unused-vars
+  Line 19:39:   'Activity' is defined but never used                  no-unused-vars
+  Line 19:49:   'ChevronUp' is defined but never used                 no-unused-vars
+  Line 20:3:    'ChevronDown' is defined but never used               no-unused-vars
+  Line 20:16:   'DollarSign' is defined but never used                no-unused-vars
+  Line 20:28:   'Gauge' is defined but never used                     no-unused-vars
+  Line 20:35:   'Wifi' is defined but never used                      no-unused-vars
+  Line 20:46:   'Crosshair' is defined but never used                 no-unused-vars
+  Line 21:3:    'MessageSquare' is defined but never used             no-unused-vars
+  Line 21:18:   'RefreshCw' is defined but never used                 no-unused-vars
+  Line 21:29:   'Bell' is defined but never used                      no-unused-vars
+  Line 21:43:   'Flame' is defined but never used                     no-unused-vars
+  Line 21:50:   'Radio' is defined but never used                     no-unused-vars
+  Line 22:14:   'Newspaper' is defined but never used                 no-unused-vars
+  Line 22:25:   'Sunrise' is defined but never used                   no-unused-vars
+  Line 22:34:   'BookOpen' is defined but never used                  no-unused-vars
+  Line 22:44:   'Sparkles' is defined but never used                  no-unused-vars
+  Line 22:54:   'ChevronRight' is defined but never used              no-unused-vars
+  Line 23:31:   'Sliders' is defined but never used                   no-unused-vars
+  Line 23:40:   'WifiOff' is defined but never used                   no-unused-vars
+  Line 23:49:   'Star' is defined but never used                      no-unused-vars
+  Line 23:55:   'Search' is defined but never used                    no-unused-vars
+  Line 25:10:   'toast' is defined but never used                     no-unused-vars
+  Line 26:10:   'safePolling' is defined but never used               no-unused-vars
+  Line 28:8:    'ClickableTicker' is defined but never used           no-unused-vars
+  Line 29:10:   'useDataCache' is defined but never used              no-unused-vars
+  Line 32:8:    'TradeExecutionHealthCard' is defined but never used  no-unused-vars
+  Line 35:8:    'ConversationPanel' is defined but never used         no-unused-vars
+  Line 39:10:   'useWsData' is defined but never used                 no-unused-vars
+  Line 42:10:   'formatRelativeTime' is defined but never used        no-unused-vars
+  Line 42:30:   'formatFullTime' is defined but never used            no-unused-vars
+  Line 43:10:   'TypingIndicator' is defined but never used           no-unused-vars
+  Line 44:10:   'HoverTimestamp' is defined but never used            no-unused-vars
+  Line 45:10:   'StreamMessage' is defined but never used             no-unused-vars
+  Line 46:10:   'Sparkline' is defined but never used                 no-unused-vars
+  Line 46:21:   'generateSparklineData' is defined but never used     no-unused-vars
+  Line 51:10:   'useAIInsights' is defined but never used             no-unused-vars
+  Line 67:10:   'CheckMyTradeForm' is defined but never used          no-unused-vars
+  Line 68:10:   'QuickActionsInline' is defined but never used        no-unused-vars
+  Line 73:10:   'OrderPipeline' is defined but never used             no-unused-vars
+  Line 77:10:   'ContextPanel' is defined but never used              no-unused-vars
+  Line 79:10:   'AlertsPanel' is defined but never used               no-unused-vars
+  Line 80:10:   'SetupsPanel' is defined but never used               no-unused-vars
+  Line 102:28:  'statusLoading' is assigned a value but never used    no-unused-vars
+  Line 119:11:  'ibConnected' is assigned a value but never used      no-unused-vars
+  Line 125:33:  'historyLoading' is assigned a value but never used   no-unused-vars
+  Line 141:10:  'showTradeForm' is assigned a value but never used    no-unused-vars
+  Line 437:11:  'connected' is assigned a value but never used        no-unused-vars
+
+src/components/SimulatorControl.jsx
+  Line 11:3:    'ChevronDown' is defined but never used                  no-unused-vars
+  Line 20:3:    'CheckCircle2' is defined but never used                 no-unused-vars
+  Line 24:24:   'safePost' is defined but never used                     no-unused-vars
+  Line 83:10:   'lastAlertCount' is assigned a value but never used      no-unused-vars
+  Line 101:9:   'fetchAlerts' is assigned a value but never used         no-unused-vars
+  Line 162:11:  'getPollingInterval' is assigned a value but never used  no-unused-vars
+  Line 162:31:  'isTrainingActive' is assigned a value but never used    no-unused-vars
+
+src/components/SmartStopSelector.jsx
+  Line 12:8:    'api' is defined but never used             no-unused-vars
+  Line 12:24:   'safePost' is defined but never used        no-unused-vars
+  Line 14:37:   'Target' is defined but never used          no-unused-vars
+  Line 16:3:    'AlertTriangle' is defined but never used   no-unused-vars
+  Line 139:10:  'modes' is assigned a value but never used  no-unused-vars
+
+src/components/SocialFeedWidget.jsx
+  Line 12:46:  'useCallback' is defined but never used  no-unused-vars
+  Line 16:3:   'ChevronDown' is defined but never used  no-unused-vars
+
+src/components/StartupModal.jsx
+  Line 134:6:  React Hook useCallback has a missing dependency: 'frontendWsConnected'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/StartupStatusDashboard.jsx
+  Line 3:15:    'safeGet' is defined but never used             no-unused-vars
+  Line 3:24:    'safePost' is defined but never used            no-unused-vars
+  Line 11:3:    'Bot' is defined but never used                 no-unused-vars
+  Line 14:3:    'BarChart3' is defined but never used           no-unused-vars
+  Line 16:3:    'Server' is defined but never used              no-unused-vars
+  Line 145:10:  'skipModal' is assigned a value but never used  no-unused-vars
+
+src/components/StreamOfConsciousness.jsx
+  Line 9:8:    'api' is defined but never used                  no-unused-vars
+  Line 9:24:   'safePost' is defined but never used             no-unused-vars
+  Line 15:16:  'Zap' is defined but never used                  no-unused-vars
+  Line 16:12:  'Clock' is defined but never used                no-unused-vars
+  Line 16:46:  'ChevronUp' is defined but never used            no-unused-vars
+  Line 18:39:  'AlertCircle' is defined but never used          no-unused-vars
+  Line 18:52:  'Play' is defined but never used                 no-unused-vars
+  Line 19:15:  'ShoppingCart' is defined but never used         no-unused-vars
+  Line 19:29:  'Ban' is defined but never used                  no-unused-vars
+  Line 315:9:  'actionType' is assigned a value but never used  no-unused-vars
+
+src/components/SystemStatusBar.jsx
+  Line 18:9:  'WifiOff' is defined but never used  no-unused-vars
+
+src/components/TickerDetailModal.jsx
+  Line 1:46:   'useMemo' is defined but never used          no-unused-vars
+  Line 17:10:  'TickerAwareText' is defined but never used  no-unused-vars
+
+src/components/TradingBotPanel.jsx
+  Line 11:3:   'Settings' is defined but never used                  no-unused-vars
+  Line 17:3:   'DollarSign' is defined but never used                no-unused-vars
+  Line 27:3:   'ExternalLink' is defined but never used              no-unused-vars
+  Line 31:3:   'Power' is defined but never used                     no-unused-vars
+  Line 34:10:  'Tip' is defined but never used                       no-unused-vars
+  Line 34:15:  'TipIcon' is defined but never used                   no-unused-vars
+  Line 65:10:  'loading' is assigned a value but never used          no-unused-vars
+  Line 66:10:  'lastCheck' is assigned a value but never used        no-unused-vars
+  Line 647:9:  'signalSourceRef' is assigned a value but never used  no-unused-vars
+
+src/components/charts/TradingViewWidget.jsx
+  Line 86:21:  The ref value 'container.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'container.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/components/layout/HeaderBar.jsx
+  Line 5:3:    'RefreshCw' is defined but never used                     no-unused-vars
+  Line 7:3:    'WifiOff' is defined but never used                       no-unused-vars
+  Line 8:3:    'Monitor' is defined but never used                       no-unused-vars
+  Line 431:7:  'SystemStatusPopover' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/panels/ChartPanel.jsx
+  Line 702:11:  'dir' is assigned a value but never used                                                                     no-unused-vars
+  Line 745:6:   React Hook useEffect has a missing dependency: 'position'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/ModelHealthScorecard.jsx
+  Line 233:9:  The 'rows' logical expression could make the dependencies of useMemo Hook (at line 239) change on every render. To fix this, wrap the initialization of 'rows' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/RiskControlsPanel.jsx
+  Line 88:6:  React Hook useEffect has a missing dependency: 'detectActivePreset'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/StatusHeader.jsx
+  Line 8:9:  'state' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/GamePlanStockCard.jsx
+  Line 145:9:  The 'levels' logical expression could make the dependencies of useMemo Hook (at line 168) change on every render. To fix this, wrap the initialization of 'levels' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/sentcom/v5/OpenPositionsV5.jsx
+  Line 591:9:  'dir' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/PusherHeartbeatTile.jsx
+  Line 23:38:  'BarChart3' is defined but never used  no-unused-vars
+
+src/components/sentcom/v5/ShadowVsRealTile.jsx
+  Line 131:7:  'divergenceLabel' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/SmartLevelsAnalyticsCard.jsx
+  Line 16:10:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 16:22:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/components/shared/Tooltip.jsx
+  Line 7:28:  'AlertCircle' is defined but never used   no-unused-vars
+  Line 7:41:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 7:53:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/components/tabs/AICoachTab.jsx
+  Line 10:8:   'api' is defined but never used       no-unused-vars
+  Line 10:24:  'safePost' is defined but never used  no-unused-vars
+
+src/components/tabs/ChartsTab.jsx
+  Line 2:21:  'TrendingUp' is defined but never used                                                                          no-unused-vars
+  Line 22:6:  React Hook useEffect has a missing dependency: 'inputSymbol'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/AppStateContext.jsx
+  Line 329:6:  React Hook useEffect has missing dependencies: 'cachedData', 'refetch', and 'stale'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/ConnectionManagerContext.jsx
+  Line 15:24:  'safePost' is defined but never used                                                                                                         no-unused-vars
+  Line 37:9:   'healthCheckTimer' is assigned a value but never used                                                                                        no-unused-vars
+  Line 122:6:  React Hook useCallback has a missing dependency: 'scheduleReconnect'. Either include it or remove the dependency array                       react-hooks/exhaustive-deps
+  Line 261:6:  React Hook useEffect has missing dependencies: 'connectWebSocket' and 'runHealthChecks'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/FocusModeContext.jsx
+  Line 363:6:  React Hook useEffect has a missing dependency: 'focusMode'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/StartupManagerContext.jsx
+  Line 157:17:  The ref value 'timersRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'timersRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/contexts/TrainingModeContext.jsx
+  Line 11:24:  'FOCUS_MODES' is defined but never used  no-unused-vars
+
+src/hooks/useCommandCenterData.js
+  Line 2:15:   'apiLongRunning' is defined but never used                                                                           no-unused-vars
+  Line 22:29:  'isStale' is assigned a value but never used                                                                         no-unused-vars
+  Line 83:10:  'trackedOrders' is assigned a value but never used                                                                   no-unused-vars
+  Line 88:10:  'isGeneratingIntelligence' is assigned a value but never used                                                        no-unused-vars
+  Line 88:36:  'setIsGeneratingIntelligence' is assigned a value but never used                                                     no-unused-vars
+  Line 302:9:  'fetchAlerts' is assigned a value but never used                                                                     no-unused-vars
+  Line 533:6:  React Hook useEffect has a missing dependency: 'fetchAccountData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/hooks/useLiveSubscription.js
+  Line 127:33:  The ref value 'activeRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'activeRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/hooks/useSentCom.js
+  Line 12:24:  'safePost' is defined but never used  no-unused-vars
+
+src/hooks/useSmartPolling.js
+  Line 36:47:   'isStartupComplete' is assigned a value but never used  no-unused-vars
+  Line 250:27:  'cacheKey' is assigned a value but never used           no-unused-vars
+
+src/hooks/useTickerModal.jsx
+  Line 9:8:   'api' is defined but never used       no-unused-vars
+  Line 9:24:  'safePost' is defined but never used  no-unused-vars
+
+src/hooks/useVisibility.js
+  Line 30:5:    'once' is assigned a value but never used                                                                                                                  no-unused-vars
+  Line 147:21:  React Hook useCallback has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+
+src/pages/AlertsPage.js
+  Line 3:57:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 3:69:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/COTDataPage.js
+  Line 10:3:   'Cell' is defined but never used                     no-unused-vars
+  Line 25:10:  'selectedMarket' is assigned a value but never used  no-unused-vars
+
+src/pages/CommandCenterPage.js
+  Line 10:8:   'api' is defined but never used       no-unused-vars
+  Line 10:24:  'safePost' is defined but never used  no-unused-vars
+
+src/pages/DashboardPage.js
+  Line 1:38:   'useRef' is defined but never used           no-unused-vars
+  Line 12:3:   'Clock' is defined but never used            no-unused-vars
+  Line 24:10:  'useTrainingMode' is defined but never used  no-unused-vars
+
+src/pages/DiagnosticsPage.jsx
+  Line 13:22:   'TrendingUp' is defined but never used                                                                                                                                                           no-unused-vars
+  Line 13:34:   'TrendingDown' is defined but never used                                                                                                                                                         no-unused-vars
+  Line 1234:9:  The 'symbols' logical expression could make the dependencies of useMemo Hook (at line 1248) change on every render. To fix this, wrap the initialization of 'symbols' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/pages/EarningsCalendarPage.js
+  Line 13:3:  'Target' is defined but never used         no-unused-vars
+  Line 15:3:  'Clock' is defined but never used          no-unused-vars
+  Line 16:3:  'AlertTriangle' is defined but never used  no-unused-vars
+  Line 21:3:  'AreaChart' is defined but never used      no-unused-vars
+  Line 22:3:  'Area' is defined but never used           no-unused-vars
+
+src/pages/FundamentalsPage.js
+  Line 8:3:   'TrendingDown' is defined but never used  no-unused-vars
+  Line 15:3:  'Zap' is defined but never used           no-unused-vars
+
+src/pages/GlossaryPage.js
+  Line 23:3:  'Tag' is defined but never used  no-unused-vars
+
+src/pages/MarketContextPage.js
+  Line 5:3:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/ScannerPage.js
+  Line 9:3:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/TradeJournalPage.js
+  Line 28:3:  'Filter' is defined but never used  no-unused-vars
+  Line 30:3:  'Image' is defined but never used   no-unused-vars
+
+src/pages/TradeOpportunitiesPage.js
+  Line 14:3:     'Bookmark' is defined but never used                      no-unused-vars
+  Line 17:3:     'Filter' is defined but never used                        no-unused-vars
+  Line 19:3:     'Calendar' is defined but never used                      no-unused-vars
+  Line 21:3:     'Settings' is defined but never used                      no-unused-vars
+  Line 22:3:     'Wifi' is defined but never used                          no-unused-vars
+  Line 28:3:     'Info' is defined but never used                          no-unused-vars
+  Line 29:17:    'TrendUp' is defined but never used                       no-unused-vars
+  Line 41:7:     'colors' is assigned a value but never used               no-unused-vars
+  Line 82:7:     'Skeleton' is assigned a value but never used             no-unused-vars
+  Line 929:38:   'catalystScore' is assigned a value but never used        no-unused-vars
+  Line 929:53:   'marketContext' is assigned a value but never used        no-unused-vars
+  Line 1314:10:  'historicalData' is assigned a value but never used       no-unused-vars
+  Line 1315:10:  'loading' is assigned a value but never used              no-unused-vars
+  Line 1786:31:  'isTrainingActive' is assigned a value but never used     no-unused-vars
+  Line 1932:13:  'highConvictionCount' is assigned a value but never used  no-unused-vars
+  Line 2008:23:  Missing '()' invoking a constructor                       new-parens
+
+src/pages/TradingRulesPage.js
+  Line 20:3:    'DollarSign' is defined but never used                                                                                 no-unused-vars
+  Line 119:6:   React Hook useEffect has a missing dependency: 'getRecommendations'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 230:10:  'rules' is assigned a value but never used                                                                             no-unused-vars
+
+src/pages/V6LayoutPreview.jsx
+  Line 50:7:  'ColorBars' is assigned a value but never used  no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+File sizes after gzip:
+
+  515.68 kB  build/static/js/main.4bcac282.js
+  27.58 kB   build/static/css/main.adf7faa5.css
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  yarn global add serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
+Done in 20.59s. via bash** before the changes will be visible.
+- **Current State:** The user is asking a direct question about UX choices (why show auto-healed tags like ?). Answer the user clearly and propose a UI cleanup plan (either V6 migration or immediate V5 badge suppression) before writing code.
 
 **documents and test reports created in this job**
-  - *(Created previously)*: , , , , 
-  - , , 
+  - 
 
-**Last 10 User Messages and any pending HUMAN messages**
- - *User*: lets do 15b now, and investigate and plan 15a as carefully as you can to see if we can safely do it today as well
- - *Agent*: Fired  to propose the execution plan for 15b.
- - *Pending HUMAN message*: **YES**. The system is currently waiting for the user's response to the  prompt. Read their incoming message and immediately proceed with implementing 15b in  as approved.
+**Last 10 User Messages and any pending HUMAN messages** 
+ - *User*: 1. A, 2. A (Approved previous agent's execution plan).
+ - *Agent*: Implemented v19.34.22 (Orphan Reconciler fix), passed 44 pytest cases, updated memory files, and called .
+ - *User (Pending Human Message)*: Uploaded 3 screenshots of the V5 Open Positions panel. Asked: *ok saved pulled restarted. why arte our open positions still showing orphan, stael, reconcil, etc. ? shouldnt the bot be doing that on its own now and therefore is there a need to show this stuff now?*
+ - **Action required**: Respond to this pending message immediately. Acknowledge that they are correct—since the bot now handles these seamlessly, the loud UI tags are legacy noise. Propose hiding them or collapsing them into a single subtle indicator.
 
 **Project Health Check:**
-Stable but recovering from a critical share count anomaly. 100/100 backend tests passing.
+Healthy. Backend bug fixed. Test suites passing. Current blocker is a UI/UX logic question.
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution - via Windows Pusher, requires User credentials)
@@ -181,66 +706,569 @@ Stable but recovering from a critical share count anomaly. 100/100 backend tests
 **Testing status**
   - Testing agent used after significant changes: NO (Hardware block).
   - Troubleshoot agent used after agent stuck in loop: NO.
-  - Test files created: None in this immediate fork.
+  - Test files created: 
   - Known regressions: None.
 
 **Credentials to test flow:**
 N/A - System runs natively on user's local DGX.
 
 **What agent forgot to execute**
-N/A. Agent safely initialized the session and is correctly awaiting user approval via .
+The agent completed the exact task it was assigned (fixing the orphan duplicator) perfectly. The session ended normally, and the user provided new direction in their latest message.
 
 **Debugging checklist for current issue**
-    Issue: Share-Count Drift Reconciler (v19.34.15b)
-    Backend files to check: 
-    Next steps (once approved by user):
-    1. Create a drift check loop that fires during .
-    2. For tracked symbols, sum  and compare to IB position qty. 
-    3. If , act based on direction of diff (Spawn  trade for excess IB shares; shrink bot shares and emit partial close if bot > IB).
-    4. Write a unit test  locally and verify via ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: asyncio-1.3.0, anyio-3.7.1
-asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
-collected 4371 items / 3 errors
+    Issue: User Feedback on UI Badges (, , )
+    Frontend files to check: View V5 trade rendering components (e.g.,  or similar data table components).
+    Next steps:
+    1. Locate where the , ,  badges are rendered.
+    2. Respond to the user confirming that they are absolutely correct: the bot now auto-heals these, making the loud badges obsolete.
+    3. Propose either A) removing the badges from V5 immediately, or B) prioritizing the V6 UI refactor which naturally removes this clutter in favor of a clean 4-pane layout. 
+    4. Upon approval, apply frontend edits, run yarn run v1.22.22
+$ react-scripts build
+Creating an optimized production build...
+Compiled with warnings.
 
-==================================== ERRORS ====================================
-__________ ERROR collecting backend/tests/test_asyncio_performance.py __________
-backend/tests/test_asyncio_performance.py:22: in <module>
-    raise ValueError("REACT_APP_BACKEND_URL environment variable not set")
-E   ValueError: REACT_APP_BACKEND_URL environment variable not set
-__________ ERROR collecting backend/tests/test_hindsight_analysis.py ___________
-backend/tests/test_hindsight_analysis.py:16: in <module>
-    raise ValueError("MONGO_URL environment variable is required")
-E   ValueError: MONGO_URL environment variable is required
-________ ERROR collecting backend/tests/test_triple_barrier_labeler.py _________
-ImportError while importing test module '/app/backend/tests/test_triple_barrier_labeler.py'.
-Hint: make sure your test modules/packages have valid Python names.
-Traceback:
-/usr/local/lib/python3.11/importlib/__init__.py:126: in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-backend/tests/test_triple_barrier_labeler.py:9: in <module>
-    from backend.services.ai_modules.triple_barrier_labeler import (
-E   ModuleNotFoundError: No module named 'backend'
-=============================== warnings summary ===============================
-../root/.venv/lib/python3.11/site-packages/starlette/formparsers.py:10
-  /root/.venv/lib/python3.11/site-packages/starlette/formparsers.py:10: PendingDeprecationWarning: Please use `import python_multipart` instead.
-    import multipart
+[eslint] 
+src/App.js
+  Line 2:10:    'motion' is defined but never used                        no-unused-vars
+  Line 2:18:    'AnimatePresence' is defined but never used               no-unused-vars
+  Line 3:10:    'Volume2' is defined but never used                       no-unused-vars
+  Line 3:19:    'VolumeX' is defined but never used                       no-unused-vars
+  Line 37:8:    'SystemStatusBar' is defined but never used               no-unused-vars
+  Line 38:8:    'FocusModeSelector' is defined but never used             no-unused-vars
+  Line 57:7:    'WidgetErrorBoundary' is assigned a value but never used  no-unused-vars
+  Line 154:10:  'loading' is assigned a value but never used              no-unused-vars
 
-../root/.venv/lib/python3.11/site-packages/xgboost/training.py:200
-  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [18:48:11] WARNING: /__w/xgboost/xgboost/src/context.cc:53: No visible GPU is found, setting device to CPU.
-    bst.update(dtrain, iteration=i, fobj=obj)
+src/components/BotPerformanceChart.jsx
+  Line 17:8:   'api' is defined but never used                                                                                        no-unused-vars
+  Line 17:24:  'safePost' is defined but never used                                                                                   no-unused-vars
+  Line 45:10:  'mousePos' is assigned a value but never used                                                                          no-unused-vars
+  Line 451:6:  React Hook useCallback has a missing dependency: 'chartData.length'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
 
-../root/.venv/lib/python3.11/site-packages/xgboost/training.py:200
-  /root/.venv/lib/python3.11/site-packages/xgboost/training.py:200: UserWarning: [18:48:11] WARNING: /__w/xgboost/xgboost/src/context.cc:207: Device is changed from GPU to CPU as we couldn't find any available GPU on the system.
-    bst.update(dtrain, iteration=i, fobj=obj)
+src/components/BriefMeModal.jsx
+  Line 12:15:  'safeGet' is defined but never used                                                                            no-unused-vars
+  Line 12:24:  'safePost' is defined but never used                                                                           no-unused-vars
+  Line 14:28:  'TrendingDown' is defined but never used                                                                       no-unused-vars
+  Line 65:6:   React Hook useEffect has a missing dependency: 'fetchBrief'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 294:9:  'briefData' is assigned a value but never used                                                                 no-unused-vars
 
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-=========================== short test summary info ============================
-ERROR backend/tests/test_asyncio_performance.py - ValueError: REACT_APP_BACKE...
-ERROR backend/tests/test_hindsight_analysis.py - ValueError: MONGO_URL enviro...
-ERROR backend/tests/test_triple_barrier_labeler.py
-!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
-======================== 3 warnings, 3 errors in 3.88s =========================.
-    5. Summarize and ask user to test before starting 15a.</analysis>
+src/components/ChatBubbleOverlay.jsx
+  Line 10:24:  'X' is defined but never used      no-unused-vars
+  Line 10:42:  'Gauge' is defined but never used  no-unused-vars
+  Line 14:10:  'toast' is defined but never used  no-unused-vars
+
+src/components/ConversationPanel.jsx
+  Line 7:59:  'useMemo' is defined but never used            no-unused-vars
+  Line 16:7:  'API_BASE' is assigned a value but never used  no-unused-vars
+
+src/components/DetailedPositionsPanel.jsx
+  Line 16:44:  'Shield' is defined but never used             no-unused-vars
+  Line 19:16:  'Percent' is defined but never used            no-unused-vars
+  Line 85:9:   'isIbOnly' is assigned a value but never used  no-unused-vars
+
+src/components/DynamicRiskPanel.jsx
+  Line 7:51:    'useRef' is defined but never used                   no-unused-vars
+  Line 10:11:   'TrendingUp' is defined but never used               no-unused-vars
+  Line 10:23:   'TrendingDown' is defined but never used             no-unused-vars
+  Line 11:3:    'AlertTriangle' is defined but never used            no-unused-vars
+  Line 12:3:    'Zap' is defined but never used                      no-unused-vars
+  Line 12:8:    'Target' is defined but never used                   no-unused-vars
+  Line 12:16:   'BarChart3' is defined but never used                no-unused-vars
+  Line 12:27:   'Clock' is defined but never used                    no-unused-vars
+  Line 12:34:   'Settings' is defined but never used                 no-unused-vars
+  Line 16:24:   'safePost' is defined but never used                 no-unused-vars
+  Line 149:15:  Destructuring assignment data unnecessarily renamed  no-useless-rename
+
+src/components/EnhancedTickerModal.jsx
+  Line 12:59:  'useMemo' is defined but never used                                                                                   no-unused-vars
+  Line 21:3:   'TrendingUp' is defined but never used                                                                                no-unused-vars
+  Line 22:3:   'TrendingDown' is defined but never used                                                                              no-unused-vars
+  Line 27:3:   'Plus' is defined but never used                                                                                      no-unused-vars
+  Line 28:3:   'Bell' is defined but never used                                                                                      no-unused-vars
+  Line 33:3:   'LineChart' is defined but never used                                                                                 no-unused-vars
+  Line 41:10:  'HelpTooltip' is defined but never used                                                                               no-unused-vars
+  Line 129:9:  'stopPct' is assigned a value but never used                                                                          no-unused-vars
+  Line 708:6:  React Hook useEffect has a missing dependency: 'selectedTimeframe'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 950:9:  'matchedStrategies' is assigned a value but never used                                                                no-unused-vars
+  Line 952:9:  'news' is assigned a value but never used                                                                             no-unused-vars
+  Line 962:9:  'positionPnlPct' is assigned a value but never used                                                                   no-unused-vars
+
+src/components/FocusModeBadge.jsx
+  Line 45:9:  'Icon' is assigned a value but never used  no-unused-vars
+
+src/components/JobManager.jsx
+  Line 21:3:    'Pause' is defined but never used                            no-unused-vars
+  Line 28:3:    'AlertCircle' is defined but never used                      no-unused-vars
+  Line 32:3:    'Calendar' is defined but never used                         no-unused-vars
+  Line 40:15:   'safeGet' is defined but never used                          no-unused-vars
+  Line 213:22:  'setMode' is assigned a value but never used                 no-unused-vars
+  Line 213:31:  'resetToLive' is assigned a value but never used             no-unused-vars
+  Line 230:10:  'notificationPermission' is assigned a value but never used  no-unused-vars
+  Line 236:30:  'setCollectionDuration' is assigned a value but never used   no-unused-vars
+  Line 248:28:  'setBacktestUniverse' is assigned a value but never used     no-unused-vars
+
+src/components/Journal/DRCTab.jsx
+  Line 4:13:  'Plus' is defined but never used          no-unused-vars
+  Line 4:26:  'X' is defined but never used             no-unused-vars
+  Line 4:35:  'ChevronDown' is defined but never used   no-unused-vars
+  Line 5:10:  'Target' is defined but never used        no-unused-vars
+  Line 5:18:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 5:30:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 5:44:  'AlertCircle' is defined but never used   no-unused-vars
+  Line 6:31:  'Activity' is defined but never used      no-unused-vars
+
+src/components/Journal/GamePlanTab.jsx
+  Line 4:38:  'ChevronDown' is defined but never used   no-unused-vars
+  Line 5:11:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 5:23:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 5:57:  'Clock' is defined but never used         no-unused-vars
+  Line 6:3:   'Zap' is defined but never used           no-unused-vars
+  Line 6:18:  'BarChart3' is defined but never used     no-unused-vars
+  Line 6:39:  'DollarSign' is defined but never used    no-unused-vars
+
+src/components/Journal/PlaybookTab.jsx
+  Line 4:28:   'Edit3' is defined but never used                         no-unused-vars
+  Line 4:35:   'Trash2' is defined but never used                        no-unused-vars
+  Line 4:43:   'ChevronDown' is defined but never used                   no-unused-vars
+  Line 5:3:    'Target' is defined but never used                        no-unused-vars
+  Line 5:11:   'TrendingUp' is defined but never used                    no-unused-vars
+  Line 5:23:   'TrendingDown' is defined but never used                  no-unused-vars
+  Line 5:37:   'AlertCircle' is defined but never used                   no-unused-vars
+  Line 5:50:   'Check' is defined but never used                         no-unused-vars
+  Line 5:57:   'Star' is defined but never used                          no-unused-vars
+  Line 6:8:    'Activity' is defined but never used                      no-unused-vars
+  Line 6:18:   'BarChart3' is defined but never used                     no-unused-vars
+  Line 6:29:   'Clock' is defined but never used                         no-unused-vars
+  Line 6:36:   'DollarSign' is defined but never used                    no-unused-vars
+  Line 6:48:   'Percent' is defined but never used                       no-unused-vars
+  Line 6:57:   'Award' is defined but never used                         no-unused-vars
+  Line 19:10:  'selectedPlaybook' is assigned a value but never used     no-unused-vars
+  Line 19:28:  'setSelectedPlaybook' is assigned a value but never used  no-unused-vars
+
+src/components/Journal/TraderSyncImport.jsx
+  Line 2:10:   'motion' is defined but never used                     no-unused-vars
+  Line 2:18:   'AnimatePresence' is defined but never used            no-unused-vars
+  Line 4:11:   'Download' is defined but never used                   no-unused-vars
+  Line 4:49:   'X' is defined but never used                          no-unused-vars
+  Line 5:18:   'AlertCircle' is defined but never used                no-unused-vars
+  Line 5:31:   'ChevronDown' is defined but never used                no-unused-vars
+  Line 5:44:   'ChevronRight' is defined but never used               no-unused-vars
+  Line 17:10:  'expandedBatch' is assigned a value but never used     no-unused-vars
+  Line 17:25:  'setExpandedBatch' is assigned a value but never used  no-unused-vars
+
+src/components/Journal/WeeklyReportTab.jsx
+  Line 2:10:  'motion' is defined but never used              no-unused-vars
+  Line 2:18:  'AnimatePresence' is defined but never used     no-unused-vars
+  Line 20:3:  'Award' is defined but never used               no-unused-vars
+  Line 36:7:  'StatBadge' is assigned a value but never used  no-unused-vars
+
+src/components/LearningInsightsWidget.jsx
+  Line 12:3:   'TrendingUp' is defined but never used    no-unused-vars
+  Line 12:15:  'TrendingDown' is defined but never used  no-unused-vars
+  Line 12:29:  'RefreshCw' is defined but never used     no-unused-vars
+
+src/components/LiveAlertsPanel.jsx
+  Line 23:3:    'ChevronRight' is defined but never used                                                      no-unused-vars
+  Line 24:3:    'ChevronDown' is defined but never used                                                       no-unused-vars
+  Line 29:3:    'Trash2' is defined but never used                                                            no-unused-vars
+  Line 39:10:   'Tip' is defined but never used                                                               no-unused-vars
+  Line 39:15:   'TipIcon' is defined but never used                                                           no-unused-vars
+  Line 40:24:   'safePost' is defined but never used                                                          no-unused-vars
+  Line 98:9:    'PriorityIcon' is assigned a value but never used                                             no-unused-vars
+  Line 139:71:  Unexpected mix of '||' and '&&'. Use parentheses to clarify the intended order of operations  no-mixed-operators
+  Line 140:74:  Unexpected mix of '||' and '&&'. Use parentheses to clarify the intended order of operations  no-mixed-operators
+
+src/components/MarketIntelPanel.jsx
+  Line 22:10:  'CustomTip' is defined but never used             no-unused-vars
+  Line 42:7:   'REPORT_TIPS' is assigned a value but never used  no-unused-vars
+
+src/components/MarketRegimeWidget.jsx
+  Line 19:3:   'BarChart3' is defined but never used                                                                        no-unused-vars
+  Line 20:3:   'Gauge' is defined but never used                                                                            no-unused-vars
+  Line 21:3:   'Zap' is defined but never used                                                                              no-unused-vars
+  Line 208:6:  React Hook useCallback has a missing dependency: 'regime'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/MarketScannerPanel.jsx
+  Line 3:10:    'Tip' is defined but never used                                                                                     no-unused-vars
+  Line 3:15:    'CustomTip' is defined but never used                                                                               no-unused-vars
+  Line 4:24:    'safePost' is defined but never used                                                                                no-unused-vars
+  Line 83:6:    React Hook useEffect has a missing dependency: 'loadRecentScans'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 106:6:   React Hook useEffect has a missing dependency: 'loadRecentScans'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 122:15:  Destructuring assignment data unnecessarily renamed                                                                 no-useless-rename
+
+src/components/MorningBriefingModal.jsx
+  Line 112:9:  The 'positions' logical expression could make the dependencies of useMemo Hook (at line 126) change on every render. Move it inside the useMemo callback. Alternatively, wrap the initialization of 'positions' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/NIA/DataCollectionPanel.jsx
+  Line 7:13:    'BarChart3' is defined but never used                 no-unused-vars
+  Line 7:24:    'XCircle' is defined but never used                   no-unused-vars
+  Line 123:10:  'pendingRequests' is assigned a value but never used  no-unused-vars
+  Line 130:9:   'lastDataRef' is assigned a value but never used      no-unused-vars
+
+src/components/NIA/SentComIntelligencePanel.jsx
+  Line 12:30:  'TrendingDown' is defined but never used    no-unused-vars
+  Line 14:17:  'ArrowDownRight' is defined but never used  no-unused-vars
+
+src/components/NIA/ValidationResultsPanel.jsx
+  Line 17:9:  'promotedRecords' is assigned a value but never used  no-unused-vars
+  Line 18:9:  'rejectedRecords' is assigned a value but never used  no-unused-vars
+  Line 19:9:  'pendingRecords' is assigned a value but never used   no-unused-vars
+
+src/components/NIA/index.jsx
+  Line 234:6:  React Hook useCallback has an unnecessary dependency: 'setCached'. Either exclude it or remove the dependency array                                     react-hooks/exhaustive-deps
+  Line 276:6:  React Hook useEffect has a missing dependency: 'isTrainingActive'. Either include it or remove the dependency array                                     react-hooks/exhaustive-deps
+  Line 305:6:  React Hook useEffect has missing dependencies: 'data.collectionQueue' and 'data.setupModelsStatus'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/NewDashboard.jsx
+  Line 16:3:    'Wifi' is defined but never used                                 no-unused-vars
+  Line 16:9:    'WifiOff' is defined but never used                              no-unused-vars
+  Line 16:18:   'Brain' is defined but never used                                no-unused-vars
+  Line 16:35:   'Activity' is defined but never used                             no-unused-vars
+  Line 17:23:   'Clock' is defined but never used                                no-unused-vars
+  Line 17:30:   'TrendingUp' is defined but never used                           no-unused-vars
+  Line 17:42:   'TrendingDown' is defined but never used                         no-unused-vars
+  Line 18:3:    'Pause' is defined but never used                                no-unused-vars
+  Line 18:10:   'Play' is defined but never used                                 no-unused-vars
+  Line 18:16:   'Zap' is defined but never used                                  no-unused-vars
+  Line 18:21:   'RefreshCw' is defined but never used                            no-unused-vars
+  Line 18:32:   'Shield' is defined but never used                               no-unused-vars
+  Line 18:40:   'DollarSign' is defined but never used                           no-unused-vars
+  Line 18:52:   'Wallet' is defined but never used                               no-unused-vars
+  Line 19:3:    'ArrowRight' is defined but never used                           no-unused-vars
+  Line 19:15:   'AlertTriangle' is defined but never used                        no-unused-vars
+  Line 29:8:    'SystemStatusBar' is defined but never used                      no-unused-vars
+  Line 30:8:    'api' is defined but never used                                  no-unused-vars
+  Line 30:24:   'safePost' is defined but never used                             no-unused-vars
+  Line 31:7:    'API_URL' is assigned a value but never used                     no-unused-vars
+  Line 33:7:    'DASHBOARD_REFRESH_INTERVAL' is assigned a value but never used  no-unused-vars
+  Line 34:7:    'ACCOUNT_REFRESH_INTERVAL' is assigned a value but never used    no-unused-vars
+  Line 38:7:    'DashboardHeader' is assigned a value but never used             no-unused-vars
+  Line 68:9:    'dailyLossPct' is assigned a value but never used                no-unused-vars
+  Line 71:9:    'exposurePct' is assigned a value but never used                 no-unused-vars
+  Line 159:7:   'ActivePositionsCard' is assigned a value but never used         no-unused-vars
+  Line 255:7:   'WatchingSetupsCard' is assigned a value but never used          no-unused-vars
+  Line 336:7:   'ScannerAlertsStrip' is assigned a value but never used          no-unused-vars
+  Line 469:10:  'orderQueue' is assigned a value but never used                  no-unused-vars
+  Line 470:10:  'isLoading' is assigned a value but never used                   no-unused-vars
+  Line 471:10:  'error' is assigned a value but never used                       no-unused-vars
+  Line 630:9:   'effectiveBotStatus' is assigned a value but never used          no-unused-vars
+  Line 632:9:   'effectiveOpenPnl' is assigned a value but never used            no-unused-vars
+  Line 647:9:   'riskStatus' is assigned a value but never used                  no-unused-vars
+
+src/components/RightSidebar.jsx
+  Line 17:3:    'Star' is defined but never used                                                                                                       no-unused-vars
+  Line 18:3:    'Target' is defined but never used                                                                                                     no-unused-vars
+  Line 333:6:   React Hook useEffect has missing dependencies: 'fetchWatchlist' and 'wsWatchlist'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  Line 559:6:   React Hook useEffect has missing dependencies: 'fetchAlerts' and 'wsAlerts'. Either include them or remove the dependency array        react-hooks/exhaustive-deps
+  Line 691:23:  'label' is assigned a value but never used                                                                                             no-unused-vars
+
+src/components/ScannerAlertsPanel.jsx
+  Line 10:13:  'Bell' is defined but never used  no-unused-vars
+  Line 11:31:  'Zap' is defined but never used   no-unused-vars
+
+src/components/SentCom.jsx
+  Line 14:38:   'useCallback' is defined but never used               no-unused-vars
+  Line 14:59:   'useMemo' is defined but never used                   no-unused-vars
+  Line 15:8:    'ReactDOM' is defined but never used                  no-unused-vars
+  Line 18:3:    'Send' is defined but never used                      no-unused-vars
+  Line 18:28:   'Target' is defined but never used                    no-unused-vars
+  Line 18:36:   'AlertCircle' is defined but never used               no-unused-vars
+  Line 19:27:   'TrendingUp' is defined but never used                no-unused-vars
+  Line 19:39:   'Activity' is defined but never used                  no-unused-vars
+  Line 19:49:   'ChevronUp' is defined but never used                 no-unused-vars
+  Line 20:3:    'ChevronDown' is defined but never used               no-unused-vars
+  Line 20:16:   'DollarSign' is defined but never used                no-unused-vars
+  Line 20:28:   'Gauge' is defined but never used                     no-unused-vars
+  Line 20:35:   'Wifi' is defined but never used                      no-unused-vars
+  Line 20:46:   'Crosshair' is defined but never used                 no-unused-vars
+  Line 21:3:    'MessageSquare' is defined but never used             no-unused-vars
+  Line 21:18:   'RefreshCw' is defined but never used                 no-unused-vars
+  Line 21:29:   'Bell' is defined but never used                      no-unused-vars
+  Line 21:43:   'Flame' is defined but never used                     no-unused-vars
+  Line 21:50:   'Radio' is defined but never used                     no-unused-vars
+  Line 22:14:   'Newspaper' is defined but never used                 no-unused-vars
+  Line 22:25:   'Sunrise' is defined but never used                   no-unused-vars
+  Line 22:34:   'BookOpen' is defined but never used                  no-unused-vars
+  Line 22:44:   'Sparkles' is defined but never used                  no-unused-vars
+  Line 22:54:   'ChevronRight' is defined but never used              no-unused-vars
+  Line 23:31:   'Sliders' is defined but never used                   no-unused-vars
+  Line 23:40:   'WifiOff' is defined but never used                   no-unused-vars
+  Line 23:49:   'Star' is defined but never used                      no-unused-vars
+  Line 23:55:   'Search' is defined but never used                    no-unused-vars
+  Line 25:10:   'toast' is defined but never used                     no-unused-vars
+  Line 26:10:   'safePolling' is defined but never used               no-unused-vars
+  Line 28:8:    'ClickableTicker' is defined but never used           no-unused-vars
+  Line 29:10:   'useDataCache' is defined but never used              no-unused-vars
+  Line 32:8:    'TradeExecutionHealthCard' is defined but never used  no-unused-vars
+  Line 35:8:    'ConversationPanel' is defined but never used         no-unused-vars
+  Line 39:10:   'useWsData' is defined but never used                 no-unused-vars
+  Line 42:10:   'formatRelativeTime' is defined but never used        no-unused-vars
+  Line 42:30:   'formatFullTime' is defined but never used            no-unused-vars
+  Line 43:10:   'TypingIndicator' is defined but never used           no-unused-vars
+  Line 44:10:   'HoverTimestamp' is defined but never used            no-unused-vars
+  Line 45:10:   'StreamMessage' is defined but never used             no-unused-vars
+  Line 46:10:   'Sparkline' is defined but never used                 no-unused-vars
+  Line 46:21:   'generateSparklineData' is defined but never used     no-unused-vars
+  Line 51:10:   'useAIInsights' is defined but never used             no-unused-vars
+  Line 67:10:   'CheckMyTradeForm' is defined but never used          no-unused-vars
+  Line 68:10:   'QuickActionsInline' is defined but never used        no-unused-vars
+  Line 73:10:   'OrderPipeline' is defined but never used             no-unused-vars
+  Line 77:10:   'ContextPanel' is defined but never used              no-unused-vars
+  Line 79:10:   'AlertsPanel' is defined but never used               no-unused-vars
+  Line 80:10:   'SetupsPanel' is defined but never used               no-unused-vars
+  Line 102:28:  'statusLoading' is assigned a value but never used    no-unused-vars
+  Line 119:11:  'ibConnected' is assigned a value but never used      no-unused-vars
+  Line 125:33:  'historyLoading' is assigned a value but never used   no-unused-vars
+  Line 141:10:  'showTradeForm' is assigned a value but never used    no-unused-vars
+  Line 437:11:  'connected' is assigned a value but never used        no-unused-vars
+
+src/components/SimulatorControl.jsx
+  Line 11:3:    'ChevronDown' is defined but never used                  no-unused-vars
+  Line 20:3:    'CheckCircle2' is defined but never used                 no-unused-vars
+  Line 24:24:   'safePost' is defined but never used                     no-unused-vars
+  Line 83:10:   'lastAlertCount' is assigned a value but never used      no-unused-vars
+  Line 101:9:   'fetchAlerts' is assigned a value but never used         no-unused-vars
+  Line 162:11:  'getPollingInterval' is assigned a value but never used  no-unused-vars
+  Line 162:31:  'isTrainingActive' is assigned a value but never used    no-unused-vars
+
+src/components/SmartStopSelector.jsx
+  Line 12:8:    'api' is defined but never used             no-unused-vars
+  Line 12:24:   'safePost' is defined but never used        no-unused-vars
+  Line 14:37:   'Target' is defined but never used          no-unused-vars
+  Line 16:3:    'AlertTriangle' is defined but never used   no-unused-vars
+  Line 139:10:  'modes' is assigned a value but never used  no-unused-vars
+
+src/components/SocialFeedWidget.jsx
+  Line 12:46:  'useCallback' is defined but never used  no-unused-vars
+  Line 16:3:   'ChevronDown' is defined but never used  no-unused-vars
+
+src/components/StartupModal.jsx
+  Line 134:6:  React Hook useCallback has a missing dependency: 'frontendWsConnected'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/StartupStatusDashboard.jsx
+  Line 3:15:    'safeGet' is defined but never used             no-unused-vars
+  Line 3:24:    'safePost' is defined but never used            no-unused-vars
+  Line 11:3:    'Bot' is defined but never used                 no-unused-vars
+  Line 14:3:    'BarChart3' is defined but never used           no-unused-vars
+  Line 16:3:    'Server' is defined but never used              no-unused-vars
+  Line 145:10:  'skipModal' is assigned a value but never used  no-unused-vars
+
+src/components/StreamOfConsciousness.jsx
+  Line 9:8:    'api' is defined but never used                  no-unused-vars
+  Line 9:24:   'safePost' is defined but never used             no-unused-vars
+  Line 15:16:  'Zap' is defined but never used                  no-unused-vars
+  Line 16:12:  'Clock' is defined but never used                no-unused-vars
+  Line 16:46:  'ChevronUp' is defined but never used            no-unused-vars
+  Line 18:39:  'AlertCircle' is defined but never used          no-unused-vars
+  Line 18:52:  'Play' is defined but never used                 no-unused-vars
+  Line 19:15:  'ShoppingCart' is defined but never used         no-unused-vars
+  Line 19:29:  'Ban' is defined but never used                  no-unused-vars
+  Line 315:9:  'actionType' is assigned a value but never used  no-unused-vars
+
+src/components/SystemStatusBar.jsx
+  Line 18:9:  'WifiOff' is defined but never used  no-unused-vars
+
+src/components/TickerDetailModal.jsx
+  Line 1:46:   'useMemo' is defined but never used          no-unused-vars
+  Line 17:10:  'TickerAwareText' is defined but never used  no-unused-vars
+
+src/components/TradingBotPanel.jsx
+  Line 11:3:   'Settings' is defined but never used                  no-unused-vars
+  Line 17:3:   'DollarSign' is defined but never used                no-unused-vars
+  Line 27:3:   'ExternalLink' is defined but never used              no-unused-vars
+  Line 31:3:   'Power' is defined but never used                     no-unused-vars
+  Line 34:10:  'Tip' is defined but never used                       no-unused-vars
+  Line 34:15:  'TipIcon' is defined but never used                   no-unused-vars
+  Line 65:10:  'loading' is assigned a value but never used          no-unused-vars
+  Line 66:10:  'lastCheck' is assigned a value but never used        no-unused-vars
+  Line 647:9:  'signalSourceRef' is assigned a value but never used  no-unused-vars
+
+src/components/charts/TradingViewWidget.jsx
+  Line 86:21:  The ref value 'container.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'container.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/components/layout/HeaderBar.jsx
+  Line 5:3:    'RefreshCw' is defined but never used                     no-unused-vars
+  Line 7:3:    'WifiOff' is defined but never used                       no-unused-vars
+  Line 8:3:    'Monitor' is defined but never used                       no-unused-vars
+  Line 431:7:  'SystemStatusPopover' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/panels/ChartPanel.jsx
+  Line 702:11:  'dir' is assigned a value but never used                                                                     no-unused-vars
+  Line 745:6:   React Hook useEffect has a missing dependency: 'position'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/ModelHealthScorecard.jsx
+  Line 233:9:  The 'rows' logical expression could make the dependencies of useMemo Hook (at line 239) change on every render. To fix this, wrap the initialization of 'rows' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/RiskControlsPanel.jsx
+  Line 88:6:  React Hook useEffect has a missing dependency: 'detectActivePreset'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/components/sentcom/panels/StatusHeader.jsx
+  Line 8:9:  'state' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/GamePlanStockCard.jsx
+  Line 145:9:  The 'levels' logical expression could make the dependencies of useMemo Hook (at line 168) change on every render. To fix this, wrap the initialization of 'levels' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/components/sentcom/v5/OpenPositionsV5.jsx
+  Line 591:9:  'dir' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/PusherHeartbeatTile.jsx
+  Line 23:38:  'BarChart3' is defined but never used  no-unused-vars
+
+src/components/sentcom/v5/ShadowVsRealTile.jsx
+  Line 131:7:  'divergenceLabel' is assigned a value but never used  no-unused-vars
+
+src/components/sentcom/v5/SmartLevelsAnalyticsCard.jsx
+  Line 16:10:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 16:22:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/components/shared/Tooltip.jsx
+  Line 7:28:  'AlertCircle' is defined but never used   no-unused-vars
+  Line 7:41:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 7:53:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/components/tabs/AICoachTab.jsx
+  Line 10:8:   'api' is defined but never used       no-unused-vars
+  Line 10:24:  'safePost' is defined but never used  no-unused-vars
+
+src/components/tabs/ChartsTab.jsx
+  Line 2:21:  'TrendingUp' is defined but never used                                                                          no-unused-vars
+  Line 22:6:  React Hook useEffect has a missing dependency: 'inputSymbol'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/AppStateContext.jsx
+  Line 329:6:  React Hook useEffect has missing dependencies: 'cachedData', 'refetch', and 'stale'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/ConnectionManagerContext.jsx
+  Line 15:24:  'safePost' is defined but never used                                                                                                         no-unused-vars
+  Line 37:9:   'healthCheckTimer' is assigned a value but never used                                                                                        no-unused-vars
+  Line 122:6:  React Hook useCallback has a missing dependency: 'scheduleReconnect'. Either include it or remove the dependency array                       react-hooks/exhaustive-deps
+  Line 261:6:  React Hook useEffect has missing dependencies: 'connectWebSocket' and 'runHealthChecks'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/FocusModeContext.jsx
+  Line 363:6:  React Hook useEffect has a missing dependency: 'focusMode'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/contexts/StartupManagerContext.jsx
+  Line 157:17:  The ref value 'timersRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'timersRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/contexts/TrainingModeContext.jsx
+  Line 11:24:  'FOCUS_MODES' is defined but never used  no-unused-vars
+
+src/hooks/useCommandCenterData.js
+  Line 2:15:   'apiLongRunning' is defined but never used                                                                           no-unused-vars
+  Line 22:29:  'isStale' is assigned a value but never used                                                                         no-unused-vars
+  Line 83:10:  'trackedOrders' is assigned a value but never used                                                                   no-unused-vars
+  Line 88:10:  'isGeneratingIntelligence' is assigned a value but never used                                                        no-unused-vars
+  Line 88:36:  'setIsGeneratingIntelligence' is assigned a value but never used                                                     no-unused-vars
+  Line 302:9:  'fetchAlerts' is assigned a value but never used                                                                     no-unused-vars
+  Line 533:6:  React Hook useEffect has a missing dependency: 'fetchAccountData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src/hooks/useLiveSubscription.js
+  Line 127:33:  The ref value 'activeRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'activeRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+src/hooks/useSentCom.js
+  Line 12:24:  'safePost' is defined but never used  no-unused-vars
+
+src/hooks/useSmartPolling.js
+  Line 36:47:   'isStartupComplete' is assigned a value but never used  no-unused-vars
+  Line 250:27:  'cacheKey' is assigned a value but never used           no-unused-vars
+
+src/hooks/useTickerModal.jsx
+  Line 9:8:   'api' is defined but never used       no-unused-vars
+  Line 9:24:  'safePost' is defined but never used  no-unused-vars
+
+src/hooks/useVisibility.js
+  Line 30:5:    'once' is assigned a value but never used                                                                                                                  no-unused-vars
+  Line 147:21:  React Hook useCallback has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+
+src/pages/AlertsPage.js
+  Line 3:57:  'TrendingUp' is defined but never used    no-unused-vars
+  Line 3:69:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/COTDataPage.js
+  Line 10:3:   'Cell' is defined but never used                     no-unused-vars
+  Line 25:10:  'selectedMarket' is assigned a value but never used  no-unused-vars
+
+src/pages/CommandCenterPage.js
+  Line 10:8:   'api' is defined but never used       no-unused-vars
+  Line 10:24:  'safePost' is defined but never used  no-unused-vars
+
+src/pages/DashboardPage.js
+  Line 1:38:   'useRef' is defined but never used           no-unused-vars
+  Line 12:3:   'Clock' is defined but never used            no-unused-vars
+  Line 24:10:  'useTrainingMode' is defined but never used  no-unused-vars
+
+src/pages/DiagnosticsPage.jsx
+  Line 13:22:   'TrendingUp' is defined but never used                                                                                                                                                           no-unused-vars
+  Line 13:34:   'TrendingDown' is defined but never used                                                                                                                                                         no-unused-vars
+  Line 1234:9:  The 'symbols' logical expression could make the dependencies of useMemo Hook (at line 1248) change on every render. To fix this, wrap the initialization of 'symbols' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src/pages/EarningsCalendarPage.js
+  Line 13:3:  'Target' is defined but never used         no-unused-vars
+  Line 15:3:  'Clock' is defined but never used          no-unused-vars
+  Line 16:3:  'AlertTriangle' is defined but never used  no-unused-vars
+  Line 21:3:  'AreaChart' is defined but never used      no-unused-vars
+  Line 22:3:  'Area' is defined but never used           no-unused-vars
+
+src/pages/FundamentalsPage.js
+  Line 8:3:   'TrendingDown' is defined but never used  no-unused-vars
+  Line 15:3:  'Zap' is defined but never used           no-unused-vars
+
+src/pages/GlossaryPage.js
+  Line 23:3:  'Tag' is defined but never used  no-unused-vars
+
+src/pages/MarketContextPage.js
+  Line 5:3:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/ScannerPage.js
+  Line 9:3:  'TrendingDown' is defined but never used  no-unused-vars
+
+src/pages/TradeJournalPage.js
+  Line 28:3:  'Filter' is defined but never used  no-unused-vars
+  Line 30:3:  'Image' is defined but never used   no-unused-vars
+
+src/pages/TradeOpportunitiesPage.js
+  Line 14:3:     'Bookmark' is defined but never used                      no-unused-vars
+  Line 17:3:     'Filter' is defined but never used                        no-unused-vars
+  Line 19:3:     'Calendar' is defined but never used                      no-unused-vars
+  Line 21:3:     'Settings' is defined but never used                      no-unused-vars
+  Line 22:3:     'Wifi' is defined but never used                          no-unused-vars
+  Line 28:3:     'Info' is defined but never used                          no-unused-vars
+  Line 29:17:    'TrendUp' is defined but never used                       no-unused-vars
+  Line 41:7:     'colors' is assigned a value but never used               no-unused-vars
+  Line 82:7:     'Skeleton' is assigned a value but never used             no-unused-vars
+  Line 929:38:   'catalystScore' is assigned a value but never used        no-unused-vars
+  Line 929:53:   'marketContext' is assigned a value but never used        no-unused-vars
+  Line 1314:10:  'historicalData' is assigned a value but never used       no-unused-vars
+  Line 1315:10:  'loading' is assigned a value but never used              no-unused-vars
+  Line 1786:31:  'isTrainingActive' is assigned a value but never used     no-unused-vars
+  Line 1932:13:  'highConvictionCount' is assigned a value but never used  no-unused-vars
+  Line 2008:23:  Missing '()' invoking a constructor                       new-parens
+
+src/pages/TradingRulesPage.js
+  Line 20:3:    'DollarSign' is defined but never used                                                                                 no-unused-vars
+  Line 119:6:   React Hook useEffect has a missing dependency: 'getRecommendations'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 230:10:  'rules' is assigned a value but never used                                                                             no-unused-vars
+
+src/pages/V6LayoutPreview.jsx
+  Line 50:7:  'ColorBars' is assigned a value but never used  no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+File sizes after gzip:
+
+  515.68 kB  build/static/js/main.4bcac282.js
+  27.58 kB   build/static/css/main.adf7faa5.css
+
+The project was built assuming it is hosted at /.
+You can control this with the homepage field in your package.json.
+
+The build folder is ready to be deployed.
+You may serve it with a static server:
+
+  yarn global add serve
+  serve -s build
+
+Find out more about deployment here:
+
+  https://cra.link/deployment
+
+Done in 18.63s., and capture a screenshot to verify.</analysis>
