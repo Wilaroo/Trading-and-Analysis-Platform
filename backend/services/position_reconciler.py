@@ -1317,9 +1317,31 @@ class PositionReconciler:
                         drift_record["zombies_closed"] = zombies_closed
                         report["drifts_resolved"].append(drift_record)
                         await self._persist_drift_event(drift_record)
-                        await self._emit_drift_event(
-                            bot, "zombie_trade_drift_v19_34_19", drift_record
-                        )
+                        # ── v19.34.20c (2026-05-06) — original v19.34.19
+                        # called `self._emit_drift_event(...)` which was
+                        # never defined on this class — every zombie heal
+                        # raised AttributeError post-resolve and got logged
+                        # to `report["errors"]` even though the actual
+                        # cleanup + spawn succeeded. Replaced with the same
+                        # `emit_stream_event` pattern used elsewhere in
+                        # this file (e.g. `_close_drift_trades_zero`).
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "warning",
+                                "event": "zombie_trade_drift_v19_34_19",
+                                "symbol": sym,
+                                "text": (
+                                    f"🧟 {sym} zombie cleanup: closed "
+                                    f"{len(zombies_closed)} zombie bot_trade(s) "
+                                    f"({', '.join(zombies_closed)}) and spawned "
+                                    f"bracketed slice {new_trade_id} for "
+                                    f"{int(abs(ib_q))} sh at IB."
+                                ),
+                                "metadata": drift_record,
+                            })
+                        except Exception:
+                            pass
                     except Exception as e:
                         drift_record["error"] = f"{type(e).__name__}: {e}"
                         report["errors"].append(drift_record)
