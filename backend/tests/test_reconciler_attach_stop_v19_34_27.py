@@ -19,10 +19,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 @pytest.mark.asyncio
 async def test_spawn_excess_slice_attaches_ib_stop():
-    """Happy path: place_stop_order returns success → stop_order_id set."""
+    """v19.34.27 legacy path: executor lacks attach_oca_stop_target →
+    falls back to place_stop_order (covered in full by v19.34.28 tests;
+    this pins the fallback code path stays supported)."""
     from services.position_reconciler import PositionReconciler
 
-    fake_executor = MagicMock()
+    fake_executor = MagicMock(spec=["place_stop_order"])
     fake_executor.place_stop_order = AsyncMock(return_value={
         "success": True, "order_id": "STP-123",
     })
@@ -54,10 +56,10 @@ async def test_spawn_excess_slice_attaches_ib_stop():
 
 @pytest.mark.asyncio
 async def test_spawn_excess_slice_loud_logs_when_stop_fails(caplog):
-    """Stop attach fails → slice still adopted, but operator sees ERROR log."""
+    """v19.34.27 legacy path fallback + failure — pins NAKED-SLICE log."""
     from services.position_reconciler import PositionReconciler
 
-    fake_executor = MagicMock()
+    fake_executor = MagicMock(spec=["place_stop_order"])
     fake_executor.place_stop_order = AsyncMock(return_value={
         "success": False, "error": "pusher_offline",
     })
@@ -115,11 +117,11 @@ async def test_spawn_excess_slice_handles_missing_executor():
 
 @pytest.mark.asyncio
 async def test_spawn_excess_slice_handles_executor_exception(caplog):
-    """place_stop_order raises → caught + logged + slice still adopted."""
+    """attach_oca_stop_target raises → caught + logged + slice still adopted."""
     from services.position_reconciler import PositionReconciler
 
     fake_executor = MagicMock()
-    fake_executor.place_stop_order = AsyncMock(side_effect=RuntimeError("boom"))
+    fake_executor.attach_oca_stop_target = AsyncMock(side_effect=RuntimeError("boom"))
 
     bot = MagicMock()
     bot._open_trades = {}
@@ -140,5 +142,5 @@ async def test_spawn_excess_slice_handles_executor_exception(caplog):
             BotTrade=BotTrade, TradeDirection=TradeDirection, TradeStatus=TradeStatus,
         )
     assert new_id in bot._open_trades
-    # Exception path logs `stop-attach raised`
-    assert any("stop-attach raised" in rec.message for rec in caplog.records)
+    # Exception path logs `OCA-attach raised`
+    assert any("OCA-attach raised" in rec.message for rec in caplog.records)

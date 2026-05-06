@@ -661,6 +661,195 @@ class TradeExecutorService:
             logger.error(f"IB stop order error: {e}")
             return {"success": False, "error": str(e)}
 
+    # ==================== OCA STOP+TARGET (POST-FILL) ====================
+
+    async def attach_oca_stop_target(self, trade) -> Dict[str, Any]:
+        """v19.34.28 — Attach an OCA-linked stop + target bracket to an
+        ALREADY-FILLED position.
+
+        Used by the reconciler's `_spawn_excess_slice` when it adopts
+        phantom IB shares into a new BotTrade — the position already
+        exists at IB, so a normal `place_bracket_order` (with a parent
+        entry) would open a second, unintended fill. Instead we submit
+        just the STP + LMT legs, both sharing a single `oca_group`
+        string so IB auto-cancels the survivor when one fills.
+
+        Contract (mirrors `bracket_reissue_service.submit_oca_pair`):
+          - STP covers trade.shares at trade.stop_price
+          - LMT covers trade.shares at trade.target_prices[0]
+          - Both flagged with the same oca_group
+          - TIF derived from trade_style/timeframe (GTC for swing,
+            DAY for intraday/scalp) via bracket_tif.bracket_tif()
+
+        Return:
+          {success, stop_order_id, target_order_id, oca_group, errors}
+
+        Failure modes (best-effort, operator-visible):
+          - Pusher offline → simulate both ids; return success=True so the
+            reconciler still adopts. Downstream manage loop will retry.
+          - STP submit fails → abort; target NOT submitted (we never want
+            a target without a stop — one-sided exposure is WORSE than
+            no protection because it can flip the position on fill).
+          - LMT submit fails AFTER STP succeeded → return partial success;
+            stop is protecting, target is missing. Operator is warned
+            in the log so they can add the target in TWS manually.
+
+        This method does NOT wait for either leg to fill (they're
+        resting orders designed to live for the trade's lifetime). It
+        returns as soon as both IDs are allocated.
+        """
+        if self._mode == ExecutorMode.SIMULATED:
+            return {
+                "success": True,
+                "stop_order_id": f"SIM-STP-{trade.id}",
+                "target_order_id": f"SIM-TGT-{trade.id}",
+                "oca_group": f"SIM-OCA-{trade.id}",
+                "simulated": True,
+            }
+
+        if not self._ensure_initialized():
+            return {"success": False, "error": "Executor not initialized"}
+
+        if self._mode != ExecutorMode.LIVE:
+            # PAPER (Alpaca) doesn't support OCA the same way — fall back
+            # to stop-only for now. Alpaca bracket support is tracked
+            # separately (see `alpaca_bracket_not_implemented` path).
+            logger.info("attach_oca_stop_target: non-LIVE mode — falling back to stop-only")
+            stop = await self.place_stop_order(trade)
+            return {
+                "success": bool(stop.get("success")),
+                "stop_order_id": stop.get("order_id"),
+                "target_order_id": None,
+                "oca_group": None,
+                "errors": [] if stop.get("success") else [stop.get("error", "stop-only-fallback")],
+                "fallback": "stop_only_non_live",
+            }
+
+        try:
+            from routers.ib import queue_order, is_pusher_connected
+            import uuid as _uuid
+
+            if not is_pusher_connected():
+                logger.warning(
+                    "attach_oca_stop_target: pusher offline for %s — "
+                    "returning simulated ids; reconciler will retry on next scan.",
+                    trade.symbol,
+                )
+                return {
+                    "success": True,
+                    "stop_order_id": f"SIM-STP-{trade.id}",
+                    "target_order_id": f"SIM-TGT-{trade.id}",
+                    "oca_group": f"SIM-OCA-{trade.id}",
+                    "simulated": True,
+                    "pusher_offline": True,
+                }
+
+            # Determine target price — first scale-out level if present.
+            target_price = None
+            if hasattr(trade, "target_prices") and trade.target_prices:
+                try:
+                    target_price = float(trade.target_prices[0])
+                except (TypeError, ValueError):
+                    target_price = None
+            if target_price is None or trade.stop_price is None:
+                return {
+                    "success": False,
+                    "error": "attach_oca_stop_target: missing stop_price or target_price",
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
+                }
+
+            action = "SELL" if trade.direction.value == "long" else "BUY"
+            qty = int(trade.shares)
+
+            # TIF per trade style (swing → GTC+outside_rth, intraday → DAY).
+            leg_tif, leg_outside_rth = bracket_tif(
+                getattr(trade, "trade_style", None),
+                getattr(trade, "timeframe", None),
+            )
+
+            oca_group = f"ADOPT-OCA-{trade.symbol}-{trade.id}-{_uuid.uuid4().hex[:6]}"
+
+            # 1) STP first. If this fails we do NOT submit the target —
+            # one-sided exposure (target only, no stop) is worse than
+            # no bracket because it can flip the position on fill.
+            try:
+                stop_id = queue_order({
+                    "symbol": trade.symbol,
+                    "action": action,
+                    "quantity": qty,
+                    "order_type": "STP",
+                    "limit_price": None,
+                    "stop_price": float(trade.stop_price),
+                    "time_in_force": leg_tif,
+                    "outside_rth": leg_outside_rth,
+                    "oca_group": oca_group,
+                    "trade_id": f"ADOPT-STOP-{trade.id}",
+                })
+            except Exception as e:
+                logger.error(
+                    f"attach_oca_stop_target: STP submit failed for "
+                    f"{trade.symbol} (trade {trade.id}): {e} — target "
+                    f"intentionally NOT submitted to avoid one-sided exposure."
+                )
+                return {
+                    "success": False,
+                    "error": f"stop_submit_failed: {e}",
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": oca_group,
+                }
+
+            # 2) LMT target.
+            target_id = None
+            target_error = None
+            try:
+                target_id = queue_order({
+                    "symbol": trade.symbol,
+                    "action": action,
+                    "quantity": qty,
+                    "order_type": "LMT",
+                    "limit_price": float(target_price),
+                    "stop_price": None,
+                    "time_in_force": leg_tif,
+                    "outside_rth": leg_outside_rth,
+                    "oca_group": oca_group,
+                    "trade_id": f"ADOPT-TGT-{trade.id}",
+                })
+            except Exception as e:
+                target_error = str(e)[:200]
+                logger.error(
+                    f"attach_oca_stop_target: LMT target submit failed for "
+                    f"{trade.symbol} (trade {trade.id}): {e}. STOP IS LIVE "
+                    f"({stop_id}) but target is MISSING — operator should "
+                    f"place a manual LMT at ${target_price:.2f} or accept "
+                    f"stop-only exposure."
+                )
+
+            logger.warning(
+                f"[v19.34.28 ADOPT-OCA] {trade.symbol} trade {trade.id}: "
+                f"attached stop={stop_id} (${trade.stop_price:.2f}) + "
+                f"target={target_id or 'FAILED'} (${target_price:.2f}) "
+                f"oca={oca_group}"
+            )
+
+            return {
+                "success": True,
+                "stop_order_id": stop_id,
+                "target_order_id": target_id,
+                "target_price": float(target_price),
+                "stop_price": float(trade.stop_price),
+                "oca_group": oca_group,
+                "errors": [target_error] if target_error else [],
+                "broker": "interactive_brokers",
+                "partial": target_id is None,  # True = stop-only survived
+            }
+
+        except Exception as e:
+            logger.error(f"attach_oca_stop_target error for {trade.symbol}: {e}")
+            return {"success": False, "error": str(e)}
+
     # ==================== BRACKET ORDERS (Phase 3 — 2026-04-22) ====================
 
     async def place_bracket_order(self, trade) -> Dict[str, Any]:

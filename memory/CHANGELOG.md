@@ -2,6 +2,43 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-eleventh commit, v19.34.28) — Reconciler OCA-linked stop+target attach on adoption
+
+**Severity: P2 (upgrade of v19.34.27 reconciler-stop-attach).**
+
+v19.34.27 attached a standalone STP on `_spawn_excess_slice` adoption — protected downside, but if the position ran in our favour there was no upside ticket at the broker. If the bot crashed between adoption and the next manage-loop scan, the position was stop-only with no way to take profit automatically.
+
+v19.34.28 ships both legs under a single OCA group so IB auto-cancels the survivor when one fills — survives bot crashes, pusher disconnects, restarts.
+
+### New method: `TradeExecutorService.attach_oca_stop_target(trade)`
+
+Submits two flat orders to the pusher sharing a single `oca_group` string (pusher already supports this — see `bracket_reissue_service.submit_oca_pair`):
+
+1. **STP** at `trade.stop_price` covering all `trade.shares`
+2. **LMT** at `trade.target_prices[0]` covering all `trade.shares`
+3. TIF resolved per trade_style via `bracket_tif.bracket_tif()` (GTC+outside_rth for swing, DAY for intraday/scalp)
+4. OCA group id: `ADOPT-OCA-{symbol}-{trade_id}-{6-char-uuid}`
+
+**Failure matrix:**
+- Pusher offline → returns simulated ids + `success=True` so reconciler still adopts; logged WARN.
+- STP submit fails → abort; target NOT submitted (one-sided exposure is WORSE than no protection — can flip the position on fill).
+- LMT submit fails AFTER STP succeeded → `success=True, partial=True`; stop is live, target is missing, operator is loud-warned in logs + trade-drops feed.
+- PAPER mode → falls back to stop-only (Alpaca OCA not implemented).
+
+### Reconciler `_spawn_excess_slice` integration
+
+Calls `attach_oca_stop_target(trade)` (v19.34.28 path) with a fallback to `place_stop_order(trade)` for legacy executor shapes. Stamps `trade.stop_order_id`, `trade.target_order_id`, and `trade.oca_group` on the spawned BotTrade so `close_trade`'s `_cancel_ib_bracket_orders` can cancel both legs on close. Partial-OCA (target missing) is loud-logged + trade-drop recorded.
+
+### Test coverage
+
+`tests/test_reconciler_attach_oca_v19_34_28.py`         11 cases:
+- 7 cases pinning `attach_oca_stop_target`: simulated mode, pusher offline, missing target_prices, STP-fails-refuses-target, target-fails-returns-partial, happy path shared oca_group, short-direction BUY action.
+- 4 cases pinning reconciler integration: happy path, partial OCA, total failure, legacy fallback.
+
+`tests/test_reconciler_attach_stop_v19_34_27.py` updated — 3 cases rewritten to test the v19.34.27 LEGACY fallback path explicitly (executor without `attach_oca_stop_target`) so both code paths stay covered.
+
+All 43 v19.34.27+28 tests green; 447/448 broader v19.34 regression suite green (1 failing test `test_manage_loop_dispatches_resub_with_60s_throttle` is a PRE-EXISTING regression unrelated to this commit — verified by `git stash` then re-run).
+
 ## 2026-02-XX (one-hundred-tenth commit, v19.34.27) — Scanner Pause toggle UI + Boot rehydration crash fix + Phantom-share clamp + IB-direct shadow mode + Reconciler stop attach + IB-LIVE chip + Scanner paused banner
 
 **Severity: P0/P1 — closes the v19.34.26 thread + ships four new operator-protection layers.**

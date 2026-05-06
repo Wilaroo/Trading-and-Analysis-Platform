@@ -1798,38 +1798,73 @@ class PositionReconciler:
             f"(SL ${stop_price:.2f}, PT ${target_1:.2f})"
         )
 
-        # ── v19.34.27 — Attach standalone IB stop on adoption ──────
-        # Pre-fix the spawned slice was naked at IB: bot's `_open_trades`
-        # cache had a stop_price field, but no STP order existed at the
-        # broker. If the bot crashed (or the manage loop's mid-bar stop
-        # check missed), the position drifted with no protection.
-        # Now: best-effort fire `place_stop_order(trade)` immediately
-        # after persisting. Failures are LOUD-LOGGED (not raised) so
-        # the slice still gets adopted into _open_trades for the
-        # manage loop to track, but the operator sees the missing stop
+        # ── v19.34.27 — Attach OCA-linked stop+target on adoption ──
+        # v19.34.28 upgrade: use `attach_oca_stop_target` instead of
+        # just `place_stop_order`. Pre-v19.34.28 the adopted slice got
+        # a stop but NO target — so the only way it could exit was via
+        # the manage loop's mid-bar stop check or an EOD close. If the
+        # bot crashed between adoption and next scan, the position was
+        # unilaterally long/short on a stop-only ticket, and any
+        # upside never got taken. Now both legs ship together under a
+        # single OCA group so whichever fills first auto-cancels the
+        # other AT THE BROKER (survives bot crashes).
+        #
+        # Best-effort: failures are LOUD-LOGGED (not raised) so the
+        # slice still gets adopted into _open_trades for the manage
+        # loop to track, but the operator sees the missing protection
         # in the trade-drops feed and can fix it manually before the
-        # bot crashes and loses its in-memory stop reference.
+        # bot crashes and loses its in-memory references.
         try:
             executor = getattr(bot, "_trade_executor", None)
-            if executor and hasattr(executor, "place_stop_order"):
-                stop_result = await executor.place_stop_order(trade)
-                if stop_result and stop_result.get("success"):
-                    trade.stop_order_id = (
-                        stop_result.get("order_id")
-                        or stop_result.get("stop_order_id")
-                    )
-                    logger.warning(
-                        f"[v19.34.27] {sym} adopted slice {trade.id} stop "
-                        f"attached at IB: order={trade.stop_order_id}, "
-                        f"stop=${stop_price:.2f}"
-                    )
+            if executor and hasattr(executor, "attach_oca_stop_target"):
+                oca_result = await executor.attach_oca_stop_target(trade)
+                if oca_result and oca_result.get("success"):
+                    trade.stop_order_id = oca_result.get("stop_order_id")
+                    # Target ID lives alongside stop. Stamped on trade
+                    # so future close_trade paths can cancel BOTH legs
+                    # via _cancel_ib_bracket_orders.
+                    tgt_id = oca_result.get("target_order_id")
+                    if tgt_id:
+                        trade.target_order_id = tgt_id
+                    trade.oca_group = oca_result.get("oca_group")
+                    if oca_result.get("partial"):
+                        logger.error(
+                            f"[v19.34.28 PARTIAL-OCA] {sym} adopted slice "
+                            f"{trade.id}: stop attached ({trade.stop_order_id}) "
+                            f"but TARGET MISSING. Operator should place a "
+                            f"manual LMT at ${target_1:.2f} or accept "
+                            f"stop-only protection."
+                        )
+                        try:
+                            from services.trade_drop_recorder import record_trade_drop
+                            record_trade_drop(
+                                trade,
+                                gate="naked_adopted_slice_partial",
+                                context={
+                                    "phase": "spawn_excess_slice",
+                                    "stop_price": stop_price,
+                                    "target_price": target_1,
+                                    "shares": excess_abs,
+                                    "errors": oca_result.get("errors", []),
+                                },
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        logger.warning(
+                            f"[v19.34.28] {sym} adopted slice {trade.id} "
+                            f"OCA bracket attached: stop={trade.stop_order_id} "
+                            f"(${stop_price:.2f}), target={tgt_id} "
+                            f"(${target_1:.2f}), oca={trade.oca_group}"
+                        )
                 else:
-                    err = (stop_result or {}).get("error", "no result")
+                    err = (oca_result or {}).get("error", "no result")
                     logger.error(
-                        f"[v19.34.27 NAKED-SLICE] {sym} adopted slice "
-                        f"{trade.id} but FAILED to attach IB stop: {err}. "
-                        f"Position is unprotected at the broker. Operator "
-                        f"must place a manual stop at ${stop_price:.2f} "
+                        f"[v19.34.28 NAKED-SLICE] {sym} adopted slice "
+                        f"{trade.id} but FAILED to attach OCA bracket: "
+                        f"{err}. Position is unprotected at the broker. "
+                        f"Operator must place a manual stop at "
+                        f"${stop_price:.2f} + target at ${target_1:.2f}, "
                         f"or close the position in TWS."
                     )
                     try:
@@ -1840,20 +1875,42 @@ class PositionReconciler:
                             context={
                                 "phase": "spawn_excess_slice",
                                 "stop_price": stop_price,
+                                "target_price": target_1,
                                 "shares": excess_abs,
                                 "error": str(err)[:200],
                             },
                         )
                     except Exception:
                         pass
+            elif executor and hasattr(executor, "place_stop_order"):
+                # Fallback for older executor (e.g. legacy tests that
+                # mock-patched only place_stop_order). Never hit in
+                # production post-v19.34.28.
+                stop_result = await executor.place_stop_order(trade)
+                if stop_result and stop_result.get("success"):
+                    trade.stop_order_id = (
+                        stop_result.get("order_id")
+                        or stop_result.get("stop_order_id")
+                    )
+                    logger.warning(
+                        f"[v19.34.28 STOP-ONLY-FALLBACK] {sym} slice "
+                        f"{trade.id} stop={trade.stop_order_id} "
+                        f"(executor lacks attach_oca_stop_target)"
+                    )
+                else:
+                    err = (stop_result or {}).get("error", "no result")
+                    logger.error(
+                        f"[v19.34.28 NAKED-SLICE] {sym} slice {trade.id} "
+                        f"stop attach failed: {err}"
+                    )
             else:
                 logger.warning(
-                    f"[v19.34.27] {sym} adopted slice {trade.id}: no "
+                    f"[v19.34.28] {sym} adopted slice {trade.id}: no "
                     f"_trade_executor on bot — slice is NAKED at IB."
                 )
         except Exception as stop_err:
             logger.error(
-                f"[v19.34.27] {sym} adopted slice {trade.id} stop-attach "
+                f"[v19.34.28] {sym} adopted slice {trade.id} OCA-attach "
                 f"raised: {stop_err}. Slice is naked at IB."
             )
 
