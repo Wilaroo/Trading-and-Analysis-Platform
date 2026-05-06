@@ -1303,13 +1303,66 @@ class PositionReconciler:
                             )
                             zombies_closed.append(getattr(zt, "id", None))
                             save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+                            persisted = False
+                            save_err = None
                             if save_fn:
                                 try:
                                     res = save_fn(zt)
                                     if asyncio.iscoroutine(res):
                                         await res
-                                except Exception:
-                                    pass
+                                    persisted = True
+                                except Exception as _save_exc:
+                                    save_err = f"{type(_save_exc).__name__}: {_save_exc}"
+                                    logger.warning(
+                                        "[v19.34.21 zombie-close] _save_trade FAILED "
+                                        "for %s (%s): %s — falling back to direct "
+                                        "Mongo update_one",
+                                        getattr(zt, "id", "?"),
+                                        getattr(zt, "symbol", "?"),
+                                        save_err,
+                                    )
+                            # ── v19.34.21 (2026-05-06) — Mongo-direct fallback.
+                            # Operator-discovered 2026-05-06: the original
+                            # `try: save_fn(zt) except: pass` swallowed real
+                            # errors (b4d27b31 stayed `status=open` in DB
+                            # despite the heal reporting it as closed).
+                            # Now if the orchestrated save raised, we write
+                            # the close fields directly via update_one so
+                            # the DB matches the heal report.
+                            if not persisted:
+                                try:
+                                    db_handle = getattr(bot, "_db", None) or getattr(self, "db", None)
+                                    if db_handle is not None and getattr(zt, "id", None):
+                                        await asyncio.to_thread(
+                                            db_handle["bot_trades"].update_one,
+                                            {"id": zt.id},
+                                            {"$set": {
+                                                "status": "closed",
+                                                "close_reason": "zombie_cleanup_v19_34_19",
+                                                "closed_at": zt.closed_at,
+                                                "remaining_shares": 0,
+                                                "notes": zt.notes,
+                                            }},
+                                        )
+                                        logger.warning(
+                                            "[v19.34.21 zombie-close] Mongo-direct "
+                                            "fallback persisted close for %s",
+                                            zt.id,
+                                        )
+                                        persisted = True
+                                except Exception as _direct_exc:
+                                    logger.error(
+                                        "[v19.34.21 zombie-close] Mongo-direct "
+                                        "fallback ALSO failed for %s: %s — DB will "
+                                        "stay out of sync, operator action needed",
+                                        getattr(zt, "id", "?"),
+                                        _direct_exc,
+                                    )
+                                    drift_record.setdefault("zombie_close_failures", []).append({
+                                        "trade_id": getattr(zt, "id", None),
+                                        "save_err": save_err,
+                                        "direct_err": f"{type(_direct_exc).__name__}: {_direct_exc}",
+                                    })
                             # Drop zombie from in-memory _open_trades.
                             _ot = getattr(bot, "_open_trades", None)
                             if _ot and getattr(zt, "id", None) in _ot:

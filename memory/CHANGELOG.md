@@ -2,6 +2,60 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (one-hundred-third commit, v19.34.21) — THE deserializer bug + silent save-failure fix
+
+**Severity: P0**. Operator forensics on the post-heal FDX panel found that the v19.34.19 heal trade itself (`a821575c`) had been zombified 11 minutes after spawn. Read-only investigation traced it to a bug far bigger than v19.34.20/20b: **the boot-time DB→memory deserializer was silently dropping ~half of every BotTrade's persisted state on every restart.**
+
+### Bug A — `dict_to_trade` was incomplete (`bot_persistence.py:498-535`)
+
+`BotPersistence.dict_to_trade(d)` constructed a `BotTrade(...)` passing only ~25 of the ~50 dataclass fields. The rest defaulted to the `@dataclass` defaults on every reload:
+
+- `remaining_shares: int = 0` — **the headline zombie-maker.** Every restart silently zeroed `remaining_shares` for every open trade. The manage-loop self-heal at `position_manager.py:494` (`if rs==0: rs=shares`) only ran for trades that got a fresh quote within ~30s of restart; everything else became a permanent zombie. Two of the three FDX zombies (`a821575c`, `467c6bf8`) are direct evidence of this. `b4d27b31`'s `entered_by=bot_fired` instead of `reconciled_external` is also evidence (an earlier restart wiped the v19.34.3 provenance stamp).
+- `original_shares: int = 0` — wiped on every restart.
+- `scale_out_config: factory(targets_hit=[])` — **wiped on every restart**, would have re-fired already-completed scale-outs.
+- `trailing_stop_config: factory(mode="original")` — wiped on every restart, lost all stop-adjustment history.
+- `mfe_*, mae_*` — wiped on every restart, R-multiple tracking lost.
+- `entered_by, prior_verdicts, prior_verdict_conflict, synthetic_source, pre_submit_at` — all v19.34.x audit fields wiped.
+- `setup_variant, entry_context, market_regime, regime_score, regime_position_multiplier` — wiped.
+- `trade_type, account_id_at_fill, total_commissions, net_pnl, notes` — wiped.
+
+**Fix:** rewrote `dict_to_trade` to construct with the required fields, then `setattr` every other persisted key back onto the instance using `dataclasses.fields(BotTrade)` as the allow-list. Drops `_id` and unknown future keys cleanly. Preserves any field the persistence layer ever decides to add.
+
+### Bug B — Silent `_save_trade` swallow in zombie cleanup (`position_reconciler.py:reconcile_share_drift`)
+
+`b4d27b31` was reported in `zombies_closed: ["b4d27b31","3f369929"]` from the operator's heal call, but `db.bot_trades.find_one({"id":"b4d27b31"})` 11 minutes later showed `status=open, close_reason=null`. Root cause: the inner loop had `try: save_fn(zt) except: pass` — any exception silently dropped the close to disk while the heal response confidently reported success.
+
+**Fix:** Replaced silent swallow with:
+1. `logger.warning` so the failure is visible in operator logs.
+2. Mongo-direct `update_one({"id":zt.id}, {"$set": {status, close_reason, closed_at, remaining_shares=0, notes}})` fallback that bypasses whatever the orchestrated `_save_trade` was choking on.
+3. If BOTH paths fail, capture in `drift_record["zombie_close_failures"]` so the heal response surfaces the failure.
+
+### Tests shipped
+- `tests/test_dict_to_trade_preserves_state_v19_34_21.py` (8 tests): roundtrip
+  for `remaining_shares`, `scale_out_config`, `trailing_stop_config`, MFE/MAE,
+  provenance bundle, unknown-key tolerance, default-status fallback, source
+  guard.
+- `tests/test_zombie_close_fallback_v19_34_21.py` (3 tests): static guard on
+  the fallback markers, simulated `_save_trade` raise → verify Mongo fallback
+  fires, both-paths-fail → verify failure recorded in drift_record.
+- 31 tests total pass (11 new + 20 prior on adjacent paths).
+
+### Operator-side impact
+
+Every previously-reported intermittent state-loss issue likely traces back
+to this bug:
+- "Stop suddenly reset to original" after backend restart → trailing_stop_config wiped.
+- "Already-hit scale-outs firing again" → scale_out_config.targets_hit wiped.
+- "Trades I'd seen as `reconciled_external` revert to `bot_fired`" → entered_by wiped.
+- "Bot's R-multiple stats look wrong post-restart" → mfe/mae wiped.
+
+After v19.34.21 ships: every restart preserves full per-trade state. The
+existing 3 FDX zombies should be cleaned by re-running `auto_resolve:true`
+once more on DGX (the v19.34.21 fallback path will now confidently close
+`b4d27b31` even if the orchestrated save still has whatever issue caused
+the silent failure).
+
+
 ## 2026-05-06 (one-hundred-second commit, v19.34.20 + v19.34.20b) — Upstream zombie-creation fixes
 
 **Severity: P0**. Read-only forensics on the 3 surviving zombies (`b4d27b31` FDX 256sh, `3f369929` FDX 20sh, `95144a8d` UPS 885sh) traced the upstream cause to TWO distinct bugs (NOT the LIFO shrinker as initially hypothesized — none of the active zombies carried the `'v19.34.15b: shrunk'` token). Forensics report at `/app/memory/forensics/zombie_root_cause_v19_34_19.md`.

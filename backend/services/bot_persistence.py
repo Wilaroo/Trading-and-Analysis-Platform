@@ -497,11 +497,44 @@ class BotPersistence:
 
     @staticmethod
     def dict_to_trade(d: Dict) -> Optional['BotTrade']:
-        """Convert dictionary to BotTrade"""
+        """Convert dictionary to BotTrade.
+
+        ── v19.34.21 (2026-05-06) ── Pre-fix this method only passed
+        ~25 of `BotTrade`'s ~50 fields to the constructor, so the rest
+        defaulted to dataclass defaults on every reload. Missing fields:
+        `remaining_shares`, `original_shares`, `scale_out_config`,
+        `trailing_stop_config`, `mfe_price/_pct/_r`, `mae_price/_pct/_r`,
+        `entered_by`, `prior_verdicts`, `prior_verdict_conflict`,
+        `synthetic_source`, `pre_submit_at`, `setup_variant`,
+        `entry_context`, `market_regime`, `regime_score`,
+        `regime_position_multiplier`, `trade_type`, `account_id_at_fill`,
+        `total_commissions`, `net_pnl`, `commission_per_share`,
+        `commission_min`, `notes`, `close_reason`, `setup_variant`,
+        `tape_score`, `target_r_multiple`, `direction_bias`, `smb_grade`,
+        `trade_style`.
+
+        Operator-discovered 2026-05-06: every restart was silently
+        zombifying every open BotTrade because `remaining_shares=0`
+        (default) replaced the persisted value. The manage-loop self-
+        heal at `position_manager.py:494` (`if rs==0: rs=shares`) was
+        masking the bug for trades that got a fresh quote within ~30s
+        of restart; positions that didn't (TIMEOUT-NEEDS-SYNC, stale
+        quote, etc.) became permanent zombies.
+
+        Worse: dropped `scale_out_config` would reset `targets_hit=[]`,
+        re-firing already-hit scale-outs after a restart. Dropped
+        `trailing_stop_config` would reset trailing stops to dataclass
+        defaults, losing all stop-adjustment history.
+
+        Fix: construct with required fields, then setattr ALL persisted
+        keys back onto the instance. Dataclass-typed enums are coerced
+        explicitly. Datetime-like ISO strings are passed through as-is
+        (the rest of the bot reads them as strings).
+        """
         from services.trading_bot_service import BotTrade, TradeDirection, TradeStatus
 
         try:
-            return BotTrade(
+            trade = BotTrade(
                 id=d.get('id', ''),
                 symbol=d.get('symbol', ''),
                 direction=TradeDirection(d.get('direction', 'long')),
@@ -518,21 +551,34 @@ class BotPersistence:
                 risk_amount=d.get('risk_amount', 0),
                 potential_reward=d.get('potential_reward', 0),
                 risk_reward_ratio=d.get('risk_reward_ratio', 0),
-                fill_price=d.get('fill_price'),
-                exit_price=d.get('exit_price'),
-                unrealized_pnl=d.get('unrealized_pnl', 0),
-                realized_pnl=d.get('realized_pnl', 0),
-                pnl_pct=d.get('pnl_pct', 0),
-                created_at=d.get('created_at', ''),
-                executed_at=d.get('executed_at'),
-                closed_at=d.get('closed_at'),
-                estimated_duration=d.get('estimated_duration', ''),
-                close_at_eod=d.get('close_at_eod', True),
-                explanation=None,
-                entry_order_id=d.get('entry_order_id'),
-                stop_order_id=d.get('stop_order_id'),
-                target_order_ids=d.get('target_order_ids', [])
             )
+
+            # ── v19.34.21: hydrate every persisted field back onto the
+            # instance. We use the dataclass field set as the allow-list
+            # to avoid setting random keys; explanation/_id are excluded.
+            from dataclasses import fields as _dc_fields
+            allowed = {f.name for f in _dc_fields(BotTrade)}
+            # These were already set by the constructor — don't overwrite.
+            constructor_set = {
+                "id", "symbol", "direction", "status", "setup_type",
+                "timeframe", "quality_score", "quality_grade",
+                "entry_price", "current_price", "stop_price",
+                "target_prices", "shares", "risk_amount",
+                "potential_reward", "risk_reward_ratio",
+            }
+            # Fields that need explicit conversion to avoid losing types.
+            for k, v in d.items():
+                if k not in allowed or k in constructor_set or k == "explanation":
+                    continue
+                try:
+                    setattr(trade, k, v)
+                except Exception as set_err:  # pragma: no cover
+                    logger.warning(
+                        f"dict_to_trade: failed to setattr "
+                        f"{k}={v!r} on {trade.id}: {set_err}"
+                    )
+
+            return trade
         except Exception as e:
             logger.error(f"Error deserializing trade: {e}")
             return None
