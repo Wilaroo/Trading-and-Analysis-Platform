@@ -2,6 +2,90 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (one-hundred-second commit, v19.34.20 + v19.34.20b) — Upstream zombie-creation fixes
+
+**Severity: P0**. Read-only forensics on the 3 surviving zombies (`b4d27b31` FDX 256sh, `3f369929` FDX 20sh, `95144a8d` UPS 885sh) traced the upstream cause to TWO distinct bugs (NOT the LIFO shrinker as initially hypothesized — none of the active zombies carried the `'v19.34.15b: shrunk'` token). Forensics report at `/app/memory/forensics/zombie_root_cause_v19_34_19.md`.
+
+### v19.34.20 — TIMEOUT path forgets to initialize share-tracking
+
+**File:** `services/trade_execution.py` lines 631–651 (the
+`elif result.get('status') == 'timeout':` branch).
+
+**Bug:** When the broker returned `status: 'timeout'`, the code
+stamped `status=OPEN`, `fill_price`, `executed_at`, persisted via
+`_save_trade`, and added the trade to `_open_trades` — but never
+overwrote the `BotTrade` dataclass defaults of
+`remaining_shares: int = 0` / `original_shares: int = 0`
+(`trading_bot_service.py:617-618`). The downstream self-heal at
+`position_manager.py:494-496` only fires when a fresh quote arrives,
+and `[TIMEOUT-NEEDS-SYNC]` trades typically go quote-stale before that.
+Result: instant zombies. **Affected:** 905sh across 2 of the 3 active
+zombies (`3f369929` + `95144a8d`).
+
+**Fix:** Added 2 init lines inside the timeout block (after
+`trade.notes`, before the in-memory move) so `remaining_shares` and
+`original_shares` always equal `trade.shares` post-timeout.
+
+### v19.34.20b — `_shrink_drift_trades` doesn't close fully-peeled slices (latent leak)
+
+**File:** `services/position_reconciler.py` lines 1484–1494
+(`_shrink_drift_trades` LIFO inner loop).
+
+**Bug:** When a Case-2 partial external close triggered LIFO shrink
+and a slice's full `remaining_shares` was peeled (`new == 0`), the
+loop set `t.remaining_shares = 0` but never:
+  1. Flipped `t.status` to `CLOSED`.
+  2. Stamped `closed_at` / `close_reason`.
+  3. Removed `t` from `bot._open_trades`.
+  4. Released `_stop_manager.forget_trade(t.id)`.
+
+**Status before fix:** Latent — zero `share_drift_events` records
+contained `shrink_detail` referencing real trades, so the bug had
+never produced a zombie *yet*. Would have started manufacturing
+zombies the moment any operator ran `auto_resolve` against a real
+Case-2 drift.
+
+**Fix:** Added a `if new == 0 and old > 0:` block inside the loop
+that flips `status=CLOSED`, stamps `closed_at` + `close_reason="shrunk_to_zero_v19_34_20b"`, tracks fully-peeled slices in
+`drift_record["fully_peeled_closed"]`, and post-loop pops them from
+`_open_trades`, appends to `_closed_trades`, and releases stop-manager
+state. Mirrors the invariants already used by `close_phantom_position`
+and `close_trade`.
+
+### Tests shipped
+
+- `tests/test_timeout_initializes_shares_v19_34_20.py` (3 tests):
+  reproduces TIMEOUT branch with stub bot, asserts
+  `remaining_shares == shares` + `original_shares == shares` BEFORE
+  `_save_trade` runs, plus a static source-grep guard against
+  accidental revert.
+- `tests/test_shrink_drift_closes_zero_slices_v19_34_20b.py` (4 tests):
+  full peel closes, partial peel doesn't, multi-slice cascade, source
+  guard.
+- All 7 pass + 19 prior reconciler/eod tests still green = 26/26.
+
+### Operator-side artifacts
+
+- `scripts/zombie_root_cause_spotcheck.py` — READ-ONLY diagnostic.
+  Counts zombies and groups by upstream signature
+  (shrunk-by-15b vs other) so future regressions can be classified
+  in one shot.
+- `/app/memory/forensics/zombie_root_cause_v19_34_19.md` — revised
+  forensics with full mutation-site inventory, evidence chain, and
+  the two distinct root causes.
+
+### Heal of existing zombies
+
+After 20 + 20b deploy, operator runs:
+```
+POST /api/trading-bot/reconcile-share-drift
+  {"zombie_detect_only": false, "auto_resolve": true}
+```
+v19.34.19 spawns bracketed `reconciled_excess_slice` BotTrades
+(`close_at_eod=true`) for the 1592 sh of IB drift and marks the 3
+zombies CLOSED. Spot-check script then confirms `TOTAL ZOMBIES: 0`.
+
+
 ## 2026-05-06 (one-hundred-first commit, v19.34.19) — Zombie-trade drift blind spot fix
 
 **Severity: P0**. Operator caught 2026-05-06: 1592 unmanaged shares

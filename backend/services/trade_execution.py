@@ -636,6 +636,22 @@ class TradeExecution:
                 trade.entry_order_id = result.get('order_id')
                 trade.notes = (trade.notes or "") + " [TIMEOUT-NEEDS-SYNC]"
 
+                # ── v19.34.20 (2026-05-06) — Initialize share-tracking on
+                # timeout. Pre-fix the BotTrade dataclass defaults
+                # (`remaining_shares=0`, `original_shares=0` —
+                # trading_bot_service.py L617-618) stayed at 0 because the
+                # TIMEOUT block stamped `status=OPEN` and persisted without
+                # ever overwriting these. The manage-loop self-heal at
+                # position_manager.py L494-496 only fires when a fresh
+                # quote arrives — TIMEOUT-NEEDS-SYNC trades typically go
+                # quote-stale before that, so they rotted as zombies
+                # (status=OPEN, rs=0, os=0). Forensic 2026-05-06 found
+                # 905 sh stuck across two zombies (3f369929 FDX 20sh +
+                # 95144a8d UPS 885sh) — both with this exact fingerprint.
+                # See /app/memory/forensics/zombie_root_cause_v19_34_19.md.
+                trade.remaining_shares = int(trade.shares)
+                trade.original_shares = int(trade.shares)
+
                 # Initialize MFE/MAE
                 trade.mfe_price = trade.fill_price
                 trade.mae_price = trade.fill_price

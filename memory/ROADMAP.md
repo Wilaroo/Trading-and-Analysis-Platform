@@ -16,6 +16,10 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 **v19.34.16 SHIPPED 2026-05-06** — see CHANGELOG ninety-eighth commit. P1 trifecta: UPS 31s forensic audit script + report, unmatched Sell Short / Buy to Cover detector (service + endpoint + audit-script section), boot zombie-sweep lifecycle persistence (per-trade rows on findings). 98/98 cumulative tests passing.
 
+**v19.34.18 + v19.34.19 SHIPPED 2026-05-06** — Drift loop diagnostic endpoint + zombie-trade blind-spot detector. v19.34.19 dry-run found 1592sh of unmanaged IB shares (369 FDX + 1223 UPS) corresponding to 3 zombie BotTrades. 112/112 cumulative tests passing.
+
+**v19.34.20 + v19.34.20b SHIPPED 2026-05-06** — see CHANGELOG one-hundred-second commit. Upstream zombie-creation prevention. **20:** TIMEOUT path in `trade_execution.py` now initializes `remaining_shares`/`original_shares` (was leaving them at dataclass-default 0 → instant zombie; affected 905sh across 2 of 3 active zombies). **20b:** `_shrink_drift_trades` LIFO peel now closes fully-peeled slices (status flip + pop from `_open_trades` + stop-manager release) instead of leaving rs=0 with status=OPEN — latent leak that would activate on the first auto_resolve Case-2 run. Forensics: `/app/memory/forensics/zombie_root_cause_v19_34_19.md`. 26 tests pass (7 new + 19 prior on adjacent paths). Operator-side healing of 3 existing zombies = `auto_resolve:true` heal call (separate from the prevention fix).
+
 ### 🔴 v19.34.15a NEXT (Naked-position safety net) — plan + investigate before code
 
 Operator request: investigate carefully before committing. Two-part fix:

@@ -1481,6 +1481,18 @@ class PositionReconciler:
         # How many shares to remove total (positive int).
         to_remove = max(0, cur_total - new_total_abs)
         applied: list = []
+        # ── v19.34.20b (2026-05-06) — track fully-peeled trades so we can
+        # mark them CLOSED post-loop. Pre-fix this loop set
+        # `remaining_shares = 0` on full peels but never flipped `status`
+        # to CLOSED, never popped from `_open_trades`, never stamped
+        # `closed_at`. That manufactured zombie BotTrades (rs=0,
+        # status=OPEN) which the v19.34.19 detector now catches. This is
+        # the upstream prevention so the Case-2 auto-resolve path doesn't
+        # generate fresh zombies on every run. See
+        # /app/memory/forensics/zombie_root_cause_v19_34_19.md.
+        from services.trading_bot_service import TradeStatus as _TS_close
+        now_iso_close = datetime.now(timezone.utc).isoformat()
+        fully_peeled: list = []
         for t in trades_lifo:
             old = int(abs(getattr(t, "remaining_shares", 0) or 0))
             if to_remove <= 0:
@@ -1492,8 +1504,45 @@ class PositionReconciler:
             t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new} (LIFO)]"
             to_remove -= take
             applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": new})
+            # v19.34.20b — close fully-peeled slices to prevent zombie creation.
+            if new == 0 and old > 0:
+                try:
+                    t.status = _TS_close.CLOSED
+                    t.closed_at = now_iso_close
+                    t.close_reason = "shrunk_to_zero_v19_34_20b"
+                    t.unrealized_pnl = 0
+                    fully_peeled.append(t)
+                except Exception as _close_err:
+                    logger.warning(
+                        f"[v19.34.20b] failed to mark {getattr(t, 'id', '?')} "
+                        f"CLOSED on full peel: {_close_err}"
+                    )
         drift_record["shrink_detail"] = applied
         drift_record["shrink_strategy"] = "lifo"
+        if fully_peeled:
+            drift_record["fully_peeled_closed"] = [
+                getattr(t, "id", None) for t in fully_peeled
+            ]
+        # v19.34.20b — drop fully-peeled trades from in-memory tracking
+        # and release stop-manager state. Mirror close_phantom_position
+        # / close_trade invariants.
+        for t in fully_peeled:
+            try:
+                if hasattr(bot, "_open_trades") and t.id in bot._open_trades:
+                    bot._open_trades.pop(t.id, None)
+                if hasattr(bot, "_closed_trades"):
+                    try:
+                        bot._closed_trades.append(t)
+                    except Exception:
+                        pass
+                sm = getattr(bot, "_stop_manager", None)
+                if sm and hasattr(sm, "forget_trade"):
+                    sm.forget_trade(t.id)
+            except Exception as _release_err:
+                logger.warning(
+                    f"[v19.34.20b] post-close cleanup failed for "
+                    f"{getattr(t, 'id', '?')}: {_release_err}"
+                )
         # Persist via bot._save_trade.
         save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
         if save_fn:
