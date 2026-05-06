@@ -1,269 +1,270 @@
-# Zombie-Trade Upstream Root Cause — Forensics Report
+# Zombie-Trade Upstream Root Cause — Forensics Report (REVISED)
 **Date:** 2026-05-06
-**Author:** Read-only investigation per operator request (Issue 1 of v19.34.19 follow-up)
-**Symbols affected:** FDX (369 sh), UPS (1223 sh) → 1592 naked IB shares total
-**Suspected zombie trade IDs:** `b4d27b31`, `3f369929`, `95144a8d`
+**Author:** Read-only investigation
+**Symbols affected:** FDX (276 sh of zombie alloc, 369 sh IB drift), UPS (885 sh of zombie alloc, 1223 sh IB drift)
+**Confirmed zombie trade IDs:** `b4d27b31` (FDX 256), `3f369929` (FDX 20), `95144a8d` (UPS 885)
 **Mode:** READ-ONLY — no code changes, no DB mutations.
 
----
-
-## TL;DR
-
-The "zombies" (`bot_trade.remaining_shares == 0` AND `bot_trade.status == OPEN`) are
-created by **`v19.34.15b`'s own LIFO shrinker** —
-`_shrink_drift_trades()` in `/app/backend/services/position_reconciler.py`
-lines **1458–1522**.
-
-When the share-count drift loop detects that IB has fewer shares than the bot
-tracks (Case 2: partial external close), it peels shares off the most-recent
-trade(s) LIFO. The peel sets `t.remaining_shares = new` (which can be `0`)
-but never:
-
-1. flips `t.status` to `TradeStatus.CLOSED`,
-2. removes `t` from `bot._open_trades`,
-3. stamps `closed_at` / `close_reason`,
-4. moves `t` to `bot._closed_trades`.
-
-So the trade keeps `status: OPEN` in memory and Mongo with `remaining_shares: 0`,
-the bot's own drift detector sums `bot_q = sum(remaining_shares) == 0`, and the
-**old** 15b case-distinction (`if sym not in bot_qty_by_sym or abs(bot_q) < 0.01: skip`)
-hid this from the next pass. **15b created its own blind spot.** v19.34.19
-patched the *detection*; this report identifies the *creation* bug.
+> ⚠️ **REVISION NOTE:** The first draft of this report blamed
+> `_shrink_drift_trades` (v19.34.15b LIFO peel) based on theoretical mutation-site
+> analysis. **The DB spot-check disproved that** — none of the 3 actual zombies
+> carry the `'v19.34.15b: shrunk'` token in `notes`, and the `share_drift_events`
+> collection has zero records referencing these trade IDs. The shrinker IS still
+> a latent leaky path (verified, no `status` flip on full peel) but it is **not**
+> the active root cause of the current 1592-share IB drift. The actual root
+> causes are below.
 
 ---
 
-## Evidence Chain
+## TL;DR (Revised)
 
-### 1. Mutation paths for `remaining_shares` (full inventory)
+There are **TWO** distinct active upstream bugs, with **ONE** latent third:
 
-I grepped the entire backend for every site that mutates `remaining_shares` and
-classified each one as **safe** (also flips status) or **leaky** (only mutates qty).
+1. **🔴 ROOT CAUSE A — Timeout path forgets to initialize shares**
+   `trade_execution.py:631–651` — when broker call returns `status: 'timeout'`,
+   the code stamps `status=OPEN`, `fill_price`, `executed_at`, and persists,
+   but **never sets `trade.remaining_shares = trade.shares`** (or
+   `original_shares`). Both fields stay at the dataclass default `0`. The
+   trade goes to `_open_trades` and gets persisted as a zombie immediately.
+   **Affects:** `3f369929` (FDX 20) + `95144a8d` (UPS 885) — both carry
+   `[TIMEOUT-NEEDS-SYNC]` fingerprint. Net: **905 sh** of the IB drift.
 
-| File | Line | Path | Status flip? | Verdict |
-|---|---|---|---|---|
-| `position_manager.py` | 270 | OCA external close sweep | ✅ `_TS.CLOSED` set L255 | Safe |
-| `position_manager.py` | 494–495 | manage-loop init when `rs == 0` | N/A (re-init) | Safe (only fires for fresh/uninitialized trades) |
-| `position_manager.py` | 1115 | scale-out partial decrement | ✅ L1186 closes when `rs <= 0` | Safe |
-| `position_manager.py` | 1378 | `close_trade()` full close | ✅ L1374 `TradeStatus.CLOSED` | Safe |
-| `position_reconciler.py` | 284 | sync-position quantity update | N/A (re-init for new trade) | Safe |
-| `position_reconciler.py` | 333 | sync-position auto-create | N/A (initial assignment) | Safe |
-| `position_reconciler.py` | 397 | `close_phantom_position()` | ✅ L380 `TradeStatus.CLOSED` | Safe |
-| `position_reconciler.py` | 411 | `close_phantom_position()` Mongo update | (mirrors above) | Safe |
-| `position_reconciler.py` | 520 | quantity_mismatch repair | N/A (sync to IB qty, never zeros if IB has shares) | Safe* |
-| `position_reconciler.py` | 824 | `_create_reconciled_orphan_trade` initial set | N/A (initial assignment) | Safe |
-| `position_reconciler.py` | 1424 | `_close_drift_trades_zero` (Case 3, IB == 0) | ✅ L1420 `TradeStatus.CLOSED` | Safe |
-| `position_reconciler.py` | **1491** | **`_shrink_drift_trades` LIFO peel (Case 2)** | **❌ NONE** | **🔴 LEAKY — zombie creator** |
-| `position_reconciler.py` | 1582 | `_spawn_excess_slice` initial set | N/A (initial assignment for new trade) | Safe |
-| `trade_execution.py` | 846 | confirm-time price recalc | N/A (re-init pre-fill) | Safe |
+2. **🟡 ROOT CAUSE B — Legacy orphan trade `b4d27b31`**
+   Single trade with `entered_by: bot_fired` (should be
+   `reconciled_external` if created post-v19.34.3) and
+   `original_shares: 0, remaining_shares: 0`. Notes match the post-v19.34.3
+   reconciler path, but the missing `entered_by` flip suggests this row was
+   either created by an older codepath OR re-saved by a path that wiped
+   the v19.34.3 fields. **Cannot pinpoint without git blame on
+   `position_reconciler.py:_create_reconciled_orphan_trade`** (need history
+   between 2026-05-04 and 2026-05-05). Single isolated event; manually
+   close-able. Net: **256 sh** of the IB drift.
 
-> *L520 (`quantity_mismatch`) only fires when IB has nonzero shares for the
-> symbol. It cannot zero a trade. Verified by re-reading the surrounding
-> conditional (`abs(ib_qty)` from L497).
+3. **🟠 LATENT LEAK — `_shrink_drift_trades`**
+   `position_reconciler.py:1484–1494` — verified leaky (full LIFO peel
+   sets `remaining_shares=0` without flipping `status`). Has not yet
+   produced a zombie because no operator has triggered a Case-2
+   `auto_resolve` shrink yet (zero `share_drift_events` with
+   `shrink_detail`). Will become a zombie generator the moment v19.34.15b
+   `auto_resolve` runs against a real partial external close. Should be
+   patched preemptively.
 
-**Single offender: `_shrink_drift_trades` L1484–L1494.**
+---
 
-### 2. The leaky code path — annotated
+## Evidence (DB-confirmed)
+
+### Zombie roster (full doc dump from operator's DGX, 2026-05-06)
+
+| Trade ID | Symbol | Dir | shares | rs | os | status | entered_by | notes (excerpt) |
+|---|---|---|---|---|---|---|---|---|
+| `b4d27b31` | FDX | LONG | 256 | 0 | 0 | open | **bot_fired** ← anomaly | "Reconciled from IB orphan — stop at 2.0%..." |
+| `3f369929` | FDX | LONG | 20  | 0 | 0 | open | bot_fired | " [PRE-SUBMIT-v19.34.6] [TIMEOUT-NEEDS-SYNC]" |
+| `95144a8d` | UPS | LONG | 885 | 0 | 0 | open | bot_fired | " [PRE-SUBMIT-v19.34.6] [TIMEOUT-NEEDS-SYNC]" |
+
+Common fingerprint: `original_shares: 0` (dataclass default — never overwritten)
+plus `remaining_shares: 0` (same). Confirms a path that fails to call
+`trade.remaining_shares = trade.shares` and `trade.original_shares = trade.shares`
+post-construction.
+
+### Negative evidence (rules out earlier hypotheses)
+
+- ✅ `share_drift_events` collection: **0 records** referencing any of these
+  trade IDs → `_shrink_drift_trades` is NOT a contributor (current data).
+- ✅ `bracket_lifecycle_events`: **0 records** for these trade IDs → not a
+  bracket-lifecycle bug.
+- ✅ `rejection_events`: **0 records** for these trade IDs → not a rejection-path
+  artifact.
+- ✅ No other collection references these IDs.
+
+---
+
+## Root Cause A — Detailed walkthrough
+
+`/app/backend/services/trade_execution.py` lines **631–651**:
 
 ```python
-# /app/backend/services/position_reconciler.py  L1484–L1494
-for t in trades_lifo:
-    old = int(abs(getattr(t, "remaining_shares", 0) or 0))
-    if to_remove <= 0:
-        applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": old})
-        continue
-    take = min(old, to_remove)
-    new = old - take                     # ← can be 0 when take == old
-    t.remaining_shares = new             # ← qty mutated
-    t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new} (LIFO)]"
-    to_remove -= take
-    applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": new})
-    # ⚠ MISSING when new == 0:
-    #     t.status = TradeStatus.CLOSED
-    #     t.closed_at = datetime.now(timezone.utc).isoformat()
-    #     t.close_reason = "shrunk_to_zero_v19_34_15b"
-    #     bot._open_trades.pop(t.id, None)
-    #     bot._closed_trades.append(t)
+elif result.get('status') == 'timeout':
+    # TIMEOUT HANDLING: Order may still execute - save as pending for sync
+    trade.status = TradeStatus.OPEN  # Assume it went through
+    trade.fill_price = trade.entry_price  # Use intended price
+    trade.executed_at = datetime.now(timezone.utc).isoformat()
+    trade.entry_order_id = result.get('order_id')
+    trade.notes = (trade.notes or "") + " [TIMEOUT-NEEDS-SYNC]"
+
+    # Initialize MFE/MAE
+    trade.mfe_price = trade.fill_price
+    trade.mae_price = trade.fill_price
+
+    # Move to open trades so bot tracks it
+    if trade.id in bot._pending_trades:
+        del bot._pending_trades[trade.id]
+    bot._open_trades[trade.id] = trade
+
+    # Update stats
+    bot._daily_stats.trades_executed += 1
+
+    await bot._save_trade(trade)
+
+    logger.warning(...)
+
+    # ⚠ MISSING:
+    #     trade.remaining_shares = trade.shares
+    #     trade.original_shares  = trade.shares
 ```
 
-### 3. How the zombies got produced (most likely sequence)
-
-For each affected symbol (FDX, UPS), the historical sequence on **2026-05-04** to
-**2026-05-06** was:
-
-1. Bot opened multiple stacked slices (likely scale-in / Day 2 swing reentries) on
-   FDX and UPS — each slice a separate `BotTrade` row in `_open_trades`.
-2. At some point IB's view diverged from the bot's view. Probable causes (to be
-   confirmed against the IB fill tape):
-   - A bracket parent leg fired/got partially filled while the bot wasn't watching, OR
-   - Day-roll: the bot persisted Day 2 trades correctly, but the IB position got
-     trimmed externally (manual operator close, OCA-cleanup, EOD flatten, etc.).
-3. The drift loop detected `IB_qty < bot_q` (Case 2) and called `_shrink_drift_trades`.
-4. LIFO shrink peeled *all* shares off one or more entire slices (`take == old`,
-   `new == 0`) — the slice's `remaining_shares` got set to `0` but
-   `status` stayed `OPEN`. **Zombie born.**
-5. Next drift pass: `bot_q = sum(remaining_shares) for FDX = 0`. IB still had
-   the parent fill (the *non-shrunken* portion). Old 15b detection said
-   `abs(bot_q) < 0.01 → skip`. Naked shares accumulate at IB.
-6. Step 4-5 repeated as more partials hit, snowballing to 1592 sh.
-
-> Verifying step 3 in production: every zombie-suspect trade should have a `notes`
-> field containing the substring `"v19.34.15b: shrunk"` and a final `→0` token.
-> Operator can confirm with the spot-check query in the **Confirmation Plan**
-> below — no code change needed for the check.
-
-### 4. Why v19.34.19's blind-spot patch is correct but incomplete
-
-`v19.34.19` (lines 1244–1280) correctly *detects* zombie trades by enumerating
-`bot_trades_by_sym` and looking for `remaining_shares == 0` even when `bot_q`
-sums to zero. That's the right downstream catch.
-
-**But the upstream fault still exists.** Until `_shrink_drift_trades` flips status
-on full-peel, every Case-2 drift event continues to manufacture more zombies. The
-v19.34.19 detector will keep cleaning them up, but:
-
-- Audit trail noise (every shrink-to-zero generates a fresh "zombie" event the
-  next pass).
-- Wasted `reconciled_excess_slice` spawns (we'd be respawning a slice for
-  shares that were "ours" the whole time — they were just orphaned by the
-  shrinker bug).
-- Drift event metadata is misleading (`zombie_trade_drift` is the *symptom*,
-  `lifo_shrink_did_not_close` is the *cause*).
-
----
-
-## Confirmation Plan (manual, operator-side, non-mutating)
-
-The fork agent doesn't have DGX Mongo access. Operator can verify the diagnosis
-in <2 min from the DGX shell:
-
-```bash
-cd ~/Trading-and-Analysis-Platform/backend
-python3 -c "
-from pymongo import MongoClient
-import os, json
-from dotenv import load_dotenv
-load_dotenv()
-db = MongoClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
-zombies = list(db.bot_trades.find(
-    {'remaining_shares': 0, 'status': 'OPEN'},
-    {'_id': 0, 'id': 1, 'symbol': 1, 'shares': 1, 'notes': 1, 'close_reason': 1, 'entered_by': 1, 'updated_at': 1}
-))
-print(f'TOTAL ZOMBIES: {len(zombies)}')
-shrunk = [z for z in zombies if 'v19.34.15b: shrunk' in (z.get('notes') or '')]
-print(f'  ↳ shrunk-by-15b (root cause): {len(shrunk)}')
-print(f'  ↳ other (different upstream): {len(zombies) - len(shrunk)}')
-for z in zombies[:10]:
-    print(json.dumps(z, default=str))
-"
-```
-
-**Expected outcome if root cause is correct:** the vast majority (≥90 %) of
-zombies will have `'v19.34.15b: shrunk'` in their `notes`. Anything not in that
-bucket points to a *second*, separate upstream leak that needs its own
-investigation.
-
----
-
-## Recommended Fix (NOT applied — for operator approval)
-
-Replace the inner loop in `_shrink_drift_trades` (L1484–L1494) with a peel that
-properly closes any slice that hits zero. **Pseudo-diff:**
-
+`BotTrade` dataclass (`trading_bot_service.py:617–618`):
 ```python
-for t in trades_lifo:
-    old = int(abs(getattr(t, "remaining_shares", 0) or 0))
-    if to_remove <= 0:
-        applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": old})
-        continue
-    take = min(old, to_remove)
-    new = old - take
-    t.remaining_shares = new
-    t.notes = (t.notes or "") + f" [v19.34.15b: shrunk {old}→{new} (LIFO)]"
-    to_remove -= take
-    applied.append({"trade_id": getattr(t, "id", None), "old": old, "new": new})
-
-    # ── v19.34.20 (proposed) — close fully-peeled slices to prevent
-    # zombie creation. Mirrors close_phantom_position() invariants.
-    if new == 0:
-        from services.trading_bot_service import TradeStatus
-        t.status = TradeStatus.CLOSED
-        t.closed_at = datetime.now(timezone.utc).isoformat()
-        t.close_reason = "shrunk_to_zero_v19_34_15b"
-        t.unrealized_pnl = 0
-        # Compute realized_pnl for the peeled portion if exit price is known.
-        # Conservative path: leave realized_pnl untouched (we don't have a
-        # reliable exit price for the external partial close).
-        if hasattr(bot, "_open_trades") and t.id in bot._open_trades:
-            bot._open_trades.pop(t.id, None)
-        if hasattr(bot, "_closed_trades"):
-            try:
-                bot._closed_trades.append(t)
-            except Exception:
-                pass
-        # Stop-manager state cleanup (mirror close_trade L1401).
-        try:
-            sm = getattr(bot, "_stop_manager", None)
-            if sm and hasattr(sm, "forget_trade"):
-                sm.forget_trade(t.id)
-        except Exception:
-            pass
+original_shares: int = 0   # default 0 — must be set explicitly
+remaining_shares: int = 0  # default 0 — must be set explicitly
 ```
 
-### Side effects to think through
+So a timeout-path trade ships to `_open_trades` AND to Mongo with rs=0, os=0.
 
-1. **Realized P&L attribution.** We don't have a fill price for the external
-   partial close that triggered the shrink, so the conservative path leaves
-   `realized_pnl` unchanged on the peeled slice. The shares' P&L gets
-   absorbed into the IB account-level realized number; the bot's own daily
-   stat will under-count. Acceptable per the existing pattern in
-   `_close_drift_trades_zero` (L1414, also doesn't compute P&L).
-2. **Notes hygiene.** Every closed slice would carry a single
-   `v19.34.15b: shrunk N→0 (LIFO)` token in notes plus
-   `close_reason="shrunk_to_zero_v19_34_15b"` for grep-friendly post-mortems.
-3. **Auto-test.** Add a unit test
-   `test_shrink_drift_closes_zero_slices_v19_34_20.py` that:
-   - Creates 2 BotTrades with `remaining_shares=100` each
-     (`bot_q=200`).
-   - Calls `_shrink_drift_trades` with `new_total_abs=50` (peel 150).
-   - Asserts: oldest trade survives with `rs=50`, newest is fully closed
-     with `status==CLOSED, rs==0, id not in bot._open_trades`.
-4. **Backward compat.** Existing zombies in the DB (the 1592 already on the
-   books) won't be auto-healed by this fix — they need the v19.34.19 healer
-   path the operator already controls. Fix v19.34.20 prevents *future*
-   zombies; v19.34.19 cleans the *existing* ones.
+The downstream "self-heal" lives in the manage loop
+(`position_manager.py:493–496`):
+```python
+# Initialize remaining_shares if not set
+if trade.remaining_shares == 0:
+    trade.remaining_shares = trade.shares
+    trade.original_shares = trade.shares
+```
 
-### Where to slot this in the version sequence
-
-Operator already approved this work order:
-- `v19.34.19` (zombie *detector*) — **shipped, dry-run verified**.
-- `v19.34.20` (zombie *prevention* — this fix) — **PROPOSED, awaiting approval.**
-- Then heal current zombies (operator's chosen mode from the prior `ask_human`).
-- Then `v19.34.15a` (naked-position safety net for `bracket unknown` race).
+**But this only fires if the manage loop sees a fresh quote.** For the TIMEOUT
+trades, the bot likely never got a fresh quote in time — the manage loop hits
+`if not quote: continue` (L466) or `if quote_age_s > STALE_QUOTE_S: continue`
+(L489) and the re-init is skipped. The trade rots as a zombie until v19.34.19
+detects it.
 
 ---
 
-## Open question for operator
+## Root Cause B — `b4d27b31` anomaly
 
-The investigation flagged **one** primary leak (`_shrink_drift_trades`).
-Confirmation step 4 above will tell us if **all** observed zombies trace back
-to it. If a non-shrunk-flagged zombie exists, we have a second leak hiding
-behind this one — likely candidates to inspect next:
-- `position_manager._sweep_position_drift_v19_*` paths (older sweepers).
-- `bracket_reissue_service.reissue_bracket_for_trade` if it ever resets
-  `remaining_shares` mid-flight (verified read-only: it doesn't, only reads).
-- `trade_execution.confirm_pending_trade` recalc path (L846) — only fires
-  pre-fill, not a runtime risk.
+The doc shows:
+- `entered_by: bot_fired` — should be `reconciled_external` after v19.34.3
+  (`position_reconciler.py:850`).
+- `original_shares: 0` — should be 256 after L825
+  (`trade.original_shares = abs_qty`).
+- Notes match L1018 (`f"Reconciled from IB orphan — stop at {default_stop_pct:.1f}%..."`)
+  exactly.
+- `executed_at: 2026-05-05T15:25:09Z` — 1 day after v19.34.3 was supposedly shipped.
 
-If step 4 returns 100 % shrunk-flagged zombies, the fix above is the complete
-upstream remediation.
+The discrepancy means one of:
+
+**Hypothesis B1 — Migrated from older codepath:** This row was *originally*
+created by a pre-v19.34.3 reconciler version that only wrote notes, not
+`entered_by` / `original_shares`. The May-6 `last_updated` is from an unrelated
+re-save (e.g., the manage loop touching `current_price`).
+
+**Hypothesis B2 — Save path overwrites with stale instance:** Some path
+constructs a new `BotTrade(id=...)` (defaults rs=0, os=0, entered_by=bot_fired)
+WITH the same id and saves it, clobbering the original row. Candidate paths:
+- `trade_execution.confirm_pending_trade` (L820+) — re-recalcs shares but only
+  if `current_price != entry_price`.
+- A boot-time DB→memory rebuild that doesn't preserve `original_shares` if
+  the legacy row didn't have it.
+
+**Hypothesis B3 — `to_dict()` field ordering quirk:** Unlikely; `asdict()` from
+dataclasses includes all fields, and `original_shares` IS a field.
+
+I cannot disambiguate B1/B2 without:
+- Git blame of `position_reconciler.py` between 2026-05-04 and 2026-05-05,
+  AND
+- Mongo oplog or `last_updated` history (not currently captured).
+
+**Pragmatic call:** since this is a single legacy row, manual cleanup
+(`auto_resolve` heal OR direct DB close) is fine. Real prevention work
+should focus on Cause A.
+
+---
+
+## Recommended Fixes (NOT applied — for operator approval)
+
+### Fix v19.34.20 — TIMEOUT path initialization (Root Cause A)
+
+**File:** `/app/backend/services/trade_execution.py`
+**Where:** inside the `elif result.get('status') == 'timeout':` block
+(currently lines 631–651), AFTER `trade.entry_order_id = result.get('order_id')`
+and BEFORE `bot._open_trades[trade.id] = trade`.
+
+**Patch (~3 lines):**
+```python
+elif result.get('status') == 'timeout':
+    trade.status = TradeStatus.OPEN
+    trade.fill_price = trade.entry_price
+    trade.executed_at = datetime.now(timezone.utc).isoformat()
+    trade.entry_order_id = result.get('order_id')
+    trade.notes = (trade.notes or "") + " [TIMEOUT-NEEDS-SYNC]"
+
+    # ── v19.34.20 (2026-05-06) — initialize share-tracking fields on
+    # timeout. Pre-fix the BotTrade dataclass defaults of
+    # remaining_shares=0 / original_shares=0 stayed at 0 because the
+    # timeout block never overwrote them, and the manage-loop self-heal
+    # at L494-496 of position_manager.py only fires when a fresh quote
+    # arrives — TIMEOUT-NEEDS-SYNC trades often go quote-stale before
+    # that, leaving them as zombies (status=OPEN, rs=0). Forensic:
+    # 2026-05-06 spot-check found 905sh stuck across 3f369929 + 95144a8d.
+    trade.remaining_shares = int(trade.shares)
+    trade.original_shares = int(trade.shares)
+
+    trade.mfe_price = trade.fill_price
+    trade.mae_price = trade.fill_price
+
+    if trade.id in bot._pending_trades:
+        del bot._pending_trades[trade.id]
+    bot._open_trades[trade.id] = trade
+    bot._daily_stats.trades_executed += 1
+    await bot._save_trade(trade)
+    logger.warning(...)
+```
+
+**Side effects:** none. We're filling fields the rest of the system already
+expects to be populated; the manage loop's L494 self-heal becomes a fallback
+instead of the only path.
+
+### Fix v19.34.20b — Latent shrinker leak (precautionary)
+
+**File:** `/app/backend/services/position_reconciler.py`
+**Where:** `_shrink_drift_trades` inner loop, currently L1484-1494.
+**Patch:** add a `if new == 0:` block that flips `status`, removes from
+`_open_trades`, and appends to `_closed_trades`. (Same patch detailed in
+the original report — applies preemptively before the shrinker can produce
+real zombies.)
+
+### Heal current zombies (separate from the prevention fix)
+
+For the 1161 sh of zombie BotTrades + 1592 sh of IB drift:
+- **Aggressive (a):** run `POST /api/trading-bot/reconcile-share-drift`
+  with `{"zombie_detect_only": false, "auto_resolve": true}`. v19.34.19
+  spawns `reconciled_excess_slice` BotTrades (with default 2% SL / 2R PT,
+  `close_at_eod=True`) and marks the 3 zombies CLOSED. ✅ Cleanest.
+- **Conservative (b):** manually flip the 3 zombie rows to status=CLOSED in
+  Mongo, rely on next normal orphan-reconcile pass to bracket the IB shares.
+- **Manual (c):** flatten 1592sh at IB Gateway, then close zombie BotTrades.
+
+---
+
+## Confirmation Plan (already executed)
+
+✅ `scripts/zombie_root_cause_spotcheck.py` ran on DGX:
+- Total zombies: 3 (case-corrected for status='open')
+- Shrunk-by-15b: 0 → original hypothesis disproven
+- TIMEOUT-NEEDS-SYNC bucket: 2 → Root Cause A confirmed
+- Reconciled-orphan bucket: 1 → Root Cause B (legacy/unknown subset)
 
 ---
 
 ## Files referenced (read-only)
 
-- `/app/backend/services/position_reconciler.py` (lines 366–425, 1240–1280, 1414–1522)
-- `/app/backend/services/position_manager.py` (lines 240–310, 480–540, 1080–1230, 1290–1410)
-- `/app/backend/services/trade_execution.py` (lines 820–880)
-- `/app/backend/services/bracket_reissue_service.py` (read-only, no zero-mutation paths found)
+- `/app/backend/services/trade_execution.py` (L395–445 PRE-SUBMIT, L615–680
+  post-broker-call branch including the leaky TIMEOUT path)
+- `/app/backend/services/trading_bot_service.py` (L583–746 BotTrade dataclass,
+  fields with default-0 that bite us)
+- `/app/backend/services/position_manager.py` (L440–496 manage-loop quote
+  guard + self-heal, L1080–1230 scale-out close path, L1294–1410 close_trade)
+- `/app/backend/services/position_reconciler.py` (L770–870 orphan create,
+  L1244–1280 v19.34.19 zombie detect, L1414–1522 drift-trade actions
+  including leaky `_shrink_drift_trades`)
+- `/app/backend/scripts/zombie_root_cause_spotcheck.py` (READ-ONLY diag tool
+  added this session)
 
-— end of forensics report —
+— end of revised forensics report —
