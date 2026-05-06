@@ -1497,12 +1497,15 @@ from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)
 # v19.34.25 — Direct IB API connection (read-only diagnostics in Phase 1;
 # Phase 2 wires it into trade_executor_service for direct order routing).
+# v19.34.25b: use print() not logger — `logger` is not bound at this
+# module scope (the surrounding live_data_router fallback has the same
+# latent NameError but never triggers because its except branch is rare).
 try:
     from routers.ib_direct_router import router as ib_direct_router  # noqa: E402
     app.include_router(ib_direct_router)
-    logger.warning("v19.34.25 — ib_direct_router registered (status endpoint at /api/system/ib-direct/status)")
+    print("[STARTUP] v19.34.25 — ib_direct_router registered at /api/system/ib-direct/*")
 except Exception as _ibdr_exc:                                       # pragma: no cover
-    logger.warning("ib_direct_router failed to register: %s", _ibdr_exc)
+    print(f"[STARTUP] WARN: ib_direct_router failed to register: {_ibdr_exc}")
 from routers.autonomy_router import router as autonomy_router  # noqa: E402
 app.include_router(autonomy_router)
 # Canonical market-state surface — single source of truth for
