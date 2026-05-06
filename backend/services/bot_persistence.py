@@ -263,8 +263,12 @@ class BotPersistence:
                         risk_reward_ratio=risk_reward_ratio
                     )
 
-                    # Restore optional fields via direct assignment
-                    trade.fill_price = trade_doc.get("fill_price", entry_price)
+                    # Restore optional fields via direct assignment.
+                    # v19.34.27 — coerce None → entry_price for fill_price
+                    # so downstream %f formatting + math operations don't
+                    # crash on partial Mongo documents.
+                    raw_fill = trade_doc.get("fill_price")
+                    trade.fill_price = raw_fill if raw_fill is not None else entry_price
                     trade.executed_at = trade_doc.get("executed_at")
                     trade.entry_order_id = trade_doc.get("entry_order_id")
                     trade.stop_order_id = trade_doc.get("stop_order_id")
@@ -297,7 +301,27 @@ class BotPersistence:
                         bot._open_trades[trade.id] = trade
 
                     restored_count += 1
-                    logger.info(f"📥 Restored trade: {trade.symbol} {trade.direction.value} {trade.shares} shares @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}")
+                    # v19.34.27 (2026-02-XX) — Format-string crash hardening.
+                    # Pre-fix this line used `${trade.fill_price:.2f}` and
+                    # `${trade.stop_price:.2f}` directly. When a trade row
+                    # in Mongo had `fill_price: null` or `stop_price: null`
+                    # (closed/stale records, or trades that were saved
+                    # before the entry actually filled), `dict.get(key, default)`
+                    # returns None — NOT the default — because the key is
+                    # PRESENT but the value is None. Applying `:.2f` to
+                    # None raised "unsupported format string passed to
+                    # NoneType.__format__", caught by the broad except
+                    # below, which warned `Failed to restore trade SYMBOL`
+                    # for every record on every boot. The trade itself
+                    # was already wired into _open_trades above, so the
+                    # crash was log-only but still noisy.
+                    fp = trade.fill_price if trade.fill_price is not None else 0.0
+                    sp = trade.stop_price if trade.stop_price is not None else 0.0
+                    logger.info(
+                        f"📥 Restored trade: {trade.symbol} "
+                        f"{trade.direction.value} {trade.shares} shares "
+                        f"@ ${fp:.2f}, stop=${sp:.2f}"
+                    )
 
                 except Exception as e:
                     logger.warning(f"Failed to restore trade {trade_doc.get('symbol')}: {e}")

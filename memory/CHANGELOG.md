@@ -2,6 +2,48 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-tenth commit, v19.34.27) — Scanner Pause toggle UI + Boot rehydration format-string crash fix
+
+**Severity: P0 (UI completion of v19.34.26 backend), P1 (boot noise hardening)**.
+
+Two small but operator-visible fixes finishing the v19.34.26 thread:
+
+### 1. Scanner Pause power-button — `frontend/src/components/sentcom/v5/SafetyV5.jsx` + `SentComV5View.jsx`
+
+The v19.34.26 backend shipped `/api/safety/scanner/{pause,resume,status}` endpoints (with persistence to the `safety_state` Mongo collection) but no UI surface — the operator could only toggle by curl. v19.34.27 ships the missing button.
+
+New `<ScannerPauseToggleV5 safety={safety} compact />` lives in the Scanner panel header (left column of V5 grid, next to the "Scanner · Live" title and `LiveDataChip`). Reads `safety.data.state.scanner_paused` from the existing `useSafety()` poll (8s cadence, no separate poll). Click flips state via the appropriate POST endpoint and force-refreshes the safety hook so the next render is correct without waiting for the next 8s tick. Visual states:
+
+- **LIVE** (running)  → emerald pill + Power icon — click to pause
+- **PAUSED** (paused) → amber pill + Power icon — click to resume; tooltip surfaces `paused_at` ET timestamp
+- **busy**            → spinner replaces icon, `cursor-wait`, button disabled
+
+Returns `null` when `safety.data` hasn't loaded yet so the header doesn't layout-shift on first paint.
+
+This is the soft-brake the operator asked for — quieter than the kill-switch. In-flight evals + open-position management continue normally; only NEW alert intake is blocked. Persists across backend restarts via the same `safety_state` collection that holds the kill-switch latch.
+
+### 2. Boot rehydration `NoneType.__format__` crash — `backend/services/bot_persistence.py:restore_open_trades`
+
+**The bug class.** The restore-trade log line at the bottom of the loop was:
+```py
+logger.info(f"... @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}")
+```
+When a `bot_trades` Mongo document had `fill_price: null` or `stop_price: null` (closed/stale records, or trades saved BEFORE the entry actually filled), `dict.get(key, default)` returned `None` — NOT the default — because the key is PRESENT but the value is None. Applying `:.2f` to None raised `unsupported format string passed to NoneType.__format__`, caught by the surrounding broad except, which warned `Failed to restore trade SYMBOL` for every record on every boot. Trade itself was already wired into `_open_trades` above the log line, so the crash was log-only — but noisy enough to mask real restore failures.
+
+**The fix.** Two-layer:
+- At restore time: `raw_fill = trade_doc.get("fill_price")` then `trade.fill_price = raw_fill if raw_fill is not None else entry_price` — so downstream math + formatting never inherit a None from a partial document.
+- At log time: `fp = trade.fill_price if trade.fill_price is not None else 0.0` (and same for `sp`). Defense in depth — even if the upstream coercion ever drops, the boot log doesn't crash.
+
+8 pytest cases in `tests/test_restore_open_trades_format_v19_34_27.py`:
+1-2. Pre-fix path raises `TypeError("unsupported format string")` for both None inputs (sanity — confirms the failure mode is real)
+3-5. Post-fix path produces clean `$0.00` strings for None inputs
+6.   Post-fix path preserves the normal-input output unchanged
+7-8. Source-code asserts that pin the fix in place against future refactors
+
+All 8 green; ruff clean.
+
+
+
 ## 2026-02-XX (one-hundred-ninth commit, v19.34.25) — Kill-switch persistence + flatten-all envelope honesty + direct IB API connection (Phase 1)
 
 **Severity: P0 (CRITICAL — kill-switch + flatten parts), P1 (direct IB foundation)**.

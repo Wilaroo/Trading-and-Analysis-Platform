@@ -448,3 +448,79 @@ export const AwaitingQuotesPillV5 = ({ safety }) => {
     </div>
   );
 };
+
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/*  Scanner Pause Toggle (v19.34.26)                                        */
+/*                                                                          */
+/*  Soft-brake — stop NEW alerts entering the eval pipeline without         */
+/*  killing in-flight evals or open-position management. Operator's         */
+/*  "I'm done finding new ideas for today" semantic. State is persisted     */
+/*  server-side (safety_state collection), so this button reflects the      */
+/*  authoritative latch and survives backend restarts.                      */
+/*                                                                          */
+/*  Reads `safety.data.state.scanner_paused` from the existing useSafety()  */
+/*  poll (8s cadence) — no separate endpoint poll needed. Mutating          */
+/*  endpoints: POST /api/safety/scanner/{pause,resume}.                     */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+export const ScannerPauseToggleV5 = ({ safety, compact = false }) => {
+  const [busy, setBusy] = useState(false);
+  const paused = !!safety?.data?.state?.scanner_paused;
+  const pausedAt = safety?.data?.state?.scanner_paused_at;
+
+  const onClick = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (paused) {
+        await api.post('/api/safety/scanner/resume');
+      } else {
+        await api.post('/api/safety/scanner/pause', { reason: 'operator_toggle' });
+      }
+      await safety?.refresh?.();
+    } catch (e) {
+      // Surface a single-line console error; the safety status poll will
+      // re-converge state on the next 8s tick if the call ever silently
+      // succeeded server-side.
+      // eslint-disable-next-line no-console
+      console.warn('[ScannerPauseToggleV5] toggle failed:', e?.message || e);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, paused, safety]);
+
+  // When safety hasn't loaded yet, render nothing rather than flash a
+  // wrong-state button. Keeps the header from layout-shifting.
+  if (!safety?.data) return null;
+
+  const label = paused ? 'PAUSED' : 'LIVE';
+  const title = paused
+    ? `Scanner paused${pausedAt ? ` since ${fmtET12Sec(pausedAt * 1000)}` : ''} — click to resume new alert intake`
+    : 'Scanner live — click to pause new alert intake (open positions keep managing)';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      data-testid="v5-scanner-pause-toggle"
+      data-state={paused ? 'paused' : 'running'}
+      title={title}
+      className={[
+        'v5-mono inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border transition-colors',
+        compact ? 'text-[10px]' : 'text-[11px]',
+        busy ? 'opacity-60 cursor-wait' : 'cursor-pointer',
+        paused
+          ? 'bg-amber-500/15 border-amber-400/40 text-amber-200 hover:bg-amber-500/25'
+          : 'bg-emerald-500/10 border-emerald-400/30 text-emerald-300 hover:bg-emerald-500/20',
+      ].join(' ')}
+    >
+      {busy
+        ? <Loader2 size={compact ? 10 : 11} className="animate-spin" />
+        : <Power size={compact ? 10 : 11} />
+      }
+      <span>{label}</span>
+    </button>
+  );
+};

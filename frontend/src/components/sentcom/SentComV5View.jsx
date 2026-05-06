@@ -37,7 +37,7 @@ import { BriefingsCompactStrip } from './v5/BriefingsCompactStrip';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
 import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
-import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5 } from './v5/SafetyV5';
+import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5 } from './v5/SafetyV5';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
@@ -486,6 +486,11 @@ export const SentComV5View = ({
             <div className="flex items-center gap-2">
               <div className="v5-panel-title">Scanner · Live</div>
               <LiveDataChip compact />
+              {/* v19.34.26 — Scanner power toggle. Soft brake on NEW
+                  alert intake; in-flight evals + open-position
+                  management continue normally. State is persisted in
+                  safety_state Mongo collection. */}
+              <ScannerPauseToggleV5 safety={safety} compact />
             </div>
             <div className="flex items-center gap-2">
               <span
