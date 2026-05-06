@@ -761,16 +761,11 @@ export const SentComV5View = ({
       </div>
       {/* End main 2-col row (Scanner | RightColumn) */}
 
-      {/* Corner watermark — lets users opt out to v4 */}
-      <div
-        data-testid="sentcom-v5-badge"
-        className="fixed bottom-1 right-2 text-[11px] v5-mono text-zinc-600 pointer-events-none z-50"
-      >
-        v5 · <a
-          href={typeof window !== 'undefined' ? `${window.location.pathname}?v4=1` : '/'}
-          className="text-violet-400 hover:underline pointer-events-auto"
-        >switch to v4</a>
-      </div>
+      {/* v19.34.29 — V4 deprecated. The former `switch to v4` corner
+          watermark (was sitting at bottom-right z-50 with an href back
+          to `?v4=1`) has been removed. V5 is the only non-embedded
+          layout; any `?v4=1` query param is silently ignored upstream
+          in SentCom.jsx. */}
     </div>
   );
 };

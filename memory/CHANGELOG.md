@@ -2,6 +2,47 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-twelfth commit, v19.34.29) — V4 layout fully deprecated
+
+**Severity: Cleanup / pre-work for V6 migration.**
+
+Removes every remaining trace of the V4 legacy layout from the frontend. V5 has been the default for months — V4 was reachable only via `?v4=1` URL escape hatch and the "switch to v4" corner watermark in V5. Prep work for the upcoming V6 refactor, which requires a clean V5-only baseline so A/B testing (`?v6=1`) has one reference to compare against instead of three.
+
+### Three dead-code blocks removed from `frontend/src/components/SentCom.jsx` (1023 → 827 lines)
+
+1. **`?v4=1` URL opt-out gate** (former lines 385-393) — the `_v5QueryOptOut` logic that checked the query string and fell through to the legacy full-page layout. Replaced with an unconditional V5 return for all non-embedded mounts. Any `?v4=1` param is now silently ignored.
+
+2. **`COMPACT MODE` branch** (former lines 817-890) — the "Small box" layout that was accessible only via `<SentCom compact={true} />`. Nothing in the codebase ever passed `compact=true` so this was 71 lines of dead JSX. The `compact` prop itself was also removed from the component signature.
+
+3. **`Full page legacy version` JSX** (former lines 892-1019) — the original V4 layout (StatusHeader + ChartPanel + 3-col PositionsPanel/StreamPanel/MarketIntelPanel + selectedPosition modal + AIInsightsDashboard). 127 lines of pre-V5 UI.
+
+Function now falls through to a `return null` guard (unreachable in practice — all non-embedded mounts return V5 at the top).
+
+### `SentComV5View.jsx`
+
+- Removed the `v5 · switch to v4` corner watermark + badge (former lines 764-773). The `[data-testid="sentcom-v5-badge"]` link is gone.
+
+### What was PRESERVED (explicit audit)
+
+- **`<SentCom embedded={true} />`** — used in two production surfaces:
+  - `NewDashboard.jsx:661` (main Command Center dashboard)
+  - `AICoachTab.jsx:190` (classic-layout AI coach tab)
+  - Full 382-line embedded branch (lines 433-815 of SentCom.jsx) is untouched — BotHealthBanner, StreamOfConsciousness, ConversationPanel, ChatBubbleOverlay, StatusDot, DynamicRiskPanel, ServerHealthBadge, TradeExecutionHealthCard, embedded chart/positions/market-intel grid, compact order pipeline, AI insights modal, enhanced ticker modal, etc. — ALL preserved byte-for-byte.
+
+- **All V5 test IDs** — `v5-scanner-pause-toggle`, `v5-ib-live-chip`, `v5-scanner-paused-banner`, `v5-awaiting-quotes-pill`, etc. untouched.
+
+### Verification
+
+- `yarn build` succeeded; bundle size unchanged (~2.0 MB — tree-shaking kept the dead code out anyway; this commit is source-file readability cleanup).
+- Compiled bundle grep: `switch to v4`, `v4=1`, `sentcom-compact` all return ZERO hits.
+- ESLint clean on both edited files (`no-unused-vars` didn't flag any previously-V4-only imports because most are shared with the embedded path).
+- Screenshot verified embedded mode renders at `/` (SENTCOM header + SOC stream + Positions + Scanner all present).
+- Navigating to `?v4=1` now silently renders V5 instead of the old legacy grid.
+
+### Follow-ups NOT done in this commit
+
+- Unused imports cleanup in `SentCom.jsx` (e.g. `GlassCard`, `StatusHeader`, `PositionsPanel`, `StreamPanel`, `MarketIntelPanel`, `ModelHealthScorecard`, `AnimatePresence`, `motion`, `X`, `Brain`) — several of these are ALSO used in the preserved `embedded` branch so a blind import sweep would break it. Left for a dedicated `import audit` commit once V6 migration is complete and we can see the full picture.
+
 ## 2026-02-XX (one-hundred-eleventh commit, v19.34.28) — Reconciler OCA-linked stop+target attach on adoption
 
 **Severity: P2 (upgrade of v19.34.27 reconciler-stop-attach).**

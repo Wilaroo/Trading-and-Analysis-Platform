@@ -91,7 +91,7 @@ import MorningBriefingModal from './MorningBriefingModal';
 // MAIN COMPONENT
 // ============================================================================
 
-const SentCom = ({ compact = false, embedded = false }) => {
+const SentCom = ({ embedded = false }) => {
   // Briefing deep-dive modal state.
   // Pre-2026-04-29 this was a simple boolean (only morning briefing
   // existed in modal form). Now stores the briefingKey ("morning" |
@@ -383,14 +383,16 @@ const SentCom = ({ compact = false, embedded = false }) => {
   }, [localMessages, messages]);
 
   // =========================================================================
-  // Stage 2d V5 Command-Center layout — PRIMARY default for all modes except
-  // `compact` (which stays legacy because V5 is a full-viewport surface).
-  // Global escape hatch: `?v4=1` in the URL reverts to the legacy embedded /
-  // full-page layouts below.
+  // v19.34.29 — V4 fully deprecated. V5 Command-Center is now the ONLY
+  // non-embedded layout. Previously the `?v4=1` URL escape hatch routed
+  // operators back to the legacy full-page grid below (StatusHeader +
+  // ChartPanel + 3-col PositionsPanel/StreamPanel/MarketIntelPanel).
+  // That code path has been removed — any `?v4=1` query param is
+  // silently ignored and operators see V5 unconditionally. The
+  // `<SentCom embedded={true}>` path remains (used by NewDashboard +
+  // AICoachTab) and was never V4.
   // =========================================================================
-  const _v5QueryOptOut = typeof window !== 'undefined'
-    && (new URLSearchParams(window.location.search).get('v4') === '1');
-  if (!_v5QueryOptOut && !compact) {
+  if (!embedded) {
     return (
       <>
         <SentComV5View
@@ -814,207 +816,11 @@ const SentCom = ({ compact = false, embedded = false }) => {
     );
   }
 
-  // =========================================================================
-  // COMPACT MODE - Small box (kept for reference but not used currently)
-  // =========================================================================
-  if (compact) {
-    return (
-      <div className="bg-zinc-900/50 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden" data-testid="sentcom-compact">
-        {/* Compact Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-              <Brain className="w-5 h-5 text-cyan-400" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white tracking-tight">SENTCOM</h2>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  {status?.connected ? (
-                    <PulsingDot color="emerald" />
-                  ) : (
-                    <Circle className="w-2 h-2 text-zinc-500" />
-                  )}
-                  <span className={`text-[12px] font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                    {status?.connected ? 'CONNECTED' : 'OFFLINE'}
-                  </span>
-                </div>
-                {context?.regime && context.regime !== 'UNKNOWN' && (
-                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${
-                    context.regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
-                    context.regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
-                    'bg-zinc-500/20 text-zinc-400'
-                  }`}>
-                    {context.regime}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-          
-          {/* Compact Order Pipeline */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/30">
-            <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3 text-amber-400" />
-              <span className="text-sm font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</span>
-            </div>
-            <ArrowRight className="w-3 h-3 text-zinc-600" />
-            <div className="flex items-center gap-1">
-              <Zap className="w-3 h-3 text-cyan-400" />
-              <span className="text-sm font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</span>
-            </div>
-            <ArrowRight className="w-3 h-3 text-zinc-600" />
-            <div className="flex items-center gap-1">
-              <CheckCircle className="w-3 h-3 text-emerald-400" />
-              <span className="text-sm font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Thought Label */}
-        <div className="px-4 pt-3 pb-1">
-          <p className="text-[12px] text-zinc-500 uppercase tracking-wider">What we're thinking right now</p>
-        </div>
-        
-        {/* Live Stream - compact height */}
-        <div className="h-[280px] overflow-hidden">
-          <StreamPanel messages={messages} loading={streamLoading} />
-        </div>
-        
-        {/* Chat Input — independent of IB connectivity (chat_server :8002) */}
-        <ChatInput onSend={handleChat} />
-      </div>
-    );
-  }
-
-  // Full page version (legacy — reached via ?v4=1 or compact=true)
-  return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Header */}
-        <div className="mb-6">
-          <GlassCard gradient glow className="p-0">
-            <StatusHeader status={status} context={context} />
-          </GlassCard>
-        </div>
-
-        {/* Stage 2a: Command Center Chart (candles + volume, auto-refresh).
-            Defaults to SPY + 5m; Stage 2c will wire it to the focused position. */}
-        <div className="mb-6 space-y-4">
-          <ModelHealthScorecard />
-          <ChartPanel
-            symbol={selectedPosition?.symbol || 'SPY'}
-            initialTimeframe="5m"
-            height={420}
-          />
-        </div>
-
-        {/* Main Grid */}
-        <div className="grid grid-cols-12 gap-6">
-          {/* Left Column - Positions only */}
-          <div className="col-span-3 space-y-6">
-            <PositionsPanel 
-              positions={positions} 
-              totalPnl={totalPnl}
-              loading={positionsLoading}
-              onSelectPosition={setSelectedPosition}
-            />
-          </div>
-
-          {/* Center - Live Stream */}
-          <div className="col-span-5">
-            <div className="h-[600px] flex flex-col">
-              <StreamPanel messages={messages} loading={streamLoading} />
-              <ChatInput onSend={handleChat} />
-            </div>
-          </div>
-
-          {/* Right Column - Market Intel (Regime + Setups + Alerts) */}
-          <div className="col-span-4">
-            <MarketIntelPanel 
-              context={context}
-              setups={setups}
-              alerts={alerts}
-              contextLoading={contextLoading}
-              setupsLoading={setupsLoading}
-              alertsLoading={alertsLoading}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Position Detail Modal */}
-      <AnimatePresence>
-        {selectedPosition && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-8"
-            onClick={() => setSelectedPosition(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <GlassCard glow className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-white">Our {selectedPosition.symbol} Position</h2>
-                    <p className="text-sm text-zinc-400">Entry: ${selectedPosition.entry_price?.toFixed(2)}</p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedPosition(null)}
-                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="p-4 rounded-xl bg-black/30 text-center">
-                    <p className="text-xs text-zinc-500 mb-1">P&L</p>
-                    <p className={`text-xl font-bold ${selectedPosition.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {selectedPosition.pnl >= 0 ? '+' : ''}{selectedPosition.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-black/30 text-center">
-                    <p className="text-xs text-zinc-500 mb-1">Stop</p>
-                    <p className="text-xl font-bold text-rose-400">
-                      ${selectedPosition.stop_price?.toFixed(2) || '--'}
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-black/30 text-center">
-                    <p className="text-xs text-zinc-500 mb-1">Target</p>
-                    <p className="text-xl font-bold text-emerald-400">
-                      ${selectedPosition.target_prices?.[0]?.toFixed(2) || '--'}
-                    </p>
-                  </div>
-                </div>
-
-                <p className="text-sm text-zinc-400">
-                  Shares: {selectedPosition.shares} • 
-                  Entry: ${selectedPosition.entry_price?.toFixed(2)} • 
-                  Current: ${selectedPosition.current_price?.toFixed(2)}
-                </p>
-              </GlassCard>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* AI Insights Dashboard Modal */}
-      {showAIInsights && (
-        <AIInsightsDashboard 
-          key="ai-insights-dashboard"
-          onClose={() => setShowAIInsights(false)} 
-        />
-      )}
-    </div>
-  );
+  // v19.34.29 — Unreachable guard. All non-embedded cases returned V5 above
+  // (line ~394). The former COMPACT and FULL-PAGE-LEGACY (V4) branches have
+  // been fully deleted. Leaving this return null so a future refactor that
+  // reorders the guards doesn't fall through to `undefined`.
+  return null;
 };
 
 export default SentCom;
