@@ -2,6 +2,49 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-seventh commit, v19.34.24) — Live partial-exit fix: reconciled positions can now hit their PT
+
+**Severity: P0**. Operator forensic on FDX 2026-02-XX revealed that price spiked through both reconciled legs' PTs ($374.44 + $375.08, peak ~$378) but neither closed and the SL never trailed up. The Open Positions panel showed `+$5,228 +1.0R` unrealized — money the bot should have booked. Two compounding bugs:
+
+1. **`trade_executor_service.execute_partial_exit` had no `ExecutorMode.LIVE` branch.** Pre-fix it only handled `SIMULATED` and `PAPER` (Alpaca, disabled per v19.13). For LIVE, the function fell off the end of the `try` block and implicitly returned `None`. The caller in `position_manager.execute_partial_exit` (line 1274) then did `result.get('success')` on `None`, raising `AttributeError` swallowed by the broader manage-loop guard. **Net effect: scale-outs silently no-op'd in LIVE mode for every trade — but bot-opened trades had their OCA bracket children fire targets server-side, so the bug only manifested visibly on reconciled trades, which never get an IB-side bracket via the reconciler.**
+2. **Trail-up dependency**: `StopManager.update_trailing_stop` only activates breakeven/trailing modes when `scale_out_config.targets_hit` is non-empty. Since #1 prevented `targets_hit` from ever being populated for reconciled trades, the SL was permanently stuck on `ORIGINAL — stop $367.66`, never moving up despite the +1.8R MFE.
+
+### Fix — `services/trade_executor_service.py:execute_partial_exit`
+
+Added the missing `ExecutorMode.LIVE` branch + new helper `_ib_partial_exit`:
+
+- Submits a standalone MKT for `shares` qty via `routers.ib.queue_order` (long → SELL, short → BUY).
+- Mirrors `_ib_close_position` but **without** the `_cancel_ib_bracket_orders` prelude — bracket child cleanup after a partial fill is the caller's responsibility, already handled by `bracket_reissue_service.reissue_bracket_for_trade` (v19.34.7) in `position_manager.check_and_execute_scale_out` AFTER the partial returns success.
+- Pusher-disconnected → falls back to simulated success (matches `_ib_close_position` semantics so the caller's local state mutation stays consistent with paper-mode behaviour).
+- Order rejected at IB → propagates the rejection reason verbatim with `success: False`, `shares: 0` so the manage loop won't decrement `remaining_shares`.
+- Timeout (60s) → `success: False` with explicit "Timeout waiting for partial-exit order execution".
+- Defensive: if the executor mode is somehow unrecognized (e.g., during a future enum migration), the function now returns an explicit `{success: False, error: "unhandled_executor_mode_*"}` instead of the pre-fix implicit `None` that crashed callers.
+
+### Tests shipped
+
+- `tests/test_partial_exit_live_v19_34_24.py` (7 tests, all green):
+  1. LIVE long partial exit → SELL MKT queued with correct partial qty + filled fill_price returned.
+  2. LIVE short partial exit → BUY MKT queued.
+  3. LIVE pusher-disconnected → falls back to simulated success.
+  4. LIVE order rejected at IB → `success=False` with rejection reason propagated.
+  5. LIVE timeout → `success=False` with explicit timeout error.
+  6. SIMULATED mode regression pin (still returns clean success, was unchanged).
+  7. Defensive: unhandled mode returns explicit `success=False` instead of `None`.
+- Existing reconciler/drift suites still green (71/72 pass — 1 unrelated stale test in `test_proper_reconcile_endpoint_v19_24.py:test_reconcile_creates_bot_trade_for_orphan_position` asserts `close_at_eod is False` but v19.34.17 deliberately changed reconciled trades to `close_at_eod=True` per operator approval; this test was stale before v19.34.24 landed).
+
+### Operator-side impact
+
+- Reconciled positions can now fire their PT in LIVE mode. Manage loop detects `current_price >= target_prices[0]` (long) → calls `check_and_execute_scale_out` → calls `execute_partial_exit` → routes via the new `_ib_partial_exit` to the IB pusher queue → MKT fills → `targets_hit=[0]` populated → `StopManager.update_trailing_stop` activates breakeven/trailing on next tick.
+- For trades with only one target (the reconciled-excess-slice and reconciled-orphan cases — both create `target_prices=[target_1]`), hitting the only target sells `remaining_shares` (the entire position closes).
+- Bot-opened trades that DID have OCA brackets are unaffected — their server-side brackets continue to fire targets at IB; this fix is a defense-in-depth catch for any case where the bracket child gets lost.
+
+### Known follow-up (deferred to v19.34.25)
+
+- **Reconciler should also place an IB-side bracket on adoption** (in `_spawn_excess_slice` and `reconcile_orphan_positions`). Once attached, server-side OCA fires the PT/SL even if the bot is offline. Defense in depth — local fix above keeps working as the fallback.
+- `place_target_order` is missing its LIVE branch too (same bug class as the one fixed here). Currently only used in the legacy two-step path, but should be patched to prevent recurrence.
+
+
+
 ## 2026-02-XX (one-hundred-sixth commit, v19.34.23) — Open Positions UX cleanup: drop loud per-row badges, add subtle auto-heal pill
 
 **Severity: P0 (UX)**. After v19.34.22 the bot now auto-heals orphan / partial / stale-bot / reconciled-external positions seamlessly within the same reconciler tick, but the V5 `OpenPositionsV5` panel still rendered every legacy state as a loud per-row badge. Operator screenshot showed 11 of 17 rows tagged with contradictory pairs like `ORPHAN ... RECONCILED` (the position WAS an orphan; it isn't anymore — the bot just adopted it). The badges added cognitive load with no operator action attached and overlapped the `2×` member-count chip + PnL.

@@ -711,7 +711,31 @@ class TradeExecutorService:
     # ==================== PARTIAL EXIT (SCALE-OUT) ====================
     
     async def execute_partial_exit(self, trade, shares: int) -> Dict[str, Any]:
-        """Execute a partial position exit (scale-out at target)"""
+        """Execute a partial position exit (scale-out at target).
+
+        v19.34.24 (2026-02-XX) — Added the missing ExecutorMode.LIVE branch.
+        Pre-fix this method only handled SIMULATED + PAPER (Alpaca, which is
+        disabled). When the manage loop detected a target hit on a LIVE-mode
+        trade and called into the executor, the function fell off the end of
+        the try block and implicitly returned None. The caller in
+        `position_manager.execute_partial_exit` then did `result.get('success')`
+        on None, raising AttributeError that was swallowed by the broader
+        manage-loop guard. Net effect: scale-outs silently no-op'd in LIVE
+        mode, and reconciled positions (which never get an IB-side OCA
+        bracket) had no way to fire targets at all.
+
+        Operator-discovered via FDX 2026-02-XX: price spiked through PT
+        $374.44 + $375.08, both reconciled legs sat unrealized at +$5,228
+        because neither path could close them — no IB bracket existed AND
+        the local fire-the-target path was broken for LIVE.
+
+        For LIVE we route a standalone MKT through the IB pusher queue
+        (mirroring `_ib_close_position` but without the bracket-cancel
+        prelude). Bracket cleanup is handled separately by the v19.34.7
+        `bracket_reissue_service.reissue_bracket_for_trade` call in
+        `position_manager.check_and_execute_scale_out` *after* the partial
+        fill succeeds — so we deliberately do NOT cancel children here.
+        """
         if self._mode == ExecutorMode.SIMULATED:
             return {
                 "success": True,
@@ -754,10 +778,117 @@ class TradeExecutorService:
                     "fill_price": fill_price,
                     "shares": shares
                 }
-                
+
+            elif self._mode == ExecutorMode.LIVE:
+                # v19.34.24 — IB live partial exit via the pusher order
+                # queue. Standalone MKT for `shares` qty in the closing
+                # direction; bracket child re-issue is handled by the
+                # caller after this returns success.
+                return await self._ib_partial_exit(trade, shares)
+
         except Exception as e:
             logger.error(f"Partial exit error: {e}")
             return {"success": False, "error": str(e)}
+
+        # Defensive: unhandled mode (should be unreachable). Pre-v19.34.24
+        # this path silently returned None and the caller crashed on
+        # `.get('success')`. Now we surface the bug explicitly.
+        logger.error(
+            f"execute_partial_exit: unhandled ExecutorMode {self._mode!r} "
+            f"for {trade.symbol} {shares}sh — returning explicit failure."
+        )
+        return {
+            "success": False,
+            "error": f"unhandled_executor_mode_{self._mode}",
+        }
+
+    async def _ib_partial_exit(self, trade, shares: int) -> Dict[str, Any]:
+        """v19.34.24 (2026-02-XX) — IB live partial exit via order queue.
+
+        Submits a standalone MKT for `shares` quantity in the closing
+        direction (long → SELL, short → BUY). Mirrors `_ib_close_position`
+        without the `_cancel_ib_bracket_orders` prelude — bracket child
+        cleanup after a partial fill is the caller's responsibility (handled
+        by `bracket_reissue_service.reissue_bracket_for_trade` in
+        `position_manager.check_and_execute_scale_out`, v19.34.7).
+
+        Returns the same shape as `_ib_close_position`:
+          - success → {success: True, order_id, fill_price, broker, shares}
+          - reject  → {success: False, error, order_id}
+          - timeout → {success: False, error: "Timeout waiting...", order_id}
+
+        On pusher disconnect we simulate (same fall-back semantics as
+        `_ib_close_position` so the local state mutation in the caller
+        stays consistent with paper-mode behaviour).
+        """
+        try:
+            from routers.ib import queue_order, get_order_result, is_pusher_connected
+
+            if not is_pusher_connected():
+                logger.warning(
+                    f"v19.34.24 partial-exit: IB pusher not connected — "
+                    f"simulating partial fill for {trade.symbol} ({shares}sh)"
+                )
+                return {
+                    "success": True,
+                    "order_id": f"SIM-PARTIAL-{trade.id}",
+                    "fill_price": trade.current_price,
+                    "shares": shares,
+                    "simulated": True,
+                }
+
+            action = "SELL" if trade.direction.value == "long" else "BUY"
+
+            order_id = queue_order({
+                "symbol": trade.symbol,
+                "action": action,
+                "quantity": shares,
+                "order_type": "MKT",
+                "limit_price": None,
+                "stop_price": None,
+                "time_in_force": "DAY",
+                "trade_id": f"PARTIAL-{trade.id}",
+            })
+
+            logger.info(
+                f"v19.34.24 partial-exit queued: {order_id} — {action} "
+                f"{shares} {trade.symbol} (target hit on trade {trade.id})"
+            )
+
+            # Wait for fill in a worker thread so the FastAPI event loop
+            # stays responsive (matches `_ib_close_position` pattern).
+            result = await asyncio.to_thread(get_order_result, order_id, 60.0)
+
+            if not result:
+                return {
+                    "success": False,
+                    "error": "Timeout waiting for partial-exit order execution",
+                    "order_id": order_id,
+                    "shares": 0,
+                }
+
+            order_result = result.get("result", {}) or {}
+            status = order_result.get("status", "unknown")
+
+            if status == "filled":
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "fill_price": order_result.get("fill_price", trade.current_price),
+                    "shares": shares,
+                    "broker": "interactive_brokers",
+                }
+
+            return {
+                "success": False,
+                "error": order_result.get("error", f"Partial exit {status}"),
+                "order_id": order_id,
+                "shares": 0,
+            }
+
+        except Exception as e:
+            logger.error(f"v19.34.24 IB partial-exit error: {e}")
+            return {"success": False, "error": str(e), "shares": 0}
 
     
     # ==================== CLOSE POSITION ====================
