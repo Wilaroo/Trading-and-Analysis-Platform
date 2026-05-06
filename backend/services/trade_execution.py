@@ -9,12 +9,122 @@ Handles:
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from services.trading_bot_service import BotTrade, TradingBotService
 
 logger = logging.getLogger(__name__)
+
+
+# ── v19.34.15a (2026-05-06) ── Naked-position safety net helper.
+async def _poll_ib_for_silent_fill_v19_34_15a(
+    trade: 'BotTrade',
+    pre_qty: float,
+    rejected_error: str,
+    poll_interval_s: float = 1.0,
+    total_duration_s: float = 15.0,
+) -> None:
+    """Post-rejection IB position poll-back.
+
+    After a broker rejection, poll the IB-pushed position snapshot for
+    ``total_duration_s`` seconds. If the position quantity for
+    ``trade.symbol`` changes by ≥1 share vs ``pre_qty``, the broker
+    actually filled the order despite returning a rejection (well-known
+    race in IB Gateway under load — parent leg fills, child bracket
+    confirm gets dropped). Emit a high-priority stream event so:
+
+    1. The operator sees the event in the V5 unified stream.
+    2. The v19.34.15b drift loop picks it up on the next 30s tick and
+       spawns a bracketed `reconciled_excess_slice` for the orphan
+       fill, restoring stop/target coverage.
+
+    Fires-and-forgets — wrapped in try/except so a poll failure never
+    propagates back into execute_trade.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        sym_u = (trade.symbol or "").upper()
+        elapsed = 0.0
+        detected = False
+        last_qty = pre_qty
+        while elapsed < total_duration_s:
+            await asyncio.sleep(poll_interval_s)
+            elapsed += poll_interval_s
+            try:
+                from routers.ib import _pushed_ib_data
+                positions = (_pushed_ib_data or {}).get("positions") or []
+                cur_qty: Optional[float] = None
+                for p in positions:
+                    if (p.get("symbol") or "").upper() == sym_u:
+                        cur_qty = float(p.get("position") or 0)
+                        break
+                if cur_qty is None:
+                    continue
+                last_qty = cur_qty
+                if abs(cur_qty - pre_qty) >= 1:
+                    detected = True
+                    delta = cur_qty - pre_qty
+                    try:
+                        from services.sentcom_service import emit_stream_event
+                        await emit_stream_event({
+                            "kind": "warning",
+                            "event": "unbracketed_fill_detected_v19_34_15",
+                            "symbol": trade.symbol,
+                            "text": (
+                                f"⚠ {trade.symbol} silent fill detected after "
+                                f"rejected order (trade_id={trade.id}, "
+                                f"qty={int(trade.shares or 0)}, "
+                                f"err={rejected_error[:60]}): IB pos "
+                                f"{pre_qty:+.0f} → {cur_qty:+.0f} "
+                                f"(Δ {delta:+.0f}). v19.34.15b drift loop "
+                                f"will spawn a bracketed slice within ~30s."
+                            ),
+                            "metadata": {
+                                "trade_id": trade.id,
+                                "rejected_error": rejected_error,
+                                "rejected_qty": int(trade.shares or 0),
+                                "rejected_direction": (
+                                    trade.direction.value
+                                    if hasattr(trade.direction, "value")
+                                    else str(trade.direction)
+                                ),
+                                "ib_qty_before": pre_qty,
+                                "ib_qty_after": cur_qty,
+                                "delta": delta,
+                                "detected_after_seconds": round(elapsed, 1),
+                                "detected_at": _dt.now(_tz.utc).isoformat(),
+                            },
+                        })
+                    except Exception as emit_err:  # pragma: no cover
+                        logger.warning(
+                            "[v19.34.15a] silent-fill stream emit failed "
+                            "for %s: %s", trade.symbol, emit_err,
+                        )
+                    logger.warning(
+                        "[v19.34.15a] silent fill detected after rejection "
+                        "of %s (trade_id=%s, err=%r): IB pos %+.0f→%+.0f "
+                        "(Δ %+.0f) after %.1fs",
+                        trade.symbol, trade.id, rejected_error,
+                        pre_qty, cur_qty, delta, elapsed,
+                    )
+                    return
+            except Exception as inner_err:
+                logger.debug(
+                    "[v19.34.15a] poll-back inner error for %s: %s",
+                    trade.symbol, inner_err,
+                )
+        if not detected:
+            logger.info(
+                "[v19.34.15a] %s rejection clean — no silent fill "
+                "detected after %.0fs (pre=%+.0f, last=%+.0f)",
+                trade.symbol, total_duration_s, pre_qty, last_qty,
+            )
+    except Exception as outer_err:  # pragma: no cover
+        logger.warning(
+            "[v19.34.15a] poll-back task crashed for %s: %s",
+            getattr(trade, "symbol", "?"), outer_err,
+        )
 
 
 class TradeExecution:
@@ -434,6 +544,28 @@ class TradeExecution:
                     type(_pre_save_err).__name__, _pre_save_err,
                 )
 
+            # ── v19.34.15a (2026-05-06) — capture IB position snapshot
+            # BEFORE the broker call so the post-rejection poll-back
+            # has a baseline. If the broker rejects but the parent leg
+            # actually fills (race), we'll see the IB position move from
+            # `pre_position_qty` to a non-trivial delta within ~15s.
+            pre_position_qty: Optional[float] = None
+            try:
+                from routers.ib import _pushed_ib_data
+                _positions = (_pushed_ib_data or {}).get("positions") or []
+                _sym_u = (trade.symbol or "").upper()
+                for _p in _positions:
+                    if (_p.get("symbol") or "").upper() == _sym_u:
+                        pre_position_qty = float(_p.get("position") or 0)
+                        break
+                if pre_position_qty is None:
+                    pre_position_qty = 0.0
+            except Exception as _snap_err:
+                logger.debug(
+                    f"[v19.34.15a] pre-submit position snap failed for "
+                    f"{trade.symbol}: {_snap_err}"
+                )
+
             bracket_result = await bot._trade_executor.place_bracket_order(trade)
             use_legacy = (
                 not bracket_result.get('success') and
@@ -746,6 +878,40 @@ class TradeExecution:
                         "Could not persist REJECTED trade %s (%s): %s",
                         trade.id, type(save_err).__name__, save_err, exc_info=True,
                     )
+
+                # ── v19.34.15a (2026-05-06) — Post-rejection IB poll-back.
+                # Pre-fix: every rejection was final. If the broker actually
+                # filled despite returning a rejection (well-known race in
+                # IB Gateway under load — parent leg fills, child bracket
+                # confirm gets dropped), the position sat orphaned at IB
+                # with no stop/target until the next orphan reconciler tick
+                # (~30-60s). The 4879-naked-share UPS event 2026-05-06 was
+                # this exact pattern. Now: kick a fire-and-forget task that
+                # polls IB position every 1s for 15s post-rejection and
+                # emits `unbracketed_fill_detected_v19_34_15` if a fill is
+                # detected, so v19.34.15b drift loop catches it within 30s
+                # AND so the operator sees the event in the V5 stream.
+                if pre_position_qty is not None and not result.get("simulated"):
+                    try:
+                        asyncio.create_task(
+                            _poll_ib_for_silent_fill_v19_34_15a(
+                                trade=trade,
+                                pre_qty=pre_position_qty,
+                                rejected_error=str(
+                                    result.get("error")
+                                    or result.get("status")
+                                    or "unknown"
+                                ),
+                                poll_interval_s=1.0,
+                                total_duration_s=15.0,
+                            )
+                        )
+                    except Exception as _poll_err:
+                        logger.warning(
+                            "[v19.34.15a] could not schedule poll-back for "
+                            "%s (%s): %s",
+                            trade.symbol, type(_poll_err).__name__, _poll_err,
+                        )
 
         except Exception as e:
             # 2026-04-30 v14: `logger.exception` so the traceback is in

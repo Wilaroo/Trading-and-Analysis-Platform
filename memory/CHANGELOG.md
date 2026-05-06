@@ -2,6 +2,47 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-06 (one-hundred-fourth commit, v19.34.15a) — Naked-position safety net + directional shares UI
+
+**Severity: P0**. The original 4879-naked-share UPS forensic root cause finally remediated. Two layers:
+
+### Backend — `v19.34.15a`
+
+**Layer 1 — `trade_executor_service.py:place_bracket_order`** ambiguous-status routing.
+
+Pre-fix: when the IB pusher returned `status: 'unknown'` (or empty/null) on a bracket placement, the code at line 614 hard-rejected. **This was the root cause of the 4879 unmanaged UPS shares 2026-05-06**: the parent leg actually filled at IB, but the child bracket confirm was malformed/missing, so the bot wrote off the trade as failed and the IB position sat orphaned (no stop, no target).
+
+Post-fix: ambiguous statuses route through the same TIMEOUT handler that real timeouts already used. trade_execution.py L631-655 then stamps `status=OPEN [TIMEOUT-NEEDS-SYNC]`, the v19.34.15b drift loop catches any silent fill within ~30s, and the v19.34.20 init guarantees `remaining_shares == shares` from the start so it doesn't zombify.
+
+**Layer 2 — Post-rejection IB poll-back** (`trade_execution.py:_poll_ib_for_silent_fill_v19_34_15a`).
+
+After ANY broker rejection, fire-and-forget task polls the IB-pushed position snapshot for the symbol every 1s for 15s. If the position changes by ≥1 share vs `pre_position_qty` (captured before the broker call), emits a high-priority `unbracketed_fill_detected_v19_34_15` stream event with full metadata (rejected qty/direction, IB qty before/after, delta, time-to-detect). Operator sees the event in the V5 stream; v19.34.15b drift loop spawns a bracketed `reconciled_excess_slice` for the orphan within 30s.
+
+Wraps every external call in try/except so a poll failure never leaks back into `_execute_trade`. Suppressed when `simulated=true` (no real IB position to poll).
+
+### Frontend — directional shares cell
+
+Operator request: "make short shares red and long shares green so the table makes the side instantly readable." Could not flip BotTrade.shares to signed (would touch every share-math call site and risk regression on a live trading system) — purely a display-layer change.
+
+**File:** `frontend/src/components/sentcom/v5/pipelineStageColumns.jsx`. New `directionalSharesCell(v, row)` renderer:
+- **Long** → emerald digits (`text-emerald-400`).
+- **Short** → rose digits with a leading `-` sign (matches IB's signed convention so operators eyeballing the bot panel + IB account window side-by-side see the same number/sign).
+- Unknown → zinc.
+
+Wired into all 3 stage tables that show shares: `closedTodayStageConfig` (closed-today drilldown), `manageStageConfig` (currently-open drilldown), `orderStageConfig`. Internal math is unchanged — `BotTrade.shares` and `remaining_shares` stay positive.
+
+### Tests shipped
+
+- `tests/test_naked_position_safety_net_v19_34_15a.py` (5 tests): static guard that ambiguous-status branch routes to `status: 'timeout'`, static guard that poll-back helper exists with `pre_position_qty` snapshot, end-to-end simulation of silent-fill detection (IB position changes mid-poll → event emitted with correct metadata), clean-rejection no-event check, missing-pushed-data tolerance.
+- 36 tests pass cumulative (5 new + 31 prior).
+
+### Operator-side impact
+
+- Future bracket-confirm races will no longer orphan IB shares — every silently-filled order goes through the TIMEOUT path and gets bracketed by v19.34.15b within 30s.
+- Every broker rejection now triggers a 15s post-rejection audit; silent fills emit a stream event the operator can see in real time.
+- Open Positions / Closed Today / Orders panels now visually distinguish shorts (red, with `-` sign) from longs (green) at a glance — matches IB's signed convention without changing internal math.
+
+
 ## 2026-05-06 (one-hundred-third commit, v19.34.21) — THE deserializer bug + silent save-failure fix
 
 **Severity: P0**. Operator forensics on the post-heal FDX panel found that the v19.34.19 heal trade itself (`a821575c`) had been zombified 11 minutes after spawn. Read-only investigation traced it to a bug far bigger than v19.34.20/20b: **the boot-time DB→memory deserializer was silently dropping ~half of every BotTrade's persisted state on every restart.**

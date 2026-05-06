@@ -625,6 +625,34 @@ class TradeExecutorService:
                     "broker": "interactive_brokers",
                     "order_type": "bracket",
                 }
+            # ── v19.34.15a (2026-05-06) — Naked-position safety net.
+            # Pre-fix this branch hard-rejected on ANY non-success status,
+            # including ambiguous values like "unknown" or empty/missing
+            # (pusher payload was malformed, network glitch mid-confirm,
+            # IB-side queue lag). Operator forensic 2026-05-06 traced the
+            # 4879-naked-share UPS bug to this exact path: parent leg
+            # filled at IB but the bracket children's status came back as
+            # `unknown`, which we read as "rejected", so the bot wrote
+            # off the trade — leaving the parent fill orphaned at IB
+            # without a stop or target.
+            #
+            # Safer: ambiguous statuses route through the SAME timeout
+            # handler as a no-result timeout. trade_execution.py L631-655
+            # then stamps `status=OPEN [TIMEOUT-NEEDS-SYNC]` and the
+            # v19.34.15b drift loop catches any silent fill within ~30s.
+            if status in ("unknown", "", None):
+                logger.warning(
+                    f"[v19.34.15a] Bracket status AMBIGUOUS for {trade.symbol} "
+                    f"order {order_id} (status={status!r}, raw={r}). "
+                    f"Routing through TIMEOUT handler to avoid the naked-position "
+                    f"race that orphaned 4879sh UPS on 2026-05-06."
+                )
+                return {
+                    "success": False,
+                    "error": "bracket_status_ambiguous_v19_34_15a",
+                    "entry_order_id": order_id,
+                    "status": "timeout",
+                }
             return {
                 "success": False,
                 "error": r.get("error", f"Bracket {status}"),

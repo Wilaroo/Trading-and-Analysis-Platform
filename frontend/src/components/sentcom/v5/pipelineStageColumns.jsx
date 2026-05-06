@@ -50,6 +50,45 @@ export const formatPct = (v, digits = 1) => {
   return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
 };
 
+// ── v19.34.15a (2026-05-06) — directional shares cell.
+// Operator request 2026-05-06: "make short shares red and long shares
+// green so the table makes the side instantly readable." We don't
+// switch to signed integers internally (BotTrade.shares stays
+// positive — flipping signs would touch every share-math call site
+// and risk regression on a live system) — purely a display layer.
+//
+// Long  → emerald digits.
+// Short → rose digits with a leading '-' to mirror IB's signed
+//         convention so operators eyeballing the bot panel + IB
+//         account window side-by-side see the same sign convention.
+// Unknown → zinc.
+export const directionalSharesCell = (v, row) => {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const dir = String(row?.direction || row?.side || '').toLowerCase();
+  const n = Math.round(Math.abs(Number(v)));
+  if (dir === 'short') {
+    return (
+      <span
+        className="text-rose-400 font-semibold"
+        data-testid="shares-short"
+      >
+        {`-${n.toLocaleString()}`}
+      </span>
+    );
+  }
+  if (dir === 'long') {
+    return (
+      <span
+        className="text-emerald-400 font-semibold"
+        data-testid="shares-long"
+      >
+        {n.toLocaleString()}
+      </span>
+    );
+  }
+  return <span className="text-zinc-400">{n.toLocaleString()}</span>;
+};
+
 const REASON_HUMAN = {
   target_hit: 'target',
   stop_hit: 'stop',
@@ -225,7 +264,8 @@ export const manageStageConfig = ({ totalUnrealized, sumR }) => ({
       cellClass: () => 'font-bold text-zinc-100' },
     { key: 'direction',      label: 'Dir',      align: 'left',  width: 'w-10',
       render: dirCell, cellClass: () => '' },
-    { key: 'shares',         label: 'Sh',       align: 'right', width: 'w-12' },
+    { key: 'shares',         label: 'Sh',       align: 'right', width: 'w-14',
+      render: directionalSharesCell, cellClass: () => 'v5-mono' },
     { key: 'entry_price',    label: 'Entry',    align: 'right', width: 'w-16',
       render: formatPrice, cellClass: () => 'text-zinc-400' },
     { key: 'current_price',  label: 'Last',     align: 'right', width: 'w-16',
@@ -280,7 +320,8 @@ export const orderStageConfig = ({ filledCount, pendingCount }) => ({
       cellClass: () => 'font-bold text-zinc-100' },
     { key: 'direction',  label: 'Dir',    align: 'left',  width: 'w-10',
       render: dirCell, cellClass: () => '' },
-    { key: 'shares',     label: 'Sh',     align: 'right', width: 'w-12' },
+    { key: 'shares',     label: 'Sh',     align: 'right', width: 'w-14',
+      render: directionalSharesCell, cellClass: () => 'v5-mono' },
     { key: 'order_type', label: 'Type',   align: 'left',  width: 'w-14',
       cellClass: () => 'text-zinc-500' },
     { key: 'limit_price', label: 'Limit', align: 'right', width: 'w-16',
@@ -376,3 +417,4 @@ export const scanStageConfig = ({ scanCount }) => ({
       render: formatTime, cellClass: () => 'text-zinc-500' },
   ],
 });
+;
