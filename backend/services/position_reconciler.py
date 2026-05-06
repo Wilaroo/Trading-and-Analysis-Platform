@@ -677,6 +677,40 @@ class PositionReconciler:
             # Bot-tracked symbols (so we skip already-managed positions).
             bot_tracked = {t.symbol.upper() for t in bot._open_trades.values()}
 
+            # ── v19.34.22 (2026-05-07) — DB-aware tracked-set hardening.
+            # Operator-discovered duplicate-spawn bug 2026-05-06 during
+            # zombie-cleanup forensics: when a v19.34.15b/v19.34.19
+            # `reconciled_excess_*` slice (or a v19.24 `reconciled_external`
+            # orphan) is persisted to `bot_trades` but NOT yet hydrated
+            # into `_open_trades` (restart race window, or out-of-band
+            # insert from another worker), this method treated the
+            # symbol as untracked and spawned a duplicate `reconciled_orphan`
+            # against the same IB position. The bot then believed it
+            # owned 2× the IB qty.
+            #
+            # Fix: union `_open_trades` symbol set with the DB's open-row
+            # symbol set so duplicate spawns are impossible regardless of
+            # in-memory hydration timing. Lookup is cheap (`status==open`
+            # rows are bounded by the active position count).
+            db_tracked: set = set()
+            try:
+                if self.db is not None:
+                    db_cursor = self.db["bot_trades"].find(
+                        {"status": "open"},
+                        {"_id": 0, "symbol": 1},
+                    )
+                    for _doc in db_cursor:
+                        _ssym = (_doc.get("symbol") or "").upper()
+                        if _ssym:
+                            db_tracked.add(_ssym)
+                    bot_tracked |= db_tracked
+            except Exception as _db_track_exc:
+                logger.debug(
+                    "[v19.34.22 RECONCILE] DB-tracked lookup failed "
+                    "(non-fatal, falling back to in-memory only): %s",
+                    _db_track_exc,
+                )
+
             # Resolve candidate list.
             if symbols:
                 candidates = [s.upper() for s in symbols if s]
@@ -697,9 +731,19 @@ class PositionReconciler:
             for sym in candidates:
                 try:
                     if sym in bot_tracked:
+                        # v19.34.22 — distinguish DB-only matches so the
+                        # operator-visible report makes the reason for
+                        # the skip unambiguous (no duplicate orphan was
+                        # spawned because an open `bot_trades` row
+                        # already claims this symbol, even if it isn't
+                        # in `_open_trades` yet).
+                        _is_db_only = sym in db_tracked and not any(
+                            (t.symbol or "").upper() == sym
+                            for t in bot._open_trades.values()
+                        )
                         report["skipped"].append({
                             "symbol": sym,
-                            "reason": "already_tracked",
+                            "reason": "db_already_tracked" if _is_db_only else "already_tracked",
                         })
                         continue
 

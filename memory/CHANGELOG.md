@@ -2,6 +2,32 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-07 (one-hundred-fifth commit, v19.34.22) — Orphan-reconciler duplicate-spawn fix
+
+**Severity: P1**. During v19.34.19 zombie-cleanup forensics the operator identified a latent duplicate-spawn bug in `reconcile_orphan_positions`: when a `reconciled_excess_v19_34_15b` / `reconciled_excess_v19_34_19` slice (or a v19.24 `reconciled_external` orphan) is persisted to `bot_trades` (`status==open`) but NOT yet hydrated into `bot._open_trades` (restart race window, or out-of-band insert from another worker), the reconciler treated the symbol as "untracked" and spawned a duplicate `reconciled_orphan` BotTrade against the same IB position. The bot then believed it owned 2× the IB qty.
+
+### Fix — `position_reconciler.py:reconcile_orphan_positions`
+
+1. **DB-aware tracked-set hardening**: After building `bot_tracked` from `bot._open_trades`, the method now unions it with the symbol set pulled from `bot_trades` where `status==open`. Lookup is bounded by the active position count (cheap). Both the `all_orphans=True` candidate filter and the per-symbol skip check inside the loop now consult the unified set so duplicate spawns are impossible regardless of in-memory hydration timing.
+2. **Skip-reason disambiguation**: Symbols matched only via the DB lookup surface as `reason=db_already_tracked` (vs `already_tracked` for in-memory matches), so the operator-visible report makes the source of the skip unambiguous.
+
+### Tests shipped
+
+- `tests/test_orphan_reconciler_skips_excess_slice_v19_34_22.py` (6 tests):
+  - regression pin: `_open_trades`-tracked excess slice → `already_tracked`.
+  - DB-only `reconciled_excess_v19_34_15b` slice → `db_already_tracked`.
+  - DB-only `reconciled_excess_v19_34_19` slice → `db_already_tracked`.
+  - DB-only `reconciled_external` orphan → `db_already_tracked`.
+  - sanity: true orphan (memory + DB empty) still gets reconciled.
+  - `all_orphans=True` candidate filter excludes DB-tracked symbols.
+- All 6 tests pass; cumulative reconciler-suite still green (44/44 across `test_proper_reconcile_endpoint_v19_24`, `test_share_drift_reconciler_v19_34_15b`, `test_zombie_drift_v19_34_19`, `test_share_drift_status_v19_34_18`, `test_auto_reconcile_at_boot_v19_31_2`, plus this new file).
+
+### Operator-side impact
+
+- Boot reconcile + manual `/api/trading-bot/reconcile?all=true` calls are now idempotent against partial DB-vs-memory state. No more 2× IB-position rows appearing in the V5 Open Positions panel after a heal event.
+- Skip reports show `db_already_tracked` for the new code path, distinct from `already_tracked`, so forensic queries can quantify how often the in-memory cache lags the DB.
+
+
 ## 2026-05-06 (one-hundred-fourth commit, v19.34.15a) — Naked-position safety net + directional shares UI
 
 **Severity: P0**. The original 4879-naked-share UPS forensic root cause finally remediated. Two layers:
