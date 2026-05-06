@@ -16,13 +16,20 @@ import React, { useEffect, useState, useCallback } from 'react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 // ── v19.34.23 (2026-05-06) — Operator pointed out 2026-05-06 that
-// "Top Movers" was misleading: the tile renders SPY / QQQ / IWM / DIA
-// / VIX, which are index + volatility ETFs, not the day's biggest
-// movers. Renamed to "Indexes" so the label is honest. If/when we
-// wire a real top-mover scanner endpoint (biggest %-movers from the
-// active scanner universe), this tile can split into two: an
-// `IndexesTile` (this) + a separate `TopMoversTile`.
-const DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
+// "Top Movers" was misleading: the tile previously rendered only
+// SPY / QQQ / IWM / DIA / VIX (the index/volatility ETFs hard-coded
+// here) and called them "movers." First fix renamed them to "Indexes."
+//
+// ── v19.34.24 (2026-05-06) — Replaced static index list with a fetch
+// against `/api/live/briefing-top-movers` (already exists; ranks the
+// dynamic watchlist of positions + scanner top-10 + core indices by
+// |change_pct|). We then filter out the core indices client-side so
+// the tile shows actual stocks moving the most. Indexes are still
+// visible in the briefings strip and the chart-timeline.
+const CORE_INDICES = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'VIX']);
+// Backwards-compat: kept for any external callers that still pass a
+// `symbols` prop to TopMoversTile (none in-repo as of v19.34.24).
+const DEFAULT_SYMBOLS = null;
 const REFRESH_MS = 30_000;
 const MAX_ROWS = 5;
 
@@ -50,15 +57,34 @@ export const TopMoversTile = ({
   const [error, setError] = useState(null);
 
   const fetchSnapshots = useCallback(async () => {
-    const qs = encodeURIComponent(symbols.join(','));
     try {
-      const resp = await fetch(
-        `${BACKEND_URL}/api/live/briefing-snapshot?symbols=${qs}&bar_size=${encodeURIComponent(barSize)}`
-      );
+      // v19.34.24 — Two paths:
+      //   (A) caller passed an explicit `symbols` list → use the static
+      //       briefing-snapshot endpoint with that list (preserves the
+      //       pre-v19.34.24 contract for any external embed).
+      //   (B) default → hit `/api/live/briefing-top-movers` which uses
+      //       the dynamic watchlist (positions + scanner top-10 + core
+      //       indices) ranked by |change_pct|. We then filter out the
+      //       core indices so the tile actually shows movers.
+      let url;
+      if (symbols && Array.isArray(symbols) && symbols.length) {
+        const qs = encodeURIComponent(symbols.join(','));
+        url = `${BACKEND_URL}/api/live/briefing-snapshot?symbols=${qs}&bar_size=${encodeURIComponent(barSize)}`;
+      } else {
+        url = `${BACKEND_URL}/api/live/briefing-top-movers?bar_size=${encodeURIComponent(barSize)}`;
+      }
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      if (!data.success) throw new Error(data.error || 'briefing-snapshot failed');
-      const successful = (data.snapshots || []).filter((s) => s.success);
+      if (!data.success) throw new Error(data.error || 'briefing-top-movers failed');
+      let successful = (data.snapshots || []).filter((s) => s.success);
+      // v19.34.24 — When pulling from briefing-top-movers, drop the
+      // core indices client-side. Server includes them so the
+      // MorningBriefing UI can show indices in a separate row; here
+      // we want movers only.
+      if (!symbols) {
+        successful = successful.filter((s) => !CORE_INDICES.has((s.symbol || '').toUpperCase()));
+      }
       setSnapshots(successful);
       setMarketState(data.market_state);
       setError(null);
@@ -85,7 +111,7 @@ export const TopMoversTile = ({
     >
       <div className="flex items-center gap-1.5 min-w-fit">
         <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide">
-          Indexes
+          Top Movers
         </span>
         {marketState && (
           <span
