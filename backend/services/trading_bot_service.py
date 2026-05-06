@@ -2939,7 +2939,30 @@ class TradingBotService:
         if not self._alert_system:
             print("⚠️ [TradingBot] No alert system configured - skipping scan")
             return
-        
+
+        # v19.34.26 — Scanner power toggle (soft brake). When operator
+        # has paused the scanner, refuse to pull new alerts into the
+        # eval pipeline. In-flight evals + open-position management
+        # (stop trail, scale-out, close) continue normally elsewhere
+        # in this service. This is the "water pump off" semantic.
+        try:
+            from services.safety_guardrails import get_safety_guardrails
+            guard = get_safety_guardrails()
+            if guard.is_scanner_paused():
+                # Single log line per cycle — don't spam. The scan loop
+                # runs every 30s so this is at most 2 lines/min.
+                print(
+                    f"🚫 [TradingBot] scanner paused by operator "
+                    f"({guard.state.scanner_paused_reason}) — skipping intake"
+                )
+                return
+        except Exception as _e:
+            # Defensive: never let a guardrail check failure block the
+            # scanner loop from running. In-memory state is the worst
+            # case fallback (scanner_paused=False), which preserves
+            # existing behaviour.
+            pass
+
         # Check max open positions
         if len(self._open_trades) >= self.risk_params.max_open_positions:
             # 2026-04-28: was a silent return — now logs into Bot's Brain

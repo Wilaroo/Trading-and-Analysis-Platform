@@ -121,6 +121,13 @@ class SafetyState:
     kill_switch_active: bool = False
     kill_switch_tripped_at: Optional[float] = None
     kill_switch_reason: Optional[str] = None
+    # v19.34.26 — Scanner power toggle (soft brake). When paused, the bot's
+    # `_scan_for_opportunities` loop refuses to pull NEW alerts into the
+    # eval pipeline. In-flight evals + open-position management continue
+    # normally (this is the "turn off the water pump" semantic).
+    scanner_paused: bool = False
+    scanner_paused_at: Optional[float] = None
+    scanner_paused_reason: Optional[str] = None
     last_checks: List[Dict[str, Any]] = field(default_factory=list)   # ring buffer, last 20
 
 
@@ -270,6 +277,99 @@ class SafetyGuardrails:
 
     # ── persistence (v19.34.25) ───────────────────────────────────────────
 
+    def _kill_switch_active_unsafe(self) -> bool:
+        """v19.34.26 — Read-only access to the latch state for executor-
+        layer guards. Used by `trade_executor_service` to refuse orders
+        BEFORE they leave the bot, even when an upstream code path skipped
+        the standard `check_can_enter` gate (today's bypass scenario).
+
+        Returns the in-memory latch directly without locking — kill-switch
+        state changes are infrequent, single-writer (operator API call) and
+        the worst-case race is a single order squeezing through during the
+        microsecond between trip and the next executor call. Acceptable
+        relative to the cost of locking on every single order.
+        """
+        return bool(self.state.kill_switch_active)
+
+    # ── scanner power toggle (v19.34.26) ──────────────────────────────────
+    #
+    # Soft-brake complement to the kill-switch. Pauses NEW alert intake so
+    # no fresh trade ideas enter the eval pipeline, but lets in-flight
+    # evaluations finish AND lets `position_manager` continue managing
+    # already-open positions (stop trail-up, scale-out, close-on-stop).
+    #
+    # Persistence model mirrors the kill-switch: writes to the same
+    # `safety_state` Mongo collection (different `_id`) so the toggle
+    # survives backend restarts. Pre-fix today: no soft-brake existed,
+    # operator had to choose between "let bot rip" or "hard-kill backend".
+
+    def is_scanner_paused(self) -> bool:
+        return bool(getattr(self.state, "scanner_paused", False))
+
+    def pause_scanner(self, reason: str) -> None:
+        if self.is_scanner_paused():
+            return
+        self.state.scanner_paused = True
+        self.state.scanner_paused_at = time.time()
+        self.state.scanner_paused_reason = reason
+        logger.warning("[SAFETY] v19.34.26 — SCANNER PAUSED: %s", reason)
+        self._persist_scanner_state()
+
+    def resume_scanner(self) -> None:
+        was_paused = self.is_scanner_paused()
+        self.state.scanner_paused = False
+        self.state.scanner_paused_at = None
+        self.state.scanner_paused_reason = None
+        if was_paused:
+            logger.warning("[SAFETY] v19.34.26 — Scanner RESUMED by operator")
+        self._persist_scanner_state()
+
+    def _persist_scanner_state(self) -> None:
+        try:
+            db = _get_sync_safety_db()
+            if db is None:
+                return
+            db.safety_state.update_one(
+                {"_id": "scanner_toggle"},
+                {"$set": {
+                    "paused":     self.is_scanner_paused(),
+                    "paused_at":  getattr(self.state, "scanner_paused_at", None),
+                    "reason":     getattr(self.state, "scanner_paused_reason", None),
+                    "updated_at": time.time(),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.error("[SAFETY] scanner-toggle persistence FAILED: %s", e)
+
+    def restore_scanner_state_from_db(self) -> bool:
+        """Restore the scanner-paused latch on boot. Same contract as
+        `restore_kill_switch_from_db` — returns True if a paused state
+        was restored so the boot logger can warn loudly.
+        """
+        try:
+            db = _get_sync_safety_db()
+            if db is None:
+                return False
+            doc = db.safety_state.find_one({"_id": "scanner_toggle"})
+            if not doc or not doc.get("paused"):
+                return False
+            self.state.scanner_paused = True
+            self.state.scanner_paused_at = doc.get("paused_at")
+            self.state.scanner_paused_reason = (
+                doc.get("reason") or "restored_from_db (no reason recorded)"
+            )
+            logger.warning(
+                "[SAFETY] v19.34.26 — SCANNER PAUSE RESTORED FROM DB on boot. "
+                "Reason: %s | Bot will NOT pull new alerts into the eval "
+                "pipeline until operator resumes via /api/safety/scanner/resume.",
+                self.state.scanner_paused_reason,
+            )
+            return True
+        except Exception as e:
+            logger.error("[SAFETY] scanner-state restore FAILED: %s", e)
+            return False
+
     def _persist_kill_switch(self) -> None:
         """Write the current kill-switch latch to Mongo `safety_state`.
 
@@ -351,6 +451,11 @@ class SafetyGuardrails:
                 "kill_switch_active": self.state.kill_switch_active,
                 "kill_switch_tripped_at": self.state.kill_switch_tripped_at,
                 "kill_switch_reason": self.state.kill_switch_reason,
+                # v19.34.26 — scanner power toggle in the same payload so
+                # the V5 UI / curl can render both brakes side-by-side.
+                "scanner_paused": self.is_scanner_paused(),
+                "scanner_paused_at": getattr(self.state, "scanner_paused_at", None),
+                "scanner_paused_reason": getattr(self.state, "scanner_paused_reason", None),
                 "recent_checks": list(self.state.last_checks[-20:]),
             },
         }

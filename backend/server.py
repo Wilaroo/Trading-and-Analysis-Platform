@@ -3831,6 +3831,13 @@ async def startup_event():
         )
         if _restored:
             print("[STARTUP] v19.34.25 — kill-switch RESTORED from DB; bot disarmed.")
+        # v19.34.26 — also restore the scanner pause toggle. Same
+        # persistence pattern, different latch (soft brake vs hard).
+        _scanner_restored = await asyncio.to_thread(
+            get_safety_guardrails().restore_scanner_state_from_db
+        )
+        if _scanner_restored:
+            print("[STARTUP] v19.34.26 — scanner pause RESTORED from DB; intake disabled.")
     except Exception as _e:
         print(f"[STARTUP] WARN: kill-switch restore failed: {_e}")
     

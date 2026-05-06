@@ -124,12 +124,62 @@ class TradeExecutorService:
         return self._mode
     
     # ==================== ORDER EXECUTION ====================
-    
+
+    def _kill_switch_refusal(self, method_name: str, trade) -> Optional[Dict[str, Any]]:
+        """v19.34.26 — Executor-layer kill-switch guard.
+
+        Today's incident (2026-02-XX): six bracket entries (UPS, ADBE,
+        AMDL, XOP, TSLG, TEAM) fired at IB between 2:45-2:54 PM ET while
+        the kill-switch was demonstrably active (`v19_34_25_persistence_test`
+        latch set + UI banner visible). Order history confirmed each had
+        full OCA brackets attached, meaning they went through
+        `place_bracket_order` — but some upstream code path in the bot's
+        autonomous flow had skipped `safety_guardrails.check_can_enter()`.
+
+        Fix: every executor entry-creating method calls this helper at
+        its very top. Bypass-proof because every order path traverses the
+        executor — guarding here catches anything the bot layer missed.
+        Returns a refusal dict if the latch is active (caller must early-
+        return), else None.
+
+        Defensive: importing/calling guardrails fails open (returns None)
+        rather than blocking the executor on a guardrail import error.
+        Worst case = same behaviour as pre-v19.34.26.
+        """
+        try:
+            from services.safety_guardrails import get_safety_guardrails
+            guard = get_safety_guardrails()
+            if guard._kill_switch_active_unsafe():
+                symbol = getattr(trade, "symbol", "?") if trade is not None else "?"
+                logger.error(
+                    "v19.34.26 [EXECUTOR-GUARD] %s REFUSED for %s — "
+                    "kill_switch_active=True (reason: %s). Order NOT submitted.",
+                    method_name, symbol, guard.state.kill_switch_reason,
+                )
+                return {
+                    "success": False,
+                    "error": "kill_switch_active",
+                    "reason": guard.state.kill_switch_reason or "kill-switch tripped",
+                    "refused_at": "executor_layer",
+                    "method": method_name,
+                }
+        except Exception as e:
+            logger.warning("v19.34.26 [EXECUTOR-GUARD] guardrail check failed in %s: %s "
+                           "— allowing through (fail-open)", method_name, e)
+        return None
+
     async def execute_entry(self, trade) -> Dict[str, Any]:
         """
         Execute entry order for a trade.
         Returns dict with success, order_id, fill_price, etc.
         """
+        # v19.34.26 — bypass-proof kill-switch refusal at the executor
+        # layer. See _kill_switch_refusal docstring for the today's
+        # incident this prevents.
+        _refusal = self._kill_switch_refusal("execute_entry", trade)
+        if _refusal is not None:
+            return _refusal
+
         if self._mode == ExecutorMode.SIMULATED:
             return await self._simulate_entry(trade)
         
@@ -464,6 +514,14 @@ class TradeExecutorService:
         Falls back to legacy two-step flow if the pusher doesn't support
         bracket payloads yet (during migration window).
         """
+        # v19.34.26 — Executor-layer kill-switch refusal. Today's incident
+        # (UPS/ADBE/AMDL/XOP/TSLG/TEAM brackets fired with kill-switch on)
+        # routed through THIS exact method. This single-line guard would
+        # have prevented all six. See `_kill_switch_refusal` docstring.
+        _refusal = self._kill_switch_refusal("place_bracket_order", trade)
+        if _refusal is not None:
+            return _refusal
+
         if self._mode == ExecutorMode.SIMULATED:
             return await self._simulate_bracket(trade)
 

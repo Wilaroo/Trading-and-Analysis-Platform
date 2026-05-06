@@ -190,6 +190,54 @@ async def trip_kill_switch(request: KillSwitchTripRequest) -> Dict[str, Any]:
     return {"success": True, "state": guard.status()["state"]}
 
 
+# ── v19.34.26 — Scanner power toggle (soft brake) ───────────────────────────
+#
+# Pauses NEW alert intake without disturbing in-flight evals or open-position
+# management. Operator's "water pump off" semantic — quieter than the
+# kill-switch, intended for "I'm done finding new ideas for today" use cases.
+
+class ScannerPauseRequest(BaseModel):
+    reason: str = Field(default="manual_pause",
+                        description="Why the scanner is being paused")
+
+
+@router.post("/scanner/pause")
+async def pause_scanner(request: ScannerPauseRequest) -> Dict[str, Any]:
+    """v19.34.26 — Soft brake: stop the scanner from pulling new alerts
+    into the eval pipeline. In-flight evals + position management
+    continue normally. Persists to Mongo so the latch survives restarts.
+    """
+    guard = get_safety_guardrails()
+    guard.pause_scanner(reason=request.reason)
+    return {"success": True, "state": guard.status()["state"]}
+
+
+@router.post("/scanner/resume")
+async def resume_scanner() -> Dict[str, Any]:
+    """v19.34.26 — Resume the scanner. Idempotent."""
+    guard = get_safety_guardrails()
+    was_paused = guard.is_scanner_paused()
+    guard.resume_scanner()
+    return {
+        "success": True,
+        "was_paused": was_paused,
+        "state": guard.status()["state"],
+    }
+
+
+@router.get("/scanner/status")
+async def scanner_status() -> Dict[str, Any]:
+    """v19.34.26 — Compact scanner-only status for the UI toggle button."""
+    guard = get_safety_guardrails()
+    s = guard.status()["state"]
+    return {
+        "paused": s["scanner_paused"],
+        "paused_at": s.get("scanner_paused_at"),
+        "reason": s.get("scanner_paused_reason"),
+    }
+# ──────────────────────────────────────────────────────────────────────────
+
+
 @router.post("/flatten-all")
 async def flatten_all(confirm: str = "") -> Dict[str, Any]:
     """
