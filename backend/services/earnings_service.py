@@ -5,8 +5,8 @@ Provides earnings calendar, historical earnings, beat/miss trends, and analysis
 import logging
 import os
 import requests
-from typing import List, Dict, Optional
-from datetime import datetime, timezone, timedelta
+from typing import Dict, Optional
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()

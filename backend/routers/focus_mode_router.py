@@ -11,7 +11,7 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import logging
 
 from services.focus_mode_manager import focus_mode_manager, FocusMode

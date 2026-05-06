@@ -1369,7 +1369,6 @@ async def chart_tail_ws(websocket: WebSocket):
     every 15s during silent windows.
     """
     import os as _os3
-    import json as _json3
 
     # Feature-flag escape hatch. If a future regression surfaces, the
     # operator can flip this off without a redeploy. Default is ON.

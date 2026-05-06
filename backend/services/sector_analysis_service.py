@@ -3,9 +3,8 @@ Sector/Industry Strength Analysis Service
 Provides sector rotation analysis, industry strength rankings, and stock-to-sector correlation.
 Integrates with the scanner, trading bot, and AI assistant.
 """
-import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
 from enum import Enum

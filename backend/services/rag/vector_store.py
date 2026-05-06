@@ -16,7 +16,6 @@ Note: ChromaDB is optional - if not installed, vector features will be disabled.
 
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
 import os
 
 logger = logging.getLogger(__name__)

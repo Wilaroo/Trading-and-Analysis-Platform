@@ -10,7 +10,6 @@ TTL: 7 days (configurable)
 
 from datetime import datetime, timezone, timedelta
 from typing import List, Set, Optional, Dict
-from collections import defaultdict
 import logging
 
 logger = logging.getLogger(__name__)

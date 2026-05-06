@@ -15,8 +15,7 @@ The goal: Make SentCom continuously smarter without manual intervention.
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass, asdict, field
-import asyncio
+from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
 
@@ -722,7 +721,6 @@ class LearningConnectorsService:
                 # Map the threshold to TQS adjustment
                 # If threshold > 1.0, we need higher TQS (be more selective)
                 # If threshold < 1.0, we can accept lower TQS
-                from services.dynamic_thresholds import ThresholdType
                 
                 # Store setup-specific threshold adjustment
                 # This will be queried during TQS calculation

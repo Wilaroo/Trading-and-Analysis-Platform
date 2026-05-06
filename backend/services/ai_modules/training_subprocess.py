@@ -11,7 +11,6 @@ Usage (from ai_training.py):
 """
 import argparse
 import asyncio
-import json
 import logging
 import os
 import subprocess as _subprocess

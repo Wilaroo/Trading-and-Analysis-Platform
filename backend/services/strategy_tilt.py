@@ -55,7 +55,7 @@ from __future__ import annotations
 import math
 import statistics
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 import logging
 

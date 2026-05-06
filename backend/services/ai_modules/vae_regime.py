@@ -24,7 +24,7 @@ Training: On Spark GPU using SPY + sector ETF microstructure features from Mongo
 
 import logging
 import numpy as np
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

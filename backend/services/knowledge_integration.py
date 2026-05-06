@@ -5,7 +5,7 @@ Queries the knowledge base and enhances stock analysis with learned strategies.
 Also integrates real-time news for comprehensive market analysis.
 """
 import logging
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 from services.knowledge_service import get_knowledge_service
 from services.llm_service import get_llm_service
 

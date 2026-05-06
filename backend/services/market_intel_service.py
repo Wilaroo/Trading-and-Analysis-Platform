@@ -17,7 +17,6 @@ import os
 import requests
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
-import json
 
 logger = logging.getLogger(__name__)
 

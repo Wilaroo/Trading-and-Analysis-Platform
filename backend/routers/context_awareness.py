@@ -4,13 +4,12 @@ Exposes the Phase 2 AI context awareness service via REST API.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 import logging
 
 from services.context_awareness_service import (
     get_context_awareness_service,
-    ContextAwarenessService,
-    TradingSession
+    ContextAwarenessService
 )
 
 logger = logging.getLogger(__name__)

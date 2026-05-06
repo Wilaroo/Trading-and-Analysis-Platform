@@ -3,7 +3,7 @@ Trade History Router - Endpoints for fetching and analyzing verified trade histo
 """
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 import logging
 
 from services.ib_flex_service import ib_flex_service

@@ -10,9 +10,9 @@ Evaluates market context and timing:
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -359,13 +359,13 @@ class ContextQualityService:
                 result.factors.append(f"AI model leans {direction} ({ai_model_confidence:.0%} conf) (+)")
             elif ai_model_direction == "flat":
                 ai_score = 45
-                result.factors.append(f"AI model sees no edge (flat) (-)")
+                result.factors.append("AI model sees no edge (flat) (-)")
             elif not ai_model_agrees and ai_model_confidence >= 0.60:
                 ai_score = 20
                 result.factors.append(f"AI model DISAGREES — predicts {ai_model_direction} ({ai_model_confidence:.0%} conf) (--)")
             else:
                 ai_score = 35
-                result.factors.append(f"AI model weakly disagrees (-)")
+                result.factors.append("AI model weakly disagrees (-)")
             
         # Calculate weighted total (updated weights to include AI alignment)
         result.score = (

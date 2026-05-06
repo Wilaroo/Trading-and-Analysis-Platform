@@ -28,7 +28,7 @@ class PositionManager:
 
     async def update_open_positions(self, bot: 'TradingBotService'):
         """Update P&L for open positions - uses IB data first, then Alpaca"""
-        from services.trading_bot_service import TradeDirection, TradeStatus
+        from services.trading_bot_service import TradeDirection
 
         # 2026-04-30 v19.13 — quote-staleness guard. If the pusher hangs
         # (we just had 120s timeouts mid-session), an old tick can fire
@@ -1614,7 +1614,6 @@ class PositionManager:
 
             # Auto-generate chart snapshot with AI annotations
             try:
-                from services.trade_snapshot_service import TradeSnapshotService
                 snapshot_svc = getattr(bot, '_snapshot_service', None)
                 if snapshot_svc:
                     asyncio.create_task(snapshot_svc.generate_snapshot(trade.id, "bot"))

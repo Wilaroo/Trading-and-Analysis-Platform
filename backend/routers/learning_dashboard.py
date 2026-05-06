@@ -5,7 +5,7 @@ Extended with Three-Speed Learning Architecture endpoints (Phase 1).
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from services.learning_loop_service import get_learning_loop_service
 
 router = APIRouter(prefix="/api/learning", tags=["learning-dashboard"])

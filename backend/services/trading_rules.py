@@ -3,7 +3,6 @@ Trading Rules Engine - Consolidated knowledge from all SMB cheat sheets
 Provides market context analysis, setup validation, and trade management rules
 """
 from typing import Dict, List, Optional
-from datetime import datetime, timezone
 from enum import Enum
 
 

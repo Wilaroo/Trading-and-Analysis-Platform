@@ -2,12 +2,12 @@
 Scoring Engine API Router
 Endpoints for Universal Scoring System and Top Picks
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
-from services.scoring_engine import get_scoring_engine, TimeframeType
+from services.scoring_engine import get_scoring_engine
 
 router = APIRouter(prefix="/api/scoring", tags=["scoring"])
 

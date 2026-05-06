@@ -8,7 +8,7 @@ Provides API access to:
 - RAG statistics
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Query, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 

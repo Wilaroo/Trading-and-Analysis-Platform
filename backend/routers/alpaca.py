@@ -96,7 +96,7 @@ async def get_quote(symbol: str, prefer_ib: bool = True):
                             "source": "ib_pusher"
                         }
                     }
-        except Exception as e:
+        except Exception:
             pass  # Fall through to Alpaca
     
     # Fallback to Alpaca

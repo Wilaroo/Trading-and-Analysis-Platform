@@ -7,10 +7,9 @@ with volume bars and moving average overlays.
 """
 import io
 import logging
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
+from typing import Dict, List, Optional
+from datetime import datetime
 
-import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')

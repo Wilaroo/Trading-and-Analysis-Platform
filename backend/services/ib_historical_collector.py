@@ -29,7 +29,7 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import uuid
-from pymongo import ASCENDING, DESCENDING
+from pymongo import DESCENDING
 
 logger = logging.getLogger(__name__)
 
@@ -1731,7 +1731,6 @@ class IBHistoricalCollector:
         Monitor queue progress and store completed data to the database.
         This runs in the background while the local pusher processes requests.
         """
-        from datetime import datetime, timezone
         
         last_completed = 0
         stall_count = 0
@@ -2330,7 +2329,7 @@ class IBHistoricalCollector:
             return {"success": False, "error": "Database not connected"}
         
         try:
-            from datetime import datetime, timezone, timedelta
+            from datetime import datetime, timezone
             
             today = datetime.now(timezone.utc).date()
             

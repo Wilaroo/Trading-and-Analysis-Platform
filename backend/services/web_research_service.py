@@ -16,11 +16,10 @@ import aiohttp
 import logging
 import time
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from bs4 import BeautifulSoup
 import re
-import json
 import hashlib
 
 logger = logging.getLogger(__name__)

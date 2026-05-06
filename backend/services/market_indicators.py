@@ -10,9 +10,8 @@ Includes:
 
 These indicators apply to ALL timeframes (Scalp, Intraday, Swing, Position)
 """
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, List, Tuple
-import math
+from datetime import datetime, timezone
+from typing import Dict, List
 import statistics
 
 
@@ -130,7 +129,7 @@ class MarketIndicatorsService:
                         "volume": sum(b.get("volume", 0) for b in bars),
                         "change_pct": ((bars[-1].get("close", 0) - bars[0].get("open", 0)) / bars[0].get("open", 1)) * 100 if bars else 0
                     }
-        except Exception as e:
+        except Exception:
             pass
         return {"symbol": symbol, "bars": [], "current_price": 0, "volume": 0, "change_pct": 0}
     

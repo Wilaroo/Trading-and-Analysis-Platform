@@ -15,7 +15,7 @@ for decisions but actual order execution requires the local IB connection.
 import os
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Optional, Any
 from enum import Enum
 
@@ -367,7 +367,7 @@ class TradeExecutorService:
     
     async def _alpaca_entry(self, trade) -> Dict[str, Any]:
         """Execute entry via Alpaca"""
-        from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
+        from alpaca.trading.requests import MarketOrderRequest
         from alpaca.trading.enums import OrderSide, TimeInForce
         
         try:
@@ -627,7 +627,7 @@ class TradeExecutorService:
     async def _ib_stop(self, trade) -> Dict[str, Any]:
         """Place stop via IB using order queue"""
         try:
-            from routers.ib import queue_order, get_order_result, is_pusher_connected
+            from routers.ib import queue_order, is_pusher_connected
             
             if not is_pusher_connected():
                 logger.warning("IB pusher not connected - simulating stop order")
@@ -1476,7 +1476,7 @@ class TradeExecutorService:
         `SIM-STOP-<uuid>` from simulated/paper modes).
         """
         try:
-            from routers.ib import cancel_order as _ib_cancel_order
+            pass
         except Exception as e:
             logger.warning(
                 f"v19.13: could not import IB cancel_order — skipping bracket "

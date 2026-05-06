@@ -7,8 +7,7 @@ the user's local connection.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
-from pymongo import MongoClient
+from typing import Dict, List, Optional
 from pymongo.database import Database
 import logging
 import uuid
@@ -592,7 +591,6 @@ class HistoricalDataQueueService:
             
         Note: Automatically clears items stuck in 'claimed' status for > 10 minutes.
         """
-        from datetime import datetime, timedelta, timezone
         
         # Auto-clear stuck items (claimed for more than 10 minutes)
         self._auto_clear_stuck_items(older_than_minutes=10)
@@ -709,7 +707,7 @@ class HistoricalDataQueueService:
         
         Uses the last 50 completions to calculate average time per symbol.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime
         
         # Get recent completed items with timestamps
         recent_completions = list(self.collection.find(

@@ -2374,7 +2374,7 @@ async def finbert_score_articles(request: FinBERTScoreRequest = None):
 def finbert_stats():
     """Get news collection and sentiment scoring statistics."""
     try:
-        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector, FinBERTSentiment
+        from services.ai_modules.finbert_sentiment import FinnhubNewsCollector
 
         model_db = _timeseries_ai._db if _timeseries_ai else None
         if model_db is None:

@@ -2,9 +2,9 @@
 Earnings Router - Calendar, analysis, IV data endpoints
 Extracted from server.py for modularity
 """
-from fastapi import APIRouter, HTTPException
-from typing import Optional, Dict, List
-from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter
+from typing import Optional, Dict
+from datetime import datetime, timedelta
 import random
 import logging
 

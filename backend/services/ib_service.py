@@ -257,7 +257,7 @@ class IBWorkerThread(threading.Thread):
     def _do_connect(self) -> IBResponse:
         """Connect to IB Gateway"""
         try:
-            from ib_insync import IB, util
+            from ib_insync import IB
             
             if self.ib and self.ib.isConnected():
                 logger.info("Already connected to IB, returning success")

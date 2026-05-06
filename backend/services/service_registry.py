@@ -18,7 +18,7 @@ Usage:
     optional = registry.get_optional('some_service')
 """
 
-from typing import Dict, Any, Optional, TypeVar, Type
+from typing import Dict, Any, Optional, TypeVar
 import logging
 
 logger = logging.getLogger(__name__)

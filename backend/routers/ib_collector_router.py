@@ -10,7 +10,7 @@ from typing import Optional, List, Dict
 from datetime import datetime, timezone
 import logging
 
-from services.ib_historical_collector import get_ib_collector, IBHistoricalCollector
+from services.ib_historical_collector import get_ib_collector
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ib-collector", tags=["ib-collector"])

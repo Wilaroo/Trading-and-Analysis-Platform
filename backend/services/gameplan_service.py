@@ -12,7 +12,6 @@ The Game Plan is a daily trading preparation document that includes:
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 from bson import ObjectId
-import os
 
 
 class GamePlanService:

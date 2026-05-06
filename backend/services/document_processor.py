@@ -3,7 +3,6 @@ Document Processor Service
 Ingests documents (PDFs, text) and uses AI to extract structured trading knowledge.
 """
 import os
-import re
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List

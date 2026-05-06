@@ -24,11 +24,7 @@ Model stored in: volatility_models collection
 
 import logging
 import numpy as np
-import pickle
-import base64
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
-from dataclasses import dataclass, asdict, field
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

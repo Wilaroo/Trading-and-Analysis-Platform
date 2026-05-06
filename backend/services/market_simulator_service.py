@@ -11,7 +11,7 @@ Generates realistic alerts based on configured scenarios.
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 

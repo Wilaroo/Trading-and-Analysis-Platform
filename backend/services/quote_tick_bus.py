@@ -45,7 +45,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from typing import Any, AsyncIterator, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Dict, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 

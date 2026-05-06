@@ -15,7 +15,7 @@ Configure via environment variables:
 import os
 import json
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)

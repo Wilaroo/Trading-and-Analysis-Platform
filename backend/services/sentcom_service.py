@@ -1237,7 +1237,7 @@ class SentComService:
                     messages.append(SentComMessage(
                         id=self._generate_message_id(),
                         type="system",
-                        content=f"Pre-market — building morning watchlist: gaps, ORB candidates, opening drives",
+                        content="Pre-market — building morning watchlist: gaps, ORB candidates, opening drives",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         confidence=70,
                         action_type="market_status",

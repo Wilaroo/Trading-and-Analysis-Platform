@@ -7,7 +7,7 @@ Used to filter training data so each setup model only learns from relevant examp
 """
 
 import numpy as np
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Tuple
 import logging
 
 logger = logging.getLogger(__name__)

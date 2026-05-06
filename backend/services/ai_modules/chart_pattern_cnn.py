@@ -8,10 +8,8 @@ Two prediction heads:
 Uses transfer learning from ImageNet pretrained weights.
 Auto-detects GPU (CUDA) and falls back to CPU gracefully.
 """
-import os
 import logging
-import json
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -90,7 +88,6 @@ def build_cnn_model(num_classes: int = None):
 
     Uses ImageNet pretrained weights for transfer learning.
     """
-    import torch
     import torch.nn as nn
 
     try:

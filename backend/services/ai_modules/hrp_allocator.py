@@ -38,7 +38,7 @@ Usage (in trading_bot_service.py BEFORE placing orders):
 """
 from __future__ import annotations
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)

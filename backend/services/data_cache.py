@@ -6,7 +6,6 @@ No mock data - only real verified data is stored and served.
 """
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-import asyncio
 import os
 from pymongo import MongoClient
 import logging

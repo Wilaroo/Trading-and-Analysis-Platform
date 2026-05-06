@@ -2,7 +2,6 @@
 Trading Rules Router - API endpoints for trading rules and market context
 """
 from fastapi import APIRouter, HTTPException
-from typing import Optional, List
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/rules", tags=["trading-rules"])

@@ -26,7 +26,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from collections import defaultdict
 
 # SMB Integration imports
 try:
@@ -3319,8 +3318,8 @@ class EnhancedBackgroundScanner:
                     f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} below support, Target: ${target_1:.2f})",
                     f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
                     f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else f"Mean reversion to EMA9",
-                    f"Entry: Double bar break above prior highs"
+                    ev_info if ev_info else "Mean reversion to EMA9",
+                    "Entry: Double bar break above prior highs"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -3377,8 +3376,8 @@ class EnhancedBackgroundScanner:
                     f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} above resistance, Target: ${target_1:.2f})",
                     f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
                     f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else f"Mean reversion to EMA9",
-                    f"Entry: Double bar break below prior lows"
+                    ev_info if ev_info else "Mean reversion to EMA9",
+                    "Entry: Double bar break below prior lows"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -3415,10 +3414,10 @@ class EnhancedBackgroundScanner:
                 headline=f"📍 {symbol} VWAP Bounce - ${snapshot.vwap:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
                     f"Price {snapshot.dist_from_vwap:+.1f}% from VWAP",
-                    f"Uptrend intact - above 9-EMA and 20-EMA",
+                    "Uptrend intact - above 9-EMA and 20-EMA",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"Tape: {tape.overall_signal.value}",
-                    f"Entry: Rejection wick + bullish candle at VWAP"
+                    "Entry: Rejection wick + bullish candle at VWAP"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -3608,7 +3607,7 @@ class EnhancedBackgroundScanner:
                     f"Tight consolidation (range: {snapshot.daily_range_pct:.1f}%)",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"Tape: {tape.overall_signal.value}",
-                    f"Entry: Break of consolidation high"
+                    "Entry: Break of consolidation high"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -3654,7 +3653,7 @@ class EnhancedBackgroundScanner:
                         f"Consolidating {dist_from_hod:.1f}% from HOD",
                         f"RVOL: {snapshot.rvol:.1f}x",
                         f"Tape: {tape.overall_signal.value}",
-                        f"Entry: Aggressive on break of consolidation"
+                        "Entry: Aggressive on break of consolidation"
                     ],
                     time_window=current_window.value,
                     market_regime=self._market_regime.value,
@@ -3770,7 +3769,7 @@ class EnhancedBackgroundScanner:
                 headline=f"🎁 {symbol} Gap Give and Go - {snapshot.gap_pct:.1f}% {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
                     f"Gap up {snapshot.gap_pct:.1f}%",
-                    f"Pulled back but holding VWAP",
+                    "Pulled back but holding VWAP",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"Tape: {tape.overall_signal.value}"
                 ],
@@ -3809,7 +3808,7 @@ class EnhancedBackgroundScanner:
                 headline=f"🔄 {symbol} Second Chance - Retesting VWAP",
                 reasoning=[
                     f"Retesting VWAP ${snapshot.vwap:.2f}",
-                    f"Uptrend intact",
+                    "Uptrend intact",
                     f"Tape: {tape.overall_signal.value}"
                 ],
                 time_window=self._get_current_time_window().value,
@@ -3843,7 +3842,7 @@ class EnhancedBackgroundScanner:
                 minutes_to_trigger=15,
                 headline=f"↗️ {symbol} Back$ide - Recovering to VWAP",
                 reasoning=[
-                    f"Higher highs/lows above 9-EMA",
+                    "Higher highs/lows above 9-EMA",
                     f"Tape: {tape.overall_signal.value}",
                     f"Target: VWAP ${snapshot.vwap:.2f}"
                 ],
@@ -3914,8 +3913,8 @@ class EnhancedBackgroundScanner:
                 minutes_to_trigger=15,
                 headline=f"⏰ {symbol} Fashionably Late - 9-EMA crossing VWAP",
                 reasoning=[
-                    f"9-EMA just crossed VWAP",
-                    f"Momentum building",
+                    "9-EMA just crossed VWAP",
+                    "Momentum building",
                     f"Tape: {tape.overall_signal.value}"
                 ],
                 time_window=self._get_current_time_window().value,
@@ -3951,7 +3950,7 @@ class EnhancedBackgroundScanner:
                     minutes_to_trigger=20,
                     headline=f"🌊 {symbol} Tidal Wave - Weaker bounces",
                     reasoning=[
-                        f"Extended below VWAP",
+                        "Extended below VWAP",
                         f"Approaching support ${snapshot.support:.2f}",
                         f"Tape: {tape.overall_signal.value}"
                     ],
@@ -4002,7 +4001,7 @@ class EnhancedBackgroundScanner:
                 reasoning=[
                     f"Price broke HOD by {breakout_pct:.2f}%",
                     f"HOD was ${snapshot.high_of_day:.2f}, now ${snapshot.current_price:.2f}",
-                    f"Afternoon session - momentum often continues",
+                    "Afternoon session - momentum often continues",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"Tape: {tape.overall_signal.value}"
                 ],
@@ -4050,7 +4049,7 @@ class EnhancedBackgroundScanner:
                 reasoning=[
                     f"Price {dist_from_hod:.2f}% below HOD ${snapshot.high_of_day:.2f}",
                     f"Current: ${snapshot.current_price:.2f}",
-                    f"Above VWAP and EMA9",
+                    "Above VWAP and EMA9",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"⚠️ Wait for confirmed break above ${snapshot.high_of_day:.2f}"
                 ],
@@ -4219,7 +4218,7 @@ class EnhancedBackgroundScanner:
             minutes_to_trigger=10,
             headline=f"SQUEEZE {symbol} {direction.upper()} - BB Width {snapshot.bb_width:.1f}% {'+ TAPE' if (tape.confirmation_for_long if direction == 'long' else tape.confirmation_for_short) else ''}",
             reasoning=[
-                f"Bollinger Bands INSIDE Keltner Channels = volatility squeeze",
+                "Bollinger Bands INSIDE Keltner Channels = volatility squeeze",
                 f"BB Width: {snapshot.bb_width:.1f}% (tight = explosive breakout imminent)",
                 f"Momentum: {snapshot.squeeze_fire:+.2f} ({'bullish' if direction == 'long' else 'bearish'})",
                 f"RVOL: {snapshot.rvol:.1f}x | RSI: {snapshot.rsi_14:.0f}",
@@ -4354,10 +4353,10 @@ class EnhancedBackgroundScanner:
             label = "LEADER"
             reasoning = [
                 f"Outperforming SPY by {rs:.1f}% today",
-                f"RS leaders tend to continue in trend days",
+                "RS leaders tend to continue in trend days",
                 f"Trend: {snapshot.trend} | RSI: {snapshot.rsi_14:.0f}",
                 f"{'Above VWAP' if snapshot.above_vwap else 'Below VWAP'} | RVOL: {snapshot.rvol:.1f}x",
-                f"Play: Buy dips, ride the relative strength"
+                "Play: Buy dips, ride the relative strength"
             ]
         else:
             direction = "short"
@@ -4366,10 +4365,10 @@ class EnhancedBackgroundScanner:
             label = "LAGGARD"
             reasoning = [
                 f"Underperforming SPY by {abs(rs):.1f}% today",
-                f"RS laggards tend to continue underperforming",
+                "RS laggards tend to continue underperforming",
                 f"Trend: {snapshot.trend} | RSI: {snapshot.rsi_14:.0f}",
                 f"{'Above VWAP' if snapshot.above_vwap else 'Below VWAP'} | RVOL: {snapshot.rvol:.1f}x",
-                f"Play: Short rallies into resistance"
+                "Play: Short rallies into resistance"
             ]
         
         risk = abs(snapshot.current_price - stop)
@@ -4578,7 +4577,7 @@ class EnhancedBackgroundScanner:
                 headline=f"🎯 {symbol} First VWAP Pullback - Gap {snapshot.gap_pct:.1f}% {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
                     f"Gap up {snapshot.gap_pct:.1f}%",
-                    f"Pulled back to VWAP",
+                    "Pulled back to VWAP",
                     f"Tape: {tape.overall_signal.value}"
                 ],
                 time_window=current_window.value,
@@ -4653,8 +4652,8 @@ class EnhancedBackgroundScanner:
                     minutes_to_trigger=15,
                     headline=f"🐕 {symbol} Big Dog - Tight consolidation",
                     reasoning=[
-                        f"Tight range near HOD",
-                        f"Above VWAP and 9-EMA",
+                        "Tight range near HOD",
+                        "Above VWAP and 9-EMA",
                         f"Tape: {tape.overall_signal.value}"
                     ],
                     time_window=self._get_current_time_window().value,
@@ -4691,10 +4690,10 @@ class EnhancedBackgroundScanner:
                     minutes_to_trigger=10,
                     headline=f"🐶 {symbol} Puppy Dog - Quick consolidation break",
                     reasoning=[
-                        f"Tight 5-10 min consolidation",
-                        f"Higher RVOL than Big Dog",
+                        "Tight 5-10 min consolidation",
+                        "Higher RVOL than Big Dog",
                         f"Tape: {tape.overall_signal.value}",
-                        f"Entry: Micro-break of consolidation"
+                        "Entry: Micro-break of consolidation"
                     ],
                     time_window=self._get_current_time_window().value,
                     market_regime=self._market_regime.value,
@@ -4727,7 +4726,7 @@ class EnhancedBackgroundScanner:
                 headline=f"📉 {symbol} 9-EMA Scalp - Testing ${snapshot.ema_9:.2f}",
                 reasoning=[
                     f"Testing 9-EMA ${snapshot.ema_9:.2f}",
-                    f"Uptrend, above VWAP",
+                    "Uptrend, above VWAP",
                     f"Tape: {tape.overall_signal.value}"
                 ],
                 time_window=self._get_current_time_window().value,
@@ -4763,11 +4762,11 @@ class EnhancedBackgroundScanner:
                 minutes_to_trigger=15,
                 headline=f"🔢 {symbol} ABC Scalp - Wave C setup",
                 reasoning=[
-                    f"A-B-C pattern forming",
-                    f"Wave B pullback to 9-EMA",
+                    "A-B-C pattern forming",
+                    "Wave B pullback to 9-EMA",
                     f"RSI: {snapshot.rsi_14:.0f} (healthy)",
                     f"Tape: {tape.overall_signal.value}",
-                    f"Entry: Break above Wave B high"
+                    "Entry: Break above Wave B high"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -4936,7 +4935,7 @@ class EnhancedBackgroundScanner:
                 reasoning=[
                     f"HOD ${snapshot.high_of_day:.2f} pushed +{push_above_open_pct:.1f}% above open",
                     f"Now {dist_below_open_pct:.2f}% back below open ${snapshot.open:.2f}",
-                    f"Lost 9-EMA",
+                    "Lost 9-EMA",
                     f"RVOL: {snapshot.rvol:.1f}x",
                 ],
                 time_window=self._get_current_time_window().value,
@@ -4983,7 +4982,7 @@ class EnhancedBackgroundScanner:
                 reasoning=[
                     f"LOD ${snapshot.low_of_day:.2f} flushed −{flush_below_open_pct:.1f}% below open",
                     f"Now {dist_above_open_pct:.2f}% back above open ${snapshot.open:.2f}",
-                    f"Reclaimed 9-EMA",
+                    "Reclaimed 9-EMA",
                     f"RVOL: {snapshot.rvol:.1f}x",
                 ],
                 time_window=self._get_current_time_window().value,
@@ -5151,7 +5150,7 @@ class EnhancedBackgroundScanner:
                 reasoning=[
                     f"Morning push: +{morning_strength_pct:.1f}% from open",
                     f"Pulled back to VWAP ({snapshot.dist_from_vwap:+.2f}%)",
-                    f"Trend: uptrend, above 9-EMA",
+                    "Trend: uptrend, above 9-EMA",
                     f"RVOL: {snapshot.rvol:.1f}x",
                     f"Exit half at HOD ${snapshot.high_of_day:.2f}, trail rest with 21-EMA",
                 ],
@@ -5210,7 +5209,7 @@ class EnhancedBackgroundScanner:
                     f"Gap up {snapshot.gap_pct:.1f}% holding",
                     f"Above VWAP ({snapshot.dist_from_vwap:+.1f}%)",
                     f"Stop: $0.01 below LOD ${snapshot.low_of_day:.2f}",
-                    f"Exit on first close below 9-EMA",
+                    "Exit on first close below 9-EMA",
                 ],
                 time_window=current_window.value,
                 market_regime=self._market_regime.value,
@@ -5267,7 +5266,7 @@ class EnhancedBackgroundScanner:
                     f"Below 9-EMA + below VWAP ({snapshot.dist_from_vwap:+.1f}%)",
                     f"RSI weak: {snapshot.rsi_14:.0f}",
                     f"Near LOD ${snapshot.low_of_day:.2f} → support break",
-                    f"Exit: new 2-min high or reclaim of 9-EMA",
+                    "Exit: new 2-min high or reclaim of 9-EMA",
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -5347,7 +5346,7 @@ class EnhancedBackgroundScanner:
                 f"Afternoon consolidation: range +{afternoon_extension:.2f} above morning OR",
                 f"At/above HOD ${snapshot.high_of_day:.2f}",
                 f"Above VWAP + 9-EMA, RVOL {snapshot.rvol:.1f}×",
-                f"Exit on blowoff move with high volume",
+                "Exit on blowoff move with high volume",
             ],
             time_window=self._get_current_time_window().value,
             market_regime=self._market_regime.value,
@@ -5463,7 +5462,7 @@ class EnhancedBackgroundScanner:
             # Get today's live data from pushed quotes
             live_quotes = {}
             try:
-                from routers.ib import get_pushed_quotes, get_pushed_positions, is_pusher_connected
+                from routers.ib import get_pushed_quotes, is_pusher_connected
                 if is_pusher_connected():
                     live_quotes = get_pushed_quotes() or {}
             except Exception:
@@ -6362,7 +6361,7 @@ class EnhancedBackgroundScanner:
             risk_reward=abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0,
             headline=f"📊 {symbol} DAILY SQUEEZE ({direction.upper()}) - BB Width {bb_width:.1f}%",
             reasoning=[
-                f"Daily Bollinger Bands INSIDE Keltner Channels = multi-day volatility squeeze",
+                "Daily Bollinger Bands INSIDE Keltner Channels = multi-day volatility squeeze",
                 f"BB Width: {bb_width:.1f}% (tight = explosive breakout imminent)",
                 f"Momentum: {'bullish' if momentum > 0 else 'bearish'} (close {'above' if momentum > 0 else 'below'} 20 SMA)",
                 f"ATR: ${atr:.2f} | Swing trade — hold overnight",
@@ -6432,7 +6431,7 @@ class EnhancedBackgroundScanner:
             risk_reward=round(rr, 1),
             headline=f"📈 {symbol} Trend Continuation - Pullback to rising 20 EMA",
             reasoning=[
-                f"Daily uptrend: Higher highs + higher lows confirmed",
+                "Daily uptrend: Higher highs + higher lows confirmed",
                 f"Price {dist_from_ema:.1f}% from rising 20 EMA (pullback entry zone)",
                 f"EMA slope: rising (current ${ema20:.2f} > 5-bar-ago ${ema20_5ago:.2f})",
                 f"ATR: ${atr:.2f} | R:R {rr:.1f}:1 | Swing hold",
@@ -6503,7 +6502,7 @@ class EnhancedBackgroundScanner:
                 f"Price broke 20-day high ${prev_high:.2f} by {breakout_pct:.1f}%",
                 f"Volume confirmation: {rvol:.1f}x average daily volume",
                 f"Stop below old resistance ${stop:.2f} | Target ${target:.2f}",
-                f"Swing trade — hold for follow-through",
+                "Swing trade — hold for follow-through",
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
@@ -6569,7 +6568,7 @@ class EnhancedBackgroundScanner:
                 f"20-day consolidation base (range: {base_range_pct:.1f}%)",
                 f"Broke above ${base_high:.2f} by {breakout_pct:.1f}%",
                 f"Volume: {rvol:.1f}x average | Measured move target: ${target:.2f}",
-                f"Position trade — multi-week hold expected",
+                "Position trade — multi-week hold expected",
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
         )
@@ -6639,7 +6638,7 @@ class EnhancedBackgroundScanner:
                 f"Daily RSI oversold at {rsi:.0f}",
                 f"Volume accumulating: {vol_increase:.1f}x increase vs prior 10 days",
                 f"Price {dist_from_low:.1f}% from 50-day low ${low_50:.2f}",
-                f"Position trade — weeks to months hold",
+                "Position trade — weeks to months hold",
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
         )
@@ -6694,7 +6693,7 @@ class EnhancedBackgroundScanner:
                 f"Price broke 20-day low ${prev_low:.2f} by {breakdown_pct:.1f}%",
                 f"Volume confirmation: {rvol:.1f}x average",
                 f"Stop above old support ${stop:.2f} | Target ${target:.2f}",
-                f"Short swing trade",
+                "Short swing trade",
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )

@@ -52,8 +52,8 @@ Slack DM or the operator's mobile glance.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

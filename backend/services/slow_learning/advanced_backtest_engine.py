@@ -19,7 +19,7 @@ import logging
 import asyncio
 import random
 import statistics
-from typing import Optional, Dict, Any, List, Tuple, Callable
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 from enum import Enum

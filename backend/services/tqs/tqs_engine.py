@@ -20,11 +20,11 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from services.tqs.setup_quality import SetupQualityService, SetupQualityScore, get_setup_quality_service
-from services.tqs.technical_quality import TechnicalQualityService, TechnicalQualityScore, get_technical_quality_service
-from services.tqs.fundamental_quality import FundamentalQualityService, FundamentalQualityScore, get_fundamental_quality_service
-from services.tqs.context_quality import ContextQualityService, ContextQualityScore, get_context_quality_service
-from services.tqs.execution_quality import ExecutionQualityService, ExecutionQualityScore, get_execution_quality_service
+from services.tqs.setup_quality import SetupQualityScore, get_setup_quality_service
+from services.tqs.technical_quality import TechnicalQualityScore, get_technical_quality_service
+from services.tqs.fundamental_quality import FundamentalQualityScore, get_fundamental_quality_service
+from services.tqs.context_quality import ContextQualityScore, get_context_quality_service
+from services.tqs.execution_quality import ExecutionQualityScore, get_execution_quality_service
 
 logger = logging.getLogger(__name__)
 

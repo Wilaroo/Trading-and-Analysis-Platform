@@ -487,7 +487,7 @@ def _extract_exit_worker(args):
     """Phase 4 worker: extract base + exit features for one symbol."""
     symbol, bars, exit_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
-    from services.ai_modules.exit_timing_model import compute_exit_features, compute_exit_target, EXIT_FEATURE_NAMES
+    from services.ai_modules.exit_timing_model import compute_exit_features, EXIT_FEATURE_NAMES
     from numpy.lib.stride_tricks import sliding_window_view
 
     try:
@@ -578,7 +578,7 @@ def _extract_risk_worker(args):
     """Phase 6 worker: extract base + risk features for one symbol."""
     symbol, bars, risk_configs = args
     from services.ai_modules.timeseries_features import TimeSeriesFeatureEngineer
-    from services.ai_modules.risk_of_ruin_model import compute_risk_features, compute_risk_target, RISK_FEATURE_NAMES
+    from services.ai_modules.risk_of_ruin_model import compute_risk_features, RISK_FEATURE_NAMES
     from numpy.lib.stride_tricks import sliding_window_view
 
     try:
@@ -1195,7 +1195,7 @@ async def stream_load_and_extract(
 
 def count_total_models() -> int:
     """Count total models that will be trained."""
-    from services.ai_modules.setup_training_config import get_all_profile_count, SETUP_TRAINING_PROFILES
+    from services.ai_modules.setup_training_config import SETUP_TRAINING_PROFILES
     generic = len(BAR_SIZE_CONFIGS)  # 7
     setup_long = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if not k.startswith("SHORT_"))  # 17
     setup_short = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if k.startswith("SHORT_"))  # 17
@@ -2919,9 +2919,7 @@ async def run_training_pipeline(
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
             from services.ai_modules.feature_augmentors import (
-                augment_features as _ens_augment_features,
                 augmented_feature_names as _ens_aug_names,
-                ffd_enabled as _ens_ffd_on,
             )
 
             feature_engineer = get_feature_engineer()

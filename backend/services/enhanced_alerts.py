@@ -102,13 +102,13 @@ def generate_trigger_reason(
         level = features.get("breakdown_level", features.get("support_1", 0))
         reasons.append(f"broke below support at ${level:.2f}")
     elif alert_type == AlertType.PULLBACK:
-        reasons.append(f"pulled back to key support while maintaining uptrend")
+        reasons.append("pulled back to key support while maintaining uptrend")
     elif alert_type == AlertType.REVERSAL:
-        reasons.append(f"showing reversal signals at extreme levels")
+        reasons.append("showing reversal signals at extreme levels")
     elif alert_type == AlertType.MOMENTUM:
-        reasons.append(f"momentum surge detected")
+        reasons.append("momentum surge detected")
     elif alert_type == AlertType.SQUEEZE:
-        reasons.append(f"short squeeze potential with high short interest")
+        reasons.append("short squeeze potential with high short interest")
     
     # Supporting factors
     rvol = features.get("rvol", 1.0)
@@ -187,12 +187,12 @@ def generate_natural_language_summary(
     summary += f"(Overall Score: {overall_score}/100) to "
     
     if direction == "LONG":
-        summary += f"move higher towards the target. "
+        summary += "move higher towards the target. "
     else:
-        summary += f"move lower towards the target. "
+        summary += "move lower towards the target. "
     
     # Trade details
-    summary += f"\n\n**Trade Plan:**\n"
+    summary += "\n\n**Trade Plan:**\n"
     summary += f"• Direction: {direction}\n"
     summary += f"• Entry: ${entry:.2f}\n"
     summary += f"• Stop Loss: ${stop:.2f}\n"
@@ -202,7 +202,7 @@ def generate_natural_language_summary(
     # Risk context
     risk_per_share = abs(entry - stop)
     reward_per_share = abs(target - entry)
-    summary += f"\n**Risk Analysis:**\n"
+    summary += "\n**Risk Analysis:**\n"
     summary += f"• Risk per share: ${risk_per_share:.2f}\n"
     summary += f"• Reward per share: ${reward_per_share:.2f}\n"
     
@@ -211,7 +211,7 @@ def generate_natural_language_summary(
     rsi = features.get("rsi", 50)
     trend = features.get("trend", "NEUTRAL")
     
-    summary += f"\n**Supporting Factors:**\n"
+    summary += "\n**Supporting Factors:**\n"
     summary += f"• Relative Volume: {rvol:.1f}x {'(elevated)' if rvol >= 1.5 else '(normal)'}\n"
     summary += f"• RSI: {rsi:.0f} {'(overbought)' if rsi > 70 else '(oversold)' if rsi < 30 else '(neutral)'}\n"
     summary += f"• Trend: {trend}\n"

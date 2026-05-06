@@ -4,7 +4,6 @@ Extracted from server.py for modularity.
 """
 from fastapi import APIRouter
 from datetime import datetime, timezone
-from typing import Optional
 import os
 import asyncio
 import logging

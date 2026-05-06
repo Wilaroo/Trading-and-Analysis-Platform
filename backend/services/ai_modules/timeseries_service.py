@@ -19,7 +19,7 @@ import os
 import base64
 import io
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -2151,7 +2151,7 @@ class TimeSeriesAIService:
         Checks MongoDB for trained models if not found in memory cache.
         """
         from services.ai_modules.setup_training_config import (
-            get_setup_profiles, get_model_name, get_all_profile_count
+            get_setup_profiles, get_model_name
         )
         
         models = {}
@@ -2280,7 +2280,7 @@ class TimeSeriesAIService:
             effective_type = "VWAP"
         
         from services.ai_modules.setup_training_config import (
-            get_setup_profiles, get_setup_profile, get_model_name
+            get_setup_profiles, get_setup_profile
         )
         
         if bar_size is None:
@@ -2761,7 +2761,6 @@ class TimeSeriesAIService:
         col = self._db["setup_type_models"]
         
         # Serialize model using XGBoost native JSON format
-        import xgboost as xgb
         buffer = io.BytesIO()
         model._model.save_model(buffer)
         model_bytes = buffer.getvalue()

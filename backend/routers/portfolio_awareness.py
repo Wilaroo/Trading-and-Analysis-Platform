@@ -4,7 +4,7 @@ Portfolio Awareness Router - API endpoints for proactive portfolio suggestions
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import Optional
 import logging
 
 from services.portfolio_awareness_service import get_portfolio_awareness_service, PortfolioAwarenessService

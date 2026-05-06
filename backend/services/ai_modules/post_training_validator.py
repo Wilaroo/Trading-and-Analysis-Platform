@@ -69,7 +69,7 @@ PROMOTION_CRITERIA = {
 def _build_strategy_config(setup_type: str, bar_size: str = None):
     """Build a StrategyConfig for a given setup type."""
     from services.slow_learning.advanced_backtest_engine import (
-        StrategyConfig, BacktestFilters
+        StrategyConfig
     )
     return StrategyConfig(
         name=f"{setup_type}_validation",
@@ -878,7 +878,7 @@ async def run_batch_validation(
     start_time = datetime.now(timezone.utc)
     logger.info(f"[VALIDATE-BATCH] Starting {batch_id} for {len(trained_setup_types)} setups")
 
-    from services.slow_learning.advanced_backtest_engine import StrategyConfig, BacktestFilters
+    from services.slow_learning.advanced_backtest_engine import StrategyConfig
 
     # Get validation symbols from the most common bar size
     symbols = _get_validation_symbols(db, "1 day", limit=VALIDATION_CONFIG["num_symbols"])

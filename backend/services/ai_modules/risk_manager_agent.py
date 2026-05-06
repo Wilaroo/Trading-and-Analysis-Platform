@@ -14,7 +14,7 @@ Factors assessed:
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional, List
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field
 

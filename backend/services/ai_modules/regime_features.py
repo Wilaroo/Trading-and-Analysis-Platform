@@ -38,8 +38,7 @@ Usage:
 
 import logging
 import numpy as np
-from typing import Dict, Optional, List
-from datetime import datetime, timezone
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, Optional
 
 if TYPE_CHECKING:
-    from services.trading_bot_service import BotTrade, TradeDirection
+    from services.trading_bot_service import BotTrade
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,6 @@ class StopManager:
         re-check (every 60s per trade) so stale liquidity reads get
         refreshed even when price hasn't extended to a fresh high/low.
         """
-        from services.trading_bot_service import TradeDirection
         targets_hit = trade.scale_out_config.get('targets_hit', [])
         trailing_config = trade.trailing_stop_config
         current_mode = trailing_config.get('mode', 'original')

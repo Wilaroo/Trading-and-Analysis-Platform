@@ -67,7 +67,7 @@ async def test_ollama_connection():
                             "models": models,
                             "method": "websocket_proxy"
                         }
-    except Exception as e:
+    except Exception:
         pass  # Fall through to direct connection check
     
     # Fallback: check direct connection via ngrok/tunnel (old method)

@@ -11,10 +11,9 @@ Data sources:
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from dataclasses import asdict
 
 from models.learning_models import (
     TradeContext, 

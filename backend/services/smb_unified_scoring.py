@@ -14,10 +14,10 @@ This module bridges the existing scoring system with SMB Capital methodology,
 maintaining backwards compatibility while adding professional trading features.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass, field
+from typing import Dict, List
 from enum import Enum
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)

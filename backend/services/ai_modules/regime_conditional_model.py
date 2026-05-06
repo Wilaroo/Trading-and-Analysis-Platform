@@ -28,8 +28,7 @@ Architecture:
 
 import logging
 import numpy as np
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 

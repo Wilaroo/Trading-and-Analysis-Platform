@@ -6,8 +6,8 @@ Provides comprehensive stock analysis with actual real-time data
 import logging
 import os
 import requests
-from typing import Dict, Optional, List, Any
-from datetime import datetime, timezone, timedelta
+from typing import Dict, Optional, Any
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from dotenv import load_dotenv
 

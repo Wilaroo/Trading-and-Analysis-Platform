@@ -3,10 +3,9 @@ Catalyst Scoring System
 Evaluates earnings, news, geopolitical events, technical catalysts, and sentiment
 Uses SMB-style -10 to +10 scoring system
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, List
 from enum import Enum
-import math
 
 class CatalystType(str, Enum):
     EARNINGS = "EARNINGS"

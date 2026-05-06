@@ -2,11 +2,10 @@
 SMB Trading Journal Router
 Exposes Playbook, DRC, and Game Plan APIs
 """
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List, Dict
+from fastapi import APIRouter, HTTPException
+from typing import Optional, List
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
-import os
+from pydantic import BaseModel
 import asyncio
 
 router = APIRouter(prefix="/api/journal", tags=["Trading Journal"])
@@ -803,7 +802,7 @@ async def generate_playbooks_from_bot_strategies():
                 },
                 
                 "trade_management": {
-                    "entry_trigger": f"Scanner alert + confidence gate GO",
+                    "entry_trigger": "Scanner alert + confidence gate GO",
                     "trail_pct": f"{trail_pct*100:.1f}%",
                     "scaling_rules": f"Scale out: {scale_rules}",
                     "close_at_eod": close_eod,
@@ -853,7 +852,7 @@ def _generate_if_thens(setup_type: str, direction: str, timeframe: str) -> list:
         ]
     elif "gap" in st and "go" in st:
         base = [
-            {"condition": "IF stock gaps up >2% and holds above pre-market low", "action": f"THEN enter long on first pullback to VWAP or 9EMA", "notes": "Gap must be into an uptrend (above 20 SMA)"},
+            {"condition": "IF stock gaps up >2% and holds above pre-market low", "action": "THEN enter long on first pullback to VWAP or 9EMA", "notes": "Gap must be into an uptrend (above 20 SMA)"},
             {"condition": "IF gap fills more than 50%", "action": "THEN exit — gap fill = failed thesis", "notes": "The gap should hold for this to work"},
             {"condition": "IF it makes a new high of day after entry", "action": "THEN add to position, trail stop to low of entry candle", "notes": "Strength confirmation = add size"},
         ]
@@ -865,7 +864,7 @@ def _generate_if_thens(setup_type: str, direction: str, timeframe: str) -> list:
         ]
     elif "vwap" in st and "bounce" in st:
         base = [
-            {"condition": f"IF stock pulls back to VWAP and shows support (hammer, doji)", "action": f"THEN enter {direction} with stop below VWAP by 1 ATR", "notes": "VWAP must be rising (uptrend day)"},
+            {"condition": "IF stock pulls back to VWAP and shows support (hammer, doji)", "action": f"THEN enter {direction} with stop below VWAP by 1 ATR", "notes": "VWAP must be rising (uptrend day)"},
             {"condition": "IF it breaks through VWAP and doesn't reclaim in 5 min", "action": "THEN exit — VWAP support broken", "notes": "Quick stop on VWAP failures"},
             {"condition": "IF it bounces and clears HOD", "action": "THEN hold runner, trail at 9EMA", "notes": "VWAP bounce + new high = strong trend"},
         ]

@@ -11,12 +11,10 @@ Features:
 - Strategy-specific filtering (Rubber Band, Breakout, etc.)
 """
 import logging
-import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-import math
 
 logger = logging.getLogger(__name__)
 

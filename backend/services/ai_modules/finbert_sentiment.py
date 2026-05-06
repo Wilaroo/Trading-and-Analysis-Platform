@@ -35,7 +35,7 @@ import logging
 import time
 import asyncio
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)

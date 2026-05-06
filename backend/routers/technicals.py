@@ -3,7 +3,7 @@ Real-Time Technical Analysis API Router
 Provides live technical indicators calculated from Alpaca bar data
 """
 from fastapi import APIRouter, HTTPException
-from typing import Optional, List
+from typing import List
 from datetime import datetime, timezone
 import logging
 
@@ -161,7 +161,7 @@ async def check_setup_conditions(symbol: str):
                 "trigger": f"Bounce off VWAP (${snapshot.vwap})",
                 "reasons": [
                     f"Near VWAP ({snapshot.dist_from_vwap:+.1f}%)",
-                    f"Uptrend intact",
+                    "Uptrend intact",
                     f"RVOL: {snapshot.rvol:.1f}x"
                 ]
             })
@@ -188,7 +188,7 @@ async def check_setup_conditions(symbol: str):
                 "trigger": "Break of opening range high",
                 "reasons": [
                     f"Gapped up {snapshot.gap_pct:.1f}%",
-                    f"Holding gap",
+                    "Holding gap",
                     f"Strong volume ({snapshot.rvol:.1f}x)"
                 ]
             })

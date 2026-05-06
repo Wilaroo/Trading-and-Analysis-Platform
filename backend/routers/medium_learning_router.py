@@ -5,7 +5,7 @@ Endpoints for daily analysis, calibration, and performance tracking.
 """
 
 from fastapi import APIRouter, Query
-from typing import Optional, Dict, Any, List
+from typing import Optional
 import logging
 
 from services.medium_learning.calibration_service import get_calibration_service

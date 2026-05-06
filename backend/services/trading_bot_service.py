@@ -16,13 +16,10 @@ Features:
 import os
 import asyncio
 import logging
-import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-import uuid
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -1511,7 +1508,6 @@ class TradingBotService:
     
     def _get_current_session(self) -> str:
         """Get current trading session (for AI consultation context)"""
-        from datetime import time as dt_time
         now_utc = datetime.now(timezone.utc)
         # Convert to ET (rough approximation)
         et_hour = (now_utc.hour - 5) % 24
@@ -1905,7 +1901,6 @@ class TradingBotService:
     def is_within_trading_hours(self) -> bool:
         """Check if current time is within allowed trading hours (Eastern Time)"""
         try:
-            from datetime import timezone
             import pytz
             
             et_tz = pytz.timezone('America/New_York')

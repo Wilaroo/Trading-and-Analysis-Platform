@@ -11,7 +11,7 @@ Provides endpoints for:
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 import logging
 import asyncio
 

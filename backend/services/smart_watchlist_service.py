@@ -12,14 +12,12 @@ Features:
 - Tier 1 scan priority for all watchlist items
 """
 
-from datetime import datetime, timezone, timedelta, time
-from typing import Dict, List, Optional, Set
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-from pymongo import MongoClient
 from pymongo.collection import Collection
-import os
 
 logger = logging.getLogger(__name__)
 

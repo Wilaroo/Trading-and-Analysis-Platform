@@ -22,7 +22,7 @@ Prediction: Returns direction + win probability, replaces CNN in Confidence Gate
 
 import logging
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

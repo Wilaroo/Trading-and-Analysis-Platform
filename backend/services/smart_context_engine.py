@@ -591,7 +591,7 @@ class SmartContextEngine:
             # POSITIONS (IB first, then Alpaca fallback)
             # Use QueryPreprocessor to inject exact data and reduce hallucinations
             if sources["positions"]:
-                print(f"[SmartContext] Getting positions...")
+                print("[SmartContext] Getting positions...")
                 positions_str, positions_data = await self._get_positions_with_data(services.get("alpaca"))
                 print(f"[SmartContext] Positions result: str={len(positions_str) if positions_str else 0} chars, data={len(positions_data) if positions_data else 0} items")
                 if positions_str and positions_data:
@@ -609,7 +609,7 @@ class SmartContextEngine:
                     context_parts.append("")
                     context_data.positions = positions_data
             else:
-                print(f"[SmartContext] Positions source not enabled")
+                print("[SmartContext] Positions source not enabled")
             
             # PORTFOLIO RISK
             if sources["portfolio_risk"] and services.get("alpaca"):
@@ -1063,7 +1063,7 @@ class SmartContextEngine:
         Returns warnings and data for validation.
         """
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime
             
             warnings = []
             earnings_data = {}

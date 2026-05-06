@@ -9,8 +9,8 @@ Comprehensive stock scoring system combining:
 - Historical Success Probability
 - Knowledge Base Integration (learned strategies)
 """
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, List, Tuple
+from datetime import datetime, timezone
+from typing import Optional, Dict, List
 from enum import Enum
 import math
 import logging

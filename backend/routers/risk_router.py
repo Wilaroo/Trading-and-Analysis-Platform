@@ -10,7 +10,7 @@ Provides API access to:
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
 from services.circuit_breaker import get_circuit_breaker_service, CircuitBreakerType
 from services.position_sizer import get_position_sizer_service

@@ -20,7 +20,7 @@ Supports multiple LLM providers:
 import os
 import logging
 import asyncio
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import dataclass, field
@@ -1263,24 +1263,24 @@ DECISION: {score_result['trade_or_skip']}
             # Build detailed context from alert data (dict format from API)
             context_lines = [
                 f"**📊 SCANNER ALERT DETAILS FOR {alert.get('symbol')}:**",
-                f"",
+                "",
                 f"**Setup Type:** {alert.get('setup_type')} ({alert.get('strategy_name', 'N/A')})",
                 f"**Direction:** {alert.get('direction', 'long').upper()}",
                 f"**Priority:** {alert.get('priority', 'medium').upper()}",
-                f"",
-                f"**Price Levels:**",
+                "",
+                "**Price Levels:**",
                 f"- Current Price: ${alert.get('current_price', 0):.2f}",
                 f"- Entry/Trigger: ${alert.get('trigger_price', 0):.2f}",
                 f"- Stop Loss: ${alert.get('stop_loss', 0):.2f}",
                 f"- Target: ${alert.get('target', 0):.2f}",
                 f"- Risk/Reward: {alert.get('risk_reward', 0):.1f}:1",
-                f"",
-                f"**Probabilities:**",
+                "",
+                "**Probabilities:**",
                 f"- Trigger Probability: {alert.get('trigger_probability', 0):.0%}",
                 f"- Win Probability: {alert.get('win_probability', 0):.0%}",
                 f"- Strategy Historical Win Rate: {alert.get('strategy_win_rate', 0):.0%}",
-                f"",
-                f"**🎯 REASONING (Why this alert was generated):**"
+                "",
+                "**🎯 REASONING (Why this alert was generated):**"
             ]
             
             # Add each reasoning point
@@ -1292,8 +1292,8 @@ DECISION: {score_result['trade_or_skip']}
                 context_lines.append("- No specific reasoning provided")
             
             context_lines.extend([
-                f"",
-                f"**Market Context:**",
+                "",
+                "**Market Context:**",
                 f"- Time Window: {alert.get('time_window', 'N/A')}",
                 f"- Market Regime: {alert.get('market_regime', 'N/A')}",
                 f"- Volatility: {alert.get('volatility_regime', 'N/A')}",
@@ -1309,8 +1309,8 @@ DECISION: {score_result['trade_or_skip']}
                 ev_report = ev_service.get_ev_report(setup_type)
                 if ev_report and ev_report.get('total_trades', 0) >= 5:
                     context_lines.extend([
-                        f"",
-                        f"**📈 EXPECTED VALUE (SMB-Style Edge Assessment):**",
+                        "",
+                        "**📈 EXPECTED VALUE (SMB-Style Edge Assessment):**",
                         f"- Historical Win Rate: {ev_report.get('win_rate', 0):.1%}",
                         f"- Average Win: {ev_report.get('avg_win_r', 0):.2f}R",
                         f"- Average Loss: {ev_report.get('avg_loss_r', 1):.2f}R",
@@ -1324,9 +1324,9 @@ DECISION: {score_result['trade_or_skip']}
                 logger.debug(f"Could not fetch EV data: {e}")
             
             context_lines.extend([
-                f"",
+                "",
                 f"**IMPORTANT: Use this SPECIFIC data to explain the reasoning for the {alert.get('symbol')} trade alert.**",
-                f"Reference the actual reasoning points and EV statistics above. Do NOT give generic advice."
+                "Reference the actual reasoning points and EV statistics above. Do NOT give generic advice."
             ])
             
             result = "\n".join(context_lines)
@@ -2042,7 +2042,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             # Try IB pushed positions first
             try:
                 from routers.ib import get_pushed_positions, is_pusher_connected
-                logger.info(f"[Context] Checking IB pusher connection...")
+                logger.info("[Context] Checking IB pusher connection...")
                 is_connected = is_pusher_connected()
                 logger.info(f"[Context] IB pusher connected: {is_connected}")
                 if is_connected:
@@ -2157,7 +2157,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         # Check if Ollama should be skipped due to recent failures
         skip_ollama = False
         if self._ollama_skip_until and datetime.now(timezone.utc) < self._ollama_skip_until:
-            logger.info(f"⏭️ Skipping Ollama (cooling down)")
+            logger.info("⏭️ Skipping Ollama (cooling down)")
             skip_ollama = True
         
         # PRIORITY 1: Check for HTTP Ollama Proxy (most reliable, no WebSocket issues)
@@ -2372,7 +2372,7 @@ REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
                         logger.info(f"✅ Ollama response OK ({len(content)} chars) - FREE")
                         return content
                     else:
-                        logger.warning(f"⚠️ Ollama returned empty content")
+                        logger.warning("⚠️ Ollama returned empty content")
                         
             except Exception as e:
                 self._ollama_failures += 1
@@ -2381,7 +2381,7 @@ REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
                 # After 3 failures, skip Ollama for 5 minutes
                 if self._ollama_failures >= 3:
                     self._ollama_skip_until = datetime.now(timezone.utc) + timedelta(minutes=5)
-                    logger.warning(f"⏸️ Ollama disabled for 5 minutes")
+                    logger.warning("⏸️ Ollama disabled for 5 minutes")
         
         # FALLBACK: Use cloud AI (Emergent/GPT-4o) - ONLY when Ollama unavailable
         if LLMProvider.EMERGENT in self.llm_clients:
@@ -2611,7 +2611,7 @@ REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
                         
                         # Add disclaimer for remaining issues
                         if any(e.get('severity') in ['high', 'medium'] for e in validation_result.get('issues', [])):
-                            response_text += f"\n\n⚠️ *Note: Some information may need verification.*"
+                            response_text += "\n\n⚠️ *Note: Some information may need verification.*"
                     
                     # Add regeneration info to validation result
                     if validation_result:

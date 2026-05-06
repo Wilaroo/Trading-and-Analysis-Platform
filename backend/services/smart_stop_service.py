@@ -27,7 +27,7 @@ ANALYSIS FACTORS:
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timezone, timedelta
@@ -661,7 +661,7 @@ class SmartStopService:
         
         return {
             'stop_price': stop,
-            'stop_reasoning': f"Anti-hunt: Beyond obvious levels with 1.5x ATR buffer",
+            'stop_reasoning': "Anti-hunt: Beyond obvious levels with 1.5x ATR buffer",
             'buffer_applied': buffer,
             'obvious_zones_avoided': obvious_zones,
             'hunt_risk': 'LOW'

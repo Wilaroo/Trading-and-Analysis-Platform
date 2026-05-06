@@ -5,8 +5,7 @@ Handles scheduled tasks like pre-market briefing generation.
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Callable, Any
-import threading
+from typing import Optional, Dict, Callable
 
 logger = logging.getLogger(__name__)
 

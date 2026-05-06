@@ -11,10 +11,9 @@ This module provides the core SMB Capital trading methodology integration:
 Integrates with existing enhanced_scanner.py and ev_tracking_service.py
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, timezone
+from typing import Dict, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)

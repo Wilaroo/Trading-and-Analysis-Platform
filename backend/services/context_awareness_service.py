@@ -12,8 +12,8 @@ This service aggregates context from multiple sources and provides
 tailored recommendations based on the current trading environment.
 """
 import logging
-from datetime import datetime, timezone, time as dt_time
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+from typing import Dict, Optional, List
 from dataclasses import dataclass, field
 from enum import Enum
 

@@ -14,7 +14,7 @@ Endpoints:
 import logging
 import os
 from typing import Optional
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from services.sentcom_service import get_sentcom_service, SentComService

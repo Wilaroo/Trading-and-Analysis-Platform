@@ -217,7 +217,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
     """
     from services.enhanced_alerts import (
         create_enhanced_alert, get_alert_manager,
-        AlertType, determine_timeframe
+        AlertType
     )
     from services.scoring_engine import get_scoring_engine
     from services.feature_engine import get_feature_engine

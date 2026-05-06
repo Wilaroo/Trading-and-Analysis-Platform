@@ -12,7 +12,7 @@ The goal is to NEVER block trading due to a non-critical service failure.
 
 import logging
 from typing import Optional, Dict, Any, List, Callable
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
 import asyncio

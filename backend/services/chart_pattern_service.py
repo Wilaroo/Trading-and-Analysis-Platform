@@ -5,8 +5,8 @@ Integrates with scanner and AI for pattern-based trade alerts.
 """
 import logging
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from enum import Enum
 import numpy as np
 

@@ -6,7 +6,7 @@ Endpoints for controlling and monitoring the dynamic risk engine.
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 import logging
 
 from services.dynamic_risk_engine import get_dynamic_risk_engine

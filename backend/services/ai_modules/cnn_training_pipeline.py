@@ -10,14 +10,10 @@ Pipeline stages:
 
 Integrates with the existing worker.py job queue system.
 """
-import os
-import io
 import logging
 import time
-from typing import Dict, List, Optional, Callable, Awaitable
-from datetime import datetime, timezone
+from typing import Dict, List, Optional, Callable
 
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +46,12 @@ async def run_cnn_training(
     Returns:
         Training result dict with metrics per model
     """
-    import torch
     from services.ai_modules.chart_pattern_cnn import (
-        build_cnn_model, save_model_to_db, get_device, get_gpu_info,
-        CNN_WINDOW_SIZES, DEFAULT_WINDOW_SIZE, SETUP_CLASSES, CLASS_TO_IDX
+        get_device, get_gpu_info,
+        CNN_WINDOW_SIZES, DEFAULT_WINDOW_SIZE
     )
     from services.ai_modules.chart_image_generator import (
-        generate_training_images_from_bars, image_bytes_to_tensor
+        generate_training_images_from_bars
     )
     from services.ai_modules.setup_training_config import SETUP_TRAINING_PROFILES
 
@@ -210,8 +205,7 @@ def _train_single_model(
     from torch.utils.data import Dataset, DataLoader, Subset
     from services.ai_modules.chart_pattern_cnn import (
         build_cnn_model, save_model_to_db, load_model_from_db,
-        CLASS_TO_IDX,
-        CNN_IMAGE_SIZE
+        CLASS_TO_IDX
     )
     from services.ai_modules.chart_image_generator import image_bytes_to_tensor
 

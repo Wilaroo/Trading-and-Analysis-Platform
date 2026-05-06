@@ -35,7 +35,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 

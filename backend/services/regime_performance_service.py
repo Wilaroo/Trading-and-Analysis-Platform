@@ -11,7 +11,7 @@ Data stored in MongoDB for historical analysis.
 
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)

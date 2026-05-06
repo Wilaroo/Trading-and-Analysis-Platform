@@ -503,7 +503,7 @@ class MarketContextService:
     def _generate_simulated_history(self, symbol: str, days: int = 30) -> List[Dict]:
         """Generate simulated historical data for analysis when real data unavailable"""
         import random
-        from datetime import datetime, timedelta
+        from datetime import datetime
         
         base_prices = {
             "SPY": 475, "QQQ": 415, "DIA": 385, "IWM": 198, "VIX": 15,

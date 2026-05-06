@@ -6,15 +6,12 @@ import io
 import base64
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from bson import ObjectId
 
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.patches as mpatches
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import mplfinance as mpf
 import pandas as pd
 import numpy as np

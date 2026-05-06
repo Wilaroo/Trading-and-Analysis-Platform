@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from services.ib_direct_service import get_ib_direct_service
 

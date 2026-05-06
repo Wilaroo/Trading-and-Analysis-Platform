@@ -4,9 +4,8 @@ Stores handle configuration in MongoDB and provides sentiment analysis on pasted
 """
 import os
 import logging
-from typing import Optional, Dict, List, Any
+from typing import Dict, List
 from datetime import datetime, timezone
-from pymongo import MongoClient
 
 logger = logging.getLogger(__name__)
 

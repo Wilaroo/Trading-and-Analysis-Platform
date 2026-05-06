@@ -3,7 +3,6 @@ Sector Analysis API Router
 Provides endpoints for sector rotation and industry strength data.
 """
 from fastapi import APIRouter, HTTPException
-from typing import Optional
 import logging
 
 from services.sector_analysis_service import get_sector_analysis_service

@@ -16,12 +16,10 @@ XGBoost with native CUDA support unlocks the Blackwell GB10 GPU.
 """
 
 import logging
-import json
 import base64
 import os
-import io
 import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 import xgboost as xgb

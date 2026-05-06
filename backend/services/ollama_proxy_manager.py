@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 from typing import Dict, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)

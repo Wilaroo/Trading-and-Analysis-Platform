@@ -3981,7 +3981,7 @@ async def simulate_closed_trade(request: SimulateClosedRequest):
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
     import random
-    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG, TradeTimeframe
+    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG, TradeTimeframe
     symbol = request.symbol.upper()
     direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
     strategy_cfg = STRATEGY_CONFIG.get(request.setup_type, DEFAULT_STRATEGY_CONFIG)

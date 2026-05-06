@@ -12,10 +12,9 @@ Uses APScheduler for background job scheduling.
 import logging
 import asyncio
 from typing import Optional, Dict, Any, Callable
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from enum import Enum
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -705,7 +704,6 @@ class TradingScheduler:
             except Exception:
                 pass
 
-            import subprocess
             import sys as _sys
             from pathlib import Path
             script = Path(__file__).resolve().parent.parent.parent / "backend" / "scripts" / "revalidate_all.py"

@@ -16,7 +16,7 @@ from services.stock_data import get_stock_service
 from services.alpaca_service import get_alpaca_service
 from services.news_service import get_news_service
 from services.support_resistance_service import get_sr_service
-from services.order_queue_service import get_order_queue_service, init_order_queue_service, OrderStatus
+from services.order_queue_service import get_order_queue_service, init_order_queue_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,6 @@ def get_pushed_ib_data() -> dict:
 # NOW BACKED BY MONGODB for persistence
 
 import uuid
-from enum import Enum
 
 # Legacy in-memory fallback (kept for backwards compatibility during migration)
 _order_queue_legacy = {
@@ -371,7 +370,6 @@ async def get_connection_status():
 @router.get("/pusher-setup")
 def get_pusher_setup_info():
     """Get setup info for the IB Data Pusher script"""
-    import os
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
@@ -3411,7 +3409,6 @@ async def get_comprehensive_analysis(symbol: str):
     """
     from datetime import datetime, timezone
     from pymongo import MongoClient
-    import os
     import random
     
     symbol = symbol.upper()
@@ -5020,8 +5017,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     try:
         from services.scoring_engine import get_scoring_engine
         from services.enhanced_alerts import (
-            create_enhanced_alert, get_alert_manager,
-            AlertType, AlertTimeframe, determine_timeframe
+            get_alert_manager,
+            AlertType
         )
         
         feature_engine = get_feature_engine()
@@ -5737,7 +5734,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
     """
     from services.enhanced_alerts import (
         create_enhanced_alert, get_alert_manager,
-        AlertType, determine_timeframe
+        AlertType
     )
     from services.scoring_engine import get_scoring_engine
     
@@ -5882,7 +5879,6 @@ def get_script(script_name: str):
     Serve local scripts for auto-update functionality.
     This allows StartTrading.bat to download the latest scripts from the cloud.
     """
-    import os
     from fastapi.responses import PlainTextResponse
     
     # Only allow specific scripts

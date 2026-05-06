@@ -21,7 +21,7 @@ Collections Managed:
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from pymongo import ASCENDING, DESCENDING, IndexModel
 from pymongo.database import Database

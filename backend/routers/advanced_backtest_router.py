@@ -1067,7 +1067,7 @@ def get_all_strategies():
     These are the full 77+ strategies available for backtesting.
     """
     try:
-        from data.strategies_data import ALL_STRATEGIES_DATA, TRADING_STRATEGIES_DATA
+        from data.strategies_data import ALL_STRATEGIES_DATA
         
         # Format strategies for backtest use
         strategies = []

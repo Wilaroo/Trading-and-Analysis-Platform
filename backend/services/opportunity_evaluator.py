@@ -27,7 +27,7 @@ class OpportunityEvaluator:
         """Evaluate an alert and create a trade if it meets criteria"""
         from services.trading_bot_service import (
             BotMode, BotTrade, TradeDirection, TradeStatus, TradeTimeframe,
-            TradeExplanation, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG,
+            STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG,
         )
 
         try:

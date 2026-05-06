@@ -2,12 +2,11 @@
 Predictive Scanner API Router
 Endpoints for real-time trade setup scanning and alerts
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 

@@ -11,8 +11,7 @@ Used to identify execution patterns and areas for improvement.
 
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone, timedelta
-from dataclasses import asdict
+from datetime import datetime, timezone
 
 from models.learning_models import ExecutionMetrics
 

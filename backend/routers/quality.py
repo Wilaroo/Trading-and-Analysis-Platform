@@ -5,7 +5,7 @@ Endpoints for Earnings Quality Factor analysis and scanning.
 Based on Quantpedia research: https://quantpedia.com/strategies/earnings-quality-factor/
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 

@@ -15,7 +15,6 @@ Each playbook entry documents a repeatable trade setup.
 from datetime import datetime, timezone
 from typing import Optional, Dict, List
 from bson import ObjectId
-import os
 
 
 class PlaybookService:

@@ -12,10 +12,9 @@ Data Sources (100% IB — zero external API dependencies):
 - Real-time quotes: IB Pusher (via routers/ib.py)
 """
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
-import math
 import asyncio
 
 logger = logging.getLogger(__name__)

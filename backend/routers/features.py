@@ -2,8 +2,8 @@
 Feature Engine API Router
 Endpoints for calculating technical indicators and features
 """
-from fastapi import APIRouter, HTTPException, Query
-from typing import List, Optional, Dict
+from fastapi import APIRouter
+from typing import List, Optional
 from pydantic import BaseModel
 
 from services.feature_engine import get_feature_engine

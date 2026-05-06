@@ -12,7 +12,6 @@ Used by the AI Assistant to give contextually aware coaching.
 
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 

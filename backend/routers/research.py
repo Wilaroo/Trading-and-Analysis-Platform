@@ -4,7 +4,7 @@ Endpoints for AI assistant web research capabilities
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel, Field
 from services.web_research_service import get_web_research_service
 import logging

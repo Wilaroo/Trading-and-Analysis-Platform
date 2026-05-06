@@ -3,8 +3,6 @@ Notification Service - Handles earnings notifications and alerts
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
-from pymongo import MongoClient
-import os
 
 class NotificationService:
     """Service for managing earnings notifications and alerts"""

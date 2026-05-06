@@ -9,7 +9,6 @@ Model: all-MiniLM-L6-v2 (fast, good quality, 384 dimensions)
 
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
 import hashlib
 
 logger = logging.getLogger(__name__)

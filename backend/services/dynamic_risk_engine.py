@@ -10,10 +10,9 @@ Intelligent position sizing based on multiple factors:
 Outputs a position size multiplier (0.25x - 2.0x by default)
 """
 
-import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from enum import Enum
 from dataclasses import dataclass, field
 import statistics

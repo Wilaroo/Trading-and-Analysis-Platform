@@ -15,7 +15,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
 import json
 
 logger = logging.getLogger(__name__)

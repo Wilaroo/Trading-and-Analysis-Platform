@@ -137,7 +137,7 @@ async def get_watchlist_context(db=None):
         
         if not symbols:
             symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "AMD"]
-    except Exception as e:
+    except Exception:
         symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "AMD"]
     
     results = await market_context_service.analyze_batch(symbols)
@@ -245,7 +245,7 @@ def get_strategies_for_context(context: str):
     }
     
     if context not in strategies:
-        raise HTTPException(400, f"Invalid context. Use: TRENDING, CONSOLIDATION, MEAN_REVERSION")
+        raise HTTPException(400, "Invalid context. Use: TRENDING, CONSOLIDATION, MEAN_REVERSION")
     
     return strategies[context]
 

@@ -10,7 +10,7 @@ Evaluates YOUR execution quality and current state:
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

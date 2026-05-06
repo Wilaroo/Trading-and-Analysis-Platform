@@ -26,7 +26,6 @@ Usage:
 """
 from __future__ import annotations
 import numpy as np
-from typing import Tuple, List
 
 from services.ai_modules.triple_barrier_labeler import atr as _atr
 

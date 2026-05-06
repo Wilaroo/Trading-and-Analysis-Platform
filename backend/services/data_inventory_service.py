@@ -9,8 +9,8 @@ into a single `data_inventory` collection. Provides:
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from datetime import datetime, timezone
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 

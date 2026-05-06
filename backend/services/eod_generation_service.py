@@ -8,9 +8,7 @@ Runs at:
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
-import asyncio
 import logging
-import os
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -544,15 +542,15 @@ class EndOfDayGenerationService:
                 # Build improvement text
                 improvement = ""
                 if wr < 40:
-                    improvement = f"Win rate below 40% — review entry criteria. Are we entering too early? Is the setup confirmation clear enough?"
+                    improvement = "Win rate below 40% — review entry criteria. Are we entering too early? Is the setup confirmation clear enough?"
                 elif wr < 50 and avg_pnl < 0:
                     improvement = f"Below 50% WR with negative avg P&L — consider tighter position sizing or stricter confidence gate threshold for {setup_type}."
                 elif wr >= 60:
                     improvement = f"Strong {wr:.0f}% WR — this setup is working. Consider increasing size or loosening trail for bigger R."
                 elif stop_outs > target_hits:
-                    improvement = f"More stop-outs than target hits — stops may be too tight. Try widening by 0.5 ATR."
+                    improvement = "More stop-outs than target hits — stops may be too tight. Try widening by 0.5 ATR."
                 else:
-                    improvement = f"Adequate performance. Monitor for consistency over the next week."
+                    improvement = "Adequate performance. Monitor for consistency over the next week."
                 
                 # Update the playbook if it exists
                 try:
@@ -685,7 +683,7 @@ class EndOfDayGenerationService:
             if overall_wr < 40:
                 went_wrong.append(f"Low win rate ({overall_wr:.0f}%) — review entry timing")
             if total_pnl < 0:
-                went_wrong.append(f"Negative P&L — losses exceeded wins in magnitude")
+                went_wrong.append("Negative P&L — losses exceeded wins in magnitude")
             for setup, stats in setup_stats.items():
                 if stats["closed"] > 0 and (stats["wins"] / stats["closed"]) < 0.3:
                     went_wrong.append(f"{setup} only {stats['wins']}/{stats['closed']} wins — needs attention")

@@ -24,11 +24,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from enum import Enum
-import pandas as pd
 
 from services.smart_stop_service import (
-    SmartStopService, SmartStopConfig, StopMode, TrailingMode, StopUrgency,
-    get_smart_stop_service, init_smart_stop_service, SETUP_STOP_RULES
+    SmartStopService, StopMode, TrailingMode, get_smart_stop_service, SETUP_STOP_RULES
 )
 
 router = APIRouter(prefix="/api/smart-stops", tags=["smart-stops"])

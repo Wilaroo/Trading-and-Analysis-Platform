@@ -4,7 +4,7 @@ Endpoints for the AI knowledge ingestion and learning system.
 """
 import os
 import tempfile
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from services.llm_service import get_llm_service

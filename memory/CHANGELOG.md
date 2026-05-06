@@ -2,6 +2,66 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-thirteenth commit, v19.34.30) — Dead-code & lint sweep + useLayoutVariant() helper
+
+**Severity: Low-risk cleanup. Shrinks source tree ~3,500 lines, auto-fixes 482 backend lint errors, adds V6-prep helper. Zero behavioral change.**
+
+This is the "opportunistic refactor" commit paired with v19.34.29's V4 deprecation — turn the source tree into a cleaner baseline before V6 migration starts.
+
+### 1. Deleted orphan files (11 total, ~3,538 source lines)
+
+Every file was verified unreferenced across the entire codebase (no imports, no JSX mounts, no subprocess calls, no dynamic dispatch) before deletion.
+
+Frontend (8 files, 2,813 lines):
+- `components/UnifiedAITraining.jsx` (1,900 lines — only matched glossary strings + comment lines, never actually mounted)
+- `components/layout/QuickStatsRow.jsx` (182 lines)
+- `components/NIA/DataHeatmap.jsx` (222 lines)
+- `components/NIA/AICommandCenter.jsx` (176 lines)
+- `components/NIA/LearningProgressPanel.jsx` (129 lines)
+- `components/NIA/IntelOverview.jsx` (104 lines)
+- `components/NIA/TestingToolsPanel.jsx` (74 lines)
+- `components/tabs/TradingTab.jsx` (26 lines)
+
+Backend (3 files, 725 lines):
+- `services/live_health_monitor.py` (191 lines — parked "scaffold" that was never wired into TradingBotService)
+- `services/ai_modules/advanced_targets.py` (290 lines)
+- `services/catalyst_aware_carry_forward.py` (244 lines)
+
+Test cleanup: deleted `tests/test_live_health_monitor.py` (was testing the now-deleted scaffold).
+
+**Bundle impact:** zero — tree-shaking already excluded these. This commit is source-file readability + future grep noise reduction.
+
+### 2. Backend lint auto-fix sweep (482 of 851 errors fixed)
+
+Ran `ruff check --fix` across `services/` + `routers/`. Auto-fixes are all semantically safe (ruff marks the unsafe ones separately and we did NOT pass `--unsafe-fixes`):
+
+- **418 × F401** (unused-import) — removed dangling imports that accumulated during rapid feature iteration
+- **92 × F541** (f-string-missing-placeholders) — `f"static string"` → `"static string"` (no behavior change, just removes the `f` prefix)
+- **84 × F841** (unused-variable) — removed dead locals from bodies of `try` blocks, early returns, etc.
+
+Remaining 366 errors are all stylistic (`E722` bare-except, `E701/E702` multi-statement-per-line, `E402` late imports) and would need case-by-case review. Not touched.
+
+### 3. New helper: `frontend/src/hooks/useLayoutVariant.js` (~120 lines)
+
+Centralizes layout-variant resolution with a clear precedence ladder:
+
+1. `?layout=v5|v6` explicit override (one-shot preview, not persisted)
+2. `?v5=1` / `?v6=1` legacy alias flags (operator muscle memory)
+3. `localStorage.sentcom_layout` sticky preference
+4. `DEFAULT_VARIANT` constant (single source of truth for "what ships")
+
+Exports: `resolveLayoutVariant()` (pure function, render-safe), `useLayoutVariant()` (memoized hook), `setStickyLayoutVariant(v)`, `clearStickyLayoutVariant()`, `VALID_VARIANTS`, `DEFAULT_VARIANT`.
+
+**Not yet wired into SentCom.jsx.** Will be used in V6 Phase B to switch between `<SentComV5View/>` and `<SentComV6View/>` at the top-level. Making Phase D's "flip default" a single one-line change: `export const DEFAULT_VARIANT = 'v6';`.
+
+### Verification
+
+- Backend restart: clean startup, `/api/safety/scanner/status` responds 200.
+- Pytest: **447/448 v19.34 tests green** (same pre-existing failure as last commit — `test_manage_loop_dispatches_resub_with_60s_throttle`, unrelated to this work, verified via prior `git stash` test).
+- `yarn build`: clean; bundle size 2.0 MB unchanged (tree-shaking).
+- ESLint + ruff: clean on all touched files.
+- End-to-end UI screenshot: embedded SentCom renders identically (header, SOC stream, positions panel, scanner, market regime, bot performance) with **zero console errors**.
+
 ## 2026-02-XX (one-hundred-twelfth commit, v19.34.29) — V4 layout fully deprecated
 
 **Severity: Cleanup / pre-work for V6 migration.**

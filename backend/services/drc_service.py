@@ -13,7 +13,6 @@ The DRC is a structured daily trading journal that includes:
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 from bson import ObjectId
-import os
 
 
 class DRCService:

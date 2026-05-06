@@ -6,7 +6,6 @@ Note: Alpaca, TwelveData removed from critical path to eliminate train/serve dat
 """
 import os
 import finnhub
-import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 import random
@@ -152,7 +151,7 @@ class StockDataService:
     async def _get_vix_quote(self) -> Dict:
         """Get VIX quote from IB pushed data"""
         try:
-            from routers.ib import get_vix_from_pushed_data, is_pusher_connected, _pushed_ib_data
+            from routers.ib import get_vix_from_pushed_data, is_pusher_connected
             
             # Try to get VIX from pushed data (allow slightly stale data for VIX)
             vix_data = get_vix_from_pushed_data()
@@ -176,7 +175,7 @@ class StockDataService:
                     "previous_close": round(prev_close, 2),
                     "source": "ib_pusher" if is_pusher_connected() else "ib_cached"
                 }
-        except Exception as e:
+        except Exception:
             pass
         
         # Fallback to empty/default VIX
@@ -212,7 +211,7 @@ class StockDataService:
                     "timestamp": bar.get("date", datetime.now(timezone.utc).isoformat()),
                     "source": "mongodb_bar"
                 }
-        except Exception as e:
+        except Exception:
             pass
         return None
 

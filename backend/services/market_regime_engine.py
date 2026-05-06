@@ -33,10 +33,9 @@ Version: 1.0
 
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List
 from enum import Enum
 import statistics
-import math
 
 
 class MarketState(str, Enum):

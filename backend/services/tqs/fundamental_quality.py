@@ -10,7 +10,7 @@ Evaluates fundamental factors:
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

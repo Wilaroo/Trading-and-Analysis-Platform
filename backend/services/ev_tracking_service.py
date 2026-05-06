@@ -11,12 +11,10 @@ Integrates with S/R levels, targets, and stops for accurate R-multiple projectio
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from pymongo import MongoClient
-import os
 
 logger = logging.getLogger(__name__)
 

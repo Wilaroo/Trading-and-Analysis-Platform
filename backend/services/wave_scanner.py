@@ -24,11 +24,11 @@ and conversely could miss $50M+ stocks that weren't in any of those ETFs.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import logging
 
 from services.smart_watchlist_service import get_smart_watchlist, SmartWatchlistService
-from services.symbol_universe import get_universe, get_universe_stats
+from services.symbol_universe import get_universe_stats
 from services.user_viewed_tracker import get_viewed_symbols
 
 logger = logging.getLogger(__name__)

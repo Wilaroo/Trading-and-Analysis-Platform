@@ -7,11 +7,9 @@ AI Integration:
 - Trades can be enriched with AI context (Confidence Gate, model predictions, TQS)
 - On close, outcomes feed into the Learning Loop and Confidence Gate for auto-calibration
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, List
-from pymongo import MongoClient
 from bson import ObjectId
-import os
 import logging
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ All FREE - uses data we already have in the system.
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 import statistics

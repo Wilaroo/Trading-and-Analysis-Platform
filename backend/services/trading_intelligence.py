@@ -3,10 +3,9 @@ TradeCommand Unified Trading Intelligence System
 Deep integration of all trading knowledge: strategies, patterns, rules, scoring, and predictive logic
 Provides comprehensive trade analysis, scoring, and AI-powered recommendations
 """
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 from enum import Enum
-from datetime import datetime, time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -754,17 +753,17 @@ class TradingIntelligenceSystem:
     ) -> str:
         """Generate human-readable recommendation"""
         if decision == "NO TRADE":
-            return f"❌ DO NOT TAKE THIS TRADE. Critical blockers identified that violate trading rules."
+            return "❌ DO NOT TAKE THIS TRADE. Critical blockers identified that violate trading rules."
         elif decision == "STRONG GO":
             return f"✅ STRONG {direction.upper()} setup via {strategy}. Multiple confirmations align. Execute with full size."
         elif decision == "GO":
             return f"✅ Valid {direction.upper()} setup via {strategy}. Proceed with standard position size."
         elif decision == "CAUTION":
-            return f"⚠️ Proceed with CAUTION. Some warnings present. Consider reduced position size."
+            return "⚠️ Proceed with CAUTION. Some warnings present. Consider reduced position size."
         elif decision == "HIGH RISK":
-            return f"⚠️ HIGH RISK trade. Multiple warnings. Only take if you have strong conviction and use minimum size."
+            return "⚠️ HIGH RISK trade. Multiple warnings. Only take if you have strong conviction and use minimum size."
         else:
-            return f"🔸 Neutral setup. No strong edge either way. Wait for better conditions."
+            return "🔸 Neutral setup. No strong edge either way. Wait for better conditions."
     
     # ==================== AI CONTEXT GENERATION ====================
     
@@ -796,12 +795,12 @@ class TradingIntelligenceSystem:
             # Get volume requirements
             vol_req = VOLUME_REQUIREMENTS.get(strategy_key, {})
             if vol_req:
-                context_parts.append(f"\nVolume Requirements:")
+                context_parts.append("\nVolume Requirements:")
                 context_parts.append(f"- Minimum RVOL: {vol_req.get('min_rvol', 'N/A')}x")
                 context_parts.append(f"- Ideal RVOL: {vol_req.get('ideal_rvol', 'N/A')}x")
             
             # Get time scores
-            context_parts.append(f"\nOptimal Trading Windows:")
+            context_parts.append("\nOptimal Trading Windows:")
             for tod, scores in TIME_STRATEGY_SCORES.items():
                 if strategy_key in scores and scores[strategy_key] >= 80:
                     context_parts.append(f"- {tod.value}: {scores[strategy_key]}% alignment")

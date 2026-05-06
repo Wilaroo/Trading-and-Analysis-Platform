@@ -16,7 +16,6 @@ Features:
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
-import asyncio
 
 from services.rag.embedding_service import get_embedding_service, EmbeddingService
 from services.rag.vector_store import get_vector_store_service, VectorStoreService

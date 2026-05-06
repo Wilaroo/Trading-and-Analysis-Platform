@@ -308,7 +308,6 @@ async def get_regime_performance(regime: Optional[str] = Query(None, description
     - your_edge_in_current: Your historical performance in the current regime
     """
     try:
-        from datetime import datetime, timezone, timedelta
         
         # Get current regime
         current_regime = "HOLD"

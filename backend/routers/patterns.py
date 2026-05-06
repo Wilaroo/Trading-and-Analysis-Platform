@@ -3,7 +3,7 @@ Chart Pattern Detection API Router
 Provides endpoints for detecting chart patterns on stocks.
 """
 from fastapi import APIRouter, HTTPException
-from typing import Optional, List
+from typing import List
 import logging
 
 from services.chart_pattern_service import get_chart_pattern_service

@@ -7,7 +7,6 @@ Data Sources:
 - IB Gateway: Real-time bars (1m/5m), Historical bars (daily/weekly), Fundamentals
 - Calculations: EMAs, RSI, MACD, ATR, VWAP, etc.
 """
-from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Tuple
 from enum import Enum
 import math

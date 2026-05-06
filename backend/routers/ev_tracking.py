@@ -10,7 +10,7 @@ Provides endpoints for:
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional
 import logging
 
 from services.ev_tracking_service import (

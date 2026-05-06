@@ -4,9 +4,8 @@ Provides endpoints for quick trading actions: Buy, Sell, Close Position, Add to 
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
-import os
 import logging
 
 router = APIRouter(prefix="/api/quick-actions", tags=["Quick Actions"])

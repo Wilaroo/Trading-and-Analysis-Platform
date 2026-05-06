@@ -6,10 +6,9 @@ Monitors open positions and generates alerts/suggestions without user prompting
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from enum import Enum
 from dataclasses import dataclass, asdict
-import os
 
 logger = logging.getLogger(__name__)
 

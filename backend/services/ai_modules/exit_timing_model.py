@@ -27,8 +27,7 @@ about the trade structure than the bar size.
 
 import logging
 import numpy as np
-from typing import Dict, List, Optional
-from datetime import datetime, timezone
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

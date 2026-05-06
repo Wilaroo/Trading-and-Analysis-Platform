@@ -4,7 +4,7 @@ All endpoints are sync def so FastAPI runs them in a thread pool.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
