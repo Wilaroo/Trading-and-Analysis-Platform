@@ -10,9 +10,18 @@ Five independent checks (any ONE fails → trade rejected):
     5. Total exposure cap         — account-relative total exposure ceiling
 
 All limits are env-driven and hot-patchable via `PUT /api/safety/config`.
-State is in-memory; after a backend restart the kill-switch must be re-tripped
-organically (the daily-loss check reads live P&L on every call so there's no
-persistence need).
+
+v19.34.25 (2026-02-XX) — Kill-switch state is now PERSISTED to the
+`safety_state` Mongo collection on every trip/reset and restored on boot.
+Pre-fix the latch was in-memory only; restarting the backend silently
+re-armed the bot. Operator-discovered 2026-02-XX after kill-switch was
+manually tripped at 12:28 PM ET, then a backend restart at ~1:20 PM ET
+silently cleared it; the bot opened 6 phantom trades during the next
+~5 minutes (saved only by IB Gateway being offline at the time, which
+prevented actual fills). Persistence prevents this exact recurrence.
+
+The daily-loss check still reads live P&L on every call so there's no
+need to persist the daily counter. Only the kill-switch latch persists.
 
 Call site: `trading_bot_service._scan_for_opportunities` wraps every
 candidate in `check_can_enter(symbol, side, notional_usd)` and skips the
@@ -42,6 +51,44 @@ def _env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, default))
     except (TypeError, ValueError):
         return int(default)
+
+
+# v19.34.25 — Sync Mongo handle for kill-switch persistence. Lazy + cached
+# so module import doesn't pay the connect cost. Returns None if Mongo
+# isn't reachable; callers must handle that gracefully (defense in depth —
+# in-memory state remains authoritative even if persistence is offline).
+_SAFETY_DB_HANDLE = None
+_SAFETY_DB_HANDLE_FAILED = False  # set True if connect fails so we don't retry every trip
+
+
+def _get_sync_safety_db():
+    """Lazy-connect a sync pymongo client for kill-switch persistence.
+
+    Sync (not motor) on purpose: trip/restore are infrequent and must
+    complete synchronously with the latch state change so a process
+    crash immediately after `trip_kill_switch()` can't lose the latch.
+    """
+    global _SAFETY_DB_HANDLE, _SAFETY_DB_HANDLE_FAILED
+    if _SAFETY_DB_HANDLE is not None:
+        return _SAFETY_DB_HANDLE
+    if _SAFETY_DB_HANDLE_FAILED:
+        return None
+    try:
+        from pymongo import MongoClient
+        mongo_url = os.environ.get("MONGO_URL")
+        db_name = os.environ.get("DB_NAME", "tradecommand")
+        if not mongo_url:
+            _SAFETY_DB_HANDLE_FAILED = True
+            return None
+        client = MongoClient(mongo_url, serverSelectionTimeoutMS=2000)
+        # Surface connection failures fast on boot rather than silently.
+        client.admin.command("ping")
+        _SAFETY_DB_HANDLE = client[db_name]
+        return _SAFETY_DB_HANDLE
+    except Exception as e:
+        logger.error("[SAFETY] could not connect to Mongo for persistence: %s", e)
+        _SAFETY_DB_HANDLE_FAILED = True
+        return None
 
 
 @dataclass
@@ -192,22 +239,108 @@ class SafetyGuardrails:
     # ── kill-switch primitives ─────────────────────────────────────────────
 
     def trip_kill_switch(self, reason: str) -> None:
-        """Latch the kill-switch. Idempotent — won't log repeatedly."""
+        """Latch the kill-switch. Idempotent — won't log repeatedly.
+
+        v19.34.25 — Persists the latch to Mongo `safety_state` so a
+        subsequent backend restart restores the tripped state instead
+        of silently re-arming the bot (operator-discovered 2026-02-XX).
+        """
         if self.state.kill_switch_active:
             return
         self.state.kill_switch_active = True
         self.state.kill_switch_tripped_at = time.time()
         self.state.kill_switch_reason = reason
         logger.error("[SAFETY] KILL-SWITCH TRIPPED — %s", reason)
+        self._persist_kill_switch()
 
     def reset_kill_switch(self) -> None:
-        """Manual unlock after the operator acknowledges the situation."""
+        """Manual unlock after the operator acknowledges the situation.
+
+        v19.34.25 — Clears the persisted latch in Mongo too; without
+        this, the bot would re-trip immediately on next boot from the
+        stale Mongo record.
+        """
         was_active = self.state.kill_switch_active
         self.state.kill_switch_active = False
         self.state.kill_switch_tripped_at = None
         self.state.kill_switch_reason = None
         if was_active:
             logger.warning("[SAFETY] Kill-switch MANUALLY RESET")
+        self._persist_kill_switch()
+
+    # ── persistence (v19.34.25) ───────────────────────────────────────────
+
+    def _persist_kill_switch(self) -> None:
+        """Write the current kill-switch latch to Mongo `safety_state`.
+
+        Sync pymongo on purpose: operations are infrequent (1-2/day at
+        peak) and we want trip → write to be synchronous so a process
+        crash *immediately after* trip can't lose the latch. The trip is
+        also called from sync code paths in some safety checks, which
+        precludes a clean async write.
+
+        Failure to write is logged but does NOT raise — the in-memory
+        state is the immediate authority; persistence is defense in
+        depth. Better to have the latch active in-memory only than to
+        propagate a Mongo error up into the trade-eval critical path.
+        """
+        try:
+            db = _get_sync_safety_db()
+            if db is None:
+                return
+            db.safety_state.update_one(
+                {"_id": "kill_switch"},
+                {"$set": {
+                    "active":     self.state.kill_switch_active,
+                    "tripped_at": self.state.kill_switch_tripped_at,
+                    "reason":     self.state.kill_switch_reason,
+                    "updated_at": time.time(),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.error("[SAFETY] kill-switch persistence FAILED: %s", e)
+
+    def restore_kill_switch_from_db(self) -> bool:
+        """Restore the kill-switch latch from Mongo on backend boot.
+
+        Called from server.py startup, BEFORE any trading code can run.
+        Returns True if a tripped latch was restored (so the boot logger
+        can emit a loud warning), False otherwise.
+
+        Operator-discovered failure mode this prevents (2026-02-XX):
+            12:28 PM — operator clicks Flatten All, kill-switch trips
+            ~1:20 PM — backend restarted to deploy v19.34.24b
+            ~1:20 PM — kill-switch silently disarmed (in-memory state
+                       gone), bot opens 6 phantom entries before the
+                       operator notices and re-trips manually.
+
+        With this restore, the same restart sequence preserves the
+        latch and the bot stays disarmed until manually acknowledged.
+        """
+        try:
+            db = _get_sync_safety_db()
+            if db is None:
+                return False
+            doc = db.safety_state.find_one({"_id": "kill_switch"})
+            if not doc or not doc.get("active"):
+                return False
+            self.state.kill_switch_active = True
+            self.state.kill_switch_tripped_at = doc.get("tripped_at")
+            self.state.kill_switch_reason = (
+                doc.get("reason") or "restored_from_db (no reason recorded)"
+            )
+            logger.error(
+                "[SAFETY] v19.34.25 — KILL-SWITCH RESTORED FROM DB on boot. "
+                "Reason: %s | Tripped at: %s | Bot will NOT place new trades "
+                "until operator manually resets via /api/safety/reset-kill-switch.",
+                self.state.kill_switch_reason,
+                self.state.kill_switch_tripped_at,
+            )
+            return True
+        except Exception as e:
+            logger.error("[SAFETY] kill-switch restore FAILED: %s", e)
+            return False
 
     # ── introspection ──────────────────────────────────────────────────────
 

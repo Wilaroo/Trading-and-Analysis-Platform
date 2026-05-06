@@ -1495,6 +1495,14 @@ except Exception as _ldr_exc:
 # Safety guardrails — kill-switch, exposure caps, emergency flatten-all
 from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)
+# v19.34.25 — Direct IB API connection (read-only diagnostics in Phase 1;
+# Phase 2 wires it into trade_executor_service for direct order routing).
+try:
+    from routers.ib_direct_router import router as ib_direct_router  # noqa: E402
+    app.include_router(ib_direct_router)
+    logger.warning("v19.34.25 — ib_direct_router registered (status endpoint at /api/system/ib-direct/status)")
+except Exception as _ibdr_exc:                                       # pragma: no cover
+    logger.warning("ib_direct_router failed to register: %s", _ibdr_exc)
 from routers.autonomy_router import router as autonomy_router  # noqa: E402
 app.include_router(autonomy_router)
 # Canonical market-state surface — single source of truth for
@@ -3805,6 +3813,23 @@ async def startup_event():
     for _r in _deferred_routers:
         app.include_router(_r)
     print(f"[STARTUP] Services ready — {len(_deferred_routers)} deferred routers registered")
+
+    # v19.34.25 (2026-02-XX) — Restore persisted kill-switch latch from
+    # Mongo BEFORE any trading code can run. Pre-fix the latch was
+    # in-memory only, so a backend restart silently re-armed the bot
+    # even when the operator had explicitly tripped it. Operator-
+    # discovered 2026-02-XX: kill-switch tripped 12:28 PM, restart at
+    # ~1:20 PM cleared it, bot opened 6 phantom entries before manual
+    # re-trip. With this restore, the latch survives restarts.
+    try:
+        from services.safety_guardrails import get_safety_guardrails
+        _restored = await asyncio.to_thread(
+            get_safety_guardrails().restore_kill_switch_from_db
+        )
+        if _restored:
+            print("[STARTUP] v19.34.25 — kill-switch RESTORED from DB; bot disarmed.")
+    except Exception as _e:
+        print(f"[STARTUP] WARN: kill-switch restore failed: {_e}")
     
     # Step 2: Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()

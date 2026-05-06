@@ -2,6 +2,102 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-ninth commit, v19.34.25) — Kill-switch persistence + flatten-all envelope honesty + direct IB API connection (Phase 1)
+
+**Severity: P0 (CRITICAL — kill-switch + flatten parts), P1 (direct IB foundation)**.
+
+Three independent fixes shipped in the same commit, all responding to operator pain experienced in the same trading session:
+
+### 1. Kill-switch persistence — `services/safety_guardrails.py` + `server.py` startup hook
+
+**The bug class.** Pre-fix `SafetyGuardrails.state.kill_switch_active` was in-memory only. The module docstring even acknowledged this (`"State is in-memory; after a backend restart the kill-switch must be re-tripped organically..."`) — that assumption was wrong. Operator-discovered 2026-02-XX:
+- 12:28 PM ET — operator clicks Flatten All; kill-switch trips.
+- ~1:20 PM ET — backend restarted to deploy v19.34.24b.
+- ~1:20 PM ET — kill-switch silently disarmed (in-memory state gone).
+- 1:25 PM ET — bot opens 6 phantom trades from scanner setups before operator notices and re-trips manually. Saved only by IB Gateway being offline at the time, which prevented actual fills.
+
+**The fix.** New `safety_state` Mongo collection. `trip_kill_switch` writes `{active, tripped_at, reason}`; `reset_kill_switch` writes `active=False` (so a stale Mongo record can't re-trip the bot on next boot). New `restore_kill_switch_from_db()` called from `server.py` startup BEFORE any trading code can run. Sync pymongo (not motor) on purpose — trip and restore must complete synchronously with the latch state change so a process crash immediately after `trip_kill_switch()` can't lose the latch.
+
+DB unavailable does NOT crash trip/reset — in-memory state remains authoritative. Persistence is defense in depth, not a hard dependency on the trade-eval critical path.
+
+### 2. Flatten-all envelope honesty — `routers/safety_router.py:flatten_all`
+
+**The bug class.** Pre-fix the response was hardcoded `{"success": True, ...}`. Today's v19.34.24b import-bug landed inside the `try` block, raised ImportError, was caught by the outer `except` and dumped into `summary["close_errors"]` as a JSON field — but the envelope still returned `success: True`. The frontend banner keys off `success` for its colour, so a `True` painted "flatten-all initiated" green and the operator reasonably assumed flatten ran. It hadn't (zero closes).
+
+**The fix.** New rule: `success: False` if EITHER (a) the close-positions step itself crashed (`stage: "close-positions"` entry in `close_errors`), OR (b) `positions_requested_close > 0` AND `positions_succeeded == 0`. In both cases the operator must know flatten didn't do its job. The frontend banner will now paint red instead of green for the same failure mode.
+
+5 lines of logic, but the most important 5 lines in this commit — these alone would have made today's flatten failure scream at the operator instead of hiding behind a green checkmark.
+
+### 3. Direct IB API connection (Phase 1) — `services/ib_direct_service.py` + `routers/ib_direct_router.py`
+
+**The motivation.** Today's session exposed multiple state-divergence bugs caused by the pusher being a relay between the bot and IB:
+- Phantom share counts (BMNR 5,472 vs IB 1,905) from snapshot lag.
+- Flatten orders silently disappearing into the queue (60s timeout each).
+- "Logged in on another platform" failures detected only by 60s timeouts.
+
+**The architecture.** IB Gateway accepts up to 32 simultaneous TWS API client connections per instance. The pusher uses `clientId=10`; the bot now connects DIRECTLY with `clientId=11` to the same Gateway, sharing the same brokerage session but with a separate dedicated socket for orders. Industry-standard split-channel pattern: market data through one path (pusher), orders through another (direct). Big shops do this for the same reasons (reliability + latency).
+
+**Phase 1 deliverables (this commit):**
+- `services/ib_direct_service.py` — singleton wrapper around `ib_async.IB()`. Methods: `connect()`, `disconnect()`, `ensure_connected()`, `is_connected()`, `is_authorized_to_trade()`, `get_positions()`, `place_market_order()`, `cancel_order()`, `status()`. Async + idempotent. Auto-reconnects on socket drop.
+- **CRITICAL: `is_authorized_to_trade()`** — IB Gateway keeps the socket open even when the brokerage session was kicked by another login (today's exact failure mode). The TWS API surfaces this via `managedAccounts()` being empty. Service checks on connect and exposes via the status endpoint. Operator can detect "logged in on another platform" in 2 seconds instead of 60s timeouts.
+- `routers/ib_direct_router.py` — endpoints at `/api/system/ib-direct/{status,connect,disconnect,positions,smoke-test}`. The smoke-test endpoint runs a complete read-only validation (connect → fetch positions → return) — operator's first-run check.
+- Added `ib_async==2.1.0` to `requirements.txt` (maintained successor to ib_insync, which was archived in 2024).
+- Env-driven config: `IB_DIRECT_HOST`, `IB_DIRECT_PORT`, `IB_DIRECT_CLIENT_ID`, `IB_DIRECT_READ_ONLY`. Defaults match the user's DGX → Windows-IB-Gateway topology (`192.168.50.1:4002` clientId=11).
+
+**Deliberately NOT shipped this commit (deferred to v19.34.26):**
+- Wiring into `trade_executor_service` (the `BOT_ORDER_PATH=pusher|shadow|direct` switch). Operator validates the socket works on their DGX FIRST, then we promote it. No risk of accidentally double-firing orders today.
+
+### Tests shipped — 22 new tests, all green
+
+- `tests/test_kill_switch_persistence_v19_34_25.py` (7 tests):
+  1-2. trip / reset persists active state to Mongo.
+  3. restore_kill_switch_from_db restores tripped state on boot — the actual operator scenario.
+  4-5. Fresh DB / inactive doc → restore returns False, latch stays clean.
+  6. DB unavailable does NOT crash trip/reset (in-memory remains authoritative).
+  7. Idempotent trip — second trip does NOT write a second time.
+- `tests/test_flatten_all_v19_34_24b.py` extended with 3 new tests (5, 6, 7):
+  5. Every close fails → `success: False`.
+  6. Closure step crashes (the v19.34.24b import-bug shape) → `success: False`.
+  7. Mixed (one succeeds) → `success: True` (honest "ok").
+- `tests/test_ib_direct_service_v19_34_25.py` (11 tests):
+  1. Singleton accessor.
+  2. ib_async availability flag.
+  3. Happy-path connect → authorized.
+  4. **Critical**: socket up but managedAccounts empty → connected=True, authorized_to_trade=False (today's silent-failure mode).
+  5. Connect failure (refused / timeout) → success=False + error captured.
+  6. Idempotent connect.
+  7. Disconnect clears state.
+  8. get_positions flattens to JSON-safe dicts (no ObjectId nasties).
+  9. place_market_order blocked in read_only mode.
+  10. place_market_order blocked when not authorized_to_trade (defense in depth).
+  11. status() payload contract pin (UI keys off these field names).
+
+All previous test suites still green: 72/73 pass (the 1 stale failure in `test_proper_reconcile_endpoint_v19_24.py:test_reconcile_creates_bot_trade_for_orphan_position` is the pre-existing v19.34.17 `close_at_eod` semantics change, not introduced here).
+
+### Operator-side impact — what to do on the DGX
+
+1. **Restart the backend** to pick up the kill-switch restore hook + the new direct-IB router.
+2. **Configure IB Gateway on the Windows box** — Configure → Settings → API → Settings:
+   - `Enable ActiveX and Socket Clients` ✅ (already on for the pusher)
+   - `Read-Only API` ❌ unchecked
+   - `Trusted IPs`: add `192.168.50.2` (the DGX)
+3. **Smoke-test the direct connection** from the DGX:
+   ```bash
+   curl -s -X POST http://localhost:8001/api/system/ib-direct/smoke-test | python3 -m json.tool
+   ```
+   Expected: `{"success": true, "stage": "complete", "connected": true, "authorized_to_trade": true, "positions_count": 0}` (positions=0 because we manually flattened earlier today).
+4. **If smoke-test passes, we wire the direct path into trade_executor in v19.34.26 next session.** If it fails, paste the output and we debug before going further.
+
+### Known follow-up — promoted to v19.34.26 priority
+
+- **Phase 2**: wire direct IB into `trade_executor_service` behind `BOT_ORDER_PATH=pusher|shadow|direct`. Default `shadow` for one full session of validation, then `direct` once divergence logs come back clean.
+- **Phase 3**: deprecate pusher's order endpoints; pusher becomes data-only.
+- **Phantom-share-aware close path** (still pending): `min(trade.shares, ib_actual_remaining)` cap — direct IB makes this trivial since we now have authoritative position queries.
+- **Reconciler attaches IB bracket on adoption** — also easier with direct IB (synchronous placeOrder vs queue+poll).
+- **`IB-LIVE` permission chip in V5 status strip** — frontend hook to the new `is_authorized_to_trade()` flag from the direct-IB status endpoint.
+
+
+
 ## 2026-02-XX (one-hundred-eighth commit, v19.34.24b) — Flatten-All was completely broken: every click no-op'd silently
 
 **Severity: P0 (CRITICAL)**. Operator-discovered 2026-02-XX during an attempted emergency flatten of 17 positions. Banner showed `flatten-all initiated`, kill-switch tripped, and the endpoint returned `success: True` — but **NOT A SINGLE close order left the backend**. Backend log:

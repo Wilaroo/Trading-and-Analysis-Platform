@@ -194,3 +194,109 @@ def test_flatten_all_requires_confirm_param():
         _run(flatten_all(confirm=""))
     assert exc.value.status_code == 400
     assert "FLATTEN" in str(exc.value.detail)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 5. v19.34.25 — Envelope honesty: every close fails → success=False.
+#    Pre-fix the response was hardcoded `success: True`, so today's
+#    v19.34.24b import bug (positions_requested_close: 0 + stage error)
+#    returned a green envelope while the bot did nothing. This pin
+#    locks down the new contract.
+# ─────────────────────────────────────────────────────────────────────
+def test_flatten_all_returns_failure_when_every_close_fails():
+    from routers.safety_router import flatten_all
+
+    bot = MagicMock()
+    bot._open_trades = {
+        "T1": SimpleNamespace(id="T1"),
+        "T2": SimpleNamespace(id="T2"),
+    }
+    bot.close_trade = AsyncMock(return_value=False)   # every close fails
+
+    fake_db = MagicMock()
+    fake_db.order_queue.update_many = AsyncMock(
+        return_value=SimpleNamespace(modified_count=0)
+    )
+    fake_client = MagicMock()
+    fake_client.__getitem__.return_value = fake_db
+
+    with patch("services.trading_bot_service.get_trading_bot_service",
+               return_value=bot, create=True), \
+         patch("motor.motor_asyncio.AsyncIOMotorClient",
+               return_value=fake_client, create=True), \
+         patch.dict("os.environ", {"MONGO_URL": "mongodb://x", "DB_NAME": "test"}):
+        result = _run(flatten_all(confirm="FLATTEN"))
+
+    assert result["success"] is False, result      # the actual regression pin
+    assert result["summary"]["positions_requested_close"] == 2
+    assert result["summary"]["positions_succeeded"] == 0
+    assert result["summary"]["positions_failed"] == 2
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 6. v19.34.25 — Envelope honesty: closure-step itself crashes (the
+#    exact v19.34.24b import-bug shape) → success=False.
+# ─────────────────────────────────────────────────────────────────────
+def test_flatten_all_returns_failure_when_close_step_crashes():
+    from routers.safety_router import flatten_all
+
+    fake_db = MagicMock()
+    fake_db.order_queue.update_many = AsyncMock(
+        return_value=SimpleNamespace(modified_count=0)
+    )
+    fake_client = MagicMock()
+    fake_client.__getitem__.return_value = fake_db
+
+    # Make the import inside flatten_all fail — same shape as the
+    # v19.34.24b operator bug (`get_trading_bot` not found).
+    def _boom(*args, **kwargs):
+        raise ImportError("cannot import name 'get_trading_bot'")
+
+    with patch("services.trading_bot_service.get_trading_bot_service",
+               side_effect=_boom, create=True), \
+         patch("motor.motor_asyncio.AsyncIOMotorClient",
+               return_value=fake_client, create=True), \
+         patch.dict("os.environ", {"MONGO_URL": "mongodb://x", "DB_NAME": "test"}):
+        result = _run(flatten_all(confirm="FLATTEN"))
+
+    assert result["success"] is False, result
+    assert any(e.get("stage") == "close-positions"
+               for e in result["summary"]["close_errors"])
+    assert result["summary"]["positions_requested_close"] == 0
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 7. v19.34.25 — Envelope honesty: mixed (some succeed) → success=True.
+#    At least one close worked, so "flatten-all initiated" is honest.
+# ─────────────────────────────────────────────────────────────────────
+def test_flatten_all_returns_success_when_at_least_one_close_works():
+    from routers.safety_router import flatten_all
+
+    bot = MagicMock()
+    bot._open_trades = {
+        "T1": SimpleNamespace(id="T1"),
+        "T2": SimpleNamespace(id="T2"),
+    }
+
+    async def _close(trade_id, reason="manual"):
+        return trade_id == "T1"   # only T1 succeeds
+
+    bot.close_trade = _close
+
+    fake_db = MagicMock()
+    fake_db.order_queue.update_many = AsyncMock(
+        return_value=SimpleNamespace(modified_count=0)
+    )
+    fake_client = MagicMock()
+    fake_client.__getitem__.return_value = fake_db
+
+    with patch("services.trading_bot_service.get_trading_bot_service",
+               return_value=bot, create=True), \
+         patch("motor.motor_asyncio.AsyncIOMotorClient",
+               return_value=fake_client, create=True), \
+         patch.dict("os.environ", {"MONGO_URL": "mongodb://x", "DB_NAME": "test"}):
+        result = _run(flatten_all(confirm="FLATTEN"))
+
+    assert result["success"] is True, result   # one close worked → honest "ok"
+    assert result["summary"]["positions_succeeded"] == 1
+    assert result["summary"]["positions_failed"] == 1

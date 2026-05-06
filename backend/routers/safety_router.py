@@ -293,5 +293,39 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
         logger.error("[SAFETY] flatten-all: cancel-queue step crashed: %s", e)
         summary["orders_cancel_errors"].append(str(e)[:200])
 
-    logger.warning("[SAFETY] FLATTEN-ALL complete: %s", summary)
-    return {"success": True, "summary": summary, "state": guard.status()["state"]}
+    # v19.34.25 (2026-02-XX) — Envelope honesty. Pre-fix the response
+    # was hardcoded `success: True`, so the v19.34.24b import bug (which
+    # caused `positions_requested_close: 0` + a `stage: "close-positions"`
+    # error) returned a green-checkmark envelope to the operator while
+    # the bot did literally nothing. The frontend banner keys off
+    # `success` for its colour, so a `True` here paints "flatten-all
+    # initiated" green and the operator reasonably assumes flatten ran.
+    #
+    # Rules: success is False if EITHER
+    #   (a) the close-positions step itself crashed (a `stage` entry in
+    #       close_errors) — flatten never even iterated, or
+    #   (b) at least one position was requested AND zero succeeded — the
+    #       loop ran but every close failed.
+    # In both cases the operator must know flatten didn't do its job.
+    closure_step_crashed = any(
+        e.get("stage") == "close-positions" for e in summary["close_errors"]
+    )
+    every_close_failed = (
+        summary["positions_requested_close"] > 0
+        and summary["positions_succeeded"] == 0
+    )
+    success = not (closure_step_crashed or every_close_failed)
+
+    if not success:
+        logger.error(
+            "[SAFETY] FLATTEN-ALL FAILED: requested=%d succeeded=%d failed=%d "
+            "close_errors=%s",
+            summary["positions_requested_close"],
+            summary["positions_succeeded"],
+            summary["positions_failed"],
+            summary["close_errors"][:3],   # cap for log readability
+        )
+    else:
+        logger.warning("[SAFETY] FLATTEN-ALL complete: %s", summary)
+
+    return {"success": success, "summary": summary, "state": guard.status()["state"]}
