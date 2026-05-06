@@ -727,8 +727,8 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
   };
 
   return (
-    <div data-testid="v5-open-positions" data-help-id="open-positions" className="flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+    <div data-testid="v5-open-positions" data-help-id="open-positions" className="flex flex-col flex-1 min-h-0 h-full">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="v5-panel-title">Open ({groups.length})</div>
           {/* v19.34.2 — `?` legend popover explaining REAL/SHADOW/MIXED
