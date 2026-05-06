@@ -595,13 +595,13 @@ export const SentComV5View = ({
             </PanelErrorBoundary>
           </div>
 
-          {/* Unified Stream + chat (~40% of center) — wider than the
+          {/* Unified Stream + chat (~30% of center) — wider than the
               old right-sidebar location so bot narratives + rejection
               thoughts have room to breathe. */}
           <div
             data-testid="sentcom-v5-stream-center"
             className="border-t border-zinc-800 flex flex-col min-h-0 overflow-hidden"
-            style={{ flex: '40 1 0%' }}
+            style={{ flex: '30 1 0%' }}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Unified Stream</div>
@@ -618,6 +618,62 @@ export const SentComV5View = ({
                   to status?.connected which falsely disabled chat
                   every weekend / overnight when IB was offline. */}
               <ChatInput onSend={handleChat} />
+            </div>
+          </div>
+
+          {/* ── v19.34.22 (2026-05-06) — bottom drawer pulled INSIDE the
+              center column. Pre-fix the SentCom Intelligence + Deep
+              Feed drawer spanned the FULL viewport width (across both
+              the chart column AND the right sidebar), which capped the
+              right sidebar at `100vh - 32vh` minus the briefings strip
+              + ML audit panel. With 18+ open positions on a busy day
+              the operator could only see ~6 rows in OpenPositionsV5
+              before having to scroll. Now the drawer's right edge
+              aligns with the chart's right edge, so the aside takes
+              the FULL grid height and OpenPositionsV5 stretches to
+              show all rows without an inner scroll. */}
+          <div
+            className="border-t border-zinc-800 flex-shrink-0 bg-zinc-950 flex flex-col min-h-0"
+            style={{ flex: '20 1 0%' }}
+            data-testid="sentcom-v5-bottom-drawer"
+          >
+            <div
+              ref={drawerContainerRef}
+              className="flex h-full bg-zinc-900 flex-1 min-h-0"
+              data-testid="sentcom-v5-drawer-split"
+            >
+              <div
+                className="bg-zinc-950 h-full overflow-hidden"
+                style={{ width: `calc(${leftPct}% - 2px)` }}
+              >
+                <PanelErrorBoundary label="sentcom-intelligence-compact">
+                  <SentComIntelligencePanel compact />
+                </PanelErrorBoundary>
+              </div>
+              <DrawerSplitHandle
+                containerRef={drawerContainerRef}
+                onChange={setLeftPct}
+                onReset={resetToDefault}
+              />
+              <div
+                className="bg-zinc-950 flex flex-col overflow-hidden h-full"
+                style={{ width: `calc(${100 - leftPct}% - 2px)` }}
+              >
+                <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                  <div className="v5-panel-title">Stream · Deep Feed</div>
+                  <span className="v5-chip v5-chip-manage">history</span>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <PanelErrorBoundary label="deep-feed">
+                    <DeepFeedV5
+                      apiBase={process.env.REACT_APP_BACKEND_URL || ''}
+                      onSymbolClick={handleOpenTicker}
+                      hoveredSymbol={hoveredSymbol}
+                      onHoverSymbol={handleHoverSymbol}
+                    />
+                  </PanelErrorBoundary>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -682,64 +738,8 @@ export const SentComV5View = ({
           </div>
         </aside>
         </div>
-        {/* End of top grid (chart + right sidebar) */}
+        {/* End of grid (chart+drawer center | right sidebar full-height) */}
 
-        {/* Bottom drawer — TWIN LIVE PANELS (2026-04-29 afternoon-10).
-            Replaces the prior trio of reflection panels (Model Health,
-            Smart Levels Analytics, AI Decision Audit), all of which were
-            static during market hours and have been moved to NIA.
-            Now: 60% SentCom Intelligence (live confidence-gate decisions
-            + trading mode banner), 40% Unified Stream mirror (deeper
-            history view; the chart-side stream stays for action-context
-            reading).
-            2026-04-30 v19.9: moved INSIDE the right column so its left
-            edge aligns with the chart — Scanner (left 20%) now spans
-            the full viewport height without the drawer cutting
-            underneath. */}
-        <div
-          className="border-t border-zinc-800 flex-shrink-0 bg-zinc-950"
-          style={{ height: '32vh', minHeight: '320px' }}
-          data-testid="sentcom-v5-bottom-drawer"
-        >
-          <div
-            ref={drawerContainerRef}
-            className="flex h-full bg-zinc-900"
-            data-testid="sentcom-v5-drawer-split"
-          >
-            <div
-              className="bg-zinc-950 h-full overflow-hidden"
-              style={{ width: `calc(${leftPct}% - 2px)` }}
-            >
-              <PanelErrorBoundary label="sentcom-intelligence-compact">
-                <SentComIntelligencePanel compact />
-              </PanelErrorBoundary>
-            </div>
-            <DrawerSplitHandle
-              containerRef={drawerContainerRef}
-              onChange={setLeftPct}
-              onReset={resetToDefault}
-            />
-            <div
-              className="bg-zinc-950 flex flex-col overflow-hidden h-full"
-              style={{ width: `calc(${100 - leftPct}% - 2px)` }}
-            >
-              <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-                <div className="v5-panel-title">Stream · Deep Feed</div>
-                <span className="v5-chip v5-chip-manage">history</span>
-              </div>
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <PanelErrorBoundary label="deep-feed">
-                  <DeepFeedV5
-                    apiBase={process.env.REACT_APP_BACKEND_URL || ''}
-                    onSymbolClick={handleOpenTicker}
-                    hoveredSymbol={hoveredSymbol}
-                    onHoverSymbol={handleHoverSymbol}
-                  />
-                </PanelErrorBoundary>
-              </div>
-            </div>
-          </div>
-        </div>
         {/* End right column */}
         </div>
       </div>
