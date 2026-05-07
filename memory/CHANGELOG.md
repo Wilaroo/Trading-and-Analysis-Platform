@@ -16516,6 +16516,18 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.35 — Pusher RPC wired + V5 badge cleanup verified live (2026-05-06 night)
+- Diagnosed + resolved "Pusher in partial state" banner on operator's DGX. Root cause: `IB_PUSHER_RPC_URL` missing from `backend/.env`; operator's Windows box had fastapi+uvicorn installed but the pusher had never been restarted since install, so RPC server was never spun up.
+- Fix sequence (operator-executed on DGX + Windows):
+  1. `pip install fastapi uvicorn` on Windows (already satisfied — deps present in Python 3.13 user site-packages).
+  2. Restarted `ib_data_pusher.py` on Windows → RPC server live on `0.0.0.0:8765` with direct-wire ethernet to DGX at `192.168.50.1`.
+  3. Added `IB_PUSHER_RPC_URL=http://192.168.50.1:8765` to DGX `backend/.env`.
+  4. Full rebuild: `rm -rf build && yarn build` → new bundle `main.1d6ce4fa.js`.
+  5. Clean restart via `spark_stop.sh` + `spark_start.sh --skip-build`.
+- Verified healthy: `/api/live/pusher-rpc-health` → `reachable:true, consecutive_failures:0, remote.ok:true`. RPC latency 3ms (direct wire), 315 quotes tracked, 29 positions tracked.
+- **V5 OpenPositions badge cleanup (v19.34.23) confirmed LIVE in production bundle.** Per-row ORPHAN/STALE/RECONCILED/PARTIAL badges fully removed, replaced by a single subtle `⬤ auto-heal · N` header pill that only renders when the bot is actively healing drift/orphans.
+- One benign one-shot boot traceback remains in `/tmp/backend.log` (`pusher_rotation_service._request` socket-read timeout on very first `subscribe_symbols` call before RPC socket warms). Self-heals on next rotation tick. Parked as P3 polish.
+
 ### Phase 4 — Startup orphan-position protection (2026-04-22 evening)
 `PositionReconciler.protect_orphan_positions`: scans `_pushed_ib_data["positions"]`, finds any with no working bot-side stop, places emergency STP using intended stop_price if known else 1% risk from avgCost (SELL for longs, BUY for shorts). Trade docs updated with the new stop_order_id and saved. Wired into `TradingBotService.start()` as a fire-and-forget background task (15s delay so pusher has time to publish positions). New endpoint `POST /api/trading-bot/positions/protect-orphans?dry_run=true|false&risk_pct=0.01` for manual triage.
 

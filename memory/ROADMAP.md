@@ -4,6 +4,19 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🟢 2026-05-06 night — Pusher RPC wired + V5 badge cleanup verified
+
+**v19.34.35** (operator-side config, no code changes) — "Pusher in partial state" banner resolved. `IB_PUSHER_RPC_URL=http://192.168.50.1:8765` added to DGX `backend/.env`; pusher restarted on Windows to activate RPC server (fastapi+uvicorn already installed). Full `yarn build` + clean `spark_stop/start.sh` cycle. Verified `/api/live/pusher-rpc-health` returns `reachable:true, consecutive_failures:0`; 3ms RPC latency over direct-wire ethernet. V5 OpenPositions badge cleanup (v19.34.23) confirmed live in production bundle — zero per-row ORPHAN/STALE/RECONCILED badges; single subtle `⬤ auto-heal · N` header pill only.
+
+### 🟡 Next up
+- **🟡 P1 — V6 UI Refactor Phase A (panel extraction).** Queued but not started. Extract shared frontend panels from `SentComV5View.jsx` into independent components to prep for the 4-pane V6 layout. Zero visual change in this phase — purely modularization.
+
+### 🟢 P3 — Minor polish parked from this session
+- **Boot `subscribe_symbols` socket-read timeout:** `pusher_rotation_service.py` fires its first `subscribe_symbols` burst before the `IBPusherRPC` socket has warmed → one traceback in `/tmp/backend.log` on every fresh DGX start. Self-heals on next rotation tick, no user impact. Add a ~2-3s startup-grace delay (and/or a retry with 1s backoff on the first `_request` call only).
+- **`OpenPositionsV5` "Loading positions…" stuck state:** when `groups.length === 0` and initial fetch hasn't resolved, the panel holds on "Loading positions…" instead of flipping to "No open positions." Add a fetch-ack flag (or 3s timeout) so the empty-state text is correct.
+- **`IB-DOWN` chip clarity:** the red `IB-DOWN` HUD chip refers to the *direct-IB* (shadow mode) link, not the pusher. Rename or tooltip to `DIRECT-IB: OFF` to stop confusing operators who see `PUSHER GREEN` and `IB-DOWN` simultaneously and assume there's a bug.
+
+
 ## 🚨 P0 — TOP OF NEXT SESSION (the GTC zombie bug — classification-aware fix)
 
 **v19.34.5 SHIPPED 2026-05-05 AM** — see CHANGELOG eighty-seventh commit. The critical path (bracket TIF classification) is in. **All NEW orders from today onward get correct DAY TIF on intraday, GTC on swing/position.** Old GTC zombies on disk were manually cancelled by operator via TC2000 last night.
