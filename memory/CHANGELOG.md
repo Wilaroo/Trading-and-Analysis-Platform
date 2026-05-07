@@ -16516,7 +16516,7 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
-### v19.34.38 — Setups-watching feed uncapped (2026-05-07 morning, T-12 to open)
+### v19.34.38 — Setups-watching feed uncapped + scanner-grouping default ON (2026-05-07 morning, T-12 to open)
 
 **Trigger:** operator follow-up to v19.34.37 — wanted setups feed to surface every qualified setup (no artificial UI cap) since the scanner's own enabled-setup / timeframe-fit / per-symbol qualification filters are the source of truth.
 
@@ -16528,6 +16528,8 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 - Bonus cleanup: tightened the de-dupe pass to use a `seen_symbols` set instead of an O(N) list scan (was previously rebuilding `[s.get("symbol") for s in setups]` per alert).
 
 **Added 1 regression test** in `test_scanner_cards_flicker_fix_v19_34_37.py` pinning all three caps as removed and verifying the uncapped contract is in place. **80/80** sanity tests pass post-fix.
+
+**Bonus UX:** flipped `v5_scanner_group_by_setup` default from OFF to ON in `ScannerCardsV5.jsx`. Now that 30-50 cards are possible on busy mornings, the section headers (GAP AND GO / RANGE BREAK / DAY 2 CONTINUATION / etc.) make the wall scannable from page load. An explicit `false` in localStorage is still respected so an operator who turned it off keeps it off.
 
 ### v19.34.37 — Scanner cards flicker fix (5↔9 every ~12s) (2026-05-07 morning, T-15 to open)
 

@@ -476,11 +476,19 @@ export const ScannerCardsV5 = ({
 
   // Wave 3 (#1) — operator-toggleable grouping by Market Setup.
   // Persisted to localStorage so the operator's choice survives reload.
-  // Defaults OFF so existing layout is preserved on first encounter
-  // — operator opts INTO grouping deliberately.
+  // 2026-05-07 v19.34.38 — default flipped to ON now that the setups
+  // feed is uncapped. On busy mornings the panel can hold 30-50 cards;
+  // the section headers (GAP AND GO / RANGE BREAK / DAY 2 CONTINUATION
+  // / etc.) make the wall scannable. An explicit "false" in localStorage
+  // is still respected so an operator who turned it off keeps it off.
   const [groupBySetup, setGroupBySetup] = useState(() => {
-    try { return localStorage.getItem('v5_scanner_group_by_setup') === 'true'; }
-    catch { return false; }
+    try {
+      const v = localStorage.getItem('v5_scanner_group_by_setup');
+      if (v === 'true') return true;
+      if (v === 'false') return false;
+      return true;  // unset → new default ON
+    }
+    catch { return true; }
   });
   const toggleGrouping = useCallback(() => {
     setGroupBySetup((v) => {
