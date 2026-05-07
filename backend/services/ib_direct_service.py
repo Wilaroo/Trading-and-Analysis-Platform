@@ -375,6 +375,32 @@ class IBDirectService:
             report["error"] = "not connected"
             return report
         try:
+            # v19.34.46 (2026-02-XX) — Operator-discovered: my v19.34.44
+            # zombie-cancel was a no-op. IB Gateway segregates working
+            # orders by clientId. `self._ib.trades()` only returns orders
+            # placed by THIS clientId. The pusher's working orders
+            # (clientId=15) are invisible to the direct service
+            # (clientId=11) until we explicitly request them via
+            # `reqAllOpenOrders()` (one-shot pull) or
+            # `reqAutoOpenOrders(True)` (subscribe to all clients,
+            # only valid for clientId=0). We use reqAllOpenOrders here
+            # because clientId=11 isn't 0. After this returns, the
+            # `_ib.trades()` cache contains every working order on the
+            # account — including the pusher's ghost OCA children that
+            # are blocking BMNR closes via the 15-order cap.
+            try:
+                await asyncio.to_thread(self._ib.reqAllOpenOrders)
+                # Brief settle so callbacks populate self._ib.trades()
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.warning(
+                    "v19.34.46 [IB-DIRECT] reqAllOpenOrders failed for %s: %s",
+                    symbol, e,
+                )
+                report["errors"].append({
+                    "stage": "reqAllOpenOrders", "err": str(e)[:200],
+                })
+
             sym_u = symbol.upper()
             side_u = (side or "").upper()
             for t in list(self._ib.trades() or []):
