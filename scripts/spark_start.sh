@@ -55,8 +55,19 @@ if [ "$SKIP_BUILD" = false ]; then
         # node_modules was last touched. Cheap no-op when nothing changed.
         if [ ! -d node_modules ] || [ package.json -nt node_modules ] || [ yarn.lock -nt node_modules ]; then
             echo "  Installing deps (yarn install --frozen-lockfile)..."
+            # v19.34.34 — fall back to regular `yarn install` if the
+            # lockfile is out of sync. Pre-fix, a `package.json` edit
+            # without a matching `yarn.lock` update (common during
+            # active dep changes) caused a loud `error Your lockfile
+            # needs to be updated` line that looked scarier than it
+            # was — the build below handled it fine but the log made
+            # operators think startup had failed. Now we retry
+            # without --frozen-lockfile, which auto-updates the
+            # lockfile to match package.json (and commits should pick
+            # that up on the next git push).
             yarn install --frozen-lockfile --silent 2>&1 | tail -5 || \
-                echo "  [WARN] yarn install had warnings — continuing"
+                (echo "  Lockfile drift — retrying without --frozen-lockfile..." && \
+                 yarn install --silent 2>&1 | tail -5)
         else
             echo "  Deps already current (node_modules fresher than package.json/yarn.lock)"
         fi
