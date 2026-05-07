@@ -15,6 +15,7 @@ same admin check used by `/api/admin/*`.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -295,55 +296,63 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
     }
 
     # 1. Close every open trade via the bot's position_manager
+    #
+    # v19.34.43 (2026-02-XX) — Parallelize the close loop. Pre-fix,
+    # this iterated sequentially: each `close_trade` does (cancel OCA
+    # children at IB → submit close MKT → DB persist) which costs
+    # ~1-2s per trade over the IB pusher round-trip. With 30+ open
+    # positions (e.g. BMNR's pre-consolidation 19 fragments + LIN/DDOG/
+    # the rest), 30 × 2s = 60s blew past the frontend's 30s axios
+    # timeout. Operator saw "FLATTEN FAILED — timeout of 30000ms
+    # exceeded" while the backend was still chewing through closes.
+    #
+    # Fix: `asyncio.gather` the closes with a `Semaphore(8)` cap to
+    # respect IB's ~50 msg/sec rate ceiling (each close emits 2-3 msgs).
+    # 30 trades / 8 concurrent = ~4 batches × 2s = 8s. Easy fit in the
+    # 30s envelope.
     try:
-        # v19.34.24 (2026-02-XX) — Fixed two latent bugs in this block that
-        # caused EVERY flatten-all click to silently no-op:
-        #
-        #   (a) `from services.trading_bot_service import get_trading_bot`
-        #       — the actual exported singleton accessor is named
-        #       `get_trading_bot_service` (see server.py:469). The wrong
-        #       name raised ImportError immediately and the broad except
-        #       at line ~250 caught it into the close_errors list as a
-        #       JSON field, so the operator saw a "success: True" envelope
-        #       with `positions_requested_close: 0` and no other clue.
-        #
-        #   (b) Trade-id key is `id`, NOT `trade_id`. The BotTrade dataclass
-        #       (services/trading_bot_service.py:586) defines `id: str` and
-        #       `bot._open_trades` is `Dict[str, BotTrade]` keyed by `id`.
-        #       The pre-fix `getattr(t, "trade_id", None)` always returned
-        #       None, so the loop hit the `if not trade_id: continue` bail
-        #       on every position even if (a) hadn't already crashed first.
-        #
-        # Operator-discovered 2026-02-XX after FDX flatten attempt: log
-        # showed `positions_requested_close: 0` while 17 positions were
-        # visibly open. Both bugs would individually have produced the
-        # same symptom; (a) crashed first so we never saw (b) bite.
         from services.trading_bot_service import get_trading_bot_service
         bot = get_trading_bot_service()
         open_trades: List[Any] = list(getattr(bot, "_open_trades", {}).values()) if bot else []
         summary["positions_requested_close"] = len(open_trades)
 
-        for t in open_trades:
+        async def _close_one(t):
             trade_id = (
                 getattr(t, "id", None)
-                or getattr(t, "trade_id", None)  # legacy dict shape, defensive
+                or getattr(t, "trade_id", None)
                 or (t.get("id") if isinstance(t, dict) else None)
                 or (t.get("trade_id") if isinstance(t, dict) else None)
             )
             if not trade_id:
-                summary["positions_failed"] += 1
-                summary["close_errors"].append({"trade": str(t)[:120], "err": "no trade_id"})
-                continue
+                return ("no_id", str(t)[:120], "no trade_id")
             try:
                 ok = await bot.close_trade(trade_id, reason="emergency_flatten_all")
                 if ok:
+                    return ("ok", trade_id, None)
+                return ("fail", trade_id, "close returned False")
+            except Exception as e:
+                return ("fail", trade_id, str(e)[:200])
+
+        sem = asyncio.Semaphore(8)
+
+        async def _bounded_close(t):
+            async with sem:
+                return await _close_one(t)
+
+        if open_trades:
+            results = await asyncio.gather(
+                *[_bounded_close(t) for t in open_trades],
+                return_exceptions=False,
+            )
+            for status, ident, err in results:
+                if status == "ok":
                     summary["positions_succeeded"] += 1
+                elif status == "no_id":
+                    summary["positions_failed"] += 1
+                    summary["close_errors"].append({"trade": ident, "err": err})
                 else:
                     summary["positions_failed"] += 1
-                    summary["close_errors"].append({"trade_id": trade_id, "err": "close returned False"})
-            except Exception as e:
-                summary["positions_failed"] += 1
-                summary["close_errors"].append({"trade_id": trade_id, "err": str(e)[:200]})
+                    summary["close_errors"].append({"trade_id": ident, "err": err})
     except Exception as e:
         logger.error("[SAFETY] flatten-all: close-positions step crashed: %s", e)
         summary["close_errors"].append({"stage": "close-positions", "err": str(e)[:200]})

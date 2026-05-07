@@ -46,7 +46,17 @@ export const useSafety = ({ pollMs = 8_000 } = {}) => {
   }, [refresh]);
 
   const flattenAll = useCallback(async () => {
-    const r = await api.post('/api/safety/flatten-all?confirm=FLATTEN');
+    // v19.34.43 — flatten-all closes 30+ positions in parallel with a
+    // semaphore-8 cap. Worst-case still up to ~15s on a busy day; the
+    // global axios default is 30s. Set 90s here as a defensive cushion
+    // for IB latency spikes during the close burst. Operator caught
+    // "FLATTEN FAILED — timeout of 30000ms exceeded" on the BMNR
+    // pre-consolidation 19-fragment day (sequential close path).
+    const r = await api.post(
+      '/api/safety/flatten-all?confirm=FLATTEN',
+      null,
+      { timeout: 90000 },
+    );
     await refresh();
     return r.data;
   }, [refresh]);
