@@ -31,12 +31,14 @@
  */
 import { useMemo } from 'react';
 
-export const VALID_VARIANTS = ['v5', 'v6'];
+export const VALID_VARIANTS = ['v5', 'v6', 'new', 'classic'];
 
 // Single source of truth for "what ships by default". Flip this
 // and redeploy to promote a new layout to default.
-// v19.34.29 — V4 fully deprecated. v5 is default.
-// Future: set to 'v6' when V6 is promoted.
+// v19.34.31 — V5 is now the ONLY reachable primary layout for
+// the command-center tab. `new` and `classic` are rollback modes
+// kept for emergency use (accessible via `?layout=new` or
+// `?layout=classic`). `v6` is reserved for the upcoming Phase B.
 export const DEFAULT_VARIANT = 'v5';
 
 const STORAGE_KEY = 'sentcom_layout';

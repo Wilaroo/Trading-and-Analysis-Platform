@@ -2,6 +2,58 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-fourteenth commit, v19.34.31) — V5View wired as primary command-center layout
+
+**Severity: P0 discovery — user reported "where is v5!?!" after v19.34.29. Root cause: V5View was ghost code.**
+
+### The bug class
+
+When auditing for the V6 migration plan, I discovered that **every v19.34.23→v19.34.30 UI improvement (Scanner Pause toggle, IB-LIVE chip, Scanner Paused banner, Open Positions auto-heal pill, Pipeline HUD, ORPHAN/STALE/RECONCILED consolidation)** was landing inside `SentComV5View.jsx`. And `SentComV5View` is rendered by the `!embedded` branch of `<SentCom>`.
+
+**But `<SentCom>` is only ever mounted with `embedded={true}`** — from two callers only:
+- `NewDashboard.jsx:661`
+- `AICoachTab.jsx:190` (classic layout)
+
+Both route to the `embedded` branch of SentCom, which is the pre-V5 legacy dashboard layout (BotHealthBanner + StreamOfConsciousness + old Positions/Market intel panels). The entire V5View grid (Scanner ┃ Chart ┃ Sidebar with PipelineHUD, Briefings, Open Positions, Safety chips, etc.) has been unreachable in production **for as long as V5 has existed**.
+
+The previous agent's handoff mentioning "user looking at V5 UI with ORPHAN badges" was incorrect — operator was always looking at the embedded layout, and the badges they saw were ones I later hid during v19.34.23 cleanup… which also only took effect in the ghost V5View.
+
+### The fix
+
+`AICoachTab.jsx` now defaults its layoutMode to `'v5'` via the centralized `useLayoutVariant()` hook. The new `'v5'` branch mounts `<SentCom />` (without `embedded={true}`), which routes to the `!embedded` branch and renders `<SentComV5View>` at full viewport.
+
+Rollback mechanisms preserved:
+- `?layout=new` → original `NewDashboard` layout (embedded SentCom + right sidebar with learning insights + market regime)
+- `?layout=classic` → original 8/4-col AICoachTab layout (embedded SentCom + Market Intel sidebar)
+- Explicit `layoutMode` prop on AICoachTab still wins over URL/localStorage
+- localStorage-persisted preference via `useLayoutVariant()`
+
+### Verification
+
+- `yarn build` clean; bundle unchanged (~2.0 MB).
+- Playwright DOM queries on command-center tab confirm:
+  - `ai-coach-tab-content-v5` wrapper present
+  - `v5-scanner-pause-toggle` (Scanner pause button) present
+  - `v5-ib-live-chip` (IB brokerage-permission chip) present
+  - "SCAN → EVAL → ORDER" Pipeline HUD present
+  - "Scanner · Live" header present
+- `?layout=new` rollback verified: V5 wrapper absent, old `ai-coach-tab-content` wrapper present.
+
+### What the operator will now see on the command-center tab (after DGX pull+restart)
+
+- Left column: Scanner cards with live ticks, Scanner Pause toggle, Pause Banner when paused
+- Center: Chart panel with position overlay, V5 chart header with entry/SL/PT markers
+- Right sidebar: Morning/Midday/Power-Hour/EOD Briefing chips, Open Positions (auto-heal pill consolidated), ML Feature Audit, CPU relief badge
+- Top: Status strip (HealthChip, ConnectivityCheck, DeadLetterBadge, FlattenAll, AccountMode, BootReconcile, AccountGuard, **IbLiveChip**, SafetyHud, CommandPalette hint), SafetyBanner/PusherDeadBanner/AwaitingQuotesPill, PipelineHUDV5 ribbon
+- Below PipelineHUD: TopMoversTile, PusherHeartbeatTile, StrategyMixCard, ShadowVsRealTile status strip
+- Drawer: SentCom Intelligence + UnifiedStream + DeepFeed + ChatInput
+
+### Known follow-ups
+
+- Update `useLayoutVariant.VALID_VARIANTS` ['v5','v6','new','classic'] — done.
+- `DEFAULT_VARIANT = 'v5'` unchanged but now actually takes effect.
+- V6 Phase A (shared panel extraction) still on the roadmap and gains importance now that V5View is live for operators.
+
 ## 2026-02-XX (one-hundred-thirteenth commit, v19.34.30) — Dead-code & lint sweep + useLayoutVariant() helper
 
 **Severity: Low-risk cleanup. Shrinks source tree ~3,500 lines, auto-fixes 482 backend lint errors, adds V6-prep helper. Zero behavioral change.**

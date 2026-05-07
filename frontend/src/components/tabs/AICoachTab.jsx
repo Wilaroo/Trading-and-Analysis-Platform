@@ -7,6 +7,7 @@ import NewDashboard from '../NewDashboard';
 import BriefMeModal from '../BriefMeModal';
 import SentCom from '../SentCom';
 import { useTickerModal } from '../../hooks/useTickerModal';
+import { useLayoutVariant } from '../../hooks/useLayoutVariant';
 import api, { safeGet, safePost } from '../../utils/api';
 
 const AICoachTab = ({
@@ -34,9 +35,24 @@ const AICoachTab = ({
   wsMarketRegime = null,
   // Navigation callback
   onNavigateToTab = null,
-  // Layout mode: 'new' for NewDashboard, 'classic' for original
-  layoutMode = 'new'
+  // Layout mode: v19.34.31 — default is now 'v5' (SentComV5View full grid
+  // with Scanner ┃ Chart ┃ Positions + PipelineHUD + Safety chips).
+  // Previous options remain as rollback: 'new' (NewDashboard with
+  // embedded SentCom) and 'classic' (original 8/4 col grid).
+  // Override via prop, `?layout=new`, `?layout=classic`, or
+  // localStorage.sentcom_layout.
+  layoutMode: layoutModeProp = null,
 }) => {
+  // Resolve the active layout variant. Prop wins (for unit-test /
+  // explicit-caller override); otherwise the centralized hook reads
+  // ?layout=, ?v5=1 / ?v6=1, localStorage, and DEFAULT_VARIANT.
+  const variant = useLayoutVariant();
+  const layoutMode = layoutModeProp || (
+    variant === 'v6' ? 'v6'
+    : variant === 'classic' ? 'classic'
+    : variant === 'new' ? 'new'
+    : 'v5'
+  );
   // Use the global ticker modal hook
   const { openTickerModal } = useTickerModal();
   
@@ -131,6 +147,30 @@ const AICoachTab = ({
   const handleBriefMe = () => {
     setIsBriefMeOpen(true);
   };
+
+  // --- V5 COMMAND-CENTER LAYOUT (v19.34.31 default) ---
+  //
+  // The SentComV5View grid — Scanner ┃ Chart ┃ Right sidebar with
+  // PipelineHUD, Briefings, Open Positions, Safety chips, Scanner
+  // Pause toggle, IB-LIVE chip, Paused banner, etc. This was the
+  // ghost code path that every v19.34.23→v19.34.30 UI improvement
+  // targeted — previously UNREACHABLE because nothing mounted
+  // `<SentCom>` without `embedded={true}`. v19.34.31 makes V5 the
+  // default AICoachTab rendering; `new` and `classic` remain
+  // available as rollback via `layoutMode` prop.
+  if (layoutMode === 'v5') {
+    return (
+      <div className="min-h-[calc(100vh-120px)]" data-testid="ai-coach-tab-content-v5">
+        {/* Brief Me Modal */}
+        <BriefMeModal
+          isOpen={isBriefMeOpen}
+          onClose={() => setIsBriefMeOpen(false)}
+        />
+        {/* Non-embedded SentCom → renders <SentComV5View> */}
+        <SentCom />
+      </div>
+    );
+  }
 
   // --- NEW DASHBOARD LAYOUT ---
   if (layoutMode === 'new') {
