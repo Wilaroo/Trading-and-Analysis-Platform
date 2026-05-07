@@ -337,6 +337,94 @@ class IBDirectService:
             logger.error("v19.34.25 [IB-DIRECT] cancel_order failed: %s — %s", order_id, e)
             return {"success": False, "error": str(e)[:200]}
 
+    async def cancel_all_open_orders_for_symbol(
+        self, symbol: str, side: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """v19.34.44 — cancel every WORKING order for a (symbol[, side]).
+
+        Operator-discovered 2026-02-XX during BMNR flatten-all attempt:
+        IB Error 201 — `Your account has a minimum of 15 orders working
+        on either the buy or sell side for this particular contract`.
+        Pre-fix, the 19 BMNR fragments each owned an OCA stop+target
+        bracket child at IB (~38 working SELL orders). The consolidator
+        collapsed the DB-side rows but those zombie OCA children stayed
+        WORKING at IB because their order_ids weren't stamped on the
+        canonical trade. Result: every subsequent close MKT got
+        rejected by IB's 15-order cap.
+
+        This method does the brute-force "blow away every working order
+        for this contract" scan that flatten-all needs as a pre-step.
+        Iterates `self._ib.trades()` (which sees ALL working orders on
+        this IB Gateway session, even those placed by the pusher's
+        clientId), filters by symbol [+ side], and cancels each.
+
+        Args:
+          symbol: Stock symbol to cancel orders for (case-insensitive).
+          side:   Optional 'BUY' or 'SELL' filter. None = both sides.
+
+        Returns:
+          {success, cancelled: [order_ids], skipped: [...], errors: [...]}
+        """
+        report: Dict[str, Any] = {
+            "success": True, "symbol": symbol.upper(),
+            "side_filter": (side or "").upper() or None,
+            "cancelled": [], "skipped": [], "errors": [],
+        }
+        if not await self.ensure_connected():
+            report["success"] = False
+            report["error"] = "not connected"
+            return report
+        try:
+            sym_u = symbol.upper()
+            side_u = (side or "").upper()
+            for t in list(self._ib.trades() or []):
+                try:
+                    contract = getattr(t, "contract", None)
+                    order = getattr(t, "order", None)
+                    status_obj = getattr(t, "orderStatus", None)
+                    if contract is None or order is None:
+                        continue
+                    csym = (getattr(contract, "symbol", "") or "").upper()
+                    if csym != sym_u:
+                        continue
+                    caction = (getattr(order, "action", "") or "").upper()
+                    if side_u and caction != side_u:
+                        continue
+                    # Status filter: cancel only orders that are still WORKING.
+                    # IB's `isActive` covers Submitted/PreSubmitted/PendingSubmit etc.
+                    # Defensive: if no status, attempt cancel anyway (cheap).
+                    if status_obj is not None and hasattr(t, "isActive"):
+                        try:
+                            if not t.isActive():
+                                report["skipped"].append({
+                                    "order_id": int(order.orderId),
+                                    "status": getattr(status_obj, "status", "?"),
+                                    "reason": "not_active",
+                                })
+                                continue
+                        except Exception:
+                            pass
+                    self._ib.cancelOrder(order)
+                    report["cancelled"].append({
+                        "order_id": int(order.orderId),
+                        "action": caction,
+                        "qty": float(getattr(order, "totalQuantity", 0) or 0),
+                    })
+                except Exception as inner:
+                    report["errors"].append({
+                        "order_id": int(getattr(getattr(t, "order", None), "orderId", 0) or 0),
+                        "err": str(inner)[:200],
+                    })
+            return report
+        except Exception as e:
+            logger.error(
+                "v19.34.44 [IB-DIRECT] cancel_all_open_orders_for_symbol "
+                "%s failed: %s", symbol, e,
+            )
+            report["success"] = False
+            report["error"] = str(e)[:200]
+            return report
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Singleton accessor

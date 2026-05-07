@@ -109,11 +109,19 @@ def test_flatten_all_calls_close_trade_for_every_open_position():
 def test_flatten_all_records_failures_without_aborting_loop():
     from routers.safety_router import flatten_all
 
+    # v19.34.44 — flatten now groups by (symbol, direction). Each test
+    # trade gets a unique symbol so each forms its own group.
+    def _ns(tid):
+        ns = SimpleNamespace(id=tid, symbol=f"SYM-{tid}",
+                              direction=SimpleNamespace(value="long"),
+                              remaining_shares=100, entry_time="2026-05-08T10:00:00+00:00")
+        return ns
+
     bot = MagicMock()
     bot._open_trades = {
-        "OK":   SimpleNamespace(id="OK"),
-        "NOPE": SimpleNamespace(id="NOPE"),
-        "BOOM": SimpleNamespace(id="BOOM"),
+        "OK":   _ns("OK"),
+        "NOPE": _ns("NOPE"),
+        "BOOM": _ns("BOOM"),
     }
 
     async def _close(trade_id, reason="manual"):
@@ -206,10 +214,15 @@ def test_flatten_all_requires_confirm_param():
 def test_flatten_all_returns_failure_when_every_close_fails():
     from routers.safety_router import flatten_all
 
+    def _ns(tid):
+        return SimpleNamespace(id=tid, symbol=f"SYM-{tid}",
+                                direction=SimpleNamespace(value="long"),
+                                remaining_shares=100, entry_time="2026-05-08T10:00:00+00:00")
+
     bot = MagicMock()
     bot._open_trades = {
-        "T1": SimpleNamespace(id="T1"),
-        "T2": SimpleNamespace(id="T2"),
+        "T1": _ns("T1"),
+        "T2": _ns("T2"),
     }
     bot.close_trade = AsyncMock(return_value=False)   # every close fails
 
@@ -272,10 +285,15 @@ def test_flatten_all_returns_failure_when_close_step_crashes():
 def test_flatten_all_returns_success_when_at_least_one_close_works():
     from routers.safety_router import flatten_all
 
+    def _ns(tid):
+        return SimpleNamespace(id=tid, symbol=f"SYM-{tid}",
+                                direction=SimpleNamespace(value="long"),
+                                remaining_shares=100, entry_time="2026-05-08T10:00:00+00:00")
+
     bot = MagicMock()
     bot._open_trades = {
-        "T1": SimpleNamespace(id="T1"),
-        "T2": SimpleNamespace(id="T2"),
+        "T1": _ns("T1"),
+        "T2": _ns("T2"),
     }
 
     async def _close(trade_id, reason="manual"):

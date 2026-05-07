@@ -35,7 +35,12 @@ def _run(coro):
 
 
 def _mk_trades(n):
-    return [SimpleNamespace(id=f"t{i}", symbol=f"SYM{i}") for i in range(n)]
+    return [SimpleNamespace(
+        id=f"t{i}", symbol=f"SYM{i}",
+        direction=SimpleNamespace(value="long"),
+        remaining_shares=100,
+        entry_time="2026-05-08T10:00:00+00:00",
+    ) for i in range(n)]
 
 
 def test_flatten_all_runs_closes_in_parallel_under_concurrency_cap():
