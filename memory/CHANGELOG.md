@@ -16516,6 +16516,30 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.41 — Proactive Coach (60s scan + one-tap suggestions) (2026-05-07 morning, T-0 to open)
+
+**Trigger:** v19.34.40 gave the chat AI hands-on trade control, but it was reactive only — the operator still had to think to ask. v19.34.41 adds the proactive layer: every 60s the bot scans open trades for coachable states and pre-computes ready-to-fire suggestions.
+
+**New service `services/proactive_coach_service.py`:**
+Pure-function `evaluate_trade(trade)` returns 0+ `CoachSuggestion` per trade, covering four conditions:
+1. **`move_stop_to_breakeven`** — long ≥ +1R AND stop still below entry → suggest move stop to entry. (Mirrors for shorts.)
+2. **`tighten_stop_runner`** — position ≥ +2R → suggest trailing stop to `current ± 0.5R` (locks half the runner).
+3. **`take_partial_winner`** — current price within 0.5% of first target → suggest partial close for half remaining shares.
+4. **`stop_proximity_warning`** — current within 0.5% of stop → info-only warning, operator decides (widen / tighten / exit).
+
+Each suggestion carries a ready-to-fire `proposed_action` dict pointing at `/api/trading-bot/adjust-trade` with the exact payload — frontend can render a one-tap accept button.
+
+`ProactiveCoachService` singleton runs an asyncio background loop (60s cadence), calls `scan_once()` against the trading bot's `_open_trades`, and rebuilds the suggestion cache each pass. Stale suggestions auto-drop when the underlying condition no longer applies.
+
+**New router `routers/coach_router.py`:**
+- `GET /api/coach/proactive-suggestions` returns `{success, count, last_scan_at, suggestions[]}` for the V5 UI / chat AI to consume.
+
+**Wiring:**
+- `server.py` registers `coach_router` next to `safety_router`.
+- `server.py` startup event spawns the coach loop via `get_proactive_coach().start(get_trading_bot_service)`.
+
+**Verified:** 13-test regression suite `test_proactive_coach_v19_34_41.py` covers each of the four conditions plus stale-state dropping plus endpoint registration. **168/168** cumulative critical-pipeline tests pass post-fix.
+
 ### v19.34.40 — Chat AI extended trade-action surface (2026-05-07 morning, T-2 to open)
 
 **Trigger:** operator told the chat AI "let's move our stop on DDOG to $194 please" and got back: *"I can't push a stop-price change through the trade-action interface — it only handles opening, closing or flipping a position."* Chat AI's tool surface was limited to `close` / `buy` / `sell`.

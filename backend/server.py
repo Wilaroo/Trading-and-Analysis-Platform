@@ -1495,6 +1495,12 @@ except Exception as _ldr_exc:
 # Safety guardrails — kill-switch, exposure caps, emergency flatten-all
 from routers.safety_router import router as safety_router  # noqa: E402
 app.include_router(safety_router)
+
+# v19.34.41 — Proactive Coach: surfaces coachable-state suggestions
+# (move stop to BE, take partial at first target, trail past 2R, stop
+# proximity warnings) every 60s for the chat AI / UI to act on.
+from routers.coach_router import router as coach_router  # noqa: E402
+app.include_router(coach_router)
 # v19.34.25 — Direct IB API connection (read-only diagnostics in Phase 1;
 # Phase 2 wires it into trade_executor_service for direct order routing).
 # v19.34.25b: use print() not logger — `logger` is not bound at this
@@ -3840,7 +3846,20 @@ async def startup_event():
             print("[STARTUP] v19.34.26 — scanner pause RESTORED from DB; intake disabled.")
     except Exception as _e:
         print(f"[STARTUP] WARN: kill-switch restore failed: {_e}")
-    
+
+    # v19.34.41 — Proactive Coach background loop.
+    # Scans open trades every 60s and emits coachable-state suggestions
+    # (move stop to BE, take partial at first target, trail past 2R,
+    # stop proximity warnings). Surfaced via /api/coach/proactive-suggestions
+    # for the chat AI / V5 UI to act on with one-tap accept.
+    try:
+        from services.proactive_coach_service import get_proactive_coach
+        from services.trading_bot_service import get_trading_bot_service
+        get_proactive_coach().start(get_trading_bot_service)
+        print("[STARTUP] v19.34.41 — proactive coach loop started (60s cadence).")
+    except Exception as _e:
+        print(f"[STARTUP] WARN: proactive coach failed to start: {_e}")
+
     # Step 2: Expand the default thread pool to prevent starvation from blocking I/O
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=64))
