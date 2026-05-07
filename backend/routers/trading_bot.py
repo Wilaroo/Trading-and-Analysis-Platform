@@ -918,6 +918,217 @@ async def reissue_bracket(payload: Dict[str, Any]):
         }
 
 
+# ─── v19.34.40 — Chat-AI / manual-UX trade-adjust endpoint ──────────────
+@router.post("/adjust-trade")
+async def adjust_trade(payload: Dict[str, Any]):
+    """Move stop, move targets, partial-close, and/or cancel pending orders
+    on an existing OPEN trade. Designed for the SentCom chat AI's tool
+    surface and for operator manual UX (right-click "modify" on a position).
+
+    Body (all fields optional except trade-locator):
+      {
+        // --- locate the trade (one of these required) ---
+        "trade_id":              "abc12345",
+        "symbol":                "DDOG",       // first OPEN trade for symbol
+
+        // --- modifications (apply any combination) ---
+        "new_stop":              194.00,       // operator-supplied stop price
+        "new_targets":           [208.0, 215.0],   // operator-supplied target levels
+        "partial_close_shares":  50,           // sell N shares at market right now
+        "cancel_pending_only":   true,         // cancel un-filled orders only
+
+        // --- meta ---
+        "reason":                "chat_ai_move_stop"  // optional, audit trail
+      }
+
+    Behavior:
+      • `new_stop` and/or `new_targets` → triggers full bracket re-issue
+        via `reissue_bracket_for_trade` (cancels old OCA legs, submits new).
+        Operator-set prices are direction-sanity validated (long stop must
+        be < entry, short stop > entry, etc.).
+      • `partial_close_shares` → fires a market order for N shares; the
+        bracket re-issue auto-runs after with `already_executed_shares=N`.
+      • `cancel_pending_only` → just cancels open orders, position stays.
+
+    Returns: `{success, trade_id, applied: [...], errors: [...], plan: {...}}`
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON body required")
+
+    if _trading_bot is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+
+    # ── locate the trade ────────────────────────────────────────────────
+    trade_id = payload.get("trade_id")
+    symbol = (payload.get("symbol") or "").upper().strip()
+    trade = None
+    if trade_id:
+        trade = (_trading_bot._open_trades or {}).get(str(trade_id))
+        if trade is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"trade_id {trade_id!r} not found in open trades",
+            )
+    elif symbol:
+        # First OPEN trade for the symbol (case-insensitive). Most operator
+        # chat requests use symbol, not trade_id.
+        for t in (_trading_bot._open_trades or {}).values():
+            if (t.symbol or "").upper() == symbol:
+                trade = t
+                break
+        if trade is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no open trade found for symbol {symbol!r}",
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="must supply either trade_id or symbol",
+        )
+
+    new_stop = payload.get("new_stop")
+    new_targets = payload.get("new_targets")
+    partial_shares = payload.get("partial_close_shares")
+    cancel_pending = bool(payload.get("cancel_pending_only", False))
+    reason = str(payload.get("reason") or "manual_adjust")
+
+    # Sanity: at least one modification must be requested.
+    if new_stop is None and not new_targets and not partial_shares and not cancel_pending:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "no modification requested — supply at least one of: "
+                "new_stop, new_targets, partial_close_shares, cancel_pending_only"
+            ),
+        )
+
+    applied: List[str] = []
+    errors: List[str] = []
+    plan_dict: Optional[Dict[str, Any]] = None
+
+    try:
+        # ── 1) cancel-only path (no re-issue, no partial close) ──────────
+        if cancel_pending and new_stop is None and not new_targets and not partial_shares:
+            try:
+                from services.bracket_reissue_service import cancel_active_bracket_legs
+                from services.order_queue_service import get_order_queue_service
+                qs = get_order_queue_service()
+                if not qs._initialized:
+                    qs.initialize()
+                cancel_result = await cancel_active_bracket_legs(
+                    trade_id=trade.id,
+                    queue_service=qs,
+                    cancel_ack_timeout_s=2.0,
+                )
+                applied.append("cancelled_pending_orders")
+                return {
+                    "success": cancel_result.get("success", True),
+                    "trade_id": trade.id,
+                    "symbol": trade.symbol,
+                    "applied": applied,
+                    "errors": errors,
+                    "cancel_result": cancel_result,
+                }
+            except Exception as ce:
+                errors.append(f"cancel_pending failed: {type(ce).__name__}: {ce}")
+                return {
+                    "success": False,
+                    "trade_id": trade.id,
+                    "applied": applied,
+                    "errors": errors,
+                }
+
+        # ── 2) partial close BEFORE bracket re-issue ─────────────────────
+        executed_count = 0
+        if partial_shares:
+            try:
+                n = int(partial_shares)
+                if n <= 0:
+                    raise ValueError(f"partial_close_shares must be > 0, got {n}")
+                if n >= int(trade.shares or 0):
+                    raise ValueError(
+                        f"partial_close_shares {n} >= total shares "
+                        f"{trade.shares} — use full close instead"
+                    )
+                # Use position_manager.close_trade with a partial-shares hint.
+                # Falls back to a queue_order MKT for the partial qty.
+                from routers.ib import queue_order
+                close_side = "SELL" if (trade.direction.value if hasattr(trade.direction, "value") else str(trade.direction)).lower() == "long" else "BUY"
+                qres = await queue_order({
+                    "symbol": trade.symbol,
+                    "action": close_side,
+                    "totalQuantity": n,
+                    "orderType": "MKT",
+                    "tif": "DAY",
+                    "outsideRth": False,
+                    "metadata": {
+                        "trade_id": trade.id,
+                        "reason": f"partial_close_chat_{reason}",
+                        "operator": "chat_ai",
+                    },
+                })
+                if not (qres or {}).get("success", True):
+                    errors.append(f"partial_close queue_order returned: {qres}")
+                executed_count = n
+                applied.append(f"partial_closed_{n}_shares")
+                # Stamp on trade so any consumer can see it
+                trade.shares = max(0, int(trade.shares or 0) - n)
+                _trading_bot._persist_trade(trade)
+            except Exception as pe:
+                errors.append(f"partial_close failed: {type(pe).__name__}: {pe}")
+
+        # ── 3) bracket re-issue with operator overrides ──────────────────
+        if new_stop is not None or new_targets:
+            try:
+                op_stop = float(new_stop) if new_stop is not None else None
+                op_targets = [float(t) for t in new_targets] if new_targets else None
+                from services.bracket_reissue_service import reissue_bracket_for_trade
+                result = await reissue_bracket_for_trade(
+                    trade=trade,
+                    bot=_trading_bot,
+                    reason=reason,
+                    operator_stop_price=op_stop,
+                    operator_target_prices=op_targets,
+                    already_executed_shares=executed_count,
+                    preserve_target_levels=(op_targets is None),
+                )
+                if result.get("success"):
+                    if op_stop is not None:
+                        applied.append(f"moved_stop_to_{op_stop}")
+                    if op_targets:
+                        applied.append(f"moved_targets_to_{op_targets}")
+                    plan_dict = result.get("plan")
+                else:
+                    errors.append(
+                        f"bracket reissue failed: {result.get('error') or result.get('phase')}"
+                    )
+            except Exception as re_e:
+                errors.append(f"bracket_reissue failed: {type(re_e).__name__}: {re_e}")
+
+        return {
+            "success": len(errors) == 0,
+            "trade_id": trade.id,
+            "symbol": trade.symbol,
+            "applied": applied,
+            "errors": errors,
+            "plan": plan_dict,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"adjust-trade orchestrator error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "trade_id": getattr(trade, "id", None),
+            "applied": applied,
+            "errors": errors + [f"orchestrator: {type(e).__name__}: {e}"],
+        }
+
+
+
+
 # ─── v19.34.8 — Rejection cooldown operator endpoints ─────────────────
 @router.get("/rejection-cooldowns")
 async def list_rejection_cooldowns():

@@ -16516,6 +16516,32 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.40 — Chat AI extended trade-action surface (2026-05-07 morning, T-2 to open)
+
+**Trigger:** operator told the chat AI "let's move our stop on DDOG to $194 please" and got back: *"I can't push a stop-price change through the trade-action interface — it only handles opening, closing or flipping a position."* Chat AI's tool surface was limited to `close` / `buy` / `sell`.
+
+**Backend (`services/bracket_reissue_service.py`):**
+- `compute_reissue_params` and `reissue_bracket_for_trade` now accept two new optional kwargs: `operator_stop_price` and `operator_target_prices`.
+- Operator-supplied prices bypass the auto-recompute (ATR-driven stop, 2R fallback target) and are direction-sanity-validated before plan emission. Long stops must sit below entry, short stops above. Long targets above entry, short targets below. Validation failure → `ValueError` with operator-readable message.
+
+**Backend (`routers/trading_bot.py`):**
+- New endpoint **`POST /api/trading-bot/adjust-trade`** accepts a single payload supporting four modifications in any combination:
+  - `new_stop` — operator price for stop, triggers full OCA bracket re-issue
+  - `new_targets` — single price or list, same re-issue path
+  - `partial_close_shares` — fires market order for N shares, auto re-issues bracket on remainder
+  - `cancel_pending_only` — cancels active OCA legs without touching the position
+- Trade locator: `trade_id` (precise) or `symbol` (operator-friendly). Returns structured `{success, applied[], errors[], plan}` so the chat AI can report back accurately.
+
+**Backend (`chat_server.py::_execute_trade_action`):** four new actions wired:
+- `move_stop` — `{"action": "move_stop", "symbol": "DDOG", "new_stop": 194.00}`
+- `move_target` — `{"action": "move_target", "symbol": "DDOG", "new_target": 210.00}` or `"new_targets": [205, 215]`
+- `partial_close` — `{"action": "partial_close", "symbol": "DDOG", "shares": 50}`
+- `cancel_orders` — `{"action": "cancel_orders", "symbol": "DDOG"}`
+
+**System prompt (`chat_server.py`):** rewrote the TRADE EXECUTION section to advertise the full menu with examples + validation rules. Added explicit guidance: *"If the user is ambiguous about the price ('tighten my DDOG stop'), ASK for the specific price before emitting JSON. Never guess a price."*
+
+**Verified:** new test suite `test_chat_extended_trade_actions_v19_34_40.py` (11 tests) covering operator-override math + direction sanity rejections + endpoint registration + chat executor wiring + system-prompt advertisement. **189/189** cumulative critical-pipeline tests pass.
+
 ### v19.34.39 — HUD account-chip consolidation (2026-05-07 morning, T-5 to open)
 
 **Trigger:** operator noticed two `PAPER · DUN615665` pills in the HUD strip — one amber/yellow (AccountModeBadge), one green (AccountGuardChipV5). Both showed nearly the same fact from different angles, weakening the loud guard-chip mismatch alarm with a competing informational badge. Critical pre-live-money UX issue.

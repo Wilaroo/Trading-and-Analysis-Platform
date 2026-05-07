@@ -145,6 +145,8 @@ def compute_reissue_params(
     new_avg_entry: Optional[float] = None,
     already_executed_shares: int = 0,
     preserve_target_levels: bool = True,
+    operator_stop_price: Optional[float] = None,
+    operator_target_prices: Optional[List[float]] = None,
 ) -> ReissuePlan:
     """Pure computation of the new bracket parameters.
 
@@ -157,8 +159,16 @@ def compute_reissue_params(
       4. TIF: re-resolved from trade.trade_style + trade.timeframe via
          services/bracket_tif.py (no manual override here).
 
+    v19.34.40 (2026-05-07) — operator overrides:
+      - `operator_stop_price` (chat AI / manual UI) bypasses rule (1) and
+         pins the stop to the supplied price. Validates direction sanity:
+         long → stop < entry, short → stop > entry. Rejects with ValueError.
+      - `operator_target_prices` bypasses rule (2) entirely — caller knows
+         best. Same direction-sanity check applied to each level.
+
     Raises:
       ValueError if computed remaining_shares <= 0 (no protection needed).
+      ValueError if operator overrides violate direction sanity.
     """
     direction = (
         trade.direction.value if hasattr(trade.direction, "value")
@@ -191,7 +201,23 @@ def compute_reissue_params(
         raise ValueError(f"avg_entry must be > 0, got {avg_entry}")
 
     stop_pct = float(getattr(risk_params, "reconciled_default_stop_pct", 2.0)) / 100.0
-    if direction == "long":
+    if operator_stop_price is not None:
+        # v19.34.40 — operator override (chat AI / manual UI).
+        operator_stop = float(operator_stop_price)
+        if operator_stop <= 0:
+            raise ValueError(f"operator_stop_price must be > 0, got {operator_stop}")
+        if direction == "long" and operator_stop >= avg_entry:
+            raise ValueError(
+                f"operator_stop_price ${operator_stop:.2f} is at/above long "
+                f"entry ${avg_entry:.2f} — would lock in immediate loss/exit"
+            )
+        if direction == "short" and operator_stop <= avg_entry:
+            raise ValueError(
+                f"operator_stop_price ${operator_stop:.2f} is at/below short "
+                f"entry ${avg_entry:.2f} — would lock in immediate loss/exit"
+            )
+        new_stop = round(operator_stop, 2)
+    elif direction == "long":
         new_stop = round(avg_entry * (1.0 - stop_pct), 2)
     else:  # short
         new_stop = round(avg_entry * (1.0 + stop_pct), 2)
@@ -199,7 +225,28 @@ def compute_reissue_params(
     # ── target levels: preserve if requested, else 2R fallback ──────────────
     rationale: List[str] = []
     original_targets = list(getattr(trade, "target_prices", None) or [])
-    if preserve_target_levels and original_targets:
+    if operator_target_prices:
+        # v19.34.40 — operator override.
+        target_levels = [float(t) for t in operator_target_prices]
+        # Direction-sanity check on each level.
+        for tlvl in target_levels:
+            if tlvl <= 0:
+                raise ValueError(f"operator_target_prices contains non-positive value: {tlvl}")
+            if direction == "long" and tlvl <= avg_entry:
+                raise ValueError(
+                    f"operator target ${tlvl:.2f} is at/below long entry "
+                    f"${avg_entry:.2f} — would fire immediately at fill"
+                )
+            if direction == "short" and tlvl >= avg_entry:
+                raise ValueError(
+                    f"operator target ${tlvl:.2f} is at/above short entry "
+                    f"${avg_entry:.2f} — would fire immediately at fill"
+                )
+        rationale.append(
+            f"target_levels: operator-supplied {len(target_levels)} levels "
+            f"({target_levels})"
+        )
+    elif preserve_target_levels and original_targets:
         target_levels = [float(t) for t in original_targets]
         rationale.append(
             f"target_levels: preserved {len(target_levels)} original levels "
@@ -467,6 +514,8 @@ async def reissue_bracket_for_trade(
     new_avg_entry: Optional[float] = None,
     already_executed_shares: int = 0,
     preserve_target_levels: bool = True,
+    operator_stop_price: Optional[float] = None,
+    operator_target_prices: Optional[List[float]] = None,
     cancel_ack_timeout_s: float = 2.0,
     queue_service=None,
     queue_order_fn=None,
@@ -502,6 +551,8 @@ async def reissue_bracket_for_trade(
             new_avg_entry=new_avg_entry,
             already_executed_shares=already_executed_shares,
             preserve_target_levels=preserve_target_levels,
+            operator_stop_price=operator_stop_price,
+            operator_target_prices=operator_target_prices,
         )
     except Exception as e:
         logger.error(

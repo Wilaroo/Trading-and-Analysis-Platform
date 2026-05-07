@@ -1218,7 +1218,78 @@ def _execute_trade_action(response_text: str) -> Optional[dict]:
                 return {"success": data.get("success", False), "summary": data.get("message", f"{action} {shares} {symbol}")}
             else:
                 return {"success": False, "error": f"Backend returned {resp.status_code}"}
-        
+
+        # ─── v19.34.40 — extended chat-AI tool surface ──────────────────
+        elif action == "move_stop":
+            # Operator-supplied new stop price. Backend re-issues OCA bracket.
+            new_stop = action_data.get("new_stop") or action_data.get("price")
+            if new_stop is None:
+                return {"success": False, "error": "move_stop requires `new_stop` price"}
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/adjust-trade",
+                json={"symbol": symbol, "new_stop": new_stop, "reason": f"chat_ai_{reason}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return {"success": True, "summary": f"Stop on {symbol} moved to ${new_stop} — bracket re-issued"}
+                err = "; ".join(data.get("errors") or ["unknown"])
+                return {"success": False, "error": f"move_stop failed: {err}"}
+            return {"success": False, "error": f"Backend returned {resp.status_code}"}
+
+        elif action == "move_target":
+            # Single price or list. Backend re-issues OCA bracket with new targets.
+            raw = action_data.get("new_target") or action_data.get("new_targets") or action_data.get("price")
+            if raw is None:
+                return {"success": False, "error": "move_target requires `new_target` price (number or list)"}
+            new_targets = raw if isinstance(raw, list) else [raw]
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/adjust-trade",
+                json={"symbol": symbol, "new_targets": new_targets, "reason": f"chat_ai_{reason}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return {"success": True, "summary": f"Target(s) on {symbol} moved to {new_targets} — bracket re-issued"}
+                err = "; ".join(data.get("errors") or ["unknown"])
+                return {"success": False, "error": f"move_target failed: {err}"}
+            return {"success": False, "error": f"Backend returned {resp.status_code}"}
+
+        elif action == "partial_close":
+            # Sell N of the M open shares right now at market.
+            n = action_data.get("shares") or action_data.get("partial_close_shares")
+            if not n or int(n) <= 0:
+                return {"success": False, "error": "partial_close requires positive `shares` count"}
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/adjust-trade",
+                json={"symbol": symbol, "partial_close_shares": int(n), "reason": f"chat_ai_{reason}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return {"success": True, "summary": f"Partial-closed {n} shares of {symbol} — bracket re-issued for remainder"}
+                err = "; ".join(data.get("errors") or ["unknown"])
+                return {"success": False, "error": f"partial_close failed: {err}"}
+            return {"success": False, "error": f"Backend returned {resp.status_code}"}
+
+        elif action == "cancel_orders":
+            # Cancel pending un-filled orders on this trade. Position itself stays.
+            resp = requests.post(
+                f"{backend_url}/api/trading-bot/adjust-trade",
+                json={"symbol": symbol, "cancel_pending_only": True, "reason": f"chat_ai_{reason}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return {"success": True, "summary": f"Cancelled pending orders on {symbol}"}
+                err = "; ".join(data.get("errors") or ["unknown"])
+                return {"success": False, "error": f"cancel_orders failed: {err}"}
+            return {"success": False, "error": f"Backend returned {resp.status_code}"}
+
         else:
             return {"success": False, "error": f"Unknown action: {action}"}
     
@@ -1350,10 +1421,31 @@ SELF-AWARENESS & COACHING:
 - Your reflections update daily after market close. Reference the date so the user knows how current the data is.
 
 TRADE EXECUTION:
-- When I ask to close, buy, or sell a position, include a JSON block at the END of your response:
-  <<<TRADE_ACTION: {{"action": "close", "symbol": "LABD", "reason": "user_requested"}}>>>
-- Only include this when I'm clearly requesting a trade action, not when discussing hypotheticals.
-- Confirm the action in plain English BEFORE the JSON block.
+- When I ask to close, buy, sell, modify, or partial-close a position, emit ONE JSON block at the END of your response. Always confirm the action in plain English BEFORE the JSON.
+- Only emit when I'm clearly requesting a trade action, not when discussing hypotheticals.
+
+Available actions (v19.34.40):
+  • CLOSE a position:
+      <<<TRADE_ACTION: {{"action": "close", "symbol": "LABD", "reason": "user_requested"}}>>>
+  • BUY / SELL a fresh position (specify shares):
+      <<<TRADE_ACTION: {{"action": "buy", "symbol": "DDOG", "shares": 100, "reason": "user_requested"}}>>>
+  • MOVE STOP on an existing open position to a specific price:
+      <<<TRADE_ACTION: {{"action": "move_stop", "symbol": "DDOG", "new_stop": 194.00, "reason": "tighten_after_breakout"}}>>>
+  • MOVE TARGET on an existing open position (single price or list):
+      <<<TRADE_ACTION: {{"action": "move_target", "symbol": "DDOG", "new_target": 210.00, "reason": "extend_runner"}}>>>
+      <<<TRADE_ACTION: {{"action": "move_target", "symbol": "DDOG", "new_targets": [205, 215], "reason": "two_tier_exit"}}>>>
+  • PARTIAL CLOSE — sell N of M open shares at market:
+      <<<TRADE_ACTION: {{"action": "partial_close", "symbol": "DDOG", "shares": 50, "reason": "lock_partial_winner"}}>>>
+  • CANCEL pending un-filled orders (position itself stays):
+      <<<TRADE_ACTION: {{"action": "cancel_orders", "symbol": "DDOG", "reason": "manual_handoff"}}>>>
+
+Validation rules backend enforces (so you don't need to second-guess):
+  • Long positions: stop must be < entry; targets must be > entry.
+  • Short positions: stop must be > entry; targets must be < entry.
+  • partial_close `shares` must be > 0 and < total open shares (use `close` for full).
+  • move_stop / move_target trigger a full OCA bracket re-issue (cancel old legs + submit new). The old levels are gone the moment the new ones acknowledge.
+
+If the user is ambiguous about the price ("tighten my DDOG stop"), ASK for the specific price before emitting JSON. Never guess a price.
 
 APP HELP / GLOSSARY:
 - The block below ("APP GLOSSARY") lists every badge / chip / score / verdict / panel in the app, with its definition.
