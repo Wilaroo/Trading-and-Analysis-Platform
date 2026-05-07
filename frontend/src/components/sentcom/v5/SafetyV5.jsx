@@ -300,6 +300,25 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                         <div className="v5-why-dim not-italic">Failed: <span className="text-rose-400 font-bold v5-mono">{result.summary.positions_failed}</span></div>
                       )}
                       <div className="v5-why-dim not-italic">Orders cancelled: <span className="v5-mono text-amber-400">{result.summary.orders_cancelled}</span></div>
+                      {/* v19.34.43 — surface the top close-error reasons so the operator
+                          doesn't have to dig through backend logs to see WHY closes failed. */}
+                      {Array.isArray(result.summary.close_errors) && result.summary.close_errors.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-zinc-800">
+                          <div className="v5-mono text-[11px] uppercase tracking-widest text-rose-400 mb-1.5">Close errors (top {Math.min(5, result.summary.close_errors.length)})</div>
+                          <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                            {result.summary.close_errors.slice(0, 5).map((e, i) => (
+                              <div key={i} className="v5-mono text-[10px] text-zinc-400 leading-tight">
+                                <span className="text-rose-300">{e.trade_id || e.trade || e.stage || '?'}</span>
+                                <span className="text-zinc-600"> — </span>
+                                <span className="text-amber-300 break-all">{e.err}</span>
+                              </div>
+                            ))}
+                            {result.summary.close_errors.length > 5 && (
+                              <div className="v5-why-dim text-[10px] italic">…and {result.summary.close_errors.length - 5} more (see backend log)</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="text-rose-400">{result.error || 'unknown error'}</div>
