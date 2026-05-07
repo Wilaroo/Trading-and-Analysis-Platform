@@ -16516,6 +16516,19 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.38 — Setups-watching feed uncapped (2026-05-07 morning, T-12 to open)
+
+**Trigger:** operator follow-up to v19.34.37 — wanted setups feed to surface every qualified setup (no artificial UI cap) since the scanner's own enabled-setup / timeframe-fit / per-symbol qualification filters are the source of truth.
+
+**Fixes in `sentcom_service.get_setups_watching()`:**
+- Removed `live_alerts[:10]` cap on primary scanner source.
+- Removed `scanner.get_recent_alerts(limit=5)` cap on secondary source (now `limit=500`, effectively unlimited for any RTH session).
+- Removed `return setups[:6]` final cap.
+- Bonus cleanup: trading-bot watchlist source previously only fired when scanner produced `<4` alerts (hiding bot-prepared symbols on busy mornings). Now always merges, de-duplicating by symbol.
+- Bonus cleanup: tightened the de-dupe pass to use a `seen_symbols` set instead of an O(N) list scan (was previously rebuilding `[s.get("symbol") for s in setups]` per alert).
+
+**Added 1 regression test** in `test_scanner_cards_flicker_fix_v19_34_37.py` pinning all three caps as removed and verifying the uncapped contract is in place. **80/80** sanity tests pass post-fix.
+
 ### v19.34.37 — Scanner cards flicker fix (5↔9 every ~12s) (2026-05-07 morning, T-15 to open)
 
 **Trigger:** operator (T-17 minutes before market open) reported scanner panel showing only 5 cards most of the time, briefly flashing to 9 cards every 10-12 seconds, then reverting to 5 within 1-2s. Screenshots showed the steady-state 5 cards had terse `bot_text` and no INTRADAY tier badge, while the 9-card flash had rich text + INTRADAY badges.

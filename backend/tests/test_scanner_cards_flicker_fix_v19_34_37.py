@@ -53,3 +53,37 @@ def test_frontend_anti_flicker_guard_present():
         "useSentComAlerts.fetchAlerts no longer checks WS freshness before "
         "calling setAlerts — REST will downgrade fresh WS state."
     )
+
+
+def test_setups_watching_has_no_artificial_caps():
+    """v19.34.38 — get_setups_watching must surface every qualified setup.
+
+    Pre-v19.34.38 had three caps that hid legitimate watchlist symbols on
+    high-momentum mornings:
+      1. live_alerts[:10]            — primary scanner source
+      2. scanner.get_recent_alerts(limit=5)  — secondary source
+      3. return setups[:6]           — final cap
+    All three are removed; the scanner's own enabled-setup / timeframe-fit /
+    per-symbol qualification filters are the source of truth.
+    """
+    src = Path("/app/backend/services/sentcom_service.py").read_text("utf-8")
+    idx = src.index("async def get_setups_watching")
+    end = src.index("async def get_recent_alerts", idx)
+    block = src[idx:end]
+
+    assert "live_alerts[:10]" not in block, (
+        "get_setups_watching still has the legacy live_alerts[:10] cap."
+    )
+    assert "limit=5)" not in block, (
+        "get_setups_watching still calls scanner.get_recent_alerts(limit=5)."
+    )
+    assert "return setups[:6]" not in block, (
+        "get_setups_watching still has the final setups[:6] cap."
+    )
+    # And the new uncapped contract must be in place
+    assert "for alert in live_alerts:" in block, (
+        "Primary scanner source must iterate the full live_alerts list."
+    )
+    assert "return setups\n" in block, (
+        "get_setups_watching must return the full setups list, not a slice."
+    )

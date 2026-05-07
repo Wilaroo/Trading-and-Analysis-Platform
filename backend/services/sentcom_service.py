@@ -2612,11 +2612,16 @@ class SentComService:
     async def get_setups_watching(self) -> List[Dict[str, Any]]:
         """
         Get setups we're currently watching.
-        
+
         Sources:
         1. Live scanner alerts (PRIMARY - real-time alerts)
         2. Trading bot's watching_setups
         3. AI-generated setups from positions (potential adds/scales)
+
+        2026-05-07 v19.34.38 — caps removed at operator request. The
+        scanner already filters by enabled-setup, timeframe-fit, and
+        per-symbol qualification, so any artificial cap here just hides
+        legitimate watchlist symbols on high-momentum mornings.
         """
         setups = []
         
@@ -2626,7 +2631,7 @@ class SentComService:
             scanner = get_enhanced_scanner()
             if scanner:
                 live_alerts = scanner.get_live_alerts()
-                for alert in live_alerts[:10]:
+                for alert in live_alerts:
                     # Handle timestamp - could be datetime or string
                     timestamp = alert.created_at
                     if hasattr(timestamp, 'isoformat'):
@@ -2650,33 +2655,39 @@ class SentComService:
                         "source": "live_scanner",
                         "alert_id": alert.id
                     })
-                    logger.info(f"Added scanner setup: {alert.symbol} - {alert.setup_type}")
+                    logger.debug(f"Added scanner setup: {alert.symbol} - {alert.setup_type}")
         except Exception as e:
             logger.error(f"Error getting live scanner alerts: {e}")
         
-        # Source 2: Trading bot watching list (if we don't have enough from scanner)
-        if len(setups) < 4:
-            trading_bot = self._get_trading_bot()
-            if trading_bot:
-                try:
-                    bot_status = trading_bot.get_status()
-                    watching = bot_status.get("watching_setups", [])
-                    for setup in watching:
-                        if setup.get("symbol") not in [s.get("symbol") for s in setups]:
-                            setups.append({
-                                "symbol": setup.get("symbol"),
-                                "setup_type": setup.get("setup_type"),
-                                "trigger_price": setup.get("trigger_price"),
-                                "current_price": setup.get("current_price"),
-                                "risk_reward": setup.get("risk_reward"),
-                                "confidence": setup.get("confidence"),
-                                "timestamp": setup.get("timestamp"),
-                                "source": "bot"
-                            })
-                except Exception as e:
-                    logger.error(f"Error getting bot setups: {e}")
+        # Source 2: Trading bot watching list (always merge — scanner
+        # alerts and bot watchlist can legitimately diverge: a symbol
+        # may be in the bot's pre-loaded watchlist before the scanner
+        # produces a live alert for it. Pre-v19.34.38 this only fired
+        # when scanner produced <4 alerts, hiding bot watchlist symbols
+        # on busy mornings.)
+        trading_bot = self._get_trading_bot()
+        if trading_bot:
+            try:
+                bot_status = trading_bot.get_status()
+                watching = bot_status.get("watching_setups", [])
+                seen_symbols = {s.get("symbol") for s in setups}
+                for setup in watching:
+                    if setup.get("symbol") not in seen_symbols:
+                        setups.append({
+                            "symbol": setup.get("symbol"),
+                            "setup_type": setup.get("setup_type"),
+                            "trigger_price": setup.get("trigger_price"),
+                            "current_price": setup.get("current_price"),
+                            "risk_reward": setup.get("risk_reward"),
+                            "confidence": setup.get("confidence"),
+                            "timestamp": setup.get("timestamp"),
+                            "source": "bot"
+                        })
+                        seen_symbols.add(setup.get("symbol"))
+            except Exception as e:
+                logger.error(f"Error getting bot setups: {e}")
         
-        # Source 2: Generate setups from positions (scale opportunities)
+        # Source 3: Generate setups from positions (scale opportunities)
         positions = await self.get_our_positions()
         for pos in positions:
             symbol = pos.get("symbol", "")
@@ -2717,16 +2728,20 @@ class SentComService:
                     "note": "Reclaiming - momentum add"
                 })
         
-        # Source 3: Check scanner service for recent alerts
+        # Source 4: Scanner service recent-alerts feed (de-duped against
+        # symbols already added above). v19.34.38 — was capped at 5,
+        # now uncapped: the scanner's own filters are the source of truth.
         try:
             from services.enhanced_scanner import get_enhanced_scanner
             scanner = get_enhanced_scanner()
-            if scanner:
-                recent_alerts = scanner.get_recent_alerts(limit=5) if hasattr(scanner, 'get_recent_alerts') else []
+            if scanner and hasattr(scanner, 'get_recent_alerts'):
+                recent_alerts = scanner.get_recent_alerts(limit=500)
+                seen_symbols = {s.get("symbol") for s in setups}
                 for alert in recent_alerts:
-                    if alert.get("symbol") not in [s.get("symbol") for s in setups]:
+                    sym = alert.get("symbol")
+                    if sym and sym not in seen_symbols:
                         setups.append({
-                            "symbol": alert.get("symbol"),
+                            "symbol": sym,
                             "setup_type": alert.get("setup_type", alert.get("alert_type", "SCANNER")),
                             "trigger_price": alert.get("trigger_price", alert.get("price")),
                             "current_price": alert.get("current_price", alert.get("price")),
@@ -2735,11 +2750,13 @@ class SentComService:
                             "timestamp": alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
                             "source": "scanner"
                         })
+                        seen_symbols.add(sym)
         except Exception as e:
             logger.debug(f"Scanner not available: {e}")
         
-        # Limit to top 6 setups
-        return setups[:6]
+        # v19.34.38 — no cap. Every qualified setup the scanner produced
+        # surfaces to the operator.
+        return setups
     
     async def get_recent_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
