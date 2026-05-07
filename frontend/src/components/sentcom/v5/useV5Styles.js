@@ -30,6 +30,10 @@ const CSS = `
 .v5-chip-manage { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08) }
 .v5-chip-close  { color:#94a3b8; border-color:#334155; background:rgba(148,163,184,.08) }
 .v5-chip-veto   { color:#f87171; border-color:#7f1d1d; background:rgba(239,68,68,.08) }
+/* v19.34.39 — sky chip for SHADOW state (pusher offline + env configured).
+   Distinguishable from manage (green) and veto (red) so operator
+   instantly recognizes "bot is on standby, not actively trading". */
+.v5-chip-shadow { color:#7dd3fc; border-color:#0c4a6e; background:rgba(56,189,248,.08) }
 
 /* Mini-5-stage bar — chunky variant matching the mockup */
 .v5-mini-5stage { display:grid; grid-template-columns:repeat(5,1fr); gap:2px; margin-top:6px; }

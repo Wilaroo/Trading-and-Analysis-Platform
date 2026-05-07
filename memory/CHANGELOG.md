@@ -16516,6 +16516,37 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.39 — HUD account-chip consolidation (2026-05-07 morning, T-5 to open)
+
+**Trigger:** operator noticed two `PAPER · DUN615665` pills in the HUD strip — one amber/yellow (AccountModeBadge), one green (AccountGuardChipV5). Both showed nearly the same fact from different angles, weakening the loud guard-chip mismatch alarm with a competing informational badge. Critical pre-live-money UX issue.
+
+**Decision:** keep the safety-enforcement-coupled `AccountGuardChipV5` (loud mismatch alarm + "kill-switch will auto-trip" tooltip + alias enumeration + 1:1 chip-state-to-bot-behavior mapping); remove the informational `AccountModeBadge`. Port the badge's three unique features into the chip so no information is lost.
+
+**Backend (`services/account_guard.py::summarize_for_ui`):**
+- Added `detected_mode` (what IB pusher reports right now) and `effective_mode` (what `trade_type` the bot will stamp on next fill). Pre-fix these fields only existed on `/api/system/account-mode` (the badge endpoint).
+- Both fields fall back to `active_mode` (env) when IB has no snapshot, so the operator's "next fill" forecast stays accurate even during a brief pusher outage.
+
+**Frontend (`SafetyV5.jsx::AccountGuardChipV5`):**
+- New SHADOW render path (sky-blue `v5-chip-shadow` className) when `ib_connected=false` and env says paper/live. Tooltip explains "Pusher offline — bot is in standby until IB Gateway reconnects."
+- Tooltip enriched with: `Mode (env)`, `Detected (IB)`, `Next fill →`, `Pusher: connected/offline`. The "Next fill →" line is colored red when LIVE, green when PAPER — pre-trade safety check.
+- Each render path now has a `data-state` attribute (`paper`/`live`/`shadow`/`mismatch`/`unconfigured`) for E2E testing.
+
+**Frontend (`SentComV5View.jsx`):**
+- Removed `<AccountModeBadge />` mount and its import. Documented the consolidation in inline comments at both sites.
+- `AccountModeBadge.jsx` file deleted (was orphaned with no other consumers).
+- Fixed stale doc reference in `BootReconcilePill.jsx`.
+
+**Style (`useV5Styles.js`):** added `.v5-chip-shadow` class — sky-blue (`#7dd3fc` text, `#0c4a6e` border) — distinguishable from manage (green) and veto (red).
+
+**Result:** ONE chip in the HUD with five render paths covering every state cleanly:
+- `PAPER · DUN615665` (green) — env=paper, IB matches → bot firing on paper
+- `LIVE · U7654321` (red) — env=live, IB matches → bot firing on LIVE money 🚨
+- `⚠ ACCOUNT MISMATCH · U…` (red) — env says X, IB reports Y → kill-switch auto-trips
+- `SHADOW · paper standby` (sky) — pusher offline, bot waiting for IB Gateway
+- `ACCT · unconfigured` (slate) — guard opt-in not enabled
+
+**Verified:** new test suite `test_account_chip_consolidation_v19_34_39.py` (7 tests pinning backend payload fields + frontend wiring + CSS class). 134/134 critical pipeline tests pass. `yarn build` succeeds.
+
 ### v19.34.38 — Setups-watching feed uncapped + scanner-grouping default ON (2026-05-07 morning, T-12 to open)
 
 **Trigger:** operator follow-up to v19.34.37 — wanted setups feed to surface every qualified setup (no artificial UI cap) since the scanner's own enabled-setup / timeframe-fit / per-symbol qualification filters are the source of truth.

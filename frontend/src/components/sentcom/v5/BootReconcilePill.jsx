@@ -11,7 +11,7 @@
  * doesn't permanently clutter the strip. Polls /api/trading-bot/boot-
  * reconcile-status once on mount, then every 60s while visible.
  *
- * Rendered next to AccountModeBadge in the HUD top strip.
+ * Rendered next to AccountGuardChipV5 in the HUD top strip.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 

@@ -362,6 +362,17 @@ export const AccountGuardChipV5 = ({ safety }) => {
   const standbyAliases = mode === 'LIVE' ? paperAliases : liveAliases;
   const standbyLabel = mode === 'LIVE' ? 'PAPER standby' : 'LIVE standby';
 
+  // v19.34.39 — fields ported from AccountModeBadge so the guard chip is
+  // the single source of truth in the HUD. `detected_mode` is what the
+  // IB pusher reports right now; `effective_mode` is what trade_type the
+  // bot will stamp on the very next fill. They diverge during the brief
+  // window after an env switch but before the pusher has reconnected.
+  const detected = (g.detected_mode || 'unknown').toUpperCase();
+  const effective = (g.effective_mode || 'unknown').toUpperCase();
+  const ibConnected = g.ib_connected === true;
+  const ibConnectedKnown = g.ib_connected !== null && g.ib_connected !== undefined;
+  const isShadow = ibConnectedKnown && !ibConnected && (mode === 'PAPER' || mode === 'LIVE');
+
   const renderAliases = (aliases, isExpectedSet) => {
     if (!aliases?.length) return <span className="v5-dim">—</span>;
     return aliases.map((a) => {
@@ -377,16 +388,32 @@ export const AccountGuardChipV5 = ({ safety }) => {
   const renderPanel = (extraHint = null) => (
     <div className="v5-hover-panel" role="tooltip">
       <div className="row">
-        <span className="k">Mode</span>
+        <span className="k">Mode (env)</span>
         <span className="v">{mode}</span>
       </div>
+      <div className="row">
+        <span className="k">Detected (IB)</span>
+        <span className="v">{detected}</span>
+      </div>
+      <div className="row">
+        <span className="k">Next fill →</span>
+        <span className={`v ${effective === 'LIVE' ? 'miss' : 'match'}`}>
+          {effective}
+        </span>
+      </div>
+      <div className="row">
+        <span className="k">Pusher</span>
+        <span className={`v ${ibConnected ? 'match' : 'miss'}`}>
+          {ibConnectedKnown ? (ibConnected ? 'connected' : 'offline') : 'unknown'}
+        </span>
+      </div>
+      <hr />
       <div className="row">
         <span className="k">Current</span>
         <span className={`v ${g.match ? 'match' : 'miss'}`}>
           {current || '(none reported)'}
         </span>
       </div>
-      <hr />
       <div className="row">
         <span className="k">Expected</span>
         <span className="v">{renderAliases(expectedAliases, true)}</span>
@@ -410,6 +437,7 @@ export const AccountGuardChipV5 = ({ safety }) => {
       <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
         <span
           data-testid="v5-account-guard-chip"
+          data-state="mismatch"
           className="v5-chip v5-chip-veto"
         >
           ⚠ ACCOUNT MISMATCH · {current || '—'}
@@ -424,6 +452,7 @@ export const AccountGuardChipV5 = ({ safety }) => {
       <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
         <span
           data-testid="v5-account-guard-chip"
+          data-state="unconfigured"
           className="v5-chip"
         >
           ACCT · unconfigured
@@ -444,10 +473,30 @@ export const AccountGuardChipV5 = ({ safety }) => {
     );
   }
 
+  // v19.34.39 — pusher offline while env is configured for paper/live →
+  // SHADOW state. Sky-blue chip ports the AccountModeBadge SHADOW path
+  // so the operator instantly knows the bot won't fire (no live IB
+  // snapshot to anchor `effective_mode` against `active_mode`).
+  if (isShadow) {
+    return (
+      <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" tabIndex={0}>
+        <span
+          data-testid="v5-account-guard-chip"
+          data-state="shadow"
+          className="v5-chip v5-chip-shadow"
+        >
+          SHADOW · {mode.toLowerCase()} standby
+        </span>
+        {renderPanel('Pusher offline — bot is in standby until IB Gateway reconnects.')}
+      </span>
+    );
+  }
+
   return (
     <span className="v5-hover-wrap" data-testid="v5-account-guard-chip-wrap" data-help-id="account-mismatch" tabIndex={0}>
       <span
         data-testid="v5-account-guard-chip"
+        data-state={mode.toLowerCase()}
         className={`v5-chip ${mode === 'LIVE' ? 'v5-chip-veto' : 'v5-chip-manage'}`}
       >
         {mode} · {current || expected}

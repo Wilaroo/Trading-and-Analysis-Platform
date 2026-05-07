@@ -165,11 +165,25 @@ def summarize_for_ui(
 
     `ib_connected` is forwarded to `check_account_match` so weekend/offline
     states show 'pending' instead of 'mismatch'.
+
+    v19.34.39 (2026-05-07) — also surfaces `detected_mode` and
+    `effective_mode` so the chip can render a SHADOW state when the
+    pusher is offline + show "next fill will be tagged X" without
+    needing a second endpoint. Replaces the standalone
+    `/api/system/account-mode` consumer (`AccountModeBadge`) which has
+    been removed in favor of a single, defensive guard chip.
     """
     exp = load_account_expectation()
     ok, reason = check_account_match(current_account_id, exp, ib_connected=ib_connected)
+    classified = classify_account_id(current_account_id)
+    effective_mode = (
+        classified if classified in ("paper", "live")
+        else exp.active_mode
+    )
     return {
         "active_mode": exp.active_mode,
+        "detected_mode": classified,            # what IB actually reports
+        "effective_mode": effective_mode,       # what bot will stamp on next fill
         "expected_account_id": exp.expected_account_id,
         "expected_aliases": list(exp.expected_aliases),
         "current_account_id": current_account_id,

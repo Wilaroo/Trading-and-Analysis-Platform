@@ -55,7 +55,8 @@ import SystemBanner from './v5/SystemBanner';
 // v19.31.13 (2026-05-04) — Account-mode badge in HUD top strip.
 // Reads /api/system/account-mode every 30s. Big enough to never
 // confuse PAPER (amber) for LIVE (red) when switching IB accounts.
-import AccountModeBadge from './v5/AccountModeBadge';
+// v19.34.39 (2026-05-07) — `AccountModeBadge` import removed. See note
+// at the chip-render site below for the consolidation rationale.
 // v19.31.14 (2026-05-04) — Boot-reconcile status pill. Self-hides
 // after 10 min, only renders when AUTO_RECONCILE_AT_BOOT ran.
 import BootReconcilePill from './v5/BootReconcilePill';
@@ -417,7 +418,14 @@ export const SentComV5View = ({
                 RPC + last-push age in richer detail. */}
             <DeadLetterBadge />
             <FlattenAllButtonV5 safety={safety} inline />
-            <AccountModeBadge />
+            {/* v19.34.39 (2026-05-07) — `<AccountModeBadge />` removed.
+                Its three unique features (SHADOW state, "next fill" mode
+                forecast, IB-connected indicator) were ported into
+                `<AccountGuardChipV5 />` so the HUD has ONE chip telling
+                the operator everything about account state. The guard
+                chip is the safety-enforcement-coupled chip — its color
+                directly mirrors whether the bot can fire (green/red) vs
+                halted (mismatch) vs standby (sky). */}
             <BootReconcilePill />
             <AccountGuardChipV5 safety={safety} />
             {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
