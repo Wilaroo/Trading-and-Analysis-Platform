@@ -16531,6 +16531,8 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 
 **Bonus UX:** flipped `v5_scanner_group_by_setup` default from OFF to ON in `ScannerCardsV5.jsx`. Now that 30-50 cards are possible on busy mornings, the section headers (GAP AND GO / RANGE BREAK / DAY 2 CONTINUATION / etc.) make the wall scannable from page load. An explicit `false` in localStorage is still respected so an operator who turned it off keeps it off.
 
+**Bonus UX 2:** within-group `timestamp desc` sort in `groupCardsBySetup`. Pre-fix the order within each Market Setup section was scanner-insert order, which on busy mornings put stale 5-min-old cards above fresh ones from the current scan tick. New sort puts the freshest hit at the top of every section.
+
 ### v19.34.37 — Scanner cards flicker fix (5↔9 every ~12s) (2026-05-07 morning, T-15 to open)
 
 **Trigger:** operator (T-17 minutes before market open) reported scanner panel showing only 5 cards most of the time, briefly flashing to 9 cards every 10-12 seconds, then reverting to 5 within 1-2s. Screenshots showed the steady-state 5 cards had terse `bot_text` and no INTRADAY tier badge, while the 9-card flash had rich text + INTRADAY badges.

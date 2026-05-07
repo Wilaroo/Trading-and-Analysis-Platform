@@ -409,6 +409,18 @@ const _humanizeSetup = (s) => {
   return s.replace(/_/g, ' ').toUpperCase();
 };
 
+// 2026-05-07 v19.34.38b — within-group timestamp sort.
+// Cards in the same Market Setup section are sorted by `timestamp desc`
+// so the freshest scanner hit lands at the top. Pre-fix the order was
+// scanner-insert order, which on busy mornings put stale 5-min-old cards
+// above fresh ones from the current scan tick.
+const _cardTime = (c) => {
+  const t = c?.timestamp;
+  if (!t) return 0;
+  const ms = typeof t === 'number' ? t : Date.parse(t);
+  return Number.isFinite(ms) ? ms : 0;
+};
+
 const groupCardsBySetup = (cards) => {
   const groups = new Map();
   for (const c of cards) {
@@ -416,8 +428,12 @@ const groupCardsBySetup = (cards) => {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   }
-  // Sort: explicit order first, unknown setups (not in _SETUP_LABEL_ORDER)
-  // sort by count desc, then "neutral" / null at the end.
+  // Sort cards WITHIN each group by timestamp desc (freshest first).
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => _cardTime(b) - _cardTime(a));
+  }
+  // Sort GROUPS: explicit order first, unknown setups (not in
+  // _SETUP_LABEL_ORDER) alphabetically, "neutral" / null at the end.
   const known = _SETUP_LABEL_ORDER;
   return Array.from(groups.entries()).sort(([a], [b]) => {
     const ai = known.indexOf(a);
