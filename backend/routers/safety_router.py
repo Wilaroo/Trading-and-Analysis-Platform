@@ -669,3 +669,137 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
     guard.clear_flatten_in_progress()
 
     return {"success": success, "summary": summary, "state": guard.status()["state"]}
+
+
+
+# ─── v19.34.45 — Nuclear emergency-flatten via direct IB ────────────
+@router.post("/emergency-flatten-ib")
+async def emergency_flatten_ib(payload: Optional[Dict[str, Any]] = None):
+    """**Nuclear option.** Flattens whatever IB *actually shows* via the
+    direct IB API, bypassing the bot's `_open_trades` bookkeeping
+    entirely. Use when:
+      • Regular flatten reports success but IB still has positions
+        (bot's view diverged from IB reality), OR
+      • A symbol exists at IB that the bot never tracked, OR
+      • Operator just wants brute-force "close every position".
+
+    Steps per held symbol at IB:
+      1. cancel_all_open_orders_for_symbol(sym, close-side)
+      2. place_market_order(sym, close-action, abs(position))
+
+    Body:
+      {
+        "confirm": "FLATTEN_IB",          // required
+        "symbols": ["BMNR", "PG"],        // optional whitelist
+        "include_kill_switch": false      // optional
+      }
+
+    Requires `ib_direct_service` connected. If not, returns a clear
+    error and does nothing — operator must close manually via TWS.
+    """
+    payload = payload or {}
+    if payload.get("confirm") != "FLATTEN_IB":
+        raise HTTPException(400, "confirm='FLATTEN_IB' required")
+
+    target_syms_filter: Optional[set] = None
+    if isinstance(payload.get("symbols"), list) and payload["symbols"]:
+        target_syms_filter = {s.upper() for s in payload["symbols"]}
+
+    summary: Dict[str, Any] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ib_snapshot": [], "closes": [], "errors": [],
+    }
+
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ib_direct = get_ib_direct_service()
+        try:
+            connected = await asyncio.wait_for(
+                ib_direct.ensure_connected(), timeout=3.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            connected = False
+        if not connected:
+            return {
+                "success": False,
+                "error": (
+                    "ib_direct_service not connected — cannot run "
+                    "nuclear flatten. Enable direct IB "
+                    "(IB_DIRECT_ENABLED=true + clientId=11) or close "
+                    "manually via TWS."
+                ),
+                "summary": summary,
+            }
+
+        positions = await ib_direct.get_positions()
+        positions = [
+            p for p in positions
+            if abs(float(p.get("position") or 0)) > 0
+            and (target_syms_filter is None
+                 or (p.get("symbol") or "").upper() in target_syms_filter)
+        ]
+        summary["ib_snapshot"] = positions
+        if not positions:
+            return {
+                "success": True,
+                "message": "no IB positions matching criteria — nothing to flatten",
+                "summary": summary,
+            }
+
+        for p in positions:
+            sym = (p.get("symbol") or "").upper()
+            qty = abs(int(round(float(p.get("position") or 0))))
+            side_long = float(p.get("position") or 0) > 0
+            close_action = "SELL" if side_long else "BUY"
+            entry: Dict[str, Any] = {
+                "symbol": sym, "qty": qty,
+                "side": "long" if side_long else "short",
+                "close_action": close_action,
+            }
+            try:
+                cancel_rep = await ib_direct.cancel_all_open_orders_for_symbol(
+                    sym, side=close_action,
+                )
+                entry["zombie_cancelled"] = len(cancel_rep.get("cancelled", []))
+                entry["zombie_errors"] = cancel_rep.get("errors", [])
+                await asyncio.sleep(0.5)
+                mkt_rep = await ib_direct.place_market_order(
+                    sym, close_action, qty,
+                )
+                entry["close_order_id"] = mkt_rep.get("order_id")
+                entry["close_status"] = mkt_rep.get("status")
+                entry["close_success"] = bool(mkt_rep.get("success"))
+                if not mkt_rep.get("success"):
+                    entry["close_error"] = mkt_rep.get("error")
+                    summary["errors"].append({
+                        "symbol": sym, "stage": "place_market_order",
+                        "err": mkt_rep.get("error"),
+                    })
+            except Exception as e:
+                entry["close_success"] = False
+                entry["close_error"] = str(e)[:200]
+                summary["errors"].append({
+                    "symbol": sym, "stage": "exception", "err": str(e)[:200],
+                })
+            summary["closes"].append(entry)
+
+        if payload.get("include_kill_switch"):
+            try:
+                guard = get_safety_guardrails()
+                guard.trip_kill_switch(reason="emergency_flatten_ib_v19_34_45")
+            except Exception as e:
+                summary["errors"].append({
+                    "symbol": "—", "stage": "kill_switch_trip",
+                    "err": str(e)[:200],
+                })
+
+        any_success = any(c.get("close_success") for c in summary["closes"])
+        return {
+            "success": any_success,
+            "summary": summary,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error("[SAFETY] emergency-flatten-ib crashed: %s", e, exc_info=True)
+        summary["errors"].append({"stage": "top-level", "err": str(e)[:300]})
+        return {"success": False, "summary": summary, "error": str(e)[:300]}
