@@ -4,6 +4,82 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🔴 2026-02-XX — TWO P0 BUGS DISCOVERED, NOT YET FIXED — DO NOT TRADE LIVE
+
+Both surfaced during BMNR flatten chaos on 2026-05-07. Either of these alone makes the bot unsafe to leave running unsupervised.
+
+### 🔴 P0 — Bug 2: Phantom-recovery falsely reports closes as succeeded
+
+**Where:** `services/position_manager.py::close_trade` → `_clamp_shares_to_ib_position` (added in v19.34.27 to handle PG-style leftover sweeps).
+
+**Symptom:** "FLATTEN COMPLETE 20/20" modal even though IB pusher logs show every close MKT was rejected with `IB Error 201`. 0 actual fills. Operator believed they were flat, BMNR + PG were still real at IB.
+
+**Root cause hypothesis:** When the clamp's IB-direct `get_positions()` returns `[]` (empty — could be: IB direct just connected, no position events yet, or a clientId-segregation artifact), the clamp returns 0 → `close_trade` enters the phantom-recovery path → marks the trade CLOSED locally with reason `*_phantom_recovery_v19_34_27` and returns True without ever calling `executor.close_position()`. Real IB position untouched.
+
+**Right fix:** Phantom recovery must require POSITIVE multi-source agreement that the position is empty:
+- Direct IB `get_positions()` returns 0 for this symbol AND snapshot age < 5s (track via timestamp on cache write), AND
+- Pusher's `_pushed_ib_data["positions"]` agrees (cross-check), OR pusher is dead and operator explicitly opted into phantom-recovery via a flag
+
+If unable to confirm with at least one fresh source → fall back to bot-tracked count and submit the close MKT for real (current pre-v19.34.27 behavior).
+
+**Test plan:**
+- Mock direct IB returning `[]` while bot tracks 100 sh BMNR → close_trade must NOT phantom-recover; must call executor.
+- Mock direct IB returning `[{symbol: "BMNR", position: 0}]` with snapshot fresh → SHOULD phantom-recover (position confirmed gone).
+- Mock direct IB returning stale snapshot (>5s old) showing 0 → must NOT phantom-recover.
+
+**Files of reference:**
+- `/app/backend/services/position_manager.py:1290-1396` — `_clamp_shares_to_ib_position`
+- `/app/backend/services/position_manager.py:1463-1481` — phantom recovery branch
+- `/app/backend/services/ib_direct_service.py:250-270` — `get_positions` (need to add staleness tracking)
+
+---
+
+### 🔴 P0 — Bug 3: Kill switch is leaking — bot enters trades while tripped
+
+**Where:** Unknown — probably the proactive coach loop, scanner re-trigger path, or a side-effect of drift reconciliation.
+
+**Symptom:** Operator tripped kill switch at ~1:00 PM on 2026-05-07. IB order log shows the bot then bought:
+- 1:32 PM: 293 sh PG @ 147.22
+- 1:34 PM: 167 sh PG @ 147.29
+- 1:34 PM: NEW Sell 460 PG OCA bracket submitted (Limit 154.72 + Stop 144.22)
+- 2:02 PM: 95 sh PG @ 146.61
+
+That's 555 sh of PG entered AND a fresh bracket placed UNDER A TRIPPED KILL SWITCH. The bot believed it was halted; IB shows otherwise.
+
+**Investigation steps:**
+1. `git log --oneline services/safety_guardrails.py services/proactive_coach_service.py services/sentcom_service.py` — look for entry paths that don't check `kill_switch_active`.
+2. `grep -rn "place_bracket\|enter_trade\|queue_order" /app/backend/services/` — find every entry codepath.
+3. Cross-reference: which of these check `safety_guardrails.kill_switch_active` BEFORE submitting?
+4. Likely suspects: (a) proactive coach auto-suggest → user-action handler doesn't gate on kill switch, OR (b) drift reconciler's `_spawn_excess_slice` placing OCA brackets via `attach_oca_stop_target` even when kill is active (but this would only affect symbols that already exist at IB, not net-new PG buys), OR (c) scanner's auto-trigger setup re-firing because the SQUEEZE setup eligibility check doesn't include kill-switch.
+
+**Right fix:** A SINGLE `_can_enter()` gate in `trade_executor_service.py::place_bracket_order` (or wherever the lowest-common-denominator entry primitive is) that checks `safety_guardrails.kill_switch_active` and refuses with a logged + streamed warning. Every entry path must funnel through this gate; no shortcuts.
+
+**Test plan:**
+- With `safety_guardrails.kill_switch_active=True`, simulate a SQUEEZE signal firing → assert `place_bracket_order` returns failure + the order is NEVER queued.
+- Same for the proactive coach's auto-trade path (if it has one).
+- Regression: running the drift reconciler with kill switch active should NOT place new OCA brackets on excess slices; it should just log the drift and wait for operator.
+
+**Files of reference:**
+- `/app/backend/services/safety_guardrails.py` — kill switch state
+- `/app/backend/services/trade_executor_service.py:129` — `_kill_switch_refusal` (only used in one path; needs to be in all)
+- `/app/backend/services/proactive_coach_service.py` — newly added; may have unguarded entry path
+- `/app/backend/services/sentcom_service.py` — scanner trigger path
+
+---
+
+## ✅ 2026-02-XX — v19.34.43–47 SHIPPED — Flatten Hardening Marathon
+
+Five-patch session resolving the cascade of issues that surfaced during BMNR cleanup:
+- **v19.34.43**: parallel close loop (`asyncio.gather` + Semaphore(8)), 90s FE timeout, error-surfacing modal.
+- **v19.34.44**: group flatten by (symbol, direction); pre-cancel zombie working orders via direct IB.
+- **v19.34.45**: nuclear `POST /api/safety/emergency-flatten-ib` — bypasses bot books, closes whatever IB shows.
+- **v19.34.46**: `cancel_all_open_orders_for_symbol` now calls `reqAllOpenOrders()` first to see ALL clients' working orders (was a no-op before — pusher's clientId=15 zombies were invisible to direct's clientId=11).
+- **v19.34.47**: `POST /api/trading-bot/sync-books-to-ib-direct` — operator escape hatch when pusher dies and bot's `_open_trades` ≠ IB reality. Operator-verified 2026-05-07 with empty IB + empty bot books in agreement.
+
+13 cumulative tests passing across all flatten/grouping/consolidator suites.
+
+
+
 ## 🚨 2026-02-XX — v19.34.42 SHIPPED — Position Consolidator (BMNR fragmentation P0 fix)
 
 Operator caught BMNR/LIN/DDOG with 19/3/2 bot_trades respectively, each owning colliding OCA brackets at IB. Root cause: `_spawn_excess_slice` was non-idempotent. Three-layer fix shipped:

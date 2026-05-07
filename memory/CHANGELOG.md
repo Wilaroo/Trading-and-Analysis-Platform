@@ -2,6 +2,49 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.43–47) — Flatten-All Hardening Marathon (BMNR aftermath)
+
+After v19.34.42 fixed the BMNR fragmentation root cause, operator hit a cascade of follow-on issues during the cleanup attempt. Five patches shipped in one session:
+
+### v19.34.43 — Flatten parallelization
+- `routers/safety_router.py::flatten_all` now closes positions concurrently with `asyncio.gather` + `Semaphore(8)` IB rate-limit cushion. Worst-case latency drops from `N × 2s` to `⌈N/8⌉ × 2s`.
+- Frontend axios timeout for flatten-all bumped from 30s → 90s in `SafetyV5.jsx`.
+- Surfaces top 5 close-error reasons in the FLATTEN COMPLETE/FAILED modal (operator no longer needs to grep backend logs).
+- Tests: `test_flatten_all_parallel_v19_34_43.py` (2 cases) — verifies 30 trades × 0.5s sim finish in <5s with cap=8.
+
+### v19.34.44 — Flatten grouping by (symbol, direction) + zombie pre-cancel
+After v19.34.43 ran, every BMNR close still got rejected with `IB Error 201: minimum of 15 orders working on either the buy or sell side for this contract`. The 19 BMNR fragments each had OCA stop+target children at IB (~38 working SELL orders), saturating IB's 15-order cap. Two fixes:
+- `flatten_all` now groups `bot._open_trades` by `(symbol, direction)`. 19 BMNR fragments → ONE close MKT for the SUM of shares, not 19 collisions. Siblings absorbed via `consolidated_in_flatten_v19_34_44` reason, PnL=0.
+- New `services/ib_direct_service.cancel_all_open_orders_for_symbol(sym, side?)` — pre-step in `flatten_all` cancels every working order for the close-side via direct IB. 1s settle delay. Best-effort; if direct IB unreachable, flatten proceeds anyway with `zombie_cancel_results: [{err: "ib_direct_not_connected"}]` in the summary.
+- 2s timeout cushion on `ensure_connected()` so an unreachable Gateway doesn't hang flatten.
+- Tests: `test_flatten_grouping_v19_34_44.py` (3 cases) — 19 fragments → 1 `close_trade()` call; zombie-cancel called per (sym, side); flatten still runs when IB direct down.
+- Existing tests `test_flatten_all_v19_34_24b.py` updated to provide `symbol` + `direction` on test trades; new dict-shape fallback path preserves legacy compatibility.
+
+### v19.34.45 — Nuclear emergency-flatten endpoint
+For when bot bookkeeping has diverged from IB reality (or bot has untracked IB positions). New endpoint `POST /api/safety/emergency-flatten-ib` with body `{confirm: "FLATTEN_IB", symbols?: [], include_kill_switch?: false}`.
+- Bypasses `bot._open_trades` entirely.
+- Queries direct IB for actual positions, then per-symbol: `cancel_all_open_orders_for_symbol(sym, close-side)` → 0.5s settle → `place_market_order(sym, close-action, abs(qty))`.
+- Returns IB snapshot (ground truth) + per-symbol close result for full operator audit.
+
+### v19.34.46 — `cancel_all_open_orders_for_symbol` actually sees other clients' orders
+Operator IB pusher logs revealed that v19.34.44's zombie-cancel was a no-op. IB Gateway segregates working orders by clientId. `self._ib.trades()` only returns orders placed by THIS clientId. The pusher's working orders (clientId=15) were invisible to the direct service (clientId=11). Fix: call `self._ib.reqAllOpenOrders()` first, 0.5s settle for callback population, then iterate `_ib.trades()` which now contains every working order on the account regardless of which client placed it. **This was the bug that made every BMNR flatten attempt fail with Error 201 today.**
+
+### v19.34.47 — Operator escape hatch: sync bot books to IB-direct reality
+Operator scenario: pusher dies, operator manually flattens in TWS, but bot's `_open_trades` still shows phantom positions because the drift reconciler can't run without pusher data. New endpoint `POST /api/trading-bot/sync-books-to-ib-direct` with `{confirm:"SYNC", dry_run?:false}`:
+- Uses direct IB (independent of pusher) to query authoritative positions
+- For each trade in `bot._open_trades`: if IB shows 0, opposite-side, or bot overshoots IB by >5% → mark CLOSED locally with reason `operator_sync_external_close_v19_34_47`, drop from in-memory map, log `share_drift_events` audit row
+- Operator-tested 2026-05-07: cleanly resolved phantom BMNR + PG positions when pusher was offline
+
+### Operational lessons captured this session
+
+1. **Trust IB ground truth over bot bookkeeping every time.** The "FLATTEN COMPLETE 20/20" modal was lying — every close MKT was rejected with Error 201 but the bot still reported success because the phantom-recovery path falsely matched. → Bug 2 in ROADMAP.
+2. **Kill switch is leaking.** Between 1:32–2:02 PM with kill switch ON, the bot bought 555 sh of PG and submitted a fresh OCA bracket. → Bug 3 in ROADMAP.
+3. **Multi-clientId IB sessions need explicit cross-client sync.** `_ib.trades()` is per-clientId; `reqAllOpenOrders()` is the only way to see other clients' working orders.
+4. **Sequential close loops are unsafe in this domain.** Always group by (symbol, direction) — IB only has ONE position per group; submitting N orders per group invites Error 201 / overshoots.
+
+---
+
+
 ## 2026-02-XX (v19.34.42) — Position Consolidator + Idempotent Excess-Slice Spawn (BMNR fragmentation fix)
 
 **Severity: P0 — financial integrity.** Operator caught BMNR showing **19 separate bot_trades** for ONE actual IB position of 4,443 sh. LIN had 3, DDOG had 2. Each fragment owned its own OCA bracket at IB → IB silently dropped all but one when they collided on the aggregated position, leaving thousands of shares effectively unprotected. Last price 21.82 was already $0.41 below the $22.23 stops yet none had triggered — proof the brackets were ghosts.
