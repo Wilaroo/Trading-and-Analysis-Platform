@@ -742,6 +742,18 @@ class BotTrade:
     # timestamp to detect a crashed in-flight order.
     pre_submit_at: Optional[str] = None
 
+    # v19.34.36 (2026-05-07) — Alert→Trade join key. Stamped from
+    # `LiveAlert.id` at evaluator time so the learning loop's pending-
+    # context store and `decision_trail.py`'s alert_id Mongo join can
+    # both resolve. Pre-v19.34.36 this field didn't exist on BotTrade,
+    # so:
+    #   1) `learning_loop.record_trade_outcome` fell through to a fresh
+    #      context capture at CLOSE time (wrong market regime).
+    #   2) `decision_trail` queries by `alert_id` returned empty for
+    #      every trade (no rows ever had the field).
+    # Now threaded all the way through scanner → bot → evaluator → trade.
+    alert_id: Optional[str] = None
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         d = asdict(self)
@@ -3105,6 +3117,11 @@ class TradingBotService:
             for alert in scanner_alerts:
                 # Convert LiveAlert to dict format for trading bot
                 alert_dict = {
+                    # v19.34.36 — thread alert.id through so the evaluator
+                    # can stamp it on BotTrade.alert_id, restoring the
+                    # alert→trade join key for learning_loop pending-context
+                    # lookups and decision_trail Mongo queries.
+                    'alert_id': alert.id,
                     'symbol': alert.symbol,
                     'setup_type': alert.setup_type,
                     'direction': alert.direction,

@@ -16516,6 +16516,23 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.36b — Learning Loop end-to-end audit + Alert→Trade join key restored (2026-05-07 night)
+
+**Trigger:** after the v19.34.36 audit fixed the silently-failing `record_trade_outcome` field-name bug (close path was using non-existent `trade.stop_loss`/`targets`/`opened_at`), an end-to-end audit of `learning_loop_service.py` revealed a deeper structural issue: the alert→trade join key was missing on `BotTrade` entirely, so context matching never worked even when the call signature was correct.
+
+**Findings + fixes:**
+1. **Missing `BotTrade.alert_id` field** — `decision_trail.py:12` documented this as the canonical join key, but the dataclass never declared it. Added `alert_id: Optional[str] = None` (auto-hydrated by `dict_to_trade` via the v19.34.21 `dataclass_fields()` allow-list).
+2. **`alert.id` was dropped at the scanner→bot boundary** — the `alert_dict` built in `trading_bot_service._check_for_opportunities` had no `alert_id` key. Added it.
+3. **Evaluator never stamped it on the BotTrade** — added `alert_id=alert.get("alert_id")` to the `BotTrade(...)` constructor in `opportunity_evaluator.py`.
+4. **`getattr(trade, 'alert_id', trade.id)` fallbacks in 2 sites** — replaced with `trade.alert_id or trade.id` (now a real field). Pre-fix every fallback evaluated to `trade.id`, so `learning_loop._pending_contexts.pop(alert_id)` never matched the key from `capture_alert_context(alert.id, ...)`. Result: every trade's market_regime / time_of_day was recaptured at CLOSE time (wrong regime).
+5. **`planned_r` calculation in `trade_execution.py`** — was `(target_prices[0] / entry_price - 1)` which returns ~0.10 for a 10% target. R-multiple is reward/risk; corrected to `abs(target - entry) / abs(entry - stop)`. Every downstream `r_capture_percent`/quality_score had been computed from the wrong baseline.
+
+**Cumulative impact:** the learning loop has been receiving outcomes since v19.34.36 (close-path field-name fix), but the contexts have been wrong for months. This patch corrects both ends: outcomes flow correctly AND the entry-time context now resolves to the actual entry-time conditions (not exit-time).
+
+**Side benefit:** `decision_trail.py` Mongo joins by `alert_id` now resolve. Timeline-by-alert endpoints will produce real results going forward (historical trades remain unjoinable — they have no `alert_id` field).
+
+**New test suite:** `tests/test_alert_id_threadthrough_v19_34_36.py` — 9 tests pinning the contract end-to-end (dataclass field, default, to_dict, dict_to_trade round-trip, source-asserts that the evaluator + trading_bot_service + position_manager + trade_execution wiring stays correct in future refactors). 258/258 cumulative pipeline tests pass post-patch.
+
 ### v19.34.36 — Pre-market pipeline audit + latent learning-loop bug fix (2026-05-06 night)
 **Scope:** systematic audit of firing, adjusting, managing, closing paths ahead of next trading session. No regressions found in any production code path; 383/385 critical tests pass (the 2 failures are cross-test env-var pollution that evaporate when tests run in isolation).
 

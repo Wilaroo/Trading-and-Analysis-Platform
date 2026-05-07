@@ -593,6 +593,9 @@ class OpportunityEvaluator:
                 stop_price=stop_price,
                 target_prices=target_prices,
                 shares=shares,
+                # v19.34.36 — stamp alert_id so the learning loop's pending
+                # context lookup and decision_trail join can resolve.
+                alert_id=alert.get("alert_id"),
                 # 2026-04-30 v19.13 — initialize remaining_shares +
                 # original_shares at TRADE-CREATE time, not on first
                 # manage-loop tick. Pre-fix: a partial exit landing

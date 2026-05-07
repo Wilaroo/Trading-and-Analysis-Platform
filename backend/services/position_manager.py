@@ -1590,7 +1590,13 @@ class PositionManager:
                     outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
                     asyncio.create_task(bot._learning_loop.record_trade_outcome(
                         trade_id=trade.id,
-                        alert_id=getattr(trade, 'alert_id', trade.id),
+                        # v19.34.36 — real alert_id (stamped at evaluator).
+                        # Pre-fix this fell back to trade.id, breaking
+                        # the pending-context lookup → context was always
+                        # recaptured at CLOSE time, polluting the regime
+                        # field with exit-time conditions instead of
+                        # entry-time conditions.
+                        alert_id=trade.alert_id or trade.id,
                         symbol=trade.symbol,
                         setup_type=trade.setup_type,
                         strategy_name=trade.setup_type,

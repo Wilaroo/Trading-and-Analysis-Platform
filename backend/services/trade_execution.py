@@ -264,11 +264,23 @@ class TradeExecution:
             # Start execution tracking (Phase 1 Learning)
             if hasattr(bot, '_learning_loop') and bot._learning_loop:
                 try:
-                    # Use target_prices instead of targets
-                    planned_r = (trade.target_prices[0] / trade.entry_price - 1) if trade.target_prices else 2.0
+                    # v19.34.36 — fix planned_r: it must be an R-multiple
+                    # (reward/risk), not a price ratio. Pre-fix this was
+                    # `target/entry - 1` (≈0.10 for a 10% target), which
+                    # poisoned every downstream `r_capture_percent` /
+                    # quality_score calculation in the learning loop.
+                    risk_per_share = abs(trade.entry_price - trade.stop_price) if trade.stop_price else 0
+                    if trade.target_prices and risk_per_share > 0:
+                        planned_r = abs(trade.target_prices[0] - trade.entry_price) / risk_per_share
+                    else:
+                        planned_r = 2.0
                     bot._learning_loop.start_execution_tracking(
                         trade_id=trade.id,
-                        alert_id=getattr(trade, 'alert_id', trade.id),
+                        # v19.34.36 — use the real `trade.alert_id` (now
+                        # stamped at evaluator time). Pre-fix this fell
+                        # back to `trade.id`, which broke pending-context
+                        # lookup in record_trade_outcome.
+                        alert_id=trade.alert_id or trade.id,
                         intended_entry=trade.entry_price,
                         intended_size=trade.shares,
                         planned_r=planned_r
