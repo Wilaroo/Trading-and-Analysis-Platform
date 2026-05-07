@@ -16516,6 +16516,30 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.36 — Pre-market pipeline audit + latent learning-loop bug fix (2026-05-06 night)
+**Scope:** systematic audit of firing, adjusting, managing, closing paths ahead of next trading session. No regressions found in any production code path; 383/385 critical tests pass (the 2 failures are cross-test env-var pollution that evaporate when tests run in isolation).
+
+**Findings (all fixed):**
+- `position_manager.close_trade` line 1601-1605 — learning-loop outcome recording used non-existent `BotTrade` field names (`trade.stop_loss`, `trade.targets`, `trade.opened_at`). Wrapped in `try/except` → failed silently on every trade close → learning loop has been receiving zero outcome data since that block was added. Fixed to use `trade.stop_price`, `trade.target_prices`, `trade.executed_at`.
+- `tests/test_execution_guardrails.py` — stale assumption that MAX_POSITION_NOTIONAL_PCT = 1% (v19.12 raised default to 40%). Test updated to match the real guardrail behavior.
+- `tests/test_proper_reconcile_endpoint_v19_24.py` — stale assumption that reconciled orphans have `close_at_eod=False` (v19.34.17 flipped to True to prevent overnight orphan holding). Test updated.
+- `tests/test_orphan_setup_detectors.py::_run` — used deprecated `asyncio.get_event_loop()` which failed when earlier tests closed the default loop. Switched to `asyncio.new_event_loop()`.
+
+**Verified healthy (no changes needed):**
+- `trade_executor_service.execute_entry` — kill-switch guard (v19.34.26) ✅
+- `trade_executor_service.place_bracket_order` — kill-switch guard (v19.34.26), flatten-in-progress guard (v19.34.32), ambiguous-status → TIMEOUT routing (v19.34.15a) ✅
+- `trade_executor_service.attach_oca_stop_target` — stop-first, target-second ordering so partial failures never leave one-sided exposure (v19.34.28) ✅
+- `bracket_tif.bracket_tif()` — intraday→DAY, swing/position→GTC+outside_rth; fail-safe default = DAY ✅
+- `position_manager.check_eod_close` — parallel closes via `asyncio.gather`, retry-on-failure flag, escalation alarm past 4pm, half-day support, critical stream event on failure (v19.14, v19.29) ✅
+- `position_manager.close_trade` — phantom-share clamp against direct IB position, direction-mismatch refusal, phantom-recovery path, executor-failure → trade stays OPEN for retry (v19.13, v19.34.27) ✅
+- `position_reconciler.reconcile_orphan_positions` — DB-aware tracked-set union (v19.34.22) still prevents duplicate orphan spawns for unhydrated slices ✅
+
+**Parked P3 polish:**
+- `services/ev_tracking_service.py` line 1119 — pre-existing unused local `scale_commission` (lint warning, not a bug).
+- Boot `subscribe_symbols` socket-read timeout already noted in prior fork session (one-shot traceback, self-heals next rotation tick).
+
+**Verdict:** Pipeline is SAFE to fire tomorrow. All known hardening layers intact.
+
 ### v19.34.35 — Pusher RPC wired + V5 badge cleanup verified live (2026-05-06 night)
 - Diagnosed + resolved "Pusher in partial state" banner on operator's DGX. Root cause: `IB_PUSHER_RPC_URL` missing from `backend/.env`; operator's Windows box had fastapi+uvicorn installed but the pusher had never been restarted since install, so RPC server was never spun up.
 - Fix sequence (operator-executed on DGX + Windows):

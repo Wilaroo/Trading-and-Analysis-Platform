@@ -184,7 +184,7 @@ def test_reconcile_creates_bot_trade_for_orphan_position():
     assert trade.setup_type == "reconciled_orphan"
     assert trade.quality_grade == "R"
     assert trade.trade_style == "reconciled"
-    assert trade.close_at_eod is False
+    assert trade.close_at_eod is True  # v19.34.17: reconciled orphans flatten at EOD (was hold overnight)
     assert trade.direction == TradeDirection.LONG
     assert trade.entry_price == 100.00
     assert trade.shares == 150

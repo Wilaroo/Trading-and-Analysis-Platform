@@ -1598,11 +1598,11 @@ class PositionManager:
                         trade_style=getattr(trade, 'trade_style', 'move_2_move'),
                         entry_price=trade.fill_price,
                         exit_price=trade.exit_price,
-                        stop_price=trade.stop_loss,
-                        target_price=trade.targets[0] if trade.targets else trade.fill_price * 1.02,
+                        stop_price=trade.stop_price,
+                        target_price=trade.target_prices[0] if trade.target_prices else trade.fill_price * 1.02,
                         outcome=outcome,
                         pnl=trade.realized_pnl,
-                        entry_time=trade.opened_at,
+                        entry_time=getattr(trade, 'executed_at', None) or getattr(trade, 'created_at', None),
                         exit_time=trade.closed_at,
                         confirmation_signals=getattr(trade, 'confirmation_signals', [])
                     ))

@@ -32,13 +32,13 @@ def test_invalid_prices_rejected():
 # ── max_position_notional ─────────────────────────────────────────────────
 
 def test_reject_oversized_position():
-    """100k equity × 1% cap = $1k. 100 shares × $50 = $5k → reject."""
-    r = check_max_position_notional(50.0, 100, 100_000.0)
+    """100k equity × 40% cap (v19.12 default) = $40k. 1000 shares × $50 = $50k → reject."""
+    r = check_max_position_notional(50.0, 1000, 100_000.0)
     assert r.skip and "notional_over_cap" in r.reason
 
 
 def test_allow_small_position():
-    """100k × 1% = $1k. 10 shares × $50 = $500 → allow."""
+    """100k × 40% = $40k. 10 shares × $50 = $500 → allow."""
     r = check_max_position_notional(50.0, 10, 100_000.0)
     assert r.allow
 

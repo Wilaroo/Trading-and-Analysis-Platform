@@ -100,7 +100,9 @@ def _scanner() -> EnhancedBackgroundScanner:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Use a fresh event loop per coroutine so earlier tests that close the
+    # default loop (e.g. test_orphan_protection.py) don't poison this helper.
+    return asyncio.new_event_loop().run_until_complete(coro)
 
 
 # ──────────────────────────── REGISTRATION ────────────────────────────
