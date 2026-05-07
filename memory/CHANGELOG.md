@@ -2,6 +2,60 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.42) — Position Consolidator + Idempotent Excess-Slice Spawn (BMNR fragmentation fix)
+
+**Severity: P0 — financial integrity.** Operator caught BMNR showing **19 separate bot_trades** for ONE actual IB position of 4,443 sh. LIN had 3, DDOG had 2. Each fragment owned its own OCA bracket at IB → IB silently dropped all but one when they collided on the aggregated position, leaving thousands of shares effectively unprotected. Last price 21.82 was already $0.41 below the $22.23 stops yet none had triggered — proof the brackets were ghosts.
+
+### Root cause
+
+The bot maintained an N:1 mapping between bot_trades and IB positions when the correct invariant is **1:1 per (account, symbol, direction)**. Each `reconcile_share_drift` tick called `_spawn_excess_slice` which inserted a brand-new `reconciled_excess_v19_34_15b` BotTrade for the delta — even when a same-direction reconciled-excess slice already existed for the symbol. After ~10min of drift ticks, BMNR had 19 fragments.
+
+### Fix (three layers)
+
+1. **Idempotent excess spawn** (`position_reconciler.py`): `_spawn_excess_slice` now first calls `_find_existing_excess_slice(symbol, direction)`. If found, it routes to `_grow_existing_excess_slice` which mutates the existing slice's `remaining_shares`, cancels the old bracket, and re-issues ONE OCA bracket sized to the new total. No new BotTrade row. Prevents future fragmentation from the drift path.
+
+2. **Consolidator service** (`services/position_consolidator.py`): one-shot cleanup for already-fragmented positions. Per (symbol, direction):
+   - Pick canonical (oldest non-reconciled trade; fallback oldest overall)
+   - Cancel ALL OCA brackets at IB (canonical + siblings)
+   - Place ONE new OCA bracket on canonical sized to total shares
+   - Close siblings (PnL=0, reason='consolidated_v19_34_42')
+   - Update canonical with summed shares
+
+3. **Endpoints** (`routers/trading_bot.py`):
+   - `GET /api/trading-bot/consolidate-positions/dry-run` — per-symbol diff, no mutations
+   - `POST /api/trading-bot/consolidate-positions/apply` — body `{symbols?: [], confirm: true}`
+
+4. **Auto-consolidate in drift loop** (`trading_bot_service.py`): after each share-drift tick, calls `consolidator.auto_consolidate_if_safe(bot)`. Safety rail: only auto-runs when (a) kill-switch is ACTIVE, OR (b) all fragmented groups have ≤2 fragments. Avoids ripping live brackets when operator hasn't acknowledged a fresh fragmentation event. Toggle via `SHARE_DRIFT_AUTO_CONSOLIDATE=false`.
+
+### Verification
+
+`tests/test_position_consolidator_v19_34_42.py` — 8 cases passing:
+- BMNR-style 3-fragment dry-run report
+- apply requires confirm=True
+- apply collapses N siblings into 1 canonical with summed shares
+- canonical resolution prefers non-reconciled, falls back to oldest
+- singleton positions untouched
+- `_spawn_excess_slice` grows existing instead of creating new
+- safety rail blocks large fragmentation when kill-switch OFF
+- safety rail allows when kill-switch ACTIVE
+
+### Operator action
+
+With kill-switch ON, run: `curl -X GET http://localhost:8001/api/trading-bot/consolidate-positions/dry-run` to preview. Then per-symbol:
+```
+curl -X POST http://localhost:8001/api/trading-bot/consolidate-positions/apply \
+  -H 'Content-Type: application/json' \
+  -d '{"symbols":["BMNR"],"confirm":true}'
+```
+After: BMNR's 19 rows collapse to ONE row holding all 4,443 sh under the original SQUEEZE bracket (SL $21.36, PT $25.59).
+
+### Known limitation (deferred)
+
+Some of BMNR's 19 fragments are SQUEEZE-typed add-ons (13 total) — meaning the SQUEEZE setup re-fired against an already-open position 12 additional times. This is a separate "pre-trade dedup" bug class not addressed here. Tracked as P1 in ROADMAP.md: "Block setup re-entry when same-direction trade already open."
+
+---
+
+
 ## 2026-02-XX (one-hundred-fifteenth commit, v19.34.32) — "Close/Cancel All" semantic decoupling
 
 **Severity: UX correctness.** "Flatten all" used to also trip the kill-switch as an invisible side effect — operators clicking it expecting "clean my books" got silently locked out of new trades. Now the two intents are fully separated.

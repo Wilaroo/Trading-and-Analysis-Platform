@@ -1660,6 +1660,64 @@ async def reconcile_share_drift_endpoint(
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.42 — Position Consolidator (BMNR fragment fix) ──────────
+@router.get("/consolidate-positions/dry-run")
+async def consolidate_positions_dry_run():
+    """Return per-symbol diff of fragmented (symbol, direction) groups
+    that would be consolidated into a single canonical trade.
+
+    No mutations. Use this before POSTing /consolidate-positions/apply.
+    Built after v19.34.42 operator-caught BMNR bug — 19 bot_trades for
+    one IB position of 4,443 sh, all with colliding OCA brackets.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    try:
+        from services.position_consolidator import PositionConsolidator
+        consolidator = PositionConsolidator(_trading_bot._db)
+        return await consolidator.dry_run_consolidation(_trading_bot)
+    except Exception as e:
+        logger.error(f"consolidate-positions/dry-run error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/consolidate-positions/apply")
+async def consolidate_positions_apply(payload: Optional[Dict[str, Any]] = None):
+    """Consolidate fragmented bot_trades for the listed symbols (or ALL
+    fragmented if `symbols` omitted). Requires `confirm=true`.
+
+    Body:
+      {
+        "symbols": ["BMNR", "LIN"],   // optional; ALL if omitted
+        "confirm": true               // required
+      }
+
+    Per (symbol, direction):
+      1. Cancel ALL OCA brackets at IB (canonical + siblings).
+      2. Place ONE new OCA bracket on canonical sized to total shares.
+      3. Close siblings (PnL=0, reason='consolidated_v19_34_42').
+      4. Update canonical (shares = sum of all fragments).
+
+    Recommend running with kill-switch ON.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    payload = payload or {}
+    confirm = bool(payload.get("confirm", False))
+    symbols = payload.get("symbols")
+    if symbols is not None and not isinstance(symbols, list):
+        raise HTTPException(400, "symbols must be an array of symbols (or omitted)")
+    try:
+        from services.position_consolidator import PositionConsolidator
+        consolidator = PositionConsolidator(_trading_bot._db)
+        return await consolidator.apply_consolidation(
+            _trading_bot, symbols=symbols, confirm=confirm,
+        )
+    except Exception as e:
+        logger.error(f"consolidate-positions/apply error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/refresh-account")
 async def refresh_account():
     """Force-pull the latest IB account equity and sync it into

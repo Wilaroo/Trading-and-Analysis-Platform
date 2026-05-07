@@ -1689,14 +1689,163 @@ class PositionReconciler:
             f"shrunk {cur_total}→{new_total_abs} sh across {len(trades)} bot_trade(s)"
         )
 
+    # ─── v19.34.42 — Idempotent excess-slice helpers ─────────────────
+    def _find_existing_excess_slice(self, bot, sym: str, direction):
+        """Return the existing `reconciled_excess_*` BotTrade for this
+        (symbol, direction) if one is open, else None.
+
+        Used by `_spawn_excess_slice` to grow rather than fragment.
+        """
+        d_val = getattr(direction, "value", str(direction)).lower()
+        candidates = []
+        for t in list(getattr(bot, "_open_trades", {}).values()):
+            if (getattr(t, "symbol", "") or "").upper() != sym.upper():
+                continue
+            t_dir = getattr(t.direction, "value", str(t.direction)).lower()
+            if t_dir != d_val:
+                continue
+            entered = (getattr(t, "entered_by", "") or "")
+            setup = (getattr(t, "setup_type", "") or "")
+            if entered.startswith("reconciled_excess") or setup == "reconciled_excess_slice":
+                candidates.append(t)
+        if not candidates:
+            return None
+        # Prefer the oldest reconciled slice (becomes the de-facto canonical).
+        def _ts_key(t):
+            for attr in ("entry_time", "executed_at", "created_at"):
+                v = getattr(t, attr, None)
+                if v:
+                    return str(v)
+            return ""
+        return sorted(candidates, key=_ts_key)[0]
+
+    async def _grow_existing_excess_slice(
+        self, bot, trade, sym: str, *, ib_qty_signed, bot_q, ib_meta, ib_quote,
+    ) -> str:
+        """Grow an existing reconciled-excess slice's share count to match
+        IB total, cancel its old bracket, place ONE new OCA bracket sized
+        to the new total. Idempotent — safe to call repeatedly per tick.
+        """
+        excess_signed = ib_qty_signed - bot_q
+        excess_abs = int(abs(excess_signed))
+        old_shares = int(abs(getattr(trade, "remaining_shares", 0) or 0))
+        new_shares = old_shares + excess_abs
+        # Mutate in-memory.
+        trade.remaining_shares = new_shares
+        try:
+            trade.shares = new_shares
+        except Exception:
+            pass
+        try:
+            trade.original_shares = max(int(getattr(trade, "original_shares", 0) or 0), new_shares)
+        except Exception:
+            pass
+        # Update risk_amount to reflect new size.
+        try:
+            stop_dist = abs(float(getattr(trade, "fill_price", 0) or trade.entry_price)
+                            - float(getattr(trade, "stop_price", 0) or 0))
+            if stop_dist > 0:
+                trade.risk_amount = stop_dist * new_shares
+        except Exception:
+            pass
+        trade.notes = (getattr(trade, "notes", "") or "") + (
+            f" [v19.34.42 grew excess slice {old_shares}→{new_shares} sh "
+            f"(ib_qty {ib_qty_signed:+.0f}, bot_q {bot_q:+.0f})]"
+        )
+        # Cancel old bracket and re-issue one sized to the new total.
+        executor = getattr(bot, "_trade_executor", None)
+        if executor and hasattr(executor, "_cancel_ib_bracket_orders"):
+            try:
+                await executor._cancel_ib_bracket_orders(trade)
+            except Exception as e:
+                logger.warning(f"[v19.34.42 grow] {sym} cancel old bracket failed: {e}")
+        trade.stop_order_id = None
+        trade.target_order_id = None
+        try:
+            trade.target_order_ids = []
+        except Exception:
+            pass
+        trade.oca_group = None
+
+        if executor and hasattr(executor, "attach_oca_stop_target"):
+            try:
+                oca_result = await executor.attach_oca_stop_target(trade)
+                if oca_result and oca_result.get("success"):
+                    trade.stop_order_id = oca_result.get("stop_order_id")
+                    tgt_id = oca_result.get("target_order_id")
+                    if tgt_id:
+                        trade.target_order_id = tgt_id
+                    trade.oca_group = oca_result.get("oca_group")
+                else:
+                    logger.error(
+                        f"[v19.34.42 grow NAKED] {sym} {trade.id} grew to {new_shares} "
+                        f"sh but OCA reissue failed: {(oca_result or {}).get('error', 'unknown')}"
+                    )
+            except Exception as e:
+                logger.error(f"[v19.34.42 grow NAKED] {sym} OCA reissue raised: {e}")
+        # Persist.
+        save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+        if save_fn:
+            try:
+                res = save_fn(trade)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as e:
+                logger.warning(f"[v19.34.42 grow] {sym} persist failed: {e}")
+        # Stream emit.
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "reconciled_excess_grown_v19_34_42",
+                "symbol": sym,
+                "text": (
+                    f"🔁 {sym} drift: grew existing reconciled slice "
+                    f"{old_shares}→{new_shares} sh (added {excess_abs}). "
+                    "No new fragment created."
+                ),
+                "metadata": {
+                    "trade_id": trade.id, "old_shares": old_shares,
+                    "new_shares": new_shares, "added": excess_abs,
+                    "ib_qty": ib_qty_signed, "bot_qty": bot_q,
+                },
+            })
+        except Exception:
+            pass
+        logger.warning(
+            f"[v19.34.42 GROW] {sym} reconciled-excess slice {trade.id}: "
+            f"{old_shares}→{new_shares} sh"
+        )
+        return trade.id
+
     async def _spawn_excess_slice(
         self, bot, sym, ib_qty_signed, *, bot_q, ib_meta, ib_quote,
         stop_pct, rr, BotTrade, TradeDirection, TradeStatus,
     ) -> str:
-        """Case 1: spawn a new BotTrade for the excess (IB - bot) shares."""
+        """Case 1: claim the excess (IB - bot) shares.
+
+        v19.34.42 (2026-05-08): made idempotent. BMNR/LIN/DDOG bug —
+        each tick spawned a NEW `reconciled_excess_v19_34_15b` slice
+        instead of growing the existing one, fragmenting one IB
+        position into N bot_trades, each with its own colliding OCA
+        bracket. Now: if a same-direction `reconciled_excess_*` slice
+        already exists for this symbol, GROW it (and re-issue ONE OCA
+        bracket sized to the new total) rather than creating a new
+        BotTrade. New slice creation only happens when there is NO
+        existing reconciled-excess trade for this (symbol, direction).
+        """
         excess_signed = ib_qty_signed - bot_q
         excess_abs = int(abs(excess_signed))
         direction = TradeDirection.LONG if excess_signed > 0 else TradeDirection.SHORT
+
+        # ── v19.34.42 idempotency: find existing reconciled-excess slice
+        # for this (symbol, direction). If present, grow it instead.
+        existing = self._find_existing_excess_slice(bot, sym, direction)
+        if existing is not None:
+            return await self._grow_existing_excess_slice(
+                bot, existing, sym, ib_qty_signed=ib_qty_signed,
+                bot_q=bot_q, ib_meta=ib_meta, ib_quote=ib_quote,
+            )
 
         avg_cost = float(ib_meta.get("avg_cost") or ib_meta.get("market_price") or 0)
         current_price = float(

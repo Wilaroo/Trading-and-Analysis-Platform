@@ -2673,6 +2673,34 @@ class TradingBotService:
                                     len(result["drifts_resolved"]),
                                     [d.get("symbol") for d in result["drifts_resolved"]][:8],
                                 )
+                            # ── v19.34.42 — auto-consolidate after drift pass.
+                            # Detects fragmented (symbol, direction) groups
+                            # (N>1 open bot_trades for one IB position) and
+                            # collapses them into a single canonical trade.
+                            # Safety rail: only runs when kill-switch is ON
+                            # OR fragments are small (≤2 per group). Disable
+                            # via SHARE_DRIFT_AUTO_CONSOLIDATE=false.
+                            if os.environ.get(
+                                "SHARE_DRIFT_AUTO_CONSOLIDATE", "true"
+                            ).lower() in ("true", "1", "yes", "on"):
+                                try:
+                                    from services.position_consolidator import (
+                                        PositionConsolidator,
+                                    )
+                                    consolidator = PositionConsolidator(self._db)
+                                    cresult = await consolidator.auto_consolidate_if_safe(self)
+                                    if cresult.get("ran"):
+                                        logger.warning(
+                                            "[v19.34.42 AUTO-CONSOLIDATE] %s",
+                                            cresult,
+                                        )
+                                        self._share_drift_diag[
+                                            "last_consolidation"
+                                        ] = cresult
+                                except Exception as ce:
+                                    logger.warning(
+                                        f"[v19.34.42 AUTO-CONSOLIDATE] tick failed: {ce}"
+                                    )
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:

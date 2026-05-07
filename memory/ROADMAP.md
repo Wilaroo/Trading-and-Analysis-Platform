@@ -4,6 +4,22 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🚨 2026-02-XX — v19.34.42 SHIPPED — Position Consolidator (BMNR fragmentation P0 fix)
+
+Operator caught BMNR/LIN/DDOG with 19/3/2 bot_trades respectively, each owning colliding OCA brackets at IB. Root cause: `_spawn_excess_slice` was non-idempotent. Three-layer fix shipped:
+1. **Idempotent excess spawn** — grow existing `reconciled_excess_*` slice instead of inserting a new one.
+2. **Consolidator service** + dry-run/apply endpoints.
+3. **Auto-consolidate in drift loop** with safety rail (kill-switch ON or fragments ≤2).
+
+8/8 new pytest cases passing. Operator action: kill-switch ON → `GET /consolidate-positions/dry-run` → `POST /consolidate-positions/apply` per symbol.
+
+### 🟡 Pending follow-ups from v19.34.42
+
+- **🟡 P1 — Pre-trade entry dedup.** BMNR's 13 SQUEEZE-typed fragments were the SAME setup re-firing 13× against an already-open position. Block setup entry when a same-direction trade is already open for the symbol. Tracked separately from the drift-side fix.
+- **🟢 P3 — Plumb IB executionId through pusher → drift reconciler** for true execution-level idempotency on close events (currently using snapshot-seq dedup which is sufficient but not exec-grade).
+
+
+
 ## 🟢 2026-05-06 night — Pusher RPC wired + V5 badge cleanup verified
 
 **v19.34.35** (operator-side config, no code changes) — "Pusher in partial state" banner resolved. `IB_PUSHER_RPC_URL=http://192.168.50.1:8765` added to DGX `backend/.env`; pusher restarted on Windows to activate RPC server (fastapi+uvicorn already installed). Full `yarn build` + clean `spark_stop/start.sh` cycle. Verified `/api/live/pusher-rpc-health` returns `reachable:true, consecutive_failures:0`; 3ms RPC latency over direct-wire ethernet. V5 OpenPositions badge cleanup (v19.34.23) confirmed live in production bundle — zero per-row ORPHAN/STALE/RECONCILED badges; single subtle `⬤ auto-heal · N` header pill only.
