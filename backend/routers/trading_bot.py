@@ -1660,6 +1660,198 @@ async def reconcile_share_drift_endpoint(
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.47 — Sync bot books to IB-direct reality ───────────────
+@router.post("/sync-books-to-ib-direct")
+async def sync_books_to_ib_direct(payload: Optional[Dict[str, Any]] = None):
+    """**Operator escape hatch.** Forces the bot's `_open_trades` cache
+    into agreement with IB's authoritative position snapshot — using
+    direct IB (clientId=11), independent of the Windows pusher.
+
+    Use when:
+      • Pusher is dead but operator manually flattened in TWS, AND
+      • Bot's UI still shows phantom positions that don't exist at IB
+
+    Per (symbol, direction) pair in `bot._open_trades`:
+      - If IB direct shows 0 (or opposite-side) shares for this symbol →
+        mark trade CLOSED locally with reason
+        `operator_sync_external_close_v19_34_47`, PnL=0, drop from
+        in-memory map, persist to mongo, log a share_drift_event.
+      - If IB direct shows the matching position (within tolerance) →
+        leave alone.
+
+    Body:
+      {
+        "confirm": "SYNC",         // required
+        "dry_run": false           // optional; if true, report only
+      }
+
+    Requires direct IB connected. If not, returns clear error and does
+    nothing — operator must wait for pusher restart.
+    """
+    payload = payload or {}
+    if payload.get("confirm") != "SYNC":
+        raise HTTPException(400, "confirm='SYNC' required")
+    dry_run = bool(payload.get("dry_run", False))
+
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+
+    summary: Dict[str, Any] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "dry_run": dry_run,
+        "ib_snapshot": [],
+        "bot_tracked": [],
+        "to_close": [],
+        "kept_open": [],
+        "errors": [],
+    }
+
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        from services.trading_bot_service import TradeStatus
+        ib_direct = get_ib_direct_service()
+        try:
+            connected = await asyncio.wait_for(
+                ib_direct.ensure_connected(), timeout=3.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            connected = False
+        if not connected:
+            return {
+                "success": False,
+                "error": (
+                    "ib_direct_service not connected — cannot sync. "
+                    "Wait for pusher restart, OR enable direct IB."
+                ),
+                "summary": summary,
+            }
+
+        ib_positions = await ib_direct.get_positions()
+        # Map: (sym_upper, signed_qty) per symbol — IB aggregates by sym.
+        ib_by_symbol: Dict[str, float] = {}
+        for p in ib_positions:
+            sym = (p.get("symbol") or "").upper()
+            if sym:
+                ib_by_symbol[sym] = float(p.get("position") or 0)
+        summary["ib_snapshot"] = [
+            {"symbol": s, "position": q} for s, q in ib_by_symbol.items() if q
+        ]
+
+        bot = _trading_bot
+        open_trades = list(bot._open_trades.values())
+        for t in open_trades:
+            sym = (getattr(t, "symbol", "") or "").upper()
+            d_val = getattr(t.direction, "value", str(t.direction)).lower()
+            tracked_qty = int(abs(getattr(t, "remaining_shares", 0) or 0))
+            tid = getattr(t, "id", None)
+            summary["bot_tracked"].append({
+                "trade_id": tid, "symbol": sym, "direction": d_val,
+                "shares": tracked_qty,
+            })
+            ib_signed = ib_by_symbol.get(sym, 0)
+            ib_abs = abs(ib_signed)
+            ib_dir = "long" if ib_signed > 0 else ("short" if ib_signed < 0 else None)
+
+            # Mismatch detection: IB shows 0 for this symbol, OR shows the
+            # opposite side, OR shows shares but the bot's tracked count
+            # is way bigger than IB's authoritative count (>5% drift).
+            should_close = (
+                ib_abs == 0
+                or (ib_dir is not None and ib_dir != d_val)
+                or (ib_abs > 0 and tracked_qty > 0
+                    and abs(tracked_qty - ib_abs) / max(tracked_qty, ib_abs) > 0.05
+                    and tracked_qty > ib_abs)  # bot bigger than IB
+            )
+            if not should_close:
+                summary["kept_open"].append({"trade_id": tid, "symbol": sym})
+                continue
+
+            entry = {
+                "trade_id": tid, "symbol": sym, "direction": d_val,
+                "tracked_shares": tracked_qty,
+                "ib_position": ib_signed,
+                "reason": (
+                    "ib_zero" if ib_abs == 0
+                    else ("opposite_side" if ib_dir and ib_dir != d_val
+                          else "bot_overshoots_ib")
+                ),
+            }
+
+            if dry_run:
+                summary["to_close"].append(entry)
+                continue
+
+            # Apply the close locally.
+            try:
+                t.status = TradeStatus.CLOSED
+                t.exit_price = float(getattr(t, "current_price", 0) or 0)
+                t.exit_time = datetime.now(timezone.utc)
+                t.exit_reason = "operator_sync_external_close_v19_34_47"
+                t.close_reason = "operator_sync_external_close_v19_34_47"
+                t.closed_at = datetime.now(timezone.utc).isoformat()
+                t.unrealized_pnl = 0.0
+                # Don't synthesize a realized PnL — we don't know what the
+                # operator's manual close fill price was. Leave existing
+                # realized_pnl untouched (zero for fresh trades).
+                t.remaining_shares = 0
+                t.stop_order_id = None
+                t.target_order_id = None
+                try:
+                    t.target_order_ids = []
+                except Exception:
+                    pass
+                t.oca_group = None
+                t.notes = (getattr(t, "notes", "") or "") + (
+                    f" [v19.34.47 operator-sync: IB shows {ib_signed:+.0f} sh, "
+                    f"bot tracked {tracked_qty} {d_val} → marking CLOSED]"
+                )
+                if tid:
+                    bot._open_trades.pop(tid, None)
+                    if hasattr(bot, "_closed_trades"):
+                        try:
+                            bot._closed_trades.append(t)
+                        except Exception:
+                            pass
+                save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+                if save_fn:
+                    try:
+                        res = save_fn(t)
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
+                # Audit trail.
+                try:
+                    if bot._db is not None:
+                        await asyncio.to_thread(
+                            bot._db["share_drift_events"].insert_one,
+                            {
+                                "created_at": datetime.now(timezone.utc),
+                                "event": "operator_sync_v19_34_47",
+                                "symbol": sym,
+                                "direction": d_val,
+                                "trade_id": tid,
+                                "tracked_shares": tracked_qty,
+                                "ib_position": ib_signed,
+                                "reason": entry["reason"],
+                            },
+                        )
+                except Exception:
+                    pass
+                summary["to_close"].append(entry)
+            except Exception as ex:
+                summary["errors"].append({
+                    "trade_id": tid, "symbol": sym, "err": str(ex)[:200],
+                })
+
+        return {"success": True, "summary": summary,
+                "completed_at": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.error("[sync-books-to-ib-direct] crashed: %s", e, exc_info=True)
+        summary["errors"].append({"stage": "top-level", "err": str(e)[:300]})
+        return {"success": False, "summary": summary, "error": str(e)[:300]}
+
+
 # ─── v19.34.42 — Position Consolidator (BMNR fragment fix) ──────────
 @router.get("/consolidate-positions/dry-run")
 async def consolidate_positions_dry_run():
