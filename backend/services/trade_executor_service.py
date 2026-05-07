@@ -15,6 +15,7 @@ for decisions but actual order execution requires the local IB connection.
 import os
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Dict, Optional, Any
 from enum import Enum
@@ -162,6 +163,39 @@ class TradeExecutorService:
                     "reason": guard.state.kill_switch_reason or "kill-switch tripped",
                     "refused_at": "executor_layer",
                     "method": method_name,
+                }
+
+            # v19.34.32 — Short-lived flatten-in-progress race guard.
+            #
+            # When Close/Cancel All is iterating (closes + cancel queue),
+            # refuse NEW entries so the scan loop can't race a close with
+            # a concurrent entry and leave a half-flipped position.
+            #
+            # NOTE: this ONLY guards entry-creating methods (the callers
+            # that pass method_name = "execute_entry" / "place_bracket_order"
+            # etc.). We deliberately do NOT guard close paths here —
+            # if an operator calls flatten they EXPECT closes to fire.
+            # The _kill_switch_refusal helper is currently called from
+            # entry paths only; if future callers add closes, they
+            # should pass method_name starting with "close_" so the
+            # allowlist below can exclude them.
+            if guard.is_flatten_in_progress() and not method_name.startswith("close_"):
+                symbol = getattr(trade, "symbol", "?") if trade is not None else "?"
+                logger.warning(
+                    "v19.34.32 [EXECUTOR-GUARD] %s REFUSED for %s — "
+                    "flatten_in_progress (reason: %s). Entry NOT submitted. "
+                    "Lock auto-expires in %.1fs.",
+                    method_name, symbol,
+                    guard.state.flatten_reason or "close_cancel_all",
+                    max(0.0, (guard.state.flatten_expires_at or 0) - time.time()),
+                )
+                return {
+                    "success": False,
+                    "error": "flatten_in_progress",
+                    "reason": guard.state.flatten_reason or "close_cancel_all",
+                    "refused_at": "executor_layer",
+                    "method": method_name,
+                    "expires_at": guard.state.flatten_expires_at,
                 }
         except Exception as e:
             logger.warning("v19.34.26 [EXECUTOR-GUARD] guardrail check failed in %s: %s "

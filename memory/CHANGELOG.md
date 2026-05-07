@@ -2,6 +2,85 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (one-hundred-fifteenth commit, v19.34.32) — "Close/Cancel All" semantic decoupling
+
+**Severity: UX correctness.** "Flatten all" used to also trip the kill-switch as an invisible side effect — operators clicking it expecting "clean my books" got silently locked out of new trades. Now the two intents are fully separated.
+
+### The bug class
+
+Pre-v19.34.32 the `/api/safety/flatten-all` endpoint did THREE things:
+1. Trip the kill-switch (permanent lockout until manual reset)
+2. Close every open position via market orders
+3. Cancel every pending order in the order_queue
+
+The button label said only "Flatten all" — no mention of the permanent halt side effect. The confirm modal DID say "the kill-switch will also latch" but operators reasonably expected the button name to match behavior.
+
+### The fix
+
+**Three separate controls, three distinct intents:**
+
+| Control | What it does | When to use |
+|---|---|---|
+| **Close/Cancel All** (renamed from Flatten all) | Close positions + cancel pending. Bot keeps scanning + can re-enter. | "Clean my books, keep trading." |
+| **Kill Switch** | Hard executor block. Does NOT auto-close anything. | "Halt new trades without flattening." |
+| **Scanner Pause** | Stop NEW alert intake; in-flight evals + open-position management continue. | "Stop finding new ideas; let existing ones play out." |
+
+Operators who want the pre-v19.34.32 combined behavior can check **"Also halt bot? (trip kill-switch)"** in the Close/Cancel All confirm modal — which fires a separate `POST /api/safety/kill-switch/trip` after the flatten completes.
+
+### Implementation
+
+**Backend — `services/safety_guardrails.py`:**
+- New `SafetyState.flatten_in_progress` / `flatten_started_at` / `flatten_expires_at` / `flatten_reason` fields.
+- `set_flatten_in_progress(ttl_s=30, reason=...)` — short-lived race guard.
+- `is_flatten_in_progress()` — lazy-expires on TTL so a crashed endpoint can't permanently lock out the bot.
+- `clear_flatten_in_progress()` — proactive release on happy path.
+- All surfaced in `status()` payload for UI.
+- **NOT persisted to Mongo** — process-lifetime only (backend restart mid-flatten releases the guard; next reconciler pass detects any half-done flatten anyway).
+
+**Backend — `routers/safety_router.py`:**
+- Removed `guard.trip_kill_switch(reason="flatten-all initiated")` call (was unconditional; now the responsibility of the frontend's optional "Also halt bot?" checkbox).
+- Added `guard.set_flatten_in_progress(reason="close_cancel_all")` before iteration + `guard.clear_flatten_in_progress()` after.
+
+**Backend — `services/trade_executor_service.py`:**
+- `_kill_switch_refusal` now ALSO checks `is_flatten_in_progress()` and refuses new ENTRIES while the flag is set. Allowlist exclusion: method names starting with `"close_"` are allowed through (flatten itself relies on closes firing).
+
+**Frontend — `components/sentcom/v5/SafetyV5.jsx`:**
+- Button label: `"Flatten all"` → `"Close/Cancel All"`.
+- Tooltip rewritten: "Close every open position + cancel every pending order. Does NOT halt the bot (bot keeps scanning)."
+- Modal header: `"Emergency flatten"` → `"Close / Cancel All"`.
+- Removed the "kill-switch will also latch so the bot cannot re-enter" line.
+- Added explanatory paragraph: bot keeps scanning + 30-sec race guard prevents mid-flatten entry races.
+- Added **"Also halt bot? (trip kill-switch)"** checkbox (default OFF). When checked, fires a separate `POST /api/safety/kill-switch/trip` after flatten completes.
+- Typed-`FLATTEN` confirmation still required (unchanged).
+
+**Endpoint URL preserved:** `/api/safety/flatten-all` remains the route so any scripts/integrations the operator has continue to work. Only the body/behavior changed.
+
+### Test coverage
+
+`tests/test_close_cancel_all_decoupling_v19_34_32.py` — **11 cases, all green:**
+
+Guardrails unit tests:
+- `test_flatten_lock_defaults_off` — clean baseline
+- `test_flatten_lock_set_and_cleared` — round-trip set/clear
+- `test_flatten_lock_auto_expires_on_ttl` — self-heal on TTL
+- `test_flatten_lock_status_payload_exposed` — status() carries new fields
+- `test_flatten_lock_independent_of_kill_switch` — ← critical decoupling
+
+Executor integration tests:
+- `test_executor_refuses_entry_during_flatten` — new entries blocked
+- `test_executor_allows_close_during_flatten` — closes allowed (flatten depends on them)
+- `test_executor_refuses_entry_when_kill_switch_active_too` — kill-switch still dominates
+- `test_executor_allows_entry_when_no_guards_active` — baseline
+- `test_executor_allows_entry_after_flatten_ttl_expires` — self-heal end-to-end
+
+Source-code regression pin:
+- `test_flatten_endpoint_source_decoupled_from_kill_switch` — grep-asserts the old `trip_kill_switch` call is gone AND the new `set_flatten_in_progress` + `clear_flatten_in_progress` calls are present. Catches any future refactor that accidentally re-couples them.
+
+### Known follow-ups
+
+- UI: tiny amber "FLATTEN-LOCK 27s" pill that shows during the short race-guard window (so operator sees WHY entries are briefly refused right after clicking Close/Cancel All). Deferred — nice-to-have, not critical.
+- Metrics: count `flatten_in_progress` refusals per session to detect if the 30s TTL is ever too short (e.g. 20+ positions to close → might need 60s). Deferred.
+
 ## 2026-02-XX (one-hundred-fourteenth commit, v19.34.31) — V5View wired as primary command-center layout
 
 **Severity: P0 discovery — user reported "where is v5!?!" after v19.34.29. Root cause: V5View was ghost code.**

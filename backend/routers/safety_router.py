@@ -261,7 +261,29 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
         )
 
     guard = get_safety_guardrails()
-    guard.trip_kill_switch(reason="flatten-all initiated")
+    # v19.34.32 — "Close/Cancel All" semantic decoupling.
+    #
+    # Pre-v19.34.32 this endpoint ALSO tripped the kill-switch as a side
+    # effect ("flatten = panic stop"). That conflated two distinct
+    # operator intents:
+    #   1. "clean my books" (close positions + cancel pending) ← flatten
+    #   2. "halt trading"  (refuse new entries permanently)    ← kill switch
+    # The UI label "Flatten all" implied only #1 but the endpoint also did
+    # #2 — so clicking it locked the operator out of new trades until a
+    # separate manual reset.
+    #
+    # Post-fix: this endpoint does EXACTLY #1. Operators who want #2
+    # should click the kill-switch separately (or opt in via the
+    # "Also halt bot?" checkbox in the confirm modal, which fires a
+    # second `/api/safety/kill-switch/trip` call from the frontend).
+    #
+    # Race guard: we still need to prevent the scan loop from firing a
+    # NEW entry while we're iterating through the close list (a race
+    # would leave a half-flipped position — close ran, new entry also
+    # ran, net-long a symbol the operator thought they flattened). The
+    # fix is a SHORT-LIVED (30s TTL, auto-expires) `flatten_in_progress`
+    # flag — NOT a sticky kill-switch.
+    guard.set_flatten_in_progress(reason="close_cancel_all")
 
     summary: Dict[str, Any] = {
         "positions_requested_close": 0,
@@ -375,5 +397,11 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
         )
     else:
         logger.warning("[SAFETY] FLATTEN-ALL complete: %s", summary)
+
+    # v19.34.32 — Release the race guard as soon as iteration finishes.
+    # The TTL is a failsafe (for a crashed endpoint / network-dropped
+    # client); on the happy path we drop it immediately so the operator's
+    # bot can re-enter on its very next scan tick.
+    guard.clear_flatten_in_progress()
 
     return {"success": success, "summary": summary, "state": guard.status()["state"]}

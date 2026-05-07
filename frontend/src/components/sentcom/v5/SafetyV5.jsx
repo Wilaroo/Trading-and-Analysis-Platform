@@ -124,6 +124,11 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
   const [result, setResult] = useState(null);
   const typedRef = useRef('');
   const [typed, setTyped] = useState('');
+  // v19.34.32 — Operator opt-in to ALSO trip the kill-switch alongside
+  // the close+cancel. Pre-v19.34.32 the backend unconditionally did
+  // this. Now it's an explicit checkbox — default OFF — so "clean my
+  // books" is the common-case one-click intent.
+  const [alsoHaltBot, setAlsoHaltBot] = useState(false);
 
   const confirmed = typed.trim().toUpperCase() === 'FLATTEN';
 
@@ -131,7 +136,23 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
     if (!confirmed || busy) return;
     setBusy(true);
     try {
+      // v19.34.32 — Close/Cancel-All first, then optionally halt.
+      // We fire the kill-switch trip AFTER the flatten call succeeds so
+      // that if flatten crashes at the pusher layer, we haven't also
+      // locked the operator out. The backend race-guard covers the
+      // intra-flatten window regardless.
       const r = await safety.flattenAll();
+      if (alsoHaltBot) {
+        try {
+          await api.post('/api/safety/kill-switch/trip',
+            { reason: 'operator_close_cancel_all_with_halt' });
+        } catch (haltErr) {
+          // eslint-disable-next-line no-console
+          console.warn('[Close/CancelAll] halt-after-flatten failed:', haltErr?.message || haltErr);
+          r.halt_after_flatten_error = haltErr?.message || 'halt call failed';
+        }
+      }
+      await safety?.refresh?.();
       setResult(r);
     } catch (err) {
       setResult({ success: false, error: err?.message || 'flatten failed' });
@@ -145,6 +166,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
     setResult(null);
     setTyped('');
     typedRef.current = '';
+    setAlsoHaltBot(false);
   };
 
   // Two layouts:
@@ -161,11 +183,11 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
         onClick={() => setOpen(true)}
         data-testid="v5-flatten-all-btn"
         data-help-id="flatten-all"
-        title="Emergency flatten — cancel all pending + close all positions"
+        title="Close every open position + cancel every pending order. Does NOT halt the bot (bot keeps scanning). Check 'Also halt bot?' in the modal to combine with kill-switch."
         className={btnClass}
       >
         <Power className={inline ? "w-2.5 h-2.5" : "w-3 h-3"} />
-        Flatten all
+        Close/Cancel All
       </button>
 
       {open && (
@@ -183,15 +205,41 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                 <div className="px-4 py-3 border-b border-rose-500/30 bg-rose-950/40">
                   <div className="flex items-center gap-2">
                     <ShieldAlert className="w-4 h-4 text-rose-400" />
-                    <span className="v5-mono text-sm font-bold text-rose-200 tracking-widest uppercase">Emergency flatten</span>
+                    <span className="v5-mono text-sm font-bold text-rose-200 tracking-widest uppercase">Close / Cancel All</span>
                   </div>
                 </div>
                 <div className="px-4 py-4 space-y-3">
                   <p className="text-[12px] text-zinc-300 leading-relaxed">
                     This will <span className="text-rose-400 font-bold">cancel every pending order</span> and
-                    <span className="text-rose-400 font-bold"> market-close every open position</span>. The kill-switch
-                    will also latch so the bot cannot re-enter until you reset it.
+                    <span className="text-rose-400 font-bold"> market-close every open position</span>.
                   </p>
+                  <p className="text-[12px] text-zinc-400 leading-relaxed">
+                    The bot <span className="text-emerald-300 font-bold">will keep scanning</span> and may re-enter
+                    on its next setup. A short 30-second race-guard prevents new entries <em>during</em> the close
+                    iteration — but once complete, trading resumes normally.
+                  </p>
+                  <label
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-sm bg-zinc-900/60 border border-zinc-700 cursor-pointer hover:border-amber-500/50 transition-colors"
+                    data-testid="v5-flatten-also-halt-label"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={alsoHaltBot}
+                      onChange={(e) => setAlsoHaltBot(e.target.checked)}
+                      data-testid="v5-flatten-also-halt-checkbox"
+                      className="accent-amber-500"
+                    />
+                    <span className="v5-mono text-[12px] text-zinc-200">
+                      Also halt bot <span className="text-zinc-500">(trip kill-switch)</span>
+                    </span>
+                  </label>
+                  {alsoHaltBot && (
+                    <p className="text-[11px] text-amber-300/80 leading-relaxed pl-2 border-l-2 border-amber-500/40">
+                      After flatten completes, the kill-switch will latch. Bot will refuse new entries
+                      until you manually reset via the Safety panel. Scanner keeps finding setups
+                      (paused separately via the scanner toggle).
+                    </p>
+                  )}
                   <p className="text-[13px] v5-mono v5-dim">
                     Type <span className="text-rose-400 font-bold">FLATTEN</span> to confirm.
                   </p>

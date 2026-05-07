@@ -128,6 +128,17 @@ class SafetyState:
     scanner_paused: bool = False
     scanner_paused_at: Optional[float] = None
     scanner_paused_reason: Optional[str] = None
+    # v19.34.32 — Flatten-in-progress race guard.
+    # Short-lived (default 30s) auto-expiring lock that blocks new ENTRIES
+    # while a Close/Cancel-All operation is iterating. Separate from the
+    # kill-switch: flatten no longer trips the kill-switch (v19.34.32
+    # decouples "clean my books" from "halt trading"). Operators who
+    # want both can opt in via the "Also halt bot?" checkbox in the
+    # confirm modal, which fires a separate kill-switch trip.
+    flatten_in_progress: bool = False
+    flatten_started_at: Optional[float] = None
+    flatten_expires_at: Optional[float] = None
+    flatten_reason: Optional[str] = None
     last_checks: List[Dict[str, Any]] = field(default_factory=list)   # ring buffer, last 20
 
 
@@ -324,6 +335,69 @@ class SafetyGuardrails:
             logger.warning("[SAFETY] v19.34.26 — Scanner RESUMED by operator")
         self._persist_scanner_state()
 
+    # ──────────────────────────────────────────────────────────────────
+    # v19.34.32 — Flatten-in-progress race guard
+    # ──────────────────────────────────────────────────────────────────
+    #
+    # When Close/Cancel-All is iterating (closing N positions + cancelling
+    # M pending orders), we don't want the scan loop firing NEW entries
+    # in parallel — a race could leave a half-flipped position where the
+    # close just happened, the new entry also just happened, and the
+    # operator ends up net-long a symbol they thought they flattened.
+    #
+    # The guard is a short, TTL'd flag (default 30s — long enough for
+    # a typical flatten iteration, short enough that a stuck/crashed
+    # endpoint doesn't permanently lock out the bot). The executor
+    # checks this flag and REFUSES new entries (execute_entry,
+    # place_bracket_order) while it's set — but closes (close_trade,
+    # place_target_order for exit) still go through.
+    #
+    # Deliberately NOT persisted to Mongo — process-lifetime only.
+    # A backend restart mid-flatten releases the guard; any half-done
+    # flatten is detected by the next reconciler pass anyway.
+
+    DEFAULT_FLATTEN_LOCK_TTL_S: float = 30.0
+
+    def set_flatten_in_progress(self, ttl_s: float = None, reason: str = "close_cancel_all") -> None:
+        ttl = ttl_s if ttl_s is not None else self.DEFAULT_FLATTEN_LOCK_TTL_S
+        now = time.time()
+        self.state.flatten_in_progress = True
+        self.state.flatten_started_at = now
+        self.state.flatten_expires_at = now + float(ttl)
+        self.state.flatten_reason = reason
+        logger.warning(
+            "[SAFETY] v19.34.32 — FLATTEN LOCK engaged for %.1fs (reason=%s). "
+            "New entries will be refused until lock expires or is cleared.",
+            ttl, reason,
+        )
+
+    def clear_flatten_in_progress(self) -> None:
+        was = bool(self.state.flatten_in_progress)
+        self.state.flatten_in_progress = False
+        self.state.flatten_started_at = None
+        self.state.flatten_expires_at = None
+        self.state.flatten_reason = None
+        if was:
+            logger.warning("[SAFETY] v19.34.32 — FLATTEN LOCK released")
+
+    def is_flatten_in_progress(self) -> bool:
+        """True iff the TTL'd flatten guard is active. Auto-clears on expiry."""
+        if not self.state.flatten_in_progress:
+            return False
+        exp = self.state.flatten_expires_at
+        if exp is not None and time.time() >= exp:
+            # Lazy expiry — self-heal so a crashed flatten endpoint can't
+            # permanently lock the bot. Logs once on transition.
+            logger.warning(
+                "[SAFETY] v19.34.32 — FLATTEN LOCK auto-expired after TTL "
+                "(reason=%s)", self.state.flatten_reason or "unknown",
+            )
+            self.clear_flatten_in_progress()
+            return False
+        return True
+
+
+
     def _persist_scanner_state(self) -> None:
         try:
             db = _get_sync_safety_db()
@@ -456,6 +530,14 @@ class SafetyGuardrails:
                 "scanner_paused": self.is_scanner_paused(),
                 "scanner_paused_at": getattr(self.state, "scanner_paused_at", None),
                 "scanner_paused_reason": getattr(self.state, "scanner_paused_reason", None),
+                # v19.34.32 — flatten lock (short TTL race-guard, separate
+                # from kill-switch). UI shows a subtle amber pulse while
+                # this is active so operator knows why entries are being
+                # refused right after clicking Close/Cancel All.
+                "flatten_in_progress": self.is_flatten_in_progress(),
+                "flatten_started_at": getattr(self.state, "flatten_started_at", None),
+                "flatten_expires_at": getattr(self.state, "flatten_expires_at", None),
+                "flatten_reason": getattr(self.state, "flatten_reason", None),
                 "recent_checks": list(self.state.last_checks[-20:]),
             },
         }
