@@ -16516,6 +16516,21 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 ### Phase 3 — Bot-side bracket caller swap (2026-04-22 evening)
 `trade_executor_service.place_bracket_order` + `_ib_bracket` / `_simulate_bracket`: queues an atomic `{"type":"bracket",...}` payload to the pusher with correctly-computed parent LMT offset (scalp-aware), child STP/LMT target, and GTC/outside-RTH flags. `trade_execution.execute_trade` now calls `place_bracket_order` first; on `bracket_not_supported` / `alpaca_bracket_not_implemented` / missing-stop-or-target it falls back to the legacy `execute_entry` + `place_stop_order` flow. Result shape is translated so downstream code doesn't change.
 
+### v19.34.37 — Scanner cards flicker fix (5↔9 every ~12s) (2026-05-07 morning, T-15 to open)
+
+**Trigger:** operator (T-17 minutes before market open) reported scanner panel showing only 5 cards most of the time, briefly flashing to 9 cards every 10-12 seconds, then reverting to 5 within 1-2s. Screenshots showed the steady-state 5 cards had terse `bot_text` and no INTRADAY tier badge, while the 9-card flash had rich text + INTRADAY badges.
+
+**Root cause:** two backend/frontend race issues feeding the same `alerts` state:
+1. `services/sentcom_service.py::get_recent_alerts()` hardcoded `live_alerts[:5]` — silently truncated the caller's `limit` arg. The REST route (`/api/sentcom/alerts`) accepts `limit` up to 500, but the inner service code ignored it and always returned at most 5 alerts.
+2. The frontend REST poll fired every 60s and called `setAlerts(5)` over the WS-pushed 9-card state. Between REST polls, WS push (~every 15s) restored 9 cards momentarily until the next REST poll clobbered it again. Net effect: 5 cards steady-state, 9-card flashes between REST cycles.
+
+**Fixes:**
+- `sentcom_service.py:2763` — `live_alerts[:5]` → `live_alerts[:limit]`. Now respects the caller's `limit` so REST and WS return the same set.
+- `useSentComAlerts.js` — added `lastWsUpdateAt` ref + `WS_FRESHNESS_MS=30000` guard. `fetchAlerts()` now early-returns if WS pushed within the last 30s, preventing REST poll from downgrading fresh WS state. The cards now stabilize at the full 9-card view in pre-market and never flicker.
+- New regression suite: `tests/test_scanner_cards_flicker_fix_v19_34_37.py` — 4 tests pinning both fixes (source-asserts on backend slice + frontend guard ref/threshold/check).
+
+**Operator action required after this lands:** run `cd frontend && yarn build` on DGX (already automated in `spark_start.sh`), then hard-refresh the browser. The flicker disappears immediately.
+
 ### v19.34.36b — Learning Loop end-to-end audit + Alert→Trade join key restored (2026-05-07 night)
 
 **Trigger:** after the v19.34.36 audit fixed the silently-failing `record_trade_outcome` field-name bug (close path was using non-existent `trade.stop_loss`/`targets`/`opened_at`), an end-to-end audit of `learning_loop_service.py` revealed a deeper structural issue: the alert→trade join key was missing on `BotTrade` entirely, so context matching never worked even when the call signature was correct.

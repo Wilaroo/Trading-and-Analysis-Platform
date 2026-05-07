@@ -2755,12 +2755,19 @@ class SentComService:
         alerts = []
         
         # Source 1: LIVE SCANNER ALERTS
+        # 2026-05-07 v19.34.37 — respect caller's `limit` instead of the
+        # legacy hardcoded `[:5]`. Pre-fix the route accepted limits up to
+        # 500 but this inner code silently truncated to 5, causing the
+        # frontend to render 5 lite cards most of the time and flicker to
+        # 9 cards every ~15s when the WS push (which uses the full 20)
+        # arrived. Operator perceived this as scanner cards "blipping in
+        # and out" every 10-12 seconds.
         try:
             from services.enhanced_scanner import get_enhanced_scanner
             scanner = get_enhanced_scanner()
             if scanner:
                 live_alerts = scanner.get_live_alerts()
-                for alert in live_alerts[:5]:
+                for alert in live_alerts[:limit]:
                     # Handle timestamp - could be datetime or string
                     timestamp = alert.created_at
                     if hasattr(timestamp, 'isoformat'):
