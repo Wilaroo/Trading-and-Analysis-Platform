@@ -240,7 +240,7 @@ const relativeAge = (ts) => {
 };
 
 
-const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
+const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
   const botColor = BOT_TEXT_COLOR[card.stage] || 'text-zinc-400';
   const hasMetrics = card.metrics && (
@@ -265,7 +265,7 @@ const ScannerCard = ({ card, active, previewed, onClick, hoveredSymbol, onHoverS
       onClick={onClick}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
-      className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}`}
+      className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}${isNew ? ' just-arrived' : ''}`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -461,6 +461,31 @@ export const ScannerCardsV5 = ({
     () => buildCards({ setups, alerts, positions, messages }),
     [setups, alerts, positions, messages]
   );
+
+  // v19.34.38d — "just arrived" tracker. The first time a card's
+  // (symbol+stage) key shows up in the panel during this session,
+  // it's flagged for a 1.5s entrance pulse. After firstSeenAt the card
+  // is "known" and never re-pulses unless the page reloads. Uses two
+  // refs:
+  //   - seenRef: set of (symbol+stage) strings that have ever appeared.
+  //   - newKeysRef: refreshes per-render with cards whose key was NOT
+  //     in seenRef before this render. We hand this set to ScannerCard
+  //     via `isNew` so only fresh cards get the .just-arrived class.
+  // 350ms boot grace prevents the entire initial render from pulsing.
+  const seenRef = useRef(new Set());
+  const bootAtRef = useRef(Date.now());
+  const newKeys = useMemo(() => {
+    const fresh = new Set();
+    const inBootGrace = Date.now() - bootAtRef.current < 350;
+    for (const c of cards) {
+      const k = `${c.symbol}|${c.stage}`;
+      if (!seenRef.current.has(k)) {
+        seenRef.current.add(k);
+        if (!inBootGrace) fresh.add(k);
+      }
+    }
+    return fresh;
+  }, [cards]);
 
   // v19.32 (2026-05-04) — Chart cache warmer.
   // Fire-and-forget POST to /api/sentcom/chart/warm with the top-12
@@ -702,6 +727,7 @@ export const ScannerCardsV5 = ({
           card={c}
           active={selectedSymbol === c.symbol}
           previewed={previewIdx === i}
+          isNew={newKeys.has(`${c.symbol}|${c.stage}`)}
           onClick={() => onSelectSymbol?.(c.symbol)}
           hoveredSymbol={hoveredSymbol}
           onHoverSymbol={onHoverSymbol}
@@ -755,6 +781,7 @@ export const ScannerCardsV5 = ({
                     card={c}
                     active={selectedSymbol === c.symbol}
                     previewed={previewIdx === idx}
+                    isNew={newKeys.has(`${c.symbol}|${c.stage}`)}
                     onClick={() => onSelectSymbol?.(c.symbol)}
                     hoveredSymbol={hoveredSymbol}
                     onHoverSymbol={onHoverSymbol}

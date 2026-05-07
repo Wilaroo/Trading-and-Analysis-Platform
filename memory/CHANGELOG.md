@@ -16533,6 +16533,8 @@ Audit revealed all 6,632 "cancelled" bot_trades were `close_reason=simulation_ph
 
 **Bonus UX 2:** within-group `timestamp desc` sort in `groupCardsBySetup`. Pre-fix the order within each Market Setup section was scanner-insert order, which on busy mornings put stale 5-min-old cards above fresh ones from the current scan tick. New sort puts the freshest hit at the top of every section.
 
+**Bonus UX 3 (v19.34.38d):** "just arrived" pulse animation on scanner cards. The first time a `(symbol+stage)` key appears in the operator's session, the card gets a 1.5s cyan-ring pulse via `@keyframes v5-card-arrive`. Subsequent renders of the same key are static. A 350ms boot-grace prevents the entire initial render from pulsing on page load. Implemented with a session-scoped `seenRef` Set and a per-render `newKeys` derivation. Respects `prefers-reduced-motion: reduce` for accessibility.
+
 ### v19.34.37 — Scanner cards flicker fix (5↔9 every ~12s) (2026-05-07 morning, T-15 to open)
 
 **Trigger:** operator (T-17 minutes before market open) reported scanner panel showing only 5 cards most of the time, briefly flashing to 9 cards every 10-12 seconds, then reverting to 5 within 1-2s. Screenshots showed the steady-state 5 cards had terse `bot_text` and no INTRADAY tier badge, while the 9-card flash had rich text + INTRADAY badges.

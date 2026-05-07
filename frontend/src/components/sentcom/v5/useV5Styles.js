@@ -126,6 +126,25 @@ const CSS = `
   background:rgba(34,211,238,.08);
 }
 
+/* v19.34.38d — "just arrived" pulse: a subtle cyan ring that fades
+   over 1.5s the first time a scanner card appears in the operator's
+   viewport. Helps the eye catch genuinely-new setups in a busy panel
+   without scanning timestamps. After 1.5s the card returns to its
+   static styling and never re-pulses unless the operator's session
+   resets (page reload / explicit clear). Uses outline so it composes
+   cleanly with the existing .previewed outline + .active border. */
+.v5-scanner-card.just-arrived {
+  animation: v5-card-arrive 1.5s ease-out 1;
+}
+@keyframes v5-card-arrive {
+  0%   { outline:2px solid rgba(34,211,238,.85); outline-offset:-1px; background:rgba(34,211,238,.10); }
+  60%  { outline:2px solid rgba(34,211,238,.45); outline-offset:-1px; background:rgba(34,211,238,.04); }
+  100% { outline:0px solid rgba(34,211,238,0);   outline-offset:-1px; background:transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v5-scanner-card.just-arrived { animation:none; }
+}
+
 /* Briefings */
 .v5-briefing-card { padding:10px 12px; border-bottom:1px solid #18181b; cursor:pointer; transition:all .15s; position:relative; }
 .v5-briefing-card:hover { background:#141416; }

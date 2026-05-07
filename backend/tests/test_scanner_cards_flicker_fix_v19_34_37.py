@@ -87,3 +87,32 @@ def test_setups_watching_has_no_artificial_caps():
     assert "return setups\n" in block, (
         "get_setups_watching must return the full setups list, not a slice."
     )
+
+
+def test_scanner_card_just_arrived_pulse_wired():
+    """v19.34.38d — scanner cards get a 1.5s pulse the first time they appear."""
+    src = Path("/app/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx").read_text("utf-8")
+    # The tracker refs must exist
+    assert "seenRef" in src and "newKeys" in src, (
+        "ScannerCardsV5 lost the first-seen tracker (seenRef / newKeys). "
+        "New scanner hits will no longer pulse on arrival."
+    )
+    # Both flat and grouped render paths must thread isNew into ScannerCard
+    assert src.count("isNew={newKeys.has(") >= 2, (
+        "ScannerCardsV5 no longer threads isNew={newKeys.has(...)} into both "
+        "the flat and grouped render paths — pulse won't fire in one of them."
+    )
+    # ScannerCard signature must accept isNew, and apply the className
+    assert ", isNew, " in src, "ScannerCard signature must accept isNew prop."
+    assert "${isNew ? ' just-arrived' : ''}" in src, (
+        "ScannerCard no longer applies the .just-arrived className when isNew is true."
+    )
+
+    # CSS animation must exist
+    css = Path("/app/frontend/src/components/sentcom/v5/useV5Styles.js").read_text("utf-8")
+    assert "v5-card-arrive" in css, (
+        "useV5Styles is missing the @keyframes v5-card-arrive animation."
+    )
+    assert "prefers-reduced-motion" in css, (
+        "useV5Styles must respect prefers-reduced-motion for accessibility."
+    )
