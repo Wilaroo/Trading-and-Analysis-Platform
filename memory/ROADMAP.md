@@ -4,6 +4,10 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-XX — v19.34.50 SHIPPED — `bot_q` zero-side detection blind-spot
+
+Drift reconciler now detects the `(bot_q ≈ 0, zombies == 0, ib_q ≥ 1)` corner case (paired hedges; tracked-but-zero edges) and routes to `_spawn_excess_slice` so unmanaged IB shares get bracketed. 7 new pytest cases (cumulative reconciler/safety suite 31/31 passing). See CHANGELOG.md.
+
 ## ✅ 2026-02-XX — BUGS 2 & 3 SHIPPED (v19.34.48 + v19.34.49) — Bot Cleared for Re-Enable
 
 Both P0s fixed and pinned by 13 new pytest cases (39 cumulative passing across the session). See CHANGELOG.md for full detail. Smoke-test checklist included there for the operator before re-arming the bot.

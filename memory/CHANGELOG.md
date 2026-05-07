@@ -2,6 +2,33 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.50) — `bot_q` zero-side detection (drift blind spot)
+
+**Symptom:** When a symbol has tracked bot_trades whose signed remaining-shares net to ≈ 0 (paired LONG + SHORT hedges, or any tracked-but-zero edge case where `len(zombies) == 0`), and IB still has real qty, the existing `reconcile_share_drift` logic dropped the drift into the `unclassified` else path. Net: IB inventory stayed silently unmanaged — same family of bug as v19.34.19's zombie blind-spot, but at a different bot_q==0 corner case.
+
+**Why the legacy logic missed it:**
+- Line 1311 zombie branch requires `len(zombies) > 0`. Paired live trades have `remaining_shares > 0`, so `zombies==0` and the branch skips.
+- Cases 1/2/3 (excess / partial / zero-external-close) all require bot_q to be strictly directional (`bot_q > 0` or `bot_q < 0`). With `bot_q ≈ 0` ALL three predicates fail.
+- The `(ib_q * bot_q < 0)` direction-flip clause also fails because `bot_q == 0` means the product is 0, not negative.
+- Pure-orphan path is gated by `sym not in bot_qty_by_sym` — symbol IS tracked, so the orphan reconciler does NOT pick it up either.
+
+**Fix:** New detection branch in `position_reconciler.reconcile_share_drift` (services/position_reconciler.py). Inserted AFTER the zombie branch's `continue` and BEFORE the directional Cases. When `abs(bot_q) < 0.01 AND abs(ib_q) >= 1`, route to `_spawn_excess_slice` to claim the IB inventory under a bracketed reconciled-excess slice. Records `kind="zero_side_external_inventory"` with `tracked_trade_count` for observability. Tracked bot_trades are NOT touched — they may be legitimate paired hedges.
+
+Stream-emits a `zero_side_drift_v19_34_50` warning so operator sees it in real time.
+
+**Tests:** `tests/test_bot_q_zero_side_v19_34_50.py` — 7 cases:
+- detect-only on paired LONG+SHORT with IB long excess
+- full heal spawns slice, leaves paired trades open & in `_open_trades`
+- symmetric short-side IB excess (-75)
+- regression: zombie branch still wins when zombies present
+- regression: pure orphan still defers to orphan reconciler
+- regression: directional excess unchanged
+- edge: bot_q≈0 + ib_q==0 produces zero drift
+
+Cumulative reconciler / kill-switch / phantom suite: **31/31 passing** (test_bot_q_zero_side_v19_34_50 + test_zombie_drift_v19_34_19 + test_orphan_reconciler_skips_excess_slice_v19_34_22 + test_kill_switch_gate_v19_34_48 + test_phantom_recovery_v19_34_49). 3 pre-existing MagicMock-await failures in `test_share_drift_reconciler_v19_34_15b.py` are unrelated to this commit.
+
+---
+
 ## 2026-02-XX (v19.34.48–49) — TWO P0 BUG FIXES — Bot Re-Enable Cleared
 
 Both bugs from the BMNR/EBAY chaos session fixed and tested. Bot is now safe to re-enable for paper trading.

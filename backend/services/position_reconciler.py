@@ -1444,6 +1444,75 @@ class PositionReconciler:
                         report["errors"].append(drift_record)
                     continue
 
+                # ── v19.34.50 (Feb 2026) — bot_q zero-side detection ──
+                # OLD: when bot tracks the symbol but `bot_q` signed-sum
+                # nets to ~0 (e.g., paired LONG + SHORT trades both with
+                # non-zero remaining_shares cancel out, OR a single trade
+                # with rs=0 that the v19.34.19 zombie branch missed because
+                # `len(zombies) == 0` failed — zombies list filters
+                # `int(abs(rs)) == 0` strictly), and IB still has shares,
+                # the directional Case 1/2/3 branches all rely on bot_q
+                # being strictly long or short. Result: drift fell through
+                # to the `unclassified` else path at line 1505 and IB
+                # shares stayed silently unmanaged — same blind-spot
+                # category as v19.34.19 but at the bot_q==0 + zombies==0
+                # edge.
+                # NEW: route any (abs(bot_q)<0.01 + abs(ib_q)>=1) where
+                # the zombie branch did not already fire to
+                # `_spawn_excess_slice` so the bot adopts the IB inventory
+                # under a bracketed reconciled-excess slice. We do NOT
+                # touch the existing tracked bot_trades — they may be
+                # legitimate paired hedges; the new slice only claims the
+                # IB excess.
+                if abs(bot_q) < 0.01 and abs(ib_q) >= 1:
+                    drift_record = {
+                        "symbol": sym,
+                        "ib_qty": ib_q,
+                        "bot_qty": bot_q,
+                        "drift_shares": drift,
+                        "kind": "zero_side_external_inventory",
+                        "tracked_trade_count": len(bot_trades_by_sym.get(sym, [])),
+                    }
+                    report["drifts_detected"].append(drift_record)
+                    if not auto_resolve:
+                        continue
+                    try:
+                        new_trade_id = await self._spawn_excess_slice(
+                            bot, sym, ib_q,
+                            bot_q=bot_q,
+                            ib_meta=ib_meta_by_sym.get(sym, {}),
+                            ib_quote=ib_quotes.get(sym, {}) or {},
+                            stop_pct=excess_stop_pct,
+                            rr=excess_rr,
+                            BotTrade=BotTrade,
+                            TradeDirection=TradeDirection,
+                            TradeStatus=TradeStatus,
+                        )
+                        drift_record["new_trade_id"] = new_trade_id
+                        report["drifts_resolved"].append(drift_record)
+                        await self._persist_drift_event(drift_record)
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "warning",
+                                "event": "zero_side_drift_v19_34_50",
+                                "symbol": sym,
+                                "text": (
+                                    f"⚖️ {sym} zero-side drift: bot tracked "
+                                    f"{len(bot_trades_by_sym.get(sym, []))} trade(s) "
+                                    f"netting bot_q={bot_q:+.0f}, IB has {ib_q:+.0f}sh. "
+                                    f"Spawned bracketed slice {new_trade_id} for "
+                                    f"{int(abs(ib_q))}sh."
+                                ),
+                                "metadata": drift_record,
+                            })
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        drift_record["error"] = f"{type(e).__name__}: {e}"
+                        report["errors"].append(drift_record)
+                    continue
+
                 drift_record = {
                     "symbol": sym,
                     "ib_qty": ib_q,
