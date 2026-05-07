@@ -18,6 +18,65 @@ echo "========================================="
 echo "  SentCom — Starting DGX Spark Services"
 echo "========================================="
 
+# v19.34.33 (2026-02-XX) — Always-rebuild-frontend step.
+#
+# Pre-v19.34.33 the script skipped EVERYTHING when backend was healthy
+# (see next guard below). That meant `git pull` + restart-via-.bat left
+# the frontend dev-server and build/ directory stale: operator sees old
+# UI, thinks the pull didn't take effect, panics. Hit exactly this
+# 2026-02-XX morning with the v19.34.31 V5 wiring — frontend source
+# was updated on disk but the webpack dev-server silently kept serving
+# the pre-pull bundle.
+#
+# Fix: rebuild the production bundle BEFORE the skip-if-healthy check.
+# `yarn build` is ~20s on a DGX and idempotent — running it on every
+# invocation is cheap insurance. Skip with --skip-frontend or
+# --skip-build if you want the old behavior.
+#
+# `yarn start` (line 199) still runs as the dev server for HMR during
+# active development, but the build/ directory is now always in sync
+# with the current source tree — so any consumer that reads build/
+# (FastAPI static serve, `serve -s build`, etc.) sees current code.
+SKIP_BUILD=false
+for arg in "$@"; do
+    if [[ "$arg" == "--skip-build" ]]; then
+        SKIP_BUILD=true
+    fi
+    if [[ "$arg" == "--skip-frontend" ]]; then
+        SKIP_BUILD=true
+    fi
+done
+
+if [ "$SKIP_BUILD" = false ]; then
+    echo "[0/6] Rebuilding frontend bundle (yarn build)..."
+    if [ -d "$FRONTEND_DIR" ]; then
+        pushd "$FRONTEND_DIR" > /dev/null
+        # Install deps only if package.json or yarn.lock changed since
+        # node_modules was last touched. Cheap no-op when nothing changed.
+        if [ ! -d node_modules ] || [ package.json -nt node_modules ] || [ yarn.lock -nt node_modules ]; then
+            echo "  Installing deps (yarn install --frozen-lockfile)..."
+            yarn install --frozen-lockfile --silent 2>&1 | tail -5 || \
+                echo "  [WARN] yarn install had warnings — continuing"
+        else
+            echo "  Deps already current (node_modules fresher than package.json/yarn.lock)"
+        fi
+        echo "  Running yarn build..."
+        # Build with timing so the operator sees how long it took.
+        BUILD_START=$(date +%s)
+        if yarn build 2>&1 | tail -3; then
+            BUILD_END=$(date +%s)
+            echo "  Frontend bundle rebuilt in $((BUILD_END - BUILD_START))s"
+        else
+            echo "  [WARN] yarn build failed — startup will continue with existing bundle"
+            echo "         Check: cd $FRONTEND_DIR && yarn build"
+        fi
+        popd > /dev/null
+    else
+        echo "  [SKIP] $FRONTEND_DIR not found"
+    fi
+    echo ""
+fi
+
 # v19.30.11 (2026-05-01): skip-restart-if-healthy guard.
 # Pre-fix this script's first action was always `fuser -k 8001/tcp`,
 # which killed any healthy backend on every invocation. Operator hit
