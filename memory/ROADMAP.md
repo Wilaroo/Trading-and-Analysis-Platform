@@ -4,11 +4,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔴 2026-02-XX — TWO P0 BUGS DISCOVERED, NOT YET FIXED — DO NOT TRADE LIVE
+## ✅ 2026-02-XX — BUGS 2 & 3 SHIPPED (v19.34.48 + v19.34.49) — Bot Cleared for Re-Enable
 
-Both surfaced during BMNR flatten chaos on 2026-05-07. Either of these alone makes the bot unsafe to leave running unsupervised.
+Both P0s fixed and pinned by 13 new pytest cases (39 cumulative passing across the session). See CHANGELOG.md for full detail. Smoke-test checklist included there for the operator before re-arming the bot.
 
-### 🔴 P0 — Bug 2: Phantom-recovery falsely reports closes as succeeded
+## 🟡 2026-02-XX — REMAINING BACKLOG (post-BMNR session)
+
+
 
 **Where:** `services/position_manager.py::close_trade` → `_clamp_shares_to_ib_position` (added in v19.34.27 to handle PG-style leftover sweeps).
 

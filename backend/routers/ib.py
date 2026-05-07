@@ -220,8 +220,148 @@ def get_order_queue() -> dict:
         return _order_queue_legacy
 
 
+def _kill_switch_gate(order: dict) -> Optional[str]:
+    """v19.34.48 — Bottom-line kill-switch defense.
+
+    Operator caught EBAY 1,454-share runaway buy on 2026-05-07 while the
+    kill switch was supposedly tripped. Pre-fix, only the high-level
+    paths (`trade_executor.execute_entry`, `place_bracket_order`) had
+    `_kill_switch_refusal` checks. Some entry codepath bypassed them
+    (likely via reissue / scanner / coach / repair flows) and reached
+    `queue_order` directly. Result: 1,454 unwanted EBAY shares bought
+    + a fresh OCA bracket placed under a tripped kill switch.
+
+    This is the LAST chokepoint before an order leaves the cloud for
+    the IB pusher. Every entry — no matter what upstream path produced
+    it — funnels through here. Refuse all entries when kill switch
+    active. Allow protective (stop / target) and close-side orders so
+    the operator's flatten remains functional and existing protection
+    isn't ripped off mid-flight.
+
+    Intent detection (in priority order):
+      1. Explicit `intent` field on payload — most reliable
+      2. `trade_id` prefix — heuristic for legacy callers:
+         - `CLOSE-`, `PARTIAL-` → close (allow)
+         - `STOP-`, `ADOPT-STOP-`, `ADOPT-TGT-`, `TARGET-`, `OCA-` → protective (allow)
+         - anything else / no prefix / bare UUID → ENTRY (refuse)
+
+    Returns: order_id of a pre-rejected row if blocked, else None.
+    """
+    try:
+        # Lazy import to avoid circular reference. safety_guardrails is
+        # the source of truth for kill_switch_active state (persisted to
+        # mongo, restored on boot per v19.34.25).
+        from services.safety_guardrails import get_safety_guardrails
+        guard = get_safety_guardrails()
+        if not (guard and guard.state.kill_switch_active):
+            return None  # kill switch off → all orders pass
+    except Exception:
+        # If we can't determine state, fail OPEN (don't block legitimate
+        # closes during a guardrails outage). The high-level guards in
+        # execute_entry / place_bracket_order are still in play.
+        return None
+
+    # Detect intent.
+    intent = (order.get("intent") or "").lower()
+    trade_id = order.get("trade_id") or ""
+    is_protective = (
+        intent in ("close", "protective", "stop", "target", "cancel")
+        or trade_id.startswith((
+            "CLOSE-", "PARTIAL-", "STOP-", "ADOPT-STOP-", "ADOPT-TGT-",
+            "TARGET-", "OCA-", "TGT-",
+        ))
+    )
+    if is_protective:
+        return None  # safety / unwind orders always allowed
+
+    # Refuse entry. Pre-insert a rejected row so the caller's
+    # `get_order_result` returns immediately with status=rejected
+    # (no 30-60s timeout wait).
+    refused_id = f"ks-refused-{uuid.uuid4().hex[:8]}"
+    refusal_doc = {
+        "order_id": refused_id,
+        "status": "rejected",
+        "result": {
+            "status": "rejected",
+            "error": "kill_switch_active_v19_34_48",
+            "error_code": 503,
+            "fill_price": None,
+            "filled_qty": 0,
+        },
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "symbol": order.get("symbol"),
+        "action": order.get("action"),
+        "quantity": order.get("quantity"),
+        "trade_id": trade_id,
+        "rejected_by": "_kill_switch_gate_v19_34_48",
+    }
+    # Try mongo first; fall back to legacy in-memory.
+    try:
+        service = get_order_queue_service()
+        # Insert directly into the completed orders collection so
+        # get_order_result picks it up.
+        if hasattr(service, "_completed") and isinstance(service._completed, dict):
+            service._completed[refused_id] = refusal_doc
+        elif hasattr(service, "db"):
+            service.db.order_queue.insert_one({**refusal_doc, "_id": refused_id})
+    except Exception:
+        pass
+    _order_queue_legacy["completed"][refused_id] = refusal_doc
+
+    # Loud log + emit a stream event so the operator sees the refusal
+    # in real time (this was the missing observability that let the
+    # EBAY runaway go undetected for an hour).
+    logger.error(
+        "[v19.34.48 KILL-SWITCH GATE] REFUSED entry: symbol=%s action=%s "
+        "qty=%s trade_id=%s — kill switch is tripped (reason=%r)",
+        order.get("symbol"), order.get("action"),
+        order.get("quantity"), trade_id,
+        getattr(guard.state, "kill_switch_reason", None),
+    )
+    try:
+        # Best-effort stream emit. Don't await here — schedule on the
+        # running event loop so we don't hold up the order path.
+        import asyncio as _asyncio
+        from services.sentcom_service import emit_stream_event
+
+        async def _emit():
+            try:
+                await emit_stream_event({
+                    "kind": "alert",
+                    "event": "kill_switch_gate_v19_34_48",
+                    "symbol": order.get("symbol"),
+                    "text": (
+                        f"🛑 KILL-SWITCH GATE refused {order.get('action')} "
+                        f"{order.get('quantity')} {order.get('symbol')} — "
+                        f"kill switch active ({getattr(guard.state, 'kill_switch_reason', 'no reason')})"
+                    ),
+                    "metadata": {
+                        "trade_id": trade_id,
+                        "refused_id": refused_id,
+                    },
+                })
+            except Exception:
+                pass
+
+        try:
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_emit())
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return refused_id
+
+
 def queue_order(order: dict) -> str:
     """Queue an order for execution by local pusher. Returns order_id."""
+    # v19.34.48 — last-line kill-switch defense (see _kill_switch_gate).
+    _refused_id = _kill_switch_gate(order)
+    if _refused_id is not None:
+        return _refused_id
     try:
         service = get_order_queue_service()
         return service.queue_order(order)

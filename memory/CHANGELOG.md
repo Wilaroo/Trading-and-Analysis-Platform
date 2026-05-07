@@ -2,6 +2,68 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.48–49) — TWO P0 BUG FIXES — Bot Re-Enable Cleared
+
+Both bugs from the BMNR/EBAY chaos session fixed and tested. Bot is now safe to re-enable for paper trading.
+
+### v19.34.48 — Kill-switch gate (entry-side leak — Bug 3)
+
+**Symptom:** With kill switch tripped at 1:00 PM on 2026-05-07, bot bought 1,454 sh EBAY between then and 2:55 PM and submitted a fresh OCA bracket. The high-level `_kill_switch_refusal` checks on `execute_entry` and `place_bracket_order` weren't enough — some entry path bypassed them and reached `routers/ib.queue_order` directly.
+
+**Fix:** Added `_kill_switch_gate(order)` as the LAST chokepoint before any order leaves the cloud for the IB pusher. Lives in `routers/ib.queue_order`. Refuses every entry when `safety_guardrails.kill_switch_active`. Allows protective (STOP/TARGET/OCA/ADOPT) and close (CLOSE/PARTIAL) orders so flatten + existing protection still work.
+
+Intent detection (priority order):
+  1. Explicit `intent` field on payload (`"close" | "protective" | "stop" | "target" | "cancel"`)
+  2. `trade_id` prefix heuristic for legacy callers (`CLOSE-`, `PARTIAL-`, `STOP-`, `ADOPT-STOP-`, `ADOPT-TGT-`, `TARGET-`, `OCA-`, `TGT-`)
+  3. Anything else → ENTRY → refused
+
+Refused orders get a sentinel order_id `ks-refused-{8hex}` and a pre-rejected row inserted into the order_queue collection. Caller's `get_order_result` returns immediately with `status=rejected` (no 30-60s wait). Loud log + stream-emit alert so operator sees the refusal in real time (the missing observability that let the EBAY runaway go undetected for an hour).
+
+Defensive: if `safety_guardrails` import/lookup fails, gate fails OPEN (don't block legitimate closes during a guardrails outage). High-level guards still in play.
+
+**Tests:** `tests/test_kill_switch_gate_v19_34_48.py` — 6 cases covering refusal of bare entries, allowance of all close/protective prefixes, explicit `intent` allowance, pass-through when kill-switch off, fail-open when guardrails unavailable.
+
+### v19.34.49 — Phantom-recovery multi-source confirmation (close-side lie — Bug 2)
+
+**Symptom:** Bot reported "FLATTEN COMPLETE 20/20" while IB still had 4,436 BMNR + 555 PG. EBAY showed 901 sh at IB but only 625 sh in bot books — 276 sh silently phantom-recovered without close MKT. Root cause: when direct IB clientId=11 had just connected and `get_positions()` returned `[]` (no events received yet), `_clamp_shares_to_ib_position` interpreted the empty list as "position is 0 for this symbol" → returned 0 → close_trade marked the trade CLOSED locally without ever calling `executor.close_position()`.
+
+**Fix:** Require POSITIVE multi-source confirmation before phantom-recovering. New decision tree in `_clamp_shares_to_ib_position`:
+
+  1. **Empty direct positions list** → snapshot unreliable, fall back to `intended_shares` (let close MKT fire for real). This is THE bug fix.
+  2. **Non-empty direct list, symbol absent** → positive zero confirmation, OK to phantom-recover.
+  3. **Direct shows zero AND pusher (if alive) disagrees** → trust pusher's authoritative ledger, fall back to `intended_shares`.
+  4. **Direct shows partial qty smaller than pusher** → pusher likely fresher, return `min(intended, pusher_abs)`.
+  5. **Direction mismatch** (long bot, short IB) → still refuse close (existing behavior, log loud).
+
+**Tests:** `tests/test_phantom_recovery_v19_34_49.py` — 7 cases:
+- Empty direct list does NOT phantom-recover (the headline regression)
+- Non-empty direct without symbol DOES phantom-recover
+- Direct zero + pusher disagrees → real close
+- Direct zero + pusher confirms zero → phantom-recover
+- Direct smaller than pusher → use pusher count
+- Direction mismatch → refuse
+- Direct unavailable → return intended (pre-v19.34.27 fallback)
+
+### Cumulative session test status: 39/39 passing
+- `test_kill_switch_gate_v19_34_48.py` — 6
+- `test_phantom_recovery_v19_34_49.py` — 7
+- `test_flatten_grouping_v19_34_44.py` — 3
+- `test_position_consolidator_v19_34_42.py` — 8
+- `test_flatten_all_v19_34_24b.py` — 7
+- `test_flatten_all_parallel_v19_34_43.py` — 2
+- `test_orphan_reconciler_skips_excess_slice_v19_34_22.py` — 6
+
+### Bot re-enable checklist
+1. Pull latest code on DGX.
+2. Restart backend AND Windows pusher (clear any wedged sockets).
+3. Verify both clientIds connected: `curl http://localhost:8001/api/live/pusher-rpc-health`.
+4. **Smoke test 1 (kill-switch gate):** trip kill switch via UI. Wait for next scanner trigger. Confirm in `/var/log/supervisor/backend.err.log` you see `[v19.34.48 KILL-SWITCH GATE] REFUSED entry` lines and ZERO BUY orders in IB.
+5. **Smoke test 2 (phantom-recovery guard):** with bot armed and a position open, click Close All. Confirm in logs that close MKTs actually go to IB (not phantom-recovered) and IB reports filled.
+6. If both green → safe to leave running unsupervised within normal risk caps.
+
+---
+
+
 ## 2026-02-XX (v19.34.43–47) — Flatten-All Hardening Marathon (BMNR aftermath)
 
 After v19.34.42 fixed the BMNR fragmentation root cause, operator hit a cascade of follow-on issues during the cleanup attempt. Five patches shipped in one session:

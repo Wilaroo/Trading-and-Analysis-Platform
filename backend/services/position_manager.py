@@ -1300,27 +1300,31 @@ class PositionManager:
     ) -> int:
         """v19.34.27 — return min(intended_shares, |IB position for symbol|).
 
-        Queries the direct IB API service for the live, authoritative
-        position on `trade.symbol`. If IB shows fewer shares than the
-        bot's tracked count (phantom shares), returns the IB number so
-        the close MKT can't oversell.
+        v19.34.49 (2026-02-XX) — REQUIRE POSITIVE MULTI-SOURCE
+        CONFIRMATION before phantom-recovering. Operator-discovered
+        2026-05-07: bot reported "FLATTEN COMPLETE 20/20" while IB
+        still had 4,436 BMNR + 555 PG. Every close was rejected with
+        IB Error 201 but the bot saw direct-IB `get_positions()`
+        returning `[]` (empty — direct IB clientId=11 had just
+        connected and hadn't received position events yet) and
+        misinterpreted that as "position is 0" → phantom-recovered
+        every trade locally without sending real close MKTs. EBAY had
+        the same divergence (276 shares falsely phantom-recovered
+        while IB held all 901).
 
-        Behaviour matrix:
-          - Direct IB unavailable / not connected   → return intended (no clamp)
-          - Symbol not in IB positions               → return 0 (entire position is phantom)
-          - IB shares ≥ intended                     → return intended (no clamp needed)
-          - IB shares <  intended                    → return IB shares (CLAMPED)
-          - Direction mismatch (long bot vs short IB)→ return 0 (refuse, log loud)
+        Decision tree for the "ib_abs == 0" branch:
+          1. If direct positions list is EMPTY → snapshot unreliable,
+             fall back to intended_shares (let close MKT fire for real).
+          2. If pusher is alive AND pusher's snapshot shows shares for
+             this symbol → disagreement, prefer pusher's authoritative
+             ledger, fall back to intended_shares.
+          3. Only when direct list is non-empty (proving direct IB is
+             responding with real data) AND symbol not present → that's
+             positive confirmation of zero. Phantom-recover.
 
-        The "fewer shares than tracked" case is the BMNR scenario; the
-        "direction mismatch" case is the v19.34.15a `[REJECTED: Bracket
-        unknown]` race fingerprint where the bot believes it's long
-        but IB has flipped or zeroed the position.
-
-        Direction is signed in IB's API: positive = long, negative =
-        short. We compare on absolute value but log if the sign
-        disagrees with the bot's tracked direction so the operator can
-        see the divergence.
+        For the BMNR-style partial-clamp (ib_abs < intended), same
+        logic applies: cross-check pusher; if pusher shows MORE shares
+        than direct, trust pusher (likely direct IB is mid-update).
         """
         try:
             from services.ib_direct_service import get_ib_direct_service
@@ -1343,8 +1347,9 @@ class PositionManager:
             )
             return intended_shares
 
-        # Find the symbol's signed position (sum across accounts is fine
-        # — operator runs single-account so this is always 1 row).
+        # Find the symbol's signed position via direct IB (sum across
+        # accounts is fine — operator runs single-account so this is
+        # always 1 row).
         ib_signed = 0.0
         for p in positions or []:
             if (p.get("symbol") or "").upper() == trade.symbol.upper():
@@ -1359,10 +1364,53 @@ class PositionManager:
         except Exception:
             bot_sign = 1 if str(getattr(trade.direction, "value", trade.direction)).lower() == "long" else -1
 
+        # ── v19.34.49 — Cross-check pusher (authoritative for this user). ─
+        pusher_signed: Optional[float] = None
+        pusher_alive = False
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+            pusher_alive = bool(is_pusher_connected())
+            if pusher_alive:
+                ps = 0.0
+                for p in (_pushed_ib_data.get("positions") or []):
+                    if (p.get("symbol") or "").upper() == trade.symbol.upper():
+                        ps += float(p.get("position") or 0)
+                pusher_signed = ps
+        except Exception:
+            pass
+
         if ib_abs == 0:
+            # ── v19.34.49 — confirmation gates ────────────────────────
+            #   Gate 1: direct list must be non-empty (proves direct IB
+            #     is responding with real data; `[]` could mean stale).
+            #   Gate 2: if pusher alive and disagrees (shows shares),
+            #     trust pusher and DON'T phantom-recover.
+            direct_snapshot_reliable = bool(positions)
+            pusher_confirms_zero = (
+                pusher_signed is None or abs(pusher_signed) < 0.5
+            )
+            if not direct_snapshot_reliable:
+                logger.warning(
+                    f"[v19.34.49 PHANTOM-GUARD] {trade.symbol} close_trade("
+                    f"reason={reason}) direct IB returned EMPTY positions list "
+                    f"— refusing to phantom-recover. Falling back to "
+                    f"intended {intended_shares}sh; close MKT will fire."
+                )
+                return intended_shares
+            if pusher_alive and not pusher_confirms_zero:
+                logger.warning(
+                    f"[v19.34.49 PHANTOM-GUARD] {trade.symbol} close_trade("
+                    f"reason={reason}) direct IB shows ZERO but pusher shows "
+                    f"{pusher_signed:+.0f} sh — disagreement, refusing to "
+                    f"phantom-recover. Falling back to intended {intended_shares}sh; "
+                    f"close MKT will fire."
+                )
+                return intended_shares
             logger.warning(
                 f"[v19.34.27 PHANTOM] {trade.symbol} close_trade(reason={reason}) "
-                f"clamped {intended_shares}→0: IB shows ZERO position. Trade "
+                f"clamped {intended_shares}→0: IB shows ZERO position "
+                f"(direct positions={len(positions)} rows, pusher_signed="
+                f"{pusher_signed}, pusher_alive={pusher_alive}). Trade "
                 f"{trade.id} will be marked CLOSED locally without broker call."
             )
             return 0
@@ -1386,6 +1434,18 @@ class PositionManager:
             return intended_shares
 
         # IB has fewer shares than tracked — clamp.
+        # v19.34.49: if pusher alive and shows MORE shares than direct,
+        # trust pusher (direct IB may be mid-update).
+        if pusher_alive and pusher_signed is not None:
+            pusher_abs = int(abs(round(pusher_signed)))
+            if pusher_abs > ib_abs:
+                logger.warning(
+                    f"[v19.34.49 PHANTOM-GUARD] {trade.symbol} close_trade("
+                    f"reason={reason}) direct IB={ib_abs} but pusher={pusher_abs} "
+                    f"— trusting pusher (direct may be mid-update). "
+                    f"Returning min(intended={intended_shares}, pusher_abs={pusher_abs})."
+                )
+                return min(intended_shares, pusher_abs)
         logger.warning(
             f"[v19.34.27 PHANTOM] {trade.symbol} close_trade(reason={reason}) "
             f"clamped {intended_shares}→{ib_abs}: bot tracked "
