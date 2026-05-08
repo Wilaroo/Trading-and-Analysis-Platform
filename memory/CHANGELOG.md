@@ -2,6 +2,61 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.60) — Zombie sweep finished the job
+
+### Symptom
+
+After v19.34.59 zombie sweep, operator's heal output showed:
+- ADBE/EBAY → fresh `new_trade_id`, healed cleanly with `entered_by=reconciled_excess_v19_34_15b`. ✓
+- BKNG/COIN/GOOG/LIN/MU → `new_trade_id == one of zombies_closed[]` (collision). ⚠
+- COIN + GOOG remained zombies (`status=OPEN, remaining_shares=0, entered_by=bot_fired`) post-heal.
+
+### Root cause
+
+`_find_existing_excess_slice` (added in v19.34.42 to make `_spawn_excess_slice` idempotent) was matching trades on `setup_type=='reconciled_excess_slice'` OR `entered_by.startswith('reconciled_excess')` — without checking `remaining_shares`. Some zombies still carried these provenance markers from a prior reconciliation. So the call sequence was:
+
+1. Zombie cleanup branch detects rs=0 zombie with `setup_type=reconciled_excess_slice`.
+2. Calls `_spawn_excess_slice` → `_find_existing_excess_slice` returns the zombie itself.
+3. `_grow_existing_excess_slice` mutates it (rs: 0 → 626).
+4. Returns to zombie-cleanup loop in `reconcile_share_drift` line 1407-1481 which sets `status=CLOSED, rs=0` on the SAME object.
+
+Net effect: spawn no-ops, zombie persists. BKNG/MU/LIN got bailed out by the orphan reconciler (showing as `reconciled_external` in the next tick); COIN/GOOG weren't picked up because their bot trades were still tracked-but-zombie.
+
+### Fix
+
+`_find_existing_excess_slice` now skips trades where `int(abs(remaining_shares)) == 0`. A zombie can never legitimately be the basis for "growing" — it has nothing to grow from, AND it's about to be closed by the zombie cleanup branch. Filtering it out forces `_spawn_excess_slice` down the create-fresh-slice path with a new uuid; that fresh trade survives the zombie close loop intact.
+
+### Tests
+
+- `tests/test_excess_slice_zombie_exclusion_v19_34_60.py` — 7 cases:
+  - Zombie with `setup_type=reconciled_excess_slice` excluded
+  - Zombie with `entered_by=reconciled_excess_*` excluded
+  - Live (rs>0) reconciled slice STILL matches (idempotency intact)
+  - Mixed population: zombie filtered, live returned
+  - Non-reconciled trade not matched
+  - Direction / symbol mismatch excluded
+
+**Cumulative reconciler/safety/boot suite: 91/91 pytests passing.**
+
+### Operator next steps (run after deploy)
+
+```bash
+# 1. Heal the 2 stuck zombies
+curl -X POST http://localhost:8001/api/trading-bot/reconcile-share-drift \
+  -H "Content-Type: application/json" \
+  -d '{"auto_resolve": true, "zombie_detect_only": false}' \
+  | python3 -m json.tool | grep -E "symbol|new_trade_id|zombies_closed"
+# Expect: COIN + GOOG both have NEW (uuid-style) new_trade_id distinct from
+# zombies_closed[]. Each shows entered_by=reconciled_excess_v19_34_15b.
+
+# 2. Verify
+curl -s http://localhost:8001/api/trading-bot/zombie-trades | python3 -m json.tool
+# Expect: count: 0
+```
+
+---
+
+
 ## 2026-02-09 (v19.34.59) — Zombie population diagnosis + sweep + boot tripwire
 
 ### Operator-discovered context

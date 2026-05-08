@@ -2018,6 +2018,20 @@ class PositionReconciler:
         (symbol, direction) if one is open, else None.
 
         Used by `_spawn_excess_slice` to grow rather than fragment.
+
+        ── v19.34.60 (2026-02-09) — Zombie exclusion ──
+        Operator-discovered after v19.34.59 zombie sweep: 5 of 7 zombie
+        heals returned `new_trade_id == one_of(zombies_closed)`. Cause:
+        a previously-reconciled trade had `setup_type='reconciled_excess_slice'`
+        but later got drained to `remaining_shares=0` (zombified) without
+        flipping status. This function then matched the zombie as a
+        "grow candidate"; `_grow_existing_excess_slice` mutated it
+        (rs=0→626); but immediately after, the zombie cleanup loop in
+        `reconcile_share_drift` closed every zombie — including the
+        just-grown slice. Net effect: the zombie persisted, the heal
+        no-opped. Excluding zombies here forces `_spawn_excess_slice`
+        to create a FRESH BotTrade with a new id, which then survives
+        the zombie close loop intact.
         """
         d_val = getattr(direction, "value", str(direction)).lower()
         candidates = []
@@ -2030,6 +2044,14 @@ class PositionReconciler:
             entered = (getattr(t, "entered_by", "") or "")
             setup = (getattr(t, "setup_type", "") or "")
             if entered.startswith("reconciled_excess") or setup == "reconciled_excess_slice":
+                # v19.34.60 — skip zombies. A trade with rs=0 cannot
+                # legitimately be "grown" (it has nothing to grow from)
+                # AND it's about to be closed by the zombie cleanup
+                # branch. Treating it as a grow target is a guaranteed
+                # data race.
+                rs = int(abs(getattr(t, "remaining_shares", 0) or 0))
+                if rs == 0:
+                    continue
                 candidates.append(t)
         if not candidates:
             return None
