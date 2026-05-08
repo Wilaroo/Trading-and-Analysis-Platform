@@ -1687,6 +1687,86 @@ async def drift_guard_stats():
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.59 — Zombie-trade diagnostic surface ──────────────────────
+@router.get("/zombie-trades")
+async def zombie_trades():
+    """v19.34.59 — Enumerate currently-loaded zombie BotTrades.
+
+    A zombie is a trade with `status=OPEN` AND `remaining_shares=0` AND
+    `original_shares > 0`. Symptom of an upstream code path that drained
+    a trade without flipping `status` to CLOSED. The drift loop's
+    v19.34.19 cleanup heals these (when `SHARE_DRIFT_ZOMBIE_AUTO_HEAL=true`),
+    but they shouldn't be created in the first place — this endpoint
+    exists so the operator can see population + provenance and the
+    upstream creator can be hunted down.
+
+    Returns:
+      {
+        success: true,
+        count: <int>,
+        zombies: [{trade_id, symbol, direction, original_shares, fill_price,
+                   entered_by, executed_at, loaded_as_zombie}, ...],
+        loaded_as_zombie_count: <int>,   // tagged at boot by dict_to_trade
+        note: "...",
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    try:
+        open_trades = getattr(_trading_bot, "_open_trades", {}) or {}
+        zombies = []
+        loaded_as_zombie_count = 0
+        for tid, t in list(open_trades.items()):
+            try:
+                rs = int(getattr(t, "remaining_shares", 0) or 0)
+                origin_sh = int(
+                    getattr(t, "original_shares", 0)
+                    or getattr(t, "shares", 0)
+                    or 0
+                )
+                if not (rs == 0 and origin_sh > 0):
+                    continue
+                d = getattr(t, "direction", None)
+                d_val = getattr(d, "value", str(d) if d else "long").lower()
+                loaded_flag = bool(getattr(t, "_loaded_as_zombie_v19_34_59", False))
+                if loaded_flag:
+                    loaded_as_zombie_count += 1
+                zombies.append({
+                    "trade_id": tid,
+                    "symbol": getattr(t, "symbol", None),
+                    "direction": d_val,
+                    "original_shares": origin_sh,
+                    "remaining_shares": rs,
+                    "fill_price": float(getattr(t, "fill_price", 0) or 0),
+                    "entered_by": str(getattr(t, "entered_by", "") or ""),
+                    "trade_style": str(getattr(t, "trade_style", "") or ""),
+                    "executed_at": str(getattr(t, "executed_at", "") or ""),
+                    "entry_time": str(getattr(t, "entry_time", "") or ""),
+                    "loaded_as_zombie": loaded_flag,
+                })
+            except Exception as inner:
+                logger.debug(f"zombie-trades scan inner error {tid}: {inner}")
+        # Stable sort: oldest first (helps spot which boot session created them).
+        zombies.sort(key=lambda z: z.get("executed_at") or z.get("entry_time") or "")
+        note = (
+            "Heal NOW with: "
+            "POST /api/trading-bot/reconcile-share-drift "
+            "{\"auto_resolve\": true, \"zombie_detect_only\": false}"
+            if zombies
+            else "No zombies currently loaded."
+        )
+        return {
+            "success": True,
+            "count": len(zombies),
+            "loaded_as_zombie_count": loaded_as_zombie_count,
+            "zombies": zombies,
+            "note": note,
+        }
+    except Exception as e:
+        logger.error(f"zombie-trades error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 # ─── v19.34.47 — Sync bot books to IB-direct reality ───────────────
 @router.post("/sync-books-to-ib-direct")
 async def sync_books_to_ib_direct(payload: Optional[Dict[str, Any]] = None):

@@ -525,8 +525,19 @@ const groupBySymbolDirection = (open) => {
     let worstSource = 'bot'; // any non-bot source dominates
     let anyTracked = false;
     let unclaimedShares = 0; // for partial rows
+    // v19.34.59 (2026-02-XX) — Zombie awareness. Pre-fix the aggregator
+    // summed `m.shares ?? m.remaining_shares`, so a BotTrade that had
+    // been silently drained (`remaining_shares=0`, `status=OPEN`) still
+    // contributed its `original_shares` count to the panel total —
+    // operator saw `1252sh COIN (2×)` while the bot actually believed
+    // it had 0sh. Flipped the precedence: prefer `remaining_shares`
+    // so zombies render as 0sh; fall back to `shares` only when
+    // `remaining_shares` is null/undefined (e.g. IB-orphan rows that
+    // haven't been reconciled yet). `?? ` (nullish coalescing) keeps
+    // the literal `0` value instead of falling through to `shares`.
+    let zombieMembers = 0;
     for (const m of members) {
-      const sh = Number(m.shares ?? m.remaining_shares ?? 0) || 0;
+      const sh = Number(m.remaining_shares ?? m.shares ?? 0) || 0;
       const ent = Number(m.entry_price ?? m.fill_price ?? 0) || 0;
       totalShares += Math.abs(sh);
       totalNotional += Math.abs(sh) * ent;
@@ -536,6 +547,10 @@ const groupBySymbolDirection = (open) => {
       if (m.source === 'ib' || m.source === 'partial') {
         unclaimedShares += Math.abs(Number(m.unclaimed_shares ?? m.shares ?? 0)) || 0;
       }
+      // Zombie = status=OPEN but remaining_shares=0 with non-zero original.
+      const origSh = Number(m.original_shares ?? m.shares ?? 0) || 0;
+      const remSh = Number(m.remaining_shares ?? 0) || 0;
+      if (origSh > 0 && remSh === 0) zombieMembers += 1;
     }
     const avgEntry = totalShares > 0 ? totalNotional / totalShares : 0;
 
@@ -566,6 +581,7 @@ const groupBySymbolDirection = (open) => {
       _is_single: single,
       _has_tracked_partner: anyTracked,
       _unclaimed_shares: unclaimedShares,
+      _zombie_members: zombieMembers,
     };
   });
 };

@@ -2,6 +2,41 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.59) — Zombie population diagnosis + sweep + boot tripwire
+
+### Operator-discovered context
+
+After v19.34.56-58 ship, operator booted with 9 zombie BotTrades visible in `/api/sentcom/positions`: `status=OPEN` but `remaining_shares=0`, while IB had real shares behind them (COIN 626, EBAY 934, GOOG 116, MU 140, etc.). UI was summing `original_shares` across the zombies (showed `1252sh COIN (2×)`) while the bot's logical position book held 0sh. Drift loop was correctly detecting all 8 zombies as `kind="zombie_trade_drift"` (`would_act=true`) but never resolving them because of the v19.34.19 safety flag `SHARE_DRIFT_ZOMBIE_AUTO_HEAL=false`.
+
+Verdict: not a phantom-close, drift-guard, or clientId=11 issue. All subsystems healthy. Operator simply needed to flip the auto-heal flag — but the agent took the opportunity to harden three layers.
+
+### v19.34.59 — Three fixes
+
+**1. Frontend aggregator now respects `remaining_shares`** (`OpenPositionsV5.jsx`)
+- Pre-fix `groupBySymbolDirection` summed `m.shares ?? m.remaining_shares` — zombie rows still contributed `original_shares` (626 each → "1252sh" on screen).
+- Flipped precedence to `m.remaining_shares ?? m.shares` so zombies render as 0sh; the `?? ` operator preserves literal `0` instead of falling through.
+- Aggregate now also tracks `_zombie_members` count (members with `original_shares > 0` but `remaining_shares == 0`) for future UI surfacing.
+
+**2. Boot-time zombie tripwire** (`bot_persistence.py::dict_to_trade`)
+- New `[v19.34.59 ZOMBIE-LOAD]` ERROR log fires for every BotTrade loaded with `status=OPEN` AND `remaining_shares=0` AND `original_shares > 0`.
+- Tags the in-memory instance with `_loaded_as_zombie_v19_34_59=True` for downstream observability.
+- Does NOT auto-mutate (would risk re-animating correctly-closed trades whose `status` field is stale). Leaves remediation to the v19.34.19 zombie cleanup path.
+- Each log line includes `grep` hint for hunting the upstream creator.
+
+**3. New diagnostic endpoint + heal script**
+- `GET /api/trading-bot/zombie-trades` — enumerates currently loaded zombies with provenance (`entered_by`, `executed_at`, fill price, original_shares). Operator-friendly.
+- `scripts/zombie_sweep_v19_34_59.sh` — one-shot heal: enumerates → calls `POST /api/trading-bot/reconcile-share-drift {auto_resolve: true, zombie_detect_only: false}` (overrides the env-flag default for ONE call, no backend restart) → re-enumerates to verify count → 0. Supports `--dry-run`.
+- Operator can heal a fresh zombie population in <2 seconds without touching `.env` or restarting.
+
+### Tests
+
+- `tests/test_zombie_load_tripwire_v19_34_59.py` — 6 cases (long zombie flagged, short zombie flagged, healthy trade not flagged, closed trade not flagged, pending status not flagged, all-zero edge case).
+
+**Cumulative reconciler/safety/boot suite: 84/84 pytests passing.**
+
+---
+
+
 ## 2026-02-09 (v19.34.56 → v19.34.58) — UX polish + boot stability + flap detection
 
 ### v19.34.56 — `OpenPositionsV5` loading-state grace timeout

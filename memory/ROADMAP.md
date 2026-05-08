@@ -4,6 +4,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-09 — v19.34.59 SHIPPED — Zombie sweep + boot tripwire + diagnostic endpoint
+
+After 9 zombie BotTrades surfaced post-restart (status=OPEN, remaining_shares=0, IB still had real shares), three fixes shipped:
+- Frontend: `OpenPositionsV5` aggregator now prefers `remaining_shares` so zombies render as 0sh (no more `1252sh COIN (2×)` while bot tracking 0).
+- Backend: `[v19.34.59 ZOMBIE-LOAD]` ERROR log on boot for every zombie loaded; instance tagged with `_loaded_as_zombie_v19_34_59` for traceability.
+- Operator surface: new `GET /api/trading-bot/zombie-trades` + `scripts/zombie_sweep_v19_34_59.sh` (one-shot heal via existing reconcile endpoint, no env-flag flip + restart needed).
+
+84/84 reconciler/safety/boot pytests passing. Open question for next session: still need to find the upstream code path that created these zombies in the first place. The boot tripwire's grep hint will produce evidence in the logs.
+
+
+
 ## ✅ 2026-02-09 — v19.34.56 + v19.34.57 + v19.34.58 SHIPPED — UX polish + boot stability + flap detection
 
 - **v19.34.56**: `OpenPositionsV5` self-defuses the loading state after 3s when the parent feed is empty (no more pre-market "Loading positions…" stuck banners).

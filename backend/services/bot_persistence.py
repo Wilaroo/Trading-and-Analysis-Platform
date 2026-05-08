@@ -602,6 +602,56 @@ class BotPersistence:
                         f"{k}={v!r} on {trade.id}: {set_err}"
                     )
 
+            # ── v19.34.59 (2026-02-XX) — Boot-time zombie tripwire ──
+            # A trade loaded with `status=OPEN` AND `remaining_shares=0`
+            # AND `original_shares > 0` is a zombie — fully-drained but
+            # never marked CLOSED. v19.34.20b (LIFO shrink), v19.34.21
+            # (persistence hydration) and v19.34.42 (consolidator)
+            # close every code path the agent has audited, but the
+            # operator's 2026-02-09 boot still loaded 9 zombies across
+            # COIN/EBAY/GOOG/MU/etc — confirming a still-undiscovered
+            # upstream creator. We don't auto-mutate at load (that
+            # would risk re-animating correctly-closed trades whose
+            # `status` field is stale); instead we LOG LOUDLY and tag
+            # the instance so:
+            #   • the v19.34.19 zombie cleanup picks it up promptly,
+            #   • a future `/api/diagnostics/zombie-trades` endpoint
+            #     can enumerate the population at boot,
+            #   • backend log forensics can correlate this load with
+            #     the upstream code path that drained the row.
+            try:
+                rs = int(getattr(trade, "remaining_shares", 0) or 0)
+                origin_sh = int(
+                    getattr(trade, "original_shares", 0)
+                    or getattr(trade, "shares", 0)
+                    or 0
+                )
+                status_val = getattr(getattr(trade, "status", None), "value", None) \
+                    or str(getattr(trade, "status", "")).lower()
+                if status_val == "open" and rs == 0 and origin_sh > 0:
+                    setattr(trade, "_loaded_as_zombie_v19_34_59", True)
+                    logger.error(
+                        "[v19.34.59 ZOMBIE-LOAD] %s id=%s loaded with "
+                        "status=OPEN but remaining_shares=0 "
+                        "(original=%d, fill=$%.2f, entered_by=%s). "
+                        "Drift loop's v19.34.19 zombie cleanup will heal "
+                        "(set SHARE_DRIFT_ZOMBIE_AUTO_HEAL=true if not "
+                        "already enabled). Hunt the upstream creator: "
+                        "grep '%s' /tmp/backend.log | grep -E "
+                        "'remaining_shares|external_close|consolidate'",
+                        getattr(trade, "symbol", "?"),
+                        getattr(trade, "id", "?"),
+                        origin_sh,
+                        float(getattr(trade, "fill_price", 0) or 0),
+                        getattr(trade, "entered_by", "?"),
+                        getattr(trade, "id", "?"),
+                    )
+            except Exception as _zombie_check_err:
+                logger.debug(
+                    f"dict_to_trade: zombie-tripwire check failed for "
+                    f"{getattr(trade, 'id', '?')}: {_zombie_check_err}"
+                )
+
             return trade
         except Exception as e:
             logger.error(f"Error deserializing trade: {e}")
