@@ -2,6 +2,83 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.66) — Boot-time orphan-GTC reconciler (the missing audit pass)
+
+### Why
+
+The night of v19.34.65, the operator pulled a TWS report and found **10 GTC sell-side bracket legs from 2026-05-04 still alive at IB**, 5 days after they had manually flattened the underlying longs (NXPI ×2, VALE ×4, NCLH ×2, ELV ×2 — ~7,800 protective shares). The bot had **completely lost track of every single one** across multiple restarts. If any of those stops had triggered, IB would have shorted the operator that many shares with no protection.
+
+Root-cause conclusion: every prior reconciler in the codebase (`position_reconciler.py`, `unmatched_short_close_service.py`, the v19.34.59 zombie sweep, the drift-guard) starts from the bot's view of the world. None of them ever ask "what does IB still have that the bot has forgotten about?". That blind spot is what this patch closes.
+
+### Three coordinated layers
+
+1. **Boot tripwire** — On every bot startup, ~25s after start (pusher snapshot warm-up window), audit IB's full open-orders list × IB positions × `bot_trades`. Log ERROR per non-tracked verdict with `ib_order_id`, symbol, qty, IB position, and reason.
+2. **Periodic background reconciler** — Same audit re-runs every 120s while the bot is alive. Emits an ERROR log line whenever `naked_no_position + orphan_no_trade > 0`. Cheap: 1 IB query + 1 position snapshot read + 1 Mongo find capped at 2,000 docs.
+3. **Operator dashboard surface** — `GET /api/safety/orphan-gtc-orders` (read-only verdict table) + `POST /api/safety/cancel-orphan-gtc` (acts only on `naked_no_position` and `orphan_no_trade` verdicts, refuses `tracked` and `mismatched_size`).
+
+### Classifier — `services/orphan_gtc_reconciler.py`
+
+Pure function `classify_open_orders(ib_open_orders, ib_positions, bot_trades, only_gtc=True)` returns one of five verdicts per working IB order:
+
+| Verdict | Meaning | Safe to auto-cancel? |
+|---|---|---|
+| `tracked` | Order matches a bot trade with a real IB position behind it | NO (it's healthy) |
+| `naked_no_position` | IB has no position; order would short on trigger | **YES** ✓ |
+| `orphan_no_trade` | Position exists but bot has no row referencing this order_id | **YES** ✓ |
+| `mismatched_size` | Order qty exceeds IB position size (over-protected) | NO (operator review) |
+| `awaiting_data` | Data sources unavailable; never silently treated as `tracked` | n/a (return success=False) |
+
+The classifier joins on every column the bot might use to track an order: `stop_order_id`, `target_order_id`, `target_order_ids[]`, `entry_order_id`, `ib_order_id`. Falls back to `permId` when `orderId` doesn't match (covers post-restart reassignments).
+
+### Cancellation gate
+
+`cancel_orphan_gtc_orders(verdicts_to_cancel)` is **fail-closed** — it filters its input to `SAFE_TO_AUTO_CANCEL = {naked_no_position, orphan_no_trade}` and refuses everything else, even if the caller passes `verdict="tracked"` explicitly. The HTTP endpoint adds a second guard: re-runs the audit at action time and only cancels orders whose **fresh** verdict is still in `SAFE_TO_AUTO_CANCEL` — protects against stale UI requests after a position has been re-opened.
+
+### Tests — 15 new pytest cases
+
+`/app/backend/tests/test_v19_34_66_orphan_gtc_reconciler.py`:
+
+- All four classifier verdicts (NXPI, VALE, NCLH, ELV used as fixture symbols)
+- `permId` fallback join + `target_order_ids[]` list-form join
+- DAY orders filtered out by default; included with `only_gtc=False`
+- Non-working statuses (Cancelled, Filled, ApiCancelled) skipped
+- **Full forensic replay** of 2026-05-04: feed the exact 10 IB order_ids + zero positions + no bot tracking → all 10 classify `naked_no_position`
+- Cancel helper refuses `tracked` / `mismatched_size`
+- Cancel helper routes through `ib_direct.cancel_order` for safe verdicts
+- Cancel helper returns error envelope (does NOT crash) when IB-direct disconnected
+- Audit returns failure envelope when IB unreachable
+- Audit happy path combines all three sources
+
+**Live smoke test (market closed, IB Gateway offline):**
+```
+GET /api/safety/orphan-gtc-orders → {success: false, reason: "ib_orders_unavailable"}
+POST cancel + wrong confirm token → 400
+POST cancel + right confirm + IB offline → 503
+```
+All three guards firing as designed. Endpoint registered under `/api/safety` prefix.
+
+### Total green: 116/116 across v19.34.65 + v19.34.66 + adjacent suites
+
+### Operator workflow once IB Gateway is up
+
+```bash
+# Read-only audit (hit during morning pre-market check):
+curl -s "$API/api/safety/orphan-gtc-orders" | python3 -m json.tool
+
+# If summary shows naked/orphan > 0, cancel them:
+curl -s -X POST "$API/api/safety/cancel-orphan-gtc" \
+  -H "Content-Type: application/json" \
+  -d '{"ib_order_ids":[870896459,870896460,...],"confirm":"CANCEL_ORPHANS"}'
+```
+
+The cancel response includes per-order outcomes plus `not_safe[]` (refused) and `not_found[]` (no longer at IB). Every cancellation routes through `ib_direct_service.cancel_order` (clientId=11) — never the pusher relay (which can be racy on cancels).
+
+### Code architecture audit (companion to v19.34.66)
+
+Done as part of this patch — see `CHANGELOG_v19_34_66_audit.md` (sibling file). TL;DR: no overlapping or stale reconcilers, three coordinated layers now cover positions / orders / fills (the order layer was the missing one), no breakage required to existing infrastructure.
+
+---
+
 ## 2026-02-09 (v19.34.65) — Order-router idempotency + bracket-reissue throttle
 
 ### Why

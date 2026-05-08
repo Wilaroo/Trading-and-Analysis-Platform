@@ -4,6 +4,25 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-09 — v19.34.66 SHIPPED — Boot-time orphan-GTC reconciler (3 layers)
+
+The long-missing audit pass. Triggered by tonight's discovery that the operator had 10 GTC sell-side bracket legs from 5/4 sitting at IB after multiple bot restarts — bot had completely lost track. Every prior reconciler started from the bot's view of the world; none ever asked "what does IB still have that the bot has forgotten about?".
+
+Three layers, one classifier, one fail-closed cancellation gate:
+- Boot tripwire — `_startup_orphan_gtc_audit()` at +25s after start
+- Periodic reconciler — `_periodic_orphan_gtc_audit()` every 120s
+- Operator dashboard — `GET /api/safety/orphan-gtc-orders` + `POST /api/safety/cancel-orphan-gtc`
+
+Verdicts: `tracked`, `naked_no_position` ✓, `orphan_no_trade` ✓, `mismatched_size`, `awaiting_data`. Only the two ✓ verdicts are auto-cancellable; the others demand operator review.
+
+15 new pytest cases including full forensic replay of 2026-05-04 event (NXPI, VALE×2, NCLH, ELV — all 10 classified `naked_no_position`). Live smoke test against running backend confirmed all three guards (audit failure envelope, wrong-confirm 400, IB-offline 503).
+
+Companion audit document at `/app/memory/CHANGELOG_v19_34_66_audit.md` confirms no overlap or staleness in existing reconcilers; identifies fill-tape reconciliation as the only remaining (P2) blind spot.
+
+**Pending operator review** — kill switch still under operator manual control.
+
+
+
 ## ✅ 2026-02-09 — v19.34.65 SHIPPED — Order-router idempotency + bracket-reissue throttle
 
 Shipped Fix A (broad symbol-level entry cooldown, 60s, ignores side/qty/price) + Fix B (bracket re-issue throttle, 1 per (symbol, 5min) + hard remaining_shares > 0 guard) in a single patch. Targets the four bug patterns surfaced in the 2026-02-08 IB trade-log forensic: ADBE 18-buy ramp, DDOG/SQQQ wash cycles, EWY re-entry into manual flatten, EFA fragmented re-entry churn.

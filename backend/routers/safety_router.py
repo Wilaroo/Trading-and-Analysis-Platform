@@ -803,3 +803,170 @@ async def emergency_flatten_ib(payload: Optional[Dict[str, Any]] = None):
         logger.error("[SAFETY] emergency-flatten-ib crashed: %s", e, exc_info=True)
         summary["errors"].append({"stage": "top-level", "err": str(e)[:300]})
         return {"success": False, "summary": summary, "error": str(e)[:300]}
+
+
+# ─── v19.34.66 — Orphan GTC reconciler ────────────────────────────────────
+#
+# Long-missing audit pass on the bot's order management surface. Triggered
+# by 2026-02-09 forensic: the user had 10 GTC sell-side bracket legs from
+# 5/4 sitting at IB after multiple bot restarts. The bot had completely
+# lost track of them; their only remaining footprint was at IB. If any
+# stop had triggered, IB would have shorted the user without protection.
+#
+# This pair of endpoints surfaces the audit (read-only) and provides a
+# safe one-shot cleanup (acts only on `naked_no_position` and
+# `orphan_no_trade` verdicts — the two unambiguously-dangerous classes).
+
+
+class CancelOrphanGtcRequest(BaseModel):
+    """Cancel orphan/naked GTC orders by IB order_id.
+
+    The endpoint re-runs classification before cancelling each id, so
+    the verdict is always fresh — protects against a stale UI sending
+    a cancel request after a position has been re-opened.
+    """
+    ib_order_ids: List[int] = Field(
+        ..., min_length=1,
+        description="IB order_ids to cancel. Each must classify as "
+                    "`naked_no_position` or `orphan_no_trade` at the "
+                    "moment of the request.",
+    )
+    confirm: str = Field(
+        ..., description="Must equal 'CANCEL_ORPHANS' to fire.",
+    )
+
+
+@router.get("/orphan-gtc-orders")
+async def orphan_gtc_orders():
+    """v19.34.66 — Read-only audit of every working GTC at IB.
+
+    Joins IB open orders × IB positions × `bot_trades` and classifies
+    each working GTC into:
+
+        tracked              — order matches a bot trade with a real position (OK)
+        naked_no_position    — IB has no position; order would short on trigger (DANGEROUS)
+        orphan_no_trade      — bot has no trade row referencing this order_id
+        mismatched_size      — order qty exceeds the IB position size (over-protection)
+
+    Returns the full verdict table + a summary count per class. Never
+    raises; failure modes return success=False with the data-source
+    diagnostic populated.
+
+    Use case: V5 HUD pill shows red if `summary.naked_no_position > 0
+    or summary.orphan_no_trade > 0`. One-click "Cancel all confirmed
+    orphans" button calls `POST /api/safety/cancel-orphan-gtc` with
+    the matching `ib_order_id`s.
+    """
+    try:
+        from services.orphan_gtc_reconciler import audit_orphan_gtc_orders
+        from services.trading_bot_service import get_trading_bot_service
+        bot = None
+        try:
+            bot = get_trading_bot_service()
+        except Exception:
+            pass
+        result = await audit_orphan_gtc_orders(bot=bot)
+        return result
+    except Exception as e:
+        logger.error("[v19.34.66] orphan-gtc-orders endpoint crashed: %s", e, exc_info=True)
+        return {
+            "success": False,
+            "reason": f"{type(e).__name__}: {str(e)[:200]}",
+            "verdicts": [],
+            "summary": {},
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@router.post("/cancel-orphan-gtc")
+async def cancel_orphan_gtc(req: CancelOrphanGtcRequest):
+    """v19.34.66 — Cancel a list of pre-classified orphan/naked GTCs.
+
+    Re-classifies before cancelling — the verdict at request time is
+    re-validated at action time so a stale UI can't fire cancels on
+    orders that have since become tracked.
+
+    Refuses anything that classifies as `tracked` or `mismatched_size`
+    — those need operator review. Returns a per-order outcome list.
+    """
+    if req.confirm != "CANCEL_ORPHANS":
+        raise HTTPException(
+            status_code=400,
+            detail="confirm field must equal 'CANCEL_ORPHANS' (safety).",
+        )
+
+    from services.orphan_gtc_reconciler import (
+        OrderVerdict,
+        SAFE_TO_AUTO_CANCEL,
+        audit_orphan_gtc_orders,
+        cancel_orphan_gtc_orders,
+    )
+    from services.trading_bot_service import get_trading_bot_service
+    bot = None
+    try:
+        bot = get_trading_bot_service()
+    except Exception:
+        pass
+
+    audit = await audit_orphan_gtc_orders(bot=bot)
+    if not audit.get("success"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"audit failed: {audit.get('reason', 'unknown')}",
+        )
+
+    requested_ids = {int(x) for x in req.ib_order_ids}
+    matched_verdicts: List[OrderVerdict] = []
+    not_found: List[int] = []
+    not_safe: List[Dict[str, Any]] = []
+
+    for v_dict in audit.get("verdicts", []):
+        if int(v_dict.get("ib_order_id", 0)) not in requested_ids:
+            continue
+        # Reconstruct OrderVerdict from dict for the cancellation helper.
+        ov = OrderVerdict(
+            ib_order_id=int(v_dict["ib_order_id"]),
+            perm_id=v_dict.get("perm_id"),
+            symbol=v_dict.get("symbol", ""),
+            action=v_dict.get("action", ""),
+            quantity=int(v_dict.get("quantity", 0)),
+            order_type=v_dict.get("order_type", ""),
+            limit_price=v_dict.get("limit_price"),
+            stop_price=v_dict.get("stop_price"),
+            time_in_force=v_dict.get("time_in_force", ""),
+            status=v_dict.get("status", ""),
+            verdict=v_dict.get("verdict", ""),
+            reasons=v_dict.get("reasons", []) or [],
+            bot_trade_id=v_dict.get("bot_trade_id"),
+            ib_position_size=v_dict.get("ib_position_size"),
+            submitted_at=v_dict.get("submitted_at"),
+        )
+        if ov.verdict in SAFE_TO_AUTO_CANCEL:
+            matched_verdicts.append(ov)
+        else:
+            not_safe.append({
+                "ib_order_id": ov.ib_order_id,
+                "verdict": ov.verdict,
+                "reason": "verdict not in SAFE_TO_AUTO_CANCEL",
+            })
+
+    matched_ids = {v.ib_order_id for v in matched_verdicts} | {
+        s["ib_order_id"] for s in not_safe
+    }
+    for rid in requested_ids:
+        if rid not in matched_ids:
+            not_found.append(rid)
+
+    cancel_summary = await cancel_orphan_gtc_orders(
+        verdicts_to_cancel=matched_verdicts,
+    )
+
+    return {
+        "success": len(cancel_summary.get("errors", [])) == 0
+                   and len(not_safe) == 0
+                   and len(not_found) == 0,
+        "cancel_summary": cancel_summary,
+        "not_safe": not_safe,
+        "not_found": not_found,
+        "audited_at": audit.get("checked_at"),
+    }

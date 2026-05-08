@@ -1999,6 +1999,116 @@ class TradingBotService:
                     logger.warning(f"Startup orphan-guard failed (non-fatal): {e}")
             asyncio.create_task(_startup_orphan_guard())
 
+            # ── v19.34.66 (2026-02-09) — Boot-time orphan-GTC tripwire ──
+            # Long-missing audit pass. Every prior reconciler starts from
+            # the bot's view of the world; none ever asked "what does IB
+            # still have that the bot has forgotten about?". The 5/4 GTC
+            # bracket-leg orphan event (10 protective sells aging at IB
+            # for 5 days) was the canary.
+            #
+            # Fires ONCE at boot (after pusher has had ~25s to publish a
+            # fresh position snapshot) AND every 90s thereafter via the
+            # periodic loop below. Logs ERROR per orphan found, with
+            # ib_order_id + symbol + verdict — searchable by `grep
+            # v19.34.66 ORPHAN-GTC` on operator-side log analysis.
+            #
+            # NEVER auto-cancels. Surfacing only. The operator decides
+            # via the V5 UI's "Cancel all confirmed orphans" button or
+            # via TWS directly.
+            async def _startup_orphan_gtc_audit():
+                try:
+                    await asyncio.sleep(25)  # pusher snapshot warm-up
+                    from services.orphan_gtc_reconciler import (
+                        VERDICT_NAKED_NO_POSITION,
+                        VERDICT_ORPHAN_NO_TRADE,
+                        VERDICT_MISMATCHED_SIZE,
+                        audit_orphan_gtc_orders,
+                    )
+                    audit = await audit_orphan_gtc_orders(bot=self)
+                    if not audit.get("success"):
+                        logger.warning(
+                            "[v19.34.66 ORPHAN-GTC BOOT] audit could not run "
+                            "at boot (reason=%s) — will retry in periodic loop",
+                            audit.get("reason"),
+                        )
+                        return
+                    summary = audit.get("summary", {})
+                    n_naked = summary.get(VERDICT_NAKED_NO_POSITION, 0)
+                    n_orphan = summary.get(VERDICT_ORPHAN_NO_TRADE, 0)
+                    n_mismatch = summary.get(VERDICT_MISMATCHED_SIZE, 0)
+                    if n_naked or n_orphan or n_mismatch:
+                        logger.error(
+                            "[v19.34.66 ORPHAN-GTC BOOT] FOUND naked=%d "
+                            "orphan=%d mismatch=%d at IB. Use GET "
+                            "/api/safety/orphan-gtc-orders for the full "
+                            "verdict table; the V5 HUD pill should be RED.",
+                            n_naked, n_orphan, n_mismatch,
+                        )
+                        for v in audit.get("verdicts", []):
+                            if v.get("verdict") == "tracked":
+                                continue
+                            logger.error(
+                                "[v19.34.66 ORPHAN-GTC BOOT] %s ib_order_id=%s "
+                                "%s %s qty=%s tif=%s status=%s verdict=%s "
+                                "ib_pos=%s reasons=%s",
+                                v.get("symbol"), v.get("ib_order_id"),
+                                v.get("action"), v.get("order_type"),
+                                v.get("quantity"), v.get("time_in_force"),
+                                v.get("status"), v.get("verdict"),
+                                v.get("ib_position_size"),
+                                v.get("reasons"),
+                            )
+                    else:
+                        logger.info(
+                            "[v19.34.66 ORPHAN-GTC BOOT] clean — "
+                            "tracked=%d, no orphans/naked/mismatched",
+                            summary.get("tracked", 0),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "[v19.34.66 ORPHAN-GTC BOOT] tripwire crashed "
+                        "(non-fatal): %s", e,
+                    )
+            asyncio.create_task(_startup_orphan_gtc_audit())
+
+            # ── v19.34.66 — Periodic background reconciler ──
+            # Re-runs every 120s while the bot is alive so new orphans
+            # accumulating during long sessions surface within ~2 min.
+            # Cheap: 1 IB query + 1 position snapshot read + 1 Mongo
+            # find capped at 2000 docs.
+            async def _periodic_orphan_gtc_audit():
+                # Initial offset so this doesn't dogpile with the boot
+                # tripwire above.
+                await asyncio.sleep(150)
+                while self._running:
+                    try:
+                        from services.orphan_gtc_reconciler import (
+                            VERDICT_NAKED_NO_POSITION,
+                            VERDICT_ORPHAN_NO_TRADE,
+                            audit_orphan_gtc_orders,
+                        )
+                        audit = await audit_orphan_gtc_orders(bot=self)
+                        if audit.get("success"):
+                            s = audit.get("summary", {})
+                            danger = (
+                                s.get(VERDICT_NAKED_NO_POSITION, 0)
+                                + s.get(VERDICT_ORPHAN_NO_TRADE, 0)
+                            )
+                            if danger:
+                                logger.error(
+                                    "[v19.34.66 ORPHAN-GTC PERIODIC] %d "
+                                    "dangerous orphan(s) at IB right now. "
+                                    "Surface = GET /api/safety/orphan-gtc-orders",
+                                    danger,
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            "[v19.34.66 ORPHAN-GTC PERIODIC] tick error "
+                            "(non-fatal): %s", e,
+                        )
+                    await asyncio.sleep(120)
+            asyncio.create_task(_periodic_orphan_gtc_audit())
+
             # 2026-05-04 v19.31.1 — Auto-reconcile-at-boot.
             # Operator-facing toggle: when AUTO_RECONCILE_AT_BOOT=true is
             # set in backend/.env, every legitimate IB-only carryover
