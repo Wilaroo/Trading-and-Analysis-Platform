@@ -468,6 +468,11 @@ def submit_oca_pair(
             "outside_rth": plan.new_outside_rth,
             "oca_group": plan.oca_group,
             "trade_id": f"REISSUE-STOP-{plan.trade_id}",
+            # v19.34.53 — explicit intent. Without this the v19.34.48
+            # kill-switch chokepoint refused REISSUE-* trade_ids
+            # (didn't match the startswith allow-list). Belt+suspenders
+            # with the consumer-side oca_group / order_type detection.
+            "intent": "protective",
         })
     except Exception as e:
         return {"success": False, "error": f"stop_submit_failed: {e}",
@@ -488,6 +493,8 @@ def submit_oca_pair(
                 "outside_rth": plan.new_outside_rth,
                 "oca_group": plan.oca_group,
                 "trade_id": f"REISSUE-TGT-{plan.trade_id}",
+                # v19.34.53 — protective bracket leg, see stop above.
+                "intent": "protective",
             })
             submitted_targets.append(tid)
         except Exception as e:

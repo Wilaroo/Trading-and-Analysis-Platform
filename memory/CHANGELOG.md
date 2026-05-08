@@ -2,6 +2,66 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.52 + v19.34.53) — Mid-Session Crisis Fix Pack
+
+**Live incident on 2026-05-08 9:30-9:39am ET.** Operator caught the bot phantom-closing real positions and looping bad entries while accumulating -$1,460.90 realized P&L. Two interlocking P0 bugs identified in real-time, fixed, tested, all 54 reconciler/safety tests green.
+
+### v19.34.52 — Drift reconciler phantom-close (mirrors v19.34.49 in a different file)
+
+**Symptom:** During market open, bot fires entries → IB pusher's `_pushed_ib_data["positions"]` lags fills 1-3s → `position_reconciler.reconcile_share_drift` runs, sees `ib_q=0` for symbols bot just opened → falls into Case 3 (`zero_external_close` → `external_close_v19_34_15b`) → marks REAL POSITIONS closed locally. Bot's `pending_trade_exists` gate releases. Bot fires same setup again. Repeat. Damage:
+- GOOG 116L, COIN 626L, AAPL 1L phantom-closed locally while alive at IB
+- MA/EWY/RKT loop accumulated 7 false closes + repeat entries → -$1,461 realized
+
+**Why v19.34.49's phantom-recovery guard didn't catch it:** that fix was in `position_manager.close_trade`. The drift reconciler is a separate code path — same bug class, different file.
+
+**Fix:** New helper `PositionReconciler._ib_qty_authoritative(sym)` that:
+1. Reads pusher's signed qty.
+2. Reads direct IB clientId=11 signed qty.
+3. Returns `(qty, "high", reason)` only when both agree within 0.5sh AND direct returned a non-empty positions list. Otherwise `(qty, "unreliable", reason)`.
+
+Case 3 (`zero_external_close`) and Case 2 (`partial_external_close`) both gated. On `unreliable`, drift is reported under `report["skipped"]` with kind `skipped_unconfirmed_zero_v19_34_52` / `skipped_unconfirmed_partial_v19_34_52` and the reconciler waits for the next cycle. Case 1 (excess), zero-side detection (v19.34.50), zombie drift (v19.34.19) and orphan reconciler are NOT gated — those CREATE protection, not destroy it.
+
+**Tests:** `tests/test_drift_phantom_close_guard_v19_34_52.py` — 9 cases:
+- pusher-says-zero / direct-disagrees → SKIP
+- pusher-and-direct-both-zero → close proceeds
+- direct disconnected → SKIP
+- direct returns empty list → SKIP
+- pusher partial / direct full → SKIP shrink
+- helper unit coverage: high confidence, disagreement, disconnected, empty list
+
+### v19.34.53 — Kill-switch chokepoint refused legitimate brackets
+
+**Symptom:** With kill switch ON, operator ran `reissue-bracket` on 6 IB positions to attach OCA stop+target legs. Every single response showed `"stop_order_id": "ks-refused-XXXX"` and `"target_order_ids": ["ks-refused-XXXX"]`. **`eod-validate-overnight-orders` confirmed `total_active=0` — 6 positions sat NAKED at IB.**
+
+**Root cause:** v19.34.48 chokepoint detects "protective vs entry" via `trade_id.startswith()` against `("CLOSE-", "STOP-", "TGT-", "OCA-", "ADOPT-STOP-", "ADOPT-TGT-", ...)`. The `bracket_reissue_service` produces `trade_id` of shape `REISSUE-STOP-{tid}` and `REISSUE-TGT-{tid}` — these start with `REISSUE-`, NOT with `STOP-` / `TGT-` → fall through to ENTRY → refused.
+
+**Fix (consumer side, `routers/ib._kill_switch_gate`):** Defense-in-depth detection ordering:
+1. Explicit `intent` field — preferred
+2. Non-empty `oca_group` → bracket leg by definition
+3. `order_type` ∈ {STP, STP_LMT, TRAIL, TRAIL_LMT} → never an entry
+4. `trade_id` substring scan (NOT startswith) for STOP/TGT/TARGET/OCA/REISSUE/ADOPT/CLOSE/PARTIAL/CANCEL/FLATTEN/EXIT
+5. Legacy startswith() compat preserved
+
+**Fix (producer side, `bracket_reissue_service.submit_oca_pair`):** Both stop and target leg payloads now carry explicit `intent: "protective"`. Belt+suspenders with the consumer hardening.
+
+**Tests:** `tests/test_kill_switch_gate_v19_34_53.py` — 14 cases. Pins:
+- All 5 detection paths
+- Regression: explicit "entry" intent + market-entry trade_id still REFUSED
+- Bug repro: REISSUE-STOP-* + REISSUE-TGT-* now PASS
+- Producer-side: both legs carry intent=protective in payload
+- All v19.34.48 legacy assertions still pass (6/6)
+
+### Cumulative reconciler/safety suite: **54/54 passing**
+test_drift_phantom_close_guard_v19_34_52 + test_kill_switch_gate_v19_34_53 + test_kill_switch_gate_v19_34_48 + test_phantom_recovery_v19_34_49 + test_bot_q_zero_side_v19_34_50 + test_zombie_drift_v19_34_19 + test_orphan_reconciler_skips_excess_slice_v19_34_22
+
+### Operator manual triage during the incident
+- Tripped kill-switch + paused scanner
+- Reset kill-switch temporarily, attached 6 brackets via `reissue-bracket`, re-tripped (~30sec window)
+- Adopted GOOG/AAPL/COIN as untracked-orphan reconciles (created bot trades + reissued brackets)
+- Final state: 6 bracketed positions (ADBE, BKNG, LIN, GOOG, AAPL, COIN), all legs at IB (`total_active=12`), kill-switch ON, scanner paused, operator can leave bot locked the rest of the day
+
+---
+
 ## 2026-02-XX (v19.34.50) — `bot_q` zero-side detection (drift blind spot)
 
 **Symptom:** When a symbol has tracked bot_trades whose signed remaining-shares net to ≈ 0 (paired LONG + SHORT hedges, or any tracked-but-zero edge case where `len(zombies) == 0`), and IB still has real qty, the existing `reconcile_share_drift` logic dropped the drift into the `unclassified` else path. Net: IB inventory stayed silently unmanaged — same family of bug as v19.34.19's zombie blind-spot, but at a different bot_q==0 corner case.

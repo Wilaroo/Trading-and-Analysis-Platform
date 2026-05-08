@@ -1523,7 +1523,48 @@ class PositionReconciler:
                 try:
                     # ── Case 3: ZERO at IB, bot still tracking ──
                     if abs(ib_q) < 0.01:
+                        # ── v19.34.52 (Feb 2026) — Multi-source confirmation ──
+                        # Same family as v19.34.49 phantom-recovery bug,
+                        # manifesting in the share-drift reconciler.
+                        # Operator caught it 2026-05-08 9:30-9:39am: bot
+                        # fired entries → fills lagged in pusher's
+                        # `_pushed_ib_data["positions"]` → reconciler ran,
+                        # saw `ib_q=0` for symbols bot was tracking →
+                        # fell into Case 3 → auto-closed REAL POSITIONS as
+                        # `external_close_v19_34_15b` → bot's
+                        # `pending_trade_exists` gate lifted → bot fired
+                        # again → repeat. Damage: GOOG 116L, COIN 626L,
+                        # AAPL 1L all phantom-closed locally while alive
+                        # at IB. MA/EWY/RKT loop produced -$1,461 realized.
+                        #
+                        # Fix: cross-check pusher (which yielded ib_q=0)
+                        # against direct IB clientId=11 BEFORE closing.
+                        # Both must agree (or direct alone if pusher
+                        # offline) before we mutate bot state.
+                        auth_qty, auth_conf, auth_reason = (
+                            await self._ib_qty_authoritative(sym)
+                        )
+                        if auth_conf == "unreliable" or (
+                            auth_qty is not None and abs(auth_qty) >= 0.5
+                        ):
+                            # Either sources disagree OR direct disagrees
+                            # with pusher's zero. Skip this drift cycle.
+                            drift_record["kind"] = (
+                                "skipped_unconfirmed_zero_v19_34_52"
+                            )
+                            drift_record["skip_reason"] = auth_reason
+                            drift_record["pusher_qty"] = ib_q
+                            drift_record["direct_qty"] = auth_qty
+                            report["skipped"].append(drift_record)
+                            logger.warning(
+                                f"[v19.34.52 DRIFT-GUARD] {sym} zero-close "
+                                f"BLOCKED: pusher=0 direct={auth_qty} "
+                                f"conf={auth_conf} reason={auth_reason}. "
+                                f"Will retry next cycle."
+                            )
+                            continue
                         drift_record["kind"] = "zero_external_close"
+                        drift_record["confirmed_by"] = auth_conf
                         report["drifts_detected"].append(drift_record)
                         if not auto_resolve:
                             continue
@@ -1535,11 +1576,39 @@ class PositionReconciler:
                     # ── Case 2: PARTIAL — IB has fewer shares than bot tracks ──
                     elif (ib_q > 0 and bot_q > 0 and ib_q < bot_q) or \
                          (ib_q < 0 and bot_q < 0 and abs(ib_q) < abs(bot_q)):
+                        # ── v19.34.52 — same multi-source guard as Case 3 ──
+                        # Pusher's `ib_q` partial could be mid-fill lag;
+                        # if direct shows the bot's full count, this is
+                        # NOT a real partial — refuse to shrink.
+                        auth_qty, auth_conf, auth_reason = (
+                            await self._ib_qty_authoritative(sym)
+                        )
+                        if auth_conf == "unreliable" or (
+                            auth_qty is not None
+                            and abs(auth_qty - bot_q) < 0.5
+                        ):
+                            drift_record["kind"] = (
+                                "skipped_unconfirmed_partial_v19_34_52"
+                            )
+                            drift_record["skip_reason"] = auth_reason
+                            drift_record["pusher_qty"] = ib_q
+                            drift_record["direct_qty"] = auth_qty
+                            report["skipped"].append(drift_record)
+                            logger.warning(
+                                f"[v19.34.52 DRIFT-GUARD] {sym} partial-shrink "
+                                f"BLOCKED: pusher={ib_q} direct={auth_qty} "
+                                f"bot={bot_q} conf={auth_conf} "
+                                f"reason={auth_reason}."
+                            )
+                            continue
                         drift_record["kind"] = "partial_external_close"
+                        drift_record["confirmed_by"] = auth_conf
                         report["drifts_detected"].append(drift_record)
                         if not auto_resolve:
                             continue
-                        target_total_abs = int(abs(ib_q))
+                        # Use authoritative qty for the shrink target,
+                        # not pusher's potentially-lagged value.
+                        target_total_abs = int(abs(auth_qty if auth_qty is not None else ib_q))
                         await self._shrink_drift_trades(
                             bot, sym, bot_trades_by_sym[sym],
                             new_total_abs=target_total_abs,
@@ -1599,8 +1668,123 @@ class PositionReconciler:
             report["error"] = str(e)
             return report
 
+    async def _ib_qty_authoritative(self, sym: str):
+        """v19.34.52 — Cross-check pusher's view of `sym` against direct
+        IB (clientId=11) before mutating bot state on drift.
+
+        Returns: tuple `(qty: Optional[float], confidence: str, reason: str)`
+
+        Confidence levels:
+          - "high":         pusher and direct agree within 0.5 shares.
+                            qty is the agreed signed value.
+          - "unreliable":   sources disagree, OR direct unavailable, OR
+                            direct returned empty positions list (which
+                            usually means the snapshot is mid-update).
+                            qty may be partial (pusher's view) — caller
+                            must NOT trust it for close/shrink.
+
+        The bug v19.34.52 fixes: pusher's `_pushed_ib_data["positions"]`
+        can lag entry fills by 1-3 seconds. During that window the
+        reconciler used to see `ib_q=0` for a symbol bot just opened,
+        and fell into Case 3 (zero_external_close) → marked the live
+        position closed locally → bot's pending_trade_exists released →
+        bot fired again. Result on 2026-05-08 open: GOOG/COIN/AAPL
+        phantom-closed; MA/EWY/RKT loop racked up -$1,461 realized.
+        """
+        # Pusher (already in our pre-built ib_qty_by_sym map at caller).
+        # Re-read to be defensive — the dict is rebuilt per reconcile pass
+        # but a sub-second helper call could race.
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+        except Exception:
+            return (None, "unreliable", "pusher_module_import_failed")
+
+        sym_u = (sym or "").upper()
+        pusher_q = None
+        pusher_alive = False
+        try:
+            pusher_alive = bool(is_pusher_connected())
+        except Exception:
+            pass
+        if pusher_alive:
+            ps = 0.0
+            saw_row = False
+            for p in (_pushed_ib_data.get("positions") or []):
+                if (p.get("symbol") or "").upper() == sym_u:
+                    saw_row = True
+                    try:
+                        ps += float(p.get("position") or 0)
+                    except Exception:
+                        pass
+            # If pusher has NO row for the symbol, treat as 0 (pusher
+            # only emits non-zero rows on most setups, but flat rows can
+            # appear too — saw_row is informational).
+            pusher_q = ps if saw_row or _pushed_ib_data.get("positions") is not None else None
+
+        # Direct IB.
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+        except Exception:
+            return (pusher_q, "unreliable", "ib_direct_module_unavailable")
+        try:
+            svc = get_ib_direct_service()
+        except Exception:
+            return (pusher_q, "unreliable", "ib_direct_service_init_failed")
+        if not (svc and svc.is_available() and svc.is_connected()):
+            return (
+                pusher_q,
+                "unreliable",
+                "ib_direct_disconnected",
+            )
+        try:
+            positions = await svc.get_positions()
+        except Exception as e:
+            return (
+                pusher_q,
+                "unreliable",
+                f"ib_direct_get_positions_failed:{type(e).__name__}",
+            )
+        if not positions:
+            # Empty list often means "mid-update", not "truly flat".
+            # Refuse to confirm zero on this basis alone — wait for next
+            # reconcile cycle.
+            return (
+                pusher_q,
+                "unreliable",
+                "ib_direct_returned_empty_positions",
+            )
+
+        direct_q = 0.0
+        for p in positions:
+            if (p.get("symbol") or "").upper() == sym_u:
+                try:
+                    direct_q += float(p.get("position") or 0)
+                except Exception:
+                    pass
+
+        # Both available — agreement check (0.5 share tolerance for
+        # rounding edge cases on fractional shares).
+        if pusher_q is None:
+            # Pusher not contributing — fall back to direct alone but
+            # mark it as such. Direct is authoritative for this account.
+            return (direct_q, "high", "direct_only_pusher_offline")
+        if abs(pusher_q - direct_q) <= 0.5:
+            return (direct_q, "high", "pusher_direct_agree")
+        # Disagree — refuse to act. Pusher likely lagging fills.
+        return (
+            direct_q,
+            "unreliable",
+            f"pusher_direct_disagree:pusher={pusher_q}_direct={direct_q}",
+        )
+
     async def _close_drift_trades_zero(self, bot, sym, trades) -> None:
-        """Case 3: IB has 0; close every bot_trade for this symbol."""
+        """Case 3: IB has 0; close every bot_trade for this symbol.
+
+        v19.34.52 NOTE: only invoked AFTER `_ib_qty_authoritative` has
+        confirmed `(qty=0, confidence='high')`. The bare check on
+        pusher's `ib_q < 0.01` was the source of the 2026-05-08
+        phantom-close incident.
+        """
         from services.trading_bot_service import TradeStatus
         now_iso = datetime.now(timezone.utc).isoformat()
         for t in trades:

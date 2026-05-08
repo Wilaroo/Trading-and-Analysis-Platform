@@ -262,15 +262,63 @@ def _kill_switch_gate(order: dict) -> Optional[str]:
         return None
 
     # Detect intent.
+    #
+    # v19.34.53 (Feb 2026) — operator caught the chokepoint silently
+    # rejecting *legitimate* protective brackets from the
+    # `bracket_reissue_service` whose orders use `trade_id` of shape
+    # `REISSUE-STOP-{tid}` / `REISSUE-TGT-{tid}`. None of those match
+    # the v19.34.48 startswith() allow-list (`STOP-`, `TGT-`, etc.) so
+    # they fell through to "ENTRY → refuse". Result: with kill switch
+    # on, every reissue-bracket call returned `ks-refused-*` order_ids
+    # for stop+target → 6 IB positions sat NAKED.
+    #
+    # The fix hardens the chokepoint with a defense-in-depth match
+    # ordering. From most-reliable to most-heuristic:
+    #   1. Explicit `intent` field — preferred.
+    #   2. Structural shape: any non-empty `oca_group` is by definition
+    #      part of an OCA bracket → protective.
+    #   3. `order_type` is unambiguously a stop family
+    #      (STP, STP_LMT, STP LMT, TRAIL, TRAIL LMT, TRAIL_LMT) →
+    #      cannot be a market entry, must be protective.
+    #   4. `trade_id` contains any of {STOP, TGT, TARGET, OCA, REISSUE,
+    #      ADOPT, CLOSE, PARTIAL, CANCEL} as substring (not startswith)
+    #      so future producers using nested prefixes are auto-allowed.
+    #
+    # The legacy startswith() prefix list is preserved for compat.
     intent = (order.get("intent") or "").lower()
     trade_id = order.get("trade_id") or ""
-    is_protective = (
-        intent in ("close", "protective", "stop", "target", "cancel")
-        or trade_id.startswith((
-            "CLOSE-", "PARTIAL-", "STOP-", "ADOPT-STOP-", "ADOPT-TGT-",
-            "TARGET-", "OCA-", "TGT-",
-        ))
-    )
+    trade_id_upper = trade_id.upper()
+    order_type = (order.get("order_type") or "").upper().replace(" ", "_")
+    oca_group = order.get("oca_group") or ""
+
+    is_protective = False
+    # 1. Explicit intent
+    if intent in ("close", "protective", "stop", "target", "cancel", "exit"):
+        is_protective = True
+    # 2. OCA bracket membership — every bracket leg has oca_group set.
+    elif oca_group:
+        is_protective = True
+    # 3. Stop family order_type — never an entry.
+    elif order_type in ("STP", "STP_LMT", "TRAIL", "TRAIL_LMT"):
+        is_protective = True
+    # 4. trade_id substring scan — catches REISSUE-STOP-, REISSUE-TGT-,
+    #    OCA-RESYNC-STOP-, etc. without requiring future producers to
+    #    know the magic prefix list.
+    elif any(
+        kw in trade_id_upper
+        for kw in (
+            "STOP", "TGT", "TARGET", "OCA", "REISSUE", "ADOPT",
+            "CLOSE", "PARTIAL", "CANCEL", "FLATTEN", "EXIT",
+        )
+    ):
+        is_protective = True
+    # 5. Legacy startswith() compat (first chokepoint impl).
+    elif trade_id.startswith((
+        "CLOSE-", "PARTIAL-", "STOP-", "ADOPT-STOP-", "ADOPT-TGT-",
+        "TARGET-", "OCA-", "TGT-",
+    )):
+        is_protective = True
+
     if is_protective:
         return None  # safety / unwind orders always allowed
 

@@ -4,6 +4,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-XX — v19.34.52 + v19.34.53 SHIPPED — Mid-Session Crisis Fix Pack
+
+Two interlocking P0 bugs fixed live during the 2026-05-08 open incident:
+- **v19.34.52**: drift reconciler phantom-close (mirrors v19.34.49 in `position_reconciler` instead of `position_manager`). Multi-source confirmation guard prevents Case 2/3 from acting on stale pusher data.
+- **v19.34.53**: kill-switch chokepoint was refusing legitimate `REISSUE-*` brackets. Hardened detection (oca_group, order_type, substring scan) + producer-side intent tagging.
+
+54/54 reconciler/safety pytests passing. See CHANGELOG.md for full timeline.
+
+**Outstanding from incident — operator follow-ups (no code change needed):**
+- Investigate WHY entry-time `attach_oca_stop_target` didn't attach brackets in the first place for ADBE/BKNG/LIN. Suspect: original entries fired during pre-open window when kill-switch was off → bracket attach succeeded → but something orphaned them. Hunt: `grep "attach_oca\|place_bracket" /tmp/backend.log` after market close + correlate timestamps with the seven `external_close_v19_34_15b` events that tore them off.
+
 ## ✅ 2026-02-XX — v19.34.50 SHIPPED — `bot_q` zero-side detection blind-spot
 
 Drift reconciler now detects the `(bot_q ≈ 0, zombies == 0, ib_q ≥ 1)` corner case (paired hedges; tracked-but-zero edges) and routes to `_spawn_excess_slice` so unmanaged IB shares get bracketed. 7 new pytest cases (cumulative reconciler/safety suite 31/31 passing). See CHANGELOG.md.
