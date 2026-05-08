@@ -11,6 +11,20 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 59/59 reconciler/safety pytests passing. UI build clean.
 
+## 🟡 (P1) Weekly Safety-Net Dashboard (idea logged 2026-02-XX after v19.34.55)
+
+Now that we capture rich save-event data (`recent_skips` per day, `recent_resolves`, `stability` block on IB-direct), feed that into a weekly dashboard quantifying invisible safety work:
+- **Drift saves vs total drift events** — % of "would-have-been phantom-close" prevented
+- **Bracket reissue success rate** — entry-time vs reissue, broken out by kill-switch state
+- **IB-direct uptime %** + drop/reconnect counts
+- **Money-saved estimate per phantom-close blocked** — using avg position size × avg same-day price-to-stop distance × commission round-trip
+- Roll up over week / month with a sparkline
+- Endpoint: `GET /api/trading-bot/safety-net-weekly`
+- UI: a small sub-panel (collapsible) under the SentCom HUD or as a dedicated tab; stable footer line "🛡 Saved $X this week (Y events)" as the persistent hook
+- Eventually: alert if save rate drops AND bug rate rises (would indicate a regression masking new bugs)
+
+Why it matters: turns the guardrail layer from invisible cost-center into a quantified ROI story. Useful when reviewing whether to keep complex safety code in 6 months.
+
 ## ✅ 2026-02-XX — v19.34.52 + v19.34.53 SHIPPED — Mid-Session Crisis Fix Pack
 
 Two interlocking P0 bugs fixed live during the 2026-05-08 open incident:

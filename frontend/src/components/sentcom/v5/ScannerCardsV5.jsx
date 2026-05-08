@@ -156,37 +156,88 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
   });
 
   // 3. Open positions — stage=manage (overrides earlier stages)
+  //
+  // ── 2026-02-XX (v19.34.56) — operator caught left scanner card
+  // showing stale fragment data (e.g., BMNR 25sh) while the
+  // OpenPositions panel correctly displayed the consolidated total
+  // (4,443sh). Root cause: the bot can hold multiple BotTrade rows
+  // per symbol (parent + reconciled-excess slices, paired hedges,
+  // etc.). The legacy code just called `bySymbol.set(sym, ...)` per
+  // row, so the LAST iteration won — typically a small slice — and
+  // the visible "shares" on the scanner card looked truncated.
+  // Fix: aggregate signed shares across all rows for the symbol
+  // first, then build a single card with the consolidated total.
+  // Keep the row with the largest absolute share count as the
+  // "primary" for entry/stop/target context (its anchors are
+  // typically the most representative).
+  const positionAgg = new Map();
   (positions || []).forEach((p) => {
     const sym = (p.symbol || p.ticker || '').toUpperCase();
     if (!sym) return;
+    const sh = Number(p.shares ?? p.quantity ?? 0);
+    if (!Number.isFinite(sh) || sh === 0) return;
     const dir = (p.direction || p.side || '').toLowerCase();
-    const pnlR = p.pnl_r ?? p.r_multiple ?? p.unrealized_r;
-    const pnlUsd = p.unrealized_pnl ?? p.pnl ?? p.pnl_usd;
+    const signed = dir === 'short' ? -Math.abs(sh) : Math.abs(sh);
+    const cur = positionAgg.get(sym);
+    if (cur) {
+      cur.signed_total += signed;
+      cur.abs_total += Math.abs(sh);
+      cur.row_count += 1;
+      // Track the row with the largest abs shares as the "primary"
+      // for entry/stop/target anchoring on the visible card.
+      if (Math.abs(sh) > Math.abs(Number(cur.primary.shares ?? cur.primary.quantity ?? 0))) {
+        cur.primary = p;
+      }
+      // PnL aggregates across slices.
+      const r = Number(p.pnl_r ?? p.r_multiple ?? p.unrealized_r);
+      const u = Number(p.unrealized_pnl ?? p.pnl ?? p.pnl_usd);
+      if (Number.isFinite(r)) cur.r_sum = (cur.r_sum ?? 0) + r;
+      if (Number.isFinite(u)) cur.u_sum = (cur.u_sum ?? 0) + u;
+    } else {
+      const r = Number(p.pnl_r ?? p.r_multiple ?? p.unrealized_r);
+      const u = Number(p.unrealized_pnl ?? p.pnl ?? p.pnl_usd);
+      positionAgg.set(sym, {
+        primary: p,
+        signed_total: signed,
+        abs_total: Math.abs(sh),
+        row_count: 1,
+        r_sum: Number.isFinite(r) ? r : null,
+        u_sum: Number.isFinite(u) ? u : null,
+      });
+    }
+  });
+
+  positionAgg.forEach((agg, sym) => {
+    const p = agg.primary;
+    const dir = agg.signed_total < 0 ? 'short' : 'long';
+    const totalAbs = Math.round(agg.abs_total);
     // Backend may return `target_prices` (array, one per scale-out) OR
     // `target_price` (legacy scalar). Pick the first usable value.
     const pt = p.target_price ?? (Array.isArray(p.target_prices) ? p.target_prices[0] : null);
-    const sh = p.shares ?? p.quantity;
+    const sliceNote = agg.row_count > 1 ? ` (${agg.row_count} slices)` : '';
     bySymbol.set(sym, {
       symbol: sym,
       stage: 'manage',
       stage_note: `${dir === 'short' ? 'SHORT' : 'LONG'}${p.setup_type ? ' ' + p.setup_type : ''}`,
       change_pct: p.change_pct ?? null,
-      // 2026-05-01 v19.23.1 — operator wants share size visible on
-      // every position card. Prepend `Nsh` to the bot narrative so
-      // the first thing the eye picks up is the position size.
+      // v19.34.56 — show the CONSOLIDATED share total, not whichever
+      // fragment row hashed last. Append `(N slices)` when the bot
+      // is tracking a multi-trade aggregate so the operator knows
+      // why this is a sum.
       bot_text:
         p.bot_note ||
-        `${sh != null ? `${Math.round(Math.abs(Number(sh)))}sh · ` : ''}` +
+        `${totalAbs}sh${sliceNote} · ` +
         `Holding ${sym}${p.entry_price ? ` @ ${formatNum(p.entry_price, 2)}` : ''}` +
         `${p.stop_price ? ` · SL ${formatNum(p.stop_price, 2)}` : ''}` +
         `${pt ? ` · PT ${formatNum(pt, 2)}` : ''}.`,
-      shares: sh,
+      shares: totalAbs,
+      slice_count: agg.row_count,
       metrics: {
         gate: p.gate_score,
         p_win: p.p_win,
         sharpe: p.sharpe,
-        r: pnlR,
-        pnl: pnlUsd,
+        r: agg.r_sum,
+        pnl: agg.u_sum,
       },
       timestamp: p.opened_at || p.entry_time,
     });
