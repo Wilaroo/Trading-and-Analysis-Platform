@@ -61,6 +61,7 @@ import SystemBanner from './v5/SystemBanner';
 // after 10 min, only renders when AUTO_RECONCILE_AT_BOOT ran.
 import BootReconcilePill from './v5/BootReconcilePill';
 import DriftGuardPill from './v5/DriftGuardPill';
+import LLMRulesPill from './v5/LLMRulesPill';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -431,6 +432,10 @@ export const SentComV5View = ({
             {/* v19.34.55 — drift-guard saves pill (only renders when
                 skip_count_today > 0). Hover → recent skip list. */}
             <DriftGuardPill />
+            {/* v19.34.64 — LLM rules pill: live equity-tied caps the
+                chat-AI enforces. 11/13 · risk $2.5K · DLP -0.4%. Hover
+                for full rules list + breach detection. */}
+            <LLMRulesPill />
             <AccountGuardChipV5 safety={safety} />
             {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
                 chip. Distinguishes 'logged in elsewhere' / socket-down /

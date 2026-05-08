@@ -2,6 +2,64 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.64) — LLM rules diagnostic surface
+
+### Why
+
+After v19.34.63 tied the chat-AI's risk/position caps to live equity, the operator had no quick way to see what the LLM thinks the limits are right now without scrolling through a chat. This adds a 30s-poll endpoint + V5 HUD chip that surfaces the live computed values + breach detection.
+
+### Backend (`routers/trading_bot.py`)
+
+New `GET /api/trading-bot/llm-rules` endpoint. Returns:
+- `equity` — live `net_liquidation` from `/api/ib/account/summary`
+- `risk_per_trade_cap` = `max(0.01 × equity, $2,500)`
+- `position_count_cap` = `max(10, floor(equity / $25K))`
+- `daily_loss_budget` = `0.01 × equity`
+- `live_state.open_positions_count` from bot's `_open_trades`
+- `live_state.at_or_over_position_cap` flag
+- `live_state.today_realized_pnl` + `today_realized_pnl_pct`
+- `live_state.daily_loss_breached` flag (true when pnl_pct ≤ -1%)
+- `rules_text[]` — 8 human-readable rule lines mirroring the system prompt
+- Defensive: ConnectionError on account fetch → returns equity=0 + safe defaults instead of crashing.
+
+### Frontend (`v5/LLMRulesPill.jsx`)
+
+Compact pill in V5 HUD top strip alongside `DriftGuardPill`. Renders:
+
+```
+🛡 11/13 · risk $2.5K · DLP -0.4%
+```
+
+Color tier:
+- **emerald** — positions < cap AND DLP not breached
+- **amber** — at/over position cap (advisory only)
+- **red** — daily-loss circuit-breaker breached
+
+Hover tooltip: equity / risk-per-trade / position-cap / daily-loss budget / today's realized pnl / R:R min / concentration cap + 8-line active-rules list. All text labels carry `data-testid` for QA.
+
+Polls every 30s. Silent on transient fetch errors.
+
+### Tests
+
+- `tests/test_llm_rules_diagnostic_v19_34_64.py` — 8 cases:
+  - Small account ($100K) hits $2,500 floor
+  - Medium account ($237K, operator's actual state today) — risk $2,500 floor, cap=10, breach=False at -0.4%
+  - Large account ($400K) — risk scales to $4,000, cap=16
+  - Daily loss breach at -1.5% → flag fires
+  - Daily loss at exactly -1.0% → flag fires (inclusive boundary)
+  - Zero equity → safe defaults, no crash
+  - Network error on account fetch → graceful degradation
+  - `rules_text[]` includes all 8 material rules
+
+**Cumulative reconciler/safety/boot suite: 130/130 passing.**
+
+### Operator note
+
+After hot-reload + `cd frontend && yarn build`, the new pill appears in the top HUD strip. Hover to see the live rule values. If you ever wonder *"what does the chat AI think the risk cap is right now?"* — just glance at the pill.
+
+---
+
+
 ## 2026-02-09 (v19.34.63) — LLM rule audit + target validation + equity-tied caps
 
 ### Operator-driven audit

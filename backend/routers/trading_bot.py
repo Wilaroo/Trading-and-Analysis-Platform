@@ -1767,6 +1767,99 @@ async def zombie_trades():
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.64 — LLM rules diagnostic surface ──────────────────────
+@router.get("/llm-rules")
+async def llm_rules():
+    """v19.34.64 — Surfaces the LIVE computed values of the equity-tied
+    rules the chat-AI system prompt enforces (per v19.34.63). Lets the
+    operator sanity-check what the LLM thinks the limits are right now,
+    without scrolling through a chat session.
+
+    Returns:
+      {
+        success: true,
+        equity: <float>,                  # net liquidation from /api/ib/account/summary
+        risk_per_trade_cap: <float>,      # max(0.01 × equity, $2,500)
+        position_count_cap: <int>,        # max(10, floor(equity / $25K))
+        daily_loss_budget: <float>,       # 0.01 × equity (positive number)
+        position_concentration_cap_pct: 15,
+        rr_min: 1.5,
+        live_state: {
+          open_positions_count: <int>,
+          at_or_over_position_cap: <bool>,
+          today_realized_pnl: <float>,
+          today_realized_pnl_pct: <float>,
+          daily_loss_breached: <bool>,    # True if pnl_pct ≤ -1%
+        },
+        rules_text: [<str>, ...],         # human-readable, mirrors system prompt
+        last_updated: <iso_ts>,
+      }
+    """
+    try:
+        # Pull live equity + daily P&L from existing IB account endpoint.
+        equity = 0.0
+        daily_pnl = 0.0
+        daily_pnl_pct = 0.0
+        try:
+            import requests
+            acct_resp = requests.get(
+                "http://127.0.0.1:8001/api/ib/account/summary", timeout=3
+            )
+            if acct_resp.ok:
+                acct = acct_resp.json()
+                equity = float(acct.get("net_liquidation") or 0)
+                daily_pnl = float(acct.get("daily_pnl") or 0)
+                daily_pnl_pct = float(acct.get("daily_pnl_percent") or 0)
+        except Exception as fetch_err:
+            logger.debug(f"llm-rules: account-summary fetch failed: {fetch_err}")
+
+        # Compute the equity-tied caps (mirror v19.34.63 system-prompt formulas).
+        risk_cap = max(0.01 * equity, 2500.0) if equity > 0 else 2500.0
+        position_cap = max(10, int(equity // 25000)) if equity > 0 else 10
+        daily_loss_budget = round(0.01 * equity, 2) if equity > 0 else 0.0
+
+        # Live position-count.
+        open_count = 0
+        if _trading_bot is not None:
+            open_count = len(getattr(_trading_bot, "_open_trades", {}) or {})
+
+        live_state = {
+            "open_positions_count": open_count,
+            "at_or_over_position_cap": open_count >= position_cap,
+            "today_realized_pnl": round(daily_pnl, 2),
+            "today_realized_pnl_pct": round(daily_pnl_pct, 2),
+            "daily_loss_breached": daily_pnl_pct <= -1.0,
+        }
+
+        rules_text = [
+            f"Per-trade risk cap: ${risk_cap:,.0f} (= max(1% × ${equity:,.0f}, $2,500))",
+            f"Position-count cap: {position_cap} (advisory; LLM asks before exceeding, never refuses)",
+            f"Daily loss budget: ${daily_loss_budget:,.0f} (1% of equity)",
+            "Concentration cap: 15% of equity per single position (flag, don't block)",
+            "Min R:R: 1.5:1",
+            "Stop direction: favor-direction only (up for longs / down for shorts) without operator confirmation",
+            "Trail stop above entry on profitable longs is VALID (must stay below current price)",
+            "Drawdown-trim target below entry on losing longs is VALID (must stay above current price)",
+        ]
+
+        from datetime import datetime, timezone
+        return {
+            "success": True,
+            "equity": round(equity, 2),
+            "risk_per_trade_cap": round(risk_cap, 2),
+            "position_count_cap": position_cap,
+            "daily_loss_budget": daily_loss_budget,
+            "position_concentration_cap_pct": 15,
+            "rr_min": 1.5,
+            "live_state": live_state,
+            "rules_text": rules_text,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"llm-rules error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 # ─── v19.34.47 — Sync bot books to IB-direct reality ───────────────
 @router.post("/sync-books-to-ib-direct")
 async def sync_books_to_ib_direct(payload: Optional[Dict[str, Any]] = None):
