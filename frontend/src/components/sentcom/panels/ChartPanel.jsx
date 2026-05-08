@@ -20,6 +20,7 @@ import {
 import { useLiveSubscription } from '../../../hooks/useLiveSubscription';
 import { VolumeProfileOverlay } from './VolumeProfileOverlay';
 import { ChartThoughtBubblesOverlay } from './ChartThoughtBubblesOverlay';
+import { ChartFloatingPriceLabel } from './ChartFloatingPriceLabel';
 // v19.33 (2026-05-04) — WebSocket-pushed chart tail. Replaces the 5s
 // polling loop while connected; auto-falls-back to polling on failure.
 import { useChartTailWs } from '../../../hooks/useChartTailWs';
@@ -193,6 +194,15 @@ export const ChartPanel = ({
       borderDownColor: '#f43f5e',
       wickUpColor: '#10b981',
       wickDownColor: '#f43f5e',
+      // 2026-02-XX (v19.34.51) — Operator UX: kill the default
+      // horizontal "current price" dashed line + the right-axis
+      // last-value label. They clutter the chart and the operator
+      // can't tell at a glance which price is current vs entry/SL/PT
+      // (which are also IPriceLine instances). Replaced by a
+      // floating badge anchored to the most recent candle via
+      // ChartFloatingPriceLabel overlay.
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -1181,6 +1191,16 @@ export const ChartPanel = ({
           chartRef={chartRef}
           visible={showThoughtBubbles}
           minutes={1440}
+        />
+        {/* v19.34.51 (Feb 2026) — Floating "current price" badge anchored
+            to the right of the most recent candle. Replaces the default
+            lightweight-charts horizontal price line + right-axis label
+            (now disabled via priceLineVisible:false +
+            lastValueVisible:false on the candleSeries). */}
+        <ChartFloatingPriceLabel
+          chartRef={chartRef}
+          candleSeriesRef={candleSeriesRef}
+          bars={bars}
         />
       </div>
 

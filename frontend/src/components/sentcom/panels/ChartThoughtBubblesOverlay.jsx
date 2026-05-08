@@ -88,17 +88,24 @@ export const ChartThoughtBubblesOverlay = ({
   // Fetch bot thoughts whenever the focused symbol changes (or on visibility
   // toggle). Limited to the last `minutes` so the chart doesn't drown in
   // months of history.
+  //
+  // v19.34.51 (Feb 2026) — Operator feedback "thoughts rarely populate":
+  // root cause was the original effect fetched ONCE per symbol-mount and
+  // never refreshed. Newly-written bot thoughts (after the chart was
+  // first rendered) stayed invisible until the operator switched symbols
+  // and switched back. Plus the limit=40 truncated busy symbols.
+  // Fix: poll every 20s while visible + bump default limit to 200.
   useEffect(() => {
     if (!symbol || !visible) {
       setThoughts([]);
       return undefined;
     }
     let cancelled = false;
-    (async () => {
+    const fetchOnce = async () => {
       try {
         const resp = await safeGet(
           `/api/sentcom/stream/history?symbol=${encodeURIComponent(symbol)}` +
-          `&minutes=${minutes}&limit=40`,
+          `&minutes=${minutes}&limit=200`,
           { timeout: 6000 },
         );
         if (cancelled) return;
@@ -144,10 +151,20 @@ export const ChartThoughtBubblesOverlay = ({
         deduped.sort((a, b) => a.time_sec - b.time_sec);
         setThoughts(deduped);
       } catch (_) {
-        if (!cancelled) setThoughts([]);
+        if (!cancelled) {
+          // Don't clobber existing thoughts on transient fetch error —
+          // keep showing what we last successfully loaded.
+        }
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    // Initial fetch + 20s polling so newly-written bot thoughts surface
+    // automatically without requiring a symbol re-mount.
+    fetchOnce();
+    const interval = setInterval(fetchOnce, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [symbol, visible, minutes]);
 
   // Recompute bubble x-coordinates whenever bars / thoughts / chart
