@@ -507,6 +507,77 @@ class TradeExecution:
                     price=_intent_price,
                     trade_id=trade.id,
                 )
+
+                # ── v19.34.65 (2026-02-09) — Broad symbol-level entry
+                # cooldown. Yesterday's IB trade-log forensic showed
+                # patterns the v19.29 fingerprint can't see:
+                #   • ADBE 18-buy ramp (sizes 54→59→47→22→17→14→5… —
+                #     v19.29's ±5% qty bucket lets every one through)
+                #   • DDOG / SQQQ wash cycles (sell→buy same minute —
+                #     v19.29 keys by side, opposite-side never matches)
+                # The broad rule: ANY entry on the same symbol within
+                # 60s of the previous submission is throttled.
+                _throttle = _dedup.should_throttle_entry(
+                    symbol=trade.symbol,
+                    side=_intent_side,
+                    qty=_intent_qty,
+                    price=_intent_price,
+                )
+                if _throttle is not None:
+                    age_s = (
+                        datetime.now(timezone.utc) - _throttle.submitted_at
+                    ).total_seconds()
+                    logger.warning(
+                        "🛑 [v19.34.65 SYMBOL-COOLDOWN] Skipping %s %s %dsh "
+                        "@ $%.2f — prior entry %s %s %dsh @ $%.2f submitted "
+                        "%.1fs ago (cooldown 60s, trade_id=%s).",
+                        trade.symbol, _intent_side.upper(), _intent_qty,
+                        _intent_price,
+                        _throttle.symbol, _throttle.side.upper(),
+                        _throttle.qty, _throttle.price, age_s,
+                        _throttle.trade_id,
+                    )
+                    trade.status = TradeStatus.VETOED
+                    trade.notes = (trade.notes or "") + " [SYMBOL-COOLDOWN-v19.34.65]"
+                    trade.close_reason = "symbol_cooldown_v19_34_65"
+                    if trade.id in bot._pending_trades:
+                        del bot._pending_trades[trade.id]
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="symbol_cooldown_v19_34_65",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=(
+                                trade.direction.value if hasattr(trade.direction, "value")
+                                else str(trade.direction)
+                            ),
+                            reason="symbol_in_cooldown_60s",
+                            context={
+                                "trade_id": trade.id,
+                                "blocked_by_trade_id": _throttle.trade_id,
+                                "blocked_by_side": _throttle.side,
+                                "blocked_by_qty": _throttle.qty,
+                                "blocked_by_price": _throttle.price,
+                                "prior_submitted_at": _throttle.submitted_at.isoformat(),
+                                "age_seconds": round(age_s, 2),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    await bot._save_trade(trade)
+                    return
+                # Pre-stamp the broad cooldown BEFORE the broker call so
+                # a rejection-retry storm can't slip past on the same
+                # second. record_entry_submitted is idempotent.
+                _dedup.record_entry_submitted(
+                    symbol=trade.symbol,
+                    side=_intent_side,
+                    qty=_intent_qty,
+                    price=_intent_price,
+                    trade_id=trade.id,
+                )
             except Exception as _dedup_err:
                 # NEVER fail-closed on dedup — better to risk a duplicate
                 # order than block a legitimate trade. Log and proceed.

@@ -453,6 +453,16 @@ def _make_queue_service_for_orchestrator(initial_active=None, cancel_succeeds=Tr
 
 class TestReissueBracketOrchestrator:
 
+    @pytest.fixture(autouse=True)
+    def _reset_v19_34_65_throttle(self):
+        """v19.34.65 introduced a process-wide reissue throttle. Clear it
+        between tests in this class so prior happy-path runs don't bleed
+        into cancel/compute-failure scenarios."""
+        from services.bracket_reissue_service import get_reissue_throttle
+        get_reissue_throttle().clear("XLU")
+        yield
+        get_reissue_throttle().clear("XLU")
+
     @pytest.mark.asyncio
     async def test_happy_path_cancels_old_and_submits_new(self):
         from services.bracket_reissue_service import reissue_bracket_for_trade
@@ -523,8 +533,14 @@ class TestReissueBracketOrchestrator:
 
     @pytest.mark.asyncio
     async def test_compute_failure_aborts_before_cancel(self):
-        """If compute_reissue_params raises (e.g. zero remaining), the
-        orchestrator MUST abort before touching IB. No cancels, no submits."""
+        """If remaining shares ≤ 0, the orchestrator MUST abort before
+        touching IB. No cancels, no submits.
+
+        v19.34.65 (2026-02-09): the hard-guard now short-circuits at the
+        throttle gate BEFORE compute_reissue_params is invoked. Phase
+        is "throttle" with error="remaining_shares_le_zero_v19_34_65"
+        instead of the legacy "compute" phase — the user-facing contract
+        ("no cancel, no submit on remaining=0") is unchanged."""
         from services.bracket_reissue_service import reissue_bracket_for_trade
 
         trade = _trade()
@@ -539,7 +555,9 @@ class TestReissueBracketOrchestrator:
         )
 
         assert result["success"] is False
-        assert result["phase"] == "compute"
+        # v19.34.65 — earlier short-circuit at the hard-guard.
+        assert result["phase"] == "throttle"
+        assert result["error"] == "remaining_shares_le_zero_v19_34_65"
         # Cancel was NOT called — every old leg still active
         assert all(svc.state[oid] == "pending" for oid in svc.state)
         assert new_orders == []

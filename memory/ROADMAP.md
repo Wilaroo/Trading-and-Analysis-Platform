@@ -4,6 +4,18 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-09 — v19.34.65 SHIPPED — Order-router idempotency + bracket-reissue throttle
+
+Shipped Fix A (broad symbol-level entry cooldown, 60s, ignores side/qty/price) + Fix B (bracket re-issue throttle, 1 per (symbol, 5min) + hard remaining_shares > 0 guard) in a single patch. Targets the four bug patterns surfaced in the 2026-02-08 IB trade-log forensic: ADBE 18-buy ramp, DDOG/SQQQ wash cycles, EWY re-entry into manual flatten, EFA fragmented re-entry churn.
+
+The 11:42 EFA 892+67 venue split was assessed as normal IB Smart Order Router behaviour (not a bug); Fix C (chunk dedup) was dropped from this patch as YAGNI.
+
+15 new pytest cases + 32 updated bracket-reissue cases all green (101/101 affected suites pass). Kill switch under operator manual control throughout.
+
+**Pending operator review** before tackling Issue 3 (operator-flatten detector).
+
+
+
 ## ✅ 2026-02-09 — v19.34.59 SHIPPED — Zombie sweep + boot tripwire + diagnostic endpoint
 
 After 9 zombie BotTrades surfaced post-restart (status=OPEN, remaining_shares=0, IB still had real shares), three fixes shipped:

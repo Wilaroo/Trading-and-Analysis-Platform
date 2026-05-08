@@ -47,7 +47,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from services.bracket_tif import bracket_tif
@@ -112,6 +112,106 @@ async def _persist_lifecycle_event(
 
 
 _lifecycle_indexes_ready: bool = False
+
+
+# ─── v19.34.65 — Bracket re-issue throttle (per-symbol, 5-minute window) ──
+# Yesterday's IB trade log showed ADBE took 18 BUY tickets between 9:32 AM
+# and 12:57 PM, with sizes drifting 54→59→47→22→17→14→5… That's the
+# bracket-reissue path firing fresh entries every time `remaining_shares`
+# changes, with no cap on how many times per minute. EFA had similar
+# behaviour around the 11:42 explosion. The fix: cap re-issues to ONE
+# per (symbol, 5-minute window) and HARD-GUARD `remaining_shares > 0`
+# at the orchestrator entry (compute_reissue_params already raises on
+# remaining <= 0, but the throttle short-circuits BEFORE we touch IB).
+import threading as _threading
+
+REISSUE_THROTTLE_WINDOW_SECONDS = 300.0   # 5 minutes
+REISSUE_THROTTLE_MAX_PER_WINDOW = 1       # one re-issue per window per symbol
+
+
+@dataclass
+class _ReissueRecord:
+    symbol: str
+    trade_id: str
+    reason: str
+    submitted_at: datetime
+
+
+class _ReissueThrottle:
+    """Process-wide throttle for bracket re-issue calls.
+
+    Tracks recent SUCCESSFUL submissions per symbol so the throttle
+    survives a transient compute/cancel failure (no point throttling on
+    something that never reached IB). Failed submissions fall through
+    so the operator can retry immediately.
+    """
+
+    def __init__(self) -> None:
+        self._records: Dict[str, List[_ReissueRecord]] = {}  # key: symbol upper
+        self._lock = _threading.Lock()
+
+    def _expire(self, sym_u: str, now: datetime) -> None:
+        cutoff = now - timedelta(seconds=REISSUE_THROTTLE_WINDOW_SECONDS)
+        rs = self._records.get(sym_u, [])
+        rs = [r for r in rs if r.submitted_at >= cutoff]
+        if rs:
+            self._records[sym_u] = rs
+        else:
+            self._records.pop(sym_u, None)
+
+    def should_throttle(self, symbol: str) -> Optional[_ReissueRecord]:
+        if not symbol:
+            return None
+        sym_u = symbol.upper()
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            self._expire(sym_u, now)
+            rs = self._records.get(sym_u, [])
+            if len(rs) >= REISSUE_THROTTLE_MAX_PER_WINDOW:
+                # Most-recent record wins as the "blocking" reason.
+                return rs[-1]
+            return None
+
+    def record_success(self, symbol: str, trade_id: str, reason: str) -> None:
+        if not symbol:
+            return
+        sym_u = symbol.upper()
+        rec = _ReissueRecord(
+            symbol=sym_u,
+            trade_id=trade_id,
+            reason=reason,
+            submitted_at=datetime.now(timezone.utc),
+        )
+        with self._lock:
+            self._records.setdefault(sym_u, []).append(rec)
+
+    def clear(self, symbol: str) -> int:
+        """Operator/test escape hatch."""
+        if not symbol:
+            return 0
+        with self._lock:
+            return 1 if self._records.pop(symbol.upper(), None) is not None else 0
+
+    def stats(self) -> Dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            for sym_u in list(self._records.keys()):
+                self._expire(sym_u, now)
+            return {
+                "tracked_symbols": list(self._records.keys()),
+                "window_seconds": REISSUE_THROTTLE_WINDOW_SECONDS,
+                "max_per_window": REISSUE_THROTTLE_MAX_PER_WINDOW,
+            }
+
+
+_reissue_throttle_singleton: Optional[_ReissueThrottle] = None
+
+
+def get_reissue_throttle() -> _ReissueThrottle:
+    global _reissue_throttle_singleton
+    if _reissue_throttle_singleton is None:
+        _reissue_throttle_singleton = _ReissueThrottle()
+    return _reissue_throttle_singleton
 
 
 
@@ -591,6 +691,73 @@ async def reissue_bracket_for_trade(
 
     started_at = datetime.now(timezone.utc).isoformat()
 
+    # ── v19.34.65 throttle gate (operator-driven, 2026-02-09) ──────────
+    # Cap bracket re-issues at 1 per (symbol, 5-minute window) and
+    # hard-guard remaining_shares > 0. Yesterday's IB trade log showed
+    # ADBE took 18 entry tickets in a single morning — that loop ran
+    # through this orchestrator. The throttle short-circuits BEFORE
+    # any cancel call hits IB, so a thrash storm can't kill the
+    # protective legs and leave the position naked.
+    _sym_for_throttle = (getattr(trade, "symbol", "") or "").upper()
+    _trade_id_for_throttle = getattr(trade, "id", None) or "?"
+
+    # Hard remaining-shares guard. compute_reissue_params raises later,
+    # but we want to NEVER touch IB if there's nothing to protect.
+    _rs_check = int(
+        getattr(trade, "remaining_shares", None)
+        or getattr(trade, "shares", 0)
+        or 0
+    )
+    if new_total_shares is not None:
+        _rs_check = int(new_total_shares) - max(0, int(already_executed_shares))
+    if _rs_check <= 0:
+        msg = (
+            f"v19.34.65 bracket re-issue REFUSED for {_sym_for_throttle} "
+            f"({reason}): remaining_shares={_rs_check} ≤ 0 — nothing to "
+            f"protect. trade_id={_trade_id_for_throttle}"
+        )
+        logger.warning(msg)
+        ev = {
+            "success": False,
+            "phase": "throttle",
+            "error": "remaining_shares_le_zero_v19_34_65",
+            "trade_id": _trade_id_for_throttle,
+            "symbol": _sym_for_throttle,
+            "reason": reason,
+            "remaining_shares": _rs_check,
+            "started_at": started_at,
+        }
+        await _persist_lifecycle_event(bot=bot, event=ev)
+        return ev
+
+    _throttle = get_reissue_throttle()
+    _blocked = _throttle.should_throttle(_sym_for_throttle)
+    if _blocked is not None:
+        age_s = (
+            datetime.now(timezone.utc) - _blocked.submitted_at
+        ).total_seconds()
+        msg = (
+            f"v19.34.65 bracket re-issue THROTTLED for {_sym_for_throttle} "
+            f"({reason}): prior re-issue {_blocked.reason!r} succeeded "
+            f"{age_s:.1f}s ago (window 300s, max 1). trade_id="
+            f"{_trade_id_for_throttle}"
+        )
+        logger.warning(msg)
+        ev = {
+            "success": False,
+            "phase": "throttle",
+            "error": "reissue_throttled_v19_34_65",
+            "trade_id": _trade_id_for_throttle,
+            "symbol": _sym_for_throttle,
+            "reason": reason,
+            "blocked_by_reason": _blocked.reason,
+            "blocked_by_trade_id": _blocked.trade_id,
+            "blocked_age_seconds": round(age_s, 2),
+            "started_at": started_at,
+        }
+        await _persist_lifecycle_event(bot=bot, event=ev)
+        return ev
+
     # 1) Compute the new plan FIRST so a math error aborts before we cancel.
     try:
         plan = compute_reissue_params(
@@ -732,6 +899,20 @@ async def reissue_bracket_for_trade(
         plan.new_stop_price, list(zip(plan.target_price_levels, plan.target_qtys)),
         plan.oca_group,
     )
+
+    # v19.34.65 — stamp the throttle ONLY on successful submit so a
+    # transient compute/cancel/submit failure can be retried immediately.
+    try:
+        _throttle.record_success(
+            symbol=plan.symbol,
+            trade_id=plan.trade_id,
+            reason=reason,
+        )
+    except Exception as _t_err:  # pragma: no cover
+        logger.debug(
+            "[v19.34.65] reissue throttle stamp failed (non-fatal): %s",
+            _t_err,
+        )
 
     success_event = {
         "success": True,

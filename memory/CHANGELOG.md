@@ -2,6 +2,67 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.65) — Order-router idempotency + bracket-reissue throttle
+
+### Why
+
+Yesterday's IB trade-execution log (full TWS blotter) cross-referenced against the prior order-intent log surfaced four execution patterns the v19.29 dedup couldn't see:
+
+- **ADBE 18-buy ramp** (9:32 AM → 12:57 PM): same `(symbol, side)` entries with sizes drifting 54→59→47→22→17→14→5… The v19.29 ±5% qty-tolerance fingerprint sees each as a distinct intent and lets every one through.
+- **DDOG / SQQQ wash cycles** (10:23–10:53): bot SELLs X shares then BUYs X shares same minute, then sells again. v19.29 keys by side; opposite-side sequences never match.
+- **EWY re-entry into manual flatten** (9:31 sold 334 → 9:32 bought 334).
+- **EFA fragmented re-entry** churn (~2,099 shares cycled in 12 minutes around 11:42).
+
+The 11:42 EFA 892+67 venue split (NASDAQ + BYX) was assessed as **normal IB Smart Order Router behaviour, not a bot bug** — `place_bracket_order` returns aggregated `filled_qty`. So Issue 4 (chunk dedup) was dropped from this patch as YAGNI; instrumentation can be added later if a real chunk-misinterpretation case surfaces.
+
+### Fix A — Broad symbol-level entry cooldown (`order_intent_dedup.py`)
+
+New `_RecentSubmission` registry keyed by **symbol only** (no side / qty / price). On every entry submission, the broker call is preceded by:
+
+1. The existing v19.29 fingerprint check (unchanged).
+2. **New v19.34.65 broad cooldown** — if any prior entry on that symbol within the last `ENTRY_COOLDOWN_SECONDS` (default 60s) was submitted, the new entry is throttled regardless of side, qty, or price.
+
+Public API additions:
+- `OrderIntentDedup.should_throttle_entry(symbol, side, qty, price, cooldown_seconds=60.0) -> Optional[_RecentSubmission]`
+- `OrderIntentDedup.record_entry_submitted(symbol, side, qty, price, trade_id=None)` — stamped BEFORE the broker call so a rejection-retry storm can't slip past on the same second.
+- `OrderIntentDedup.clear_symbol_cooldown(symbol)` — operator/test escape hatch.
+- `stats()` now exposes `recent_submissions_count` and `entry_cooldown_seconds`.
+
+Wired into `services/trade_execution.py:execute_trade` immediately after the v19.29 dedup, before `place_bracket_order`. Throttled trades are stamped `status=VETOED`, `close_reason="symbol_cooldown_v19_34_65"`, and recorded via `trade_drop_recorder` with full diagnostic context (blocking trade_id, prior side/qty/price, age in seconds).
+
+### Fix B — Bracket re-issue throttle (`bracket_reissue_service.py`)
+
+New `_ReissueThrottle` singleton. Every successful re-issue of a bracket is recorded per-symbol with a 5-minute sliding window (`REISSUE_THROTTLE_WINDOW_SECONDS = 300`, `REISSUE_THROTTLE_MAX_PER_WINDOW = 1`). A second re-issue attempt within the window short-circuits at the orchestrator entry — BEFORE any cancel call hits IB — so a thrash storm can't kill the protective legs and leave the position naked.
+
+The orchestrator gate runs in this order:
+
+1. **Hard `remaining_shares > 0` guard** — refuses immediately with `error="remaining_shares_le_zero_v19_34_65"` if there's nothing to protect.
+2. **Throttle check** — refuses with `error="reissue_throttled_v19_34_65"` if a prior success is still inside the window.
+3. Only on success does `_throttle.record_success(symbol, trade_id, reason)` fire — failed compute/cancel/submit never stamps the throttle, so the operator can retry immediately after a transient failure.
+
+Backwards-compat note: the legacy test `test_compute_failure_aborts_before_cancel` (which forced `remaining=0` to trigger compute-phase abort) was updated to expect `phase="throttle"` + the new error code. The user-facing contract ("no cancel, no submit on remaining=0") is unchanged.
+
+### Tests
+
+`/app/backend/tests/test_v19_34_65_idempotency_and_throttle.py` — 15 cases covering:
+- ADBE size-drift ramp (7 different qty values all blocked)
+- DDOG opposite-side wash cycle (sell→buy 60s blocks)
+- 60s cooldown release
+- Per-symbol isolation
+- Edge: zero qty no-op, escape hatch
+- Reissue throttle isolation, window expiry, hard guard, orchestrator integration with mocked queue, no-throttle-stamp on failure
+- Yesterday's actual symbols (DDOG, SQQQ, EWY, ADBE) full forensic regression
+
+Total: **101/101 pass** across `test_v19_34_65_idempotency_and_throttle.py` (15) + `test_bracket_reissue_v19_34_7.py` (32 — one autouse fixture added to clear the new throttle between orchestrator tests) + `test_critical_pipeline_hardening_v19_29.py` (existing) + adjacent v19.34.21/60/61/62/63 + orphan-reconciler suites.
+
+### Operator notes
+
+- Kill switch under operator manual control (per their direction); this patch ships with kill-switch state untouched.
+- The next eval of a symbol-cooldown'd or throttle-blocked trade will re-evaluate at the next scanner tick after the window lapses — this is intentional. The patch trades a small amount of latency on legitimate scale-ups for hard guarantees against ramp/wash patterns.
+- Both throttles are process-wide singletons; on bot restart the cooldown windows reset (acceptable since live IB position state takes precedence after a restart anyway).
+
+---
+
 ## 2026-02-09 (v19.34.64) — LLM rules diagnostic surface
 
 ### Why
