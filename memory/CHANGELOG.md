@@ -2,6 +2,70 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.63) — LLM rule audit + target validation + equity-tied caps
+
+### Operator-driven audit
+
+After v19.34.62 fixed the trail-stop bug, operator requested a full audit of LLM-enforced rules and backend validators. Found 4 issues across two files; this batch fixes all four.
+
+### Backend fix — target validation (`bracket_reissue_service.py::compute_reissue_params`)
+
+**Same class of bug as v19.34.62 stop validation, but for targets.**
+
+- Pre-fix: rejected long target `≤ avg_entry` and short target `≥ avg_entry`. Wrong because:
+  1. Drawdown trim case (long entry $100, current $95, target $98) was rejected even though $98 > current → wouldn't fire immediately. Operator legitimately wants to scale out below entry to cut bleeding.
+  2. Genuine danger missed: long target between entry and current on a profitable position (entry $100, current $110, target $105) would fire instantly at the next IB ack.
+- Post-fix: `if direction == "long" and tlvl <= current_price: reject`; mirrored for shorts. Error messages explicitly explain the entry-vs-current distinction.
+
+### LLM system prompt — equity-tied risk/position caps (`chat_server.py`)
+
+Operator chose option (c): tie limits to live equity so they auto-scale.
+
+- **Per-trade risk cap**: was `$2,500` hard. Now `max(0.01 × equity, $2,500)`. Pulled from "Net Liq" in LIVE DATA block. At $237K → $2,500. At $400K → $4,000.
+- **Daily loss circuit-breaker**: was `-1% of account` (vague). Now explicit formula: `today's realized P&L ≤ -0.01 × equity`.
+- **Position-count cap**: was `max 10` (HARD — operator already routinely runs 11+). Now `max(10, floor(equity / $25K))` AND reframed as ADVISORY: at/over cap, LLM ASKS rather than refuses ("we're already at 11 — should I close something or are you OK adding another?"). Never hard-blocks a manually-requested entry.
+- **Stop adverse-direction rule**: was *"Never suggest moving a stop further away from entry"* (ambiguous after trail-stop fix). Now: *"Stops should generally only move in the FAVOR direction. If operator explicitly asks to LOOSEN a stop, confirm intent in plain English before emitting JSON, then execute. Never refuse outright."*
+
+### LLM system prompt — corrected validation-rules block
+
+Updated to reflect both v19.34.62 stop rule AND v19.34.63 target rule, plus added "Drawdown-trim intuition" paragraph mirroring the trail-stop one. The LLM now correctly understands four scenarios:
+1. Trail stop on profitable long (above entry, below current) → ALLOW
+2. Drawdown-trim target below entry (above current) → ALLOW
+3. Move stop adversely (away from current) → CONFIRM with operator first
+4. Either side of immediate-fire boundary → backend rejects with clear error
+
+### Verified clean
+
+- `partial_close` validation in `routers/trading_bot.py:1042-1053` already correct (`shares > 0` AND `shares < total_open`). No change needed.
+- `buy/sell` (quick-order) routes through full safety stack (kill switch, daily-loss, position cap). Trusted.
+- `close` and `cancel_orders` need no validation beyond "position exists" / "orders exist".
+
+### Tests
+
+- `tests/test_target_validation_v19_34_63.py` — 11 cases:
+  - Long drawdown trim below entry but above current → ACCEPTED (the bug case)
+  - Short drawdown trim above entry but below current → ACCEPTED
+  - Long target below current on profitable position → REJECTED (would fire immediately)
+  - Long target at current → REJECTED
+  - Short target above current → REJECTED
+  - Short target at current → REJECTED
+  - Standard happy paths preserved (long target above current, short below)
+  - Multi-level targets validated individually
+  - Negative target rejected
+
+**Cumulative reconciler/safety/boot suite: 122/122 passing.**
+
+### Operator note
+
+Hot-reload picks up backend; new LLM behavior requires fresh chat thread (or `/clear`) to load updated system prompt. Test prompts to verify next session:
+- *"How many shares for COIN at $190 with $185 stop?"* → should compute using equity-based risk cap, not flat $2,500.
+- *"We're at 11 positions — should I add MSTR?"* → should ASK, not refuse.
+- *"Move target on EBAY to $108"* (if EBAY entered $107, current $108.50) → should reject with "would fire immediately at $108.50".
+- *"Loosen stop on MU to $695"* (current stop $725, current price $735) → should ASK first ("we'd be giving up the locked-in $725 — sure?"), then execute.
+
+---
+
+
 ## 2026-02-09 (v19.34.62) — Trail-stop validation now uses current_price (not entry)
 
 ### Symptom

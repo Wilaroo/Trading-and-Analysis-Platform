@@ -250,20 +250,40 @@ def compute_reissue_params(
     original_targets = list(getattr(trade, "target_prices", None) or [])
     if operator_target_prices:
         # v19.34.40 — operator override.
+        # v19.34.63 (2026-02-09) — corrected validation. Pre-fix this rejected
+        # any long target ≤ entry / short target ≥ entry, which was wrong
+        # for two cases:
+        #   1. Drawdown trim: long entry $100, current $95. Operator wants
+        #      to scale out a third at $98 (still a $2 loss but cuts the
+        #      bleeding). $98 < entry, but $98 > current — legitimate.
+        #   2. The check missed the genuinely dangerous case: target
+        #      between entry and current on a profitable position would
+        #      fire immediately (e.g., long entry $100, current $110,
+        #      target moved to $105 → instant fill).
+        # Right rule (mirror of stop fix): target must be on the profit
+        # side of CURRENT price. Long target > current; short target < current.
+        current_price = float(
+            getattr(trade, "current_price", None)
+            or getattr(trade, "fill_price", None)
+            or avg_entry
+        )
         target_levels = [float(t) for t in operator_target_prices]
-        # Direction-sanity check on each level.
         for tlvl in target_levels:
             if tlvl <= 0:
                 raise ValueError(f"operator_target_prices contains non-positive value: {tlvl}")
-            if direction == "long" and tlvl <= avg_entry:
+            if direction == "long" and tlvl <= current_price:
                 raise ValueError(
-                    f"operator target ${tlvl:.2f} is at/below long entry "
-                    f"${avg_entry:.2f} — would fire immediately at fill"
+                    f"operator target ${tlvl:.2f} is at/below long current "
+                    f"price ${current_price:.2f} — would fire immediately. "
+                    f"(Entry: ${avg_entry:.2f}; targets must be above current "
+                    f"to remain pending.)"
                 )
-            if direction == "short" and tlvl >= avg_entry:
+            if direction == "short" and tlvl >= current_price:
                 raise ValueError(
-                    f"operator target ${tlvl:.2f} is at/above short entry "
-                    f"${avg_entry:.2f} — would fire immediately at fill"
+                    f"operator target ${tlvl:.2f} is at/above short current "
+                    f"price ${current_price:.2f} — would fire immediately. "
+                    f"(Entry: ${avg_entry:.2f}; targets must be below current "
+                    f"to remain pending.)"
                 )
         rationale.append(
             f"target_levels: operator-supplied {len(target_levels)} levels "
