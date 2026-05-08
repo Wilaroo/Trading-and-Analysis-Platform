@@ -161,10 +161,14 @@ def compute_reissue_params(
 
     v19.34.40 (2026-05-07) — operator overrides:
       - `operator_stop_price` (chat AI / manual UI) bypasses rule (1) and
-         pins the stop to the supplied price. Validates direction sanity:
-         long → stop < entry, short → stop > entry. Rejects with ValueError.
+         pins the stop to the supplied price.
       - `operator_target_prices` bypasses rule (2) entirely — caller knows
-         best. Same direction-sanity check applied to each level.
+         best. Direction-sanity check applied to each level.
+
+    v19.34.62 (2026-02-09) — corrected `operator_stop_price` validation:
+      now checks against CURRENT_PRICE (not entry). Trail stops on
+      profitable longs frequently want stop > entry but < current — that's
+      the whole point of trailing. Old rule wrongly rejected those.
 
     Raises:
       ValueError if computed remaining_shares <= 0 (no protection needed).
@@ -203,18 +207,37 @@ def compute_reissue_params(
     stop_pct = float(getattr(risk_params, "reconciled_default_stop_pct", 2.0)) / 100.0
     if operator_stop_price is not None:
         # v19.34.40 — operator override (chat AI / manual UI).
+        # v19.34.62 (2026-02-09) — corrected validation. Pre-fix this rejected
+        # any long stop ≥ entry (and short stop ≤ entry). That's correct for
+        # an INITIAL stop, but operators frequently trail stops UP on
+        # profitable longs (and DOWN on profitable shorts) to lock in
+        # gains — which is the entire point of a trailing stop. The real
+        # constraint is "stop must not immediately trigger": stop must be
+        # strictly below CURRENT_PRICE for longs (above for shorts). A
+        # stop at $731 on MU long with entry $713.69 / current $740.50 is
+        # a perfectly valid +$17/share lock-in. Operator was getting
+        # rejected by chat AI for trying to do exactly this.
         operator_stop = float(operator_stop_price)
         if operator_stop <= 0:
             raise ValueError(f"operator_stop_price must be > 0, got {operator_stop}")
-        if direction == "long" and operator_stop >= avg_entry:
+        current_price = float(
+            getattr(trade, "current_price", None)
+            or getattr(trade, "fill_price", None)
+            or avg_entry
+        )
+        if direction == "long" and operator_stop >= current_price:
             raise ValueError(
                 f"operator_stop_price ${operator_stop:.2f} is at/above long "
-                f"entry ${avg_entry:.2f} — would lock in immediate loss/exit"
+                f"current price ${current_price:.2f} — would trigger "
+                f"immediately. (Entry: ${avg_entry:.2f}; trail stops above "
+                f"entry are fine, but must stay below current.)"
             )
-        if direction == "short" and operator_stop <= avg_entry:
+        if direction == "short" and operator_stop <= current_price:
             raise ValueError(
                 f"operator_stop_price ${operator_stop:.2f} is at/below short "
-                f"entry ${avg_entry:.2f} — would lock in immediate loss/exit"
+                f"current price ${current_price:.2f} — would trigger "
+                f"immediately. (Entry: ${avg_entry:.2f}; trail stops below "
+                f"entry are fine, but must stay above current.)"
             )
         new_stop = round(operator_stop, 2)
     elif direction == "long":

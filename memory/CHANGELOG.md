@@ -2,6 +2,45 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.62) — Trail-stop validation now uses current_price (not entry)
+
+### Symptom
+
+Operator typed "move the stop up on MU to $731" in chat. MU was a long with entry $713.69, current $740.50. Bot refused: *"I can't move a long stop above the entry price – the rule requires the stop to stay below $713.69."*
+
+That's wrong. A trail stop locks in profit by moving up — the constraint isn't "below entry," it's "below the price we'd trigger at right now."
+
+### Two-layer fix
+
+**Layer 1: Backend `bracket_reissue_service.py::compute_reissue_params` operator-stop validation.**
+- Pre-fix: `if direction == "long" and operator_stop >= avg_entry: reject`.
+- Post-fix: `if direction == "long" and operator_stop >= current_price: reject` (mirror for shorts).
+- New error messages explicitly note that trail stops above entry are valid as long as they stay below current.
+
+**Layer 2: Chat LLM system prompt** (`chat_server.py`).
+- Pre-fix: *"Long positions: stop must be < entry"* — the LLM was preemptively refusing valid operator commands without ever calling the backend.
+- Post-fix: *"Long positions: stop must be < CURRENT price (NOT < entry — trail stops above entry are valid lock-ins)"*. Plus a dedicated paragraph: *"Trail-stop intuition: on a profitable long (current > entry), moving the stop UP from the original (still keeping it below current) locks in profit. ALWAYS allow this — never reject because 'stop is above entry'."*
+
+### Tests
+
+- `tests/test_trail_stop_validation_v19_34_62.py` — 9 cases covering:
+  - Long trail stop above entry but below current → ACCEPTED (the bug case)
+  - Short trail stop below entry but above current → ACCEPTED
+  - Long stop at/above current → REJECTED with corrected error message
+  - Short stop at/below current → REJECTED with corrected error message
+  - Long initial stop below both entry and current → still ACCEPTED (regression check)
+  - Drawdown long stop below current and below entry → ACCEPTED
+  - Negative stop → REJECTED
+
+**Cumulative reconciler/safety/boot suite: 111/111 passing.**
+
+### Operator note
+
+After hot-reload picks up the change, the same chat command (*"move the stop up on MU to $731"*) should now route through to the OCA bracket re-issue cleanly. If the LLM still gives the old refusal, it's stale-system-prompt cache — restart chat session or send a one-shot `/clear` to refresh.
+
+---
+
+
 ## 2026-02-09 (v19.34.61) — Killed the upstream zombie creator (manage-loop self-heal)
 
 ### The smoking gun

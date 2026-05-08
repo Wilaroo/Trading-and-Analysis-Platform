@@ -1440,10 +1440,12 @@ Available actions (v19.34.40):
       <<<TRADE_ACTION: {{"action": "cancel_orders", "symbol": "DDOG", "reason": "manual_handoff"}}>>>
 
 Validation rules backend enforces (so you don't need to second-guess):
-  • Long positions: stop must be < entry; targets must be > entry.
-  • Short positions: stop must be > entry; targets must be < entry.
+  • Long positions: stop must be < CURRENT price (NOT < entry — trail stops above entry are valid lock-ins); targets must be > entry.
+  • Short positions: stop must be > CURRENT price (NOT > entry — trail stops below entry are valid lock-ins); targets must be < entry.
   • partial_close `shares` must be > 0 and < total open shares (use `close` for full).
   • move_stop / move_target trigger a full OCA bracket re-issue (cancel old legs + submit new). The old levels are gone the moment the new ones acknowledge.
+
+Trail-stop intuition: on a profitable long (current > entry), moving the stop UP from the original (still keeping it below current) locks in profit. ALWAYS allow this — never reject because "stop is above entry". Same logic mirrored for shorts.
 
 If the user is ambiguous about the price ("tighten my DDOG stop"), ASK for the specific price before emitting JSON. Never guess a price.
 
