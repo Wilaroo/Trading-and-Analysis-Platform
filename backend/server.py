@@ -4121,6 +4121,24 @@ async def startup_event():
     asyncio.create_task(perf_service.start_scheduler())
     print("Learning loop scheduler started")
 
+    # ── v19.34.54 (Feb 2026) — IB-direct connection watchdog ──
+    # The clientId=11 socket has been flapping 1-3x/day. v19.34.52
+    # drift guard fails-safe by SKIPping zero-closes when direct IB
+    # is down, but real external closes also go un-resolved during
+    # the disconnect window. The watchdog reconnects automatically
+    # within ~15s of any drop with linear backoff up to 5 min.
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        _ib_direct = get_ib_direct_service()
+        # Initial connect attempt — best effort, watchdog will retry.
+        await _ib_direct.connect()
+        if _ib_direct.start_watchdog():
+            print("v19.34.54 [IB-DIRECT] watchdog started — auto-reconnect on drop")
+        else:
+            print("v19.34.54 [IB-DIRECT] watchdog NOT started (already running or ib_async unavailable)")
+    except Exception as e:
+        print(f"v19.34.54 [IB-DIRECT] watchdog init failed: {e}")
+
     # Order-queue dead-letter reconciler (P1 2026-04-23) — scans every 30s
     # for orders stuck in PENDING/CLAIMED/EXECUTING and times them out so
     # silent broker rejects / pusher crashes don't leave orphan rows.

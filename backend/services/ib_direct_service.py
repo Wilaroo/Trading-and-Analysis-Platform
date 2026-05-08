@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -121,6 +122,27 @@ class IBDirectService:
         self._last_connect_error: Optional[str] = None
         self._connect_lock = asyncio.Lock() if IB_ASYNC_AVAILABLE else None
 
+        # ── v19.34.54 (Feb 2026) — connection stability instrumentation ──
+        # The clientId=11 socket has been flapping 1-3x/day. The
+        # v19.34.52 drift guard fails-safe by SKIPping zero-closes when
+        # direct IB is down, which is correct but means real external
+        # closes go un-resolved during the disconnect window. We need:
+        #   1. Disconnect-event handler so `is_connected()` flips
+        #      immediately (don't wait for next call to notice).
+        #   2. Background watchdog that auto-reconnects within ~30s
+        #      of a drop (currently `ensure_connected()` is called
+        #      lazily, so a drop persists until someone tries to use it).
+        #   3. Drop / reconnect counters surfaced via `status()` so the
+        #      operator can see flap frequency at a glance.
+        self._drop_count_total: int = 0
+        self._reconnect_count_total: int = 0
+        self._reconnect_failures_total: int = 0
+        self._last_drop_at: Optional[float] = None
+        self._last_reconnect_at: Optional[float] = None
+        self._last_drop_reason: Optional[str] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_started_at: Optional[float] = None
+
     # ── connection lifecycle ──────────────────────────────────────────
 
     def is_available(self) -> bool:
@@ -170,11 +192,41 @@ class IBDirectService:
                 )
                 self._connected = True
                 self._last_connect_error = None
+                self._last_reconnect_at = time.time()
                 logger.warning(
                     "v19.34.25 [IB-DIRECT] connected: %s:%d (clientId=%d, readonly=%s)",
                     self.config.host, self.config.port,
                     self.config.client_id, self.config.read_only,
                 )
+
+                # ── v19.34.54 — flap-detection event hook ──
+                # `disconnectedEvent` fires when the socket drops for
+                # ANY reason (Gateway restart, network blip, idle
+                # timeout, "logged in elsewhere" kick). Without this,
+                # `is_connected()` only learns about the drop on the
+                # next call (because it polls `_ib.isConnected()`).
+                # With this, we record the drop timestamp + reason so
+                # the watchdog knows to reconnect AND `status()` can
+                # surface flap frequency.
+                try:
+                    def _on_disconnect():
+                        self._connected = False
+                        self._authorized_to_trade = False
+                        self._drop_count_total += 1
+                        self._last_drop_at = time.time()
+                        self._last_drop_reason = "disconnectedEvent"
+                        logger.error(
+                            "v19.34.54 [IB-DIRECT] socket dropped "
+                            "(clientId=%d, drop #%d). Watchdog will "
+                            "reconnect.",
+                            self.config.client_id, self._drop_count_total,
+                        )
+                    self._ib.disconnectedEvent += _on_disconnect
+                except Exception as _ev_err:
+                    logger.warning(
+                        "v19.34.54 [IB-DIRECT] could not register "
+                        "disconnectedEvent handler: %s", _ev_err,
+                    )
 
                 # Probe trade authorization. `managedAccounts` is empty
                 # when the brokerage session has been kicked elsewhere.
@@ -223,6 +275,93 @@ class IBDirectService:
         result = await self.connect()
         return bool(result.get("success") is not False and self.is_connected())
 
+    # ── v19.34.54 — watchdog: keeps clientId=11 alive automatically ──
+    #
+    # Without this, drops persist until something calls
+    # `ensure_connected()`. The drift reconciler runs every ~5s but
+    # only calls direct IB when it's already considering a close —
+    # plenty of time for v19.34.52 to skip a real external close
+    # because the socket was momentarily down.
+    #
+    # The watchdog runs every `_WATCHDOG_INTERVAL_S` seconds. If the
+    # socket is down, it calls `ensure_connected()`. Failures are
+    # backed off (linearly) up to 5 minutes between attempts so we
+    # don't hammer IB Gateway during extended outages.
+    _WATCHDOG_INTERVAL_S = 15.0
+    _WATCHDOG_MAX_BACKOFF_S = 300.0
+
+    async def _watchdog_loop(self) -> None:
+        consecutive_failures = 0
+        logger.info(
+            "v19.34.54 [IB-DIRECT] watchdog started (interval=%ss)",
+            self._WATCHDOG_INTERVAL_S,
+        )
+        while True:
+            try:
+                if self.is_connected():
+                    consecutive_failures = 0
+                else:
+                    backoff = min(
+                        self._WATCHDOG_INTERVAL_S * (consecutive_failures + 1),
+                        self._WATCHDOG_MAX_BACKOFF_S,
+                    )
+                    if consecutive_failures > 0:
+                        await asyncio.sleep(
+                            backoff - self._WATCHDOG_INTERVAL_S,
+                        )
+                    logger.warning(
+                        "v19.34.54 [IB-DIRECT] watchdog reconnecting "
+                        "(attempt %d after %.0fs backoff)",
+                        consecutive_failures + 1, backoff,
+                    )
+                    res = await self.connect()
+                    if res.get("connected"):
+                        self._reconnect_count_total += 1
+                        consecutive_failures = 0
+                        logger.warning(
+                            "v19.34.54 [IB-DIRECT] watchdog reconnected "
+                            "after %s. total drops=%d total reconnects=%d",
+                            self._last_drop_reason or "unknown",
+                            self._drop_count_total,
+                            self._reconnect_count_total,
+                        )
+                    else:
+                        self._reconnect_failures_total += 1
+                        consecutive_failures += 1
+                        logger.error(
+                            "v19.34.54 [IB-DIRECT] reconnect failed "
+                            "(consecutive=%d): %s",
+                            consecutive_failures,
+                            res.get("error") or self._last_connect_error,
+                        )
+            except asyncio.CancelledError:
+                logger.info("v19.34.54 [IB-DIRECT] watchdog cancelled")
+                raise
+            except Exception as e:
+                logger.exception(
+                    "v19.34.54 [IB-DIRECT] watchdog iteration crashed: %s", e
+                )
+            await asyncio.sleep(self._WATCHDOG_INTERVAL_S)
+
+    def start_watchdog(self) -> bool:
+        """Start the background reconnect watchdog. Idempotent — safe
+        to call multiple times. Returns True if a new task was spawned,
+        False if one was already running."""
+        if not IB_ASYNC_AVAILABLE:
+            return False
+        if self._watchdog_task is not None and not self._watchdog_task.done():
+            return False
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            return False
+        self._watchdog_task = asyncio.create_task(
+            self._watchdog_loop(),
+            name="ib_direct_watchdog_v19_34_54",
+        )
+        self._watchdog_started_at = time.time()
+        return True
+
     # ── diagnostics (Phase 1 deliverable) ─────────────────────────────
 
     def status(self) -> Dict[str, Any]:
@@ -245,6 +384,20 @@ class IBDirectService:
                 list(self._ib.managedAccounts()) if self._ib and self._ib.isConnected() else []
             ),
             "last_connect_error": self._last_connect_error,
+            # v19.34.54 — flap visibility
+            "stability": {
+                "drop_count_total": self._drop_count_total,
+                "reconnect_count_total": self._reconnect_count_total,
+                "reconnect_failures_total": self._reconnect_failures_total,
+                "last_drop_at": self._last_drop_at,
+                "last_drop_reason": self._last_drop_reason,
+                "last_reconnect_at": self._last_reconnect_at,
+                "watchdog_running": (
+                    self._watchdog_task is not None
+                    and not self._watchdog_task.done()
+                ),
+                "watchdog_started_at": self._watchdog_started_at,
+            },
         }
 
     async def get_positions(self) -> List[Dict[str, Any]]:

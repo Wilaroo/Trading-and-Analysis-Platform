@@ -1660,6 +1660,33 @@ async def reconcile_share_drift_endpoint(
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.55 — Drift-guard stats for UI status pill ───────────────
+@router.get("/drift-guard-stats")
+async def drift_guard_stats():
+    """v19.34.55 — Surface v19.34.52 drift-guard saves to the UI.
+
+    Each `skip_count_today` entry is a phantom-close that was BLOCKED:
+    the share-drift reconciler wanted to call `_close_drift_trades_zero`
+    or `_shrink_drift_trades` based on pusher's qty=0 / partial view,
+    but multi-source confirmation refused (direct IB disagreed, or
+    direct was disconnected, or returned an empty positions list).
+
+    Returns a snapshot suitable for a small status pill in the V5 HUD.
+    Counters reset at UTC midnight.
+    """
+    try:
+        reconciler = getattr(_trading_bot, "_position_reconciler", None)
+        if reconciler is None:
+            from services.position_reconciler import PositionReconciler
+            reconciler = PositionReconciler(_trading_bot._db)
+            _trading_bot._position_reconciler = reconciler
+        stats = reconciler.get_guard_stats()
+        return {"success": True, **stats}
+    except Exception as e:
+        logger.error(f"drift-guard-stats error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 # ─── v19.34.47 — Sync bot books to IB-direct reality ───────────────
 @router.post("/sync-books-to-ib-direct")
 async def sync_books_to_ib_direct(payload: Optional[Dict[str, Any]] = None):

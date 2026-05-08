@@ -60,6 +60,7 @@ import SystemBanner from './v5/SystemBanner';
 // v19.31.14 (2026-05-04) — Boot-reconcile status pill. Self-hides
 // after 10 min, only renders when AUTO_RECONCILE_AT_BOOT ran.
 import BootReconcilePill from './v5/BootReconcilePill';
+import DriftGuardPill from './v5/DriftGuardPill';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -427,6 +428,9 @@ export const SentComV5View = ({
                 directly mirrors whether the bot can fire (green/red) vs
                 halted (mismatch) vs standby (sky). */}
             <BootReconcilePill />
+            {/* v19.34.55 — drift-guard saves pill (only renders when
+                skip_count_today > 0). Hover → recent skip list. */}
+            <DriftGuardPill />
             <AccountGuardChipV5 safety={safety} />
             {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
                 chip. Distinguishes 'logged in elsewhere' / socket-down /

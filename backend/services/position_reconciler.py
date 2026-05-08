@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.trading_bot_service import TradingBotService
@@ -105,6 +105,74 @@ class PositionReconciler:
         # `database.get_database()` on first read. This keeps the
         # router endpoint's explicit-db construction working too.
         self._db = db
+        # ── v19.34.55 (Feb 2026) — drift-guard stats ─────────────────
+        # Surface v19.34.52's SKIP events to the UI. Each SKIP is a
+        # potential phantom-close prevented; the operator should be
+        # able to see at a glance how often the guard is firing.
+        # In-memory counters reset each new UTC day.
+        from collections import deque
+        self._guard_skip_count_today: int = 0
+        self._guard_resolve_count_today: int = 0
+        self._guard_stats_day: Optional[str] = None  # "YYYY-MM-DD" UTC
+        self._guard_recent_skips: deque = deque(maxlen=20)
+        self._guard_recent_resolves: deque = deque(maxlen=20)
+        self._guard_first_skip_at: Optional[float] = None
+        self._guard_last_skip_at: Optional[float] = None
+
+    def _stats_roll_day_if_needed(self):
+        """Reset counters on UTC midnight."""
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._guard_stats_day != today:
+            self._guard_stats_day = today
+            self._guard_skip_count_today = 0
+            self._guard_resolve_count_today = 0
+            self._guard_recent_skips.clear()
+            self._guard_recent_resolves.clear()
+            self._guard_first_skip_at = None
+            self._guard_last_skip_at = None
+
+    def _record_guard_skip(self, drift_record: dict) -> None:
+        import time as _time
+        self._stats_roll_day_if_needed()
+        self._guard_skip_count_today += 1
+        now = _time.time()
+        if self._guard_first_skip_at is None:
+            self._guard_first_skip_at = now
+        self._guard_last_skip_at = now
+        # Keep a lean record (sym + reason + ts) for tooltip/history.
+        self._guard_recent_skips.append({
+            "ts": now,
+            "symbol": drift_record.get("symbol"),
+            "kind": drift_record.get("kind"),
+            "reason": drift_record.get("skip_reason"),
+            "pusher_qty": drift_record.get("pusher_qty"),
+            "direct_qty": drift_record.get("direct_qty"),
+        })
+
+    def _record_guard_resolve(self, drift_record: dict) -> None:
+        import time as _time
+        self._stats_roll_day_if_needed()
+        self._guard_resolve_count_today += 1
+        self._guard_recent_resolves.append({
+            "ts": _time.time(),
+            "symbol": drift_record.get("symbol"),
+            "kind": drift_record.get("kind"),
+            "shares": drift_record.get("drift_shares"),
+        })
+
+    def get_guard_stats(self) -> dict:
+        """v19.34.55 — Snapshot for the UI status pill."""
+        self._stats_roll_day_if_needed()
+        return {
+            "day_utc": self._guard_stats_day,
+            "skip_count_today": self._guard_skip_count_today,
+            "resolve_count_today": self._guard_resolve_count_today,
+            "first_skip_at": self._guard_first_skip_at,
+            "last_skip_at": self._guard_last_skip_at,
+            "recent_skips": list(self._guard_recent_skips),
+            "recent_resolves": list(self._guard_recent_resolves),
+        }
 
     @property
     def db(self):
@@ -1556,6 +1624,7 @@ class PositionReconciler:
                             drift_record["pusher_qty"] = ib_q
                             drift_record["direct_qty"] = auth_qty
                             report["skipped"].append(drift_record)
+                            self._record_guard_skip(drift_record)
                             logger.warning(
                                 f"[v19.34.52 DRIFT-GUARD] {sym} zero-close "
                                 f"BLOCKED: pusher=0 direct={auth_qty} "
@@ -1594,6 +1663,7 @@ class PositionReconciler:
                             drift_record["pusher_qty"] = ib_q
                             drift_record["direct_qty"] = auth_qty
                             report["skipped"].append(drift_record)
+                            self._record_guard_skip(drift_record)
                             logger.warning(
                                 f"[v19.34.52 DRIFT-GUARD] {sym} partial-shrink "
                                 f"BLOCKED: pusher={ib_q} direct={auth_qty} "

@@ -4,6 +4,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-XX — v19.34.54 + v19.34.55 SHIPPED — Stabilization & Observability
+
+- **v19.34.54**: IB-direct (clientId=11) watchdog with auto-reconnect + drop/reconnect counters. Eliminates the recurring manual reconnect dance. 6 new pytests.
+- **v19.34.55**: Drift-guard saves status pill in V5 HUD. Surfaces v19.34.52's prevented phantom-closes for at-a-glance observability. New `/api/trading-bot/drift-guard-stats` endpoint + `DriftGuardPill.jsx` with hover tooltip showing last 8 saves.
+
+59/59 reconciler/safety pytests passing. UI build clean.
+
 ## ✅ 2026-02-XX — v19.34.52 + v19.34.53 SHIPPED — Mid-Session Crisis Fix Pack
 
 Two interlocking P0 bugs fixed live during the 2026-05-08 open incident:

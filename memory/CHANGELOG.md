@@ -2,6 +2,33 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-XX (v19.34.54 + v19.34.55) — IB-direct watchdog + drift-guard pill
+
+### v19.34.54 — IB-direct connection watchdog (`clientId=11` flap fix)
+
+**Symptom:** `clientId=11` direct IB socket dropped 2-3x/day with no auto-recovery. Each drop made v19.34.52's drift guard fail-safe by SKIPping zero-closes (correct), but real external closes also went un-resolved during the disconnect window. Operator had to manually `POST /api/system/ib-direct/connect` each time.
+
+**Fix in `services/ib_direct_service.py`:**
+- Subscribed to `ib_async.IB.disconnectedEvent` so the service flips `_connected=False` *immediately* on socket drop (instead of waiting for the next caller to notice).
+- Added background `_watchdog_loop()` that polls every 15s and reconnects on drop with linear backoff (15s → 30s → 45s → … capped at 5min).
+- Added stability counters: `drop_count_total`, `reconnect_count_total`, `reconnect_failures_total`, `last_drop_at`, `last_drop_reason`, `last_reconnect_at`. Exposed via `status()["stability"]`.
+- Hooked `start_watchdog()` into FastAPI startup in `server.py`. Initial connect attempt + watchdog spawn happen during boot.
+
+**Tests:** `tests/test_ib_direct_watchdog_v19_34_54.py` — 6 cases covering status field shape, idempotent start, drop accounting, ib_async unavailable.
+
+### v19.34.55 — Drift-guard saves status pill (UI surface)
+
+**Why:** v19.34.52 SKIP events (each one a phantom-close prevented) were buried in the backend log. Operator couldn't see at a glance how often the guard was firing or what the bug pattern looked like. Without UI surface, the safety net feels invisible — bad for confidence + bad for incident triage.
+
+**Fix:**
+- New endpoint `GET /api/trading-bot/drift-guard-stats` — returns `skip_count_today`, `resolve_count_today`, `recent_skips[]` (last 20), `recent_resolves[]`, `first_skip_at`, `last_skip_at`, `day_utc` (auto-resets at UTC midnight).
+- New `PositionReconciler` instance counters + `_record_guard_skip()` / `_record_guard_resolve()` hooks wired into the v19.34.52 SKIP branches.
+- New `DriftGuardPill.jsx` mounted in `SentComV5View` HUD top strip next to `BootReconcilePill`. Polls every 30s. Renders only when `skip_count_today > 0`. Hover shows last 8 saves with symbol + reason + age.
+
+### Cumulative reconciler/safety suite: **59/59 passing**
+
+---
+
 ## 2026-02-XX (v19.34.52 + v19.34.53) — Mid-Session Crisis Fix Pack
 
 **Live incident on 2026-05-08 9:30-9:39am ET.** Operator caught the bot phantom-closing real positions and looping bad entries while accumulating -$1,460.90 realized P&L. Two interlocking P0 bugs identified in real-time, fixed, tested, all 54 reconciler/safety tests green.
