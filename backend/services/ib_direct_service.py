@@ -142,6 +142,18 @@ class IBDirectService:
         self._last_drop_reason: Optional[str] = None
         self._watchdog_task: Optional[asyncio.Task] = None
         self._watchdog_started_at: Optional[float] = None
+        # ── v19.34.58 (Feb 2026) — proactive heartbeat ──
+        # `ib_async`'s `disconnectedEvent` only fires when the TCP
+        # socket *closes cleanly*. Half-open / silently-broken sockets
+        # (network drop, IB Gateway frozen, NAT idle eviction) leave
+        # `_ib.isConnected()` returning True forever. The watchdog
+        # now also pings IB with `reqCurrentTime()` every
+        # `_HEARTBEAT_INTERVAL_S` seconds; if the ping fails or
+        # exceeds the deadline, we flip ourselves to disconnected and
+        # let the watchdog reconnect.
+        self._last_heartbeat_ok_at: Optional[float] = None
+        self._last_heartbeat_failed_at: Optional[float] = None
+        self._heartbeat_failures_total: int = 0
 
     # ── connection lifecycle ──────────────────────────────────────────
 
@@ -289,17 +301,65 @@ class IBDirectService:
     # don't hammer IB Gateway during extended outages.
     _WATCHDOG_INTERVAL_S = 15.0
     _WATCHDOG_MAX_BACKOFF_S = 300.0
+    # v19.34.58 — heartbeat timing. Ping at 30s and require a response
+    # within 5s. IB Gateway's `reqCurrentTime` typically returns in
+    # well under 200ms; a 5s deadline is a generous "the socket is
+    # dead, not just slow" threshold.
+    _HEARTBEAT_INTERVAL_S = 30.0
+    _HEARTBEAT_DEADLINE_S = 5.0
+
+    async def _heartbeat_check(self) -> bool:
+        """Send `reqCurrentTime` over the existing socket. Returns True
+        if IB responded within the deadline. On failure, flips this
+        service to disconnected so the watchdog reconnects.
+        """
+        if self._ib is None or not self._ib.isConnected():
+            return False
+        try:
+            # `reqCurrentTimeAsync` returns a `datetime`. ib_async raises
+            # on transport error. We additionally clamp with `wait_for`
+            # to detect frozen / half-open sockets.
+            await asyncio.wait_for(
+                self._ib.reqCurrentTimeAsync(),
+                timeout=self._HEARTBEAT_DEADLINE_S,
+            )
+            self._last_heartbeat_ok_at = time.time()
+            return True
+        except (asyncio.TimeoutError, Exception) as e:
+            self._last_heartbeat_failed_at = time.time()
+            self._heartbeat_failures_total += 1
+            # Treat heartbeat failure as a silent socket drop so the
+            # watchdog reconnects on the next iteration.
+            self._connected = False
+            self._authorized_to_trade = False
+            self._drop_count_total += 1
+            self._last_drop_at = time.time()
+            self._last_drop_reason = f"heartbeat_failed:{type(e).__name__}"
+            logger.error(
+                "v19.34.58 [IB-DIRECT] heartbeat failed (%s: %s) — "
+                "marking socket dropped. Watchdog will reconnect.",
+                type(e).__name__, str(e)[:120],
+            )
+            return False
 
     async def _watchdog_loop(self) -> None:
         consecutive_failures = 0
+        last_heartbeat_at = 0.0
         logger.info(
-            "v19.34.54 [IB-DIRECT] watchdog started (interval=%ss)",
-            self._WATCHDOG_INTERVAL_S,
+            "v19.34.54 [IB-DIRECT] watchdog started (interval=%ss, heartbeat=%ss)",
+            self._WATCHDOG_INTERVAL_S, self._HEARTBEAT_INTERVAL_S,
         )
         while True:
             try:
                 if self.is_connected():
                     consecutive_failures = 0
+                    # v19.34.58 — send periodic heartbeat to detect
+                    # half-open / silently-broken sockets that
+                    # `disconnectedEvent` never reports.
+                    now_ts = time.time()
+                    if (now_ts - last_heartbeat_at) >= self._HEARTBEAT_INTERVAL_S:
+                        last_heartbeat_at = now_ts
+                        await self._heartbeat_check()
                 else:
                     backoff = min(
                         self._WATCHDOG_INTERVAL_S * (consecutive_failures + 1),
@@ -397,6 +457,10 @@ class IBDirectService:
                     and not self._watchdog_task.done()
                 ),
                 "watchdog_started_at": self._watchdog_started_at,
+                # v19.34.58 — heartbeat visibility
+                "heartbeat_failures_total": self._heartbeat_failures_total,
+                "last_heartbeat_ok_at": self._last_heartbeat_ok_at,
+                "last_heartbeat_failed_at": self._last_heartbeat_failed_at,
             },
         }
 

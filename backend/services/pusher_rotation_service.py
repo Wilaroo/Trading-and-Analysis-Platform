@@ -449,6 +449,22 @@ class PusherRotationService:
     DYNAMIC_OVERLAY_REFRESH_INTERVAL_MIN = 15
     LOOP_TICK_SECONDS = 60  # check every minute whether a refresh is due
 
+    # v19.34.57 (2026-02-XX) — boot grace + retry for first rotation.
+    # Operator-discovered: backend boot logs were peppered with
+    # `subscribe_symbols socket-read timeout` tracebacks because the
+    # rotation loop fires its first cycle BEFORE the pusher RPC has
+    # finished warming up (IB Gateway client login + ib_async TWS
+    # contract qualification adds ~1-3s of latency on cold start).
+    # The fix is two-pronged:
+    #   1. Sleep BOOT_GRACE_S before the very first rotation so the
+    #      pusher RPC has time to come online.
+    #   2. Retry rotate_once() once after FIRST_ROTATION_RETRY_S if it
+    #      returns `error="pusher_unreachable"`. Keeps the noisy
+    #      traceback out of /tmp/backend.log without changing the
+    #      steady-state behavior.
+    BOOT_GRACE_S = 2.0
+    FIRST_ROTATION_RETRY_S = 1.0
+
     def __init__(
         self,
         *,
@@ -616,15 +632,43 @@ class PusherRotationService:
         return False, "no_refresh_due"
 
     async def _loop_body(self) -> None:
+        # v19.34.57 — boot grace before the very first rotation.
+        # Pusher RPC may not be ready for a few hundred ms after backend
+        # startup; firing rotate_once() too early produces a noisy
+        # `pusher_unreachable` log + a wasted IB contract-qualify burst.
+        try:
+            await asyncio.sleep(self.BOOT_GRACE_S)
+        except asyncio.CancelledError:
+            return
         while self._running:
             try:
                 due, reason = self._is_refresh_due()
                 # Always run a rotate_once on the first loop iteration
                 # so the operator gets coverage immediately on startup.
                 if due or self._last_rotation is None:
+                    is_first_cycle = self._last_rotation is None
                     logger.info("[PusherRotation] running cycle: %s", reason)
                     # Run the sync rotate in a thread to keep the loop responsive.
-                    await asyncio.to_thread(self.rotate_once)
+                    result = await asyncio.to_thread(self.rotate_once)
+                    # v19.34.57 — retry once if first cycle failed because
+                    # the pusher hadn't warmed up yet. Steady-state cycles
+                    # don't retry (next cycle is only ~LOOP_TICK_SECONDS
+                    # away anyway, no need to double-fire).
+                    if (
+                        is_first_cycle
+                        and isinstance(result, dict)
+                        and result.get("error") == "pusher_unreachable"
+                    ):
+                        logger.info(
+                            "[PusherRotation] first cycle hit pusher_unreachable; "
+                            "retrying after %.1fs grace",
+                            self.FIRST_ROTATION_RETRY_S,
+                        )
+                        try:
+                            await asyncio.sleep(self.FIRST_ROTATION_RETRY_S)
+                        except asyncio.CancelledError:
+                            break
+                        await asyncio.to_thread(self.rotate_once)
                 # Always check open positions for newly-opened trades
                 # that need pinning (covered by next due cycle, but a
                 # second-pass pin keeps stale-quote risk minimal).

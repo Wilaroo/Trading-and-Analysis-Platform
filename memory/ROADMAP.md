@@ -4,6 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-09 — v19.34.56 + v19.34.57 + v19.34.58 SHIPPED — UX polish + boot stability + flap detection
+
+- **v19.34.56**: `OpenPositionsV5` self-defuses the loading state after 3s when the parent feed is empty (no more pre-market "Loading positions…" stuck banners).
+- **v19.34.57**: Pusher rotation service waits 2s before its first cycle and retries once on `pusher_unreachable` — eliminates noisy `subscribe_symbols socket-read timeout` boot tracebacks.
+- **v19.34.58**: IB-direct (clientId=11) heartbeat ping every 30s with 5s deadline. Detects half-open / silently broken sockets that `disconnectedEvent` cannot. Heartbeat metrics surfaced in `/api/system/ib-direct/status` → `stability`. New `scripts/analyze_ib_direct_flap_v19_34_58.sh` mines logs for drop intervals + groups reasons + flags bursty (<60s) flap windows. Bracket-attach audit script extended with verdict line.
+
+**Cumulative reconciler/safety/boot suite: 78/78 pytests passing.**
+
+
+
 ## ✅ 2026-02-XX — v19.34.54 + v19.34.55 SHIPPED — Stabilization & Observability
 
 - **v19.34.54**: IB-direct (clientId=11) watchdog with auto-reconnect + drop/reconnect counters. Eliminates the recurring manual reconnect dance. 6 new pytests.

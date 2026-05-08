@@ -2,6 +2,49 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.56 → v19.34.58) — UX polish + boot stability + flap detection
+
+### v19.34.56 — `OpenPositionsV5` loading-state grace timeout
+
+**Symptom:** Panel could get stuck on `Loading positions…` indefinitely if the parent feed produced an empty `positions` array but never flipped its `positionsLoading` flag (typical pre-market). Operator confusion.
+
+**Fix in `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`:**
+- Added `LOADING_GRACE_MS = 3000` self-defuse timer.
+- After 3s of `loading=true && groups.length === 0`, the component flips its own `loadingTimedOut` and shows `"No open positions."` instead of the spinner text.
+- Timer resets the moment a non-empty positions array arrives, so a slow first load is never cut short.
+- New `data-testid="open-positions-loading"` and `open-positions-empty` for QA hooks.
+
+### v19.34.57 — Pusher rotation boot-grace + first-cycle retry
+
+**Symptom:** Backend startup logs were peppered with `subscribe_symbols socket-read timeout` because `PusherRotationService._loop_body` fired its first rotation BEFORE the pusher RPC finished warming up (IB Gateway client login + ib_async qualify takes ~1-3s on cold start).
+
+**Fix in `services/pusher_rotation_service.py`:**
+- Added class constants `BOOT_GRACE_S = 2.0` and `FIRST_ROTATION_RETRY_S = 1.0`.
+- `_loop_body` now sleeps `BOOT_GRACE_S` before its first rotation.
+- If the first `rotate_once()` returns `error="pusher_unreachable"`, the loop retries exactly once after `FIRST_ROTATION_RETRY_S`. Steady-state cycles still wait for `LOOP_TICK_SECONDS` (no double-firing).
+
+### v19.34.58 — IB-direct heartbeat (half-open socket detection)
+
+**Symptom:** v19.34.54's watchdog only learned about drops via `disconnectedEvent`, which fires on *clean* TCP close. Half-open sockets (network drop, NAT idle eviction, frozen IB Gateway) leave `_ib.isConnected()` returning True forever — invisible to the watchdog. Result: drift-guard SKIPs in production despite the watchdog reporting "connected".
+
+**Fix in `services/ib_direct_service.py`:**
+- Added `_HEARTBEAT_INTERVAL_S = 30.0`, `_HEARTBEAT_DEADLINE_S = 5.0`.
+- New `_heartbeat_check()` method calls `_ib.reqCurrentTimeAsync()` over the live socket. Failure → flips `_connected=False`, increments `_drop_count_total`, sets `_last_drop_reason = "heartbeat_failed:<exc>"`. Watchdog reconnects on next iteration.
+- Watchdog loop now ticks the heartbeat every 30s while connected.
+- New stability fields surfaced via `status()["stability"]`: `heartbeat_failures_total`, `last_heartbeat_ok_at`, `last_heartbeat_failed_at`.
+
+**Tests:** `tests/test_boot_grace_and_heartbeat_v19_34_58.py` — 7 cases (boot grace, retry once on first cycle, no-retry on steady state, heartbeat failure flips dropped, heartbeat success records ts, heartbeat timeout, status payload). **All passing.**
+
+### v19.34.58 — Operator audit/analysis scripts
+
+- `scripts/audit_bracket_attach_2026_05_08.sh` — extended with cross-correlation + verdict line ("✓ healthy day" vs "⚠ guard never engaged" vs "✓ guard intercepting").
+- `scripts/analyze_ib_direct_flap_v19_34_58.sh` — NEW. Mines backend log for clientId=11 drop / reconnect / heartbeat events. Emits grouped reasons, inter-drop interval stats (median/min/max/mean, bursty-flap detection under 60s), and the 5 most-recent drops with surrounding context. Run after watchdog has been live a few hours: `./scripts/analyze_ib_direct_flap_v19_34_58.sh /tmp/backend.log`.
+
+### Cumulative safety + boot suite: **78/78 passing** (71 prior + 7 new in v19.34.58)
+
+---
+
+
 ## 2026-02-XX (v19.34.54 + v19.34.55) — IB-direct watchdog + drift-guard pill
 
 ### v19.34.54 — IB-direct connection watchdog (`clientId=11` flap fix)

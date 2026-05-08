@@ -16,7 +16,7 @@
  *   trailing_stop_state{ enabled, mode, current_stop, high_water_mark },
  *   p_win, pnl_series[]
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LiveDataChip } from './LiveDataChip';
 import TradeTypeChip from './TradeTypeChip';
@@ -630,6 +630,38 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
   const [reconcileBusy, setReconcileBusy] = useState(false);
   const [reconcileMsg, setReconcileMsg] = useState(null);
 
+  // v19.34.56 (2026-02-XX) — Loading-state grace timeout. Operator
+  // feedback: panel was getting stuck on "Loading positions…" when
+  // the parent feed produced an empty positions array but never
+  // flipped its `positionsLoading` flag (e.g. pre-market when the
+  // backend has nothing to send). The component now self-defuses
+  // the loading state after `LOADING_GRACE_MS` so the operator sees
+  // a clean "No open positions" instead of a phantom spinner.
+  // The grace timer also resets the moment we see ANY non-empty
+  // positions arrive, so a slow first load doesn't get cut short.
+  const LOADING_GRACE_MS = 3000;
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const mountedAtRef = useRef(Date.now());
+  useEffect(() => {
+    if (!loading) {
+      // Parent already says "done" — clear any prior timeout state.
+      setLoadingTimedOut(false);
+      return undefined;
+    }
+    if (groups.length > 0) {
+      // We have data; ignore loading flag from parent regardless.
+      setLoadingTimedOut(false);
+      return undefined;
+    }
+    // loading=true AND empty — start the grace timer.
+    const elapsed = Date.now() - mountedAtRef.current;
+    const remaining = Math.max(0, LOADING_GRACE_MS - elapsed);
+    const id = setTimeout(() => setLoadingTimedOut(true), remaining);
+    return () => clearTimeout(id);
+  }, [loading, groups.length]);
+  const showLoading = loading && !loadingTimedOut && groups.length === 0;
+  const showEmpty = !showLoading && groups.length === 0;
+
   const handleToggle = (key) => {
     setExpandedKey((prev) => (prev === key ? null : key));
   };
@@ -799,11 +831,11 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
       </div>
 
       <div className="flex-1 overflow-y-auto v5-scroll">
-        {loading && groups.length === 0 && (
-          <div className="px-3 py-4 text-[13px] text-zinc-500">Loading positions…</div>
+        {showLoading && (
+          <div className="px-3 py-4 text-[13px] text-zinc-500" data-testid="open-positions-loading">Loading positions…</div>
         )}
-        {!loading && groups.length === 0 && (
-          <div className="px-3 py-4 text-[13px] text-zinc-500">No open positions.</div>
+        {showEmpty && (
+          <div className="px-3 py-4 text-[13px] text-zinc-500" data-testid="open-positions-empty">No open positions.</div>
         )}
         {groups.map(g => {
           const isExpanded = expandedKey === g._group_key;
